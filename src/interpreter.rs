@@ -1745,6 +1745,10 @@ impl Interpreter {
                         };
                         std::process::exit(code);
                     }
+                    Intrinsic::Halt => {
+                        // No-op in interpreter — can't halt the host CPU
+                        Ok(Value::Int(0))
+                    }
                     Intrinsic::Time => {
                         use std::time::{SystemTime, UNIX_EPOCH};
                         let nanos = SystemTime::now()

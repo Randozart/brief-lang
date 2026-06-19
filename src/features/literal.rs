@@ -212,18 +212,6 @@ mod kani_full_tests {
     }
 }
 
-impl ExprCodegenVHDL for LiteralExpr {
-    fn emit_vhdl(&self, _ctx: &crate::backend::vhdl::VhdlGenerator, _dispatch: &ExprDispatch) -> String {
-        match self {
-            LiteralExpr::Bool(b) => (if *b { "'1'" } else { "'0'" }).to_string(),
-            LiteralExpr::Integer(i) => i.to_string(),
-            LiteralExpr::Float(f) => f.to_string(),
-            LiteralExpr::String(s) => format!("\"{}\"", s),
-            LiteralExpr::Char(c) => format!("character'val({})", *c as u32),
-            LiteralExpr::Term => "true".to_string(),
-        }
-    }
-}
 
 impl ExprCodegenWebstack for LiteralExpr {
     fn emit_js(&self, _ctx: &crate::backend::webstack::WebstackGenerator, _dispatch: &ExprDispatch) -> String {

@@ -23,9 +23,6 @@ impl StmtEval for LocalTriggerStmt {
 impl StmtCodegenLLVM for LocalTriggerStmt {
     fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &StmtDispatch, _indent: &str) {}
 }
-impl StmtCodegenVHDL for LocalTriggerStmt {
-    fn emit_vhdl(&self, _ctx: &mut crate::backend::vhdl::VhdlGenerator, _out: &mut String, _dispatch: &StmtDispatch, _indent: &str) {}
-}
 impl StmtCodegenWebstack for LocalTriggerStmt {
     fn emit_js(&self, _ctx: &mut crate::backend::webstack::WebstackGenerator, _out: &mut String, _dispatch: &StmtDispatch) {}
 }

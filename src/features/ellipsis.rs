@@ -15,5 +15,3 @@ impl ExprEval for EllipsisExpr {
 }
 
 impl ExprCodegenLLVM for EllipsisExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%elp".into(), ty: Type::Void } } }
-impl ExprCodegenVHDL for EllipsisExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
-impl ExprCodegenWebstack for EllipsisExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

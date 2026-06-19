@@ -21,5 +21,3 @@ impl ExprEval for SubtypeProjectionExpr {
 }
 
 impl ExprCodegenLLVM for SubtypeProjectionExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%sub".into(), ty: Type::Void } } }
-impl ExprCodegenVHDL for SubtypeProjectionExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
-impl ExprCodegenWebstack for SubtypeProjectionExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

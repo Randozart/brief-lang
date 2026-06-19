@@ -74,11 +74,6 @@ impl ExprCodegenLLVM for BinaryOpExpr {
     }
 }
 
-impl ExprCodegenVHDL for BinaryOpExpr {
-    fn emit_vhdl(&self, _ctx: &crate::backend::vhdl::VhdlGenerator, _dispatch: &ExprDispatch) -> String {
-        "'0'".to_string()
-    }
-}
 
 impl ExprCodegenWebstack for BinaryOpExpr {
     fn emit_js(&self, _ctx: &crate::backend::webstack::WebstackGenerator, _dispatch: &ExprDispatch) -> String {

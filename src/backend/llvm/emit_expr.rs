@@ -2338,6 +2338,12 @@ impl LlvmBackend {
                         let fd = self.emit_expr(out, &args[0], indent);
                         writeln!(out, "{}  {} = call i64 @__ttyname__(i64 {})", indent, v, fd.name).ok();
                     }
+                    Intrinsic::Halt => {
+                        // CPU halt: WFI on ARM, HLT on x86, WFI on RISC-V
+                        // The target triple determines the instruction.
+                        writeln!(out, "{}call void asm sideeffect \"wfi\", \"\"()", indent).ok();
+                        writeln!(out, "{}{} = add i64 0, 0 ; halt returns void", indent, v).ok();
+                    }
                 }
             }
             // ── ListLiteral ──────────────────────────────────────

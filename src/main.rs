@@ -343,7 +343,7 @@ fn print_usage(program: &str) {
     eprintln!("  --out <dir>     Output directory");
     eprintln!();
     eprintln!("Verilog Options:");
-    eprintln!("  --hw <file>      Hardware config TOML, .dbv, or .dbvs (required for .ebv/.cbv files)");
+    eprintln!("  --hw <file>      Hardware config TOML, .dbv, or .dbvs (for legacy verilog/vhdl targets)");
     eprintln!("  --tcl            Generate TCL build scripts alongside SystemVerilog");
     eprintln!("  --tcl-only       Generate TCL only (skip SystemVerilog generation)");
     eprintln!();
@@ -770,6 +770,16 @@ fn is_gpu_extension(file_path: &PathBuf) -> bool {
     ext == "abv"
 }
 
+fn is_embedded_extension(file_path: &PathBuf) -> bool {
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    ext == "ebv" || ext == "sebv"
+}
+
+fn is_circuit_extension(file_path: &PathBuf) -> bool {
+    let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    ext == "cbv"
+}
+
 /// Intent: run check.
 fn run_check(
     file_path: &PathBuf,
@@ -1059,15 +1069,38 @@ fn run_build(
             Ok(out.join(format!("{}-build", stem)))
         }
         "ebv" | "sebv" => {
-            // .ebv / .sebv files: Require explicit target
-            eprintln!("Error: {} files require explicit target", if ext == "sebv" { ".sebv (Strict Embedded)" } else { ".ebv" });
-            eprintln!("  Use: brief compile <file.{}> --target <spec.toml>", ext);
-            eprintln!("  Example targets: verilog_fpga.toml, vhdl_fpga.toml");
-            eprintln!("  Or: brief <verilog|vhdl> <file.{}> --hw <hardware.dbv>", ext);
-            Err(format!(".{} files require explicit target specification", ext).into())
+            // .ebv / .sebv files: Compile to embedded binary via LLVM (bare-metal)
+            println!("Building {} file: compiling via LLVM (embedded)...", if ext == "sebv" { "Strict Embedded Brief" } else { "Embedded Brief" });
+            if ext == "sebv" {
+                println!("  Strict mode: full contracts + no sugar");
+            }
+            if prod_mode {
+                println!("  Production mode: full optimization enabled");
+            }
+            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend);
+            match result {
+                Ok(ll_path) => {
+                    let exe_path = out.join(stem);
+                    if exe_path.exists() {
+                        println!("  Built embedded executable: {}", exe_path.display());
+                        Ok(exe_path)
+                    } else {
+                        eprintln!("  LLVM output at: {}", ll_path.display());
+                        Ok(ll_path)
+                    }
+                }
+                Err(e) => Err(e),
+            }
+        }
+        "cbv" => {
+            // .cbv files: Compile to circuit via CIRCT (no LLVM, no FFI)
+            println!("Building Circuit Brief (.cbv) file: compiling via CIRCT...");
+            run_cbv(file_path, out_dir)
         }
         _ => {
-            Err(format!("Unknown file extension: {}. Use .bv, .sbv, .rbv, .srbv, .ebv, or .sebv", ext).into())
+            Err(format!("Unknown file extension: {}. Use .bv, .sbv, .rbv, .srbv, .ebv, .sebv, or .cbv", ext).into())
         }
     }
 }
@@ -1512,93 +1545,18 @@ fn run_arm(
 
 /// Intent: run rust.
 fn run_rust(
-    file_path: &PathBuf,
-    out_dir: Option<&Path>,
-    no_stdlib: bool,
-    stdlib_path: Option<PathBuf>,
-    target_spec: Option<TargetSpec>,
-    emit_memory_spec: bool,
-    memory_spec_format: &str,
-    strict: bool,
-    verbose: bool,
-    optimize: bool,
+    _file_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _no_stdlib: bool,
+    _stdlib_path: Option<PathBuf>,
+    _target_spec: Option<TargetSpec>,
+    _emit_memory_spec: bool,
+    _memory_spec_format: &str,
+    _strict: bool,
+    _verbose: bool,
+    _optimize: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    println!("Compiling to Native Rust: {}", file_path.display());
-    if strict {
-        println!("  Strict mode: full pre/postcondition verification enforced");
-    }
-
-    let source = fs::read_to_string(file_path)?;
-    let clean_source = strip_annotations(&source);
-
-    let mut parser = parser::Parser::new(&clean_source).with_strict_mode(strict);
-    let mut program = parser
-        .parse()
-        .map_err(|e| format!("Brief parse error: {}", e))?;
-
-    let mut import_resolver = import_resolver::ImportResolver::new()
-        .with_strict_mode(strict)
-        .with_use_stdlib(!no_stdlib)
-        .with_stdlib_path(stdlib_path.clone());
-    let mut program = import_resolver
-        .resolve_imports(&program, file_path)
-        .map_err(|e| format!("Import error: {}", e))?;
-
-    let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
-
-    let mut tc = typechecker::TypeChecker::new()
-        .with_stdlib_config(no_stdlib, stdlib_path)
-        .with_target(typechecker::CompilationTarget::Interpreter);
-    let type_errors = tc.check_program(&mut program.clone());
-    if !type_errors.is_empty() {
-        return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
-    }
-
-    // Validate hashtags against Rust backend
-    if !backend::validate_hashtags_in_program(&program, "rust", false) {
-        return Err("Hashtag validation errors (Rust backend)".into());
-    }
-
-    // Run shared program analysis
-    if verbose {
-        println!("  [Analysis] Call graph + parameter ranges...");
-    }
-    let _analysis = backend::analyze_program(&program, optimize);
-
-    let mut rust_backend = backend::rust::RustBackend::new();
-    if let Some(spec) = target_spec {
-        rust_backend = rust_backend.with_spec(spec);
-    }
-    let output = rust_backend.generate(&program);
-
-    let stem = file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
-
-    let out_path = if let Some(dir) = out_dir {
-        let d = dir.to_path_buf();
-        fs::create_dir_all(&d)?;
-        d.join(format!("{}.rs", stem))
-    } else {
-        PathBuf::from(format!("{}.rs", stem))
-    };
-
-    fs::write(&out_path, &output)?;
-    println!("  Native Rust generated: {}", out_path.display());
-
-    // Emit memory spec if requested
-    emit_memory_spec_if_requested(
-        &program,
-        out_dir,
-        stem,
-        emit_memory_spec,
-        memory_spec_format,
-        "rust",
-    );
-
-    Ok(out_path)
+    Err("The Rust backend has been removed. Use 'brief build <file>' for LLVM compilation instead.".into())
 }
 
 /// Intent: run compile unified.
@@ -1652,11 +1610,14 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
     // Detect source type from extension
     let source_type = if matches!(file_path.extension().and_then(|e| e.to_str()), Some("rbv" | "srbv")) {
         "rendered"
-    } else if matches!(file_path.extension().and_then(|e| e.to_str()), Some("ebv" | "sebv" | "cbv")) {
+    } else if matches!(file_path.extension().and_then(|e| e.to_str()), Some("ebv" | "sebv")) {
         "embedded"
+    } else if matches!(file_path.extension().and_then(|e| e.to_str()), Some("cbv")) {
+        "circuit"
     } else {
         "foundational"
     };
+
 
     // Infer default target if not specified (Phase 3.3)
     // .bv/.sbv -> hosted_c.toml (default C)
@@ -1675,7 +1636,8 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         // No target specified - infer from source type
         let inferred_target = match source_type {
             "rendered" => "react_web.toml",
-            "embedded" => "verilog_fpga.toml",
+            "embedded" => "llvm.toml",
+            "circuit" => "circt.toml",
             _ => "llvm.toml",
         };
         let loader = target_spec::TargetSpecLoader::new();
@@ -1710,7 +1672,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         if source_type == "embedded" && !spec.has_capability("hardware_triggers") {
             let prefix = if is_strict { "Error B4001" } else { "Error B4001" };
             eprintln!("{}: Target '{}' lacks required 'hardware_triggers' capability", prefix, target_name);
-            eprintln!("  .ebv/.sebv/.cbv files require target with hardware_triggers support");
+            eprintln!("  .ebv/.sebv files require target with hardware_triggers support");
             eprintln!("  Hint: Use a target spec with capabilities = [\"logic\", \"hardware_triggers\"]");
             std::process::exit(1);
         }
@@ -1798,6 +1760,12 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             eprintln!("Note: React backend - .rbv files use RBV path, .bv files need dedicated generator");
             Some(file_path.clone())
         }
+        "circt" => {
+            match run_cbv(&file_path, out_dir.as_deref()) {
+                Ok(p) => Some(p),
+                Err(e) => { eprintln!("Error: {}", e); None }
+            }
+        }
         _ => {
             eprintln!("Error: Unknown backend '{}' in target spec", backend);
             None
@@ -1811,14 +1779,14 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
 /// Intent: run c compile.
 fn run_c_compile(
-    file_path: &PathBuf,
-    out_dir: Option<&Path>,
-    no_stdlib: bool,
-    stdlib_path: Option<PathBuf>,
-    target: Option<&TargetSpec>,
-    strict: bool,
+    _file_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _no_stdlib: bool,
+    _stdlib_path: Option<PathBuf>,
+    _target: Option<&TargetSpec>,
+    _strict: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_c(file_path, out_dir, no_stdlib, stdlib_path, target.cloned(), &[], strict)
+    Err("The C backend has been removed. Use 'brief build <file>' for LLVM compilation instead.".into())
 }
 
 /// Intent: run rust compile.
@@ -2410,8 +2378,15 @@ fn run_llvm_compile(
         deps
     };
 
+    let comp_target = if is_embedded_extension(file_path) {
+        typechecker::CompilationTarget::Embedded
+    } else if is_circuit_extension(file_path) {
+        typechecker::CompilationTarget::Circuit
+    } else {
+        typechecker::CompilationTarget::Interpreter
+    };
     let mut tc = typechecker::TypeChecker::new()
-        .with_target(typechecker::CompilationTarget::Interpreter);
+        .with_target(comp_target);
     let type_errors = tc.check_program(&mut program.clone());
     if !type_errors.is_empty() {
         return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
@@ -2697,714 +2672,74 @@ fn run_llvm_compile(
 }
 
 fn run_cobol_compile(
-    file_path: &PathBuf,
-    out_dir: Option<&Path>,
-    target: Option<&TargetSpec>,
+    _file_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _target: Option<&TargetSpec>,
     _strict: bool,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_cobol(file_path, out_dir, target.cloned())
+    Err("The COBOL backend has been removed. Use 'brief build <file>' for LLVM compilation instead.".into())
 }
 
 /// Intent: run verilog compile.
 fn run_verilog_compile(
-    file_path: &PathBuf,
-    hw_config_path: &PathBuf,
-    out_dir: Option<&Path>,
-    no_stdlib: bool,
-    stdlib_path: Option<PathBuf>,
-    generate_tcl: bool,
-    tcl_only: bool,
-    target: Option<&TargetSpec>,
+    _file_path: &PathBuf,
+    _hw_config_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _no_stdlib: bool,
+    _stdlib_path: Option<PathBuf>,
+    _generate_tcl: bool,
+    _tcl_only: bool,
+    _target: Option<&TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_verilog(file_path, hw_config_path, out_dir, no_stdlib, stdlib_path, generate_tcl, tcl_only, target.cloned())
+    Err("The Verilog backend has been removed. Use 'brief build <file>' for LLVM compilation instead.".into())
 }
 
 /// Intent: run vhdl compile.
 fn run_vhdl_compile(
-    file_path: &PathBuf,
-    hw_config_path: &PathBuf,
-    out_dir: Option<&Path>,
-    target: Option<&TargetSpec>,
+    _file_path: &PathBuf,
+    _hw_config_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _target: Option<&TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    run_vhdl(file_path, hw_config_path, out_dir, target.cloned())
+    Err("The VHDL backend has been removed. Use 'brief build <file>' for LLVM compilation instead.".into())
 }
 
 /// Intent: run c.
 fn run_c(
-    file_path: &PathBuf,
-    out_dir: Option<&Path>,
-    no_stdlib: bool,
-    stdlib_path: Option<PathBuf>,
-    target_spec: Option<TargetSpec>,
-    args: &[String],
-    strict: bool,
+    _file_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _no_stdlib: bool,
+    _stdlib_path: Option<PathBuf>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    println!("Compiling to C: {}", file_path.display());
-    if strict {
-        println!("  Strict mode: full pre/postcondition verification enforced");
-    }
-    if let Some(ref spec) = target_spec {
-        println!("  Target: {}", spec.target.as_ref().map(|t| t.name.as_str()).unwrap_or("unknown"));
-    }
-
-    let source = fs::read_to_string(file_path)?;
-    let clean_source = strip_annotations(&source);
-
-    let mut parser = parser::Parser::new(&clean_source).with_strict_mode(strict);
-    let mut program = parser
-        .parse()
-        .map_err(|e| format!("Brief parse error: {}", e))?;
-
-    let mut import_resolver = import_resolver::ImportResolver::new()
-        .with_strict_mode(strict);
-    let mut program = import_resolver
-        .resolve_imports(&program, file_path)
-        .map_err(|e| format!("Import error: {}", e))?;
-
-    let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
-
-    let mut tc = typechecker::TypeChecker::new()
-        .with_stdlib_config(no_stdlib, stdlib_path)
-        .with_target(typechecker::CompilationTarget::Interpreter);
-    let type_errors = tc.check_program(&mut program.clone());
-    if !type_errors.is_empty() {
-        return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
-    }
-
-    // Validate hashtags against C backend
-    if !backend::validate_hashtags_in_program(&program, "c", false) {
-        return Err("Hashtag validation errors (C backend)".into());
-    }
-
-    // Run shared program analysis
-    let _analysis = backend::analyze_program(&program, false);
-
-    // Load linkage config (optional - look alongside source file)
-    let linkage_path = file_path
-        .parent()
-        .map(|p| p.join("linkage.toml"));
-    let linkage_config = if let Some(ref lp) = linkage_path {
-        if lp.exists() {
-            Some(linkage::LinkageConfig::load(lp).map_err(|e| {
-                format!("Failed to load linkage.toml: {}", e)
-            })?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    let is_ebv = file_path.extension().map(|e| e == "ebv" || e == "cbv").unwrap_or(false);
-
-    let mut c_backend = backend::c::CBackend::new();
-    if let Some(linkage) = linkage_config {
-        c_backend = c_backend.with_linkage(linkage);
-    }
-
-    // Use target spec if provided
-    if let Some(spec) = target_spec {
-        c_backend = c_backend.with_spec(spec);
-    }
-
-    let stem = file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
-
-    let (output, makefile) = c_backend.generate(&program, stem);
-
-    let out_path = if let Some(dir) = out_dir {
-        let d = dir.to_path_buf();
-        fs::create_dir_all(&d)?;
-        d.join(format!("{}.c", stem))
-    } else {
-        PathBuf::from(format!("{}.c", stem))
-    };
-
-    fs::write(&out_path, &output)?;
-    println!("  C generated: {}", out_path.display());
-
-    // Write Makefile if in kernel mode
-    if let Some(makefile_content) = makefile {
-        let makefile_path = if let Some(dir) = out_dir {
-            dir.join("Makefile")
-        } else {
-            PathBuf::from("Makefile")
-        };
-        fs::write(&makefile_path, makefile_content)?;
-        println!("  Makefile generated: {}", makefile_path.display());
-    }
-
-    Ok(out_path)
+    Err("The C backend has been removed. Use 'brief build<file>' for LLVM compilation instead.".into())
 }
-
-/// Intent: run cobol.
 fn run_cobol(
-    file_path: &PathBuf,
-    out_dir: Option<&Path>,
-    target_spec: Option<TargetSpec>,
+    _file_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _target_spec: Option<TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    println!("Compiling to COBOL: {}", file_path.display());
-
-    let source = fs::read_to_string(file_path)?;
-    let clean_source = strip_annotations(&source);
-
-    let mut parser = parser::Parser::new(&clean_source);
-    let mut program = parser
-        .parse()
-        .map_err(|e| format!("Brief parse error: {}", e))?;
-
-    let mut import_resolver = import_resolver::ImportResolver::new();
-    let mut program = import_resolver
-        .resolve_imports(&program, file_path)
-        .map_err(|e| format!("Import error: {}", e))?;
-
-    let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
-
-    let mut tc = typechecker::TypeChecker::new()
-        .with_stdlib_config(false, None)
-        .with_target(typechecker::CompilationTarget::Interpreter);
-    let type_errors = tc.check_program(&mut program.clone());
-    if !type_errors.is_empty() {
-        return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
-    }
-
-    // Run shared program analysis
-    let _analysis = backend::analyze_program(&program, false);
-
-    let stem = file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("output");
-
-    let mut cobol_backend = backend::cobol::CobolBackend::new();
-    if let Some(spec) = target_spec {
-        cobol_backend = cobol_backend.with_spec(spec);
-    }
-    let output = cobol_backend.generate(&program, stem);
-
-    let out_path = if let Some(dir) = out_dir {
-        let d = dir.to_path_buf();
-        fs::create_dir_all(&d)?;
-        d.join(format!("{}.cbl", stem))
-    } else {
-        PathBuf::from(format!("{}.cbl", stem))
-    };
-
-    fs::write(&out_path, &output)?;
-    println!("  COBOL generated: {}", out_path.display());
-
-    Ok(out_path)
+    Err("The COBOL backend has been removed. Use 'brief build<file>' for LLVM compilation instead.".into())
 }
-
-/// Intent: run verilog.
 fn run_verilog(
-    file_path: &PathBuf,
-    hw_config_path: &PathBuf,
-    out_dir: Option<&Path>,
-    no_stdlib: bool,
-    stdlib_path: Option<PathBuf>,
-    generate_tcl: bool,
-    tcl_only: bool,
-    target_spec: Option<TargetSpec>,
+    _file_path: &PathBuf,
+    _hw_config_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _no_stdlib: bool,
+    _stdlib_path: Option<PathBuf>,
+    _generate_tcl: bool,
+    _tcl_only: bool,
+    _target_spec: Option<TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    println!("Compiling to SystemVerilog: {}", file_path.display());
-
-    // Load HW config (required)
-    if hw_config_path.to_str() == Some("/dev/null") {
-        return Err("Hardware config (--hw) is REQUIRED for Verilog compilation".into());
-    }
-
-    // Check if loading .dbv (DBrief config) or .toml (hardware config)
-    let hw_config = if hw_config_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e == "dbv")
-        .unwrap_or(false)
-    {
-        // Load DBrief config and extract address aliases
-        println!("  Loading DBrief config: {}", hw_config_path.display());
-        let dbrief_source = fs::read_to_string(hw_config_path)?;
-        let dbrief_program = dbrief::parse_dbrief(&dbrief_source)
-            .map_err(|e| format!("DBrief parse error: {}", e))?;
-        
-        // Convert DBrief aliases to hardware config
-        let mut aliases = Vec::new();
-        for alias in &dbrief_program.aliases {
-            if let Some(addr) = &alias.address {
-                match addr {
-                    dbrief::DbriefAddress::Hex(h) => {
-                        aliases.push((alias.name.clone(), *h));
-                    }
-                    dbrief::DbriefAddress::Numeric(n) => {
-                        aliases.push((alias.name.clone(), *n));
-                    }
-                    _ => {}
-                }
-            }
-        }
-        println!("  Found {} alias bindings", aliases.len());
-        
-        // Create a minimal hardware config from DBrief
-        ast::HardwareConfig {
-            project: ast::ProjectConfig {
-                name: "dbrief_target".to_string(),
-                version: "0.1.0".to_string(),
-            },
-            target: ast::TargetConfig {
-                fpga: "auto".to_string(),
-                clock_hz: 100_000_000,
-                platform: None,
-                synthesis: None,
-            },
-            interface: ast::InterfaceConfig {
-                name: "axi4-lite".to_string(),
-                address_width: Some(32),
-                data_width: Some(32),
-                controller: None,
-                situs: None,
-            },
-            memory: HashMap::new(),
-            io: None,
-        }
-    } else if hw_config_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e == "dbvs")
-        .unwrap_or(false)
-    {
-        // Load DBrief schema and display available registers/aliases
-        println!("  Loading DBrief schema: {}", hw_config_path.display());
-        let dbvs_source = fs::read_to_string(hw_config_path)?;
-        let dbvs_program = dbrief::parse_dbvs(&dbvs_source)
-            .map_err(|e| format!("DBrief schema parse error: {}", e))?;
-        
-        println!("  Schema defines:");
-        println!("    Registers: {}", dbvs_program.registers.len());
-        println!("    Structs: {}", dbvs_program.structs.len());
-        println!("    Enums: {}", dbvs_program.enums.len());
-        println!("    Aliases: {}", dbvs_program.aliases.len());
-        
-        for alias in &dbvs_program.aliases {
-            println!("      - {}: {:?}", alias.name, alias.alias_type);
-        }
-        
-        // Create a minimal hardware config
-        ast::HardwareConfig {
-            project: ast::ProjectConfig {
-                name: "dbrief_target".to_string(),
-                version: "0.1.0".to_string(),
-            },
-            target: ast::TargetConfig {
-                fpga: "auto".to_string(),
-                clock_hz: 100_000_000,
-                platform: None,
-                synthesis: None,
-            },
-            interface: ast::InterfaceConfig {
-                name: "axi4-lite".to_string(),
-                address_width: Some(32),
-                data_width: Some(32),
-                controller: None,
-                situs: None,
-            },
-            memory: HashMap::new(),
-            io: None,
-        }
-    } else {
-        parser::parse_hardware_config(hw_config_path)?
-    };
-
-    // Check for .dbvs schema imports in the source file
-    let source = fs::read_to_string(file_path)?;
-    if source.contains("IMPORT") && source.contains(".dbvs") {
-        println!("  Checking for .dbvs schema imports...");
-        
-        // Find .dbvs import statements
-        for line in source.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("IMPORT") && trimmed.contains(".dbvs") {
-                // Extract path
-                if let Some(path_start) = trimmed.find('"') {
-                    if let Some(path_end) = trimmed[path_start+1..].find('"') {
-                        let import_path = &trimmed[path_start+1..path_start+1+path_end];
-                        println!("    Found import: {}", import_path);
-                        
-                        // Load and display schema info
-                        if let Ok(dbvs_content) = fs::read_to_string(file_path.parent().unwrap().join(import_path)) {
-                            if let Ok(dbvs) = dbrief::parse_dbvs(&dbvs_content) {
-                                for alias in &dbvs.aliases {
-                                    println!("      Schema alias: {} -> {:?}", alias.name, alias.alias_type);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Load linkage config (optional - look alongside source file)
-    let linkage_path = file_path
-        .parent()
-        .map(|p| p.join("linkage.toml"));
-    let linkage_config = if let Some(ref lp) = linkage_path {
-        if lp.exists() {
-            Some(linkage::LinkageConfig::load(lp).map_err(|e| {
-                format!("Failed to load linkage.toml: {}", e)
-            })?)
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-
-    // Standard Brief pipeline
-    let source = fs::read_to_string(file_path)?;
-    let mut parser = parser::Parser::new(&source);
-    let mut program = parser
-        .parse()
-        .map_err(|e| format!("Brief parse error: {}", e))?;
-
-    let mut import_resolver = import_resolver::ImportResolver::new();
-    let mut program = import_resolver
-        .resolve_imports(&program, file_path)
-        .map_err(|e| format!("Import error: {}", e))?;
-
-    let mut desug = desugarer::Desugarer::new();
-    let mut program = desug.desugar(&program);
-
-    let mut tc = typechecker::TypeChecker::new()
-        .with_stdlib_config(no_stdlib, stdlib_path)
-        .with_target(typechecker::CompilationTarget::Verilog);
-    let type_errors = tc.check_program(&mut program);
-    if !type_errors.is_empty() {
-        eprintln!(
-            "{}",
-            format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.ebv"))
-        );
-        return Err("Type errors".into());
-    }
-
-    // Hardware validation
-    let is_ebv = file_path.extension().map(|e| e == "ebv" || e == "cbv").unwrap_or(false);
-    
-    let dbvs_engine: Option<crate::dbrief::DbvsEngine> = None;
-
-    let hw_diagnostics = hardware_validator::HardwareValidator::validate(
-        &program,
-        Some(&hw_config),
-        "vhdl",
-        is_ebv,
-        target_spec.as_ref(),
-        dbvs_engine.as_ref(),
-    );
-
-    if !hw_diagnostics.is_empty() {
-        eprintln!(
-            "{}",
-            format_hardware_diagnostics(
-                &hw_diagnostics,
-                &source,
-                file_path.to_str().unwrap_or("main.ebv")
-            )
-        );
-        let has_errors = hw_diagnostics
-            .iter()
-            .any(|d| d.severity == errors::Severity::Error);
-        if is_ebv && has_errors {
-            return Err("Hardware validation failed for .ebv".into());
-        }
-    }
-    
-    // Schema import validation (for .dbvs imports)
-    let schema_diagnostics = hardware_validator::HardwareValidator::validate_schema_imports(
-        &program,
-        file_path,
-    );
-    
-    if !schema_diagnostics.is_empty() {
-        eprintln!("{}", format_hardware_diagnostics(
-            &schema_diagnostics,
-            &source,
-            file_path.to_str().unwrap_or("main.ebv")
-        ));
-        let has_errors = schema_diagnostics
-            .iter()
-            .any(|d| d.severity == errors::Severity::Error);
-        if is_ebv && has_errors {
-            return Err("Schema validation failed for .ebv".into());
-        }
-    }
-
-    // Run shared program analysis
-    let _analysis = backend::analyze_program(&program, false);
-
-    // Verilog generation
-    let stem = file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("top");
-    let mut verilog_gen = backend::verilog::VerilogGenerator::new(stem, hw_config.clone());
-    if let Some(linkage) = linkage_config {
-        verilog_gen = verilog_gen.with_linkage(linkage);
-    }
-    if let Some(spec) = target_spec {
-        verilog_gen = verilog_gen.with_spec(spec);
-    }
-    let verilog_code = verilog_gen.generate(&program);
-    let tb_code = verilog_gen.generate_testbench(&program);
-
-    // Write output
-    let out_path = out_dir
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
-    if !out_path.exists() {
-        fs::create_dir_all(&out_path)?;
-    }
-    let output_file = out_path.join(format!("{}.sv", stem));
-    fs::write(&output_file, verilog_code)?;
-
-    let tb_file = out_path.join(format!("{}_tb.sv", stem));
-    fs::write(&tb_file, tb_code)?;
-    println!("  Generated: {}", tb_file.display());
-
-    if generate_tcl || tcl_only {
-        let sv_files = vec![format!("{}.sv", stem)];
-        let tcl_gen = backend::tcl_generator::TclGenerator::new(&hw_config, sv_files);
-        let tcl_code = tcl_gen.generate();
-        let tcl_file = out_path.join(format!("{}.tcl", stem));
-        fs::write(&tcl_file, tcl_code)?;
-        println!("  Generated TCL: {}", tcl_file.display());
-
-        if tcl_only {
-            return Ok(output_file);
-        }
-    }
-
-    println!("  Generated: {}", output_file.display());
-    Ok(output_file)
+    Err("The Verilog backend has been removed. Use 'brief build<file>' for LLVM compilation instead.".into())
 }
-
-/// Intent: run vhdl.
 fn run_vhdl(
-    file_path: &PathBuf,
-    hw_config_path: &PathBuf,
-    out_dir: Option<&Path>,
-    target_spec: Option<TargetSpec>,
+    _file_path: &PathBuf,
+    _hw_config_path: &PathBuf,
+    _out_dir: Option<&Path>,
+    _target_spec: Option<TargetSpec>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    println!("Compiling to VHDL: {}", file_path.display());
-
-    // Load HW config (required)
-    if hw_config_path.to_str() == Some("/dev/null") {
-        return Err("Hardware config (--hw) is REQUIRED for VHDL compilation".into());
-    }
-
-    // Check if loading .dbv (DBrief config), .dbvs (schema), or .toml (hardware config)
-    let hw_config = if hw_config_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e == "dbv")
-        .unwrap_or(false)
-    {
-        // Load DBrief config and extract address aliases
-        println!("  Loading DBrief config: {}", hw_config_path.display());
-        let dbrief_source = fs::read_to_string(hw_config_path)?;
-        let dbrief_program = dbrief::parse_dbrief(&dbrief_source)
-            .map_err(|e| format!("DBrief parse error: {}", e))?;
-        
-        // Extract alias bindings
-        for alias in &dbrief_program.aliases {
-            if let Some(addr) = &alias.address {
-                match addr {
-                    dbrief::DbriefAddress::Hex(h) => {
-                        println!("    ALIAS {} -> 0x{:X}", alias.name, h);
-                    }
-                    dbrief::DbriefAddress::Numeric(n) => {
-                        println!("    ALIAS {} -> {}", alias.name, n);
-                    }
-                    _ => {}
-                }
-            }
-        }
-        
-        // Create a minimal hardware config from DBrief
-        ast::HardwareConfig {
-            project: ast::ProjectConfig {
-                name: "dbrief_target".to_string(),
-                version: "0.1.0".to_string(),
-            },
-            target: ast::TargetConfig {
-                fpga: "auto".to_string(),
-                clock_hz: 100_000_000,
-                platform: None,
-                synthesis: None,
-            },
-            interface: ast::InterfaceConfig {
-                name: "axi4-lite".to_string(),
-                address_width: Some(32),
-                data_width: Some(32),
-                controller: None,
-                situs: None,
-            },
-            memory: HashMap::new(),
-            io: None,
-        }
-    } else if hw_config_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e == "dbvs")
-        .unwrap_or(false)
-    {
-        // Load DBrief schema
-        println!("  Loading DBrief schema: {}", hw_config_path.display());
-        let dbvs_source = fs::read_to_string(hw_config_path)?;
-        let dbvs_program = dbrief::parse_dbvs(&dbvs_source)
-            .map_err(|e| format!("DBrief schema parse error: {}", e))?;
-        
-        println!("  Schema defines:");
-        println!("    Registers: {}", dbvs_program.registers.len());
-        println!("    Structs: {}", dbvs_program.structs.len());
-        for alias in &dbvs_program.aliases {
-            println!("    Alias: {} = {:?}", alias.name, alias.alias_type);
-        }
-        
-        ast::HardwareConfig {
-            project: ast::ProjectConfig {
-                name: "dbrief_target".to_string(),
-                version: "0.1.0".to_string(),
-            },
-            target: ast::TargetConfig {
-                fpga: "auto".to_string(),
-                clock_hz: 100_000_000,
-                platform: None,
-                synthesis: None,
-            },
-            interface: ast::InterfaceConfig {
-                name: "axi4-lite".to_string(),
-                address_width: Some(32),
-                data_width: Some(32),
-                controller: None,
-                situs: None,
-            },
-            memory: HashMap::new(),
-            io: None,
-        }
-    } else {
-        parser::parse_hardware_config(hw_config_path)?
-    };
-
-    // Standard Brief pipeline
-    let source = fs::read_to_string(file_path)?;
-    let mut parser = parser::Parser::new(&source);
-    let mut program = parser
-        .parse()
-        .map_err(|e| format!("Brief parse error: {}", e))?;
-
-    let mut import_resolver = import_resolver::ImportResolver::new();
-    let mut program = import_resolver
-        .resolve_imports(&program, file_path)
-        .map_err(|e| format!("Import error: {}", e))?;
-
-    let mut desug = desugarer::Desugarer::new();
-    let program = desug.desugar(&program);
-
-    let mut tc = typechecker::TypeChecker::new()
-        .with_target(typechecker::CompilationTarget::Verilog);
-    let type_errors = tc.check_program(&mut program.clone());
-
-    if !type_errors.is_empty() {
-        for e in type_errors.iter().take(10) {
-            eprintln!("Type error: {}", e);
-        }
-        if type_errors.len() > 10 {
-            eprintln!("... and {} more errors", type_errors.len() - 10);
-        }
-        return Err("Type checking failed".into());
-    }
-
-    // Check if this is an .ebv file and validate hardware if so
-    let is_ebv = file_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e == "ebv")
-        .unwrap_or(false);
-
-    if is_ebv {
-        let hw_diagnostics = hardware_validator::HardwareValidator::validate(
-            &program,
-            Some(&hw_config),
-            "vhdl",
-            is_ebv,
-            target_spec.as_ref(),
-            None,  // dbvs_engine
-        );
-        
-        let has_errors = hw_diagnostics
-            .iter()
-            .any(|d| d.severity == errors::Severity::Error);
-        if has_errors {
-            return Err("Hardware validation failed for .ebv".into());
-        }
-        
-        // Schema import validation
-        let schema_diagnostics = hardware_validator::HardwareValidator::validate_schema_imports(
-            &program,
-            file_path,
-        );
-        
-        let schema_errors = schema_diagnostics
-            .iter()
-            .any(|d| d.severity == errors::Severity::Error);
-        if schema_errors {
-            eprintln!("{}", format_hardware_diagnostics(
-                &schema_diagnostics,
-                &source,
-                file_path.to_str().unwrap_or("main.ebv")
-            ));
-            return Err("Schema validation failed for .ebv".into());
-        }
-    }
-
-    // Run shared program analysis
-    let _analysis = backend::analyze_program(&program, false);
-
-    // VHDL generation
-    let stem = file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("top");
-    let mut vhdl_gen = backend::vhdl::VhdlGenerator::new(stem, hw_config.clone());
-    if let Some(spec) = target_spec {
-        vhdl_gen = vhdl_gen.with_spec(spec);
-    }
-    let vhdl_files = vhdl_gen.generate(&program);
-
-    // Write output — each file is a separate .vhd
-    let out_path = out_dir
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."));
-    if !out_path.exists() {
-        fs::create_dir_all(&out_path)?;
-    }
-    let mut last_output = out_path.join(format!("{}.vhd", stem));
-    for (filename, source) in &vhdl_files {
-        let output_file = out_path.join(filename);
-        fs::write(&output_file, source)?;
-        println!("  Generated: {}", output_file.display());
-        if filename == &format!("{}.vhd", stem) || filename == "top.vhd" {
-            last_output = output_file;
-        }
-    }
-
-    Ok(last_output)
+    Err("The VHDL backend has been removed. Use 'brief build<file>' for LLVM compilation instead.".into())
 }
-
-/// Intent: run rbv.
 fn run_rbv(
     file_path: &PathBuf,
     out_dir: Option<&Path>,
@@ -3737,6 +3072,50 @@ wasm-opt = false
     Ok(output_path)
 }
 
+/// Intent: Compile a .cbv (Circuit Brief) file via the CIRCT backend.
+fn run_cbv(
+    file_path: &PathBuf,
+    out_dir: Option<&Path>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let source = fs::read_to_string(file_path)?;
+    let clean_source = strip_annotations(&source);
+
+    let mut parser = parser::Parser::new(&clean_source);
+    let mut program = parser
+        .parse()
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let mut import_resolver = import_resolver::ImportResolver::new();
+    program = import_resolver
+        .resolve_imports(&program, file_path)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    program.synthesize_builtin_types();
+    program.synthesize_init_txn();
+
+    let mut desug = desugarer::Desugarer::new();
+    let mut program = desug.desugar(&program);
+
+    let mut tc = typechecker::TypeChecker::new()
+        .with_target(typechecker::CompilationTarget::Circuit);
+    let type_errors = tc.check_program(&mut program.clone());
+    if !type_errors.is_empty() {
+        return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.cbv"))).into());
+    }
+
+    let mut circt = backend::circt::CirctBackend::new();
+    let mlir_output = circt.generate(&program);
+
+    let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+    let output_path = out_dir.unwrap_or_else(|| std::path::Path::new("."));
+    let mlir_file = output_path.join(format!("{}.mlir", stem));
+    fs::write(&mlir_file, &mlir_output)?;
+    println!("  MLIR output: {}", mlir_file.display());
+    println!("  To synthesize: circt-opt {}.mlir | circt-translate --export-verilog", stem);
+
+    Ok(output_path.to_path_buf())
+}
+
 /// Intent: Generate a direct WASM binary from a .bv file.
 fn run_wasm(
     file_path: &PathBuf,
@@ -3749,44 +3128,7 @@ fn run_wasm(
 
     match ext {
         "bv" | "sbv" => {
-            println!("Generating direct WASM binary from .{} file...", ext);
-
-            let source = fs::read_to_string(file_path)?;
-            let clean_source = strip_annotations(&source);
-
-            let mut parser = parser::Parser::new(&clean_source);
-            let mut program = parser.parse()
-                .map_err(|e| format!("Brief parse error: {}", e))?;
-
-            let mut import_resolver = import_resolver::ImportResolver::new();
-            program = import_resolver.resolve_imports(&program, file_path)
-                .map_err(|e| format!("Import error: {}", e))?;
-
-            let mut desug = desugarer::Desugarer::new();
-            program = desug.desugar(&program);
-
-            let mut tc = typechecker::TypeChecker::new()
-                .with_stdlib_config(no_stdlib, stdlib_path)
-                .with_target(typechecker::CompilationTarget::Wasm);
-            let type_errors = tc.check_program(&mut program);
-            if !type_errors.is_empty() {
-                return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
-            }
-
-            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
-
-            let module = backend::wasm::generate_wasm(&program);
-
-            let output_path = out_dir.map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from("."));
-            fs::create_dir_all(&output_path)?;
-
-            let wasm_path = output_path.join(format!("{}.wasm", stem));
-            fs::write(&wasm_path, &module.bytes)?;
-            println!("  WASM binary: {} ({} bytes, {} functions, {} exports)",
-                wasm_path.display(), module.bytes.len(), module.function_count, module.export_count);
-
-            Ok(output_path)
+            Err("The direct WASM backend has been removed. Use 'brief webstack <file>' for WebAssembly compilation via Webstack, or 'brief build <file>' for native binary.".into())
         }
         "rbv" | "srbv" => {
             println!("Generating WASM + JS + frontend from .{} file...", ext);

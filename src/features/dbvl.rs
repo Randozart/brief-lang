@@ -28,5 +28,3 @@ impl ExprEval for DbvlTableExpr {
 }
 
 impl ExprCodegenLLVM for DbvlTableExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%dbvl".into(), ty: Type::Void } } }
-impl ExprCodegenVHDL for DbvlTableExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
-impl ExprCodegenWebstack for DbvlTableExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

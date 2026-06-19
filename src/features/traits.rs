@@ -75,15 +75,6 @@ pub trait ExprCodegenLLVM {
     ) -> crate::backend::llvm::TypedRegister;
 }
 
-/// VHDL Codegen. VHDL codegen is stateless — takes `&VhdlGenerator`.
-pub trait ExprCodegenVHDL {
-    fn emit_vhdl(
-        &self,
-        ctx: &crate::backend::vhdl::VhdlGenerator,
-        dispatch: &ExprDispatch,
-    ) -> String;
-}
-
 /// Webstack Codegen. Stateless string builder — takes `&WebstackGenerator`.
 pub trait ExprCodegenWebstack {
     fn emit_js(
@@ -127,17 +118,6 @@ pub trait StmtCodegenLLVM {
     );
 }
 
-/// VHDL Codegen.
-pub trait StmtCodegenVHDL {
-    fn emit_vhdl(
-        &self,
-        ctx: &mut crate::backend::vhdl::VhdlGenerator,
-        out: &mut String,
-        dispatch: &StmtDispatch,
-        indent: &str,
-    );
-}
-
 /// Webstack Codegen.
 pub trait StmtCodegenWebstack {
     fn emit_js(
@@ -161,12 +141,6 @@ mod kani_full_tests {
     #[kani::proof]
     fn verify_expr_codegen_llvm_trait_satisfied() {
         fn assert_trait<T: ExprCodegenLLVM>() {}
-        assert_trait::<crate::features::literal::LiteralExpr>();
-    }
-
-    #[kani::proof]
-    fn verify_expr_codegen_vhdl_trait_satisfied() {
-        fn assert_trait<T: ExprCodegenVHDL>() {}
         assert_trait::<crate::features::literal::LiteralExpr>();
     }
 

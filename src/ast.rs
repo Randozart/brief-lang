@@ -647,6 +647,10 @@ pub enum Intrinsic {
     /// backtrace#() -> List<Int> — stack trace addresses
     Backtrace,
 
+    // ===== D14b: CPU Halt (2026-06-19) =====
+    /// halt#() -> Void — halt CPU (WFI on ARM, HLT on x86). Used by embedded mode term!
+    Halt,
+
     // ===== D15: Scheduling (2026-06-19) =====
     /// sched_yield#() -> Int — yield CPU (0 on success)
     SchedYield,
@@ -897,6 +901,7 @@ impl Intrinsic {
             // D14: Debugging
             "abort" => Some(Intrinsic::Abort),
             "backtrace" => Some(Intrinsic::Backtrace),
+            "halt" => Some(Intrinsic::Halt),
             // D15: Scheduling
             "sched_yield" => Some(Intrinsic::SchedYield),
             "getpriority" => Some(Intrinsic::GetPriority),
@@ -1088,6 +1093,7 @@ impl Intrinsic {
             // D14: Debugging
             Intrinsic::Abort => "abort",
             Intrinsic::Backtrace => "backtrace",
+            Intrinsic::Halt => "halt",
             // D15: Scheduling
             Intrinsic::SchedYield => "sched_yield",
             Intrinsic::GetPriority => "getpriority",

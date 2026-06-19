@@ -85,7 +85,5 @@ impl ExprCodegenLLVM for PatternMatchExpr {
     }
 }
 impl ExprCodegenLLVM for MatchExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%mtc".into(), ty: Type::Void } } }
-impl ExprCodegenVHDL for PatternMatchExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
-impl ExprCodegenVHDL for MatchExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenWebstack for PatternMatchExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }
 impl ExprCodegenWebstack for MatchExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

@@ -43,6 +43,8 @@ pub enum CompilationTarget {
     Interpreter,
     Wasm,
     Verilog,
+    Embedded,
+    Circuit,
 }
 
 pub struct TypeChecker {
@@ -1434,12 +1436,29 @@ impl TypeChecker {
         match expr {
             Expr::Integer(_) => Type::Int,
             Expr::Float(_) => {
-                if self.target == CompilationTarget::Verilog {
-                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                        expected: "Fixed-point or Integer".to_string(),
-                        found: "Float".to_string(),
-                        context: "Verilog synthesis".to_string(),
-                    });
+                match self.target {
+                    CompilationTarget::Verilog => {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: "Fixed-point or Integer".to_string(),
+                            found: "Float".to_string(),
+                            context: "Verilog synthesis".to_string(),
+                        });
+                    }
+                    CompilationTarget::Embedded => {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: "Fixed-point or Integer".to_string(),
+                            found: "Float".to_string(),
+                            context: "Embedded target (no FPU)".to_string(),
+                        });
+                    }
+                    CompilationTarget::Circuit => {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: "Fixed-point or Integer".to_string(),
+                            found: "Float".to_string(),
+                            context: "CIRCT hardware synthesis".to_string(),
+                        });
+                    }
+                    _ => {}
                 }
                 Type::Float
             }
@@ -1475,7 +1494,7 @@ impl TypeChecker {
                     Intrinsic::Keys | Intrinsic::Values => Type::Custom("List".to_string()),
                     Intrinsic::Println | Intrinsic::WriteFile | Intrinsic::Sleep | Intrinsic::Bind | Intrinsic::Listen => Type::Bool,
                     Intrinsic::Readln | Intrinsic::ReadFile => Type::String,
-                    Intrinsic::Exit => Type::Bool,
+                    Intrinsic::Exit | Intrinsic::Halt => Type::Bool,
                     Intrinsic::Time | Intrinsic::Socket | Intrinsic::Accept => Type::Int,
                     Intrinsic::Sort | Intrinsic::Reverse => Type::Bool,
                     Intrinsic::Range => Type::Custom("List".to_string()),

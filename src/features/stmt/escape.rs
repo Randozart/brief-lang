@@ -17,9 +17,6 @@ impl StmtEval for EscapeStmt {
 impl StmtCodegenLLVM for EscapeStmt {
     fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &StmtDispatch, _indent: &str) {}
 }
-impl StmtCodegenVHDL for EscapeStmt {
-    fn emit_vhdl(&self, _ctx: &mut crate::backend::vhdl::VhdlGenerator, _out: &mut String, _dispatch: &StmtDispatch, _indent: &str) {}
-}
 impl StmtCodegenWebstack for EscapeStmt {
     fn emit_js(&self, _ctx: &mut crate::backend::webstack::WebstackGenerator, _out: &mut String, _dispatch: &StmtDispatch) {}
 }

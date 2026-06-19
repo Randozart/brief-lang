@@ -71,16 +71,6 @@ impl ExprCodegenLLVM for TypeDef {
     }
 }
 
-impl ExprCodegenVHDL for TypeDef {
-    fn emit_vhdl(
-        &self,
-        ctx: &crate::backend::vhdl::VhdlGenerator,
-        dispatch: &ExprDispatch,
-    ) -> String {
-        // DEFERRED: Emit width/port mapping from Bytes
-        "'0'".into()
-    }
-}
 
 impl ExprCodegenWebstack for TypeDef {
     fn emit_js(

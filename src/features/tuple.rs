@@ -58,7 +58,5 @@ impl ExprCodegenLLVM for TupleDestructureExpr {
         ctx.emit_expr(out, &Expr::TupleDestructure(self.names.clone(), self.expr.clone()), "")
     }
 }
-impl ExprCodegenVHDL for TupleExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
-impl ExprCodegenVHDL for TupleDestructureExpr { fn emit_vhdl(&self, _: &crate::backend::vhdl::VhdlGenerator, _: &ExprDispatch) -> String { "'0'".into() } }
 impl ExprCodegenWebstack for TupleExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }
 impl ExprCodegenWebstack for TupleDestructureExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

@@ -57,11 +57,6 @@ impl ExprCodegenLLVM for UnaryOpExpr {
     }
 }
 
-impl ExprCodegenVHDL for UnaryOpExpr {
-    fn emit_vhdl(&self, _ctx: &crate::backend::vhdl::VhdlGenerator, _dispatch: &ExprDispatch) -> String {
-        "'0'".to_string()
-    }
-}
 
 impl ExprCodegenWebstack for UnaryOpExpr {
     fn emit_js(&self, _ctx: &crate::backend::webstack::WebstackGenerator, _dispatch: &ExprDispatch) -> String {

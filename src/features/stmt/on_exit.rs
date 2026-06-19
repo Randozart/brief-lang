@@ -21,9 +21,6 @@ impl StmtEval for OnExitStmt {
 impl StmtCodegenLLVM for OnExitStmt {
     fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &StmtDispatch, _indent: &str) {}
 }
-impl StmtCodegenVHDL for OnExitStmt {
-    fn emit_vhdl(&self, _ctx: &mut crate::backend::vhdl::VhdlGenerator, _out: &mut String, _dispatch: &StmtDispatch, _indent: &str) {}
-}
 impl StmtCodegenWebstack for OnExitStmt {
     fn emit_js(&self, _ctx: &mut crate::backend::webstack::WebstackGenerator, _out: &mut String, _dispatch: &StmtDispatch) {}
 }

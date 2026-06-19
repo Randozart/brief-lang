@@ -1,16 +1,6 @@
-pub mod aarch64;
-pub mod c;
 pub mod circt;
 pub mod llvm;
-// llvm_optimizer moved into llvm/ as llvm::optimizer
-pub mod rust;
-pub mod verilog;
-pub mod vhdl;
-pub mod wasm;
 pub mod webstack;
-pub mod x86_64;
-pub mod tcl_generator;
-pub mod cobol;
 
 use crate::analysis::call_graph::CallGraph;
 use crate::analysis::dependency_graph::DependencyGraph;
@@ -92,24 +82,17 @@ pub fn run_peephole(program: &Program, analysis: &AnalysisResults) -> Program {
 }
 
 /// Intent: Return the list of hashtags supported by a given backend name.
-/// Backend names match the subcommand (e.g. "c", "rust", "wasm", "verilog", "vhdl", "x86_64", "aarch64", "cobol").
 pub fn supported_hashtags(backend: &str) -> Vec<&'static str> {
     match backend {
-        "c" | "x86_64" | "aarch64" | "llvm" => {
+        "llvm" => {
             vec!["volatile", "sfence", "lfence", "mfence", "aligned", "packed",
                  "inline", "unroll", "vectorize", "gpu"]
         }
-        "rust" => {
-            vec!["volatile", "sync", "aligned", "repr", "packed"]
-        }
-        "wasm" | "webstack" => {
+        "webstack" => {
             vec!["volatile", "aligned"]
         }
-        "verilog" | "vhdl" => {
+        "circt" => {
             vec!["clock", "register", "gate", "posedge", "negedge"]
-        }
-        "cobol" => {
-            vec!["volatile", "packed", "aligned"]
         }
         _ => {
             vec![] // unknown backend — no known support
@@ -828,99 +811,6 @@ impl GuardTracker {
 mod tests {
     use super::*;
     use crate::ast::Hashtag;
-
-    /// Intent: Verify the C backend supports the volatile hashtag.
-    #[test]
-    fn test_c_backend_supports_volatile() {
-        let tag = Hashtag { name: "volatile".into(), value: None, mandatory: false, speculative: false, fallback: vec![], scoped: None };
-        let results = validate_hashtags(&[tag], "c");
-        assert_eq!(results[0], HashtagValidation::Supported);
-    }
-
-    /// Intent: Verify the C backend rejects an unknown advisory hashtag.
-    #[test]
-    fn test_c_backend_rejects_unknown_advisory() {
-        let tag = Hashtag { name: "thermal_sense".into(), value: None, mandatory: false, speculative: false, fallback: vec![], scoped: None };
-        let results = validate_hashtags(&[tag], "c");
-        assert_eq!(results[0], HashtagValidation::UnsupportedAdvisory("thermal_sense".to_string()));
-    }
-
-    /// Intent: Verify the C backend rejects an unknown mandatory hashtag.
-    #[test]
-    fn test_c_backend_rejects_unknown_mandatory() {
-        let tag = Hashtag { name: "thermal_sense".into(), value: None, mandatory: true, speculative: false, fallback: vec![], scoped: None };
-        let results = validate_hashtags(&[tag], "c");
-        assert_eq!(results[0], HashtagValidation::UnsupportedMandatory("thermal_sense".to_string()));
-    }
-
-    /// Intent: Verify fallback chain tries alternative hashtags.
-    #[test]
-    fn test_fallback_chain_tries_alternatives() {
-        let tag = Hashtag {
-            name: "unknown_op".into(),
-            value: None,
-            mandatory: true,
-            speculative: false,
-            fallback: vec!["lfence".to_string(), "mfence".to_string()],
-            scoped: None,
-        };
-        let results = validate_hashtags(&[tag], "c");
-        assert_eq!(results[0], HashtagValidation::Supported);
-    }
-
-    /// Intent: Verify fallback chain returns error when all alternatives unknown.
-    #[test]
-    fn test_fallback_chain_all_unknown() {
-        let tag = Hashtag {
-            name: "unknown_op".into(),
-            value: None,
-            mandatory: true,
-            speculative: false,
-            fallback: vec!["nope1".to_string(), "nope2".to_string()],
-            scoped: None,
-        };
-        let results = validate_hashtags(&[tag], "c");
-        assert_eq!(results[0], HashtagValidation::UnsupportedMandatory("unknown_op".to_string()));
-    }
-
-    /// Intent: Verify scoped tag is skipped when backend does not match.
-    #[test]
-    fn test_scoped_tag_skipped_for_wrong_backend() {
-        let tag = Hashtag {
-            name: "volatile".into(),
-            value: None,
-            mandatory: false,
-            speculative: false,
-            fallback: vec![],
-            scoped: Some("verilog".to_string()),
-        };
-        let results = validate_hashtags(&[tag], "c");
-        assert_eq!(results.len(), 0, "Scoped tag should be skipped for wrong backend");
-    }
-
-    /// Intent: Verify scoped tag is validated when backend matches.
-    #[test]
-    fn test_scoped_tag_validated_for_correct_backend() {
-        let tag = Hashtag {
-            name: "clock".into(),
-            value: None,
-            mandatory: false,
-            speculative: false,
-            fallback: vec![],
-            scoped: Some("verilog".to_string()),
-        };
-        let results = validate_hashtags(&[tag], "verilog");
-        assert_eq!(results[0], HashtagValidation::Supported);
-    }
-
-    /// Intent: Verify a speculative hashtag produces advisory (not mandatory) when unsupported.
-    #[test]
-    fn test_speculative_hashtag_is_always_advisory() {
-        let tag = Hashtag { name: "unknown_gpu_feature".into(), value: None, mandatory: false, speculative: true, fallback: vec![], scoped: None };
-        let results = validate_hashtags(&[tag], "c");
-        assert_eq!(results[0], HashtagValidation::UnsupportedAdvisory("unknown_gpu_feature".to_string()),
-            "Speculative hashtags should never produce UnsupportedMandatory");
-    }
 
     /// Intent: Verify a speculative hashtag on a supported directive succeeds.
     #[test]
