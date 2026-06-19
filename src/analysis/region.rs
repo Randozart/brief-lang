@@ -1315,6 +1315,9 @@ fn count_statements_recursive(body: &[Statement]) -> usize {
             Statement::SyncBlock { body } => 1 + count_statements_recursive(body),
             Statement::Foreach { body, .. } => 1 + count_statements_recursive(body),
             Statement::Oracle { body, handler, .. } => 1 + count_statements_recursive(body) + count_statements_recursive(handler),
+            Statement::Await { .. } => 1,
+            Statement::Async { body, .. } => 1 + count_statements_recursive(std::slice::from_ref(body.as_ref())),
+            Statement::AsyncAwait { body, .. } => 1 + count_statements_recursive(std::slice::from_ref(body.as_ref())),
         }
     }).sum()
 }
@@ -1341,6 +1344,9 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
             body.iter().any(|s| has_ffi_or_terminator_stmt(s))
                 || handler.iter().any(|s| has_ffi_or_terminator_stmt(s))
         }
+        Statement::Await { expr, .. } => expr_has_call(expr),
+        Statement::Async { body, .. } => has_ffi_or_terminator_stmt(body),
+        Statement::AsyncAwait { body, .. } => has_ffi_or_terminator_stmt(body),
     }
 }
 
@@ -1372,6 +1378,9 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, _trigger_vars: &HashSet<String>) ->
             body.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars))
                 || handler.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars))
         }
+        Statement::Await { expr, .. } => expr_has_call(expr),
+        Statement::Async { body, .. } => has_ffi_or_trigger_stmt(body.as_ref(), _trigger_vars),
+        Statement::AsyncAwait { body, .. } => has_ffi_or_trigger_stmt(body.as_ref(), _trigger_vars),
     }
 }
 

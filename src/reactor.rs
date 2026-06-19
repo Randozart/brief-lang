@@ -380,6 +380,18 @@ impl Reactor {
                 }
                 Ok(StmtResult::Continue)
             }
+            Statement::Await { expr, .. } => {
+                interp.eval_expr(expr)?;
+                Ok(StmtResult::Continue)
+            }
+            Statement::Async { body, .. } => {
+                interp.exec_stmt(body)?;
+                Ok(StmtResult::Continue)
+            }
+            Statement::AsyncAwait { body, .. } => {
+                interp.exec_stmt(body)?;
+                Ok(StmtResult::Continue)
+            }
         }
     }
 }

@@ -1316,6 +1316,23 @@ impl Interpreter {
                 // TODO: Full async yield/await semantics with rollback support
             }
             Statement::Alka(_) | Statement::OnExit { .. } => {}
+            Statement::Await { expr, .. } => {
+                let value = self.eval_expr(expr)?;
+                self.return_value = Some(value);
+            }
+            Statement::Async { body, .. } => {
+                self.exec_stmt(body)?;
+            }
+            Statement::AsyncAwait { body, lhs, .. } => {
+                if let Statement::Expression(expr) = body.as_ref() {
+                    let value = self.eval_expr(expr)?;
+                    if let Some(name) = lhs {
+                        self.state.insert(name.clone(), value);
+                    }
+                } else {
+                    self.exec_stmt(body)?;
+                }
+            }
         }
         Ok(())
     }

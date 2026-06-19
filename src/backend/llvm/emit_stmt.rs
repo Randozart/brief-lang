@@ -605,6 +605,18 @@ impl LlvmBackend {
                     self.emit_stmt(out, s, indent);
                 }
             }
+            Statement::Await { expr, .. } => {
+                let _ = self.emit_expr(out, expr, indent);
+            }
+            Statement::Async { body, .. } => {
+                self.emit_stmt(out, body, indent);
+            }
+            Statement::AsyncAwait { body, lhs, .. } => {
+                self.emit_stmt(out, body, indent);
+                if let Some(name) = lhs {
+                    writeln!(out, "{}; %{} = alloca i64, align 8", indent, name).ok();
+                }
+            }
         }
     }
 }

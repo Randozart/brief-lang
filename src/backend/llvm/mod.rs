@@ -219,6 +219,9 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
             for s in body { collect_strings_stmt(s, seen, out); }
             for s in handler { collect_strings_stmt(s, seen, out); }
         }
+        Statement::Await { expr, .. } => { collect_strings_expr(expr, seen, out); }
+        Statement::Async { body, .. } => { collect_strings_stmt(body, seen, out); }
+        Statement::AsyncAwait { body, .. } => { collect_strings_stmt(body, seen, out); }
     }
 }
 

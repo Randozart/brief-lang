@@ -72,6 +72,10 @@ pub enum Token {
     #[token("ASYNC")]
     Async,
 
+    #[token("await")]
+    #[token("AWAIT")]
+    Await,
+
     #[token("term")]
     #[token("TERM")]
     Term,
@@ -512,6 +516,7 @@ impl std::fmt::Display for Token {
             Token::Txn => write!(f, "txn"),
             Token::Rct => write!(f, "rct"),
             Token::Async => write!(f, "async"),
+            Token::Await => write!(f, "await"),
             Token::Term => write!(f, "term"),
             Token::TermBang => write!(f, "term!"),
             Token::Escape => write!(f, "escape"),

@@ -1492,6 +1492,16 @@ impl WebstackGenerator {
             }
             Statement::Foreach { .. } => { /* foreach: not yet implemented in Webstack backend */ }
             Statement::Oracle { .. } => { /* oracle: not yet implemented */ }
+            Statement::Await { expr, .. } => {
+                let expr_code = self.expr_to_js_value(expr);
+                output.push_str(&format!("        {};\n", expr_code));
+            }
+            Statement::Async { body, .. } => {
+                self.statement_to_rust(output, body);
+            }
+            Statement::AsyncAwait { body, .. } => {
+                self.statement_to_rust(output, body);
+            }
         }
     }
 

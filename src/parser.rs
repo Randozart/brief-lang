@@ -182,6 +182,7 @@ impl<'a> Parser<'a> {
             Token::Txn => "txn".into(),
             Token::Rct => "rct".into(),
             Token::Async => "async".into(),
+            Token::Await => "await".into(),
             Token::Term => "term".into(),
             Token::Frgn => "frgn".into(),
             Token::Import => "import".into(),
@@ -267,6 +268,7 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Unification)) => { self.advance(); Ok("uni".to_string()) }
             Some(Ok(Token::Escape)) => { self.advance(); Ok("escape".to_string()) }
             Some(Ok(Token::Async)) => { self.advance(); Ok("async".to_string()) }
+            Some(Ok(Token::Await)) => { self.advance(); Ok("await".to_string()) }
             Some(Ok(Token::From)) => { self.advance(); Ok("from".to_string()) }
             Some(Ok(Token::As)) => { self.advance(); Ok("as".to_string()) }
             Some(Ok(Token::Registry)) => { self.advance(); Ok("reg".to_string()) }
@@ -5060,7 +5062,51 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     Ok(Statement::Expression(expr))
                 }
             }
+            Some(Ok(Token::Await)) => {
+                self.advance();
+                let expr = self.parse_expression()?;
+                self.expect(Token::Semicolon)?;
+                let modifiers = self.parse_hashtag_modifiers()?;
+                Ok(Statement::Await { expr, modifiers })
+            }
+            Some(Ok(Token::Async)) => {
+                self.advance();
+                // Check if followed by await -> async await
+                if let Some(Ok(Token::Await)) = self.current_token() {
+                    return self.parse_async_await();
+                }
+                // Check if followed by rct/txn -> error (top-level only)
+                if let Some(Ok(Token::Rct)) | Some(Ok(Token::Txn)) = self.current_token() {
+                    return Err(SyntaxError::UnexpectedToken {
+                        expected: "statement or block".to_string(),
+                        found: "'rct' or 'txn'".to_string(),
+                        span: self.current_span().unwrap_or_else(Span::dummy),
+                    });
+                }
+                let body = Box::new(self.parse_statement()?);
+                let modifiers = self.parse_hashtag_modifiers()?;
+                Ok(Statement::Async { body, modifiers })
+            }
         }
+    }
+
+    fn parse_async_await(&mut self) -> Result<Statement, SyntaxError> {
+        // Already consumed Token::Async, now on Token::Await
+        self.advance(); // consume await
+
+        // Optional: "let x = "
+        let lhs = if let Some(Ok(Token::Let)) = self.current_token() {
+            self.advance();
+            let name = self.expect_identifier()?;
+            self.expect(Token::Eq)?;
+            Some(name)
+        } else {
+            None
+        };
+
+        let body = Box::new(self.parse_statement()?);
+        let modifiers = self.parse_hashtag_modifiers()?;
+        Ok(Statement::AsyncAwait { body, lhs, modifiers })
     }
 
     /// Extract (target, index) from an arrow mutation expression.
@@ -7171,6 +7217,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             Token::Unification => Some("uni"),
             Token::Escape => Some("escape"),
             Token::Async => Some("async"),
+            Token::Await => Some("await"),
             Token::Is => Some("is"),
             Token::Like => Some("like"),
             Token::Some => Some("Some"),

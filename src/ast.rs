@@ -1729,6 +1729,27 @@ pub enum Statement {
         body: Vec<Statement>,
         span: Option<Span>,
     },
+
+    // Await: await call_expr; — blocking wait for a callable result
+    Await {
+        expr: Expr,
+        modifiers: Vec<Hashtag>,
+    },
+
+    // Async: async stmt; or async { body }; — fire-and-forget
+    Async {
+        body: Box<Statement>,
+        modifiers: Vec<Hashtag>,
+    },
+
+    // AsyncAwait: async await expr; or async await let x = expr;
+    // Fork-join: launches immediately, barriers at term.
+    // lhs: Some(name) if "async await let x = expr;" form
+    AsyncAwait {
+        body: Box<Statement>,
+        lhs: Option<String>,
+        modifiers: Vec<Hashtag>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

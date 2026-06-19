@@ -299,6 +299,15 @@ impl<'a> DataflowAnalyzer<'a> {
                     self.extract_ids_from_statement(s, ids);
                 }
             }
+            Statement::Await { expr, .. } => {
+                self.extract_ids_recursive(expr, ids);
+            }
+            Statement::Async { body, .. } => {
+                self.extract_ids_from_statement(body, ids);
+            }
+            Statement::AsyncAwait { body, .. } => {
+                self.extract_ids_from_statement(body, ids);
+            }
         }
     }
 

@@ -921,6 +921,15 @@ impl SymbolicExecutor {
                     self.enumerate_paths_recursive(body, current_state.clone(), paths);
                     self.enumerate_paths_recursive(handler, current_state.clone(), paths);
                 }
+                Statement::Await { expr, .. } => {
+                    let _value = SymbolicValue::from_expr(expr, &current_state.vars);
+                }
+                Statement::Async { body, .. } => {
+                    self.enumerate_paths_recursive(std::slice::from_ref(body.as_ref()), current_state.clone(), paths);
+                }
+                Statement::AsyncAwait { body, .. } => {
+                    self.enumerate_paths_recursive(std::slice::from_ref(body.as_ref()), current_state.clone(), paths);
+                }
             }
         }
 
@@ -3068,6 +3077,17 @@ impl ProofEngine {
                 for stmt in handler {
                     self.collect_write_vars(stmt, vars);
                 }
+            }
+            Statement::Await { expr, .. } => {
+                if let Expr::Identifier(name) = expr {
+                    vars.insert(name.clone());
+                }
+            }
+            Statement::Async { body, .. } => {
+                self.collect_write_vars(body, vars);
+            }
+            Statement::AsyncAwait { body, .. } => {
+                self.collect_write_vars(body, vars);
             }
         }
     }
