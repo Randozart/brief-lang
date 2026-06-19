@@ -181,10 +181,9 @@ Each variant has a different *contract baseline* and *feature set* appropriate t
 
 | Variant | Contract Sugar | Intrinsics | `frgn` | Typical Use |
 |---------|---------------|------------|--------|-------------|
-| `.bv` (Brief) | `[[post]`, `[pre]]` | All 29 available | C, Rust, Python, Java, JavaScript | General-purpose |
-| `.abv` (Accel) | sugar allowed | GPU subset only | Banned | GPU compute |
-| `.rbv` (Render) | sugar allowed | All 29 available | JavaScript (inlined); C/Rust via WASM | Web frontends |
-| `.ebv` (Embed) | sugar allowed | All 29 available | C, Rust (Python/Java warned) | Bare-metal MCU |
+| `.bv` (Brief) | `[[post]`, `[pre]]` | All available | C, Rust, Python, Java, JavaScript | General-purpose |
+| `.rbv` (Render) | sugar allowed | All available | JavaScript (inlined); C/Rust via WASM | Web frontends |
+| `.ebv` (Embed) | sugar allowed | All available | C, Rust (Python/Java warned) | Bare-metal MCU |
 | `.cbv` (Circuit) | sugar banned | Hardware subset only | Banned | Hardware synthesis |
 | `.dbv` (Data) | No contracts | None | None | Configuration |
 | **Strict** (`.sbv`, `.sebv`, `.srbv`) | sugar banned — full `[pre][post]` required | Same as base | Same as base | Safety-critical, formal verification |
