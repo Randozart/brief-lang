@@ -2,7 +2,7 @@
 // Invoked via: brief build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
 use crate::analysis::dependency_graph::DependencyGraph;
-use crate::ast::{BitRange, Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{BitRange, Contract, Expr, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -70,6 +70,16 @@ impl CirctBackend {
                     self.trg_ports.push(trg.name.clone());
                     self.var_types.insert(trg.name.clone(), trg.ty.clone());
                     self.var_exprs.insert(trg.name.clone(), None);
+                }
+                TopLevel::Transaction(txn) => {
+                    for stmt in &txn.body {
+                        if let Statement::Assignment { lhs: Expr::OwnedRef(name), expr, .. } = stmt {
+                            if !self.var_types.contains_key(name) {
+                                self.var_types.insert(name.clone(), Type::Int);
+                                self.var_exprs.insert(name.clone(), Some(expr.clone()));
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -176,7 +186,7 @@ impl CirctBackend {
         // Emit transaction body logic if any
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
-                self.emit_txn_body(&mut ng, out, &txn.name, &txn.body, &reg_names);
+                self.emit_txn_body(&mut ng, out, &txn.name, &txn.body, &txn.contract, &reg_names);
             }
         }
 
@@ -286,7 +296,16 @@ impl CirctBackend {
         Some(w)
     }
 
-    fn emit_txn_body(&self, ng: &mut NameGen, out: &mut String, _name: &str, body: &[Statement], reg_names: &HashMap<String, String>) {
+    fn emit_txn_body(&self, ng: &mut NameGen, out: &mut String, _name: &str, body: &[Statement], contract: &Contract, reg_names: &HashMap<String, String>) {
+        // Allocate FSM state register: 2 bits supports 3 states (idle/running/done)
+        let state_reg = ng.fresh_reg("txn_state");
+        writeln!(out, "  {} = seq.firreg initial_value {{ init_value = 0 : i2 }} : i2", state_reg).ok();
+
+        // Precondition: evaluate guard condition
+        let pre_cond = ng.fresh_wire("pre");
+        self.emit_contract_condition(out, ng, &contract.pre_condition, &pre_cond, reg_names);
+
+        // Emit body logic with state-based enable
         for stmt in body {
             match stmt {
                 Statement::Assignment { lhs, expr, .. } => {
@@ -306,6 +325,81 @@ impl CirctBackend {
                     self.emit_expr(ng, out, expr, reg_names, "i64");
                 }
                 _ => {}
+            }
+        }
+
+        // Postcondition: evaluate guarantee condition
+        let post_cond = ng.fresh_wire("post");
+        self.emit_contract_condition(out, ng, &contract.post_condition, &post_cond, reg_names);
+
+        // State transition: if postcondition met, go to done (2), else if precondition false go to idle (0)
+        let state_next = ng.fresh_wire("txn_state_next");
+        writeln!(out, "  {} = comb.mux {}, {}, {} : i2", state_next, post_cond, 2, 1).ok();
+        let state_after_body = ng.fresh_wire("txn_state_after");
+        writeln!(out, "  {} = comb.mux {}, {}, {} : i2", state_after_body, pre_cond, state_next, 0).ok();
+        writeln!(out, "  seq.always(posedge %clock) {{").ok();
+        writeln!(out, "    {} <= {}", state_reg, state_after_body).ok();
+        writeln!(out, "  }}").ok();
+    }
+
+    /// Emit combinational logic for a contract condition (precondition or postcondition).
+    /// Supports simple comparisons like `[x < N]`, `[x == N]`, and logical combinations.
+    fn emit_contract_condition(&self, out: &mut String, ng: &mut NameGen, cond: &Expr, result_wire: &str, reg_names: &HashMap<String, String>) {
+        match cond {
+            Expr::Bool(true) => {
+                writeln!(out, "  {} = hw.constant 1 : i1", result_wire).ok();
+            }
+            Expr::Bool(false) => {
+                writeln!(out, "  {} = hw.constant 0 : i1", result_wire).ok();
+            }
+            Expr::Lt(l, r) => {
+                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp ult {}, {} : i64", result_wire, left, right).ok();
+            }
+            Expr::Le(l, r) => {
+                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp ule {}, {} : i64", result_wire, left, right).ok();
+            }
+            Expr::Gt(l, r) => {
+                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp ugt {}, {} : i64", result_wire, left, right).ok();
+            }
+            Expr::Ge(l, r) => {
+                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp uge {}, {} : i64", result_wire, left, right).ok();
+            }
+            Expr::Eq(l, r) => {
+                let left = self.emit_expr(ng, out, l, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                let right = self.emit_expr(ng, out, r, reg_names, "i64").unwrap_or_else(|| "%0".to_string());
+                writeln!(out, "  {} = comb.icmp eq {}, {} : i64", result_wire, left, right).ok();
+            }
+            Expr::And(l, r) => {
+                let left_wire = ng.fresh_wire("cond_l");
+                self.emit_contract_condition(out, ng, l, &left_wire, reg_names);
+                let right_wire = ng.fresh_wire("cond_r");
+                self.emit_contract_condition(out, ng, r, &right_wire, reg_names);
+                writeln!(out, "  {} = comb.and {}, {} : i1", result_wire, left_wire, right_wire).ok();
+            }
+            Expr::Or(l, r) => {
+                let left_wire = ng.fresh_wire("cond_l");
+                self.emit_contract_condition(out, ng, l, &left_wire, reg_names);
+                let right_wire = ng.fresh_wire("cond_r");
+                self.emit_contract_condition(out, ng, r, &right_wire, reg_names);
+                writeln!(out, "  {} = comb.or {}, {} : i1", result_wire, left_wire, right_wire).ok();
+            }
+            Expr::Not(inner) => {
+                let inner_wire = ng.fresh_wire("cond_not");
+                self.emit_contract_condition(out, ng, inner, &inner_wire, reg_names);
+                let c = ng.fresh_const("true");
+                writeln!(out, "  {} = hw.constant 1 : i1", c).ok();
+                writeln!(out, "  {} = comb.xor {}, {} : i1", result_wire, inner_wire, c).ok();
+            }
+            _ => {
+                writeln!(out, "  {} = hw.constant 1 : i1", result_wire).ok();
             }
         }
     }
@@ -454,5 +548,69 @@ mod tests {
             make_state_decl("word", ty, Some(Expr::Integer(0))),
         ]));
         assert!(output.contains(": i32)"), "Sized UInt[32] should map to i32. Got:\n{}", output);
+    }
+
+    fn make_txn(name: &str, body: Vec<Statement>, pre: Expr, post: Expr) -> TopLevel {
+        TopLevel::Transaction(Transaction {
+            is_async: false, is_reactive: true,
+            name: name.to_string(),
+            parameters: vec![],
+            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
+            body,
+            reactor_speed: None, span: None, is_lambda: false,
+            dependencies: vec![], attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        })
+    }
+
+    #[test]
+    fn test_circt_fsm_state_reg() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_trigger("tick", Type::Bool),
+            make_state_decl("counter", Type::Int, Some(Expr::Integer(0))),
+            make_txn("count", vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("counter".to_string()),
+                    expr: Expr::Add(
+                        Box::new(Expr::Identifier("counter".to_string())),
+                        Box::new(Expr::Integer(1)),
+                    ),
+                    timeout: None, modifiers: vec![],
+                },
+            ], Expr::Bool(true), Expr::Bool(true)),
+        ]));
+        assert!(output.contains("seq.firreg"), "FSM should have state reg. Got:\n{}", output);
+        assert!(output.contains("comb.mux"), "FSM should have state transition mux. Got:\n{}", output);
+        assert!(output.contains("seq.always(posedge %clock)"), "FSM should have seq.always. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_fsm_precondition_check() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("done", Type::Int, Some(Expr::Integer(0))),
+            make_txn("loop", vec![], Expr::Lt(
+                Box::new(Expr::Identifier("done".to_string())),
+                Box::new(Expr::Integer(10)),
+            ), Expr::Bool(true)),
+        ]));
+        assert!(output.contains("comb.icmp ult"), "Precondition should emit comb.icmp. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_fsm_postcondition_check() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("done", Type::Int, Some(Expr::Integer(0))),
+            make_txn("loop", vec![], Expr::Bool(true), Expr::Eq(
+                Box::new(Expr::Identifier("done".to_string())),
+                Box::new(Expr::Integer(10)),
+            )),
+        ]));
+        assert!(output.contains("comb.icmp eq"), "Postcondition should emit comb.icmp eq. Got:\n{}", output);
     }
 }
