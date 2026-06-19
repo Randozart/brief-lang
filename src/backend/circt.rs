@@ -2,16 +2,29 @@
 // Invoked via: brief build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
 use crate::analysis::dependency_graph::DependencyGraph;
-use crate::ast::{BitRange, Contract, Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{BitRange, Contract, Expr, LinkRef, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
+
+/// Metadata for a trigger variable mapped to a module port.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerPort {
+    /// Signal name used as the port name.
+    pub port_name: String,
+    /// Original trigger name in Brief source.
+    pub trg_name: String,
+    /// Whether this trigger has the `#wake` modifier (generates wake_ output).
+    pub is_wake: bool,
+}
 
 /// CIRCT backend state for MLIR code generation.
 #[derive(Debug, Clone)]
 pub struct CirctBackend {
-    pub trg_ports: Vec<String>,
+    pub trg_ports: Vec<TriggerPort>,
     pub var_types: HashMap<String, Type>,
     pub var_exprs: HashMap<String, Option<Expr>>,
+    /// State variables with @ addresses that should become external ports (MMIO).
+    pub mmio_vars: Vec<String>,
 }
 
 /// Per-generation counters for unique MLIR value names.
@@ -46,6 +59,7 @@ impl CirctBackend {
             trg_ports: Vec::new(),
             var_types: HashMap::new(),
             var_exprs: HashMap::new(),
+            mmio_vars: Vec::new(),
         }
     }
 
@@ -65,10 +79,28 @@ impl CirctBackend {
                 TopLevel::StateDecl(decl) => {
                     self.var_types.insert(decl.name.clone(), decl.ty.clone());
                     self.var_exprs.insert(decl.name.clone(), decl.expr.clone());
+                    if decl.address.is_some() {
+                        self.mmio_vars.push(decl.name.clone());
+                    }
                 }
                 TopLevel::Trigger(trg) => {
-                    self.trg_ports.push(trg.name.clone());
-                    self.var_types.insert(trg.name.clone(), trg.ty.clone());
+                    let port_name = self.trigger_port_name(&trg.address, &trg.name);
+                    self.trg_ports.push(TriggerPort {
+                        port_name: port_name.clone(),
+                        trg_name: trg.name.clone(),
+                        is_wake: trg.is_wake,
+                    });
+                    self.var_types.insert(port_name, trg.ty.clone());
+                    self.var_exprs.insert(trg.name.clone(), None);
+                }
+                TopLevel::Trigger(trg) => {
+                    let port_name = self.trigger_port_name(&trg.address, &trg.name);
+                    self.trg_ports.push(TriggerPort {
+                        port_name: port_name.clone(),
+                        trg_name: trg.name.clone(),
+                        is_wake: trg.is_wake,
+                    });
+                    self.var_types.insert(port_name, trg.ty.clone());
                     self.var_exprs.insert(trg.name.clone(), None);
                 }
                 TopLevel::Transaction(txn) => {
@@ -89,6 +121,17 @@ impl CirctBackend {
         self.emit_header(&mut out);
         self.emit_module(&mut out, &dep_graph, program);
         out
+    }
+
+    /// Determine the port name for a trigger based on its LinkRef address.
+    fn trigger_port_name(&self, address: &LinkRef, default_name: &str) -> String {
+        match address {
+            LinkRef::Explicit(_) => default_name.to_string(),
+            LinkRef::Linked(name) => name.clone(),
+            LinkRef::Timer(freq_hz) => format!("timer_{}hz", freq_hz),
+            LinkRef::Signal(name) => name.clone(),
+            LinkRef::Stdin => format!("{}_stdin", default_name),
+        }
     }
 
     fn emit_header(&self, out: &mut String) {
@@ -127,20 +170,34 @@ impl CirctBackend {
         input_ports.push("in %clock: i1".to_string());
         input_ports.push("in %reset: i1".to_string());
 
-        for trg_name in &self.trg_ports {
-            if let Some(ty) = self.var_types.get(trg_name) {
+        for trg in &self.trg_ports {
+            if let Some(ty) = self.var_types.get(&trg.port_name) {
                 let mlir_ty = self.mlir_type(ty);
-                input_ports.push(format!("in %{}: {}", trg_name, mlir_ty));
+                input_ports.push(format!("in %{}: {}", trg.port_name, mlir_ty));
+            }
+            if trg.is_wake {
+                let mlir_ty = self.mlir_type(&Type::Bool);
+                output_ports.push((format!("wake_{}", trg.port_name), mlir_ty));
             }
         }
 
         let sorted_vars = &dep_graph.topo_order;
+        let trg_names: std::collections::HashSet<String> = self.trg_ports.iter().map(|t| t.trg_name.clone()).collect();
         for var_name in sorted_vars {
-            if !self.trg_ports.contains(var_name) {
+            if trg_names.contains(var_name) {
+                continue;
+            }
+            if self.mmio_vars.contains(var_name) {
+                // MMIO vars become external input ports instead of registers
                 if let Some(ty) = self.var_types.get(var_name) {
                     let mlir_ty = self.mlir_type(ty);
-                    output_ports.push((var_name.clone(), mlir_ty));
+                    input_ports.push(format!("in %{}: {}", var_name, mlir_ty));
                 }
+                continue;
+            }
+            if let Some(ty) = self.var_types.get(var_name) {
+                let mlir_ty = self.mlir_type(ty);
+                output_ports.push((var_name.clone(), mlir_ty));
             }
         }
 
@@ -157,9 +214,12 @@ impl CirctBackend {
         }
         writeln!(out, ") {{").ok();
 
-        // Emit sequential registers for state variables
+        // Emit sequential registers for state variables (skip MMIO vars — they're external ports)
         let mut reg_names: HashMap<String, String> = HashMap::new();
         for (var_name, mlir_ty) in &output_ports {
+            if self.mmio_vars.contains(var_name) {
+                continue;
+            }
             let init_val = self.initial_value(var_name);
             let reg = ng.fresh_reg(var_name);
             writeln!(out, "  {} = seq.firreg initial_value {{ init_value = {} : {} }} : {}", reg, init_val, mlir_ty, mlir_ty).ok();
@@ -236,7 +296,7 @@ impl CirctBackend {
             Expr::Identifier(name) => {
                 if let Some(reg) = reg_names.get(name) {
                     Some(reg.clone())
-                } else if self.trg_ports.contains(name) {
+                } else if self.trg_ports.iter().any(|t| t.trg_name == *name || t.port_name == *name) {
                     Some(format!("%{}", name))
                 } else {
                     None
@@ -453,6 +513,22 @@ mod tests {
         })
     }
 
+    fn make_txn(name: &str, body: Vec<Statement>, pre: Expr, post: Expr) -> TopLevel {
+        TopLevel::Transaction(Transaction {
+            is_async: false, is_reactive: true,
+            name: name.to_string(),
+            parameters: vec![],
+            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
+            body,
+            reactor_speed: None, span: None, is_lambda: false,
+            dependencies: vec![], attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        })
+    }
+
     #[test]
     fn test_circt_empty_program() {
         let mut backend = CirctBackend::new();
@@ -550,20 +626,52 @@ mod tests {
         assert!(output.contains(": i32)"), "Sized UInt[32] should map to i32. Got:\n{}", output);
     }
 
-    fn make_txn(name: &str, body: Vec<Statement>, pre: Expr, post: Expr) -> TopLevel {
-        TopLevel::Transaction(Transaction {
-            is_async: false, is_reactive: true,
-            name: name.to_string(),
-            parameters: vec![],
-            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
-            body,
-            reactor_speed: None, span: None, is_lambda: false,
-            dependencies: vec![], attrs: vec![],
-            modifiers: vec![],
-            variant_bodies: vec![],
-            outputs: vec![],
-            output_type: None,
-        })
+    #[test]
+    fn test_circt_linked_trg() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            TopLevel::Trigger(TriggerDeclaration {
+                name: "btn".to_string(), ty: Type::Bool,
+                address: LinkRef::Linked("button0".to_string()),
+                bit_range: None, stages: vec![], condition: None,
+                is_wake: false, span: None,
+            }),
+        ]));
+        // Linked triggers use the linked name as port name
+        assert!(output.contains("button0"), "Linked trg should use linked name. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_wake_trg() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            TopLevel::Trigger(TriggerDeclaration {
+                name: "btn".to_string(), ty: Type::Bool,
+                address: LinkRef::Explicit(0),
+                bit_range: None, stages: vec![], condition: None,
+                is_wake: true, span: None,
+            }),
+        ]));
+        // Wake triggers produce a wake_ output port
+        assert!(output.contains("wake_btn"), "Wake trg should emit wake_ port. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_mmio_input_port() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            TopLevel::StateDecl(StateDecl {
+                name: "status".to_string(), ty: Type::Int,
+                expr: None,
+                address: Some(0x40000000),
+                bit_range: None, range_constraint: None,
+                is_override: false, os_mode: false,
+                span: None, attrs: vec![],
+            }),
+        ]));
+        // MMIO vars with @ address should become input ports, not registers
+        assert!(output.contains("in %status: i64"), "MMIO var should be input port. Got:\n{}", output);
+        assert!(output.contains("-> ()"), "MMIO-only module has no output ports. Got:\n{}", output);
     }
 
     #[test]
