@@ -1,4 +1,4 @@
-<!-- 2026-06-09. Updated 2026-06-09 — LLVM backend split into subdirectory -->
+<!-- 2026-06-09. Updated 2026-06-19 — Dead backends archived, routing by extension -->
 
 # Backend Strategy
 
@@ -10,16 +10,43 @@ recompiles LLVM codegen.
 
 ## Three Canonical Backends (2026-06-15)
 
-Only three backends are actively developed. All others are dead code:
+Only three backends are actively developed. All others are dead code.
 
 | Backend | Target | Status |
 |---------|--------|--------|
 | **LLVM** (`src/backend/llvm/`) | Native binary (`.ll` + `llc`) | **Active** — canonical OS target |
 | **Webstack** (`src/backend/webstack.rs`) | WASM + JS glue | **Active** — canonical web target |
-| **CIRCT** (`src/backend/circt.rs`) | Hardware (`.mlir` + `circt-opt` + `circt-translate`) | **Active** — canonical hardware target (NEW) |
+| **CIRCT** (`src/backend/circt.rs`) | Hardware (`.mlir` + `circt-opt` + `circt-translate`) | **Active** — canonical hardware target |
 
-Dead backends: `verilog.rs`, `vhdl.rs`, `c.rs`, `rust.rs`, `cobol.rs`,
-`x86_64.rs`, `aarch64.rs`, `wasm.rs`, `tcl_generator.rs` — zero fixes.
+### Dead Backends (Archived 2026-06-19)
+
+Nine dead backends were moved to `archive/backend/` — zero fixes:
+`verilog.rs`, `vhdl.rs`, `c.rs`, `rust.rs`, `cobol.rs`, `x86_64.rs`,
+`aarch64.rs`, `wasm.rs`, `tcl_generator.rs`. All `main.rs` call sites
+return errors. VHDL trait system (`ExprCodegenVHDL`, `StmtCodegenVHDL`)
+removed from `src/features/traits.rs` and all 28 `impl` blocks.
+
+## Backend Routing by Extension (2026-06-19)
+
+File extension determines which backend (and `CompilationTarget`) is used:
+
+| Extension | Backend | CompilationTarget | Notes |
+|-----------|---------|-------------------|-------|
+| `.bv`/`.sbv` | LLVM | `Interpreter` | Standard native binary |
+| `.abv` | LLVM | `Interpreter` | GPU offload enabled via SPIR-V |
+| `.rbv`/`.srbv` | Webstack | `Wasm` | Rendered Brief → WASM+JS |
+| `.ebv`/`.sebv` | LLVM | `Embedded` | Bare-metal LLVM, `halt#` emits `wfi` |
+| `.cbv` | CIRCT | `Circuit` | Pure logic graph → MLIR |
+
+Routing dispatch is in `run_build()` (`src/main.rs:984`). The helpers
+`is_embedded_extension()` and `is_circuit_extension()` detect `.ebv`/`.cbv`
+files. `run_compile_unified()` infers target spec from extension.
+
+`run_compile_unified()` dispatch:
+- `"llvm"` → `run_llvm_compile()` (handles `.bv`, `.sbv`, `.ebv`, `.sebv`)
+- `"circt"` → `run_cbv()` (handles `.cbv`)
+- `"react"` → RBV/Webstack path (handles `.rbv`, `.srbv`)
+- `"verilog"`/`"vhdl"` → errors (backends removed)
 
 ## LLVM Backend (Split into Subdirectory)
 
@@ -51,13 +78,7 @@ impls (~20 cycles), matching the interpreter's `ExprEval` migration
 pattern from Phase 9. For now, the directory split is sufficient: each
 file is small enough to navigate, and no optimization path was touched.
 
-## VHDL Backend
-
-(`src/backend/vhdl.rs`, 1,261 lines) — expression emission extracted
-into feature `ExprCodegenVHDL` impls. Optimizations deferred until
-LLVM pattern is proven.
-
-## CIRCT Backend (NEW 2026-06-15)
+## CIRCT Backend
 
 (`src/backend/circt.rs`, 240 lines) — emits MLIR text in HW + Comb
 dialects. Trigger variables become top-level input ports. State variables
@@ -72,9 +93,16 @@ hw.module @top(clock: i1, reset: i1, sensor: i64, c: i64) -> () {
 }
 ```
 
-Invoked externally: `brief-compiler circt <file.bv> → program.mlir →
-circt-opt → circt-translate → verilog`. Same proven pattern as LLVM
-backend emitting `.ll` text.
+Invoked via `run_cbv()` in `src/main.rs` when a `.cbv` file is compiled
+through `run_build()` or `run_compile_unified()`:
+```
+brief build file.cbv    → generates file.mlir
+brief compile file.cbv  → infers circt.toml, generates file.mlir
+```
+
+The MLIR output can then be synthesized through the standard CIRCT pipeline:
+```
+circt-opt file.mlir | circt-translate --export-verilog
 
 ## Webstack Backend
 
