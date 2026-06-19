@@ -1,7 +1,7 @@
 # Async/Await — Statement-Level Concurrency
 
 **Date**: 2026-06-19
-**Phase**: 2 (Lexer, AST, Parser, Interpreter)
+**Phase**: 2 (Lexer, AST, Parser, Interpreter, Typechecker, Proof Engine)
 
 ## Syntax
 
@@ -47,6 +47,23 @@ In `parse_statement()`, `Token::Async` disambiguates:
 
 The `parse_async_await()` helper handles optional `let x =` capture.
 
+## Typechecking
+
+In `check_statement()` (`src/typechecker.rs:1284`):
+
+- **`Await { expr }`**: Must resolve to a callable (`defn`, `txn`, or `frgn`).
+  The return type of the callable becomes the type of the await expression.
+  Non-callable expressions (literals, identifiers without function type) produce
+  `TypeError::NotCallable`.
+- **`Async { body }`**: Body can return anything or nothing. Return value is
+  discarded. Recurse into body for inner type checking.
+- **`AsyncAwait { body, lhs }`**: If `lhs: Some(name)`, the call's return type
+  must match `name`'s declared type (via `types_compatible`). The variable is
+  auto-declared if not yet declared.
+
+Helper `check_async_await_callable(expr)` validates the expression is one of:
+`Expr::Call`, `Expr::IntrinsicCall`, or `Expr::FieldAccess` forming a method call.
+
 ## Interpreter
 
 All three forms execute sequentially in the interpreter (no actual parallelism):
@@ -55,9 +72,16 @@ All three forms execute sequentially in the interpreter (no actual parallelism):
 - `Async` evaluates `body`, discards return value
 - `AsyncAwait` evaluates `body`, optionally stores in variable via `lhs`
 
-A `pending_barriers: Vec<Value>` field on `Interpreter` tracks
-`async await` results. On `Statement::Term`, barriers are resolved
-(cleared — no-op in interpreter since execution is already sequential).
+## Proof Engine
+
+Updates in `src/proof_engine.rs`:
+
+- **`check_mutual_exclusion`**: An `Await` call means the txn POSTCONDITION
+  depends on the call result. Mark the txn as blocking for the awaited call.
+  An `Async` call does NOT create a dependency — the POSTCONDITION is independent.
+- **`suggest_async_promotion`**: `async await` with `lhs: Some(name)` creates
+  a barrier-at-term dependency. The result variable `name` is treated as
+  potentially uninitialized until the next `term;` statement.
 
 ## Backend Notes (Future Phases)
 
@@ -78,3 +102,5 @@ A `pending_barriers: Vec<Value>` field on `Interpreter` tracks
 | `test_interp_await` | interpreter.rs | Await evaluates callable, captures result |
 | `test_interp_async` | interpreter.rs | Async evaluates body, discards return |
 | `test_interp_async_await` | interpreter.rs | AsyncAwait captures result, blocks term |
+| `test_typecheck_await_non_callable` | typechecker.rs | `await 42;` — type error (not callable) |
+| `test_typecheck_async_await_let_type` | typechecker.rs | Mismatched `let` type vs callable return → type error |
