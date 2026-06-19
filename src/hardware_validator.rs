@@ -24,6 +24,7 @@ use crate::ast::{Expr, HardwareConfig, Program, Statement, TopLevel, Type};
 use crate::dbrief::DbvsEngine;
 use crate::errors::{Diagnostic, Severity};
 use crate::target_spec::TargetSpec;
+use crate::typechecker::CompilationTarget;
 use std::collections::HashSet;
 
 pub struct HardwareValidator;
@@ -33,10 +34,12 @@ impl HardwareValidator {
         program: &Program,
         hw_config: Option<&HardwareConfig>,
         _target: &str,
-        is_ebv: bool,
+        comp_target: CompilationTarget,
         target_spec: Option<&TargetSpec>,
         dbvs_engine: Option<&DbvsEngine>,
     ) -> Vec<Diagnostic> {
+        let is_embedded = comp_target == CompilationTarget::Embedded
+            || comp_target == CompilationTarget::Circuit;
         let write_graph = WriteGraph::build(program);
         let trigger_graph = TriggerGraph::build(program);
         let read_graph = ReadGraph::build(program);
@@ -48,13 +51,13 @@ impl HardwareValidator {
             hw_config,
             &write_graph,
             &trigger_graph,
-            is_ebv,
+            is_embedded,
         ));
         diagnostics.extend(Self::check_untriggerable_transactions(
             program,
             &write_graph,
             &trigger_graph,
-            is_ebv,
+            is_embedded,
         ));
         diagnostics.extend(Self::check_unused_variables(
             program,
@@ -66,8 +69,8 @@ impl HardwareValidator {
             diagnostics.extend(Self::check_memory_overlaps(program, hw_config, spec, dbvs_engine));
         }
 
-        // .cbv-specific checks (pure logic graph tier)
-        if is_ebv {
+        // .cbv / .ebv-specific checks (circuit/embedded tier)
+        if is_embedded {
             diagnostics.extend(Self::check_hebv_restrictions(program));
         }
 
