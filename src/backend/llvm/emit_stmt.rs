@@ -18,9 +18,9 @@ impl LlvmBackend {
             writeln!(out, "{}{} = zext i1 {} to i64", indent, z, r.name).ok();
             z
         } else if r.ty == Type::Char {
-            let z = format!("%rz{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = zext i32 {} to i64", indent, z, r.name).ok();
-            z
+            // All Char registers from emit_expr are already i64 (boxed).
+            // No zext needed — the register is already the right width.
+            r.name.clone()
         } else if r.ty == Type::String || r.ty == Type::Data {
             let p = format!("%rp{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();

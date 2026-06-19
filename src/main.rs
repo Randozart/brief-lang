@@ -343,7 +343,7 @@ fn print_usage(program: &str) {
     eprintln!("  --out <dir>     Output directory");
     eprintln!();
     eprintln!("Verilog Options:");
-    eprintln!("  --hw <file>      Hardware config TOML, .dbv, or .dbvs (required for .ebv/.hebv files)");
+    eprintln!("  --hw <file>      Hardware config TOML, .dbv, or .dbvs (required for .ebv/.cbv files)");
     eprintln!("  --tcl            Generate TCL build scripts alongside SystemVerilog");
     eprintln!("  --tcl-only       Generate TCL only (skip SystemVerilog generation)");
     eprintln!();
@@ -376,9 +376,9 @@ fn print_usage(program: &str) {
     eprintln!("File Extensions:");
     eprintln!("  .bv, .br            Core Brief (specification)");
     eprintln!("  .rbv                Rendered Brief (Brief + View)");
-    eprintln!("  .gbv                Graphic Brief (native GPU compilation)");
+    eprintln!("  .abv                Accelerated Brief (native GPU compilation)");
     eprintln!("  .ebv                Embedded Brief (hardware targets)");
-    eprintln!("  .hebv               Hardware Embedded Brief (logic graph, synthesizable only)");
+    eprintln!("  .cbv               Circuit Brief (logic graph, synthesizable only)");
     eprintln!("  .sbv                Strict Brief (requires full contracts)");
     eprintln!("  .sebv               Strict Embedded Brief");
     eprintln!("  .srbv               Strict Rendered Brief");
@@ -758,16 +758,16 @@ fn run_bind(
     Ok(())
 }
 
-/// Intent: is strict extension.
+/// Intent: is strict extension (`.sbv`, `.sebv`, `.srbv`, `.cbv`).
 fn is_strict_extension(file_path: &PathBuf) -> bool {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    matches!(ext, "sbv" | "sebv" | "srbv" | "hebv")
+    matches!(ext, "sbv" | "sebv" | "srbv" | "cbv")
 }
 
-/// Intent: is GPU (`.gbv`) extension — always compiles to SPIR-V.
+/// Intent: is GPU (`.abv`) extension — always compiles to SPIR-V.
 fn is_gpu_extension(file_path: &PathBuf) -> bool {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    ext == "gbv"
+    ext == "abv"
 }
 
 /// Intent: run check.
@@ -988,8 +988,8 @@ fn run_build(
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Detect source type from extension
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    // Force GPU offload for .gbv files
-    let gpu_offload = gpu_offload || ext == "gbv";
+    // Force GPU offload for .abv files
+    let gpu_offload = gpu_offload || ext == "abv";
     
     match ext {
         "bv" | "sbv" => {
@@ -1020,9 +1020,9 @@ fn run_build(
                 Err(e) => Err(e),
             }
         }
-        "gbv" => {
-            // .gbv files: Compile to GPU — always enables SPIR-V offload
-            println!("Building Graphic Brief (.gbv) file: compiling via GPU...");
+        "abv" => {
+            // .abv files: Compile to GPU — always enables SPIR-V offload
+            println!("Building Accelerated Brief (.abv) file: compiling via GPU...");
             if prod_mode {
                 println!("  Production mode: full optimization enabled");
             }
@@ -1631,7 +1631,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         } else if arg == "--out" && i + 1 < args.len() {
             out_dir = Some(PathBuf::from(&args[i + 1]));
             i += 2;
-        } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".hebv")
+        } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".cbv")
             || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv") {
             file_path = Some(PathBuf::from(arg));
             i += 1;
@@ -1652,7 +1652,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
     // Detect source type from extension
     let source_type = if matches!(file_path.extension().and_then(|e| e.to_str()), Some("rbv" | "srbv")) {
         "rendered"
-    } else if matches!(file_path.extension().and_then(|e| e.to_str()), Some("ebv" | "sebv" | "hebv")) {
+    } else if matches!(file_path.extension().and_then(|e| e.to_str()), Some("ebv" | "sebv" | "cbv")) {
         "embedded"
     } else {
         "foundational"
@@ -1710,7 +1710,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         if source_type == "embedded" && !spec.has_capability("hardware_triggers") {
             let prefix = if is_strict { "Error B4001" } else { "Error B4001" };
             eprintln!("{}: Target '{}' lacks required 'hardware_triggers' capability", prefix, target_name);
-            eprintln!("  .ebv/.sebv/.hebv files require target with hardware_triggers support");
+            eprintln!("  .ebv/.sebv/.cbv files require target with hardware_triggers support");
             eprintln!("  Hint: Use a target spec with capabilities = [\"logic\", \"hardware_triggers\"]");
             std::process::exit(1);
         }
@@ -2206,11 +2206,11 @@ fn run_llvm_compile(
     gpu_backend: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let is_gpu = is_gpu_extension(file_path);
-    // Force GPU offload for .gbv files
+    // Force GPU offload for .abv files
     let gpu_offload = gpu_offload || is_gpu;
 
     println!("Compiling to LLVM IR: {} {}", file_path.display(),
-        if is_gpu { "(GPU — .gbv)" } else { "" });
+        if is_gpu { "(GPU — .abv)" } else { "" });
 
     let source = fs::read_to_string(file_path)?;
     let clean_source = strip_annotations(&source);
@@ -2796,7 +2796,7 @@ fn run_c(
         None
     };
 
-    let is_ebv = file_path.extension().map(|e| e == "ebv" || e == "hebv").unwrap_or(false);
+    let is_ebv = file_path.extension().map(|e| e == "ebv" || e == "cbv").unwrap_or(false);
 
     let mut c_backend = backend::c::CBackend::new();
     if let Some(linkage) = linkage_config {
@@ -3091,7 +3091,7 @@ fn run_verilog(
     }
 
     // Hardware validation
-    let is_ebv = file_path.extension().map(|e| e == "ebv" || e == "hebv").unwrap_or(false);
+    let is_ebv = file_path.extension().map(|e| e == "ebv" || e == "cbv").unwrap_or(false);
     
     let dbvs_engine: Option<crate::dbrief::DbvsEngine> = None;
 
@@ -4020,7 +4020,7 @@ fn main() {
                 .iter()
                 .skip(2)
                 .find(|a| {
-                    a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv") || a.ends_with(".hebv")
+                    a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv") || a.ends_with(".cbv")
                         || a.ends_with(".sebv") || a.ends_with(".rbv") || a.ends_with(".srbv")
                 })
                 .map(PathBuf::from);
@@ -4051,7 +4051,7 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv, .gbv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
+                eprintln!("Error: No .bv, .abv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
                 eprintln!("Usage: {} check <file>", args[0]);
                 std::process::exit(1);
             }
@@ -4093,9 +4093,9 @@ fn main() {
                 } else if arg == "--gpu-backend" && i + 1 < args.len() {
                     gpu_backend = args[i + 1].clone();
                     i += 2;
-                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".hebv")
+                } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".cbv")
                     || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv")
-                    || arg.ends_with(".gbv") {
+                    || arg.ends_with(".abv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -4116,10 +4116,10 @@ fn main() {
                     }
                 }
             } else {
-                eprintln!("Error: No .bv, .gbv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
+                eprintln!("Error: No .bv, .abv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
                 eprintln!("Usage: {} build <file> [--out <dir>] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
                 eprintln!("  .bv/.sbv files → compile via LLVM to native binary");
-                eprintln!("  .gbv file      → compile via LLVM + SPIR-V (GPU) to native binary + .spv");
+                eprintln!("  .abv file      → compile via LLVM + SPIR-V (GPU) to native binary + .spv");
                 eprintln!("  .rbv/.srbv files → WASM + JS + frontend");
                 eprintln!("  .ebv/.sebv files → requires explicit target (see: brief compile --help)");
                 std::process::exit(1);
@@ -4249,8 +4249,8 @@ fn main() {
                     std::process::exit(1);
                 }
             } else {
-                eprintln!("Error: No .bv, .gbv, .sbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} llvm <file.bv|file.gbv> [--out <dir>] [--hw-handoff <system.xsa|xparameters.h>] [--hw-target <board>] [--target-dbv <target.dbv>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
+                eprintln!("Error: No .bv, .abv, .sbv, .ebv, or .sebv file specified");
+                eprintln!("Usage: {} llvm <file.bv|file.abv> [--out <dir>] [--hw-handoff <system.xsa|xparameters.h>] [--hw-target <board>] [--target-dbv <target.dbv>] [--optimize-budget <N>] [--optimize-report] [--optimize-size <bytes>] [--no-dead-info] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
                 std::process::exit(1);
             }
         }
@@ -4379,7 +4379,7 @@ fn main() {
                 } else if arg == "--tcl-only" {
                     tcl_only = true;
                     i += 1;
-                } else if arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".hebv") {
+                } else if arg.ends_with(".ebv") || arg.ends_with(".sebv") || arg.ends_with(".cbv") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else if arg.ends_with(".bv") || arg.ends_with(".sbv") {
@@ -4395,7 +4395,7 @@ fn main() {
 
             if let Some(path) = file_path {
                 let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-                if ext == "ebv" || ext == "sebv" || ext == "hebv" {
+                if ext == "ebv" || ext == "sebv" || ext == "cbv" {
                     if let Some(hw) = hw_config {
                         if let Err(e) = run_verilog(
                             &path,
@@ -4653,7 +4653,7 @@ fn main() {
 
         "selfhost" => {
             let file_path = args.iter().skip(2).find(|a| {
-                a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv") || a.ends_with(".hebv")
+                a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv") || a.ends_with(".cbv")
                     || a.ends_with(".rbv") || a.ends_with(".srbv")
             }).map(|s| s.to_string());
 

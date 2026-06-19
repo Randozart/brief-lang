@@ -4,7 +4,8 @@
 
 <img src="assets/e-brief-logo.svg" alt="Embedded Brief" width="200"/><img src="assets/d-brief-logo.svg" alt="Data Brief" width="200"/>
 
-<img src="assets/a-brief-logo.svg" alt="Accelerated Brief" width="200"/>
+<img src="assets/a-brief-logo.svg" alt="Accelerated Brief" width="200"/><img src="assets/c-brief-logo.svg" alt="Circuit Brief" width="200"/>
+
 
 ## Brief Doesn't Break
 
@@ -126,9 +127,11 @@ txn main() [true][true] {
 | Type | File Extension | Description | Targets |
 |------|----------------|-------------|---------|
 | <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Brief** | `.bv` | Pure declarative logic | LLVM into native binary, COBOL |
-| <img src="assets/r-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Rendered Brief** | `.rbv` | Brief + Web UI (HTML/CSS/SVG) | Browser (WASM + JS + HTML + CSS) |
-| <img src="assets/e-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Embedded Brief** | `.ebv` | Brief + Hardware triggers | FPGA (VHDL/SystemVerilog), ARM bare-metal |
-| <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief** | `.dbv` | Configuration data | All targets |
+| <img src="assets/a-brief-logo.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Accelerated Brief** (Brief Accel) | `.abv` | Native GPU compilation (SPIR-V) | GPU via SPIR-V |
+| <img src="assets/r-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Rendered Brief** (Brief Render) | `.rbv` | Brief + Web UI (HTML/CSS/SVG) | Browser (WASM + JS + HTML + CSS) |
+| <img src="assets/e-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Embedded Brief** (Brief Embed) | `.ebv` | Brief + Hardware triggers | FPGA (VHDL/SystemVerilog), ARM bare-metal |
+| <img src="assets/c-brief-logo.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Circuit Brief** (Brief Circuit) | `.cbv` | Pure logic graph, synthesizable only | Verilog/VHDL/SV |
+| <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief** (D-Brief / Brief Data) | `.dbv` | Configuration data | All targets |
 | <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief Schema** | `.dbvs` | Schema/FFI bindings | All targets |
 | <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief Lines** | `.dbvl` | Line-based databases | All targets |
 

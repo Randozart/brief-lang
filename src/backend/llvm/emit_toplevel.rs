@@ -303,7 +303,7 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add float 0.0, {}", indent, dst, raw).ok();
             }
             Type::Char => {
-                writeln!(out, "{}{} = add i32 0, {}", indent, dst, raw).ok();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, raw).ok();
             }
             Type::String | Type::Data => {
                 writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, dst, raw).ok();

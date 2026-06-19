@@ -500,7 +500,7 @@ impl TypeChecker {
 
         self.register_stdlib_signatures();
 
-        // GPU (.gbv) validation — enforce type and intrinsic restrictions
+        // GPU (.abv) validation — enforce type and intrinsic restrictions
         if program.strict_mode.is_gpu() {
             self.validate_gpu_program(program);
         }
@@ -704,16 +704,16 @@ impl TypeChecker {
         }
     }
 
-    /// Validate GPU (.gbv) restrictions on the program.
+    /// Validate GPU (.abv) restrictions on the program.
     /// Called only when `strict_mode == StrictMode::Gpu`.
     fn validate_gpu_program(&self, program: &Program) {
         for item in &program.items {
             match item {
                 TopLevel::ForeignBinding { name, .. } => {
-                    // frgn declarations are allowed in .gbv for host-side I/O.
+                    // frgn declarations are allowed in .abv for host-side I/O.
                     // The GPU kernel body itself is checked separately by
                     // check_eligibility (no Expr::Call inside kernels).
-                    let diag = Diagnostic::new("G001", Severity::Warning, "FFI declared in .gbv file")
+                    let diag = Diagnostic::new("G001", Severity::Warning, "FFI declared in .abv file")
                         .with_explanation(&format!(
                             "`frgn` '{}' — this FFI call is for host-side I/O. \
                              The GPU kernel body cannot use it; only GPU intrinsics \
@@ -769,7 +769,7 @@ impl TypeChecker {
         }
     }
 
-    /// Validate that a type is allowed in .gbv context.
+    /// Validate that a type is allowed in .abv context.
     fn validate_gpu_type(&self, ty: &Type) {
         match ty {
             Type::Int | Type::UInt | Type::Float | Type::Bool | Type::Char => {}
@@ -778,7 +778,7 @@ impl TypeChecker {
             _ => {
                 let diag = Diagnostic::new("G003", Severity::Error, "Type not allowed in GPU kernel")
                     .with_explanation(&format!(
-                        "Type `{:?}` is not supported in .gbv files. \
+                        "Type `{:?}` is not supported in .abv files. \
                          Allowed types: Int, Float, Bool, Char, String (const), and [T; N]",
                         ty
                     ));
@@ -821,13 +821,13 @@ impl TypeChecker {
             Expr::Call(name, _) => {
                 let diag = Diagnostic::new("G001", Severity::Error, "FFI not allowed in GPU kernel")
                     .with_explanation(&format!(
-                        "Function call `{}()` is not allowed in .gbv files. \
+                        "Function call `{}()` is not allowed in .abv files. \
                          Use only built-in GPU intrinsics.",
                         name
                     ));
                 self.diagnostics.borrow_mut().push(diag);
                 self.errors.borrow_mut().push(TypeError::FFIError {
-                    message: format!("call '{}' not allowed in .gbv", name),
+                    message: format!("call '{}' not allowed in .abv", name),
                 });
             }
             // Recurse

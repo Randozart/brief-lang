@@ -796,3 +796,43 @@ See `.opencode/plans/2026-06-14-eliminate-magic.md` for the fix plan.
 
 ### Tests
 - Full suite: 1072 passed, 0 failed
+
+---
+
+## Session: 2026-06-19 — Tier Renames (Graphic → Accelerated, Hardware Embedded → Circuit)
+
+### Goal
+Rename `.gbv` → `.abv` (Graphic Brief → Accelerated Brief / "Brief Accel") and
+`.hebv` → `.cbv` (Hardware Embedded Brief → Circuit Brief / "Brief Circuit")
+across the entire codebase, including alternative names for all tiers.
+
+### Changes
+
+**Rust source files:**
+- `src/main.rs`: All 5 `.gbv` → `.abv`, 3 `.hebv` → `.cbv`, "Graphic Brief" → "Accelerated Brief",
+  "Hardware Embedded Brief" → "Circuit Brief" in help text, error messages, comments
+- `src/ast.rs`: `StrictMode::Gpu` doc comment updated
+- `src/typechecker.rs`: `.gbv` → `.abv`
+- `src/hardware_validator.rs`: `.hebv` → `.cbv`
+
+**Test files:**
+- `test_gbv.gbv` → `test_abv.abv`
+
+**Documentation:**
+- `AGENTS.md`: All file types updated with `.abv`/`.cbv` + alternative names ("Brief Accel",
+  "Brief Render", "Brief Embed", "Brief Circuit", "D-Brief"/"Brief Data"); sugar rules updated
+- `README.md`: Table expanded with `.abv` and `.cbv` rows + alternative names
+- `docs/architecture/features/graphic-brief.md` → `accelerated-brief.md` (content fully updated)
+- `docs/plans/2026-06-18-graphic-brief.md`: Updated with `.abv` and completion status
+- `docs/plans/2026-06-18-gpu-io-intrinsics.md`: Updated `.gbv` → `.abv`, `test_gbv` → `test_abv`
+- `syntax-highlighter/syntaxes/brief.tmLanguage.json`: `fileTypes` array expanded to all 12 extensions
+
+**Not changed (intentionally):**
+- Internal GPU-mode names (`StrictMode::Gpu`, `is_gpu_extension`, `with_gpu_mode`) — these
+  describe the compilation mode, not a brand name. Regular Brief can declare GPU-accelerated
+  code without a `.abv` file.
+- `learn-brief/` and `docs/reference/BRIEF_LANGUAGE_REFERENCE.md` and `spec/SPEC.md` — had
+  zero old references
+
+### Verification
+- All 1072 tests pass, 0 fail

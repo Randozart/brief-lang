@@ -1,9 +1,9 @@
-# Graphic Brief (`.gbv`) — Native GPU Compilation Tier
+# Accelerated Brief (`.abv`) — Native GPU Compilation Tier
 
-**Date:** 2026-06-18  
-**Status:** Planned  
-**Context:** SPIR-V backend extended through Phases 1–7 (1028 tests). Now adding a
-dedicated file extension that always compiles to GPU, with type/intrinsic guards.
+**Date:** 2026-06-18 (updated 2026-06-19)  
+**Status:** COMPLETED — renamed from "Graphic Brief" to "Accelerated Brief" (`.gbv` → `.abv`)  
+**Context:** SPIR-V backend extended through Phases 1–7 (1028 tests). Dedicated file
+extension `.abv` that always compiles to GPU, with type/intrinsic guards.
 
 ---
 
@@ -18,22 +18,23 @@ dedicated file extension that always compiles to GPU, with type/intrinsic guards
 | Contracts | Optional (warn if missing) |
 | GPU flag | Implicit — no `#gpu` or `--gpu-offload` needed |
 | Output | Both: native binary (embedded SPIR-V) + standalone `file.spv` |
-| CLI | `brief-compiler build file.gbv` — auto-detect extension |
+| CLI | `brief-compiler build file.abv` — auto-detect extension |
+| Alternative name | "Brief Accel" |
 
 ---
 
-## Files to Modify
+## Files Modified
 
 | File | Change |
 |------|--------|
 | `src/ast.rs` | Add `StrictMode::Gpu` variant |
-| `src/parser.rs` | Detect `.gbv` extension → `StrictMode::Gpu` |
+| `src/parser.rs` | Detect `.abv` extension → `StrictMode::Gpu` |
 | `src/typechecker.rs` | Validate GPU type/intrinsic restrictions |
 | `src/backend/llvm/mod.rs` | `StrictMode::Gpu` → skip CPU IR, emit SPIR-V directly |
 | `src/backend/llvm/gpu.rs` | `emit_standalone_spirv()` for `.spv` file output |
-| `src/main.rs` | `.gbv` auto-detection, standalone `.spv` emission |
-| `AGENTS.md` | File types table — add `.gbv` |
-| `docs/architecture/features/graphic-brief.md` | NEW architecture doc |
+| `src/main.rs` | `.abv` auto-detection, standalone `.spv` emission |
+| `AGENTS.md` | File types table — add `.abv` |
+| `docs/architecture/features/accelerated-brief.md` | Architecture doc |
 
 ### New test files
 
@@ -69,7 +70,7 @@ or slice).
 
 ### Intrinsic validation
 
-Only the following intrinsics are allowed in `.gbv`:
+Only the following intrinsics are allowed in `.abv`:
 ```
 sin, cos, pow, sqrt, fabs, ceil, floor,
 get_global_id, get_local_id, get_group_id, get_num_groups, barrier
@@ -79,9 +80,9 @@ Any other `Expr::IntrinsicCall` produces a compile error.
 
 ### Contract warnings
 
-When a transaction in `.gbv` lacks `[pre][post]` contracts, emit:
+When a transaction in `.abv` lacks `[pre][post]` contracts, emit:
 ```
-warning: .gbv transaction 'name' has no contracts — contracts enable GPU
+warning: .abv transaction 'name' has no contracts — contracts enable GPU
          optimization. Add [pre][post] for better codegen.
 ```
 
@@ -91,12 +92,14 @@ warning: .gbv transaction 'name' has no contracts — contracts enable GPU
 
 | Phase | Items | Files |
 |-------|-------|-------|
-| **1** | `StrictMode::Gpu` + parser `.gbv` detection | `ast.rs`, `parser.rs` |
-| **2** | `.gbv` type/intrinsic validation | `typechecker.rs` |
+| **1** | `StrictMode::Gpu` + parser `.abv` detection | `ast.rs`, `parser.rs` |
+| **2** | `.abv` type/intrinsic validation | `typechecker.rs` |
 | **3** | Standalone SPIR-V emit + auto-detect build | `mod.rs`, `gpu.rs`, `main.rs` |
-| **4** | End-to-end test | `tests/gpu_e2e.rs`, test `.bv` files |
+| **4** | End-to-end test | `tests/gpu_e2e.rs`, test `.abv` files |
 | **5** | GPU benchmark | `benchmarks/gpu/saxpy/`, `build_and_bench.sh` |
-| **6** | Architecture doc + AGENTS.md update | `docs/architecture/features/graphic-brief.md`, `AGENTS.md` |
+| **6** | Architecture doc + AGENTS.md update | `docs/architecture/features/accelerated-brief.md`, `AGENTS.md` |
+| **7** | Rename `.gbv` → `.abv`, "Graphic Brief" → "Accelerated Brief" | All source + docs |
+
 
 ---
 

@@ -112,6 +112,13 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
                                 return TypedRegister { name: v, ty: Type::Int };
                             }
+                            "i32" => {
+                                // i32 LLVM type means Char at the Brief level.
+                                // zext to i64 and preserve the Char type so that
+                                // downstream casts use Char→String conversion.
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ev).ok();
+                                return TypedRegister { name: v.clone(), ty: Type::Char };
+                            }
                             _ => {
                                 writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
                                 return TypedRegister { name: v, ty: Type::Int };
@@ -125,15 +132,9 @@ impl LlvmBackend {
                             return TypedRegister { name: reg.clone(), ty: Type::Float };
                         }
                         if *ty == Type::Char {
-                            // Char may be i32 (from Expr::Char or truncated
-                            // let binding) or i64 (from SSA pre-extracted
-                            // old-int regs). Always zext from i32 to i64 to
-                            // handle the i32 case; the zext is a no-op when
-                            // the value is already i64 (LLVM's zext i64 to
-                            // i64 is semantically valid as identity).
-                            let z = format!("%iz_c{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = zext i32 {} to i64", indent, z, reg).ok();
-                            writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                            // All Char registers from emit_expr are already i64.
+                            // Copy the register as-is; no zext needed.
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, reg).ok();
                             return TypedRegister { name: v, ty: Type::Char };
                         }
                         if *ty == Type::Bool {
@@ -496,9 +497,8 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = zext i1 {} to i64", indent, z, raw.name).ok();
                                 z
                             } else if raw.ty == Type::Char {
-                                let z = format!("%czc{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, raw.name).ok();
-                                z
+                                // Char registers are already i64 from emit_expr
+                                raw.name.clone()
                             } else if raw.ty == Type::Float {
                                 let bi = format!("%cfb{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, raw.name).ok();
@@ -886,7 +886,9 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = zext i8 {} to i32", indent, tmp, c).ok();
                         writeln!(out, "{}  br label %{}", indent, end_l).ok();
                         writeln!(out, "{}{}:", indent, end_l).ok();
-                        writeln!(out, "{}{} = phi i32 [ -1, %{} ], [ {}, %{} ]", indent, v, err_l, tmp, ok_l).ok();
+                        let phi_r = format!("%trkp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = phi i32 [ -1, %{} ], [ {}, %{} ]", indent, phi_r, err_l, tmp, ok_l).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, phi_r).ok();
                         return TypedRegister { name: v, ty: Type::Char };
                     }
                     Intrinsic::IoCtl => {

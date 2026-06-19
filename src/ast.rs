@@ -2168,7 +2168,8 @@ impl Hashtag {
 pub enum StrictMode {
     Off,
     Strict,
-    /// Graphic Brief (`.gbv`) — always compiles to GPU, no FFI, restricted types.
+    /// Accelerated Brief (`.abv`) — native GPU compilation (SPIR-V).
+    /// No FFI, restricted types, GPU intrinsics only.
     /// Contracts are optional (warned about, not required).
     Gpu,
 }

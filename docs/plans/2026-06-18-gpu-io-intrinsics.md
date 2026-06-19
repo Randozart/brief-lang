@@ -1,13 +1,13 @@
 # GPU I/O Intrinsics — Observable Output Without `frgn`
 
 **Date:** 2026-06-18  
-**Problem:** `.gbv` bans `frgn`, but kernels need observable output for liveness.
+**Problem:** `.abv` bans `frgn`, but kernels need observable output for liveness.
 The solution is not `frgn` — it's existing I/O intrinsics (`print_int#`,
 `print_float#`, `put_char#`) wired into the SPIR-V backend.
 
 ## Precept
 
-**Zero `frgn` in `.gbv`.** Every operation maps to an `Intrinsic` variant.
+**Zero `frgn` in `.abv`.** Every operation maps to an `Intrinsic` variant.
 If no suitable intrinsic exists, add one — never reach for `frgn`.
 
 ## Approach
@@ -56,7 +56,7 @@ if (has_print_buffer) {
 The C runtime allocates `N * 8` bytes for the print buffer when print
 intrinsics are detected.
 
-### 4. `.gbv` test file
+### 4. `.abv` test file
 
 ```brief
 // Pure GPU kernel — zero frgn
@@ -82,12 +82,12 @@ term! -> print_int#(i);    // intrinsic, NOT frgn
 | `src/backend/llvm/gpu.rs` | Add PrintInt/PutChar/PrintFloat to allowlist + `emit_spirv_intrinsic` + print buffer generation |
 | `lib/runtime/brief_gpu_rt.c` | Allocate + drain print buffer in `brief_gpu_launch` |
 | `AGENTS.md` | Add "before frgn, check intrinsics" directive |
-| `test_gbv.gbv` | Clean test with print_int# intrinsic |
+| `test_abv.abv` | Clean test with print_int# intrinsic |
 
 ## Incremental test
 
 ```bash
-echo 'N=100 ./test_gbv'   # Should print 100
+echo 'N=100 ./test_abv'   # Should print 100
 ```
 
 The host reads the print buffer after GPU dispatch and calls `printf`

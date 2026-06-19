@@ -66,7 +66,7 @@ impl HardwareValidator {
             diagnostics.extend(Self::check_memory_overlaps(program, hw_config, spec, dbvs_engine));
         }
 
-        // .hebv-specific checks (pure logic graph tier)
+        // .cbv-specific checks (pure logic graph tier)
         if is_ebv {
             diagnostics.extend(Self::check_hebv_restrictions(program));
         }
@@ -82,14 +82,14 @@ impl HardwareValidator {
                     diagnostics.push(Diagnostic::new(
                         "B5001",
                         Severity::Error,
-                        ".hebv does not allow 'import \"link/...\"' — no external dependencies",
+                        ".cbv does not allow 'import \"link/...\"' — no external dependencies",
                     ));
                 }
                 TopLevel::ForeignBinding { .. } => {
                     diagnostics.push(Diagnostic::new(
                         "B5002",
                         Severity::Error,
-                        ".hebv does not allow 'frgn' declarations — pure logic graph only",
+                        ".cbv does not allow 'frgn' declarations — pure logic graph only",
                     ));
                 }
                 TopLevel::Import(imp) => {
@@ -99,7 +99,7 @@ impl HardwareValidator {
                                 diagnostics.push(Diagnostic::new(
                                     "B5003",
                                     Severity::Error,
-                                    ".hebv cannot import from 'link/' — no external dependencies",
+                                    ".cbv cannot import from 'link/' — no external dependencies",
                                 ));
                             }
                         }
@@ -111,14 +111,14 @@ impl HardwareValidator {
                         diagnostics.push(Diagnostic::new(
                             "B5004",
                             Severity::Error,
-                            &format!(".hebv transaction '{}' has [true] precondition — must be total", txn.name),
+                            &format!(".cbv transaction '{}' has [true] precondition — must be total", txn.name),
                         ));
                     }
                     if matches!(txn.contract.post_condition, Expr::Bool(true)) {
                         diagnostics.push(Diagnostic::new(
                             "B5005",
                             Severity::Error,
-                            &format!(".hebv transaction '{}' has [true] postcondition — must be total", txn.name),
+                            &format!(".cbv transaction '{}' has [true] postcondition — must be total", txn.name),
                         ));
                     }
                     // Check for dynamic heap usage
@@ -145,21 +145,21 @@ impl HardwareValidator {
                 diagnostics.push(Diagnostic::new(
                     "B5006",
                     Severity::Error,
-                    &format!(".hebv type '{}' uses Int/UInt (unsized) — use UInt[N] or SInt[N] for synthesizable logic", context),
+                    &format!(".cbv type '{}' uses Int/UInt (unsized) — use UInt[N] or SInt[N] for synthesizable logic", context),
                 ));
             }
             Type::Float => {
                 diagnostics.push(Diagnostic::new(
                     "B5007",
                     Severity::Error,
-                    &format!(".hebv type '{}' uses Float — not synthesizable", context),
+                    &format!(".cbv type '{}' uses Float — not synthesizable", context),
                 ));
             }
             Type::String => {
                 diagnostics.push(Diagnostic::new(
                     "B5008",
                     Severity::Error,
-                    &format!(".hebv type '{}' uses String — not synthesizable", context),
+                    &format!(".cbv type '{}' uses String — not synthesizable", context),
                 ));
             }
             Type::Bool | Type::Char => {} // OK for hardware

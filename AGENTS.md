@@ -22,13 +22,13 @@ proven at compile time, not `unsafe` blocks. See
 ### File Types
 - **.bv** - Brief (standard Brief file, cosmopolitan tier — any FFI, any language, OS assumed)
 - **.sbv** - Strict Brief (full contracts required, no sugar defaults)
-- **.gbv** - Graphic Brief (native GPU compilation — always compiles to SPIR-V, no FFI, restricted types, GPU intrinsics only)
-- **.rbv** - Rendered Brief (Brief + View, compiles to web frontend. Like `.tsx` is to `.ts`)
+- **.abv** - Accelerated Brief (native GPU compilation — always compiles to SPIR-V, no FFI, restricted types, GPU intrinsics only. Also known as "Brief Accel")
+- **.rbv** - Rendered Brief (Brief + View, compiles to web frontend. Like `.tsx` is to `.ts`. Also known as "Brief Render")
 - **.srbv** - Strict Rendered Brief (full contracts required in web target)
-- **.ebv** - Embedded Brief (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned)
+- **.ebv** - Embedded Brief (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned. Also known as "Brief Embed")
 - **.sebv** - Strict Embedded Brief (full contracts required, bare metal)
-- **.hebv** - Hardware Embedded Brief (pure logic graph — no FFI, no external deps, only synthesizable types. Contracts must be total. Outputs Verilog/VHDL/SV)
-- **.dbv/.dbvs/.dbvl** - Data Brief (configuration with schema, think `.xml`/`.xmls`/`.jsonl`)
+- **.cbv** - Circuit Brief (pure logic graph — no FFI, no external deps, only synthesizable types. Contracts must be total. Outputs Verilog/VHDL/SV. Also known as "Brief Circuit"; formerly Hardware Embedded Brief / `.hebv`)
+- **.dbv/.dbvs/.dbvl** - Data Brief (configuration with schema, think `.xml`/`.xmls`/`.jsonl`. Also known as "D-Brief" or "Brief Data")
 
 ### Contract Sugar Syntax
 
@@ -46,8 +46,8 @@ first one opens an empty precondition (defaults to `true`), the second opens the
 `]]` = two right brackets = the first closes the precondition, the second closes an empty
 postcondition (defaults to `true`).
 
-**Banned in**: `.sbv`, `.srbv`, `.sebv`, `.hebv` (strict tiers require explicit both-sided contracts).
-**Allowed in**: `.gbv`, `.bv`, `.ebv`, `.rbv` (sugar is the recommended style).
+**Banned in**: `.sbv`, `.srbv`, `.sebv`, `.cbv` (strict tiers require explicit both-sided contracts).
+**Allowed in**: `.abv`, `.bv`, `.ebv`, `.rbv` (sugar is the recommended style).
 
 ### Critical Philosophy
 
@@ -60,7 +60,7 @@ postcondition (defaults to `true`).
 
 **INTRINSICS BEFORE FRGN**: Before reaching for a `frgn` declaration, check if
 an `Intrinsic` variant already exists that does the same thing. This is
-especially critical in `.gbv` (Graphic Brief) files, where `frgn` is banned:
+especially critical in `.abv` (Accelerated Brief) files, where `frgn` is banned:
   - Need to print? → `print_int#`, `print_float#`, `put_char#` (already exist)
   - Need input? → `get_env_int#`, `read_stdin#` (already exist)
   - Need GPU thread ID? → `get_global_id#`, `get_local_id#` (already exist)
