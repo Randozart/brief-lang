@@ -13,6 +13,7 @@ impl LlvmBackend {
     pub(super) fn emit_declares(&self, out: &mut String) {
         writeln!(out).ok();
         writeln!(out, "declare void @llvm.assume(i1) #1").ok();
+        writeln!(out, "declare void @llvm.trap() #1").ok();
         // Intrinsic declares used by name#() instrinsic calls in emit_expr.
         // Previously these came from std/llvm.bv via as intrinsic, but the
         // name#() mechanism emits them directly without frgn_map entries.
@@ -53,6 +54,33 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__getaddrinfo__(i64, i64)").ok();
         writeln!(out, "declare i64 @__map_keys__(i64)").ok();
         writeln!(out, "declare i64 @__map_values__(i64)").ok();
+        // D12–D18 + Extra Shim declares (2026-06-19)
+        writeln!(out, "declare i64 @__errno__()").ok();
+        writeln!(out, "declare i64 @__getrandom__(i64, i64, i64)").ok();
+        writeln!(out, "declare i64 @__uname__()").ok();
+        writeln!(out, "declare i64 @__hostname__()").ok();
+        writeln!(out, "declare i64 @__strerror__(i64)").ok();
+        writeln!(out, "declare i64 @__strsignal__(i64)").ok();
+        writeln!(out, "declare i64 @__realpath__(i64)").ok();
+        writeln!(out, "declare i64 @__backtrace__()").ok();
+        writeln!(out, "declare i64 @__getpwuid__(i64)").ok();
+        writeln!(out, "declare i64 @__getgrgid__(i64)").ok();
+        writeln!(out, "declare i64 @__thread_create__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__thread_join__(i64)").ok();
+        writeln!(out, "declare void @__thread_exit__(i64)").ok();
+        writeln!(out, "declare i64 @__mutex_lock__(i64)").ok();
+        writeln!(out, "declare i64 @__mutex_unlock__(i64)").ok();
+        writeln!(out, "declare i64 @__condvar_wait__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__condvar_signal__(i64)").ok();
+        writeln!(out, "declare i64 @__condvar_broadcast__(i64)").ok();
+        writeln!(out, "declare i64 @__getrlimit__(i64)").ok();
+        writeln!(out, "declare i64 @__setrlimit__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__mkstemp__(i64)").ok();
+        writeln!(out, "declare i64 @__mkdtemp__(i64)").ok();
+        writeln!(out, "declare i64 @__dlopen__(i64)").ok();
+        writeln!(out, "declare i64 @__dlsym__(i64, i64)").ok();
+        writeln!(out, "declare i64 @__dlclose__(i64)").ok();
+        writeln!(out, "declare i64 @__ttyname__(i64)").ok();
         // Some externally-linked functions called by intrinsics
         writeln!(out, "declare i32 @ioctl(i32, i64, ptr)").ok();
     }
@@ -501,7 +529,13 @@ impl LlvmBackend {
                     let g = format!("@str.{}", si);
                     let str_p = format!("%ip_{}s", idx);
                     writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, p, self.align_of("i8*")).ok();
+                    let tag_p = format!("%ip_{}t", idx);
+                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tag_p, str_p).ok();
+                    let tag_o = format!("%ip_{}o", idx);
+                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
+                    let tag_b = format!("%ip_{}b", idx);
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, tag_b, tag_o).ok();
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, tag_b, p, self.align_of("i8*")).ok();
                 }
                 Some(Expr::String(s)) => {
                     // 2026-06-17: Store actual string constant pointer, not null.
@@ -511,7 +545,14 @@ impl LlvmBackend {
                     let g = format!("@str.{}", si);
                     let str_p = format!("%ip_{}s", idx);
                     writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, p, self.align_of("i8*")).ok();
+                    // Tag with bit 0 = 1 to mark as static (not heap-allocated)
+                    let tag_p = format!("%ip_{}t", idx);
+                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tag_p, str_p).ok();
+                    let tag_o = format!("%ip_{}o", idx);
+                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
+                    let tag_b = format!("%ip_{}b", idx);
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, tag_b, tag_o).ok();
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, tag_b, p, self.align_of("i8*")).ok();
                 }
                 Some(Expr::Char(c)) => {
                     let v = c as i32;

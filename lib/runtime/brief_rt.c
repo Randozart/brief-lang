@@ -6,6 +6,7 @@
  *   2. __rt_init() — signal handlers, timers, epoll/kqueue setup (called by main())
  *   3. __rt_wait() — per-platform blocking sleep (called by main())
  *   4. __wait_for_event() — user-callable FFI wrapper over __rt_wait()
+ *   5. D12–D18 + Extra intrinsic implementations (2026-06-19)
  *
  * Compile once per target:
  *   cc -c brief_rt.c -o brief_rt.o
@@ -14,6 +15,7 @@
  * The C preprocessor handles platform detection. No manual per-system config.
  */
 
+#define _GNU_SOURCE
 #include <stddef.h>
 #include <stdint.h>
 #include <signal.h>
@@ -27,6 +29,19 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#ifdef __linux__
+#include <sys/utsname.h>
+#include <sys/random.h>
+#include <execinfo.h>
+#endif
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
+#include <sys/resource.h>
+#include <dlfcn.h>
+#include <pthread.h>
+#include <pwd.h>
+#include <grp.h>
 
 /* ===================================================================
  * 1. @ link Global Definitions
@@ -290,9 +305,6 @@ void __rt_init(void) {
  * =================================================================== */
 
 #if defined(BRIEF_THREAD_POOL)
-#include <pthread.h>
-#include <stdlib.h>
-
 /* Portable barrier — works on all pthread platforms */
 typedef struct {
     pthread_mutex_t mutex;
@@ -1373,6 +1385,341 @@ int64_t __map_values__(int64_t map_bstr) {
         new_buf[2 + i] = h[2 + 2 * i + 1];
     }
     return (int64_t)new_buf;
+}
+
+/* ===================================================================
+ * D12–D18 + Extra Intrinsic Implementations (2026-06-19)
+ *
+ * Each function takes i64 parameters (Brief-boxed values) and returns i64.
+ * For string parameters, the i64 is ptrtoint of a {data_ptr, length} struct.
+ * Cast to int64_t* to read: hdr[0] = data pointer, hdr[1] = length.
+ * For return strings, malloc a {i64, i64} struct and return ptrtoint.
+ * =================================================================== */
+
+/* ── D12: Random / Entropy ── */
+
+int64_t __errno__(void) {
+    return (int64_t)errno;
+}
+
+int64_t __getrandom__(int64_t buf, int64_t len, int64_t flags) {
+#ifdef __linux__
+    return (int64_t)getrandom((void*)buf, (size_t)len, (unsigned int)flags);
+#else
+    (void)buf; (void)len; (void)flags;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+/* ── D13: System Info ── */
+
+int64_t __uname__(void) {
+#ifdef __linux__
+    struct utsname uts;
+    if (uname(&uts) != 0) {
+        errno = 0;
+        return 0;
+    }
+    // Pack as "sysname:release:version:machine" — allocate + snprintf
+    char buf[512];
+    int n = snprintf(buf, sizeof(buf), "%s:%s:%s:%s",
+        uts.sysname, uts.release, uts.version, uts.machine);
+    if (n < 0 || n >= (int)sizeof(buf)) return 0;
+    int64_t* hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!hdr) return 0;
+    char* data = (char*)malloc((size_t)n + 1);
+    if (!data) { free(hdr); return 0; }
+    memcpy(data, buf, (size_t)n + 1);
+    hdr[0] = (int64_t)data;
+    hdr[1] = (int64_t)n;
+    return (int64_t)hdr;
+#else
+    return 0;
+#endif
+}
+
+int64_t __hostname__(void) {
+    char buf[256];
+    if (gethostname(buf, sizeof(buf)) != 0) {
+        buf[0] = '\0';
+    }
+    buf[sizeof(buf) - 1] = '\0';
+    size_t len = strlen(buf);
+    int64_t* hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!hdr) return 0;
+    char* data = (char*)malloc(len + 1);
+    if (!data) { free(hdr); return 0; }
+    memcpy(data, buf, len + 1);
+    hdr[0] = (int64_t)data;
+    hdr[1] = (int64_t)len;
+    return (int64_t)hdr;
+}
+
+int64_t __strerror__(int64_t errnum) {
+    char buf[1024];
+    buf[0] = '\0';
+#ifdef __linux__
+    if (strerror_r((int)errnum, buf, sizeof(buf))) {}
+#else
+    // On some BSDs/macOS, strerror_r returns char* (GNU-style)
+    // We just call strerror and copy
+    const char* s = strerror((int)errnum);
+    if (s) {
+        size_t slen = strlen(s);
+        if (slen >= sizeof(buf)) slen = sizeof(buf) - 1;
+        memcpy(buf, s, slen);
+        buf[slen] = '\0';
+    }
+#endif
+    size_t len = strlen(buf);
+    int64_t* hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!hdr) return 0;
+    char* data = (char*)malloc(len + 1);
+    if (!data) { free(hdr); return 0; }
+    memcpy(data, buf, len + 1);
+    hdr[0] = (int64_t)data;
+    hdr[1] = (int64_t)len;
+    return (int64_t)hdr;
+}
+
+int64_t __strsignal__(int64_t signum) {
+    const char* s = strsignal((int)signum);
+    if (!s) s = "Unknown signal";
+    size_t len = strlen(s);
+    int64_t* hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!hdr) return 0;
+    char* data = (char*)malloc(len + 1);
+    if (!data) { free(hdr); return 0; }
+    memcpy(data, s, len + 1);
+    hdr[0] = (int64_t)data;
+    hdr[1] = (int64_t)len;
+    return (int64_t)hdr;
+}
+
+int64_t __realpath__(int64_t path_bstr) {
+    int64_t* hdr = (int64_t*)path_bstr;
+    if (!hdr || !hdr[0]) return 0;
+    const char* path = (const char*)hdr[0];
+    char* resolved = realpath(path, NULL);
+    if (!resolved) return 0;
+    size_t len = strlen(resolved);
+    int64_t* out_hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!out_hdr) { free(resolved); return 0; }
+    out_hdr[0] = (int64_t)resolved;
+    out_hdr[1] = (int64_t)len;
+    return (int64_t)out_hdr;
+}
+
+/* ── D14: Debugging ── */
+
+int64_t __backtrace__(void) {
+#ifdef __linux__
+    void* addrs[128];
+    int count = backtrace(addrs, 128);
+    if (count <= 0) return 0;
+    // Allocate a Brief List: {data_ptr, len, elem[0], elem[1], ...}
+    // Each element is an i64 address
+    int64_t* list_hdr = (int64_t*)malloc(((size_t)count + 2) * sizeof(int64_t));
+    if (!list_hdr) return 0;
+    list_hdr[0] = (int64_t)(list_hdr + 2);  // data ptr
+    list_hdr[1] = (int64_t)count;            // length
+    for (int i = 0; i < count; i++) {
+        list_hdr[2 + i] = (int64_t)addrs[i];
+    }
+    return (int64_t)list_hdr;
+#else
+    return 0;
+#endif
+}
+
+/* ── D16: User / Group ── */
+
+int64_t __getpwuid__(int64_t uid) {
+#ifdef __linux__
+    struct passwd pw;
+    struct passwd* result;
+    char buf[4096];
+    if (getpwuid_r((uid_t)uid, &pw, buf, sizeof(buf), &result) != 0 || !result)
+        return 0;
+    // Pack as "name:dir:shell"
+    char out[4096];
+    int n = snprintf(out, sizeof(out), "%s:%s:%s",
+        pw.pw_name, pw.pw_dir, pw.pw_shell);
+    if (n < 0 || n >= (int)sizeof(out)) return 0;
+    int64_t* hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!hdr) return 0;
+    char* data = (char*)malloc((size_t)n + 1);
+    if (!data) { free(hdr); return 0; }
+    memcpy(data, out, (size_t)n + 1);
+    hdr[0] = (int64_t)data;
+    hdr[1] = (int64_t)n;
+    return (int64_t)hdr;
+#else
+    (void)uid;
+    return 0;
+#endif
+}
+
+int64_t __getgrgid__(int64_t gid) {
+#ifdef __linux__
+    struct group gr;
+    struct group* result;
+    char buf[4096];
+    if (getgrgid_r((gid_t)gid, &gr, buf, sizeof(buf), &result) != 0 || !result)
+        return 0;
+    size_t len = strlen(gr.gr_name);
+    int64_t* hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!hdr) return 0;
+    char* data = (char*)malloc(len + 1);
+    if (!data) { free(hdr); return 0; }
+    memcpy(data, gr.gr_name, len + 1);
+    hdr[0] = (int64_t)data;
+    hdr[1] = (int64_t)len;
+    return (int64_t)hdr;
+#else
+    (void)gid;
+    return 0;
+#endif
+}
+
+/* ── D17: Threading ── */
+
+int64_t __thread_create__(int64_t fn_ptr, int64_t arg) {
+    pthread_t thread;
+    int ret = pthread_create(&thread, NULL,
+        (void* (*)(void*))fn_ptr, (void*)arg);
+    if (ret != 0) return -1;
+    // Pack pthread_t into i64 (works on Linux where pthread_t is pointer-sized)
+    union { pthread_t t; int64_t i; } u;
+    u.t = thread;
+    return u.i;
+}
+
+int64_t __thread_join__(int64_t thread_val) {
+    union { int64_t i; pthread_t t; } u;
+    u.i = thread_val;
+    return (int64_t)pthread_join(u.t, NULL);
+}
+
+void __thread_exit__(int64_t code) {
+    pthread_exit((void*)code);
+}
+
+int64_t __mutex_lock__(int64_t mptr) {
+    return (int64_t)pthread_mutex_lock((pthread_mutex_t*)mptr);
+}
+
+int64_t __mutex_unlock__(int64_t mptr) {
+    return (int64_t)pthread_mutex_unlock((pthread_mutex_t*)mptr);
+}
+
+int64_t __condvar_wait__(int64_t cptr, int64_t mptr) {
+    return (int64_t)pthread_cond_wait(
+        (pthread_cond_t*)cptr, (pthread_mutex_t*)mptr);
+}
+
+int64_t __condvar_signal__(int64_t cptr) {
+    return (int64_t)pthread_cond_signal((pthread_cond_t*)cptr);
+}
+
+int64_t __condvar_broadcast__(int64_t cptr) {
+    return (int64_t)pthread_cond_broadcast((pthread_cond_t*)cptr);
+}
+
+/* ── D18: Resource Limits ── */
+
+int64_t __getrlimit__(int64_t resource) {
+#ifdef __linux__
+    struct rlimit rlim;
+    if (getrlimit((int)resource, &rlim) != 0) return -1;
+    // Pack as (cur << 32) | max
+    return ((int64_t)rlim.rlim_cur << 32) | ((int64_t)rlim.rlim_max & 0xFFFFFFFF);
+#else
+    (void)resource;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+int64_t __setrlimit__(int64_t resource, int64_t packed) {
+#ifdef __linux__
+    struct rlimit rlim;
+    rlim.rlim_cur = (rlim_t)(packed >> 32);
+    rlim.rlim_max = (rlim_t)(packed & 0xFFFFFFFF);
+    return (int64_t)setrlimit((int)resource, &rlim);
+#else
+    (void)resource; (void)packed;
+    errno = ENOSYS;
+    return -1;
+#endif
+}
+
+/* ── Extra intrinsics ── */
+
+int64_t __mkstemp__(int64_t template_bstr) {
+    int64_t* hdr = (int64_t*)template_bstr;
+    if (!hdr || !hdr[0]) return -1;
+    const char* tmpl = (const char*)hdr[0];
+    size_t len = (size_t)hdr[1];
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return -1;
+    memcpy(buf, tmpl, len + 1);
+    int fd = mkstemp(buf);
+    free(buf);
+    return (int64_t)fd;
+}
+
+int64_t __mkdtemp__(int64_t template_bstr) {
+    int64_t* hdr = (int64_t*)template_bstr;
+    if (!hdr || !hdr[0]) return 0;
+    const char* tmpl = (const char*)hdr[0];
+    size_t len = (size_t)hdr[1];
+    char* buf = (char*)malloc(len + 1);
+    if (!buf) return 0;
+    memcpy(buf, tmpl, len + 1);
+    char* result = mkdtemp(buf);
+    if (!result) { free(buf); return 0; }
+    size_t rlen = strlen(result);
+    int64_t* out_hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!out_hdr) { free(buf); return 0; }
+    out_hdr[0] = (int64_t)result;  // transfers ownership of buf
+    out_hdr[1] = (int64_t)rlen;
+    return (int64_t)out_hdr;
+}
+
+int64_t __dlopen__(int64_t filename_bstr) {
+    int64_t* hdr = (int64_t*)filename_bstr;
+    if (!hdr || !hdr[0]) return 0;
+    const char* filename = (const char*)hdr[0];
+    void* handle = dlopen(filename, RTLD_NOW | RTLD_LOCAL);
+    return (int64_t)handle;
+}
+
+int64_t __dlsym__(int64_t handle_val, int64_t symbol_bstr) {
+    int64_t* hdr = (int64_t*)symbol_bstr;
+    if (!hdr || !hdr[0]) return 0;
+    const char* symbol = (const char*)hdr[0];
+    void* addr = dlsym((void*)handle_val, symbol);
+    return (int64_t)addr;
+}
+
+int64_t __dlclose__(int64_t handle_val) {
+    return (int64_t)dlclose((void*)handle_val);
+}
+
+int64_t __ttyname__(int64_t fd_val) {
+    char buf[256];
+    if (ttyname_r((int)fd_val, buf, sizeof(buf)) != 0) return 0;
+    size_t len = strlen(buf);
+    int64_t* hdr = (int64_t*)malloc(2 * sizeof(int64_t));
+    if (!hdr) return 0;
+    char* data = (char*)malloc(len + 1);
+    if (!data) { free(hdr); return 0; }
+    memcpy(data, buf, len + 1);
+    hdr[0] = (int64_t)data;
+    hdr[1] = (int64_t)len;
+    return (int64_t)hdr;
 }
 
 /* Constructor wrapper — ensures init runs even without the generated main() */

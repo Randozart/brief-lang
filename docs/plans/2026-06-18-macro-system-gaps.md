@@ -1,8 +1,21 @@
 # Macro System — Remaining Gaps
 
 **Date:** 2026-06-18  
-**Status:** Identified, not yet fixed  
+**Updated:** 2026-06-19  
+**Status:** ✅ All gaps resolved  
 **Context:** Post-implementation audit after M1–M6 of the macro/template system.
+
+---
+
+## Resolution Notes (2026-06-19)
+
+| Gap | Resolution | Details |
+|-----|-----------|---------|
+| 1 — Statement-level expansion | ✅ Fixed | `expand_template_in_stmt` handles all return types (Block/Stmt/Expr) in `expand.rs:89-113` |
+| 2 — Nested macro calls | ✅ Fixed | `expand_macro_calls_in_items` recurses into Definition/Transaction bodies via `expand_macro_in_stmts` (added `expand_macro_in_stmts` at `expand.rs:291-305`). Macro calls inside guarded blocks, let bindings, term values all resolved. |
+| 3 — Template control flow | ✅ Fixed | `expand_template` does AST @-substitution + interpreter execution (guards evaluated, term return captured) in `template.rs:31-44` |
+| 4 — `macro_.rs` empty | No action needed | Cosmetic placeholder, no bug. |
+| 5 — Integration tests | ✅ Fixed | Three `.bv` source-parsing tests added: `test_integration_macro_expansion_from_source`, `_in_defn_body`, `_in_txn_body` at `expand.rs:673-723` |
 
 ---
 

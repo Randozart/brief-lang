@@ -2571,11 +2571,9 @@ fn run_llvm_compile(
 
             let mut link_cmd = std::process::Command::new("cc");
             link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj_path);
-            link_cmd.arg("-lm");
+            link_cmd.args(["-lm", "-lpthread"]);
             if has_wake {
-                link_cmd.args(["-lrt", "-lpthread"]);
-            } else if has_thread_pool {
-                link_cmd.arg("-lpthread");
+                link_cmd.arg("-lrt");
             }
             let link_status = link_cmd.status();
             match link_status {
@@ -2584,9 +2582,8 @@ fn run_llvm_compile(
                 }
                 _ => {
                     eprintln!("  Warning: linking failed. Link manually:");
-                    eprintln!("    cc -no-pie {} -o {} -lm", lto_obj_path.display(), exe_path.display());
-                    if has_wake { eprintln!("    (add -lrt -lpthread)"); }
-                    if has_thread_pool && !has_wake { eprintln!("    (add -lpthread)"); }
+                    eprintln!("    cc -no-pie {} -o {} -lm -lpthread", lto_obj_path.display(), exe_path.display());
+                    if has_wake { eprintln!("    (add -lrt)"); }
                 }
             }
             return Ok(output_file);
@@ -2607,11 +2604,9 @@ fn run_llvm_compile(
                 println!("  LTO: program + brief_rt.c bitcode merged and optimized");
                 let mut link_cmd = std::process::Command::new("cc");
                 link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj);
-                link_cmd.arg("-lm");
+                link_cmd.args(["-lm", "-lpthread"]);
                 if has_wake {
-                    link_cmd.args(["-lrt", "-lpthread"]);
-                } else if has_thread_pool {
-                    link_cmd.arg("-lpthread");
+                    link_cmd.arg("-lrt");
                 }
                 if link_cmd.status().ok().map_or(true, |s| !s.success()) {
                     eprintln!("  Warning: LTO linking failed. Trying cc fallback.");
@@ -2672,7 +2667,8 @@ fn run_llvm_compile(
                 eprintln!("    opt -O2 -S {} -o {}.opt.ll", output_file.display(), stem);
                 eprintln!("    llc {}.opt.ll -filetype=obj -o {}", stem, ll_o_path.display());
                 print!("    ld {}.o {} -o {}", stem, rt_o_path.display(), stem);
-                if has_wake { print!(" -lrt -lpthread"); } else if has_thread_pool { print!(" -lpthread"); }
+                print!(" -lpthread");
+                if has_wake { print!(" -lrt"); }
                 println!();
                 return Ok(output_file);
             }
@@ -2680,10 +2676,9 @@ fn run_llvm_compile(
 
         let mut link_cmd = std::process::Command::new("cc");
         link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&ll_o_path).arg(&rt_o_path);
+        link_cmd.args(["-lpthread"]);
         if has_wake {
-            link_cmd.args(["-lrt", "-lpthread"]);
-        } else if has_thread_pool {
-            link_cmd.arg("-lpthread");
+            link_cmd.arg("-lrt");
         }
         let link_status = link_cmd.status();
         match link_status {
@@ -2692,9 +2687,8 @@ fn run_llvm_compile(
             }
             _ => {
                 eprintln!("  Warning: linking failed. Link manually:");
-                eprintln!("    cc -no-pie {} {} -o {}", ll_o_path.display(), rt_o_path.display(), exe_path.display());
-                if has_wake { eprintln!("    (add -lrt -lpthread for timerfd/signalfd)"); }
-                if has_thread_pool && !has_wake { eprintln!("    (add -lpthread for thread pool)"); }
+                eprintln!("    cc -no-pie {} {} -o {} -lpthread", ll_o_path.display(), rt_o_path.display(), exe_path.display());
+                if has_wake { eprintln!("    (add -lrt)"); }
             }
         }
     }

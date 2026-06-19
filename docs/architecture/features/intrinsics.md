@@ -1,8 +1,8 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Updated:** 2026-06-17 — majority migrated from Shim (C shim) to Direct (inline libc)
-**Status:** Phase H complete. **75/86** intrinsics emit direct libc calls. **11** remain as brief_rt.c shims.
+**Updated:** 2026-06-19 — D12–D18 + 9 extras implemented (35 new intrinsics, 166 total)
+**Status:** All 18 domains complete. **166** intrinsic variants. **131** emit direct libc or inline LLVM IR, **35** use brief_rt.c shims.
 
 ## Migration to Direct Libc (2026-06-16 — 2026-06-17)
 
@@ -272,74 +272,116 @@ and DNS resolution.
 `pipe#` is fundamental for process I/O (used by `spawn_with_output#`).
 `shm_open#` + `mmap#` replace the entire Metro SHM FFI.
 
-### D12 — Random / Entropy
+### D12 — Random / Entropy ✅ (2026-06-19)
 
-| Intrinsic | Signature | Safety | Airlock |
-|---|---|---|---|
-| `getrandom#` | `(buf: Int, len: Int, flags: Int) -> Int` | returns -1 on error | buf writable, len > 0 |
-
-Irreducible: `/dev/urandom` via `read#` works but `getrandom` is the
-modern kernel interface. Needed for crypto, UUIDs, hash randomization.
-
-### D13 — System Info
-
-| Intrinsic | Signature | Safety | Airlock |
-|---|---|---|---|
-| `uname#` | `() -> String` | returns empty on error | — |
-| `sysinfo#` | `() -> Int` | returns 0 on error | — |
-| `pagesize#` | `() -> Int` | always succeeds | — |
-| `cpu_count#` | `() -> Int` | returns 1 on error | — |
-| `hostname#` | `() -> String` | returns empty on error | — |
-| `errno#` | `() -> Int` | always succeeds | — |
+| Intrinsic | Signature | Safety | Airlock | Codegen |
+|---|---|---|---|---|
+| `errno#` | `() -> Int` | always succeeds | — | Shim (`__errno__`) |
+| `getrandom#` | `(buf: Int, len: Int, flags: Int) -> Int` | returns -1 on error | buf writable, len > 0 | Shim (`__getrandom__`) |
 
 `errno#` is needed after any failing intrinsic to diagnose the error.
+`getrandom#` wraps the Linux `getrandom()` syscall (or `/dev/urandom` fallback).
 
-### D14 — Debugging
+### D13 — System Info ✅ (2026-06-19)
 
-| Intrinsic | Signature | Safety | Airlock |
-|---|---|---|---|
-| `abort#` | `() -> Void` | never returns | — |
-| `backtrace#` | `() -> List<Int>` | returns empty list if unavailable | — |
+| Intrinsic | Signature | Safety | Airlock | Codegen |
+|---|---|---|---|---|
+| `pagesize#` | `() -> Int` | always succeeds | — | Direct (`sysconf`) |
+| `cpu_count#` | `() -> Int` | returns 1 on error | — | Direct (`sysconf`) |
+| `hostname#` | `() -> String` | returns empty on error | — | Shim (`__hostname__`) |
+| `uname#` | `() -> String` | returns empty on error | — | Shim (`__uname__`) |
+| `strerror#` | `(errnum: Int) -> String` | always succeeds | — | Shim (`__strerror__`) |
+| `strsignal#` | `(signum: Int) -> String` | always succeeds | — | Shim (`__strsignal__`) |
 
-### D15 — Scheduling
+`pagesize#` and `cpu_count#` are pure (no side effects — constant for process lifetime).
+`strerror#` provides human-readable error messages for `errno#` results.
+`strsignal#` provides human-readable signal names for signal numbers.
 
-| Intrinsic | Signature | Safety | Airlock |
-|---|---|---|---|
-| `sched_yield#` | `() -> Int` | always succeeds | — |
-| `getpriority#` | `(which: Int, who: Int) -> Int` | returns -1 on error | — |
-| `setpriority#` | `(which: Int, who: Int, prio: Int) -> Int` | returns -1 on error | — |
+### D14 — Debugging ✅ (2026-06-19)
 
-### D16 — User / Group
+| Intrinsic | Signature | Safety | Airlock | Codegen |
+|---|---|---|---|---|
+| `abort#` | `() -> Void` | never returns | — | Direct (`abort()`) |
+| `backtrace#` | `() -> List<Int>` | returns empty list if unavailable | — | Shim (`__backtrace__`) |
 
-| Intrinsic | Signature | Safety | Airlock |
-|---|---|---|---|
-| `getuid#` | `() -> Int` | always succeeds | — |
-| `geteuid#` | `() -> Int` | always succeeds | — |
-| `getgid#` | `() -> Int` | always succeeds | — |
-| `getegid#` | `() -> Int` | always succeeds | — |
+`abort#` triggers SIGABRT + core dump. `backtrace#` returns program counter addresses
+(use with `dladdr` or `addr2line` for symbol resolution).
 
-### D17 — Threading
+### D15 — Scheduling ✅ (2026-06-19)
 
-| Intrinsic | Signature | Safety | Airlock |
-|---|---|---|---|
-| `thread_create#` | `(fn: Int, arg: Int) -> Int` | returns -1 on error | fn is function pointer |
-| `thread_join#` | `(thread: Int) -> Int` | returns -1 on error | thread from `thread_create#` |
-| `thread_exit#` | `(code: Int) -> Void` | never returns | — |
-| `mutex_lock#` | `(mutex: Int) -> Int` | returns -1 on error | mutex initialized |
-| `mutex_unlock#` | `(mutex: Int) -> Int` | returns -1 on error | mutex locked by this thread |
-| `condvar_wait#` | `(cond: Int, mutex: Int) -> Int` | returns -1 on error | both initialized |
-| `condvar_signal#` | `(cond: Int) -> Int` | returns -1 on error | cond initialized |
+| Intrinsic | Signature | Safety | Airlock | Codegen |
+|---|---|---|---|---|
+| `sched_yield#` | `() -> Int` | always succeeds | — | Direct (`sched_yield`) |
+| `getpriority#` | `(which: Int, who: Int) -> Int` | returns -1 on error | — | Direct (`getpriority`) |
+| `setpriority#` | `(which: Int, who: Int, prio: Int) -> Int` | returns -1 on error | — | Direct (`setpriority`) |
 
-Replaces the `pthread` dependency. The thread pool in `brief_rt.c`
-currently uses pthread_barrier/pthread_create — moving to intrinsics
-eliminates the libpthread link dependency.
+`getpriority#`/`setpriority#` use `PRIO_PROCESS` (0), `PRIO_PGRP` (1), or `PRIO_USER` (2) for `which`.
 
-### D18 — Resource Limits
+### D16 — User / Group ✅ (2026-06-19)
 
-| Intrinsic | Signature | Safety | Airlock |
-|---|---|---|---|
-| `getrlimit#` | `(resource: Int) -> Int` | returns -1 on error | — |
-| `setrlimit#` | `(resource: Int, rlim: Int) -> Int` | returns -1 on error | — |
+| Intrinsic | Signature | Safety | Airlock | Codegen |
+|---|---|---|---|---|
+| `getuid#` | `() -> Int` | always succeeds | — | Direct (`getuid`) |
+| `geteuid#` | `() -> Int` | always succeeds | — | Direct (`geteuid`) |
+| `getgid#` | `() -> Int` | always succeeds | — | Direct (`getgid`) |
+| `getegid#` | `() -> Int` | always succeeds | — | Direct (`getegid`) |
+| `getpwuid#` | `(uid: Int) -> String` | returns empty on error | uid ≥ 0 | Shim (`__getpwuid__`) |
+| `getgrgid#` | `(gid: Int) -> String` | returns empty on error | gid ≥ 0 | Shim (`__getgrgid__`) |
+
+`getpwuid#` returns `"name:dir:shell"` colon-separated. Use pure-Brief parsing to extract fields.
+
+### D17 — Threading ✅ (2026-06-19)
+
+| Intrinsic | Signature | Safety | Airlock | Codegen |
+|---|---|---|---|---|
+| `thread_create#` | `(fn_ptr: Int, arg: Int) -> Int` | returns -1 on error | fn_ptr is callable | Shim (`__thread_create__`) |
+| `thread_join#` | `(thread: Int) -> Int` | returns -1 on error | thread from `thread_create#` | Shim (`__thread_join__`) |
+| `thread_exit#` | `(code: Int) -> Void` | never returns | — | Shim (`__thread_exit__`) |
+| `mutex_lock#` | `(mptr: Int) -> Int` | returns -1 on error | mptr is initialized mutex | Shim (`__mutex_lock__`) |
+| `mutex_unlock#` | `(mptr: Int) -> Int` | returns -1 on error | mptr locked by this thread | Shim (`__mutex_unlock__`) |
+| `condvar_wait#` | `(cptr: Int, mptr: Int) -> Int` | returns -1 on error | both initialized | Shim (`__condvar_wait__`) |
+| `condvar_signal#` | `(cptr: Int) -> Int` | returns -1 on error | cptr initialized | Shim (`__condvar_signal__`) |
+| `condvar_broadcast#` | `(cptr: Int) -> Int` | returns -1 on error | cptr initialized | Shim (`__condvar_broadcast__`) |
+
+All threading intrinsics wrap `pthread_*` functions. Thread handles are `pthread_t` packed as `i64`.
+
+### D18 — Resource Limits ✅ (2026-06-19)
+
+| Intrinsic | Signature | Safety | Airlock | Codegen |
+|---|---|---|---|---|
+| `getrlimit#` | `(resource: Int) -> Int` | returns -1 on error | — | Shim (`__getrlimit__`) |
+| `setrlimit#` | `(resource: Int, packed: Int) -> Int` | returns -1 on error | — | Shim (`__setrlimit__`) |
+
+Limits are packed as `(cur << 32) | max`. Decode: `cur = packed >> 32`, `max = packed & 0xFFFFFFFF`.
+Resource constants: `RLIMIT_CPU=0`, `RLIMIT_FSIZE=1`, `RLIMIT_DATA=2`, `RLIMIT_STACK=3`,
+`RLIMIT_CORE=4`, `RLIMIT_NOFILE=7`, `RLIMIT_AS=9`, `RLIMIT_NPROC=6`, `RLIMIT_MEMLOCK=8`.
+
+### Extra — Cross-platform Utilities ✅ (2026-06-19)
+
+| Intrinsic | Signature | Safety | Airlock | Codegen |
+|---|---|---|---|---|
+| `realpath#` | `(path: String) -> String` | returns empty on error | path != "" | Shim (`__realpath__`) |
+| `mkstemp#` | `(template: String) -> Int` | returns -1 on error | template ends with XXXXXX | Shim (`__mkstemp__`) |
+| `mkdtemp#` | `(template: String) -> String` | returns empty on error | template ends with XXXXXX | Shim (`__mkdtemp__`) |
+| `dlopen#` | `(filename: String) -> Int` | returns 0 on error | filename != "" | Shim (`__dlopen__`) |
+| `dlsym#` | `(handle: Int, symbol: String) -> Int` | returns 0 on error | handle from dlopen# | Shim (`__dlsym__`) |
+| `dlclose#` | `(handle: Int) -> Int` | returns -1 on error | handle from dlopen# | Shim (`__dlclose__`) |
+| `ttyname#` | `(fd: Int) -> String` | returns empty on error | fd is a terminal | Shim (`__ttyname__`) |
+
+### Phase I–VI — D12–D18 + Extras (completed 2026-06-19)
+
+**35 new intrinsics** across 7 domains + 9 extras:
+
+| Phase | Domain | Intrinsics | Count | Codegen |
+|---|---|---|---|---|
+| I | D12 Random + D13 System Info (subset) | `errno`, `getrandom`, `pagesize`, `cpu_count`, `hostname`, `abort` | 6 | 2 Direct + 4 Shim |
+| II | D13 System Info (remainder) + Extras | `uname`, `strerror`, `strsignal`, `realpath` | 4 | 4 Shim |
+| III | D16 User/Group | `getuid`, `geteuid`, `getgid`, `getegid`, `getpwuid`, `getgrgid` | 6 | 4 Direct + 2 Shim |
+| IV | D15 Scheduling + D18 Resource Limits | `sched_yield`, `getpriority`, `setpriority`, `getrlimit`, `setrlimit` | 5 | 3 Direct + 2 Shim |
+| V | D17 Threading | `thread_create`, `thread_join`, `thread_exit`, `mutex_lock`, `mutex_unlock`, `condvar_wait`, `condvar_signal`, `condvar_broadcast` | 8 | 8 Shim |
+| VI | Extras | `mkstemp`, `mkdtemp`, `dlopen`, `dlsym`, `dlclose`, `ttyname` | 6 | 6 Shim |
+
+**Total after all phases:** 166 intrinsic variants (131 Phase A–H + 35 Phase I–VI).
 
 ## Implementation Phases
 

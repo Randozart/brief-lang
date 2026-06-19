@@ -848,14 +848,14 @@ impl LlvmBackend {
             if has_wake_triggers {
                 writeln!(out, "  br i1 {}, label %done, label %wait", tr).ok();
                 writeln!(out, "  wait:").ok();
-                writeln!(out, "  call void @__rt_wait()").ok();
+                emit_trg_event_epoll_wait(self, out);
                 writeln!(out, "  br label %tick").ok();
             } else {
                 writeln!(out, "  br i1 {}, label %done, label %tick", tr).ok();
             }
             writeln!(out, "  done:").ok();
         } else if has_wake_triggers {
-            writeln!(out, "  call void @__rt_wait()").ok();
+            emit_trg_event_epoll_wait(self, out);
             writeln!(out, "  br label %tick").ok();
         } else {
             writeln!(out, "  br label %tick").ok();
@@ -1396,9 +1396,22 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                     writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sge, idx).ok();
                     let ch_ld = format!("%chld_{}_{}", tc, name);
                     writeln!(out, "  {} = load i8, i8* {}, align 1", ch_ld, ch_slot).ok();
-                    let ch_z = format!("%chz_{}_{}", tc, name);
-                    writeln!(out, "  {} = zext i8 {} to i64", ch_z, ch_ld).ok();
-                    writeln!(out, "  store i64 {}, i64* {}, align 8", ch_z, sge).ok();
+                    let ft = backend.field_types[idx].clone();
+                    match ft.as_str() {
+                        "i32" => {
+                            let ch_z = format!("%chz_{}_{}", tc, name);
+                            writeln!(out, "  {} = zext i8 {} to i32", ch_z, ch_ld).ok();
+                            writeln!(out, "  store i32 {}, i32* {}, align 4", ch_z, sge).ok();
+                        }
+                        "i8" => {
+                            writeln!(out, "  store i8 {}, i8* {}, align 1", ch_ld, sge).ok();
+                        }
+                        _ => {
+                            let ch_z = format!("%chz_{}_{}", tc, name);
+                            writeln!(out, "  {} = zext i8 {} to i64", ch_z, ch_ld).ok();
+                            writeln!(out, "  store i64 {}, i64* {}, align 8", ch_z, sge).ok();
+                        }
+                    }
                 }
             }
             crate::ast::LinkRef::Timer(_hz) => {

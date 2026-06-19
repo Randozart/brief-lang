@@ -223,6 +223,9 @@ benchmarks/fannkuch_redux_merged.bc
 benchmarks/fannkuch_redux_merged.opt.bc
 knucleotide_c
 benchmarks/knucleotide
+# Brief-compiled executables
+officina
+
 # Binaries igignore
 benchmarks/mandelbrot
 benchmarks/mandelbrot_cofficina

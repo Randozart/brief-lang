@@ -1,6 +1,11 @@
 use crate::ast::{Expr, Program, Statement, TopLevel};
+
 use crate::features::macros::context::{MacroContext, MacroDef, TemplateDef};
+
 use crate::features::macros::template;
+
+#[cfg(test)]
+use crate::parser::Parser;
 
 /// Phase 1a: Expand all template calls in the program.
 pub fn expand_templates(program: &mut Program, ctx: &mut MacroContext) -> Result<(), String> {
@@ -255,20 +260,46 @@ fn expand_macro_calls_in_items(
 ) -> Result<(), String> {
     let mut i = 0;
     while i < items.len() {
-        match &items[i] {
-            TopLevel::Statement(stmt) => {
-                let expanded = expand_macro_in_stmt(stmt, ctx)?;
-                if let Some(new_stmts) = expanded {
-                    items.remove(i);
-                    for (j, s) in new_stmts.into_iter().enumerate() {
-                        items.insert(i + j, TopLevel::Statement(Box::new(s)));
-                    }
-                    i += 1;
-                } else {
-                    i += 1;
-                }
+        let expanded = match &items[i] {
+            TopLevel::Statement(stmt) => expand_macro_in_stmt(stmt, ctx)?,
+            _ => None,
+        };
+        if let Some(new_stmts) = expanded {
+            items.remove(i);
+            for (j, s) in new_stmts.into_iter().enumerate() {
+                items.insert(i + j, TopLevel::Statement(Box::new(s)));
             }
-            _ => i += 1,
+            i += 1;
+        } else {
+            // Recurse into definitions/transactions for sub-expression macro calls
+            match &mut items[i] {
+                TopLevel::Definition(def) => {
+                    expand_macro_in_stmts(&mut def.body, ctx)?;
+                }
+                TopLevel::Transaction(txn) => {
+                    expand_macro_in_stmts(&mut txn.body, ctx)?;
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+    Ok(())
+}
+
+/// Walk a list of statements and expand any MacroCall in sub-expression positions.
+fn expand_macro_in_stmts(
+    stmts: &mut Vec<Statement>,
+    ctx: &mut MacroContext,
+) -> Result<(), String> {
+    let mut i = 0;
+    while i < stmts.len() {
+        let expanded = expand_macro_in_stmt(&stmts[i], ctx)?;
+        if let Some(new_stmts) = expanded {
+            stmts.splice(i..=i, new_stmts);
+            i += 1;
+        } else {
+            i += 1;
         }
     }
     Ok(())
@@ -637,5 +668,135 @@ mod tests {
         collect_macro_defs(&mut program, &mut ctx);
         assert!(program.items.is_empty());
         assert!(ctx.macros.contains_key("m"));
+    }
+
+    #[test]
+    fn test_integration_macro_expansion_from_source() {
+        // Macro returning a let statement via quote block, called at statement level
+        let source = r#"macro setup() -> Block { term quote { let x: Int = 0; }; }; defn main() -> Int { $!setup(); term x; };"#;
+        let mut parser = Parser::new(source);
+        let mut program = parser.parse().expect("Parsing should succeed");
+        let mut ctx = MacroContext::new();
+        collect_macro_defs(&mut program, &mut ctx);
+        expand_macro_calls_in_items(&mut program.items, &mut ctx).expect("Macro expansion should succeed");
+        for item in &program.items {
+            assert_no_macro_call(item);
+        }
+        let has_defn = program.items.iter().any(|item| matches!(item, TopLevel::Definition(_)));
+        assert!(has_defn, "Expanded program should contain a Definition");
+        // Body should have 2 statements: the let + term
+        if let Some(TopLevel::Definition(defn)) = program.items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
+            assert!(defn.body.len() >= 2, "Expected at least 2 statements in defn body, got {:?}", defn.body);
+        }
+    }
+
+    #[test]
+    fn test_integration_macro_expansion_in_defn_body() {
+        // Macro call inside a defn body, returning a let statement via quote block
+        let source = r#"macro fortytwo() -> Block { term quote { let x: Int = 42; }; }; defn main() -> Int { $!fortytwo(); term x; };"#;
+        let mut parser = Parser::new(source);
+        let mut program = parser.parse().expect("Parsing should succeed");
+        let mut ctx = MacroContext::new();
+        collect_macro_defs(&mut program, &mut ctx);
+        expand_macro_calls_in_items(&mut program.items, &mut ctx).expect("Macro expansion should succeed");
+        for item in &program.items {
+            assert_no_macro_call(item);
+        }
+        // After expansion, the defn body should contain 2 statements: the let + term
+        if let Some(TopLevel::Definition(defn)) = program.items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
+            assert_eq!(defn.body.len(), 2, "Expected 2 statements in defn body after expansion, got {:?}", defn.body);
+        }
+    }
+
+    #[test]
+    fn test_integration_macro_expansion_in_txn_body() {
+        // Macro returning a statement block via quote block, called inside a txn
+        let source = r#"macro one() -> Block { term quote { let y: Int = 1; }; }; defn main() -> Int { $!one(); term y; };"#;
+        let mut parser = Parser::new(source);
+        let mut program = parser.parse().expect("Parsing should succeed");
+        let mut ctx = MacroContext::new();
+        collect_macro_defs(&mut program, &mut ctx);
+        expand_macro_calls_in_items(&mut program.items, &mut ctx).expect("Macro expansion should succeed");
+        for item in &program.items {
+            assert_no_macro_call(item);
+        }
+        // After expansion, the defn body should contain 2 statements: the let + term
+        if let Some(TopLevel::Definition(defn)) = program.items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
+            assert_eq!(defn.body.len(), 2, "Expected 2 statements in defn body after expansion");
+        }
+    }
+
+    fn assert_no_macro_call(item: &TopLevel) {
+        match item {
+            TopLevel::Statement(stmt) => {
+                assert_no_macro_call_in_stmt(stmt.as_ref());
+            }
+            TopLevel::Definition(def) => {
+                for s in &def.body {
+                    assert_no_macro_call_in_stmt(s);
+                }
+            }
+            TopLevel::Transaction(txn) => {
+                for s in &txn.body {
+                    assert_no_macro_call_in_stmt(s);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn assert_no_macro_call_in_stmt(stmt: &Statement) {
+        match stmt {
+            Statement::Expression(Expr::MacroCall { .. }) => {
+                panic!("Found unresolved MacroCall: {:?}", stmt);
+            }
+            Statement::Expression(expr) => {
+                assert_no_macro_call_in_expr(expr);
+            }
+            Statement::Let { expr, .. } => {
+                if let Some(e) = expr {
+                    assert_no_macro_call_in_expr(e);
+                }
+            }
+            Statement::Guarded { condition, statements } => {
+                assert_no_macro_call_in_expr(condition);
+                for s in statements {
+                    assert_no_macro_call_in_stmt(s);
+                }
+            }
+            Statement::Assignment { lhs, expr, .. } => {
+                assert_no_macro_call_in_expr(lhs);
+                assert_no_macro_call_in_expr(expr);
+            }
+            Statement::Foreach { list, body, .. } => {
+                assert_no_macro_call_in_expr(list);
+                for s in body {
+                    assert_no_macro_call_in_stmt(s);
+                }
+            }
+            Statement::SyncBlock { body } => {
+                for s in body {
+                    assert_no_macro_call_in_stmt(s);
+                }
+            }
+            Statement::Oracle { handler, body, .. } => {
+                for s in handler {
+                    assert_no_macro_call_in_stmt(s);
+                }
+                for s in body {
+                    assert_no_macro_call_in_stmt(s);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn assert_no_macro_call_in_expr(expr: &Expr) {
+        match expr {
+            Expr::MacroCall { .. } => {
+                panic!("Found unresolved MacroCall in expression: {:?}", expr);
+            }
+            _ => {}
+        }
     }
 }

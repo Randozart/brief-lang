@@ -619,6 +619,94 @@ pub enum Intrinsic {
     /// to_str#(Int|Float|Char|Bool) -> String — generic value to string
     ToStr,
 
+    // ===== D12: Random / Entropy (2026-06-19) =====
+    /// errno#() -> Int — last error code (thread-local)
+    Errno,
+    /// getrandom#(buf: Int, len: Int, flags: Int) -> Int — fill buffer with random bytes
+    GetRandom,
+
+    // ===== D13: System Info (2026-06-19) =====
+    /// uname#() -> String — OS/kernel info (sysname:release:version:machine)
+    Uname,
+    /// pagesize#() -> Int — system memory page size
+    PageSize,
+    /// cpu_count#() -> Int — number of online CPUs
+    CpuCount,
+    /// hostname#() -> String — system hostname
+    Hostname,
+    /// strerror#(errnum: Int) -> String — human-readable error string
+    StrError,
+    /// strsignal#(signum: Int) -> String — human-readable signal name
+    StrSignal,
+    /// realpath#(path: String) -> String — canonical absolute path
+    RealPath,
+
+    // ===== D14: Debugging (2026-06-19) =====
+    /// abort#() -> Void — abort with core dump
+    Abort,
+    /// backtrace#() -> List<Int> — stack trace addresses
+    Backtrace,
+
+    // ===== D15: Scheduling (2026-06-19) =====
+    /// sched_yield#() -> Int — yield CPU (0 on success)
+    SchedYield,
+    /// getpriority#(which: Int, who: Int) -> Int — get process priority
+    GetPriority,
+    /// setpriority#(which: Int, who: Int, prio: Int) -> Int — set process priority
+    SetPriority,
+
+    // ===== D16: User / Group (2026-06-19) =====
+    /// getuid#() -> Int — real user ID
+    GetUid,
+    /// geteuid#() -> Int — effective user ID
+    GetEUid,
+    /// getgid#() -> Int — real group ID
+    GetGid,
+    /// getegid#() -> Int — effective group ID
+    GetEGid,
+    /// getpwuid#(uid: Int) -> String — user info (name:dir:shell)
+    GetPwUid,
+    /// getgrgid#(gid: Int) -> String — group name
+    GetGrGid,
+
+    // ===== D17: Threading (2026-06-19) =====
+    /// thread_create#(fn_ptr: Int, arg: Int) -> Int — spawn thread
+    ThreadCreate,
+    /// thread_join#(thread: Int) -> Int — wait for thread
+    ThreadJoin,
+    /// thread_exit#(code: Int) -> Void — exit current thread
+    ThreadExit,
+    /// mutex_lock#(mptr: Int) -> Int — lock mutex
+    MutexLock,
+    /// mutex_unlock#(mptr: Int) -> Int — unlock mutex
+    MutexUnlock,
+    /// condvar_wait#(cptr: Int, mptr: Int) -> Int — wait on condition variable
+    CondvarWait,
+    /// condvar_signal#(cptr: Int) -> Int — signal one waiter
+    CondvarSignal,
+    /// condvar_broadcast#(cptr: Int) -> Int — signal all waiters
+    CondvarBroadcast,
+
+    // ===== D18: Resource Limits (2026-06-19) =====
+    /// getrlimit#(resource: Int) -> Int — packed cur:max resource limit
+    GetRlimit,
+    /// setrlimit#(resource: Int, packed: Int) -> Int — set resource limit
+    SetRlimit,
+
+    // ===== Extra intrinsics (2026-06-19) =====
+    /// mkstemp#(template: String) -> Int — create temp file (returns fd)
+    MkStemp,
+    /// mkdtemp#(template: String) -> String — create temp directory
+    MkDtemp,
+    /// dlopen#(filename: String) -> Int — open shared library (returns handle)
+    DlOpen,
+    /// dlsym#(handle: Int, symbol: String) -> Int — look up symbol
+    DlSym,
+    /// dlclose#(handle: Int) -> Int — close shared library
+    DlClose,
+    /// ttyname#(fd: Int) -> String — terminal device name
+    TtyName,
+
     // ===== Macro/Template intrinsics (compile-time only) =====
     /// compile#(code: String) -> Block — parse string as Brief code at compile time
     Compile,
@@ -648,6 +736,8 @@ impl Intrinsic {
             // GPU compute queries — pure (read-only state queries)
             | Intrinsic::GetGlobalId | Intrinsic::GetLocalId
             | Intrinsic::GetGroupId | Intrinsic::GetNumGroups
+            // OS queries that are constant for process lifetime
+            | Intrinsic::PageSize | Intrinsic::CpuCount
             => false,
             // Everything else is observable — cannot fold
             _ => true,
@@ -793,6 +883,50 @@ impl Intrinsic {
             "putchar" => Some(Intrinsic::PutChar),
             "print_float" => Some(Intrinsic::PrintFloat),
             "getenv_int" => Some(Intrinsic::GetEnvInt),
+            // D12: Random / Entropy
+            "errno" => Some(Intrinsic::Errno),
+            "getrandom" => Some(Intrinsic::GetRandom),
+            // D13: System Info
+            "uname" => Some(Intrinsic::Uname),
+            "pagesize" => Some(Intrinsic::PageSize),
+            "cpu_count" => Some(Intrinsic::CpuCount),
+            "hostname" => Some(Intrinsic::Hostname),
+            "strerror" => Some(Intrinsic::StrError),
+            "strsignal" => Some(Intrinsic::StrSignal),
+            "realpath" => Some(Intrinsic::RealPath),
+            // D14: Debugging
+            "abort" => Some(Intrinsic::Abort),
+            "backtrace" => Some(Intrinsic::Backtrace),
+            // D15: Scheduling
+            "sched_yield" => Some(Intrinsic::SchedYield),
+            "getpriority" => Some(Intrinsic::GetPriority),
+            "setpriority" => Some(Intrinsic::SetPriority),
+            // D16: User / Group
+            "getuid" => Some(Intrinsic::GetUid),
+            "geteuid" => Some(Intrinsic::GetEUid),
+            "getgid" => Some(Intrinsic::GetGid),
+            "getegid" => Some(Intrinsic::GetEGid),
+            "getpwuid" => Some(Intrinsic::GetPwUid),
+            "getgrgid" => Some(Intrinsic::GetGrGid),
+            // D17: Threading
+            "thread_create" => Some(Intrinsic::ThreadCreate),
+            "thread_join" => Some(Intrinsic::ThreadJoin),
+            "thread_exit" => Some(Intrinsic::ThreadExit),
+            "mutex_lock" => Some(Intrinsic::MutexLock),
+            "mutex_unlock" => Some(Intrinsic::MutexUnlock),
+            "condvar_wait" => Some(Intrinsic::CondvarWait),
+            "condvar_signal" => Some(Intrinsic::CondvarSignal),
+            "condvar_broadcast" => Some(Intrinsic::CondvarBroadcast),
+            // D18: Resource Limits
+            "getrlimit" => Some(Intrinsic::GetRlimit),
+            "setrlimit" => Some(Intrinsic::SetRlimit),
+            // Extra intrinsics
+            "mkstemp" => Some(Intrinsic::MkStemp),
+            "mkdtemp" => Some(Intrinsic::MkDtemp),
+            "dlopen" => Some(Intrinsic::DlOpen),
+            "dlsym" => Some(Intrinsic::DlSym),
+            "dlclose" => Some(Intrinsic::DlClose),
+            "ttyname" => Some(Intrinsic::TtyName),
             // Macro/template intrinsics (compile-time only)
             "compile" => Some(Intrinsic::Compile),
             "error" => Some(Intrinsic::MacroError),
@@ -940,6 +1074,51 @@ impl Intrinsic {
             Intrinsic::PutChar => "putchar",
             Intrinsic::PrintFloat => "print_float",
             Intrinsic::GetEnvInt => "getenv_int",
+            // D12: Random / Entropy
+            Intrinsic::Errno => "errno",
+            Intrinsic::GetRandom => "getrandom",
+            // D13: System Info
+            Intrinsic::Uname => "uname",
+            Intrinsic::PageSize => "pagesize",
+            Intrinsic::CpuCount => "cpu_count",
+            Intrinsic::Hostname => "hostname",
+            Intrinsic::StrError => "strerror",
+            Intrinsic::StrSignal => "strsignal",
+            Intrinsic::RealPath => "realpath",
+            // D14: Debugging
+            Intrinsic::Abort => "abort",
+            Intrinsic::Backtrace => "backtrace",
+            // D15: Scheduling
+            Intrinsic::SchedYield => "sched_yield",
+            Intrinsic::GetPriority => "getpriority",
+            Intrinsic::SetPriority => "setpriority",
+            // D16: User / Group
+            Intrinsic::GetUid => "getuid",
+            Intrinsic::GetEUid => "geteuid",
+            Intrinsic::GetGid => "getgid",
+            Intrinsic::GetEGid => "getegid",
+            Intrinsic::GetPwUid => "getpwuid",
+            Intrinsic::GetGrGid => "getgrgid",
+            // D17: Threading
+            Intrinsic::ThreadCreate => "thread_create",
+            Intrinsic::ThreadJoin => "thread_join",
+            Intrinsic::ThreadExit => "thread_exit",
+            Intrinsic::MutexLock => "mutex_lock",
+            Intrinsic::MutexUnlock => "mutex_unlock",
+            Intrinsic::CondvarWait => "condvar_wait",
+            Intrinsic::CondvarSignal => "condvar_signal",
+            Intrinsic::CondvarBroadcast => "condvar_broadcast",
+            // D18: Resource Limits
+            Intrinsic::GetRlimit => "getrlimit",
+            Intrinsic::SetRlimit => "setrlimit",
+            // Extra intrinsics
+            Intrinsic::MkStemp => "mkstemp",
+            Intrinsic::MkDtemp => "mkdtemp",
+            Intrinsic::DlOpen => "dlopen",
+            Intrinsic::DlSym => "dlsym",
+            Intrinsic::DlClose => "dlclose",
+            Intrinsic::TtyName => "ttyname",
+            // Macro/template intrinsics (compile-time only)
             Intrinsic::Compile => "compile",
             Intrinsic::MacroError => "error",
             Intrinsic::MacroWarn => "warn",
@@ -2909,6 +3088,222 @@ mod tests {
     fn test_intrinsic_from_name_nanosleep() {
         assert_eq!(Intrinsic::from_name("nanosleep"), Some(Intrinsic::NanoSleep));
         assert_eq!(Intrinsic::NanoSleep.name(), "nanosleep");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d12_errno() {
+        assert_eq!(Intrinsic::from_name("errno"), Some(Intrinsic::Errno));
+        assert_eq!(Intrinsic::Errno.name(), "errno");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d12_getrandom() {
+        assert_eq!(Intrinsic::from_name("getrandom"), Some(Intrinsic::GetRandom));
+        assert_eq!(Intrinsic::GetRandom.name(), "getrandom");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d13_uname() {
+        assert_eq!(Intrinsic::from_name("uname"), Some(Intrinsic::Uname));
+        assert_eq!(Intrinsic::Uname.name(), "uname");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d13_pagesize() {
+        assert_eq!(Intrinsic::from_name("pagesize"), Some(Intrinsic::PageSize));
+        assert_eq!(Intrinsic::PageSize.name(), "pagesize");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d13_cpu_count() {
+        assert_eq!(Intrinsic::from_name("cpu_count"), Some(Intrinsic::CpuCount));
+        assert_eq!(Intrinsic::CpuCount.name(), "cpu_count");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d13_hostname() {
+        assert_eq!(Intrinsic::from_name("hostname"), Some(Intrinsic::Hostname));
+        assert_eq!(Intrinsic::Hostname.name(), "hostname");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d13_strerror() {
+        assert_eq!(Intrinsic::from_name("strerror"), Some(Intrinsic::StrError));
+        assert_eq!(Intrinsic::StrError.name(), "strerror");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d13_strsignal() {
+        assert_eq!(Intrinsic::from_name("strsignal"), Some(Intrinsic::StrSignal));
+        assert_eq!(Intrinsic::StrSignal.name(), "strsignal");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d13_realpath() {
+        assert_eq!(Intrinsic::from_name("realpath"), Some(Intrinsic::RealPath));
+        assert_eq!(Intrinsic::RealPath.name(), "realpath");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d14_abort() {
+        assert_eq!(Intrinsic::from_name("abort"), Some(Intrinsic::Abort));
+        assert_eq!(Intrinsic::Abort.name(), "abort");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d14_backtrace() {
+        assert_eq!(Intrinsic::from_name("backtrace"), Some(Intrinsic::Backtrace));
+        assert_eq!(Intrinsic::Backtrace.name(), "backtrace");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d15_sched_yield() {
+        assert_eq!(Intrinsic::from_name("sched_yield"), Some(Intrinsic::SchedYield));
+        assert_eq!(Intrinsic::SchedYield.name(), "sched_yield");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d15_getpriority() {
+        assert_eq!(Intrinsic::from_name("getpriority"), Some(Intrinsic::GetPriority));
+        assert_eq!(Intrinsic::GetPriority.name(), "getpriority");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d15_setpriority() {
+        assert_eq!(Intrinsic::from_name("setpriority"), Some(Intrinsic::SetPriority));
+        assert_eq!(Intrinsic::SetPriority.name(), "setpriority");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d16_getuid() {
+        assert_eq!(Intrinsic::from_name("getuid"), Some(Intrinsic::GetUid));
+        assert_eq!(Intrinsic::GetUid.name(), "getuid");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d16_geteuid() {
+        assert_eq!(Intrinsic::from_name("geteuid"), Some(Intrinsic::GetEUid));
+        assert_eq!(Intrinsic::GetEUid.name(), "geteuid");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d16_getgid() {
+        assert_eq!(Intrinsic::from_name("getgid"), Some(Intrinsic::GetGid));
+        assert_eq!(Intrinsic::GetGid.name(), "getgid");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d16_getegid() {
+        assert_eq!(Intrinsic::from_name("getegid"), Some(Intrinsic::GetEGid));
+        assert_eq!(Intrinsic::GetEGid.name(), "getegid");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d16_getpwuid() {
+        assert_eq!(Intrinsic::from_name("getpwuid"), Some(Intrinsic::GetPwUid));
+        assert_eq!(Intrinsic::GetPwUid.name(), "getpwuid");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d16_getgrgid() {
+        assert_eq!(Intrinsic::from_name("getgrgid"), Some(Intrinsic::GetGrGid));
+        assert_eq!(Intrinsic::GetGrGid.name(), "getgrgid");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d17_thread_create() {
+        assert_eq!(Intrinsic::from_name("thread_create"), Some(Intrinsic::ThreadCreate));
+        assert_eq!(Intrinsic::ThreadCreate.name(), "thread_create");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d17_thread_join() {
+        assert_eq!(Intrinsic::from_name("thread_join"), Some(Intrinsic::ThreadJoin));
+        assert_eq!(Intrinsic::ThreadJoin.name(), "thread_join");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d17_thread_exit() {
+        assert_eq!(Intrinsic::from_name("thread_exit"), Some(Intrinsic::ThreadExit));
+        assert_eq!(Intrinsic::ThreadExit.name(), "thread_exit");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d17_mutex_lock() {
+        assert_eq!(Intrinsic::from_name("mutex_lock"), Some(Intrinsic::MutexLock));
+        assert_eq!(Intrinsic::MutexLock.name(), "mutex_lock");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d17_mutex_unlock() {
+        assert_eq!(Intrinsic::from_name("mutex_unlock"), Some(Intrinsic::MutexUnlock));
+        assert_eq!(Intrinsic::MutexUnlock.name(), "mutex_unlock");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d17_condvar_wait() {
+        assert_eq!(Intrinsic::from_name("condvar_wait"), Some(Intrinsic::CondvarWait));
+        assert_eq!(Intrinsic::CondvarWait.name(), "condvar_wait");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d17_condvar_signal() {
+        assert_eq!(Intrinsic::from_name("condvar_signal"), Some(Intrinsic::CondvarSignal));
+        assert_eq!(Intrinsic::CondvarSignal.name(), "condvar_signal");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d17_condvar_broadcast() {
+        assert_eq!(Intrinsic::from_name("condvar_broadcast"), Some(Intrinsic::CondvarBroadcast));
+        assert_eq!(Intrinsic::CondvarBroadcast.name(), "condvar_broadcast");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d18_getrlimit() {
+        assert_eq!(Intrinsic::from_name("getrlimit"), Some(Intrinsic::GetRlimit));
+        assert_eq!(Intrinsic::GetRlimit.name(), "getrlimit");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_d18_setrlimit() {
+        assert_eq!(Intrinsic::from_name("setrlimit"), Some(Intrinsic::SetRlimit));
+        assert_eq!(Intrinsic::SetRlimit.name(), "setrlimit");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_extra_mkstemp() {
+        assert_eq!(Intrinsic::from_name("mkstemp"), Some(Intrinsic::MkStemp));
+        assert_eq!(Intrinsic::MkStemp.name(), "mkstemp");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_extra_mkdtemp() {
+        assert_eq!(Intrinsic::from_name("mkdtemp"), Some(Intrinsic::MkDtemp));
+        assert_eq!(Intrinsic::MkDtemp.name(), "mkdtemp");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_extra_dlopen() {
+        assert_eq!(Intrinsic::from_name("dlopen"), Some(Intrinsic::DlOpen));
+        assert_eq!(Intrinsic::DlOpen.name(), "dlopen");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_extra_dlsym() {
+        assert_eq!(Intrinsic::from_name("dlsym"), Some(Intrinsic::DlSym));
+        assert_eq!(Intrinsic::DlSym.name(), "dlsym");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_extra_dlclose() {
+        assert_eq!(Intrinsic::from_name("dlclose"), Some(Intrinsic::DlClose));
+        assert_eq!(Intrinsic::DlClose.name(), "dlclose");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_extra_ttyname() {
+        assert_eq!(Intrinsic::from_name("ttyname"), Some(Intrinsic::TtyName));
+        assert_eq!(Intrinsic::TtyName.name(), "ttyname");
     }
 
     #[test]

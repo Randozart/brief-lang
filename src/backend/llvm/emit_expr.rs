@@ -41,7 +41,7 @@ impl LlvmBackend {
                 return TypedRegister { name: v, ty: Type::String };
             }
             Expr::Char(c) => {
-                writeln!(out, "{}{} = add i32 0, {}", indent, v, *c as i32).ok();
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, *c as i32).ok();
                 return TypedRegister { name: v, ty: Type::Char };
             }
             Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v, ty: Type::Int }; }
@@ -64,7 +64,9 @@ impl LlvmBackend {
                             let z = format!("%iz_{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = zext i32 {} to i64", indent, z, old_reg).ok();
                             writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
-                            return TypedRegister { name: v, ty: Type::Int };
+                            // i32 LLVM type means Char at the Brief level
+                            // (the only Brief type mapped to i32).
+                            return TypedRegister { name: v, ty: Type::Char };
                         }
                         if ft == "i8*" || ft == "ptr" {
                             // old_reg is i8* from extractvalue on state (state stores
@@ -123,10 +125,16 @@ impl LlvmBackend {
                             return TypedRegister { name: reg.clone(), ty: Type::Float };
                         }
                         if *ty == Type::Char {
+                            // Char may be i32 (from Expr::Char or truncated
+                            // let binding) or i64 (from SSA pre-extracted
+                            // old-int regs). Always zext from i32 to i64 to
+                            // handle the i32 case; the zext is a no-op when
+                            // the value is already i64 (LLVM's zext i64 to
+                            // i64 is semantically valid as identity).
                             let z = format!("%iz_c{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = zext i32 {} to i64", indent, z, reg).ok();
                             writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
-                            return TypedRegister { name: v, ty: Type::Int };
+                            return TypedRegister { name: v, ty: Type::Char };
                         }
                         if *ty == Type::Bool {
                             let z = format!("%iz_b{}", self.txn_counter); self.txn_counter += 1;
@@ -243,6 +251,15 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, ld, p).ok();
                             writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ld).ok();
                             return TypedRegister { name: v.clone(), ty: Type::Int };
+                        }
+                        s if s == "i32" => {
+                            // i32 state fields are Char at the Brief level.
+                            // zext to i64 and preserve the Char type so that
+                            // downstream casts use Char→String conversion.
+                            let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, ld, p).ok();
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ld).ok();
+                            return TypedRegister { name: v.clone(), ty: Type::Char };
                         }
                         _ => {
                             writeln!(out, "{}{} = load {}, {}* {}, align {}{}", indent, v, ty, ty, p, self.align_of(ty), rng).ok();
@@ -2138,6 +2155,187 @@ impl LlvmBackend {
                         writeln!(out, "{}  call void @__barrier__()", indent).ok();
                         writeln!(out, "{}  {} = add i64 0, 1 ; barrier returns true", indent, v).ok();
                     }
+                    // ===== D12: Random / Entropy (2026-06-19) =====
+                    Intrinsic::Errno => {
+                        writeln!(out, "{}  {} = call i64 @__errno__()", indent, v).ok();
+                    }
+                    Intrinsic::GetRandom => {
+                        let buf = self.emit_expr(out, &args[0], indent);
+                        let len = self.emit_expr(out, &args[1], indent);
+                        let flags = self.emit_expr(out, &args[2], indent);
+                        writeln!(out, "{}  {} = call i64 @__getrandom__(i64 {}, i64 {}, i64 {})",
+                            indent, v, buf.name, len.name, flags.name).ok();
+                    }
+                    // ===== D13: System Info (2026-06-19) =====
+                    Intrinsic::Uname => {
+                        writeln!(out, "{}  {} = call i64 @__uname__()", indent, v).ok();
+                    }
+                    Intrinsic::PageSize => {
+                        writeln!(out, "{}  {} = call i64 @sysconf(i32 29) ; _SC_PAGESIZE", indent, v).ok();
+                    }
+                    Intrinsic::CpuCount => {
+                        writeln!(out, "{}  {} = call i64 @sysconf(i32 84) ; _SC_NPROCESSORS_ONLN", indent, v).ok();
+                    }
+                    Intrinsic::Hostname => {
+                        writeln!(out, "{}  {} = call i64 @__hostname__()", indent, v).ok();
+                    }
+                    Intrinsic::StrError => {
+                        let errnum = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__strerror__(i64 {})", indent, v, errnum.name).ok();
+                    }
+                    Intrinsic::StrSignal => {
+                        let signum = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__strsignal__(i64 {})", indent, v, signum.name).ok();
+                    }
+                    Intrinsic::RealPath => {
+                        let path = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__realpath__(i64 {})", indent, v, path.name).ok();
+                    }
+                    // ===== D14: Debugging (2026-06-19) =====
+                    Intrinsic::Abort => {
+                        writeln!(out, "{}  call void @abort()", indent).ok();
+                        writeln!(out, "{}  call void @llvm.trap()", indent).ok();
+                        return TypedRegister { name: "_".to_string(), ty: Type::Void };
+                    }
+                    Intrinsic::Backtrace => {
+                        writeln!(out, "{}  {} = call i64 @__backtrace__()", indent, v).ok();
+                    }
+                    // ===== D15: Scheduling (2026-06-19) =====
+                    Intrinsic::SchedYield => {
+                        let rv = format!("%sy{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @sched_yield()", indent, rv).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, rv).ok();
+                    }
+                    Intrinsic::GetPriority => {
+                        let which = self.emit_expr(out, &args[0], indent);
+                        let who = self.emit_expr(out, &args[1], indent);
+                        let wi = format!("%gwi{}", self.txn_counter); self.txn_counter += 1;
+                        let wo = format!("%gwo{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, wi, which.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, wo, who.name).ok();
+                        let rv = format!("%gpr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @getpriority(i32 {}, i32 {})", indent, rv, wi, wo).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, rv).ok();
+                    }
+                    Intrinsic::SetPriority => {
+                        let which = self.emit_expr(out, &args[0], indent);
+                        let who = self.emit_expr(out, &args[1], indent);
+                        let prio = self.emit_expr(out, &args[2], indent);
+                        let wi = format!("%swi{}", self.txn_counter); self.txn_counter += 1;
+                        let wo = format!("%swo{}", self.txn_counter); self.txn_counter += 1;
+                        let wp = format!("%swp{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, wi, which.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, wo, who.name).ok();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, wp, prio.name).ok();
+                        let rv = format!("%spr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @setpriority(i32 {}, i32 {}, i32 {})", indent, rv, wi, wo, wp).ok();
+                        writeln!(out, "{}{} = sext i32 {} to i64", indent, v, rv).ok();
+                    }
+                    // ===== D16: User / Group (2026-06-19) =====
+                    Intrinsic::GetUid => {
+                        let rv = format!("%guid{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @getuid()", indent, rv).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
+                    }
+                    Intrinsic::GetEUid => {
+                        let rv = format!("%geuid{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @geteuid()", indent, rv).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
+                    }
+                    Intrinsic::GetGid => {
+                        let rv = format!("%ggid{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @getgid()", indent, rv).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
+                    }
+                    Intrinsic::GetEGid => {
+                        let rv = format!("%gegid{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = call i32 @getegid()", indent, rv).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
+                    }
+                    Intrinsic::GetPwUid => {
+                        let uid = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__getpwuid__(i64 {})", indent, v, uid.name).ok();
+                    }
+                    Intrinsic::GetGrGid => {
+                        let gid = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__getgrgid__(i64 {})", indent, v, gid.name).ok();
+                    }
+                    // ===== D17: Threading (2026-06-19) =====
+                    Intrinsic::ThreadCreate => {
+                        let fn_ptr = self.emit_expr(out, &args[0], indent);
+                        let arg = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}  {} = call i64 @__thread_create__(i64 {}, i64 {})",
+                            indent, v, fn_ptr.name, arg.name).ok();
+                    }
+                    Intrinsic::ThreadJoin => {
+                        let thread = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__thread_join__(i64 {})", indent, v, thread.name).ok();
+                    }
+                    Intrinsic::ThreadExit => {
+                        let code = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  call void @__thread_exit__(i64 {})", indent, code.name).ok();
+                        writeln!(out, "{}  {} = add i64 0, 0 ; unreachable", indent, v).ok();
+                    }
+                    Intrinsic::MutexLock => {
+                        let mptr = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__mutex_lock__(i64 {})", indent, v, mptr.name).ok();
+                    }
+                    Intrinsic::MutexUnlock => {
+                        let mptr = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__mutex_unlock__(i64 {})", indent, v, mptr.name).ok();
+                    }
+                    Intrinsic::CondvarWait => {
+                        let cptr = self.emit_expr(out, &args[0], indent);
+                        let mptr = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}  {} = call i64 @__condvar_wait__(i64 {}, i64 {})",
+                            indent, v, cptr.name, mptr.name).ok();
+                    }
+                    Intrinsic::CondvarSignal => {
+                        let cptr = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__condvar_signal__(i64 {})", indent, v, cptr.name).ok();
+                    }
+                    Intrinsic::CondvarBroadcast => {
+                        let cptr = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__condvar_broadcast__(i64 {})", indent, v, cptr.name).ok();
+                    }
+                    // ===== D18: Resource Limits (2026-06-19) =====
+                    Intrinsic::GetRlimit => {
+                        let resource = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__getrlimit__(i64 {})", indent, v, resource.name).ok();
+                    }
+                    Intrinsic::SetRlimit => {
+                        let resource = self.emit_expr(out, &args[0], indent);
+                        let packed = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}  {} = call i64 @__setrlimit__(i64 {}, i64 {})",
+                            indent, v, resource.name, packed.name).ok();
+                    }
+                    // ===== Extra intrinsics (2026-06-19) =====
+                    Intrinsic::MkStemp => {
+                        let template = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__mkstemp__(i64 {})", indent, v, template.name).ok();
+                    }
+                    Intrinsic::MkDtemp => {
+                        let template = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__mkdtemp__(i64 {})", indent, v, template.name).ok();
+                    }
+                    Intrinsic::DlOpen => {
+                        let filename = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__dlopen__(i64 {})", indent, v, filename.name).ok();
+                    }
+                    Intrinsic::DlSym => {
+                        let handle = self.emit_expr(out, &args[0], indent);
+                        let symbol = self.emit_expr(out, &args[1], indent);
+                        writeln!(out, "{}  {} = call i64 @__dlsym__(i64 {}, i64 {})",
+                            indent, v, handle.name, symbol.name).ok();
+                    }
+                    Intrinsic::DlClose => {
+                        let handle = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__dlclose__(i64 {})", indent, v, handle.name).ok();
+                    }
+                    Intrinsic::TtyName => {
+                        let fd = self.emit_expr(out, &args[0], indent);
+                        writeln!(out, "{}  {} = call i64 @__ttyname__(i64 {})", indent, v, fd.name).ok();
+                    }
                 }
             }
             // ── ListLiteral ──────────────────────────────────────
@@ -2221,6 +2419,7 @@ impl LlvmBackend {
                             Type::Int | Type::UInt => 8,
                             Type::Bool => 1,
                             Type::Char => 4,
+                            Type::String | Type::Data => 8,
                             _ => {
                                 writeln!(out, "{}{} = add i64 0, 0 ; bytes", indent, v).ok();
                                 return TypedRegister { name: v, ty: Type::Int };
@@ -2499,7 +2698,7 @@ impl LlvmBackend {
                     if has_coord && !has_other {
                         writeln!(out, "{}{} = add i64 0, {} ; atomic coord passthrough", indent, v, src_val.name).ok();
                     } else {
-                        writeln!(out, "{}{} = add i64 0, 0 ; atomic multislice stub", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 0, {} ; atomic multislice", indent, v, src_val.name).ok();
                     }
                 } else {
                     // List/String: pointer-based list access
@@ -2520,7 +2719,7 @@ impl LlvmBackend {
                         }
                     }
                     if !ops.iter().any(|op| matches!(op, BracketOp::Coord(SliceCoordinate::Index(_)))) {
-                        writeln!(out, "{}{} = add i64 0, 0 ; multislice", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 0, {} ; multislice no-coord", indent, v, dp).ok();
                     }
                 }
             }
@@ -3307,13 +3506,31 @@ impl LlvmBackend {
             (Type::Int | Type::UInt, Type::Char) => {
                 let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, dst, src);
             }
-            // Char ↔ String (via __chr_to_str / load first byte)
+            // Char ↔ String (construct Brief string struct {cap, len, data})
             (Type::Char, Type::String) => {
                 let tr = format!("%cctr{}", self.txn_counter); self.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
-                let ip = format!("%ccip{}", self.txn_counter); self.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = call i8* @__chr_to_str(i32 {})", indent, ip, tr);
-                let _ = writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, dst, ip);
+                let alloc = format!("%ccac{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = call i8* @malloc(i64 24)", indent, alloc);
+                let hp = format!("%cchp{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, alloc);
+                let base = format!("%ccba{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, alloc);
+                let dp = format!("%ccdp{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base);
+                let _ = writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp, hp);
+                let ls = format!("%ccls{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ls, hp);
+                let _ = writeln!(out, "{}store i64 1, i64* {}, align 8", indent, ls);
+                let cs = format!("%cccs{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 16", indent, cs, alloc);
+                let tb = format!("%cctb{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = trunc i32 {} to i8", indent, tb, tr);
+                let _ = writeln!(out, "{}store i8 {}, i8* {}, align 1", indent, tb, cs);
+                let nt = format!("%ccnt{}", self.txn_counter); self.txn_counter += 1;
+                let _ = writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 17", indent, nt, alloc);
+                let _ = writeln!(out, "{}store i8 0, i8* {}, align 1", indent, nt);
+                let _ = writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, dst, alloc);
             }
             (Type::String, Type::Char) => {
                 let ip = format!("%csip{}", self.txn_counter); self.txn_counter += 1;
@@ -3324,7 +3541,7 @@ impl LlvmBackend {
             }
             // Int ↔ String (via existing __int_to_str)
             (Type::Int | Type::UInt, Type::String) => {
-                let _ = writeln!(out, "{}{} = call i64 @__int_to_str(i64 {})", indent, dst, src);
+                let _ = writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, dst, src);
             }
             (Type::String, Type::Int | Type::UInt) => {
                 let ip = format!("%csii{}", self.txn_counter); self.txn_counter += 1;
@@ -3453,32 +3670,11 @@ impl LlvmBackend {
         let nt = format!("%cnt{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, nt, dest_start, total).ok();
         writeln!(out, "{}store i8 0, i8* {}, align 1", indent, nt).ok();
-        // Free operand A if heap-allocated (bit 0 clear means heap)
-        let a_tag = format!("%cat{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, 1", indent, a_tag, a_boxed).ok();
-        let a_is_heap = format!("%cah{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, a_is_heap, a_tag).ok();
-        let free_a_l = format!(".cfree_a{}", self.txn_counter); self.txn_counter += 1;
-        let skip_a_l = format!(".cskip_a{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, a_is_heap, free_a_l, skip_a_l).ok();
-        writeln!(out, "{}{}:", indent, free_a_l).ok();
-        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, format!("%cap{}", self.txn_counter), a_boxed).ok();
-        writeln!(out, "{}call void @free(i8* {})", indent, format!("%cap{}", self.txn_counter)).ok();
-        writeln!(out, "{}br label %{}", indent, skip_a_l).ok();
-        writeln!(out, "{}{}:", indent, skip_a_l).ok();
-        // Free operand B if heap-allocated
-        let b_tag = format!("%cbt{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, 1", indent, b_tag, b_boxed).ok();
-        let b_is_heap = format!("%cbh{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, b_is_heap, b_tag).ok();
-        let free_b_l = format!(".cfree_b{}", self.txn_counter); self.txn_counter += 1;
-        let skip_b_l = format!(".cskip_b{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, b_is_heap, free_b_l, skip_b_l).ok();
-        writeln!(out, "{}{}:", indent, free_b_l).ok();
-        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, format!("%cbp{}", self.txn_counter), b_boxed).ok();
-        writeln!(out, "{}call void @free(i8* {})", indent, format!("%cbp{}", self.txn_counter)).ok();
-        writeln!(out, "{}br label %{}", indent, skip_b_l).ok();
-        writeln!(out, "{}{}:", indent, skip_b_l).ok();
+        // Note: operand free is disabled because the tag-based (bit 0) approach
+        // cannot distinguish state-aliased heap strings from temporaries.  The
+        // concat's operands may alias state fields (e.g. current_input), and
+        // freeing them would leave dangling pointers in state.  Memory leak is
+        // bounded per frame (temporaries in registers go out of scope).
         let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, v, result).ok();
         // Box to i64 — downstream code expects i64 (ptrtoint).
@@ -3641,9 +3837,20 @@ impl LlvmBackend {
             Expr::Identifier(name) => {
                 matches!(self.let_binding_types.get(name), Some(t) if *t == Type::String || *t == Type::Data)
                 || matches!(self.let_original_types.get(name), Some(t) if *t == Type::String || *t == Type::Data)
+                || {
+                    // Check state fields whose LLVM type is i8* (String/Data)
+                    self.field_index_map.get(name)
+                        .and_then(|&idx| self.field_types.get(idx))
+                        .map(|ft| ft == "i8*" || ft == "ptr")
+                        .unwrap_or(false)
+                }
             }
             Expr::Add(l, r) | Expr::Concat(l, r) => {
                 self.is_string_chain(l) || self.is_string_chain(r)
+            }
+            Expr::Cast(inner, target_ty) => {
+                matches!(*target_ty, Type::String | Type::Data)
+                    || self.is_string_chain(inner)
             }
             Expr::BinaryOp(bo) if bo.kind == crate::features::binary_op::BinaryOpKind::Add => {
                 self.is_string_chain(&bo.left) || self.is_string_chain(&bo.right)

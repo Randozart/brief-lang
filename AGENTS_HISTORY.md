@@ -768,3 +768,31 @@ This would eliminate the C dependency entirely for Char→String.
 ### Pending Plan
 
 See `.opencode/plans/2026-06-14-eliminate-magic.md` for the fix plan.
+
+---
+
+# 2026-06-19: Macro Gaps 2+4 + LLVM Stub Hardening
+
+## Completed
+
+### Macro System Gaps
+- **Gap 2 (nested macro calls)**: `expand_macro_calls_in_items` now recurses into
+  `Definition`/`Transaction` bodies via `expand_macro_in_stmts`. Macro calls in
+  guarded blocks, let bindings, and term values are all expanded.
+- **Gap 4 (integration tests)**: Three `.bv` source-parsing tests added
+  (`test_integration_macro_expansion_from_source`, `_in_defn_body`, `_in_txn_body`)
+  testing end-to-end parse → collect → expand → verify.
+
+### LLVM Backend Hardening (3 stubs fixed)
+- `Projection::Bytes` on `String`/`Data`: returns `8` (was `add i64 0, 0`)
+- MultiSlice atomic stub: passthrough returns source value (was `add i64 0, 0`)
+- MultiSlice no-coord: returns data pointer from header slot 0 (was `add i64 0, 0`)
+
+### Documentation
+- All three plan docs updated with completion status and resolution notes:
+  `2026-06-18-llvm-backend-hardening.md`, `2026-06-18-macro-system-gaps.md`,
+  `2026-06-18-llvm-backend-known-issues.md`
+- BUGS.md already had 5 entries for these fixes from prior sessions
+
+### Tests
+- Full suite: 1072 passed, 0 failed

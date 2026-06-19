@@ -3646,6 +3646,646 @@ impl Interpreter {
                     Intrinsic::SubGroupBarrier => {
                         Ok(Value::Bool(true))
                     }
+                    // ===== D12: Random / Entropy (2026-06-19) =====
+                    Intrinsic::Errno => {
+                        #[cfg(unix)]
+                        {
+                            let err = unsafe { *libc::__errno_location() };
+                            Ok(Value::Int(err as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::GetRandom => {
+                        let buf = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getrandom buf requires Int, got {:?}", v))),
+                        };
+                        let len = match values.remove(0) {
+                            Value::Int(n) => n as usize,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getrandom len requires Int, got {:?}", v))),
+                        };
+                        let _flags = match values.remove(0) {
+                            Value::Int(n) => n as u32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getrandom flags requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::getrandom(buf as *mut libc::c_void, len, _flags) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = buf; let _ = len;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    // ===== D13: System Info (2026-06-19) =====
+                    Intrinsic::Uname => {
+                        #[cfg(unix)]
+                        {
+                            let mut uts: libc::utsname = unsafe { std::mem::zeroed() };
+                            let ret = unsafe { libc::uname(&mut uts) };
+                            if ret == 0 {
+                                let sysname = unsafe { std::ffi::CStr::from_ptr(uts.sysname.as_ptr()).to_string_lossy().to_string() };
+                                let release = unsafe { std::ffi::CStr::from_ptr(uts.release.as_ptr()).to_string_lossy().to_string() };
+                                let version = unsafe { std::ffi::CStr::from_ptr(uts.version.as_ptr()).to_string_lossy().to_string() };
+                                let machine = unsafe { std::ffi::CStr::from_ptr(uts.machine.as_ptr()).to_string_lossy().to_string() };
+                                Ok(Value::String(format!("{}:{}:{}:{}", sysname, release, version, machine)))
+                            } else {
+                                Ok(Value::String(String::new()))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::String(String::new()))
+                        }
+                    }
+                    Intrinsic::PageSize => {
+                        #[cfg(unix)]
+                        {
+                            let ps = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+                            Ok(Value::Int(ps as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(4096))
+                        }
+                    }
+                    Intrinsic::CpuCount => {
+                        #[cfg(unix)]
+                        {
+                            let ncpu = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+                            Ok(Value::Int(ncpu as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(1))
+                        }
+                    }
+                    Intrinsic::Hostname => {
+                        #[cfg(unix)]
+                        {
+                            let mut buf = vec![0u8; 256];
+                            let ret = unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, 256) };
+                            if ret == 0 {
+                                let name = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const libc::c_char).to_string_lossy().to_string() };
+                                Ok(Value::String(name))
+                            } else {
+                                Ok(Value::String(String::new()))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::String("localhost".to_string()))
+                        }
+                    }
+                    Intrinsic::StrError => {
+                        let errnum = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("strerror errnum requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut buf = vec![0u8; 1024];
+                            let ret = unsafe { libc::strerror_r(errnum, buf.as_mut_ptr() as *mut libc::c_char, 1024) };
+                            let msg = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const libc::c_char).to_string_lossy().to_string() };
+                            if ret == 0 { Ok(Value::String(msg)) } else { Ok(Value::String(format!("Unknown error {}", errnum))) }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::String(format!("error {}", errnum)))
+                        }
+                    }
+                    Intrinsic::StrSignal => {
+                        let signum = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("strsignal signum requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let msg = unsafe { std::ffi::CStr::from_ptr(libc::strsignal(signum)).to_string_lossy().to_string() };
+                            Ok(Value::String(msg))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::String(format!("signal {}", signum)))
+                        }
+                    }
+                    Intrinsic::RealPath => {
+                        let path = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("realpath path requires String, got {:?}", v))),
+                        };
+                        let cpath = std::ffi::CString::new(path.as_bytes()).unwrap_or_default();
+                        #[cfg(unix)]
+                        {
+                            let resolved = unsafe { libc::realpath(cpath.as_ptr(), std::ptr::null_mut()) };
+                            if !resolved.is_null() {
+                                let result = unsafe { std::ffi::CStr::from_ptr(resolved).to_string_lossy().to_string() };
+                                unsafe { libc::free(resolved as *mut libc::c_void); }
+                                Ok(Value::String(result))
+                            } else {
+                                Ok(Value::String(String::new()))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::String(path))
+                        }
+                    }
+                    // ===== D14: Debugging (2026-06-19) =====
+                    Intrinsic::Abort => {
+                        #[cfg(unix)]
+                        { unsafe { libc::abort(); } }
+                        #[cfg(not(unix))]
+                        { std::process::abort(); }
+                        // unreachable
+                        #[allow(unreachable_code)]
+                        Ok(Value::Void)
+                    }
+                    Intrinsic::Backtrace => {
+                        #[cfg(all(unix, not(target_os = "linux")))]
+                        {
+                            Ok(Value::List(Vec::new()))
+                        }
+                        #[cfg(target_os = "linux")]
+                        {
+                            let mut addrs: Vec<*mut libc::c_void> = vec![std::ptr::null_mut(); 128];
+                            let count = unsafe { libc::backtrace(addrs.as_mut_ptr(), 128) };
+                            if count > 0 {
+                                let frames: Vec<Value> = addrs[..count as usize].iter().map(|&addr| Value::Int(addr as i64)).collect();
+                                Ok(Value::List(frames))
+                            } else {
+                                Ok(Value::List(Vec::new()))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::List(Vec::new()))
+                        }
+                    }
+                    // ===== D15: Scheduling (2026-06-19) =====
+                    Intrinsic::SchedYield => {
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::sched_yield() };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::GetPriority => {
+                        let which = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getpriority which requires Int, got {:?}", v))),
+                        };
+                        let who = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getpriority who requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::getpriority(which as u32, who as libc::id_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = which; let _ = who;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::SetPriority => {
+                        let which = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setpriority which requires Int, got {:?}", v))),
+                        };
+                        let who = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setpriority who requires Int, got {:?}", v))),
+                        };
+                        let prio = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setpriority prio requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::setpriority(which as u32, who as libc::id_t, prio) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = which; let _ = who; let _ = prio;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    // ===== D16: User / Group (2026-06-19) =====
+                    Intrinsic::GetUid => {
+                        #[cfg(unix)]
+                        {
+                            let uid = unsafe { libc::getuid() };
+                            Ok(Value::Int(uid as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::GetEUid => {
+                        #[cfg(unix)]
+                        {
+                            let euid = unsafe { libc::geteuid() };
+                            Ok(Value::Int(euid as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::GetGid => {
+                        #[cfg(unix)]
+                        {
+                            let gid = unsafe { libc::getgid() };
+                            Ok(Value::Int(gid as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::GetEGid => {
+                        #[cfg(unix)]
+                        {
+                            let egid = unsafe { libc::getegid() };
+                            Ok(Value::Int(egid as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::GetPwUid => {
+                        let uid = match values.remove(0) {
+                            Value::Int(n) => n as libc::uid_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getpwuid uid requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut pw: libc::passwd = unsafe { std::mem::zeroed() };
+                            let mut buf = vec![0u8; 4096];
+                            let mut result: *mut libc::passwd = std::ptr::null_mut();
+                            let ret = unsafe { libc::getpwuid_r(uid, &mut pw, buf.as_mut_ptr() as *mut libc::c_char, 4096, &mut result) };
+                            if ret == 0 && !result.is_null() {
+                                let name = unsafe { std::ffi::CStr::from_ptr(pw.pw_name).to_string_lossy().to_string() };
+                                let dir = unsafe { std::ffi::CStr::from_ptr(pw.pw_dir).to_string_lossy().to_string() };
+                                let shell = unsafe { std::ffi::CStr::from_ptr(pw.pw_shell).to_string_lossy().to_string() };
+                                Ok(Value::String(format!("{}:{}:{}", name, dir, shell)))
+                            } else {
+                                Ok(Value::String(String::new()))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = pw; let _ = buf; let _ = result;
+                            Ok(Value::String(String::new()))
+                        }
+                    }
+                    Intrinsic::GetGrGid => {
+                        let gid = match values.remove(0) {
+                            Value::Int(n) => n as libc::gid_t,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getgrgid gid requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut gr: libc::group = unsafe { std::mem::zeroed() };
+                            let mut buf = vec![0u8; 4096];
+                            let mut result: *mut libc::group = std::ptr::null_mut();
+                            let ret = unsafe { libc::getgrgid_r(gid, &mut gr, buf.as_mut_ptr() as *mut libc::c_char, 4096, &mut result) };
+                            if ret == 0 && !result.is_null() {
+                                let name = unsafe { std::ffi::CStr::from_ptr(gr.gr_name).to_string_lossy().to_string() };
+                                Ok(Value::String(name))
+                            } else {
+                                Ok(Value::String(String::new()))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = gr; let _ = buf; let _ = result;
+                            Ok(Value::String(String::new()))
+                        }
+                    }
+                    // ===== D17: Threading (2026-06-19) =====
+                    Intrinsic::ThreadCreate => {
+                        let fn_ptr = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("thread_create fn_ptr requires Int, got {:?}", v))),
+                        };
+                        let arg = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("thread_create arg requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut thread: libc::pthread_t = unsafe { std::mem::zeroed() };
+                            let fn_ptr_fn: extern "C" fn(*mut libc::c_void) -> *mut libc::c_void = unsafe { std::mem::transmute(fn_ptr) };
+                            let ret = unsafe { libc::pthread_create(&mut thread, std::ptr::null(), fn_ptr_fn, arg as *mut libc::c_void) };
+                            if ret == 0 {
+                                Ok(Value::Int(thread as i64))
+                            } else {
+                                Ok(Value::Int(-1))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = fn_ptr; let _ = arg;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::ThreadJoin => {
+                        let thread = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("thread_join thread requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::pthread_join(thread as libc::pthread_t, std::ptr::null_mut()) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = thread;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::ThreadExit => {
+                        let code = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("thread_exit code requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            unsafe { libc::pthread_exit(code as *mut libc::c_void); }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = code;
+                        }
+                        #[allow(unreachable_code)]
+                        Ok(Value::Void)
+                    }
+                    Intrinsic::MutexLock => {
+                        let mptr = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mutex_lock mptr requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::pthread_mutex_lock(mptr as *mut libc::pthread_mutex_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = mptr;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::MutexUnlock => {
+                        let mptr = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mutex_unlock mptr requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::pthread_mutex_unlock(mptr as *mut libc::pthread_mutex_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = mptr;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::CondvarWait => {
+                        let cptr = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("condvar_wait cptr requires Int, got {:?}", v))),
+                        };
+                        let mptr = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("condvar_wait mptr requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::pthread_cond_wait(cptr as *mut libc::pthread_cond_t, mptr as *mut libc::pthread_mutex_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = cptr; let _ = mptr;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::CondvarSignal => {
+                        let cptr = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("condvar_signal cptr requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::pthread_cond_signal(cptr as *mut libc::pthread_cond_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = cptr;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::CondvarBroadcast => {
+                        let cptr = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("condvar_broadcast cptr requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::pthread_cond_broadcast(cptr as *mut libc::pthread_cond_t) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = cptr;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    // ===== D18: Resource Limits (2026-06-19) =====
+                    Intrinsic::GetRlimit => {
+                        let resource = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("getrlimit resource requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut rlim: libc::rlimit = unsafe { std::mem::zeroed() };
+                            let ret = unsafe { libc::getrlimit(resource as u32, &mut rlim) };
+                            if ret == 0 {
+                                let packed = (rlim.rlim_cur as i64) << 32 | (rlim.rlim_max as i64 & 0xFFFF_FFFF);
+                                Ok(Value::Int(packed))
+                            } else {
+                                Ok(Value::Int(-1))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = resource;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::SetRlimit => {
+                        let resource = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setrlimit resource requires Int, got {:?}", v))),
+                        };
+                        let packed = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("setrlimit packed requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let rlim = libc::rlimit {
+                                rlim_cur: (packed >> 32) as libc::rlim_t,
+                                rlim_max: (packed & 0xFFFF_FFFF) as libc::rlim_t,
+                            };
+                            let ret = unsafe { libc::setrlimit(resource as u32, &rlim) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = resource; let _ = packed;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    // ===== Extra intrinsics (2026-06-19) =====
+                    Intrinsic::MkStemp => {
+                        let template = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mkstemp template requires String, got {:?}", v))),
+                        };
+                        let ctemplate = std::ffi::CString::new(template.as_bytes()).unwrap_or_default();
+                        let mut buf = ctemplate.into_bytes_with_nul();
+                        #[cfg(unix)]
+                        {
+                            let fd = unsafe { libc::mkstemp(buf.as_mut_ptr() as *mut libc::c_char) };
+                            Ok(Value::Int(fd as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = buf;
+                            Ok(Value::Int(-1))
+                        }
+                    }
+                    Intrinsic::MkDtemp => {
+                        let template = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("mkdtemp template requires String, got {:?}", v))),
+                        };
+                        let ctemplate = std::ffi::CString::new(template.as_bytes()).unwrap_or_default();
+                        let mut buf = ctemplate.into_bytes_with_nul();
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::mkdtemp(buf.as_mut_ptr() as *mut libc::c_char) };
+                            if !ret.is_null() {
+                                let path = unsafe { std::ffi::CStr::from_ptr(ret).to_string_lossy().to_string() };
+                                Ok(Value::String(path))
+                            } else {
+                                Ok(Value::String(String::new()))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = buf;
+                            Ok(Value::String(String::new()))
+                        }
+                    }
+                    Intrinsic::DlOpen => {
+                        let filename = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("dlopen filename requires String, got {:?}", v))),
+                        };
+                        let cfilename = std::ffi::CString::new(filename.as_bytes()).unwrap_or_default();
+                        #[cfg(unix)]
+                        {
+                            let handle = unsafe { libc::dlopen(cfilename.as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL) };
+                            Ok(Value::Int(handle as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = cfilename;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::DlSym => {
+                        let handle = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("dlsym handle requires Int, got {:?}", v))),
+                        };
+                        let symbol = match values.remove(0) {
+                            Value::String(s) => s,
+                            v => return Err(RuntimeError::TypeMismatch(format!("dlsym symbol requires String, got {:?}", v))),
+                        };
+                        let csymbol = std::ffi::CString::new(symbol.as_bytes()).unwrap_or_default();
+                        #[cfg(unix)]
+                        {
+                            let addr = unsafe { libc::dlsym(handle as *mut libc::c_void, csymbol.as_ptr()) };
+                            Ok(Value::Int(addr as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = handle; let _ = csymbol;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::DlClose => {
+                        let handle = match values.remove(0) {
+                            Value::Int(n) => n,
+                            v => return Err(RuntimeError::TypeMismatch(format!("dlclose handle requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let ret = unsafe { libc::dlclose(handle as *mut libc::c_void) };
+                            Ok(Value::Int(ret as i64))
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = handle;
+                            Ok(Value::Int(0))
+                        }
+                    }
+                    Intrinsic::TtyName => {
+                        let fd = match values.remove(0) {
+                            Value::Int(n) => n as i32,
+                            v => return Err(RuntimeError::TypeMismatch(format!("ttyname fd requires Int, got {:?}", v))),
+                        };
+                        #[cfg(unix)]
+                        {
+                            let mut buf = vec![0u8; 256];
+                            let ret = unsafe { libc::ttyname_r(fd, buf.as_mut_ptr() as *mut libc::c_char, 256) };
+                            if ret == 0 {
+                                let name = unsafe { std::ffi::CStr::from_ptr(buf.as_ptr() as *const libc::c_char).to_string_lossy().to_string() };
+                                Ok(Value::String(name))
+                            } else {
+                                Ok(Value::String(String::new()))
+                            }
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            let _ = fd;
+                            Ok(Value::String(String::new()))
+                        }
+                    }
                 }
             }
             // Legacy collection variants — delegate through feature structs

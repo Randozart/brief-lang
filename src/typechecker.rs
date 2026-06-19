@@ -1539,6 +1539,36 @@ impl TypeChecker {
                     Intrinsic::SubGroupBarrier => Type::Bool,
                     // String conversion intrinsics
                     Intrinsic::FloatToStr | Intrinsic::ToStr => Type::String,
+                    // D12: Random / Entropy
+                    Intrinsic::Errno => Type::Int,
+                    Intrinsic::GetRandom => Type::Int,
+                    // D13: System Info
+                    Intrinsic::Hostname | Intrinsic::Uname
+                    | Intrinsic::StrError | Intrinsic::StrSignal
+                    | Intrinsic::RealPath => Type::String,
+                    Intrinsic::PageSize | Intrinsic::CpuCount => Type::Int,
+                    // D14: Debugging
+                    Intrinsic::Abort => Type::Void,
+                    Intrinsic::Backtrace => Type::Custom("List".to_string()),
+                    // D15: Scheduling
+                    Intrinsic::SchedYield | Intrinsic::GetPriority
+                    | Intrinsic::SetPriority => Type::Int,
+                    // D16: User / Group
+                    Intrinsic::GetUid | Intrinsic::GetEUid
+                    | Intrinsic::GetGid | Intrinsic::GetEGid => Type::Int,
+                    Intrinsic::GetPwUid | Intrinsic::GetGrGid => Type::String,
+                    // D17: Threading
+                    Intrinsic::ThreadCreate | Intrinsic::ThreadJoin
+                    | Intrinsic::MutexLock | Intrinsic::MutexUnlock
+                    | Intrinsic::CondvarWait | Intrinsic::CondvarSignal
+                    | Intrinsic::CondvarBroadcast => Type::Int,
+                    Intrinsic::ThreadExit => Type::Void,
+                    // D18: Resource Limits
+                    Intrinsic::GetRlimit | Intrinsic::SetRlimit => Type::Int,
+                    // Extra intrinsics
+                    Intrinsic::MkStemp | Intrinsic::DlOpen
+                    | Intrinsic::DlSym | Intrinsic::DlClose => Type::Int,
+                    Intrinsic::MkDtemp | Intrinsic::TtyName => Type::String,
                     // Macro/template intrinsics (compile-time only)
                     Intrinsic::Compile | Intrinsic::MacroError
                     | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Data,

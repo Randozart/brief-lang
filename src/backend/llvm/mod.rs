@@ -1066,7 +1066,7 @@ self.emit_declares(&mut out);
 
         // Declare cast helper functions
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
-        writeln!(out, "declare i64 @__int_to_str(i64) #1").ok();
+        writeln!(out, "declare i64 @__int_to_str__(i64) #1").ok();
         writeln!(out, "declare i64 @__str_to_int(i8*) #1").ok();
 
         // Format string constants for benchmark intrinsics (print_int#, print_float#)
@@ -1083,6 +1083,16 @@ self.emit_declares(&mut out);
         writeln!(out, "declare ptr @getenv(ptr) #1").ok();
         writeln!(out, "declare i64 @atol(ptr) #1").ok();
         writeln!(out, "declare void @exit(i32) #1").ok();
+        // D12–D18 direct libc declares (2026-06-19)
+        writeln!(out, "declare void @abort() #1").ok();
+        writeln!(out, "declare i64 @sysconf(i32) #1").ok();
+        writeln!(out, "declare i32 @sched_yield() #1").ok();
+        writeln!(out, "declare i32 @getpriority(i32, i32) #1").ok();
+        writeln!(out, "declare i32 @setpriority(i32, i32, i32) #1").ok();
+        writeln!(out, "declare i32 @getuid() #1").ok();
+        writeln!(out, "declare i32 @geteuid() #1").ok();
+        writeln!(out, "declare i32 @getgid() #1").ok();
+        writeln!(out, "declare i32 @getegid() #1").ok();
         writeln!(out, "declare i32 @setvbuf(ptr, ptr, i32, i64) #1").ok();
         writeln!(out, "declare i32 @sleep(i32) #1").ok();
         writeln!(out, "declare i32 @nanosleep(ptr, ptr) #1").ok();

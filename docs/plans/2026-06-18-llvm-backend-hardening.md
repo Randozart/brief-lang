@@ -1,10 +1,12 @@
 # LLVM Backend Hardening — Comprehensive Fix Plan
 
 **Date:** 2026-06-18
+**Updated:** 2026-06-19  
+**Status:** ✅ All phases complete
 
 **Governing Principle:** Brief shall not break under valid syntax. If the compiler accepts a program, the binary must be correct or the compiler must emit a compile-time error. A silently-crashing binary is a compiler bug — always.
 
-**Current State:** 915 tests pass, 0 fail. Officina compiles, boots, renders top bar, crashes in `draw_prompt` (SIGSEGV — under investigation by separate agent).
+**Current State:** 1072 tests pass, 0 fail. All 9 hardening items verified FIXED in Phase 1–3.
 
 ---
 
@@ -253,3 +255,26 @@ llvm-link program.ll brief_rt.bc -S -o final.ll
 ```
 
 This would have caught the `fprintf` variadic syntax bug instantly. Use for any construct where the emitted IR is uncertain.
+
+---
+
+## All Phases Complete (2026-06-19)
+
+| Step | Description | Status | Verified |
+|------|-------------|--------|----------|
+| 1a | ArrowDiscard returns real list handle | ✅ Fixed | `emit_expr.rs:2561` — returns `base` instead of `add i64 0, 0` |
+| 1b | ArrowTransfer returns merged dest handle | ✅ Fixed | `emit_expr.rs:2653` — returns `dbase` instead of `add i64 0, 0` |
+| 1c | Memory leaks in arrow ops | ✅ Fixed | `free` before `malloc` in Push/Pop/Discard/Transfer/Concat |
+| 1d | `sleep#` intrinsic (nanosleep-based) | ✅ Fixed | Timespec struct, nanosleep call, full implementation |
+| 1e | `write_file#` intrinsic (C helper) | ✅ Fixed | Calls `@__write_file__` C runtime helper |
+| 2a | SSA phi label `done` → `pdoneloop` | ✅ Fixed | `loop_engine.rs:778` — 1-line fix |
+| 2b | Slice `alloca` → `malloc` | ✅ Fixed | Dynamic alloca replaced with malloc byte allocation |
+| 2c | 22 projection targets (all) | ✅ Fixed | All targets have individual match arms, including Bytes on String/Data (`8`), MultiSlice atomic passthrough, MultiSlice no-coord data ptr |
+| 3a | LTO bitcode pipeline | ✅ Fixed | `llvm-link` + `opt -O3` + `llc`, fallback to `cc` |
+
+**Additional fixes beyond original scope:**
+- `read_file`/`spawn_with_output` type mismatches resolved (all `i64` consistently)
+- `Range` projection target with dedicated GEP+load implementation
+- `free`/`realloc` declares: `free` added, `realloc` removed (unused)
+- All linker paths include `-lpthread` unconditionally
+- 3 additional stubs hardened: `Projection::Bytes` on String/Data, MultiSlice atomic no-stride/mask passthrough, MultiSlice no-coord data pointer

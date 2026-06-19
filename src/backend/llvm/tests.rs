@@ -1011,24 +1011,22 @@ fn empty_program() -> Program {
     }
 
     #[test]
-    fn test_main_calls_rt_wait_with_wake_triggers() {
-        // Use Int trigger (non-enumerable) to force standard reactor path
+    fn test_main_with_wake_triggers_has_symbol() {
+        // Linked wake triggers still appear in the emitted IR
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Int, true);
         let output = LlvmBackend::new().generate(&program);
-        assert!(output.contains("call void @__rt_wait()"),
-            "main() calls __rt_wait() after reactor_tick");
+        assert!(output.contains("__sigint_flag"),
+            "Linked trigger symbol present in output");
     }
 
     #[test]
     fn test_enum_with_wake_triggers_hybrid() {
         // Bool trigger with is_wake → enters enum dispatch in hybrid wake mode.
-        // Previously this bypassed enum entirely (Phase A gate). Now enum dispatch
-        // is active, with __rt_wait() wrapping the switch arms.
+        // Now uses emit_trg_event_epoll_wait for built-in triggers or nothing
+        // for linked-only triggers (previously __rt_wait which was a no-op).
         // With uniform-body detection: identical case arms skip the switch dispatch.
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
         let output = LlvmBackend::new().generate(&program);
-        assert!(output.contains("call void @__rt_wait()"),
-            "Wake triggers get __rt_wait between ticks");
         assert!(!output.contains("switch i64"),
             "Uniform enum bodies skip the switch dispatch");
         assert!(output.contains("load volatile"),
@@ -3817,8 +3815,8 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("call i64 @__int_to_str(i64"),
-            "Cast Int -> String should call __int_to_str. Got:\n{}", output);
+        assert!(output.contains("call i64 @__int_to_str__(i64"),
+            "Cast Int -> String should call __int_to_str__. Got:\n{}", output);
     }
 
     #[test]
@@ -3889,8 +3887,10 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("call i8* @__chr_to_str"),
-            "Cast Char -> String should call __chr_to_str. Got:\n{}", output);
+        assert!(output.contains("call i8* @malloc(i64 24)"),
+            "Cast Char -> String should allocate cap/len/data struct. Got:\n{}", output);
+        assert!(output.contains("store i64 1, i64*"),
+            "Cast Char -> String should store len=1. Got:\n{}", output);
     }
 
     #[test]
