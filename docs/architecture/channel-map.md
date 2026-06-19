@@ -17,6 +17,7 @@ Parser ─────────► Program { items: Vec<TopLevel>, comments, 
   │                 parse_equality → parse_check → parse_comparison
   │                 Handles: `is` (type/variant check), `from` (derivation check),
   │                          `like` (structural equality)
+  │               Import target syntax: `(wasm) import`, `(circt) import`, `(javascript) import`, `import`
   ▼
 Type-Universe ────► TypeUniverse (frozen map of resolved type metadata)
   │
@@ -169,7 +170,19 @@ LLVM Backend:
   Expr::RegexLiteral → string constant pointer
 ```
 
-## Self-Loop Elimination (2026-06-11)
+## Import Target Routing (2026-06-19)
+
+The `(wasm) import`, `(circt) import`, and `(javascript) import` syntaxes
+set `Import.target` on the AST node:
+
+| Syntax | `ImportTarget` | Webstack behavior | LLVM behavior |
+|--------|----------------|-------------------|---------------|
+| `import "path"` | `Native` | Inline as TS | Inline as LLVM IR |
+| `(wasm) import` | `Wasm` | Queue for LLVM wasm32, base64-embed in TS | Compile to wasm32 |
+| `(circt) import` | `Circt` | Error | Route to CIRCT backend |
+| `(javascript) import` | `Javascript` | Inline JS from `wasm_impl` field | Error |
+
+(WASM sidecar compilation is Phase B — pending wasm32 target support.)
 
 ```
 Precondition failure in direct SSA loop:
