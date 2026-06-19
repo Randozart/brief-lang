@@ -1,0 +1,33 @@
+schema mcu_target {
+    target_triple: String = "armv7em-none-eabi";
+    cpu: String?;
+    linker_script: String?;
+
+    memory_regions: List<MemoryRegion>;
+    struct MemoryRegion {
+        name: String;
+        base: UInt[64];
+        size: UInt[64];
+        kind: String;  // "flash" | "sram" | "peripheral"
+    }
+
+    interrupts: List<InterruptEntry>;
+    struct InterruptEntry {
+        name: String;
+        vector: UInt[32];
+        trg_name: String?;
+    }
+
+    peripherals: List<Peripheral>;
+    struct Peripheral {
+        name: String;
+        base_addr: UInt[64];
+        registers: List<Register>;
+    }
+    struct Register {
+        name: String;
+        offset: UInt[32];
+        size: UInt[8];
+        access: String;  // "rw" | "ro" | "wo"
+    }
+}

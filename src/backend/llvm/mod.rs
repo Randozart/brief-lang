@@ -620,8 +620,26 @@ pub struct LlvmBackend {
 pub struct EmbeddedConfig {
     pub target_triple: String,
     pub linker_script: Option<String>,
+    pub cpu: Option<String>,
     pub freestanding: bool,
     pub halt_on_term: bool,
+    pub memory_regions: Vec<MemoryRegion>,
+    pub interrupts: Vec<InterruptEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemoryRegion {
+    pub name: String,
+    pub base: u64,
+    pub size: u64,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct InterruptEntry {
+    pub name: String,
+    pub vector: u32,
+    pub trg_name: Option<String>,
 }
 
 impl LlvmBackend {

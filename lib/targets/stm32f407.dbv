@@ -1,0 +1,45 @@
+import "mcu.dbvs";
+
+target_triple = "armv7em-none-eabi";
+cpu = "cortex-m4";
+linker_script = "lib/targets/stm32f407.ld";
+
+memory_regions = [
+    { name: "FLASH", base: 0x08000000, size: 0x00100000, kind: "flash" },
+    { name: "SRAM",  base: 0x20000000, size: 0x00020000, kind: "sram" },
+    { name: "CCMRAM", base: 0x10000000, size: 0x00010000, kind: "sram" },
+];
+
+interrupts = [
+    { name: "TIM2",   vector: 44,  trg_name: "timer" },
+    { name: "TIM3",   vector: 45,  trg_name: "pwm" },
+    { name: "USART1", vector: 51,  trg_name: "serial_rx" },
+    { name: "USART2", vector: 52,  trg_name: "serial_tx" },
+    { name: "EXTI0",  vector: 23,  trg_name: "button" },
+];
+
+peripherals = [
+    {
+        name: "USART1",
+        base_addr: 0x40011000,
+        registers: [
+            { name: "SR",   offset: 0x00, size: 16, access: "rw" },
+            { name: "DR",   offset: 0x04, size: 16, access: "rw" },
+            { name: "BRR",  offset: 0x08, size: 16, access: "rw" },
+            { name: "CR1",  offset: 0x0C, size: 16, access: "rw" },
+            { name: "CR2",  offset: 0x10, size: 16, access: "rw" },
+        ]
+    },
+    {
+        name: "TIM2",
+        base_addr: 0x40000000,
+        registers: [
+            { name: "CR1",   offset: 0x00, size: 16, access: "rw" },
+            { name: "DIER",  offset: 0x0C, size: 16, access: "rw" },
+            { name: "SR",    offset: 0x10, size: 16, access: "rw" },
+            { name: "CNT",   offset: 0x24, size: 32, access: "rw" },
+            { name: "PSC",   offset: 0x28, size: 16, access: "rw" },
+            { name: "ARR",   offset: 0x2C, size: 32, access: "rw" },
+        ]
+    },
+];
