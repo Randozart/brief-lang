@@ -44,11 +44,13 @@ pub struct GpuKernel {
 ///
 /// A transaction or loop body is GPU-eligible when:
 /// 1. No user FFI calls in the body (only well-known GPU intrinsics allowed)
-/// 2. No loop-carried dependencies (parallelizable)
-/// 3. Contiguous memory access patterns (coalesced reads/writes)
-/// 4. Bounded iteration count (known or provably finite)
-/// 5. No `term`/`term!`/`unification`/`escape` statements
-/// 6. Only operates on integer and float types (no string/struct/enum)
+/// 2. Bounded iteration count (known or provably finite)
+/// 3. Only operates on integer and float types (no string/struct/enum)
+/// 4. No `term!`/`unification`/`escape` statements
+///
+/// Deferred (not yet implemented):
+/// - Loop-carried dependency analysis for parallelizability verification
+/// - Stride analysis for memory coalescing verification
 pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
     let mut reasons = Vec::new();
     let mut write_fields = Vec::new();
