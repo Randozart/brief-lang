@@ -320,7 +320,8 @@ fn print_usage(program: &str) {
     eprintln!("Commands:");
     eprintln!("  check <file>     Type check without execution (fast)");
     eprintln!("  compile <file>   Unified compile with --target (Phase 3)");
-    eprintln!("  build <file>     Full compilation");
+    eprintln!("  build <file>        Compile and build binary from .bv/.sbv/.rbv/.srbv/.ebv/.sebv/.abv/.cbv/.dbv");
+    eprintln!("                      Pass --llvm for .bv/.sbv/.ebv/.sebv/.abv to emit LLVM IR instead");
     eprintln!("  init [name]      Create new project");
     eprintln!("  import <name>    Add dependency to project");
     eprintln!("  serve [dir]      Serve static files (default: .)");
@@ -1100,8 +1101,27 @@ fn run_build(
             println!("Building Circuit Brief (.cbv) file: compiling via CIRCT...");
             run_cbv(file_path, out_dir)
         }
+        "dbv" | "dbvs" | "dbvl" => {
+            // .dbv/.dbvs/.dbvl files: Validate and emit JSON
+            println!("Building Data Brief ({}) file: validating and emitting...", ext);
+            let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
+            let source = std::fs::read_to_string(file_path)
+                .map_err(|e| format!("Error reading {}: {}", file_path.display(), e))?;
+            let doc = dbrief::v2::parse_document(&source)
+                .map_err(|e| format!("Parse error: {}", e))?;
+            let json = serde_json::to_string_pretty(&doc)
+                .map_err(|e| format!("JSON error: {}", e))?;
+            let json_path = out.join(format!("{}.json", stem));
+            std::fs::write(&json_path, &json)
+                .map_err(|e| format!("Error writing {}: {}", json_path.display(), e))?;
+            println!("  Parsed {} schemas, {} data groups, {} rules",
+                doc.schemas.len(), doc.data_groups.len(), doc.rules.len());
+            println!("  Emitted JSON: {}", json_path.display());
+            Ok(json_path)
+        }
         _ => {
-            Err(format!("Unknown file extension: {}. Use .bv, .sbv, .rbv, .srbv, .ebv, .sebv, or .cbv", ext).into())
+            Err(format!("Unknown file extension: {}. Use .bv, .sbv, .rbv, .srbv, .ebv, .sebv, .abv, .cbv, .dbv, .dbvs, .dbvl", ext).into())
         }
     }
 }
@@ -3451,6 +3471,7 @@ fn main() {
             let mut simplify_budget: Option<u64> = None;
             let mut gpu_offload = false;
             let mut gpu_backend = "vulkan".to_string();
+            let mut emit_llvm = false;
 
             let mut i = 2;
             while i < args.len() {
@@ -3458,6 +3479,9 @@ fn main() {
                 if arg == "--out" && i + 1 < args.len() {
                     out_dir = Some(PathBuf::from(&args[i + 1]));
                     i += 2;
+                } else if arg == "--llvm" {
+                    emit_llvm = true;
+                    i += 1;
                 } else if arg == "--prod" || arg == "--release" {
                     prod_mode = true;
                     i += 1;
@@ -3478,7 +3502,7 @@ fn main() {
                     i += 2;
                 } else if arg.ends_with(".bv") || arg.ends_with(".rbv") || arg.ends_with(".ebv") || arg.ends_with(".cbv")
                     || arg.ends_with(".sbv") || arg.ends_with(".srbv") || arg.ends_with(".sebv")
-                    || arg.ends_with(".abv") {
+                    || arg.ends_with(".abv") || arg.ends_with(".dbv") || arg.ends_with(".dbvs") || arg.ends_with(".dbvl") {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
                 } else {
@@ -3489,6 +3513,32 @@ fn main() {
             if let Some(path) = file_path {
                 let out = out_dir.as_deref();
                 let strict = strict_flag || is_strict_extension(&path);
+
+                // --llvm flag: emit LLVM IR instead of building a binary (for LLVM-emitting variants)
+                if emit_llvm {
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    match ext {
+                        "bv" | "sbv" | "ebv" | "sebv" | "abv" => {
+                            let result = run_llvm_compile(&path, out, None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None);
+                            match result {
+                                Ok(ll_path) => {
+                                    println!("  LLVM IR emitted: {}", ll_path.display());
+                                    std::process::exit(0);
+                                }
+                                Err(e) => {
+                                    eprintln!("{}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        _ => {
+                            eprintln!("Error: --llvm flag is only valid for .bv, .sbv, .ebv, .sebv, and .abv files");
+                            eprintln!("  '{}' does not compile via LLVM", ext);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
                 match run_build(&path, verbose, no_stdlib, stdlib_path, out, emit_memory_spec, memory_spec_format, strict, optimize_flag, prod_mode, simplify_budget, gpu_offload, &gpu_backend) {
                     Ok(output) => {
                         println!("Build complete: {}", output.display());
@@ -3499,13 +3549,15 @@ fn main() {
                     }
                 }
             } else {
-                eprintln!("Error: No .bv, .abv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
-                eprintln!("Usage: {} build <file> [--out <dir>] [--dev] [--prod|--release] [--simplify-budget <N>] [--no-simplify]", args[0]);
-                eprintln!("  .bv/.sbv files → compile via LLVM to native binary");
-                eprintln!("  .abv file      → compile via LLVM + SPIR-V (GPU) to native binary + .spv");
-                eprintln!("  .rbv/.srbv files → WASM + JS + frontend");
-                eprintln!("  .ebv/.sebv files → requires explicit target (see: brief compile --help)");
-                std::process::exit(1);
+                eprintln!("Error: No .bv, .abv, .sbv, .rbv, .srbv, .ebv, .sebv, .cbv, .dbv, .dbvs, or .dbvl file specified");
+                eprintln!("Usage: {} build <file> [--out <dir>] [--dev] [--prod|--release] [--llvm] [--simplify-budget <N>] [--no-simplify]", args[0]);
+                eprintln!("  .bv/.sbv files        → compile via LLVM to native binary");
+                eprintln!("  .abv file             → compile via LLVM + SPIR-V (GPU) to native binary + .spv");
+                eprintln!("  .rbv/.srbv files      → TypeScript + frontend");
+                eprintln!("  .ebv/.sebv files      → microcontroller binary via LLVM");
+                eprintln!("  .cbv file             → CIRCT hardware description (Verilog/VHDL)");
+                eprintln!("  .dbv/.dbvs/.dbvl files → validate and emit JSON");
+                eprintln!("  --llvm                → emit LLVM IR instead of binary (.bv/.sbv/.ebv/.sebv/.abv only)");
             }
         }
 

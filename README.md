@@ -154,9 +154,9 @@ Each variant has a different *contract baseline* and *feature set* appropriate t
 
 | Variant | Contract Sugar | FFI Targets Allowed | Intrinsics vs `frgn` | Typical Use |
 |---------|---------------|---------------------|---------------------|-------------|
-| `.bv` (Brief) | ✅ `[[post]]`, `[pre]]` | C, Rust, Python, Java, JavaScript | Prefer `frgn`; intrinsics fallback | General-purpose, prototyping |
+| `.bv` (Brief) | ✅ `[[post]`, `[pre]]` | C, Rust, Python, Java, JavaScript | `frgn` and full intrinsics | General-purpose |
 | `.abv` (Accel) | ✅ sugar allowed | None (GPU only) | Prefer intrinsics; `frgn` banned | GPU compute |
-| `.rbv` (Render) | ✅ sugar allowed | JavaScript (+ C/Rust via WASM) | Prefer `frgn` | Web frontends |
+| `.rbv` (Render) | ✅ sugar allowed | JavaScript (+ C/Rust via WASM) | Special `frgn` handling and full intrinsics| Web frontends |
 | `.ebv` (Embed) | ✅ sugar allowed | C, Rust (Python/Java warned) | Prefer `frgn` | Bare-metal MCU |
 | `.cbv` (Circuit) | **❌ sugar banned** — full contracts required | None (FFI banned) | Prefer intrinsics; `frgn` banned | Hardware synthesis |
 | `.dbv` (Data) | No contracts | None | No codegen | Configuration |
