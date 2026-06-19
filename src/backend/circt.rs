@@ -2,7 +2,7 @@
 // Invoked via: brief build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
 use crate::analysis::dependency_graph::DependencyGraph;
-use crate::ast::{Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{BitRange, Expr, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -87,26 +87,40 @@ impl CirctBackend {
         writeln!(out).ok();
     }
 
-    fn mlir_type(&self, ty: &Type) -> &str {
+    fn mlir_type(&self, ty: &Type) -> String {
         match ty {
-            Type::Bool => "i1",
-            Type::Int | Type::UInt => "i64",
-            Type::Char => "i32",
-            Type::Float => "f64",
-            _ => "i64",
+            Type::Bool => "i1".into(),
+            Type::Int | Type::UInt => "i64".into(),
+            Type::Char => "i32".into(),
+            Type::Float => "f64".into(),
+            Type::Constrained(inner, bit_range) => {
+                let width = match bit_range {
+                    BitRange::Single(w) => *w,
+                    BitRange::Range(_, hi) => *hi,
+                    BitRange::Any(w) => *w,
+                };
+                if matches!(inner.as_ref(), Type::Bool) && width <= 1 {
+                    return "i1".into();
+                }
+                format!("i{}", width)
+            }
+            _ => "i64".into(),
         }
     }
 
     fn emit_module(&mut self, out: &mut String, dep_graph: &DependencyGraph, program: &Program) {
         let mut ng = NameGen::default();
-        let mut port_decls: Vec<String> = Vec::new();
-        port_decls.push("clock: i1".to_string());
-        port_decls.push("reset: i1".to_string());
+
+        // Collect input and output ports separately
+        let mut input_ports: Vec<String> = Vec::new();
+        let mut output_ports: Vec<(String, String)> = Vec::new(); // (name, mlir_type)
+        input_ports.push("in %clock: i1".to_string());
+        input_ports.push("in %reset: i1".to_string());
 
         for trg_name in &self.trg_ports {
             if let Some(ty) = self.var_types.get(trg_name) {
                 let mlir_ty = self.mlir_type(ty);
-                port_decls.push(format!("{}: {}", trg_name, mlir_ty));
+                input_ports.push(format!("in %{}: {}", trg_name, mlir_ty));
             }
         }
 
@@ -115,38 +129,35 @@ impl CirctBackend {
             if !self.trg_ports.contains(var_name) {
                 if let Some(ty) = self.var_types.get(var_name) {
                     let mlir_ty = self.mlir_type(ty);
-                    port_decls.push(format!("{}: {}", var_name, mlir_ty));
+                    output_ports.push((var_name.clone(), mlir_ty));
                 }
             }
         }
 
+        // Emit hw.module with input ports and output return signature
         write!(out, "hw.module @top(").ok();
-        for (i, port) in port_decls.iter().enumerate() {
+        for (i, port) in input_ports.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
             write!(out, "{}", port).ok();
         }
-        writeln!(out, ") -> () {{").ok();
+        write!(out, ") -> (").ok();
+        for (i, (name, mlir_ty)) in output_ports.iter().enumerate() {
+            if i > 0 { write!(out, ", ").ok(); }
+            write!(out, "{}: {}", name, mlir_ty).ok();
+        }
+        writeln!(out, ") {{").ok();
 
         // Emit sequential registers for state variables
         let mut reg_names: HashMap<String, String> = HashMap::new();
-        for var_name in sorted_vars {
-            if !self.trg_ports.contains(var_name) {
-                if let Some(ty) = self.var_types.get(var_name) {
-                    let mlir_ty = self.mlir_type(ty);
-                    let init_val = self.initial_value(var_name);
-                    let reg = ng.fresh_reg(var_name);
-                    writeln!(out, "  {} = seq.firreg initial_value {{ init_value = {} : {} }} : {}", reg, init_val, mlir_ty, mlir_ty).ok();
-                    reg_names.insert(var_name.clone(), reg);
-                }
-            }
+        for (var_name, mlir_ty) in &output_ports {
+            let init_val = self.initial_value(var_name);
+            let reg = ng.fresh_reg(var_name);
+            writeln!(out, "  {} = seq.firreg initial_value {{ init_value = {} : {} }} : {}", reg, init_val, mlir_ty, mlir_ty).ok();
+            reg_names.insert(var_name.clone(), reg);
         }
 
-        // Emit combinational expressions for each variable
-        for var_name in sorted_vars {
-            if self.trg_ports.contains(var_name) {
-                continue;
-            }
-            let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Int));
+        // Emit combinational expressions for each output variable
+        for (var_name, mlir_ty) in &output_ports {
             if let Some(expr) = self.var_exprs.get(var_name).and_then(|e| e.as_ref()) {
                 let result = self.emit_expr(&mut ng, out, expr, &reg_names, mlir_ty);
                 if let Some(r) = result {
@@ -162,18 +173,6 @@ impl CirctBackend {
             }
         }
 
-        // Connect output ports to register values
-        for var_name in sorted_vars {
-            if !self.trg_ports.contains(var_name) {
-                if let Some(ty) = self.var_types.get(var_name) {
-                    let mlir_ty = self.mlir_type(ty);
-                    if let Some(reg) = reg_names.get(var_name) {
-                        writeln!(out, "  hw.output_assign {}, {} : {}", var_name, reg, mlir_ty).ok();
-                    }
-                }
-            }
-        }
-
         // Emit transaction body logic if any
         for item in &program.items {
             if let TopLevel::Transaction(txn) = item {
@@ -181,7 +180,14 @@ impl CirctBackend {
             }
         }
 
-        writeln!(out, "  hw.output").ok();
+        // Final hw.output maps register values to output ports
+        write!(out, "  hw.output").ok();
+        for (var_name, mlir_ty) in &output_ports {
+            if let Some(reg) = reg_names.get(var_name) {
+                write!(out, " {} : {},", reg, mlir_ty).ok();
+            }
+        }
+        writeln!(out).ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }
@@ -248,9 +254,8 @@ impl CirctBackend {
             Expr::Cast(inner, target_ty) => {
                 let inner_mlir_ty = self.mlir_type(&crate::ast::Type::Int);
                 let target_mlir_ty = self.mlir_type(target_ty);
-                let val = self.emit_expr(ng, out, inner, reg_names, inner_mlir_ty)?;
+                let val = self.emit_expr(ng, out, inner, reg_names, &inner_mlir_ty)?;
                 let w = ng.fresh_wire("cast");
-                // For same-width casts, just forward; for truncation/extraction, emit comb.extract
                 if inner_mlir_ty == target_mlir_ty {
                     Some(val)
                 } else {
@@ -288,7 +293,7 @@ impl CirctBackend {
                     if let Expr::OwnedRef(var_name) = lhs {
                         let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Int));
                         if let Some(reg) = reg_names.get(var_name) {
-                            let val = self.emit_expr(ng, out, expr, reg_names, mlir_ty);
+                            let val = self.emit_expr(ng, out, expr, reg_names, &mlir_ty);
                             if let Some(v) = val {
                                 writeln!(out, "  seq.always(posedge %clock) {{").ok();
                                 writeln!(out, "    {} <= {}", reg, v).ok();
@@ -415,5 +420,39 @@ mod tests {
             ))),
         ]));
         assert!(output.contains("comb.icmp ult"), "Lt expr should emit comb.icmp ult. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_modern_output_ports() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("counter", Type::Int, Some(Expr::Integer(0))),
+        ]));
+        // Modern form: hw.module @top(in %clock: i1, in %reset: i1) -> (counter: i64)
+        assert!(output.contains("in %clock: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
+        assert!(output.contains("in %reset: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
+        assert!(output.contains("-> (counter: i64)"), "Outputs should be in return signature. Got:\n{}", output);
+        assert!(!output.contains("hw.output_assign"), "Should not use deprecated hw.output_assign. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_sized_int() {
+        let mut backend = CirctBackend::new();
+        // UInt constrained to 8 bits
+        let ty = Type::Constrained(Box::new(Type::UInt), BitRange::Single(8));
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("byte", ty, Some(Expr::Integer(0))),
+        ]));
+        assert!(output.contains(": i8)"), "Sized UInt[8] should map to i8. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_sized_int_32() {
+        let mut backend = CirctBackend::new();
+        let ty = Type::Constrained(Box::new(Type::UInt), BitRange::Single(32));
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("word", ty, Some(Expr::Integer(0))),
+        ]));
+        assert!(output.contains(": i32)"), "Sized UInt[32] should map to i32. Got:\n{}", output);
     }
 }
