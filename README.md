@@ -75,7 +75,7 @@ Anything interacting with an external language or interrupt source must be decla
 
 This is an odd one I discovered I could do while optimizing Brief. In most languages, a precondition, assertion or some other safety wrapper is you doing the compiler or even just the runtime a favor to prevent messy logic from crashing the program. In Brief, the contract *is* the optimization input. The more you declare, the more the compiler proves, and the faster your program runs. Safety enables speed.
 
-A precondition like `[x < N]` does more than guard the transaction, and uses this information to emit `!range` metadata on the field load, which lets LLVM eliminate bounds checks in the loop body. Because of contracts, we have more metadata, and thus more guarantees about the code. The optimizer feeds on what the prover proves.
+A precondition like `[x < N]` does more than guard the transaction. The compiler uses this information to emit `!range` metadata on the field load, which lets LLVM eliminate bounds checks in the loop body. More contracts means more metadata, which means more guarantees about the code. The optimizer feeds on what the prover proves.
 
 This is why strict variants (`.sbv`, `.cbv`) ban sugar syntax. If you are writing hardware or safety-critical code, you should not take shortcuts. The full `[pre][post]` contract is the compiler's primary optimization signal. When you omit one side, you are leaving performance on the table, but also opening yourself up to unpredictable and undefined behaviour. However, sometimes this asks too much of a programmer, which is why the file extension serves as the opt-in.
 
@@ -179,15 +179,15 @@ The file extension selects which backend compiles your program, and what syntax 
 
 Each variant has a different *contract baseline* and *feature set* appropriate to its target. The `s` prefix (Strict Brief — `.sbv`, `.srbv`, `.sebv`) uses the **same backend** as its base variant but enforces stricter syntax rules:
 
-| Variant | Contract Sugar | FFI Targets Allowed | Intrinsics vs `frgn` | Typical Use |
-|---------|---------------|---------------------|---------------------|-------------|
-| `.bv` (Brief) | `[[post]`, `[pre]]` | C, Rust, Python, Java, JavaScript | `frgn` and full intrinsics | General-purpose |
-| `.abv` (Accel) | sugar allowed | None (GPU only) | Prefer intrinsics; `frgn` banned | GPU compute |
-| `.rbv` (Render) | sugar allowed | JavaScript (+ C/Rust via WASM) | Special `frgn` handling and full intrinsics| Web frontends |
-| `.ebv` (Embed) | sugar allowed | C, Rust (Python/Java warned) | Partial intrinsics and `frgn` | Bare-metal MCU |
-| `.cbv` (Circuit) | **❌ sugar banned** — full contracts required | None (FFI banned) | Partial intrinsics; `frgn` banned | Hardware synthesis |
-| `.dbv` (Data) | No contracts | None | No codegen | Configuration |
-| **Strict** (`.sbv`, `.sebv`, `.srbv`) | **❌ sugar banned** — same as base variant but full `[pre][post]` required | Same as base variant | Same as base variant | Safety-critical, formal verification |
+| Variant | Contract Sugar | Intrinsics | `frgn` | Typical Use |
+|---------|---------------|------------|--------|-------------|
+| `.bv` (Brief) | `[[post]`, `[pre]]` | All 29 available | C, Rust, Python, Java, JavaScript | General-purpose |
+| `.abv` (Accel) | sugar allowed | GPU subset only | Banned | GPU compute |
+| `.rbv` (Render) | sugar allowed | All 29 available | JavaScript (inlined); C/Rust via WASM | Web frontends |
+| `.ebv` (Embed) | sugar allowed | All 29 available | C, Rust (Python/Java warned) | Bare-metal MCU |
+| `.cbv` (Circuit) | sugar banned | Hardware subset only | Banned | Hardware synthesis |
+| `.dbv` (Data) | No contracts | None | None | Configuration |
+| **Strict** (`.sbv`, `.sebv`, `.srbv`) | sugar banned — full `[pre][post]` required | Same as base | Same as base | Safety-critical, formal verification |
 
 The rationale: **contracts are optimization information**. The more complete your contracts, the more the compiler can prove, and the faster your program runs. Sugar syntax (`[[post]`, `[pre]]`) is a convenience for prototyping, but strict variants force you to commit to full specifications. This is what makes Brief different from total languages (Coq, Agda — must prove everything upfront) and mainstream languages (C, Rust — prove nothing by default).
 
