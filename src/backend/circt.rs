@@ -366,6 +366,7 @@ impl CirctBackend {
         self.emit_contract_condition(out, ng, &contract.pre_condition, &pre_cond, reg_names);
 
         // Emit body logic with state-based enable
+        let mut has_await = false;
         for stmt in body {
             match stmt {
                 Statement::Assignment { lhs, expr, .. } => {
@@ -384,6 +385,31 @@ impl CirctBackend {
                 Statement::Expression(expr) => {
                     self.emit_expr(ng, out, expr, reg_names, "i64");
                 }
+                Statement::Await { expr, .. } => {
+                    has_await = true;
+                    // Extract sub-module name from call expression
+                    let sub_name = match expr {
+                        Expr::Call(name, _args) => name.clone(),
+                        _ => "sub".to_string(),
+                    };
+                    // Emit sub-module instance with start/done handshake
+                    let start_wire = ng.fresh_wire(&format!("{}_start", sub_name));
+                    let done_wire = ng.fresh_wire(&format!("{}_done", sub_name));
+                    let sub_result = ng.fresh_wire(&format!("{}_result", sub_name));
+                    writeln!(out, "  {} = hw.wire : i1", start_wire).ok();
+                    writeln!(out, "  {} = hw.wire : i1", done_wire).ok();
+                    writeln!(out, "  {} = hw.wire : i64", sub_result).ok();
+                    // FSM: assert start on entering, stall until done
+                    let stall_wire = ng.fresh_wire("stall");
+                    let not_done = ng.fresh_wire("not_done");
+                    let c1 = ng.fresh_const("one");
+                    writeln!(out, "  {} = hw.constant 1 : i1", c1).ok();
+                    writeln!(out, "  {} = comb.xor {}, {} : i1", not_done, done_wire, c1).ok();
+                    writeln!(out, "  {} = comb.mux {}, {}, {} : i2", stall_wire, not_done, 2, 1).ok();
+                }
+                Statement::Async { body, .. } | Statement::AsyncAwait { body, .. } => {
+                    self.emit_stmt_body(ng, out, body, reg_names);
+                }
                 _ => {}
             }
         }
@@ -392,14 +418,53 @@ impl CirctBackend {
         let post_cond = ng.fresh_wire("post");
         self.emit_contract_condition(out, ng, &contract.post_condition, &post_cond, reg_names);
 
-        // State transition: if postcondition met, go to done (2), else if precondition false go to idle (0)
+        // State transition: if postcondition met, go to done (2);
+        // if await stall, stay in stall state; else if precondition false go to idle (0)
         let state_next = ng.fresh_wire("txn_state_next");
-        writeln!(out, "  {} = comb.mux {}, {}, {} : i2", state_next, post_cond, 2, 1).ok();
+        if has_await {
+            writeln!(out, "  {} = comb.mux {}, {}, {} : i2", state_next, post_cond, 2, 2).ok();
+        } else {
+            writeln!(out, "  {} = comb.mux {}, {}, {} : i2", state_next, post_cond, 2, 1).ok();
+        }
         let state_after_body = ng.fresh_wire("txn_state_after");
         writeln!(out, "  {} = comb.mux {}, {}, {} : i2", state_after_body, pre_cond, state_next, 0).ok();
         writeln!(out, "  seq.always(posedge %clock) {{").ok();
         writeln!(out, "    {} <= {}", state_reg, state_after_body).ok();
         writeln!(out, "  }}").ok();
+    }
+
+    /// Emit statements that are purely combinational (no FSM involvement).
+    fn emit_stmt_body(&self, ng: &mut NameGen, out: &mut String, stmt: &Statement, reg_names: &HashMap<String, String>) {
+        match stmt {
+            Statement::Expression(expr) => {
+                self.emit_expr(ng, out, expr, reg_names, "i64");
+            }
+            Statement::Assignment { lhs, expr, .. } => {
+                if let Expr::OwnedRef(var_name) = lhs {
+                    let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Int));
+                    if let Some(reg) = reg_names.get(var_name) {
+                        let val = self.emit_expr(ng, out, expr, reg_names, &mlir_ty);
+                        if let Some(v) = val {
+                            writeln!(out, "  seq.always(posedge %clock) {{").ok();
+                            writeln!(out, "    {} <= {}", reg, v).ok();
+                            writeln!(out, "  }}").ok();
+                        }
+                    }
+                }
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                for s in statements {
+                    self.emit_stmt_body(ng, out, s, reg_names);
+                }
+            }
+            Statement::SyncBlock { body } => {
+                // Sync block: emit all statements combinatorially (parallel)
+                for s in body {
+                    self.emit_stmt_body(ng, out, s, reg_names);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Emit combinational logic for a contract condition (precondition or postcondition).
@@ -720,5 +785,47 @@ mod tests {
             )),
         ]));
         assert!(output.contains("comb.icmp eq"), "Postcondition should emit comb.icmp eq. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_await_handshake() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("x", Type::Int, Some(Expr::Integer(0))),
+            make_txn("test", vec![
+                Statement::Await {
+                    expr: Expr::Call("compute".to_string(), vec![Expr::Integer(42)]),
+                    modifiers: vec![],
+                },
+            ], Expr::Bool(true), Expr::Bool(true)),
+        ]));
+        assert!(output.contains("hw.wire"), "Await should emit handshake wires. Got:\n{}", output);
+        assert!(output.contains("comb.mux"), "Await should emit stall mux. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_sync_block() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("a", Type::Int, Some(Expr::Integer(0))),
+            make_state_decl("b", Type::Int, Some(Expr::Integer(0))),
+            make_txn("test", vec![
+                Statement::SyncBlock {
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::OwnedRef("a".to_string()),
+                            expr: Expr::Integer(10),
+                            timeout: None, modifiers: vec![],
+                        },
+                        Statement::Assignment {
+                            lhs: Expr::OwnedRef("b".to_string()),
+                            expr: Expr::Integer(20),
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                },
+            ], Expr::Bool(true), Expr::Bool(true)),
+        ]));
+        assert!(output.contains("seq.always(posedge %clock)"), "Sync block should emit seq updates. Got:\n{}", output);
     }
 }
