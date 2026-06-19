@@ -177,11 +177,111 @@ enabling precise bit-widths (i8, i16, i32, i64) for efficient FPGA synthesis.
 
 ## Webstack Backend
 
-(`src/backend/webstack.rs`, 2,327 lines) — expression emission extracted
-into feature `ExprCodegenWebstack` impls. Now integrates `TopLevel::Trigger`
-declarations as reactive signals via `collect_signals_and_transactions`.
-Generates `step_triggers()` function that marks dirty signals and propagates
-to dependent transactions. Optimizations deferred until LLVM pattern is proven.
+(`src/backend/webstack.rs`, 1,200 lines) — TypeScript emitter for the web target.
+Replaced the Rust/wasm-bindgen codegen (Phase A, 2026-06-19). The archived Rust
+codegen lives at `archive/backend/webstack_rust_codegen.rs` (1,758 lines).
+
+### Architecture
+
+```
+WebstackGenerator
+├── collect_signals_and_transactions()  — AST → signal map + txn map (shared with archived codegen)
+├── generate_ts_code()                  — main TS emitter entry point
+│   ├── ts_type_for_signal()            — SignalType → "number" / "string" / "boolean" / "any[]"
+│   ├── ts_ident()                      — name normalization (hyphens → underscores)
+│   ├── emit_ts_txn_body()              — transaction body → TS method body
+│   │   └── statement_to_ts()           — Statement → TS code (Assignment, Let, Guarded, Term, etc.)
+│   ├── expr_to_ts()                    — Expr → native TS expression (no JsValue boxing)
+│   ├── ffi_ts_impl                    — frgn from "javascript" → inline TS methods on App class
+│   └── js_glue via generate_js_glue() — view binding watchers (b-text, b-trigger, b-show, b-class, b-each)
+└── generate_arm_rust_code()            — dead code path (placeholder body)
+```
+
+### TypeScript Output
+
+Each `.rbv` file compiles to an `App` class with typed fields and async transaction methods:
+
+```typescript
+class App {
+  count: number = 0;
+  name: string = "";
+  items: any[] = [];
+
+  async increment(): Promise<void> {
+    this.count = this.count + 1;
+    return;
+  }
+}
+
+export function createApp(): App {
+  return new App();
+}
+```
+
+### Key Differences from Old Rust/wasm-bindgen Codegen
+
+| Aspect | Old (archived) | New (TS emitter) |
+|--------|----------------|-------------------|
+| Output language | Rust (`#[wasm_bindgen]`) | TypeScript |
+| Signal storage | `Vec<JsValue>` (all boxing) | Typed fields (`number`, `string`, `boolean`) |
+| Arithmetic | `JsValue::from(a + b)` → JS number | Direct `a + b` (native) |
+| FFI calls | `js_sys::Reflect::get()` + dynamic dispatch | Inline TS implementation from `frgn from "javascript"` |
+| Intrinsics | Matched on `Intrinsic` enum → Rust | Matched on `Intrinsic` enum → native TS (`console.log`, `String.fromCharCode`, etc.) |
+| Toolchain | `wasm-pack` + `wasm-bindgen` | `tsc` (standard TypeScript compiler) |
+| DOM bindings | Rust struct methods called from JS glue | Direct `app.` property/method calls from JS glue |
+| Build dependencies | Rust + wasm-pack + wasm-bindgen | TypeScript only |
+
+### Signal Type Mapping
+
+| Brief type | TS type | Initializer |
+|------------|---------|-------------|
+| `Int` | `number` | `0` |
+| `Float` | `number` | `0` |
+| `Bool` | `boolean` | `false` |
+| `String` | `string` | `""` |
+| `List<T>` | `any[]` | `[]` |
+| `Vector(N)` | `number[]` | `new Array(N).fill(0)` |
+
+### frgn from "javascript" FFI
+
+When a `.bv` file declares `frgn from "javascript"`, the `wasm_impl` and
+`wasm_setup` fields (which contain JavaScript code) are registered in
+`ffi_ts_impl` / `ffi_ts_setups`. The TS emitter inlines these as methods
+on the `App` class:
+
+```typescript
+class App {
+  myFn(arg0: any): any {
+    // wasm_impl code inlined here
+  }
+}
+```
+
+The `wasm_impl` field name is historical (from when Rust/wasm-bindgen targeted WASM).
+In the TS emitter, it serves as the JavaScript implementation code for any
+`frgn` declaration — whether or not WASM is involved.
+
+### View Binding JS Glue
+
+The `generate_js_glue()` method emits DOM watchers that reference the `App` instance:
+
+| Directive | Generated Code |
+|-----------|---------------|
+| `b-text="x"` | `el.textContent = String(app.x)` |
+| `b-trigger:click="txn"` | `el.addEventListener('click', () => app.txn())` |
+| `b-show="cond"` | `el.style.display = app.cond ? '' : 'none'` |
+| `b-class="cond:cls"` | `el.classList.toggle('cls', Boolean(app.cond))` |
+
+### Known Limitations
+
+- **ArrowMut/ArrowDiscard/ArrowTransfer**: Emit as `splice` calls; filtered
+  transfer falls through to a no-op comment
+- **Block expressions**: Emit as IIFE `(() => { ...; return last; })()`
+- **Pattern B feature dispatch**: Feature module `ExprCodegenWebstack` trait
+  still uses Rust-codegen return values (`"JsValue::TRUE"`); TS emitter
+  bypasses these by matching Expr variants directly in `expr_to_ts()`
+- **ARM target**: `generate_arm_rust_code` emits Rust for bare-metal KV260
+  (dead code path — not actively maintained)
 
 ## FFI Marshaling Convention (Critical)
 
@@ -481,6 +581,7 @@ The following are tracked but not yet implemented:
 | `to_str`/`float_to_str` | LLVM panics fixed — uses `__int_to_str__`/`snprintf` | ✅ Fixed |
 | Webstack `IntrinsicCall` | Replaced `unimplemented!()` panic with JS codegen | ✅ Fixed |
 | Webstack `foreach`/`oracle` | Replaced silent no-op with implementations | ✅ Fixed |
+| Webstack Rust codegen | Replaced with TypeScript emitter (Phase A, 2026-06-19) | ✅ Fixed |
 | Pattern B dispatch | 13 `features/stmt/` files + 16 interpreter arms — stub | Deferred |
 | `$!` macro expansion | Full engine required — `expand_macro_call` returns error | Deferred |
 | `Private` field visibility | Parsed but silently not enforced in typechecker | Low |
