@@ -3161,6 +3161,25 @@ fn compile_wasm32_module(
     program.synthesize_builtin_types();
     program.synthesize_init_txn();
 
+    // Validate FFI cross-compilation rules for WASM target (B.5)
+    for item in &program.items {
+        if let ast::TopLevel::ForeignBinding { signature, .. } = item {
+            match signature.frgn_target {
+                ast::ForeignTarget::Named(ref lang) if lang == "javascript" => {
+                    eprintln!("  Error: 'frgn from \"javascript\"' not available in WASM-compiled modules");
+                    eprintln!("  Offending declaration: frgn {} from \"javascript\"", signature.name);
+                    return Err("FFI target 'javascript' not available in WASM modules".into());
+                }
+                ast::ForeignTarget::Named(ref lang) if lang != "c" => {
+                    eprintln!("  Error: 'frgn from \"{}\"' not available in WASM-compiled modules", lang);
+                    eprintln!("  Offending declaration: frgn {} from \"{}\"", signature.name, lang);
+                    return Err(format!("FFI target '{}' not available in WASM modules", lang).into());
+                }
+                _ => {}
+            }
+        }
+    }
+
     let mut tc = typechecker::TypeChecker::new()
         .with_target(typechecker::CompilationTarget::Interpreter);
     let type_errors = tc.check_program(&mut program.clone());
@@ -3235,71 +3254,6 @@ fn run_webstack(
     stdlib_path: Option<PathBuf>,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
-
-    /// Intent: compile via wasm pack.
-    fn compile_via_wasm_pack(stem: &str, output_path: &Path, rs_path: &Path) {
-        let cargo_toml = format!(r#"
-[package]
-name = "{}"
-version = "0.1.0"
-edition = "2021"
-
-[lib]
-crate-type = ["cdylib"]
-
-[dependencies]
-wasm-bindgen = "0.2"
-js-sys = "0.3"
-"#,
-            stem
-        );
-        let cargo_path = output_path.join("Cargo.toml");
-        let _ = fs::write(&cargo_path, cargo_toml);
-
-        let wasm_pack_result = std::process::Command::new("wasm-pack")
-            .args(&["build", "--target", "web", "--out-dir", "pkg"])
-            .current_dir(output_path)
-            .output();
-
-        match wasm_pack_result {
-            Ok(result) if result.status.success() => {
-                let wasm_file = output_path.join("pkg").join(format!("{}_bg.wasm", stem));
-                if wasm_file.exists() {
-                    println!("  WASM compiled: {}", wasm_file.display());
-                }
-                println!("  Use: {}", output_path.join("pkg").display());
-            }
-            Ok(_) => {
-                eprintln!("  wasm-pack not available or failed, trying rustc...");
-                let compile_result = std::process::Command::new("rustc")
-                    .args(&[
-                        "--target", "wasm32-unknown-unknown",
-                        "--crate-type", "cdylib",
-                        "-O",
-                        "-o", &output_path.join(format!("{}.wasm", stem)).to_string_lossy(),
-                        &rs_path.to_string_lossy()
-                    ])
-                    .output();
-
-                match compile_result {
-                    Ok(cresult) if cresult.status.success() => {
-                        println!("  WASM compiled: {}", output_path.join(format!("{}.wasm", stem)).display());
-                    }
-                    Ok(_) => {
-                        eprintln!("  Note: rustc wasm32 target not installed");
-                        eprintln!("  Install with: rustup target add wasm32-unknown-unknown");
-                    }
-                    Err(_) => {
-                        eprintln!("  Note: rustc not found - outputting Rust source only");
-                    }
-                }
-            }
-            Err(_) => {
-                eprintln!("  Note: wasm-pack not found - outputting Rust source only");
-                eprintln!("  Install wasm-pack from https://rustwasm.github.io/wasm-pack/");
-            }
-        }
-    }
 
     match ext {
         "bv" | "sbv" => {

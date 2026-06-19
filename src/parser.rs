@@ -968,6 +968,21 @@ impl<'a> Parser<'a> {
 
         let cur_tok = self.current_token().cloned();
         let result = match cur_tok {
+            // (wasm) import / (circt) import / (javascript) import — try parsing target-prefixed import
+            Some(Ok(Token::LParen)) => {
+                match self.try_parse_import_target() {
+                    Some(item) => Ok(wrap_test(item, &test_groups)),
+                    // Not an import target — fall through to exec statement parser
+                    None => match self.try_parse_exec_statement() {
+                        Some(stmt) => Ok(TopLevel::Statement(Box::new(stmt))),
+                        None => Err(SyntaxError::UnexpectedToken {
+                            expected: "top-level declaration or statement".to_string(),
+                            found: "(".to_string(),
+                            span,
+                        }),
+                    },
+                }
+            }
             Some(Ok(Token::Import)) => {
                 self.parse_import().map(|item| wrap_test(item, &test_groups))
             }
@@ -1126,6 +1141,40 @@ impl<'a> Parser<'a> {
                 None
             }
         }
+    }
+
+    /// Try to parse a `(wasm) import` / `(circt) import` / etc. target-prefixed import.
+    /// Returns None if the current token is not a valid import target prefix.
+    fn try_parse_import_target(&mut self) -> Option<TopLevel> {
+        // Current must be `(`, peek must be a target keyword
+        if !matches!(self.current_token(), Some(Ok(Token::LParen))) {
+            return None;
+        }
+        let peek_kw = match self.peek_token() {
+            Some(Ok(Token::Identifier(kw))) => kw.clone(),
+            _ => return None,
+        };
+        if !matches!(peek_kw.as_str(), "wasm" | "native" | "circt" | "javascript") {
+            return None;
+        }
+
+        // Create a temporary lexer from source after current token
+        let after_open_pos = self.current.as_ref().map(|(_, s)| s.end).unwrap_or(self.pos);
+        let sub_source = &self.source[after_open_pos..];
+        let mut temp = Parser::new(sub_source);
+        if !matches!(temp.current_token(), Some(Ok(Token::Identifier(kw))) if matches!(kw.as_str(), "wasm" | "native" | "circt" | "javascript")) {
+            return None;
+        }
+        temp.advance(); // past keyword
+        if !matches!(temp.current_token(), Some(Ok(Token::RParen))) {
+            return None;
+        }
+        temp.advance(); // past )
+        if !matches!(temp.current_token(), Some(Ok(Token::Import))) {
+            return None;
+        }
+        // Confirmed: valid import target — let parse_import handle it
+        self.parse_import().ok()
     }
 
     fn parse_import(&mut self) -> Result<TopLevel, SyntaxError> {
@@ -8868,6 +8917,46 @@ mod parser_tests {
             }
         }
     }
+
+    #[test]
+    fn test_parse_import_wasm_target() {
+        let s = r#"(wasm) import "physics.bv" as physics; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "(wasm) import should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert_eq!(imp.target, crate::ast::ImportTarget::Wasm);
+            assert_eq!(imp.path.join("/"), "physics.bv");
+        } else {
+            panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_circt_target() {
+        let s = r#"(circt) import "alu.cbv" as alu; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "(circt) import should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert_eq!(imp.target, crate::ast::ImportTarget::Circt);
+        } else {
+            panic!("Expected Import");
+        }
+    }
+
+    #[test]
+    fn test_parse_import_javascript_target() {
+        let s = r#"(javascript) import "greet.js" as greet; defn main -> Int { term 42; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "(javascript) import should parse: {:?}", result.err());
+        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
+            assert_eq!(imp.target, crate::ast::ImportTarget::Javascript);
+        } else {
+            panic!("Expected Import");
+        }
+    }
 }
 
 enum BracketElement {
@@ -9104,46 +9193,6 @@ mod kani_full_tests {
         if let TopLevel::Import(imp) = &result.unwrap().items[0] {
             assert!(imp.is_magic, "import# should set is_magic = true");
             assert_eq!(imp.path.join("/"), "std/core/*");
-        } else {
-            panic!("Expected Import");
-        }
-    }
-
-    #[test]
-    fn test_parse_import_wasm_target() {
-        let s = r#"(wasm) import physics from "physics.bv"; defn main -> Int { term 42; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "(wasm) import should parse: {:?}", result.err());
-        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
-            assert_eq!(imp.target, crate::ast::ImportTarget::Wasm);
-            assert_eq!(imp.path.join("/"), "physics.bv");
-        } else {
-            panic!("Expected Import");
-        }
-    }
-
-    #[test]
-    fn test_parse_import_circt_target() {
-        let s = r#"(circt) import alu from "alu.cbv"; defn main -> Int { term 42; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "(circt) import should parse: {:?}", result.err());
-        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
-            assert_eq!(imp.target, crate::ast::ImportTarget::Circt);
-        } else {
-            panic!("Expected Import");
-        }
-    }
-
-    #[test]
-    fn test_parse_import_javascript_target() {
-        let s = r#"(javascript) import greet from "greet.js"; defn main -> Int { term 42; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "(javascript) import should parse: {:?}", result.err());
-        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
-            assert_eq!(imp.target, crate::ast::ImportTarget::Javascript);
         } else {
             panic!("Expected Import");
         }

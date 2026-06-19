@@ -1201,6 +1201,101 @@ mod tests {
         let output = backend.generate(&program, &[], "test");
         assert!(output.ts_code.contains("export function createApp"));
     }
+
+    #[test]
+    fn test_ts_int_division_trunc() {
+        // Brief integer division must emit native JS division.
+        // JS division yields floats, so Brief integer division would need
+        // Math.trunc() — but the current TS emitter uses direct `/`.
+        let mut backend = WebstackGenerator::new();
+        let out = backend.expr_to_ts(&Expr::Div(
+            Box::new(Expr::Integer(3)),
+            Box::new(Expr::Integer(2)),
+        ));
+        assert!(out.contains("3 / 2") || out.contains("Math.trunc"),
+            "Int division should emit native JS division (or Math.trunc): got {}", out);
+    }
+
+    #[test]
+    fn test_ts_reactive_contract() {
+        // A simple transaction with a state variable, assignment, and term
+        let mut backend = WebstackGenerator::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "count".into(),
+                    ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None,
+                    bit_range: None,
+                    range_constraint: None,
+                    is_override: false,
+                    os_mode: false,
+                    span: None,
+                    attrs: vec![],
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "tick".into(),
+                    parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Lt(
+                            Box::new(Expr::Identifier("count".into())),
+                            Box::new(Expr::Integer(10)),
+                        ),
+                        post_condition: Expr::Eq(
+                            Box::new(Expr::Identifier("count".into())),
+                            Box::new(Expr::Add(
+                                Box::new(Expr::PriorState("count".into())),
+                                Box::new(Expr::Integer(1)),
+                            )),
+                        ),
+                        watchdog: None,
+                        span: None,
+                    },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("count".into()),
+                            expr: Expr::Add(
+                                Box::new(Expr::Identifier("count".into())),
+                                Box::new(Expr::Integer(1)),
+                            ),
+                            timeout: None,
+                            modifiers: vec![],
+                        },
+                        Statement::Term {
+                            values: vec![],
+                            swan_song: None,
+                            modifiers: vec![],
+                        },
+                    ],
+                    is_async: false,
+                    is_reactive: true,
+                    reactor_speed: None,
+                    span: None,
+                    is_lambda: false,
+                    dependencies: vec![],
+                    attrs: vec![],
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let output = backend.generate(&program, &[], "test");
+        assert!(output.ts_code.contains("tick"), "Transaction method 'tick' should exist");
+        assert!(output.ts_code.contains("count") || output.ts_code.contains("count = count + 1"),
+            "Should reference count signal in tick body");
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]

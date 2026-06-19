@@ -203,7 +203,7 @@ let orc    = Enemy{ hp: 20, ... };
 
 This is future work. The `$!keyboard_input` decorator (Phase B) works within the current single-instance reactor model. Per-instance reactivity only becomes relevant when we need hundreds of independently ticking entities — a game engine use case.
 
-### Phase C — Spurious Epoll Wakeup Guard (ready now)
+### Phase C — Spurious Epoll Wakeup Guard (committed)
 
 ### C1: Root cause
 
@@ -283,6 +283,6 @@ printf "hello\x03" | timeout 3 ./officina    # pipe test still works
 ### Execution Order
 
 1. ~~Phase A fixes (committed at 28e2195)~~
-2. **Phase C — spurious epoll guard (ready now)**
+2. ~~Phase C — spurious epoll guard (committed)~~
 3. Phase B architecture (requires AST + parser + expander + stdlib changes)
 4. Future: per-instance reactive structs (when game-engine work begins)
