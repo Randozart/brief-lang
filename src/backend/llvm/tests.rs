@@ -4611,3 +4611,72 @@ let spec = crate::target_spec::TargetSpec {
         let backend2 = LlvmBackend::new().with_embedded_mode(false);
         assert!(!backend2.is_embedded, "with_embedded_mode(false) should not set is_embedded");
     }
+
+    #[test]
+    fn test_embedded_rejects_string_state() {
+        let mut backend = LlvmBackend::new().with_embedded_mode(true);
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "buf".to_string(), ty: Type::String,
+                    expr: Some(Expr::String("".to_string())),
+                    address: None, bit_range: None, range_constraint: None,
+                    is_override: false, os_mode: false, span: None, attrs: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        backend.check_embedded_restrictions(&program);
+        let has_error = backend.warnings().iter().any(|w| w.contains("TargetError") && w.contains("String"));
+        assert!(has_error, "Embedded mode should reject String state. Warnings: {:?}", backend.warnings());
+    }
+
+    #[test]
+    fn test_embedded_rejects_thread_intrinsic() {
+        let mut backend = LlvmBackend::new().with_embedded_mode(true);
+        let program = Program {
+            items: vec![
+                TopLevel::Definition(Definition {
+                    name: "spawn".to_string(),
+                    type_params: vec![],
+                    parameters: vec![],
+                    outputs: vec![],
+                    output_type: None,
+                    output_names: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Expression(
+                            Expr::IntrinsicCall { intrinsic: Intrinsic::ThreadCreate, args: vec![Expr::Integer(0)] },
+                        ),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_lambda: false,
+                    modifiers: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        backend.check_embedded_restrictions(&program);
+        let has_error = backend.warnings().iter().any(|w| w.contains("TargetError") && w.contains("ThreadCreate"));
+        assert!(has_error, "Embedded mode should reject ThreadCreate. Warnings: {:?}", backend.warnings());
+    }
+
+    #[test]
+    fn test_embedded_accepts_int_state() {
+        let mut backend = LlvmBackend::new().with_embedded_mode(true);
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "counter".to_string(), ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, range_constraint: None,
+                    is_override: false, os_mode: false, span: None, attrs: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        backend.check_embedded_restrictions(&program);
+        let has_error = backend.warnings().iter().any(|w| w.contains("TargetError"));
+        assert!(!has_error, "Embedded mode should accept Int state. Warnings: {:?}", backend.warnings());
+    }

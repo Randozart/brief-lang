@@ -135,7 +135,7 @@ pub(crate) fn hoist_terminating_guard(
 }
 
 use crate::ast::{
-    ArrowDir, BracketOp, DispatchMode, Expr, ForeignSignature, MatchArm, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
+    ArrowDir, BracketOp, DispatchMode, Expr, ForeignSignature, Intrinsic, MatchArm, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
 };
 use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
 
@@ -887,6 +887,178 @@ impl LlvmBackend {
         &self.spirv_kernels
     }
 
+    /// Scan the typed program for constructs that are forbidden in embedded mode:
+    /// dynamic heap allocation (List, String, HashMap) and threading intrinsics.
+    pub(crate) fn check_embedded_restrictions(&mut self, program: &Program) {
+        let threading_intrinsics: &[Intrinsic] = &[
+            Intrinsic::ThreadCreate, Intrinsic::ThreadJoin, Intrinsic::ThreadExit,
+            Intrinsic::MutexLock, Intrinsic::MutexUnlock,
+            Intrinsic::CondvarWait, Intrinsic::CondvarSignal, Intrinsic::CondvarBroadcast,
+        ];
+        for item in &program.items {
+            match item {
+                TopLevel::StateDecl(decl) => {
+                    if self.type_is_heap_allocated(&decl.ty) {
+                        self.warnings.push(format!(
+                            "TargetError: dynamic allocation not supported on target 'Embedded' — state variable '{}' has type {:?}",
+                            decl.name, decl.ty
+                        ));
+                    }
+                }
+                TopLevel::Transaction(txn) => {
+                    for stmt in &txn.body {
+                        self.check_stmt_embedded(stmt, &txn.name, threading_intrinsics);
+                    }
+                }
+                TopLevel::Definition(defn) => {
+                    for stmt in &defn.body {
+                        self.check_stmt_embedded(stmt, &defn.name, threading_intrinsics);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn type_is_heap_allocated(&self, ty: &Type) -> bool {
+        matches!(ty, Type::String | Type::Data) || matches!(ty, Type::Custom(name) if name == "List" || name == "HashMap" || name == "HashSet" || name == "Stack" || name == "Queue" || name == "StringBuilder")
+    }
+
+    fn check_stmt_embedded(&mut self, stmt: &Statement, ctx_name: &str, threading_intrinsics: &[Intrinsic]) {
+        match stmt {
+            Statement::Let { ty, expr, .. } => {
+                if let Some(t) = ty {
+                    if self.type_is_heap_allocated(t) {
+                        self.warnings.push(format!(
+                            "TargetError: dynamic allocation not supported on target 'Embedded' — variable in '{}' has type {:?}",
+                            ctx_name, t
+                        ));
+                    }
+                }
+                if let Some(e) = expr {
+                    self.check_expr_embedded(e, ctx_name, threading_intrinsics);
+                }
+            }
+            Statement::Assignment { expr, .. } => {
+                self.check_expr_embedded(expr, ctx_name, threading_intrinsics);
+            }
+            Statement::Expression(e) => {
+                self.check_expr_embedded(e, ctx_name, threading_intrinsics);
+            }
+            Statement::Term { values, swan_song, .. } | Statement::TermBang { values, swan_song, .. } => {
+                for v in values.iter().flatten() {
+                    self.check_expr_embedded(v, ctx_name, threading_intrinsics);
+                }
+                if let Some(swan) = swan_song {
+                    self.check_stmt_embedded(swan, ctx_name, threading_intrinsics);
+                }
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                self.check_expr_embedded(condition, ctx_name, threading_intrinsics);
+                for s in statements {
+                    self.check_stmt_embedded(s, ctx_name, threading_intrinsics);
+                }
+            }
+            Statement::Unification { expr, .. } => {
+                self.check_expr_embedded(expr, ctx_name, threading_intrinsics);
+            }
+            Statement::Foreach { list, body, .. } => {
+                self.check_expr_embedded(list, ctx_name, threading_intrinsics);
+                for s in body {
+                    self.check_stmt_embedded(s, ctx_name, threading_intrinsics);
+                }
+            }
+            Statement::Oracle { body, handler, .. } => {
+                for s in body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
+                for s in handler { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
+            }
+            Statement::SyncBlock { body } => {
+                for s in body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
+            }
+            Statement::Await { expr, .. } => {
+                self.check_expr_embedded(expr, ctx_name, threading_intrinsics);
+            }
+            Statement::Async { body, .. } => {
+                self.check_stmt_embedded(body, ctx_name, threading_intrinsics);
+            }
+            Statement::AsyncAwait { body, .. } => {
+                self.check_stmt_embedded(body, ctx_name, threading_intrinsics);
+            }
+            _ => {}
+        }
+    }
+
+    fn check_expr_embedded(&mut self, expr: &Expr, ctx_name: &str, threading_intrinsics: &[Intrinsic]) {
+        match expr {
+            Expr::IntrinsicCall { intrinsic, .. } => {
+                if threading_intrinsics.contains(intrinsic) {
+                    self.warnings.push(format!(
+                        "TargetError: threading intrinsic not supported on target 'Embedded' — {:?} in '{}'",
+                        intrinsic, ctx_name
+                    ));
+                }
+            }
+            Expr::Call(_, args) | Expr::ListLiteral(args) => {
+                for arg in args {
+                    self.check_expr_embedded(arg, ctx_name, threading_intrinsics);
+                }
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+            | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
+            | Expr::Or(l, r) | Expr::And(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+            | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
+                self.check_expr_embedded(l, ctx_name, threading_intrinsics);
+                self.check_expr_embedded(r, ctx_name, threading_intrinsics);
+            }
+            Expr::Neg(inner) | Expr::Not(inner) | Expr::BitNot(inner)
+            | Expr::Cast(inner, _) => {
+                self.check_expr_embedded(inner, ctx_name, threading_intrinsics);
+            }
+            Expr::OwnedRef(_) | Expr::PriorState(_) => {} // identifiers, no embedded checks
+            Expr::FieldAccess(target, _) | Expr::ListIndex(target, _) => {
+                self.check_expr_embedded(target, ctx_name, threading_intrinsics);
+            }
+            Expr::Slice { value, start, end, stride, .. } => {
+                self.check_expr_embedded(value, ctx_name, threading_intrinsics);
+                for opt in [start, end, stride].iter() {
+                    if let Some(e) = opt {
+                        self.check_expr_embedded(e, ctx_name, threading_intrinsics);
+                    }
+                }
+            }
+            Expr::MultiSlice { value, .. } => {
+                self.check_expr_embedded(value, ctx_name, threading_intrinsics);
+            }
+            Expr::Block(stmts, _) => {
+                for s in stmts {
+                    self.check_stmt_embedded(s, ctx_name, threading_intrinsics);
+                }
+            }
+            Expr::StructInstance(_, fields) => {
+                for (_, v) in fields {
+                    self.check_expr_embedded(v, ctx_name, threading_intrinsics);
+                }
+            }
+            Expr::MapLiteral(entries) => {
+                for (k, v) in entries {
+                    self.check_expr_embedded(k, ctx_name, threading_intrinsics);
+                    self.check_expr_embedded(v, ctx_name, threading_intrinsics);
+                }
+            }
+            Expr::SetLiteral(items) => {
+                for item in items {
+                    self.check_expr_embedded(item, ctx_name, threading_intrinsics);
+                }
+            }
+            Expr::ObjectLiteral(fields) => {
+                for (_, v) in fields {
+                    self.check_expr_embedded(v, ctx_name, threading_intrinsics);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn generate(&mut self, program: &Program) -> String {
         let mut analysis = crate::backend::analyze_program(program, false);
         self.dep_graph = analysis.dependency_graph.clone();
@@ -915,6 +1087,10 @@ impl LlvmBackend {
 
         let cg = &analysis.call_graph;
         self.has_cycles = cg.has_cycle();
+
+        if self.is_embedded {
+            self.check_embedded_restrictions(program);
+        }
 
         self.exit_condition = program.exit_condition.clone();
         self.build_field_index(program);
