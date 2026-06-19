@@ -609,6 +609,18 @@ pub struct LlvmBackend {
     pub(crate) spirv_kernels: Vec<String>,
     /// Compiled SPIR-V binary blobs for embedding in the output.
     pub(crate) spirv_blobs: Vec<Vec<u8>>,
+
+    // ── Embedded Mode ──────────────────────────────────────
+    pub(crate) is_embedded: bool,
+}
+
+/// Configuration for embedded (bare-metal) LLVM codegen.
+#[derive(Debug, Clone)]
+pub struct EmbeddedConfig {
+    pub target_triple: String,
+    pub linker_script: Option<String>,
+    pub freestanding: bool,
+    pub halt_on_term: bool,
 }
 
 impl LlvmBackend {
@@ -692,6 +704,7 @@ impl LlvmBackend {
             gpu_backend: "vulkan".to_string(),
             spirv_kernels: Vec::new(),
             spirv_blobs: Vec::new(),
+            is_embedded: false,
         }
     }
 
@@ -756,6 +769,11 @@ impl LlvmBackend {
 
     pub fn with_gpu_backend(mut self, backend: String) -> Self {
         self.gpu_backend = backend;
+        self
+    }
+
+    pub fn with_embedded_mode(mut self, enabled: bool) -> Self {
+        self.is_embedded = enabled;
         self
     }
 

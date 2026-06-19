@@ -128,6 +128,10 @@ impl LlvmBackend {
                             writeln!(out, "{}ret i32 {}", indent, tr).ok();
                         } else if self.fn_ret_ty == "i64" {
                             writeln!(out, "{}ret i64 {}", indent, r).ok();
+                        } else if self.is_embedded {
+                            writeln!(out, "{}store i64 {}, ptr %state", indent, r).ok();
+                            writeln!(out, "{}call void asm sideeffect \"wfi\", \"\"()", indent).ok();
+                            writeln!(out, "{}ret void", indent).ok();
                         } else {
                             writeln!(out, "{}ret void", indent).ok();
                         }
@@ -135,6 +139,9 @@ impl LlvmBackend {
                         writeln!(out, "{}ret i32 0", indent).ok();
                     } else if self.returns_i64 {
                         writeln!(out, "{}ret i64 0", indent).ok();
+                    } else if self.is_embedded {
+                        writeln!(out, "{}call void asm sideeffect \"wfi\", \"\"()", indent).ok();
+                        writeln!(out, "{}ret void", indent).ok();
                     } else {
                         writeln!(out, "{}ret void", indent).ok();
                     }

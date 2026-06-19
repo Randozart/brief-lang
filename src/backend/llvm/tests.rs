@@ -4594,3 +4594,20 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("call i64 @get_int()"),
             "Int pipe frgn should emit raw call. Got:\n{}", &output[..std::cmp::min(2000, output.len())]);
     }
+
+    #[test]
+    fn test_embedded_term_halt() {
+        let mut backend = LlvmBackend::new().with_embedded_mode(true);
+        let mut out = String::new();
+        let stmt = Statement::TermBang { values: vec![], swan_song: None, modifiers: vec![] };
+        backend.emit_stmt(&mut out, &stmt, "");
+        assert!(out.contains("wfi"), "Embedded term! should emit wfi. Got:\n{}", out);
+    }
+
+    #[test]
+    fn test_embedded_mode_flag() {
+        let backend = LlvmBackend::new().with_embedded_mode(true);
+        assert!(backend.is_embedded, "with_embedded_mode(true) should set is_embedded");
+        let backend2 = LlvmBackend::new().with_embedded_mode(false);
+        assert!(!backend2.is_embedded, "with_embedded_mode(false) should not set is_embedded");
+    }

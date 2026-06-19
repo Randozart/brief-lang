@@ -1,79 +1,169 @@
-# Plan: Trigger Variable Not Cleared + step() Type Fix
+# Plan: Keyboard Input — Immediate Fix + Macro Decorator Architecture
 
 **Date:** 2026-06-19  
-**Status:** Planned, awaiting execution request
+**Status:** Written (awaiting execution request)  
 
-## Problem
+## Overview
 
-Two bugs in officina's keyboard input:
+Two-phased work: (A) immediate fixes for the officina character-repeat bug, (B) architectural addition to let macros emit top-level items so keyboard input becomes a one-line decorator.
 
-### Bug 1: Trigger variable never reset (user-facing)
+---
 
-`officina.bv` declares `trg keypress: Char @stdin#;`. When the user types a character, the stdin epoll handler stores it to the `keypress` state field. The `process_input` txn reads it and appends to `current_input`, but **nothing ever resets `keypress` back to `'\0'`**.
+## Phase A — Immediate Fixes (ready now)
 
-The guard `[booted && keypress != '\0']` stays true forever for that character value. If any code path re-evaluates the guard (e.g., a timer tick, spurious epoll_wait return, or convergence loop), the same character gets appended again — producing `hhhhhhhhhhhh...`.
+### A1: `loop_engine.rs:1264-1272` — type-correct load/store in `step()`
 
-### Bug 2: `step()` emits wrong load/store type (latent)
+`emit_trg_step` hardcodes `load volatile i64` / `store volatile i64` for all trigger fields regardless of their actual LLVM type in `%State`:
 
-`emit_trg_step` in `loop_engine.rs` hardcodes `load volatile i64` / `store volatile i64` for ALL trigger fields regardless of their actual LLVM type in `%State`:
-- `Char` → `i32`
-- `Bool` → `i8`
-- `String` → `i8*`
+| Brief type | LLVM type |
+|------------|-----------|
+| `Char`     | `i32`     |
+| `Bool`     | `i8`      |
+| `String`   | `i8*`     |
+| `Int`      | `i64`     |
+| `Float`    | `float`   |
 
-With opaque pointers this reads/writes 8 bytes from a 4/1/8-byte field, potentially clobbering adjacent struct padding. Currently benign because the same value is written back (volatile read-modify-write), but is semantically wrong.
+Match on `self.field_types[idx]` and emit the correct typed load/store. Three sub-locations: trigger volatile loads (1264-1272), dependency field loads (1318-1328), and proxy store (1329-1339).
 
-## Fix
+### A2: `officina.bv:78-80` — clear trigger after consumption
 
-### Fix 1: `loop_engine.rs:1258-1350` — type-correct load/store in `emit_trg_step`
+Add `&keypress = '\0';` unconditionally before `term;` so the guard `[booted && keypress != '\0']` converges to false after one firing.
 
-Three locations need to match on the actual field type instead of hardcoding `i64`:
+### A3: Verification
 
-| Location | Lines | Current code | Fix |
-|----------|-------|--------------|-----|
-| Trigger volatile loads | 1264-1272 | `load volatile i64, i64*` | Match `self.field_types[idx]`: i32, i8, i8*, ptr, i64 |
-| Dependency field loads | 1318-1328 | `load i64, i64*` | Match `self.field_types[dep_idx]` |
-| Proxy store | 1329-1339 | `store i64, i64*` | Match `self.field_types[idx]` for destination |
-
-Example for trigger loads:
-```rust
-let ty_str = &self.field_types[idx];
-match ty_str.as_str() {
-    "i32" => {
-        writeln!(out, "  {} = load volatile i32, i32* {}, align 4", ld, gep).ok();
-        writeln!(out, "  store volatile i32 {}, i32* {}, align 4", ld, gep).ok();
-    }
-    "i8" => {
-        writeln!(out, "  {} = load volatile i8, i8* {}, align 1", ld, gep).ok();
-        writeln!(out, "  store volatile i8 {}, i8* {}, align 1", ld, gep).ok();
-    }
-    "i8*" | "ptr" => {
-        writeln!(out, "  {} = load volatile i8*, i8** {}, align 8", ld, gep).ok();
-        writeln!(out, "  store volatile i8* {}, i8** {}, align 8", ld, gep).ok();
-    }
-    _ => {
-        writeln!(out, "  {} = load volatile i64, i64* {}, align 8", ld, gep).ok();
-        writeln!(out, "  store volatile i64 {}, i64* {}, align 8", ld, gep).ok();
-    }
-}
+```bash
+cargo test --lib
+./target/release/brief-compiler build ~/Projects/officina-cli/officina.bv
+printf "hello\x03" | timeout 3 ./officina
 ```
 
-### Fix 2: `officina.bv:78-80` — clear keypress after consumption
+---
 
-Add `&keypress = '\0';` unconditionally before `term;` in `process_input`:
+## Phase B — Macro Decorator Architecture
+
+### B1: Architecture
+
+**One macro pattern, one syntax**: `$!name { overrides? }` before a `rct txn` = decorator. The macro receives the following declaration's AST parts (name, guard, body) as implicit arguments and emits augmented top-level items.
+
+### B2: AST changes (`src/ast.rs`)
+
+| Change | Detail |
+|--------|--------|
+| `Value::TopLevels(Vec<TopLevel>)` | New Value variant — macro return type for top-level items |
+| `Expr::QuoteTopBlock { items: Vec<TopLevel> }` | `quote_top { }` syntax inside macro bodies — produces top-level items |
+| Named block args on MacroCall | `on_char: (ch) { ... }` in trailing `{ }` parsed as `HashMap<String, (Vec<String>, Block)>` |
+| `TopLevel::DecoratedMacro` | Parser wires `$!name { overrides }` + following `rct txn` into one AST node: `DecoratedMacro(MacroCall, Box<TopLevel>)` |
+
+### B3: Parser changes (`src/parser.rs`)
+
+| Change | Detail |
+|--------|--------|
+| Decorator detection | In `parse_top_level()`, if `$!` call is followed by a declaration keyword (`rct`, `defn`), parse as `TopLevel::DecoratedMacro` |
+| Named block args | Inside `$!name { }` trailing block, parse `label: (params) { body },` pairs instead of a single raw Block |
+| `quote_top { }` | `QuoteTopBlock` parser — parses top-level items inside macro definitions |
+| Param-aware `@` interpolation | Inside `quote_top { }`, the parser knows which identifiers are macro params. `@name` → interpolation; `@stdin` → literal (not a param, falls through to trigger source token). This is controlled by a `macro_param_names: Option<HashSet<String>>` flag on the parser context. |
+| `gensym#()` in macro context | Already works — returns fresh `__gensym_N` identifiers |
+
+### B4: Expander changes (`src/features/macros/expand.rs`)
+
+| Change | Detail |
+|--------|--------|
+| `TopLevel::DecoratedMacro` expansion | Extract `rct txn`'s name, guard, body as AST; pass them as implicit args to the macro call; call macro expansion; splice returned `Vec<TopLevel>` into program |
+| `Value::TopLevels` handling | If macro returns `Value::TopLevels(items)`, splice items directly (not wrapped in `TopLevel::Statement`) |
+| `QuoteTopBlock` execution | Inside interpreter, `QuoteTopBlock` evaluates to `Value::TopLevels` |
+
+### B5: Hygiene changes (`src/features/macros/hygiene.rs`)
+
+Extend `apply_hygiene` to walk top-level items (not just statements), so `let trg_name = gensym#()` in macro body produces unique names.
+
+### B6: `lib/std/tty.bv` — `keyboard_input` macro
 
 ```brief
+macro keyboard_input(body, guard, name) {
+    let trg_name = gensym#();
+    term quote_top {
+        trg @trg_name: Char @stdin#;
+        rct txn @name [@guard && @trg_name != '\0']] {
+            let __ch = @trg_name;
+            [__ch == '\n'] { @on_enter; &@trg_name = '\0'; term; };
+            [__ch == '\x7f'] { @on_backspace; &@trg_name = '\0'; term; };
+            [__ch == '\x03'] { @on_ctrl_c; &@trg_name = '\0'; term; };
+            [__ch != '\n' && __ch != '\x7f' && __ch != '\x03'] {
+                @on_char(__ch);
+                &@trg_name = '\0';
+                term;
+            };
+            &@trg_name = '\0';
+            @body
+            term;
+        };
+    };
+};
+```
+
+Defaults for each handler are defined inside the macro as fallback blocks:
+- `on_char(ch)`: appends `(String)ch` to a state variable `current_input`
+- `on_enter()`: submits current input, clears it
+- `on_backspace()`: trims current_input by 1
+- `on_ctrl_c()`: restores terminal, exits
+
+### B7: User API
+
+```brief
+// With defaults only — works as-is:
+$!keyboard_input
+rct txn process_input [needs_redraw]] {
     &needs_redraw = true;
-    &keypress = '\0';
+    term;
+};
+
+// With overrides:
+$!keyboard_input {
+    on_char: (ch) { &current_input = &current_input + (String)ch; },
+    on_ctrl_c: () { tty_raw_mode#(false); term! -> exit#(0); },
+}
+rct txn process_input [needs_redraw]] {
+    &needs_redraw = true;
     term;
 };
 ```
 
-This makes the guard `[booted && keypress != '\0']` converge to false after one firing, regardless of which guard branch executed.
+### B8: What the user does NOT write
 
-## Verification
+- No `trg keypress: Char @stdin#;` — macro gensyms it
+- No `keypress != '\0'` guard — macro appends it
+- No `&keypress = '\0'` — macro injects it
+- No escape sequences (`\x7f`, `\x03`, `\n`) — macro's default handlers handle them
+- No trigger variable name — macro gensyms it
+
+### B9: Files changed
+
+| File | Phase | Change |
+|------|-------|--------|
+| `src/backend/llvm/loop_engine.rs` | A | Type-correct step() loads/stores |
+| `officina.bv` (user's project) | A | Add `&keypress = '\0'` |
+| `src/ast.rs` | B | `Value::TopLevels`, `QuoteTopBlock`, named block args, `DecoratedMacro` |
+| `src/parser.rs` | B | Decorator detection, `quote_top { }`, param-aware `@`, named blocks |
+| `src/features/macros/expand.rs` | B | Decorator expansion, `TopLevels` splicing |
+| `src/features/macros/template.rs` | B | `QuoteTopBlock` → `TopLevels` in interpreter |
+| `src/features/macros/hygiene.rs` | B | Top-level item hygiene |
+| `lib/std/tty.bv` | B | `keyboard_input` macro |
+| `docs/architecture/features/macro.md` | B | Update architecture doc |
+
+### B10: Verification
 
 ```bash
-cargo test --lib                              # compiler tests pass
-./target/release/brief-compiler build ~/Projects/officina-cli/officina.bv
-printf "hello\x03" | timeout 2 ./officina     # "hello" appears once, not "hhhhhhhhheeee..."
+cargo test --lib                                          # all existing tests pass
+# New test: decorator macro expands trg + augmented txn
+cargo test --lib macro_decorator_test
+# Build officina using $!keyboard_input decorator
+./target/release/brief-compiler build officina.bv
+printf "hello\x03" | timeout 3 ./officina                 # one "hello", no repeats
 ```
+
+---
+
+## Execution Order
+
+1. Phase A fixes (proven, scoped, ready now)
+2. Phase B architecture (requires AST + parser + expander + stdlib changes)

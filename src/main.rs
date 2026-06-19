@@ -2411,7 +2411,8 @@ fn run_llvm_compile(
         .with_explain(explain)
         .with_emit_remarks(emit_remarks)
         .with_gpu_offload(gpu_offload)
-        .with_gpu_backend(gpu_backend.to_string());
+        .with_gpu_backend(gpu_backend.to_string())
+        .with_embedded_mode(is_embedded_extension(file_path));
     if dead_info_disabled {
         llvm_backend = llvm_backend.with_dead_info_disabled(true);
     }
