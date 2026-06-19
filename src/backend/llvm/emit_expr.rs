@@ -3657,18 +3657,19 @@ impl LlvmBackend {
         }
     }
 
-    /// Emit inline string concatenation: malloc + header setup + memcpy.
+    /// Emit inline string concatenation: malloc + header setup + memcpy + free.
     /// Both operands are i8* (Brief header pointers). Returns i8*.
-    /// Frees heap-allocated operands after copying (detected by bit-0 tag:
-    /// string constants are tagged with 1, heap strings have bit 0 clear).
+    /// Frees temporary operands after copying (detected by bit-1 tag:
+    /// concat results are tagged with 2, state fields have bit 1 clear).
+    /// Static string constants have bit 0 set and are never freed.
     fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &TypedRegister, b: &TypedRegister) -> TypedRegister {
         let a_boxed = self.adapt_to_i64(out, indent, a);
         let b_boxed = self.adapt_to_i64(out, indent, b);
-        // Mask off bit 0 (static string tag) before reading headers
+        // Mask off tag bits (bit 0 = static, bit 1 = temp) before reading headers
         let a_clean = format!("%cam{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, -2", indent, a_clean, a_boxed).ok();
+        writeln!(out, "{}{} = and i64 {}, -4", indent, a_clean, a_boxed).ok();
         let b_clean = format!("%cbm{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, -2", indent, b_clean, b_boxed).ok();
+        writeln!(out, "{}{} = and i64 {}, -4", indent, b_clean, b_boxed).ok();
         let ha = format!("%cha{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, ha, a_clean).ok();
         let la_ptr = format!("%clp{}", self.txn_counter); self.txn_counter += 1;
@@ -3718,17 +3719,50 @@ impl LlvmBackend {
         let nt = format!("%cnt{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, nt, dest_start, total).ok();
         writeln!(out, "{}store i8 0, i8* {}, align 1", indent, nt).ok();
-        // Note: operand free is disabled because the tag-based (bit 0) approach
-        // cannot distinguish state-aliased heap strings from temporaries.  The
-        // concat's operands may alias state fields (e.g. current_input), and
-        // freeing them would leave dangling pointers in state.  Memory leak is
-        // bounded per frame (temporaries in registers go out of scope).
+        // Free heap-allocated operands that are temporaries (bit 1 set).
+        // Static constants (bit 0=1) and state fields (bit 0=0,bit 1=0) are
+        // preserved; only concat results (bit 1=1) are freed.
+        let tag_a = format!("%cta{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = and i64 {}, 2", indent, tag_a, a_boxed).ok();
+        let is_temp_a = format!("%cia{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp_a, tag_a).ok();
+        let free_a_label = format!("free_a_{}", self.txn_counter);
+        let after_free_a_label = format!("af_a_{}", self.txn_counter);
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp_a, free_a_label, after_free_a_label).ok();
+        writeln!(out, "{}{}:", indent, free_a_label).ok();
+        let a_clean_all = format!("%cca{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = and i64 {}, -4", indent, a_clean_all, a_boxed).ok();
+        let a_free_ptr = format!("%cfp{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, a_free_ptr, a_clean_all).ok();
+        writeln!(out, "{}call void @free(i8* {})", indent, a_free_ptr).ok();
+        writeln!(out, "{}br label %{}", indent, after_free_a_label).ok();
+        writeln!(out, "{}{}:", indent, after_free_a_label).ok();
+        // Same for operand B
+        let tag_b = format!("%ctb{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = and i64 {}, 2", indent, tag_b, b_boxed).ok();
+        let is_temp_b = format!("%cib{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp_b, tag_b).ok();
+        let free_b_label = format!("free_b_{}", self.txn_counter);
+        let after_free_b_label = format!("af_b_{}", self.txn_counter);
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp_b, free_b_label, after_free_b_label).ok();
+        writeln!(out, "{}{}:", indent, free_b_label).ok();
+        let b_clean_all = format!("%ccb{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = and i64 {}, -4", indent, b_clean_all, b_boxed).ok();
+        let b_free_ptr = format!("%cfq{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, b_free_ptr, b_clean_all).ok();
+        writeln!(out, "{}call void @free(i8* {})", indent, b_free_ptr).ok();
+        writeln!(out, "{}br label %{}", indent, after_free_b_label).ok();
+        writeln!(out, "{}{}:", indent, after_free_b_label).ok();
+
         let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, v, result).ok();
         // Box to i64 — downstream code expects i64 (ptrtoint).
         let vi = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, vi, v).ok();
-        TypedRegister { name: vi, ty: Type::Int }
+        // Tag as temporary (bit 1 = 1) so future concat calls can free it
+        let vi_tagged = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "{}{} = or i64 {}, 2", indent, vi_tagged, vi).ok();
+        TypedRegister { name: vi_tagged, ty: Type::Int }
     }
 
     pub(crate) fn emit_binop(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) -> TypedRegister {
