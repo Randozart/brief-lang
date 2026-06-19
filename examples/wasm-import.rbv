@@ -3,7 +3,8 @@
 // a WASM sidecar module and auto-generate TypeScript wrapper functions.
 //
 // The imported file runs as native WASM (via LLVM wasm32 target). All standard
-// intrinsics (print_int#, put_char#, etc.) resolve via linked brief_rt.c.
+// intrinsics (print_int#, put_char#, etc.) resolve via the env import stubs
+// generated in the TS output.
 //
 // Custom `frgn from "c"` in the imported .bv is a compile-time error — WASM
 // modules can only use built-in intrinsics and pure Brief logic.
@@ -11,9 +12,14 @@
 // Other import targets: (circt) for hardware compilation, (javascript) for
 // inline JS/TS functions, (native) for default (no prefix needed).
 //
-// Usage:
-//   brief build wasm-import.rbv    → emits wasm-import.ts + wasm-import.html
-//   The physics.wasm sidecar is base64-embedded in the .ts file.
+// Compilation:
+//   brief build wasm-import.rbv   → emits wasm-import.ts, wasm-import.js, wasm-import.html
+//   The physics.wasm sidecar is compiled and embedded as a Uint8Array
+//   in the .ts file, instantiated via WebAssembly.instantiate() at runtime.
+//
+// The embedded WASM module's exports are accessible via wrapper functions:
+//   await init_physics_wasm();  // returns WebAssembly.Instance
+//   instance.exports.simulate(data, count);  // call exported functions
 
 import "link/default.toml";
 
