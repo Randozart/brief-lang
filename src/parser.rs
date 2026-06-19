@@ -1457,9 +1457,9 @@ impl<'a> Parser<'a> {
             let addr = if let Some(Ok(Token::Integer(n))) = self.current_token() {
                 *n as u64
             } else if let Some(Ok(Token::Identifier(name))) = self.current_token() {
-                // Named address - resolve to actual address from FFI state
-                // For now, store the name; resolution happens in type checking
-                0 // TODO: resolve named address
+                // Named address - resolve from FFI state or .dbv alias map
+                // For now, require explicit hex address in .ebv/.cbv mode
+                return self.spanned_err("Named address not yet resolved. Use a hex address like @0x40000000.".to_string());
             } else {
                 return self.spanned_err("Expected address after @".to_string());
             };
@@ -2871,13 +2871,7 @@ impl<'a> Parser<'a> {
                                 address = Some(offset as u64);
                             }
                             Some(Ok(Token::Identifier(id))) => {
-                                // Named address variable
-                                address = Some(0); // TODO: resolve named address
-                                self.advance();
-                                if let Some(Ok(Token::Slash)) = self.current_token() {
-                                    self.advance();
-                                    bit_range = Some(self.parse_bit_range()?);
-                                }
+                                return self.spanned_err(format!("Named address '{}' not yet resolved. Use a hex address like @0x40000000.", id));
                             }
                             _ => return self.spanned_err("Expected address mode after @: raw, stack, heap, or /".to_string()),
                         }
@@ -2918,13 +2912,7 @@ impl<'a> Parser<'a> {
                             }
                         }
                         Some(Ok(Token::Identifier(id))) => {
-                            // Named address variable
-                            address = Some(0); // TODO: resolve named address
-                            self.advance();
-                            if let Some(Ok(Token::Slash)) = self.current_token() {
-                                self.advance();
-                                bit_range = Some(self.parse_bit_range()?);
-                            }
+                            return self.spanned_err(format!("Named address '{}' not yet resolved. Use a hex address like @0x40000000.", id));
                         }
                         _ => return self.spanned_err("Expected integer address or / after '@'".to_string()),
                     }

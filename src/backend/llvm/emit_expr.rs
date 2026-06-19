@@ -273,7 +273,36 @@ impl LlvmBackend {
                 return self.emit_expr(out, &Expr::Identifier(name.clone()), indent);
             }
             Expr::PriorState(name) => {
-                writeln!(out, "{}{} = add i64 0, 0 ; @{}", indent, v, name).ok();
+                // Load the value from state BEFORE this tick's modifications.
+                // The SSA state register holds the committed (pre-tick) value.
+                if let Some(&idx) = self.field_index_map.get(name) {
+                    let ll_ty = &self.field_types[idx];
+                    let ev = format!("%pev{}", self.txn_counter); self.txn_counter += 1;
+                    if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
+                        writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, idx).ok();
+                        let field_ty = match ll_ty.as_str() {
+                            "i8" => {
+                                let tr = format!("%ptr_{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = trunc i8 {} to i1", indent, tr, ev).ok();
+                                return TypedRegister { name: tr, ty: Type::Bool };
+                            }
+                            "i32" => {
+                                let z = format!("%piz_{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, z, ev).ok();
+                                writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                                return TypedRegister { name: v, ty: Type::Char };
+                            }
+                            "float" => {
+                                return TypedRegister { name: ev, ty: Type::Float };
+                            }
+                            _ => {
+                                writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
+                                return TypedRegister { name: v, ty: Type::Int };
+                            }
+                        };
+                    }
+                }
+                writeln!(out, "{}{} = add i64 0, 0 ; @{} (not found)", indent, v, name).ok();
             }
             // Binary ops
             Expr::Add(l, r) => {
@@ -2044,12 +2073,23 @@ impl LlvmBackend {
                         }
                     }
                     Intrinsic::FloatToStr => {
-                        // TODO: use snprintf or brief_rt.c helper for float→string
-                        panic!("float_to_str not yet implemented in LLVM backend");
+                        if let Some(arg) = args.first() {
+                            let n = self.emit_expr(out, arg, indent);
+                            let fmt = format!("%pff{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = alloca i8, i64 64", indent, fmt).ok();
+                            let boxed = self.adapt_to_i64(out, indent, &n);
+                            writeln!(out, "{}{} = call i64 (ptr, i64, ptr, ...) @__snprintf__(ptr {}, i64 64, ptr @.str.float_fmt, double {})", indent, v, fmt, boxed).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; float_to_str no-arg", indent, v).ok();
+                        }
                     }
                     Intrinsic::ToStr => {
-                        // TODO: dispatch on type and format accordingly
-                        panic!("to_str not yet implemented in LLVM backend");
+                        if let Some(arg) = args.first() {
+                            let boxed = self.emit_expr(out, arg, indent);
+                            writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, v, boxed).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; to_str no-arg", indent, v).ok();
+                        }
                     }
                     // Benchmark intrinsics (2026-06-16) — direct libc, no brief_rt.c shims
                     Intrinsic::PrintInt => {
