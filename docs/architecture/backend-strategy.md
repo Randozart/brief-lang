@@ -48,6 +48,32 @@ files. `run_compile_unified()` infers target spec from extension.
 - `"react"` → RBV/Webstack path (handles `.rbv`, `.srbv`)
 - `"verilog"`/`"vhdl"` → errors (backends removed)
 
+## Embedded LLVM Mode (.ebv) (2026-06-19)
+
+When `is_embedded_extension()` is true (`.ebv`/`.sebv` files), the LLVM backend
+activates restricted "embedded" mode:
+
+| Feature | Status | Detail |
+|---------|--------|--------|
+| `CompilationTarget::Embedded` | ✅ | Typechecker uses embedded-specific rules |
+| `Intrinsic::Halt` | ✅ | `halt#()` emits `asm("wfi")` |
+| `is_embedded` flag | ✅ | `LlvmBackend.is_embedded: bool` + `with_embedded_mode()` builder |
+| `term!` → `wfi` | ✅ | `Statement::TermBang` emits `wfi` asm before `ret` in embedded mode |
+| Reject heap types | ✅ | `check_embedded_restrictions()` warns on `String`, `List`, `HashMap`, etc. |
+| Reject threading | ✅ | ThreadCreate, MutexLock, CondvarWait etc. produce `TargetError` |
+| Freestanding linker | ⬜ | `-ffreestanding -nostdlib -nostartfiles` |
+| Unbounded recursion | ⬜ | Static call-graph depth check |
+| ISR annotations | ⬜ | `#[interrupt(NAME)]` on `trg` declarations |
+
+### Restrictions Checker
+
+`check_embedded_restrictions()` (`src/backend/llvm/mod.rs:892`) scans the typed AST:
+- **State declarations**: rejects `String`, `Data`, `Custom("List")`, `Custom("HashMap")`, `Custom("HashSet")`, `Custom("Stack")`, `Custom("Queue")`, `Custom("StringBuilder")`
+- **Threading intrinsics**: rejects `ThreadCreate`, `ThreadJoin`, `ThreadExit`, `MutexLock`, `MutexUnlock`, `CondvarWait`, `CondvarSignal`, `CondvarBroadcast`
+
+Called from `generate()` before any code emission. Errors are collected as
+warnings (non-fatal for now, will become hard errors in strict mode).
+
 ## LLVM Backend (Split into Subdirectory)
 
 The LLVM backend is at `src/backend/llvm/` (11 files, ~9,400 total lines;

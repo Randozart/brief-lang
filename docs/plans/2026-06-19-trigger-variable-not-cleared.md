@@ -163,7 +163,48 @@ printf "hello\x03" | timeout 3 ./officina                 # one "hello", no repe
 
 ---
 
-## Execution Order
+## Future Work: Per-Instance Reactive Structs
+
+### Vision
+
+Currently, a struct's `rct txn` is promoted once at compile time — all instances share one reactor-slot. The vision for independent reactivity per instance:
+
+```brief
+struct Enemy {
+    hp: Int,
+    position: Vec2,
+    state: AIState,
+
+    rct txn ai_tick [__ticker > 0]] {
+        // reads/writes this instance's fields
+        [state == Idle] { &state = Patrol; };
+        [state == Patrol] { patrol(); };
+        [hp <= 0] { spawn_particles(position); term!; };
+    };
+};
+
+// Each instance gets its own state slot in the reactor:
+let goblin = Enemy{ hp: 10, ... };
+let orc    = Enemy{ hp: 20, ... };
+// goblin.ai_tick and orc.ai_tick are independent reactor participants
+```
+
+### What would need to change
+
+| Component | Change |
+|-----------|--------|
+| **State allocation** | Dynamic instance registry, not one static `%State` struct. Pool allocator or sparse set. |
+| **Reactor dispatch** | Per-instance precondition evaluation. Linear scan → indexed dispatch for entity-scale counts. |
+| **Trigger wiring** | `@stdin#` fan-out: one epoll fd, N listeners. Or per-instance trigger via a different mechanism (event bus, not epoll). |
+| **Desugarer** | No longer promotes struct txns to global. Instance txns are registered at instantiation time. |
+| **Backend** | Codegen for instance-aware state access. GEP through instance offset, not hardcoded field index. |
+
+### Not needed yet
+
+This is future work. The `$!keyboard_input` decorator (Phase B) works within the current single-instance reactor model. Per-instance reactivity only becomes relevant when we need hundreds of independently ticking entities — a game engine use case.
+
+### Execution Order
 
 1. Phase A fixes (proven, scoped, ready now)
 2. Phase B architecture (requires AST + parser + expander + stdlib changes)
+3. Future: per-instance reactive structs (when game-engine work begins)
