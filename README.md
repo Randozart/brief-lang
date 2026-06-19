@@ -1,17 +1,26 @@
 # Brief
 
-<img src="assets/brief-logo.svg" alt="Brief" width="200"/><img src="assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/> 
+<img src="assets/brief-icon.svg" alt="Brief" width="200"/><img src="assets/r-brief-icon.svg" alt="Rendered Brief" width="200"/> 
 
-<img src="assets/e-brief-logo.svg" alt="Embedded Brief" width="200"/><img src="assets/d-brief-logo.svg" alt="Data Brief" width="200"/>
+<img src="assets/e-brief-icon.svg" alt="Embedded Brief" width="200"/><img src="assets/d-brief-icon.svg" alt="Data Brief" width="200"/>
 
-<img src="assets/a-brief-logo.svg" alt="Accelerated Brief" width="200"/><img src="assets/c-brief-logo.svg" alt="Circuit Brief" width="200"/>
+<img src="assets/a-brief-icon.svg" alt="Accelerated Brief" width="200"/><img src="assets/c-brief-icon.svg" alt="Circuit Brief" width="200"/>
 
 
 ## Brief Doesn't Break
 
-**Status:** v0.14.0 - Multi-Backend, FFI-Connected, LLVM-Ready
+**Status:** v0.15.0 - Three Canonical Backends, Contract-Proven Optimizations
 
-Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. Due to this, it transpiles well to many imperative languages by inferring what instructions must happen for each new state to become true, and writing that in the target code. Due to its declarative nature, this means it handles both software transpilation (LLVM, COBOL), hardware transpilation (SystemVerilog, VHDL), embedded transpilation, web transpilation (by combining WASM, HTML, CSS and SVG, and gluing these together with a thing layer of JS. Also TypeScript and TSX).
+Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target — each one optimizes the same contract-proven logic for a different material:
+
+| Extension | Variant | Compiles to |
+|-----------|---------|-------------|
+| `.bv` | **Brief** | LLVM native binary (optional SPIR-V offload) |
+| `.rbv` | **Rendered Brief** | TypeScript + frontend code + WASM sidecars |
+| `.ebv` | **Embedded Brief** | LLVM microcontroller binary |
+| `.abv` | **Accelerated Brief** | SPIR-V GPU kernel |
+| `.cbv` | **Circuit Brief** | CIRCT hardware description (Verilog/VHDL) |
+| `.dbv` | **Data Brief** | Configuration data parsed by Brief itself |
 
 The main sources of inspiration are Rust (by Graydon Hoare and the Rust community) and Dialog (by Linus Åkesson). Specifically the fact that both have a very strict compiler, that catches bad code before it ever compiles, simply through smart conventions. Especially the declarative nature is inspired by Dialog, as a direct successor of Prolog, since Dialog showed that setting up a series of predicates could be sufficient to have a compiler figure out a complex runtime capable of simulating a world. And the reactor loop? That was inspired by, well... React. As such, everything in Brief is designed to, in some way, aid in predictable runtime cascades. You set up the first billiard ball, and based on the variables present describing the overall "state", the rest of the balls predictably scatter.
 
@@ -93,30 +102,33 @@ txn main() [true][true] {
 # Type-check only (fast)
 ./target/debug/brief-compiler check counter.bv
 
-# Check in strict mode (.sbv files or --strict flag)
-./target/debug/brief-compiler check counter.sbv
+# Compile to a native binary (LLVM → machine code)
+./target/debug/brief-compiler build counter.bv
+
+# Web frontend (TypeScript + view bindings)
+./target/debug/brief-compiler build counter.rbv
+
+# Embedded/microcontroller binary
+./target/debug/brief-compiler build counter.ebv
+
+# SPIR-V GPU kernel
+./target/debug/brief-compiler build counter.abv
+
+# CIRCT hardware description
+./target/debug/brief-compiler build counter.cbv
+
+# Validate Data Brief configuration
+./target/debug/brief-compiler build counter.dbv
+
+# Emit LLVM IR instead of a binary
+./target/debug/brief-compiler build --llvm counter.bv
+
+# Strict mode verification (.sbv files or --strict flag)
 ./target/debug/brief-compiler check --strict counter.bv
-
-# Compile to Rust
-./target/debug/brief-compiler rust counter.bv
-
-# Compile to C
-./target/debug/brief-compiler c counter.bv
-
-# Compile to LLVM IR
-./target/debug/brief-compiler llvm counter.bv
-
-# Compile to AArch64 assembly
-./target/debug/brief-compiler compile counter.bv --target aarch64.dbvs
-
-# Compile to x86-64 assembly
-./target/debug/brief-compiler compile counter.bv --target x86_64.dbvs
+./target/debug/brief-compiler build --strict counter.bv
 
 # Generate FFI bindings for a foreign library
 ./target/debug/brief-compiler bind mylib.h
-
-# Connect to a Metropolitan shared memory service
-./target/debug/brief-compiler metrod connect WeatherApi
 
 # Start the LSP server
 ./target/debug/brief-compiler lsp
@@ -124,16 +136,22 @@ txn main() [true][true] {
 
 ## Language Variants
 
-| Type | File Extension | Description | Targets |
-|------|----------------|-------------|---------|
-| <img src="assets/brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Brief** | `.bv` | Pure declarative logic | LLVM into native binary, COBOL |
-| <img src="assets/a-brief-logo.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Accelerated Brief** (Brief Accel) | `.abv` | Native GPU compilation (SPIR-V) | GPU via SPIR-V |
-| <img src="assets/r-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Rendered Brief** (Brief Render) | `.rbv` | Brief + Web UI (HTML/CSS/SVG) | Browser (WASM + JS + HTML + CSS) |
-| <img src="assets/e-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Embedded Brief** (Brief Embed) | `.ebv` | Brief + Hardware triggers | FPGA (VHDL/SystemVerilog), ARM bare-metal |
-| <img src="assets/c-brief-logo.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Circuit Brief** (Brief Circuit) | `.cbv` | Pure logic graph, synthesizable only | Verilog/VHDL/SV |
-| <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief** (D-Brief / Brief Data) | `.dbv` | Configuration data | All targets |
-| <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief Schema** | `.dbvs` | Schema/FFI bindings | All targets |
-| <img src="assets/d-brief-icon.svg" alt="Brief" width="25" style="vertical-align: middle;"/> **Data Brief Lines** | `.dbvl` | Line-based databases | All targets |
+The file extension selects which backend compiles your program:
+
+| Type | File Ext | Description | Compilation Target |
+|------|----------|-------------|-------------------|
+| <img src="assets/brief-icon.svg" alt="Brief" width="25"/> **Brief** | `.bv` | Pure declarative logic | LLVM → native binary, optional SPIR-V offload |
+| <img src="assets/a-brief-icon.svg" alt="Brief Accel" width="25"/> **Accelerated Brief** | `.abv` | GPU compute kernel | SPIR-V |
+| <img src="assets/r-brief-icon.svg" alt="Rendered Brief" width="25"/> **Rendered Brief** | `.rbv` | Reactive web UI | TypeScript + WASM sidecars + view bindings |
+| <img src="assets/e-brief-icon.svg" alt="Embedded Brief" width="25"/> **Embedded Brief** | `.ebv` | Microcontroller bare-metal | LLVM → microcontroller binary |
+| <img src="assets/c-brief-icon.svg" alt="Circuit Brief" width="25"/> **Circuit Brief** | `.cbv` | Pure hardware logic graph | CIRCT → Verilog/VHDL |
+| <img src="assets/d-brief-icon.svg" alt="Data Brief" width="25"/> **Data Brief** | `.dbv` | Configuration data + schema | Data validation only |
+| <img src="assets/d-brief-icon.svg" alt="Data Brief Schema" width="25"/> **Data Brief Schema** | `.dbvs` | FFI bindings schema | Used by `brief bind` |
+| <img src="assets/d-brief-icon.svg" alt="Data Brief Lines" width="25"/> **Data Brief Lines** | `.dbvl` | Line-based databases | All targets |
+
+**Strict variants** (`.sbv`, `.srbv`, `.sebv`) require full both-sided contracts — sugar syntax (`[[`, `]]`) is banned.
+
+**Planned:** COBOL backend (future target for enterprise integration).
 
 ## Key Features
 
@@ -194,46 +212,39 @@ The compiler proves:
 ## Compiler Architecture
 
 ```
-Source (.bv/.sbv/.rbv/.ebv)
+Source (.bv/.sbv/.rbv/.ebv/.abv/.cbv/.dbv)
     ↓
-Lexer (lexer.bv) → List<Token>
+Lexer (lexer.rs) → Token stream
     ↓
-Parser (parser.bv, ast.bv) → AST
+Parser (parser.rs) → AST
     ↓
 Import Resolver (import_resolver.rs) → Resolved AST
     ↓
 Desugarer (desugarer.rs) → Desugared AST
     ↓
-Type Checker (typechecker.bv) → Typed AST
+Type Checker (typechecker.rs) → Typed AST
     ↓
-Proof Engine (proof_engine.bv) → Verified AST
+Proof Engine (proof_engine.rs) → Verified AST
     ↓
 Shared Analysis
-├── CallGraph (call_graph.bv) — Cycle detection, acyclic optimization
-├── Range Analysis (range.bv) — Parameter bounds inference
-├── Dataflow (analysis/dataflow.rs) — Read/write dependencies
-└── Protocol (analysis/protocol.rs) — Control register prerequisites
+├── CallGraph — Cycle detection, acyclic optimization
+├── Range Analysis — Parameter bounds inference
+├── Dataflow — Read/write dependencies
+└── Protocol — Control register prerequisites
     ↓
-FFI Layer (Metropolitan)
-├── DBVS Bindings (std/bindings/*.dbvs) — Interface definitions
-├── Registry (ffi/registry.rs) — 60+ Rust implementation functions
-├── Orchestrator (ffi/orchestrator.rs) — Native + Metropolitan dispatch
-├── Sentinel (ffi/sentinel.rs) — Pre/post-condition validation
-├── NativeMapper (ffi/native_mapper.rs) — Byte serialization
-└── Metropolitan Hub (ffi/metropolitan.rs) — Shared memory IPC + codegen
-    ↓
-Backends
-├── AArch64 (aarch64.rs) — ARM64 assembly
-├── x86-64 (x86_64.rs) — AMD64 assembly
-├── Rust (rust.rs) — Rust source
-├── C (c.rs) — C source
-├── LLVM (llvm.rs) — LLVM IR
-├── WASM (wasm.rs) — WebAssembly text format
-├── Webstack (webstack.rs) — Rust + wasm-bindgen + JS
-├── COBOL (cobol.rs) — COBOL source
-├── VHDL (vhdl.rs) — FPGA
-├── SystemVerilog (verilog.rs) — FPGA/ASIC
-└── TCL Generator (tcl_generator.rs) — Vivado build scripts
+┌───────────────── Three Canonical Backends ─────────────────┐
+│                                                             │
+│  LLVM Backend         Webstack Backend     CIRCT Backend    │
+│  (llvm/)              (webstack.rs)        (circt.rs)       │
+│                                                             │
+│  .bv → LLVM IR        .rbv → TypeScript    .cbv → MLIR     │
+│  .ebv → MCU bin       .wasm sidecars       → Verilog/VHDL  │
+│  .abv → SPIR-V        + frontend glue                       │
+│                                                             │
+├─────────────────────────────────────────────────────────────┤
+│  Other backends (C, Rust, COBOL, VHDL, etc.) archived in   │
+│  archive/backend/ — preserved for reference, not active.    │
+└─────────────────────────────────────────────────────────────┘
     ↓
 LSP Server (lsp.rs)
 ├── Hover — Type information
@@ -394,7 +405,7 @@ cargo test --lib backend::llvm::tests
 ./target/debug/brief-compiler check --strict counter.sbv
 ```
 
-**Test Suite (269 tests):**
+**Test Suite (1,078 tests):**
 - `tests/tier1/` - Core data type tests
 - `tests/tier2/` - String processing tests
 - `tests/backends/` - Backend generation tests
@@ -415,26 +426,27 @@ The Brief compiler can now:
 - Parse itself
 - Type-check itself
 - Verify its own contracts
-- Generate code for itself (all 11 backends)
+- Generate code for itself (3 canonical backends)
 - Run shared analysis (CallGraph, range inference) in both Rust and Brief
 
 **Implementation:**
-- 9 architectural tiers (100% complete)
-- 11 production backends
+- 3 canonical backends (LLVM, CIRCT, Webstack)
 - 300+ standard library functions
 - ~46,000 lines of Rust bootstrap compiler
 - ~8,500 lines of Brief self-hosted compiler
 - ~7,500 lines of documentation
-- 269 passing tests
+- 1,078 passing tests
 
-**Key v0.14.0 additions:**
-- Metropolitan FFI: shared memory IPC with C/Python/JS/Rust interop
-- Strict Brief: full pre/postcondition verification with `--strict` flag
-- LSP server: hover, definition, completions, document/workspace symbols
-- `brief bind` + `brief metrod connect`: one-command FFI binding generation
-- LLVM IR backend with acyclic optimization
-- Backend syncs: all 11 backends have full statement/expression coverage
-- Phase 0 shared analysis: CallGraph + ParameterRanges across all backends
+**Key v0.15.0 additions:**
+- Three canonical backends: LLVM (native/embedded/SPIR-V), Webstack (TypeScript + WASM), CIRCT (HLS)
+- TypeScript emitter replaces Rust/wasm-bindgen (native-typed signals, no JsValue boxing)
+- `(wasm) import` syntax for compute-heavy WASM sidecars
+- `.rbv` Brief-as-default format (no `<script>` wrapper needed)
+- Full CIRCT FSM with pre/postcondition guards, sized integers, modern output ports
+- `!range` metadata and TBAA type trees for LLVM optimization
+- `?#` proof oracle with structural recursion checker
+- Instruction reordering (ILP optimization via dependency DAG)
+- 9 retired backends archived to `archive/backend/`
 
 **See:** [docs/milestones/SELF_HOSTING_COMPLETE.md](docs/milestones/SELF_HOSTING_COMPLETE.md) for the full story.
 
@@ -465,19 +477,23 @@ brief-compiler/
 │   │   ├── entry_point.rs        # Triggerable transaction discovery
 │   │   └── struct_generator.rs   # State struct generation
 │   │
-│   ├── backend/                  # Code generation backends
-│   │   ├── aarch64.rs            # ARM64 assembly (577 lines)
-│   │   ├── x86_64.rs             # AMD64 assembly (598 lines)
-│   │   ├── rust.rs               # Rust source (789 lines)
-│   │   ├── c.rs                  # C source (872 lines)
-│   │   ├── llvm.rs               # LLVM IR (500 lines) — NEW
-│   │   ├── wasm.rs               # WebAssembly text format (600 lines)
-│   │   ├── webstack.rs           # Rust + wasm-bindgen + JS (2087 lines)
-│   │   ├── cobol.rs              # COBOL source (710 lines)
-│   │   ├── verilog.rs            # SystemVerilog (1805 lines)
-│   │   ├── vhdl.rs               # VHDL (1042 lines)
-│   │   ├── tcl_generator.rs      # Xilinx Vivado Tcl (369 lines)
-│   │   └── mod.rs                # Backend registry + analysis helper
+│   ├── backend/                  # Three canonical code generation backends
+│   │   ├── llvm/                 # LLVM IR — native, embedded, SPIR-V (active)
+│   │   ├── webstack.rs           # TypeScript + WASM — web target (active)
+│   │   ├── circt.rs              # CIRCT MLIR — hardware target (active)
+│   │   └── mod.rs                # Backend registry + dispatch
+│   │
+│   └── archive/backend/          # Retired backends (preserved for reference)
+│       ├── aarch64.rs            # ARM64 assembly (archived)
+│       ├── x86_64.rs             # AMD64 assembly (archived)
+│       ├── rust.rs               # Rust source (archived)
+│       ├── c.rs                  # C source (archived)
+│       ├── wasm.rs               # WASM text format (archived)
+│       ├── cobol.rs              # COBOL source (archived)
+│       ├── vhdl.rs               # VHDL (archived)
+│       ├── verilog.rs            # SystemVerilog (archived)
+│       ├── tcl_generator.rs      # Vivado TCL (archived)
+│       └── webstack_rust_codegen.rs  # Old Rust/wasm-bindgen webstack (archived)
 │   │
 │   ├── ffi/                      # Foreign Function Interface
 │   │   ├── metropolitan.rs       # Shared memory IPC (876 lines)
@@ -567,7 +583,7 @@ brief-compiler/
 │
 ├── examples/                     # Example programs
 ├── spec/                         # Language specification
-├── tests/                        # Test files (269 tests)
+├── tests/                        # Test files (1,078 tests)
 └── docs/                         # Documentation
     ├── milestones/               # Milestone reports
     └── reports/                  # Status reports
@@ -575,30 +591,28 @@ brief-compiler/
 
 ## Roadmap
 
-### ✅ Complete (v0.14.0)
-- [x] 11 production backends (AArch64, x86-64, Rust, C, LLVM, WASM, Webstack, COBOL, Verilog, VHDL, TCL)
-- [x] Full statement/expression coverage across all backends (13/13 statement variants, 22-36 expression variants)
-- [x] 300+ standard library functions
-- [x] Self-hosting capable (both Rust bootstrap and Brief self-hosted)
-- [x] Metropolitan FFI: shared memory IPC with C/Python/JS/Rust clients
-- [x] DBVS binding schema with `Fn()`, `Trigger()`, `Result[]` type support
-- [x] `brief bind` — one-command FFI binding generation
-- [x] `brief metrod connect` — interactive shared memory CLI
-- [x] Strict Brief (.sbv/.sebv/.srbv) with full contract verification
-- [x] LSP server: hover, definition, completions, symbols, strict mode detection
-- [x] Shared analysis: CallGraph + ParameterRanges across all backends
-- [x] Acyclic optimization — static dispatch in backends when graph is cycle-free
-- [x] Sentinel pre/post-condition validation
-- [x] 269 passing tests
+### ✅ Complete (v0.15.0)
+- [x] Three canonical backends: LLVM (native/embedded/SPIR-V), Webstack (TypeScript + WASM), CIRCT (HLS)
+- [x] TypeScript emitter with native-typed signals (no JsValue boxing)
+- [x] `(wasm) import` syntax for compute-heavy WASM sidecars
+- [x] `.rbv` Brief-as-default format (no `<script>` wrapper)
+- [x] CIRCT FSM: pre/postcondition guards, sized integers, modern output ports, MMIO, sync blocks
+- [x] `!range` metadata + TBAA type trees for LLVM optimization passes
+- [x] `?#` proof oracle with structural recursion checker
+- [x] Instruction reordering (ILP optimization via dependency DAG)
+- [x] `<-` arrow push/pop/discard/transfer for List, HashMap, HashSet, Stack, Queue
+- [x] Reactive dirty-flag architecture with DependencyGraph
+- [x] Dead-field elimination, LTO pipeline, compile-time PGO
+- [x] 1,078 passing tests
+- [x] 9 retired backends archived (no dead code in active pipeline)
 
 ### 📋 Planned
-- [ ] AArch64 FFI support + linkage config
-- [ ] Integration tests for all 11 backends
-- [ ] Bootstrap process (compile compiler with itself)
-- [ ] LSP ghost text (inlay hints with call graph, trigger dependencies, ranges)
+- [ ] COBOL backend (enterprise integration — re-implement from archive)
+- [ ] Full bootstrap process (compile compiler with itself)
 - [ ] LLVM backend inkwell bindings (programmatic IR generation)
-- [ ] Performance profiler
-- [ ] Debugger integration
+- [ ] Performance profiler with contract-level attribution
+- [ ] Debugger integration (GDB/LLDB with signal-state inspection)
+- [ ] LSP ghost text (inlay hints with call graph, trigger dependencies, ranges)
 
 ## Contributing
 
@@ -613,5 +627,5 @@ Apache 2.0 with explicit runtime exception
 
 ---
 
-*Last updated: 2026-05-28*  
-*Version: Brief v0.14.0*
+*Last updated: 2026-06-19*  
+*Version: Brief v0.15.0*
