@@ -565,7 +565,7 @@ pub struct LlvmBackend {
     optimize_size: Option<u64>,
     pgo_profile: Option<crate::analysis::pgo::PgoProfile>,
     pgo_guard_idx: usize,
-    has_cycles: bool,
+    pub(crate) has_cycles: bool,
     slp_hazard_fns: HashSet<String>,
 
     // ── Async / Thread Pool ────────────────────────────────
@@ -889,6 +889,7 @@ impl LlvmBackend {
 
     /// Scan the typed program for constructs that are forbidden in embedded mode:
     /// dynamic heap allocation (List, String, HashMap) and threading intrinsics.
+    /// Also warns about unbounded recursion via the call graph's cycle detection.
     pub(crate) fn check_embedded_restrictions(&mut self, program: &Program) {
         let threading_intrinsics: &[Intrinsic] = &[
             Intrinsic::ThreadCreate, Intrinsic::ThreadJoin, Intrinsic::ThreadExit,
@@ -917,6 +918,11 @@ impl LlvmBackend {
                 }
                 _ => {}
             }
+        }
+        if self.has_cycles {
+            self.warnings.push(
+                "TargetError: unbounded recursion detected — call graph has cycles, which are not supported on target 'Embedded'".to_string()
+            );
         }
     }
 

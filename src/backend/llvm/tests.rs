@@ -4680,3 +4680,13 @@ let spec = crate::target_spec::TargetSpec {
         let has_error = backend.warnings().iter().any(|w| w.contains("TargetError"));
         assert!(!has_error, "Embedded mode should accept Int state. Warnings: {:?}", backend.warnings());
     }
+
+    #[test]
+    fn test_embedded_rejects_recursion() {
+        let mut backend = LlvmBackend::new().with_embedded_mode(true);
+        backend.has_cycles = true;
+        let program = empty_program();
+        backend.check_embedded_restrictions(&program);
+        let has_warning = backend.warnings().iter().any(|w| w.contains("unbounded recursion"));
+        assert!(has_warning, "Embedded mode should warn about recursion cycles. Warnings: {:?}", backend.warnings());
+    }
