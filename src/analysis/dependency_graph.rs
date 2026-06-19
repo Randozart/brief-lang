@@ -592,6 +592,7 @@ mod tests {
             stages: vec![],
             condition: None,
             is_wake: false,
+            is_const: false,
             span: None,
         })
     }

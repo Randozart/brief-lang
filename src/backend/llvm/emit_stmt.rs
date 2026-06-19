@@ -305,6 +305,12 @@ impl LlvmBackend {
                                 writeln!(out, "{}store volatile i64 {}, i64* {}, align 1", indent, elem, p).ok();
                                 continue;
                             }
+                            if let Some(trg) = self.triggers.get(name) {
+                                if trg.is_const {
+                                    writeln!(out, "{}; error: cannot write to const trigger '{}'", indent, name).ok();
+                                    continue;
+                                }
+                            }
                             if let Some(&idx) = self.field_index_map.get(name) {
                                 let ty = self.field_types[idx].clone();
                                 let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
@@ -336,6 +342,13 @@ impl LlvmBackend {
                     _ => { writeln!(out, "{}; assign {}", indent, val).ok(); return; }
                 };
                 let is_volatile = modifiers.iter().any(|h| h.name == "volatile");
+                // const trg check: reject writes to const triggers
+                if let Some(trg) = self.triggers.get(&fname) {
+                    if trg.is_const {
+                        writeln!(out, "{}; error: cannot write to const trigger '{}'", indent, fname).ok();
+                        return;
+                    }
+                }
                 // SSA mode: use insertvalue instead of GEP + store
                 if let Some(ssa_reg) = self.ssa_state_reg.clone() {
                     if let Some(&idx) = self.field_index_map.get(&fname) {

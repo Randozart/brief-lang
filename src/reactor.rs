@@ -644,6 +644,7 @@ mod tests {
             stages: vec![],
             condition: None,
             is_wake: false,
+            is_const: false,
             span: None,
         });
         let reactor = build_reactor(&simple_program(vec![trg]));

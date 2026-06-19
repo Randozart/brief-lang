@@ -996,8 +996,16 @@ impl<'a> Parser<'a> {
                 Ok(wrap_test(TopLevel::StateDecl(state), &test_groups))
             }
             Some(Ok(Token::Const)) => {
-                let constant = self.parse_constant()?;
-                Ok(wrap_test(TopLevel::Constant(constant), &test_groups))
+                // Check if this is const trg or a regular constant
+                if let Some(Ok(Token::Trg)) = self.peek_token() {
+                    self.advance(); // consume const
+                    self.advance(); // consume trg
+                    let trg = self.parse_trigger_body(true)?;
+                    Ok(wrap_test(TopLevel::Trigger(trg), &test_groups))
+                } else {
+                    let constant = self.parse_constant()?;
+                    Ok(wrap_test(TopLevel::Constant(constant), &test_groups))
+                }
             }
             Some(Ok(Token::Sync)) => {
                 self.advance();
@@ -1030,7 +1038,15 @@ impl<'a> Parser<'a> {
                 Ok(wrap_test(TopLevel::Definition(defn), &test_groups))
             }
             Some(Ok(Token::Trg)) => {
-                let trg = self.parse_trigger()?;
+                self.advance();
+                let trg = self.parse_trigger_body(false)?;
+                // Hardware-addressed triggers (Explicit with non-zero address) require const.
+                // Explicit(0) is the default for unbound triggers — no @ was specified.
+                if let crate::ast::LinkRef::Explicit(addr) = trg.address {
+                    if addr != 0 && !trg.is_const {
+                        return self.spanned_err("hardware-addressed triggers must be declared 'const trg'".to_string());
+                    }
+                }
                 Ok(wrap_test(TopLevel::Trigger(trg), &test_groups))
             }
             Some(Ok(Token::Frgn)) => {
@@ -3320,6 +3336,10 @@ let span = self.current_span();
 
     fn parse_trigger(&mut self) -> Result<TriggerDeclaration, SyntaxError> {
         self.expect(Token::Trg)?;
+        self.parse_trigger_body(false)
+    }
+
+    fn parse_trigger_body(&mut self, is_const: bool) -> Result<TriggerDeclaration, SyntaxError> {
         let name = self.expect_identifier()?;
         self.expect(Token::Colon)?;
         let ty = self.parse_type()?;
@@ -3451,6 +3471,7 @@ let span = self.current_span();
             stages,
             condition,
             is_wake,
+            is_const,
             span,
         })
     }
@@ -7691,7 +7712,7 @@ mod parser_tests {
     #[test]
     fn test_parse_top_level_trigger_without_bang() {
         // Test that top-level trg (without !) still works
-        let s = r#"trg button: Bool @ 0x1000;"#;
+        let s = r#"const trg button: Bool @ 0x1000;"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Top-level trg without ! should parse: {:?}", result.err());

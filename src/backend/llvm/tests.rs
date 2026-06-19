@@ -585,6 +585,7 @@ fn empty_program() -> Program {
                     stages: vec![],
                     condition: None,
                     is_wake: false,
+                    is_const: false,
                     span: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
@@ -927,6 +928,7 @@ fn empty_program() -> Program {
                     stages: vec![],
                     condition: None,
                     is_wake,
+                    is_const: false,
                     span: None,
                 }),
                 TopLevel::Transaction(Transaction {
@@ -999,6 +1001,7 @@ fn empty_program() -> Program {
             stages: vec![],
             condition: None,
             is_wake: true,
+            is_const: false,
             span: None,
         }));
         let output = LlvmBackend::new().generate(&p1);
@@ -1074,6 +1077,7 @@ fn empty_program() -> Program {
                     stages: vec![],
                     condition: None,
                     is_wake: true,
+                    is_const: false,
                     span: None,
                 }),
                 TopLevel::Transaction(Transaction {
@@ -1364,7 +1368,7 @@ fn empty_program() -> Program {
             items.push(TopLevel::Trigger(TriggerDeclaration {
                 name: trg_name.to_string(), ty: trg_ty,
                 address: LinkRef::Explicit(0), bit_range: None,
-                stages: vec![], condition: None, is_wake: false, span: None,
+                stages: vec![], condition: None, is_wake: false, is_const: false, span: None,
             }));
         }
         for (txn_name, body) in txns {
@@ -1778,7 +1782,7 @@ fn empty_program() -> Program {
             ty: trg_ty,
             address: LinkRef::Linked("__io_pending".to_string()),
             bit_range: None, stages: vec![], condition: None,
-            is_wake, span: None,
+            is_wake, is_const: false, span: None,
         }));
         let pre = Expr::And(
             Box::new(Expr::Identifier(trg_name.to_string())),

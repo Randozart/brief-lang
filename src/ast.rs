@@ -1952,6 +1952,7 @@ pub struct TriggerDeclaration {
     pub stages: Vec<String>,
     pub condition: Option<Expr>,
     pub is_wake: bool,
+    pub is_const: bool,
     pub span: Option<Span>,
 }
 

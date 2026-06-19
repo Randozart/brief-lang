@@ -601,6 +601,7 @@ mod tests {
             stages: vec![],
             condition: None,
             is_wake: false,
+            is_const: false,
             span: None,
         })
     }
@@ -727,7 +728,7 @@ mod tests {
                 name: "btn".to_string(), ty: Type::Bool,
                 address: LinkRef::Linked("button0".to_string()),
                 bit_range: None, stages: vec![], condition: None,
-                is_wake: false, span: None,
+                is_wake: false, is_const: false, span: None,
             }),
         ]));
         // Linked triggers use the linked name as port name
@@ -742,7 +743,7 @@ mod tests {
                 name: "btn".to_string(), ty: Type::Bool,
                 address: LinkRef::Explicit(0),
                 bit_range: None, stages: vec![], condition: None,
-                is_wake: true, span: None,
+                is_wake: true, is_const: false, span: None,
             }),
         ]));
         // Wake triggers produce a wake_ output port

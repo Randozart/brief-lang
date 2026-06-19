@@ -284,5 +284,52 @@ printf "hello\x03" | timeout 3 ./officina    # pipe test still works
 
 1. ~~Phase A fixes (committed at 28e2195)~~
 2. ~~Phase C — spurious epoll guard (committed)~~
-3. Phase B architecture (requires AST + parser + expander + stdlib changes)
-4. Future: per-instance reactive structs (when game-engine work begins)
+3. **Phase D — `const trg` design (next)**
+4. Phase B architecture (requires AST + parser + expander + stdlib changes)
+5. Future: per-instance reactive structs (when game-engine work begins)
+
+---
+
+## Phase D — `const trg` Design
+
+### Philosophy
+
+A `trg` is a **mailbox** — the outside world drops a value, Brief reads it. Writing to the `trg` variable mutates the local copy; the external source neither sees nor cares.
+
+For software triggers (`@stdin#`), writing is fine — you consumed the event and clear the latch. For hardware triggers (`@0x...`, `@mmio`), the register is **sovereign** — the program must never pretend to own what the hardware holds.
+
+Hence `const trg` exists: "I, the code, cannot mutate this."
+
+### Syntax
+
+```brief
+trg  keypress: Char @stdin#;            // software — writable by code
+const trg status: Int @0xFFFF0000;      // hardware — read-only from code
+```
+
+`trg` without `const` = mutable local copy (software triggers).
+`const trg` = read-only (hardware triggers, or any trigger you want to guard).
+
+### Compiler Errors
+
+| Code | Error |
+|------|-------|
+| `&const_trg_name = expr` | `"cannot write to const trigger 'name'"` |
+| `trg name @{literal} ...` (address literal without `const`) | `"hardware-addressed triggers must be declared 'const trg'"` |
+
+The first catches any write to a const trigger. The second catches the common embedded bug: declaring a hardware trigger as mutable, then writing to the shadow field thinking you're writing to the register.
+
+### Rendered Brief (`.rbv`)
+
+Same rule applies. a front-end button press emits a one-time signal into a `trg`. Brief can read and optionally write back (`&trg = ...`), but the front end never listens. The mailbox is one-directional regardless.
+
+### Implementation
+
+| Change | File | Detail |
+|--------|------|--------|
+| AST | `src/ast.rs` | Add `is_const: bool` to `TriggerDeclaration` |
+| Parser | `src/parser.rs` | Accept `const` before `trg` in `parse_trigger()` |
+| Resolver/Analysis | `src/analysis/` | Validate address-bound triggers have `const` |
+| Codegen | `src/backend/llvm/emit_stmt.rs` | Error on write to `const` trigger in assignment |
+| Docs | `docs/architecture/glossary.md` | Document `const trg` |
+| Plan | `docs/plans/...` | This document |

@@ -98,6 +98,7 @@ pub fn arb_trigger_decl(_max_depth: usize) -> impl Strategy<Value = TopLevel> {
             stages: Vec::new(),
             condition: None,
             is_wake: false,
+            is_const: false,
             span: None,
         })
     })
