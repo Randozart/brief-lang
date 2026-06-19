@@ -2174,6 +2174,7 @@ fn run_llvm_compile(
     gpu_backend: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let is_gpu = is_gpu_extension(file_path);
+    let is_embedded = is_embedded_extension(file_path);
     // Force GPU offload for .abv files
     let gpu_offload = gpu_offload || is_gpu;
 
@@ -2378,7 +2379,7 @@ fn run_llvm_compile(
         deps
     };
 
-    let comp_target = if is_embedded_extension(file_path) {
+    let comp_target = if is_embedded {
         typechecker::CompilationTarget::Embedded
     } else if is_circuit_extension(file_path) {
         typechecker::CompilationTarget::Circuit
@@ -2412,7 +2413,7 @@ fn run_llvm_compile(
         .with_emit_remarks(emit_remarks)
         .with_gpu_offload(gpu_offload)
         .with_gpu_backend(gpu_backend.to_string())
-        .with_embedded_mode(is_embedded_extension(file_path));
+        .with_embedded_mode(is_embedded);
     if dead_info_disabled {
         llvm_backend = llvm_backend.with_dead_info_disabled(true);
     }
@@ -2546,10 +2547,14 @@ fn run_llvm_compile(
             println!("  LTO-merged: program.bc + {} foreign modules → optimized", link_modules.len());
 
             let mut link_cmd = std::process::Command::new("cc");
-            link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj_path);
-            link_cmd.args(["-lm", "-lpthread"]);
-            if has_wake {
-                link_cmd.arg("-lrt");
+            if is_embedded {
+                link_cmd.args(["-ffreestanding", "-nostdlib", "-nostartfiles", "-o"]).arg(&exe_path).arg(&lto_obj_path);
+            } else {
+                link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj_path);
+                link_cmd.args(["-lm", "-lpthread"]);
+                if has_wake {
+                    link_cmd.arg("-lrt");
+                }
             }
             let link_status = link_cmd.status();
             match link_status {
@@ -2558,8 +2563,12 @@ fn run_llvm_compile(
                 }
                 _ => {
                     eprintln!("  Warning: linking failed. Link manually:");
-                    eprintln!("    cc -no-pie {} -o {} -lm -lpthread", lto_obj_path.display(), exe_path.display());
-                    if has_wake { eprintln!("    (add -lrt)"); }
+                    if is_embedded {
+                        eprintln!("    cc -ffreestanding -nostdlib -nostartfiles {} -o {}", lto_obj_path.display(), exe_path.display());
+                    } else {
+                        eprintln!("    cc -no-pie {} -o {} -lm -lpthread", lto_obj_path.display(), exe_path.display());
+                        if has_wake { eprintln!("    (add -lrt)"); }
+                    }
                 }
             }
             return Ok(output_file);
@@ -2579,10 +2588,14 @@ fn run_llvm_compile(
             ) {
                 println!("  LTO: program + brief_rt.c bitcode merged and optimized");
                 let mut link_cmd = std::process::Command::new("cc");
-                link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj);
-                link_cmd.args(["-lm", "-lpthread"]);
-                if has_wake {
-                    link_cmd.arg("-lrt");
+                if is_embedded {
+                    link_cmd.args(["-ffreestanding", "-nostdlib", "-nostartfiles", "-o"]).arg(&exe_path).arg(&lto_obj);
+                } else {
+                    link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&lto_obj);
+                    link_cmd.args(["-lm", "-lpthread"]);
+                    if has_wake {
+                        link_cmd.arg("-lrt");
+                    }
                 }
                 if link_cmd.status().ok().map_or(true, |s| !s.success()) {
                     eprintln!("  Warning: LTO linking failed. Trying cc fallback.");
@@ -2651,10 +2664,14 @@ fn run_llvm_compile(
         }
 
         let mut link_cmd = std::process::Command::new("cc");
-        link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&ll_o_path).arg(&rt_o_path);
-        link_cmd.args(["-lpthread"]);
-        if has_wake {
-            link_cmd.arg("-lrt");
+        if is_embedded {
+            link_cmd.args(["-ffreestanding", "-nostdlib", "-nostartfiles", "-o"]).arg(&exe_path).arg(&ll_o_path).arg(&rt_o_path);
+        } else {
+            link_cmd.args(["-O2", "-no-pie", "-o"]).arg(&exe_path).arg(&ll_o_path).arg(&rt_o_path);
+            link_cmd.args(["-lpthread"]);
+            if has_wake {
+                link_cmd.arg("-lrt");
+            }
         }
         let link_status = link_cmd.status();
         match link_status {
@@ -2663,7 +2680,11 @@ fn run_llvm_compile(
             }
             _ => {
                 eprintln!("  Warning: linking failed. Link manually:");
-                eprintln!("    cc -no-pie {} {} -o {} -lpthread", ll_o_path.display(), rt_o_path.display(), exe_path.display());
+                if is_embedded {
+                    eprintln!("    cc -ffreestanding -nostdlib -nostartfiles {} {} -o {}", ll_o_path.display(), rt_o_path.display(), exe_path.display());
+                } else {
+                    eprintln!("    cc -no-pie {} {} -o {} -lpthread", ll_o_path.display(), rt_o_path.display(), exe_path.display());
+                }
                 if has_wake { eprintln!("    (add -lrt)"); }
             }
         }
