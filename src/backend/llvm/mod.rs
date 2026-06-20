@@ -585,6 +585,12 @@ pub struct LlvmBackend {
     /// Used by is_string_chain to detect string parameters stored as Type::Int.
     pub(crate) let_original_types: HashMap<String, Type>,
     terminated: bool,
+    /// 2026-06-20: When true, `term`/`term!`/`escape` fallbacks emit `ret i32 0`
+    /// instead of `ret void`. Set by all `main()` emitters. Prevents `ret void`
+    /// from being emitted in `define i32 @main()` when a `Term`/`TermBang` inside
+    /// a `Guarded` block fires with complex swan-song arguments that bypass
+    /// the `loop_exit_label` mechanism.
+    main_body: bool,
     returns_i64: bool,
     fn_ret_ty: String,
     callable_txn_result: Option<String>,
@@ -718,6 +724,7 @@ impl LlvmBackend {
             let_binding_types: HashMap::new(),
             let_original_types: HashMap::new(),
             terminated: false,
+            main_body: false,
             returns_i64: false,
             fn_ret_ty: "void".to_string(),
             callable_txn_result: None,

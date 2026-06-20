@@ -150,6 +150,7 @@ impl LlvmBackend {
     // ── MAIN FUNCTION ─────────────────────────────────────────
     pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
         self.fn_ret_ty = "i32".to_string();
+        self.main_body = true;
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#3")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
@@ -540,6 +541,7 @@ impl LlvmBackend {
         body: Option<&[Statement]>,
     ) {
         self.fn_ret_ty = "i32".to_string();
+        self.main_body = true;
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
@@ -573,6 +575,7 @@ impl LlvmBackend {
         body: &[Statement],
     ) {
         self.fn_ret_ty = "i32".to_string();
+        self.main_body = true;
         let attr = self.slp_attr("main", "#0");
         let c0 = self.txn_counter;
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
@@ -642,6 +645,7 @@ impl LlvmBackend {
         has_wake_triggers: bool,
     ) {
         self.fn_ret_ty = "i32".to_string();
+        self.main_body = true;
         let attr = self.slp_attr("main", "#3");
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
@@ -983,6 +987,7 @@ impl LlvmBackend {
             }
         }
         self.fn_ret_ty = "i32".to_string();
+        self.main_body = true;
         let main_attr = self.slp_attr("main", if has_wake { "#3" } else { "#0" });
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", main_attr).ok();
         writeln!(out, "  entry:").ok();
