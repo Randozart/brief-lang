@@ -177,14 +177,14 @@ impl LlvmBackend {
             let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
             if has_wake_triggers {
-                let md_idx = super::emit_loop_metadata_nodes(out, "  ", &mut self.metadata_counter);
+                let md_idx = super::emit_loop_metadata_nodes(&mut self.metadata_counter, &mut self.pending_metadata);
                 writeln!(out, "  br i1 {}, label %done, label %wait", tr).ok();
                 writeln!(out, "  wait:").ok();
                 emit_trg_event_epoll_wait(self, out);
-                writeln!(out, "  br label %tick !llvm.loop !{}", md_idx).ok();
+                writeln!(out, "  br label %tick, !llvm.loop !{}", md_idx).ok();
             } else {
-                let md_idx = super::emit_loop_metadata_nodes(out, "  ", &mut self.metadata_counter);
-                writeln!(out, "  br i1 {}, label %done, label %tick !llvm.loop !{}", tr, md_idx).ok();
+                let md_idx = super::emit_loop_metadata_nodes(&mut self.metadata_counter, &mut self.pending_metadata);
+                writeln!(out, "  br i1 {}, label %done, label %tick, !llvm.loop !{}", tr, md_idx).ok();
             }
             writeln!(out, "  done:").ok();
             writeln!(out, "  ret i32 0").ok();
@@ -192,7 +192,7 @@ impl LlvmBackend {
             if has_wake_triggers {
                 emit_trg_event_epoll_wait(self, out);
             }
-            super::emit_loop_metadata(out, "  ", "tick", &mut self.metadata_counter);
+            super::emit_loop_metadata(out, "  ", "tick", &mut self.metadata_counter, &mut self.pending_metadata);
         }
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -324,7 +324,7 @@ impl LlvmBackend {
             writeln!(out, "  br i1 %cp_{}_{}, label %{}, label %{}", label_prefix, c_once + 3, body_label, done_label).ok();
             writeln!(out, "{}:", body_label).ok();
             writeln!(out, "  %dec_{}_{} = sub i64 %i_{}_{}, 1", label_prefix, c_once + 2, label_prefix, c_once + 2).ok();
-            super::emit_loop_metadata(out, "  ", &hdr_label, &mut self.metadata_counter);
+            super::emit_loop_metadata(out, "  ", &hdr_label, &mut self.metadata_counter, &mut self.pending_metadata);
             writeln!(out, "{}:", done_label).ok();
             // Final counter value is always the bound after counted-down loop
             writeln!(out, "  store i64 %lt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
@@ -368,7 +368,7 @@ impl LlvmBackend {
                 }
                 let backedge4 = cur;
                 writeln!(body4_buf, "  store %State {}, %State* %slot_{}, align 8", backedge4, label_prefix).ok();
-                super::emit_loop_metadata(&mut body4_buf, "  ", &format!("{}_hdr", label_prefix), &mut self.metadata_counter);
+                super::emit_loop_metadata(&mut body4_buf, "  ", &format!("{}_hdr", label_prefix), &mut self.metadata_counter, &mut self.pending_metadata);
             }
 
             // --- body1: remainder loop (single iteration) ---
@@ -385,7 +385,7 @@ impl LlvmBackend {
             }
             let backedge_val = self.ssa_state_reg.take().unwrap_or(phi_reg.clone());
             writeln!(body1_buf, "  store %State {}, %State* %slot_{}, align 8", backedge_val, label_prefix).ok();
-            super::emit_loop_metadata(&mut body1_buf, "  ", &format!("{}_hdr", label_prefix), &mut self.metadata_counter);
+            super::emit_loop_metadata(&mut body1_buf, "  ", &format!("{}_hdr", label_prefix), &mut self.metadata_counter, &mut self.pending_metadata);
 
             // Build initial %State from known constants
             writeln!(out, "  br label %{}_pre", label_prefix).ok();
@@ -525,7 +525,7 @@ impl LlvmBackend {
             writeln!(out, "  br i1 {}, label %{}_body, label %{}_done", cmp_reg, label_prefix, label_prefix).ok();
             writeln!(out, "{}_body:", label_prefix).ok();
             writeln!(out, "  call void @{}(%State* %state)", txn_name).ok();
-            super::emit_loop_metadata(out, "  ", &format!("{}_hdr", label_prefix), &mut self.metadata_counter);
+            super::emit_loop_metadata(out, "  ", &format!("{}_hdr", label_prefix), &mut self.metadata_counter, &mut self.pending_metadata);
             writeln!(out, "{}_done:", label_prefix).ok();
         }
     }
@@ -643,7 +643,7 @@ impl LlvmBackend {
         // The body's GEP+store for the counter field stores the same value
         // (via ssa_old_int_regs → body sees phi, writes back phi+1).
         writeln!(out, "  {0} = add i64 {1}, 1", next_reg, phi_reg).ok();
-        super::emit_loop_metadata(out, "  ", "_hdr", &mut self.metadata_counter);
+        super::emit_loop_metadata(out, "  ", "_hdr", &mut self.metadata_counter, &mut self.pending_metadata);
         writeln!(out, "_done:").ok();
         let saved = std::mem::take(&mut self.pending_post_hoist);
         self.emit_hoisted_post_loop_prints(out, &saved);
@@ -874,7 +874,7 @@ impl LlvmBackend {
             writeln!(out, "  br label %platch").ok();
             writeln!(out, "  platch:").ok();
             writeln!(out, "  {} = add i64 {}, 1", pn_reg, pi_reg).ok();
-            super::emit_loop_metadata(out, "  ", "phdr", &mut self.metadata_counter);
+            super::emit_loop_metadata(out, "  ", "phdr", &mut self.metadata_counter, &mut self.pending_metadata);
             writeln!(out, "  pdoneloop:").ok();
             // Emit post-loop prints after loop exit
             let saved = std::mem::take(&mut self.pending_post_hoist);
@@ -885,21 +885,21 @@ impl LlvmBackend {
             let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
             if has_wake_triggers {
-                let md_idx = super::emit_loop_metadata_nodes(out, "  ", &mut self.metadata_counter);
+                let md_idx = super::emit_loop_metadata_nodes(&mut self.metadata_counter, &mut self.pending_metadata);
                 writeln!(out, "  br i1 {}, label %done, label %wait", tr).ok();
                 writeln!(out, "  wait:").ok();
                 emit_trg_event_epoll_wait(self, out);
-                writeln!(out, "  br label %tick !llvm.loop !{}", md_idx).ok();
+                writeln!(out, "  br label %tick, !llvm.loop !{}", md_idx).ok();
             } else {
-                let md_idx = super::emit_loop_metadata_nodes(out, "  ", &mut self.metadata_counter);
-                writeln!(out, "  br i1 {}, label %done, label %tick !llvm.loop !{}", tr, md_idx).ok();
+                let md_idx = super::emit_loop_metadata_nodes(&mut self.metadata_counter, &mut self.pending_metadata);
+                writeln!(out, "  br i1 {}, label %done, label %tick, !llvm.loop !{}", tr, md_idx).ok();
             }
             writeln!(out, "  done:").ok();
         } else if has_wake_triggers {
             emit_trg_event_epoll_wait(self, out);
-            super::emit_loop_metadata(out, "  ", "tick", &mut self.metadata_counter);
+            super::emit_loop_metadata(out, "  ", "tick", &mut self.metadata_counter, &mut self.pending_metadata);
         } else {
-            super::emit_loop_metadata(out, "  ", "tick", &mut self.metadata_counter);
+            super::emit_loop_metadata(out, "  ", "tick", &mut self.metadata_counter, &mut self.pending_metadata);
         }
         self.phi_induction_reg = None;
         self.pending_post_hoist.clear();

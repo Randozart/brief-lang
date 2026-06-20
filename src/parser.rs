@@ -76,6 +76,17 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn with_strict_mode(mut self, mode: bool) -> Self {
+        self.strict_mode = if mode { StrictMode::Strict } else { StrictMode::Off };
+        self
+    }
+
+    pub fn with_gpu_mode(self, _mode: bool) -> Self {
+        // GPU mode is handled by the Annotator pass (compiler pass #2).
+        // The parser itself is target-agnostic; no changes to parsing needed.
+        self
+    }
+
     pub fn take_sed_item_names(&mut self) -> Vec<String> {
         std::mem::take(&mut self.sed_item_names)
     }

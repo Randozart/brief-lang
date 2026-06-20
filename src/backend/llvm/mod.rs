@@ -435,14 +435,10 @@ pub(super) fn tbaa_node(ty_str: &str) -> i32 {
 
 /// Emit `!llvm.loop` metadata for a backedge branch and the branch itself.
 ///
-/// Follows the `foreach.rs` pattern: emit metadata entries (default:
-/// `!llvm.loop.vectorize.enable`), build the self-referencing loop metadata
-/// node, and attach it to the backedge branch.
-///
-/// Called from `loop_engine.rs` main loop emission paths (emit_folded_loop,
-/// emit_folded_memory_main, emit_main). Always emits at minimum
-/// `!llvm.loop.vectorize.enable = true` since all Brief counted loops
-/// have known bounds and are vectorizable.
+/// Follows the `foreach.rs` pattern: emit metadata entries, build the
+/// self-referencing loop metadata node, and attach it to the backedge branch.
+/// Metadata definitions are written to `pending_metadata` (flushed at module
+/// end) because LLVM 18+ rejects metadata definitions inside function bodies.
 ///
 /// 2026-06-20: Phase 0a — retrofitted from foreach.rs to main loop paths.
 pub(super) fn emit_loop_metadata(
@@ -450,33 +446,30 @@ pub(super) fn emit_loop_metadata(
     indent: &str,
     backedge_label: &str,
     metadata_counter: &mut usize,
+    pending_metadata: &mut String,
 ) {
-    let md_idx = emit_loop_metadata_nodes(out, indent, metadata_counter);
-    writeln!(out, "{0}br label %{1} !llvm.loop !{2}", indent, backedge_label, md_idx).ok();
+    let md_idx = emit_loop_metadata_nodes(metadata_counter, pending_metadata);
+    writeln!(out, "{0}br label %{1}, !llvm.loop !{2}", indent, backedge_label, md_idx).ok();
 }
 
-/// Emit loop metadata nodes (without the branch) and return the self-referencing
-/// metadata node ID. The caller is responsible for attaching `!llvm.loop !N`
-/// to their branch instruction.
-///
-/// Use this variant when the backedge is a conditional branch or when multiple
-/// backedges need to share the same metadata node.
+/// Same as `emit_loop_metadata` but the caller supplies the backedge text.
+/// Use when the backedge is a conditional branch (br i1) or when multiple
+/// backedges share the same metadata node.
 pub(super) fn emit_loop_metadata_nodes(
-    out: &mut String,
-    indent: &str,
     metadata_counter: &mut usize,
+    pending_metadata: &mut String,
 ) -> usize {
     let start = *metadata_counter;
     let mut md_count = 1;
     let mut md_entries = Vec::new();
     // Default: vectorize.enable for all counted loops
     let vd_md = start + md_count;
-    writeln!(out, "{}!{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}", indent, vd_md).ok();
+    writeln!(pending_metadata, "!{0} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}", vd_md).ok();
     md_entries.push(format!("!{}", vd_md));
     md_count += 1;
 
     let entries = md_entries.join(", ");
-    writeln!(out, "{}!{} = !{{!{}, {}}}", indent, start, start, entries).ok();
+    writeln!(pending_metadata, "!{0} = !{{!{0}, {1}}}", start, entries).ok();
     *metadata_counter += md_count;
     start
 }
@@ -640,6 +633,10 @@ pub struct LlvmBackend {
     pub(crate) constants: HashMap<String, (Type, Expr)>,
     struct_types: HashMap<String, Vec<(String, Type)>>,
     enum_types: HashMap<String, crate::ast::EnumDefinition>,
+    /// Accumulated `!N = !{...}` metadata definitions emitted at module level.
+    /// LLVM 18+ rejects metadata definitions inside function bodies, so they
+    /// are collected here and flushed by emit_module_end_metadata().
+    pending_metadata: String,
     variant_disc: HashMap<String, (String, u64, usize)>,
 
     // ── Reporting ──────────────────────────────────────────
@@ -769,6 +766,7 @@ impl LlvmBackend {
             ssa_old_int_regs: HashMap::new(),
             struct_types: HashMap::new(),
             enum_types: HashMap::new(),
+            pending_metadata: String::new(),
             variant_disc: HashMap::new(),
             explain: false,
             remarks: Vec::new(),
@@ -2094,6 +2092,10 @@ self.emit_declares(&mut out);
         }
 
         // Attributes
+        if !self.pending_metadata.is_empty() {
+            writeln!(out, "; Loop metadata").ok();
+            out.push_str(&self.pending_metadata);
+        }
         writeln!(out).ok();
         writeln!(out, "attributes #0 = {{").ok();
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn").ok();

@@ -2052,11 +2052,21 @@ Expr::ObjectLiteral(fields) => {
             }
             // ── Pattern B routing (direct destructure, not through trait) ──
             Expr::BinaryOp(bop) => {
-                let l_ty = self.infer_expression(&bop.left);
-                let r_ty = self.infer_expression(&bop.right);
-                if l_ty == Type::Int && r_ty == Type::Int { Type::Int }
-                else if l_ty == Type::Float && r_ty == Type::Float { Type::Float }
-                else { Type::Int }
+                use crate::features::binary_op::BinaryOpKind;
+                // Comparison and logical operators return Bool regardless of
+                // operand types. Arithmetic operators return the operand type.
+                match bop.kind {
+                    BinaryOpKind::Eq | BinaryOpKind::Ne
+                    | BinaryOpKind::Lt | BinaryOpKind::Le
+                    | BinaryOpKind::Gt | BinaryOpKind::Ge
+                    | BinaryOpKind::And | BinaryOpKind::Or => Type::Bool,
+                    _ => {
+                        let l_ty = self.infer_expression(&bop.left);
+                        let r_ty = self.infer_expression(&bop.right);
+                        if l_ty == Type::Float || r_ty == Type::Float { Type::Float }
+                        else { Type::Int }
+                    }
+                }
             }
             Expr::UnaryOp(uop) => {
                 let inner = self.infer_expression(&uop.operand);
