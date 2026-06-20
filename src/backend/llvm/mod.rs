@@ -613,6 +613,9 @@ pub struct LlvmBackend {
     // ── Embedded Mode ──────────────────────────────────────
     pub(crate) is_embedded: bool,
     pub(crate) pending_async_await_count: usize,
+
+    // ── Type Universe (Phase 3.5) ──────────────────────────
+    pub(crate) type_universe: Option<crate::type_universe::TypeUniverse>,
 }
 
 /// Configuration for embedded (bare-metal) LLVM codegen.
@@ -725,6 +728,7 @@ impl LlvmBackend {
             spirv_blobs: Vec::new(),
             is_embedded: false,
             pending_async_await_count: 0,
+            type_universe: None,
         }
     }
 
@@ -794,6 +798,11 @@ impl LlvmBackend {
 
     pub fn with_embedded_mode(mut self, enabled: bool) -> Self {
         self.is_embedded = enabled;
+        self
+    }
+
+    pub fn with_type_universe(mut self, tu: crate::type_universe::TypeUniverse) -> Self {
+        self.type_universe = Some(tu);
         self
     }
 

@@ -22,7 +22,9 @@
 
 use crate::ast::*;
 use crate::errors::{Span, SyntaxError};
+use crate::features::binary_op::{BinaryOpExpr, BinaryOpKind};
 use crate::features::literal::LiteralExpr;
+use crate::features::unary_op::{UnaryOpExpr, UnaryOpKind};
 use crate::lexer::Token;
 use logos::{Lexer, Logos};
 use std::path::Path;
@@ -4140,7 +4142,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             if let Some(Ok(Token::TildeSlash)) = self.current_token() {
                 self.advance(); // Consume ~/
                 let expr = self.parse_expression()?;
-                pre_condition = Expr::Not(Box::new(expr.clone()));
+                pre_condition = Expr::UnaryOp(Box::new(UnaryOpExpr::new(UnaryOpKind::Not, expr.clone())));
                 post_condition = expr;
                 self.expect(Token::RBracket)?;
                 count = 2; // ~/ provides both pre and post
@@ -5590,7 +5592,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         while let Some(Ok(Token::OrOr)) = self.current_token() {
             self.advance();
             let right = self.parse_and()?;
-            left = Expr::Or(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Or, left, right)));
         }
         Ok(left)
     }
@@ -5600,7 +5602,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         while let Some(Ok(Token::AndAnd)) = self.current_token() {
             self.advance();
             let right = self.parse_bitwise_or()?;
-            left = Expr::And(Box::new(left), Box::new(right));
+            left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::And, left, right)));
         }
         Ok(left)
     }
@@ -5610,7 +5612,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         while let Some(Ok(Token::Pipe)) = self.current_token() {
             self.advance();
             let right = self.parse_bitwise_xor()?;
-            left = Expr::BitOr(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::BitOr, left, right)));
         }
         Ok(left)
     }
@@ -5620,7 +5622,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         while let Some(Ok(Token::BitXor)) = self.current_token() {
             self.advance();
             let right = self.parse_bitwise_and()?;
-            left = Expr::BitXor(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::BitXor, left, right)));
         }
         Ok(left)
     }
@@ -5630,7 +5632,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         while let Some(Ok(Token::Ampersand)) = self.current_token() {
             self.advance();
             let right = self.parse_equality()?;
-            left = Expr::BitAnd(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::BitAnd, left, right)));
         }
         Ok(left)
     }
@@ -5642,12 +5644,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(Token::EqEq) => {
                     self.advance();
                     let right = self.parse_check()?;
-                    left = Expr::Eq(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Eq, left, right)));
                 }
                 Ok(Token::Ne) => {
                     self.advance();
                     let right = self.parse_check()?;
-                    left = Expr::Ne(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Ne, left, right)));
                 }
                 _ => break,
             }
@@ -5717,22 +5719,22 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(Token::Lt) => {
                     self.advance();
                     let right = self.parse_shift()?;
-                    left = Expr::Lt(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Lt, left, right)));
                 }
                 Ok(Token::Le) => {
                     self.advance();
                     let right = self.parse_shift()?;
-                    left = Expr::Le(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Le, left, right)));
                 }
                 Ok(Token::Gt) => {
                     self.advance();
                     let right = self.parse_shift()?;
-                    left = Expr::Gt(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, left, right)));
                 }
                 Ok(Token::Ge) => {
                     self.advance();
                     let right = self.parse_shift()?;
-                    left = Expr::Ge(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Ge, left, right)));
                 }
                 _ => break,
             }
@@ -5747,12 +5749,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(Token::Shl) => {
                     self.advance();
                     let right = self.parse_additive()?;
-                    left = Expr::Shl(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Shl, left, right)));
                 }
                 Ok(Token::Shr) => {
                     self.advance();
                     let right = self.parse_additive()?;
-                    left = Expr::Shr(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Shr, left, right)));
                 }
                 _ => break,
             }
@@ -5767,7 +5769,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(Token::Plus) => {
                     self.advance();
                     let right = self.parse_multiplicative()?;
-                    left = Expr::Add(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Add, left, right)));
                 }
                 Ok(Token::PlusPlus) => {
                     self.advance();
@@ -5777,7 +5779,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(Token::Minus) => {
                     self.advance();
                     let right = self.parse_multiplicative()?;
-                    left = Expr::Sub(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Sub, left, right)));
                 }
                 _ => break,
             }
@@ -5792,17 +5794,17 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(Token::Star) => {
                     self.advance();
                     let right = self.parse_unary()?;
-                    left = Expr::Mul(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Mul, left, right)));
                 }
                 Ok(Token::Slash) => {
                     self.advance();
                     let right = self.parse_unary()?;
-                    left = Expr::Div(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Div, left, right)));
                 }
                 Ok(Token::Percent) => {
                     self.advance();
                     let right = self.parse_unary()?;
-                    left = Expr::Mod(Box::new(left), Box::new(right));
+                    left = Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Mod, left, right)));
                 }
                 _ => break,
             }
@@ -5816,17 +5818,17 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(Token::Not) => {
                     self.advance();
                     let expr = self.parse_unary()?;
-                    Ok(Expr::Not(Box::new(expr)))
+                    Ok(Expr::UnaryOp(Box::new(UnaryOpExpr::new(UnaryOpKind::Not, expr))))
                 }
                 Ok(Token::Minus) => {
                     self.advance();
                     let expr = self.parse_unary()?;
-                    Ok(Expr::Neg(Box::new(expr)))
+                    Ok(Expr::UnaryOp(Box::new(UnaryOpExpr::new(UnaryOpKind::Neg, expr))))
                 }
                 Ok(Token::Tilde) => {
                     self.advance();
                     let expr = self.parse_unary()?;
-                    Ok(Expr::BitNot(Box::new(expr)))
+                    Ok(Expr::UnaryOp(Box::new(UnaryOpExpr::new(UnaryOpKind::BitNot, expr))))
                 }
                 Ok(Token::Ampersand) => {
                     self.advance();
@@ -7326,10 +7328,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
     /// Simplified version of proof_engine::check_convergence — the full proof runs
     /// later during verification; this is just a parse-time structural check.
     fn is_convergent_contract_pair(pre: &Expr, post: &Expr) -> bool {
-        // Pattern: post is a comparison (Eq/Ne/Gt/Ge/Lt/Le), pre is also a comparison.
-        // The full proof runs in proof_engine; this is a structural parse-time check.
-        matches!(post, Expr::Eq(_, _) | Expr::Gt(_, _) | Expr::Ge(_, _) | Expr::Lt(_, _) | Expr::Le(_, _) | Expr::Ne(_, _))
-            && matches!(pre, Expr::Lt(_, _) | Expr::Le(_, _) | Expr::Gt(_, _) | Expr::Ge(_, _) | Expr::Eq(_, _) | Expr::Ne(_, _) | Expr::And(_, _))
+        use crate::features::binary_op::BinaryOpKind::*;
+        // Pattern: post is a comparison wrapped in BinaryOp, pre is also a comparison.
+        let is_comparison = |e: &Expr| -> bool {
+            matches!(e, Expr::BinaryOp(bop) if matches!(bop.kind, Eq | Ne | Lt | Le | Gt | Ge | And))
+        };
+        is_comparison(post) && is_comparison(pre)
     }
 
     fn parse_keyword_as_expr(&mut self, name: &str) -> Result<Expr, SyntaxError> {
@@ -8729,10 +8733,13 @@ mod parser_tests {
     fn test_parse_subtype_map() {
         check_subtype_ops(
             "let result <: items { MAP(x * 2); };",
-            &[crate::ast::SubtypeOp::Map(Box::new(Expr::Mul(
-                Box::new(Expr::Identifier("x".into())),
-                Box::new(Expr::Literal(Box::new(LiteralExpr::Integer(2)))),
-            )))],
+            &[crate::ast::SubtypeOp::Map(Box::new(Expr::BinaryOp(Box::new(
+                crate::features::binary_op::BinaryOpExpr::new(
+                    crate::features::binary_op::BinaryOpKind::Mul,
+                    Expr::Identifier("x".into()),
+                    Expr::Literal(Box::new(LiteralExpr::Integer(2))),
+                ),
+            ))))],
         );
     }
 
@@ -8841,10 +8848,13 @@ mod parser_tests {
             "let result <: items { FILTER(active); MAP(x * 2); LIMIT(5); };",
             &[
                 crate::ast::SubtypeOp::Filter(Box::new(Expr::Identifier("active".into()))),
-                crate::ast::SubtypeOp::Map(Box::new(Expr::Mul(
-                    Box::new(Expr::Identifier("x".into())),
-                    Box::new(Expr::Literal(Box::new(LiteralExpr::Integer(2)))),
-                ))),
+                crate::ast::SubtypeOp::Map(Box::new(Expr::BinaryOp(Box::new(
+                    crate::features::binary_op::BinaryOpExpr::new(
+                        crate::features::binary_op::BinaryOpKind::Mul,
+                        Expr::Identifier("x".into()),
+                        Expr::Literal(Box::new(LiteralExpr::Integer(2))),
+                    ),
+                )))),
                 crate::ast::SubtypeOp::Limit(5),
             ],
         );
@@ -8932,7 +8942,7 @@ mod parser_tests {
             match &defn.body[0] {
                 Statement::Term { values, .. } => {
                     let expr = values[0].as_ref().unwrap();
-                    assert!(matches!(expr, Expr::And(_, _)),
+                    assert!(matches!(expr, Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::And),
                         "is should bind tighter than &&, got: {:?}", expr);
                 }
                 _ => panic!("Expected Term"),

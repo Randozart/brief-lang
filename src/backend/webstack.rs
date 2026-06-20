@@ -898,6 +898,38 @@ impl WebstackGenerator {
                     format!("(() => {{ {}.push(...{}.splice(0)); return {}; }})()", d, s, s)
                 }
             }
+            Expr::BinaryOp(bop) => {
+                let l = self.expr_to_ts(&bop.left);
+                let r = self.expr_to_ts(&bop.right);
+                match bop.kind {
+                    crate::features::binary_op::BinaryOpKind::Add => format!("({} + {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Sub => format!("({} - {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Mul => format!("({} * {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Div => format!("({} / {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Mod => format!("({} % {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Eq => format!("({} === {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Ne => format!("({} !== {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Lt => format!("({} < {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Le => format!("({} <= {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Gt => format!("({} > {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Ge => format!("({} >= {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::And => format!("({} && {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Or => format!("({} || {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::BitAnd => format!("({} & {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::BitOr => format!("({} | {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::BitXor => format!("({} ^ {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Shl => format!("({} << {})", l, r),
+                    crate::features::binary_op::BinaryOpKind::Shr => format!("({} >> {})", l, r),
+                }
+            }
+            Expr::UnaryOp(uop) => {
+                let op = self.expr_to_ts(&uop.operand);
+                match uop.kind {
+                    crate::features::unary_op::UnaryOpKind::Neg => format!("(-{})", op),
+                    crate::features::unary_op::UnaryOpKind::Not => format!("(!{})", op),
+                    crate::features::unary_op::UnaryOpKind::BitNot => format!("(~{})", op),
+                }
+            }
             _ => format!("/* expr: {:?} */ 0", expr),
         }
     }

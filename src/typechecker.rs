@@ -67,6 +67,7 @@ pub struct TypeChecker {
     struct_files: HashMap<String, PathBuf>,  // struct_name -> defining file
     struct_parents: HashMap<String, Option<Type>>,  // struct_name -> parent type (for derivation upcast)
     trigger_names: std::collections::HashSet<String>,  // names of declared @ link triggers (read-only)
+    type_universe: Option<crate::type_universe::TypeUniverse>,
 }
 
 impl TypeChecker {
@@ -91,6 +92,7 @@ impl TypeChecker {
             struct_files: HashMap::new(),
             struct_parents: HashMap::new(),
             trigger_names: std::collections::HashSet::new(),
+            type_universe: None,
         }
     }
 
@@ -112,6 +114,11 @@ impl TypeChecker {
     pub fn with_stdlib_config(mut self, no_stdlib: bool, custom_path: Option<PathBuf>) -> Self {
         self.no_stdlib = no_stdlib;
         self.custom_stdlib_path = custom_path;
+        self
+    }
+
+    pub fn with_type_universe(mut self, tu: crate::type_universe::TypeUniverse) -> Self {
+        self.type_universe = Some(tu);
         self
     }
 
@@ -2003,13 +2010,10 @@ impl TypeChecker {
                         }
                     }
                     ProjectionTarget::UserDefined(name) => {
-                        // User-defined projections are resolved against the source type's
-                        // binding table during monomorphization. For now, return Void.
-                        Type::Void
+                        self.resolve_user_projection_type(&src_ty, name)
                     }
                     ProjectionTarget::UserDefinedWithArg(name, _) => {
-                        // User-defined parameterized projection — same resolution strategy.
-                        Type::Void
+                        self.resolve_user_projection_type(&src_ty, name)
                     }
                 }
             }
@@ -2469,6 +2473,49 @@ Expr::ObjectLiteral(fields) => {
             }
             _ => {}
         }
+    }
+
+    /// Phase 3.5: Resolve the return type of a user-defined projection.
+    /// Checks built-in well-known operator names first, then falls back to
+    /// TypeUniverse lookup for user-defined types.
+    fn resolve_user_projection_type(&self, src_ty: &Type, name: &str) -> Type {
+        // Fast-path: known built-in type + well-known operator name
+        let known = match (src_ty, name) {
+            (Type::Int, "Add" | "Sub" | "Mul" | "Div" | "Mod"
+                       | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr") => Some(Type::Int),
+            (Type::Int, "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge"
+                       | "And" | "Or" | "Not") => Some(Type::Bool),
+            (Type::Int, "Neg" | "BitNot") => Some(Type::Int),
+            (Type::Float, "Add" | "Sub" | "Mul" | "Div") => Some(Type::Float),
+            (Type::Float, "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge") => Some(Type::Bool),
+            (Type::Float, "Neg") => Some(Type::Float),
+            (Type::Bool, "And" | "Or" | "Eq" | "Ne" | "Not") => Some(Type::Bool),
+            (Type::Char, "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge") => Some(Type::Bool),
+            _ => None,
+        };
+        if let Some(ty) = known {
+            return ty;
+        }
+
+        // Fallback: look up in TypeUniverse for user-defined types
+        let type_name = match src_ty {
+            Type::Custom(n) => n.clone(),
+            Type::Applied(n, _) => n.clone(),
+            Type::Enum(n) => n.clone(),
+            _ => return Type::Int,
+        };
+
+        if let Some(ref universe) = self.type_universe {
+            if let Some(resolved) = universe.types.get(&type_name) {
+                if let Some(binding) = resolved.projections.get(name) {
+                    // Infer the return type from the binding's value expression
+                    return self.infer_expression(&binding.value);
+                }
+            }
+        }
+
+        // Default fallback
+        Type::Int
     }
 }
 

@@ -2598,7 +2598,14 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, v, len).ok();
                         writeln!(out, "{}{} = zext i1 {} to i64", indent, v, v).ok();
                     }
-                    ProjectionTarget::UserDefined(_) | ProjectionTarget::UserDefinedWithArg(_, _) => {
+                    ProjectionTarget::UserDefinedWithArg(name, arg_expr) => {
+                        // Phase 3.5: Fast-path for well-known operator projections
+                        if let Some(tr) = self.try_projection_fast_path(out, &src_val, name.as_str(), arg_expr, indent, &v) {
+                            return tr;
+                        }
+                        writeln!(out, "{}{} = add i64 0, 0 ; user-defined projection stub", indent, v).ok();
+                    }
+                    ProjectionTarget::UserDefined(_) => {
                         writeln!(out, "{}{} = add i64 0, 0 ; user-defined projection stub", indent, v).ok();
                     }
                     _ => {
@@ -3938,5 +3945,195 @@ impl LlvmBackend {
             }
             _ => false,
         }
+    }
+
+    /// Phase 3.5: Fast-path codegen for well-known UserDefinedWithArg projection names.
+    /// Recognizes operator names (Add, Sub, Eq, etc.) on known types (Int, Float, Bool)
+    /// and emits native LLVM IR instead of the generic fallback.
+    fn try_projection_fast_path(
+        &mut self,
+        out: &mut String,
+        src_val: &TypedRegister,
+        name: &str,
+        arg_expr: &Expr,
+        indent: &str,
+        v: &str,
+    ) -> Option<TypedRegister> {
+        let rhs = self.emit_expr(out, arg_expr, indent);
+        let tr = match (src_val.ty.clone(), name) {
+            // ── Int arithmetic ──
+            (Type::Int, "Add") => {
+                writeln!(out, "{}{} = add i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Sub") => {
+                writeln!(out, "{}{} = sub i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Mul") => {
+                writeln!(out, "{}{} = mul i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Div") => {
+                writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Mod") => {
+                writeln!(out, "{}{} = srem i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            // ── Int comparison ──
+            (Type::Int, "Eq") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Ne") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Lt") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Le") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Gt") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Ge") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            // ── Int bitwise ──
+            (Type::Int, "BitAnd") => {
+                writeln!(out, "{}{} = and i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "BitOr") => {
+                writeln!(out, "{}{} = or i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "BitXor") => {
+                writeln!(out, "{}{} = xor i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Shl") => {
+                writeln!(out, "{}{} = shl i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Shr") => {
+                writeln!(out, "{}{} = lshr i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            // ── Int/Char logical (treated as boolean in Brief) ──
+            (Type::Int, "And") => {
+                writeln!(out, "{}{} = and i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            (Type::Int, "Or") => {
+                writeln!(out, "{}{} = or i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Int }
+            }
+            // ── Float arithmetic ──
+            (Type::Float, "Add") => {
+                writeln!(out, "{}{} = fadd float {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Sub") => {
+                writeln!(out, "{}{} = fsub float {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Mul") => {
+                writeln!(out, "{}{} = fmul float {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Div") => {
+                writeln!(out, "{}{} = fdiv float {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Eq") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = fcmp oeq float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                let ext = format!("%pce{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
+                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Ne") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = fcmp one float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                let ext = format!("%pce{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
+                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Lt") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = fcmp olt float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                let ext = format!("%pce{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
+                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Le") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = fcmp ole float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                let ext = format!("%pce{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
+                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Gt") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = fcmp ogt float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                let ext = format!("%pce{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
+                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            (Type::Float, "Ge") => {
+                let cmp = format!("%pcmp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = fcmp oge float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
+                let ext = format!("%pce{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
+                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Float }
+            }
+            // ── Bool logical ──
+            (Type::Bool, "And") => {
+                writeln!(out, "{}{} = and i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Bool }
+            }
+            (Type::Bool, "Or") => {
+                writeln!(out, "{}{} = or i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Bool }
+            }
+            (Type::Bool, "Eq") => {
+                writeln!(out, "{}{} = icmp eq i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Bool }
+            }
+            (Type::Bool, "Ne") => {
+                writeln!(out, "{}{} = icmp ne i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
+                TypedRegister { name: v.to_string(), ty: Type::Bool }
+            }
+            // ── Unknown combination — not a fast-path ──
+            _ => return None,
+        };
+        Some(tr)
     }
 }

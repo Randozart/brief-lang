@@ -24,7 +24,7 @@
 
 use brief_compiler::{
     analysis, annotator, ast, backend, dbrief, desugarer, errors, hardware, hardware_validator, import_resolver, interpreter,
-    linkage, lsp, manifest, memory_spec, parser, proof_engine, rbv, typechecker, view_compiler,
+    linkage, lsp, manifest, memory_spec, parser, proof_engine, rbv, typechecker, type_universe, view_compiler,
     target_spec::{self, TargetSpec},
 };
 use brief_compiler::backend::llvm::EmbeddedConfig;
@@ -2401,6 +2401,9 @@ fn run_llvm_compile(
         deps
     };
 
+    // Phase 3.5: Build the Type Universe for projection resolution
+    let tu = type_universe::TypeUniverse::build(&program);
+
     let comp_target = if is_embedded {
         typechecker::CompilationTarget::Embedded
     } else if is_circuit_extension(file_path) {
@@ -2409,7 +2412,8 @@ fn run_llvm_compile(
         typechecker::CompilationTarget::Interpreter
     };
     let mut tc = typechecker::TypeChecker::new()
-        .with_target(comp_target);
+        .with_target(comp_target)
+        .with_type_universe(tu.clone());
     let type_errors = tc.check_program(&mut program.clone());
     if !type_errors.is_empty() {
         return Err(format!("Type errors: {}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv"))).into());
@@ -2435,7 +2439,8 @@ fn run_llvm_compile(
         .with_emit_remarks(emit_remarks)
         .with_gpu_offload(gpu_offload)
         .with_gpu_backend(gpu_backend.to_string())
-        .with_embedded_mode(is_embedded);
+        .with_embedded_mode(is_embedded)
+        .with_type_universe(tu);
     if dead_info_disabled {
         llvm_backend = llvm_backend.with_dead_info_disabled(true);
     }

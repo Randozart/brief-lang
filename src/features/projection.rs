@@ -192,15 +192,33 @@ impl ExprEval for ProjectionExpr {
                 _ => Err(RuntimeError::TypeMismatch("AsQueue requires List".into())),
             },
             ProjectionTarget::UserDefined(name) => {
-                Err(RuntimeError::UnsupportedProjection(format!(
-                    "user-defined projection '{}' is not supported at runtime; \
-                     define it in a type declaration", name
-                )))
+                let val = source_val.clone();
+                match name.as_str() {
+                    "Neg" => match &val {
+                        Value::Int(n) => Ok(Value::Int(-n)),
+                        Value::Float(f) => Ok(Value::Float(-f)),
+                        _ => Err(RuntimeError::TypeMismatch("Neg requires Int or Float".into())),
+                    },
+                    "Not" => match &val {
+                        Value::Bool(b) => Ok(Value::Bool(!b)),
+                        _ => Err(RuntimeError::TypeMismatch("Not requires Bool".into())),
+                    },
+                    "BitNot" => match &val {
+                        Value::Int(n) => Ok(Value::Int(!n)),
+                        _ => Err(RuntimeError::TypeMismatch("BitNot requires Int".into())),
+                    },
+                    _ => Err(RuntimeError::UnsupportedProjection(format!(
+                        "user-defined projection '{}' is not supported at runtime", name
+                    ))),
+                }
             }
-            ProjectionTarget::UserDefinedWithArg(name, _) => {
+            ProjectionTarget::UserDefinedWithArg(name, arg_expr) => {
+                // Phase 3.5: Fast-path for well-known operator projections
+                if let Ok(val) = eval_user_projection_fast_path(ctx, &source_val, name, arg_expr) {
+                    return Ok(val);
+                }
                 Err(RuntimeError::UnsupportedProjection(format!(
-                    "user-defined projection '{}' is not supported at runtime; \
-                     define it in a type declaration", name
+                    "user-defined projection '{}' is not supported at runtime", name
                 )))
             }
         }
@@ -217,5 +235,68 @@ impl ExprCodegenLLVM for ProjectionExpr {
 impl ExprCodegenWebstack for ProjectionExpr {
     fn emit_js(&self, _ctx: &crate::backend::webstack::WebstackGenerator, _dispatch: &ExprDispatch) -> String {
         "JsValue::undefined".to_string()
+    }
+}
+
+/// Phase 3.5: Fast-path for well-known UserDefinedWithArg operator projections
+/// in the interpreter. Handles operator names (Add, Sub, Eq, etc.) on known
+/// value types (Int, Float, Bool) directly without projection binding lookup.
+fn eval_user_projection_fast_path(
+    ctx: &mut Interpreter,
+    source_val: &Value,
+    name: &str,
+    arg_expr: &Expr,
+) -> Result<Value, RuntimeError> {
+    let rhs = ctx.eval_expr(arg_expr)?;
+    match (source_val, &rhs, name) {
+        // ── Int arithmetic ──
+        (Value::Int(l), Value::Int(r), "Add") => Ok(Value::Int(l + r)),
+        (Value::Int(l), Value::Int(r), "Sub") => Ok(Value::Int(l - r)),
+        (Value::Int(l), Value::Int(r), "Mul") => Ok(Value::Int(l * r)),
+        (Value::Int(l), Value::Int(r), "Div") => {
+            if *r == 0 { Err(RuntimeError::DivisionByZero) }
+            else { Ok(Value::Int(l / r)) }
+        }
+        (Value::Int(l), Value::Int(r), "Mod") => {
+            if *r == 0 { Err(RuntimeError::DivisionByZero) }
+            else { Ok(Value::Int(l % r)) }
+        }
+        // ── Int comparisons ──
+        (Value::Int(l), Value::Int(r), "Eq") => Ok(Value::Bool(l == r)),
+        (Value::Int(l), Value::Int(r), "Ne") => Ok(Value::Bool(l != r)),
+        (Value::Int(l), Value::Int(r), "Lt") => Ok(Value::Bool(l < r)),
+        (Value::Int(l), Value::Int(r), "Le") => Ok(Value::Bool(l <= r)),
+        (Value::Int(l), Value::Int(r), "Gt") => Ok(Value::Bool(l > r)),
+        (Value::Int(l), Value::Int(r), "Ge") => Ok(Value::Bool(l >= r)),
+        // ── Int bitwise ──
+        (Value::Int(l), Value::Int(r), "BitAnd") => Ok(Value::Int(l & r)),
+        (Value::Int(l), Value::Int(r), "BitOr") => Ok(Value::Int(l | r)),
+        (Value::Int(l), Value::Int(r), "BitXor") => Ok(Value::Int(l ^ r)),
+        (Value::Int(l), Value::Int(r), "Shl") => Ok(Value::Int(l << r)),
+        (Value::Int(l), Value::Int(r), "Shr") => Ok(Value::Int(l >> r)),
+        // ── Int logical (treated as boolean in Brief) ──
+        (Value::Int(l), Value::Int(r), "And") => Ok(Value::Bool(*l != 0 && *r != 0)),
+        (Value::Int(l), Value::Int(r), "Or") => Ok(Value::Bool(*l != 0 || *r != 0)),
+        // ── Float arithmetic ──
+        (Value::Float(l), Value::Float(r), "Add") => Ok(Value::Float(l + r)),
+        (Value::Float(l), Value::Float(r), "Sub") => Ok(Value::Float(l - r)),
+        (Value::Float(l), Value::Float(r), "Mul") => Ok(Value::Float(l * r)),
+        (Value::Float(l), Value::Float(r), "Div") => Ok(Value::Float(l / r)),
+        // ── Float comparisons ──
+        (Value::Float(l), Value::Float(r), "Eq") => Ok(Value::Bool((l - r).abs() < f64::EPSILON)),
+        (Value::Float(l), Value::Float(r), "Ne") => Ok(Value::Bool((l - r).abs() >= f64::EPSILON)),
+        (Value::Float(l), Value::Float(r), "Lt") => Ok(Value::Bool(l < r)),
+        (Value::Float(l), Value::Float(r), "Le") => Ok(Value::Bool(l <= r)),
+        (Value::Float(l), Value::Float(r), "Gt") => Ok(Value::Bool(l > r)),
+        (Value::Float(l), Value::Float(r), "Ge") => Ok(Value::Bool(l >= r)),
+        // ── Bool logical ──
+        (Value::Bool(l), Value::Bool(r), "And") => Ok(Value::Bool(*l && *r)),
+        (Value::Bool(l), Value::Bool(r), "Or") => Ok(Value::Bool(*l || *r)),
+        (Value::Bool(l), Value::Bool(r), "Eq") => Ok(Value::Bool(l == r)),
+        (Value::Bool(l), Value::Bool(r), "Ne") => Ok(Value::Bool(l != r)),
+        // ── Unknown combination ──
+        _ => Err(RuntimeError::UnsupportedProjection(format!(
+            "projection '{}' not applicable to source type", name
+        ))),
     }
 }

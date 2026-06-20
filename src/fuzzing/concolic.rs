@@ -95,6 +95,10 @@ fn collect_constraints_recursive(
 
 /// Check if an expression involves a trigger variable
 fn expr_involves_trigger(expr: &Expr) -> bool {
+    // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+    if let Some(normalized) = expr.normalize_to_old() {
+        return expr_involves_trigger(&normalized);
+    }
     match expr {
         Expr::Identifier(name) => {
             // Heuristic: trigger variables often have signal-like names

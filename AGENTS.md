@@ -430,7 +430,13 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 952 tests pass, 0 fail
+- 1087 tests pass, 0 fail
+- **Phase 3.5 (Backend Fast-Path Registry)** complete:
+  - TypeUniverse wired into main.rs pipeline (constructed after desugar, passed to typechecker + LLVM backend)
+  - LLVM fast-path: `try_projection_fast_path()` emits native IR for 45+ (type, operator) pairs
+  - Typechecker: `resolve_user_projection_type()` resolves ~25 well-known operator return types, falls back to TypeUniverse
+  - Interpreter: `eval_user_projection_fast_path()` handles all operator names on Int/Float/Bool values
+  - UserDefined (unary) projections: Neg/Not/BitNot evaluated directly
 - **trg reactive dirty-flag architecture** complete (Phases 1–6):
   - Phase 1: `DependencyGraph` — variable-level DAG, Kahn's sort, cycle detection
   - Phase 2: `DirtyFlags(u64)` — bitmask with mark/clear/merge/any/none

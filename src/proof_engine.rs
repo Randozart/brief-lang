@@ -119,6 +119,10 @@ pub enum SymbolicValue {
 
 impl SymbolicValue {
     fn from_expr(expr: &Expr, vars: &HashMap<String, SymbolicValue>) -> Self {
+        // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+        if let Some(normalized) = expr.normalize_to_old() {
+            return Self::from_expr(&normalized, vars);
+        }
         match expr {
             Expr::Literal(lit) => match lit.as_ref() {
                 LiteralExpr::Integer(n) => SymbolicValue::Concrete(*n),
@@ -665,6 +669,10 @@ impl SymbolicExecutor {
     }
 
     fn negate_expr(&self, expr: &Expr) -> Option<Expr> {
+        // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+        if let Some(normalized) = expr.normalize_to_old() {
+            return self.negate_expr(&normalized);
+        }
         match expr {
             Expr::Literal(lit) => match lit.as_ref() {
                 LiteralExpr::Bool(b) => Some(Expr::Literal(Box::new(LiteralExpr::Bool(!b)))),
@@ -740,6 +748,10 @@ impl SymbolicExecutor {
     }
 
     fn collect_vars(&self, expr: &Expr, vars: &mut HashSet<String>) {
+        // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+        if let Some(normalized) = expr.normalize_to_old() {
+            return self.collect_vars(&normalized, vars);
+        }
         match expr {
             Expr::Identifier(name) => {
                 vars.insert(name.clone());
@@ -977,6 +989,11 @@ impl SymbolicExecutor {
         initial_vars: &HashMap<String, SymbolicValue>,
         state: &SymbolicState,
     ) -> bool {
+        // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+        if let Some(normalized) = post.normalize_to_old() {
+            return self.check_post_satisfiable(&normalized, initial_vars, state);
+        }
+        let sym = SymbolicValue::from_expr(post, &state.vars);
         let sym = SymbolicValue::from_expr(post, &state.vars);
         let result = sym.to_bool(initial_vars, &state.vars);
         match result {
@@ -1002,6 +1019,10 @@ impl SymbolicExecutor {
     }
 
     fn contains_prior_state(&self, expr: &Expr) -> bool {
+        // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+        if let Some(normalized) = expr.normalize_to_old() {
+            return self.contains_prior_state(&normalized);
+        }
         match expr {
             Expr::PriorState(_) => true,
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
@@ -1022,6 +1043,10 @@ impl SymbolicExecutor {
     }
 
     fn is_truthy(&self, expr: &Expr, state: &SymbolicState) -> bool {
+        // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+        if let Some(normalized) = expr.normalize_to_old() {
+            return self.is_truthy(&normalized, state);
+        }
         match expr {
             Expr::Literal(lit) => match lit.as_ref() {
                 LiteralExpr::Bool(b) => *b,
@@ -1088,6 +1113,10 @@ impl SymbolicExecutor {
     }
 
     fn eval_numeric(&self, expr: &Expr, state: &SymbolicState) -> Option<i64> {
+        // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+        if let Some(normalized) = expr.normalize_to_old() {
+            return self.eval_numeric(&normalized, state);
+        }
         match expr {
             Expr::Literal(lit) => match lit.as_ref() {
                 LiteralExpr::Integer(n) => Some(*n),
@@ -1140,6 +1169,10 @@ impl SymbolicExecutor {
 }
 
 fn format_expr(expr: &Expr) -> String {
+    // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+    if let Some(normalized) = expr.normalize_to_old() {
+        return format_expr(&normalized);
+    }
     match expr {
         Expr::Literal(lit) => lit.format(),
         Expr::Integer(n) => n.to_string(),
@@ -1185,6 +1218,10 @@ fn format_expr(expr: &Expr) -> String {
 
 /// Check if a compound expression tree involves a variable by name.
 fn contains_var(expr: &Expr, var: &str) -> bool {
+    // Handle new-style BinaryOp/UnaryOp by normalizing to old variants
+    if let Some(normalized) = expr.normalize_to_old() {
+        return contains_var(&normalized, var);
+    }
     match expr {
         Expr::Identifier(v) | Expr::PriorState(v) => v == var,
         Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r)
@@ -1214,6 +1251,21 @@ fn extract_var_relation<'a>(expr: &'a Expr, var: &str) -> Option<&'a Expr> {
             }
         }
         Expr::Or(_, _) => None,
+        Expr::BinaryOp(bop) => match bop.kind {
+            crate::features::binary_op::BinaryOpKind::And => {
+                if contains_var(&bop.left, var) {
+                    extract_var_relation(&bop.left, var).or(Some(&bop.left))
+                } else if contains_var(&bop.right, var) {
+                    extract_var_relation(&bop.right, var).or(Some(&bop.right))
+                } else {
+                    None
+                }
+            }
+            crate::features::binary_op::BinaryOpKind::Or => None,
+            _ => {
+                if contains_var(expr, var) { Some(expr) } else { None }
+            }
+        },
         other => {
             if contains_var(other, var) { Some(other) } else { None }
         }
@@ -1223,6 +1275,10 @@ fn extract_var_relation<'a>(expr: &'a Expr, var: &str) -> Option<&'a Expr> {
 /// Evaluate a pure-integer constant expression. Returns None for non-constants.
 /// Resolves const identifiers from `initial_values`.
 fn eval_const_expr(expr: &Expr, initial_values: &HashMap<String, Expr>) -> Option<i64> {
+    // Handle new-style BinaryOp by normalizing to old variants
+    if let Some(normalized) = expr.normalize_to_old() {
+        return eval_const_expr(&normalized, initial_values);
+    }
     match expr {
         Expr::Integer(n) => Some(*n),
         Expr::Literal(lit) => match lit.as_ref() {
@@ -1257,6 +1313,10 @@ fn is_self_minus_one(a: &Expr, b: &Expr, var: &str) -> bool {
 /// Returns `(var, bound)` where `var` is always an identifier and `bound`
 /// can be an identifier, integer literal, or other expression.
 fn extract_var_bound(expr: &Expr) -> Option<(String, Expr)> {
+    // Handle new-style BinaryOp by normalizing to old variants
+    if let Some(normalized) = expr.normalize_to_old() {
+        return extract_var_bound(&normalized);
+    }
     let (lhs, rhs) = match expr {
         Expr::Eq(l, r)
         | Expr::Ne(l, r)
@@ -1276,6 +1336,10 @@ fn extract_var_bound(expr: &Expr) -> Option<(String, Expr)> {
 /// Check if a pre-condition is structurally `var <op> bound_expr` for one of `valid_ops`.
 /// `bound_expr` can be an identifier or an integer literal.
 fn check_pre_matches(pre: &Expr, var: &str, bound_expr: &Expr, valid_ops: &[&str]) -> bool {
+    // Handle new-style BinaryOp by normalizing to old variants
+    if let Some(normalized) = pre.normalize_to_old() {
+        return check_pre_matches(&normalized, var, bound_expr, valid_ops);
+    }
     let op = match pre {
         Expr::Lt(..) => "<",
         Expr::Gt(..) => ">",
@@ -1321,6 +1385,17 @@ fn check_convergence(
     post_condition: &Expr,
     initial_values: &HashMap<String, Expr>,
 ) -> bool {
+    // Normalize new-style BinaryOp/UnaryOp to old variants
+    let owned_pre;
+    let owned_post;
+    let pre_condition = match pre_condition.normalize_to_old() {
+        Some(n) => { owned_pre = n; &owned_pre as &Expr }
+        None => pre_condition,
+    };
+    let post_condition = match post_condition.normalize_to_old() {
+        Some(n) => { owned_post = n; &owned_post as &Expr }
+        None => post_condition,
+    };
     // Step 1: Extract (var, bound_expr) from postcondition
     let (var, bound_expr) = match extract_var_bound(post_condition) {
         Some(pair) => pair,
@@ -1361,6 +1436,12 @@ fn check_convergence(
             if assign_name != &var {
                 continue;
             }
+            // Normalize BinaryOp to old variants for convergence analysis
+            let owned_expr;
+            let expr = match expr.normalize_to_old() {
+                Some(normalized) => { owned_expr = normalized; &owned_expr as &Expr }
+                None => expr,
+            };
             match expr {
                 Expr::Add(a, b) => {
                     if let Expr::Identifier(v) = a.as_ref() {
@@ -2219,7 +2300,11 @@ impl ProofEngine {
     }
 
     fn analyze_postcondition(&mut self, txn: &Transaction) {
-        let post = &txn.contract.post_condition;
+        let owned_post;
+        let post = match txn.contract.post_condition.normalize_to_old() {
+            Some(n) => { owned_post = n; &owned_post as &Expr }
+            None => &txn.contract.post_condition,
+        };
         self.check_post_contradiction(post, &txn.name, txn.contract.span);
     }
 
@@ -2333,6 +2418,10 @@ impl ProofEngine {
     /// Extract (variable_name, comparison_op, value) from a comparison expression.
     fn extract_bound(&self, expr: &Expr) -> Option<(String, &str, i64)> {
         fn bind_val(e: &Expr) -> Option<i64> { e.as_integer() }
+        // Handle new-style BinaryOp by normalizing to old variants
+        if let Some(normalized) = expr.normalize_to_old() {
+            return self.extract_bound(&normalized);
+        }
         match expr {
             Expr::Gt(l, r) => {
                 if let Expr::Identifier(var) = l.as_ref() {
@@ -2493,8 +2582,14 @@ impl ProofEngine {
                     self.collect_identifiers(arg, vars);
                 }
             }
+            Expr::BinaryOp(bop) => {
+                self.collect_identifiers(&bop.left, vars);
+                self.collect_identifiers(&bop.right, vars);
+            }
+            Expr::UnaryOp(uop) => {
+                self.collect_identifiers(&uop.operand, vars);
+            }
             Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
-            | Expr::BinaryOp(_) | Expr::UnaryOp(_)
             | Expr::ProjectionExpr(_) | Expr::CallExpr(_) | Expr::ListLiteralExpr(_)
             | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_) | Expr::SliceExpr(_)
             | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_) | Expr::StructInstanceExpr(_)
@@ -3334,8 +3429,12 @@ impl ProofEngine {
 
 /// Extract (variable_name, operator, value) from a comparison expression.
 /// Supports: x > N, x >= N, x < N, x <= N (variable on either side).
-pub fn extract_bound_from_expr(expr: &Expr) -> Option<(String, &str, i64)> {
+pub fn extract_bound_from_expr(expr: &Expr) -> Option<(String, &'static str, i64)> {
     fn bind_val(e: &Expr) -> Option<i64> { e.as_integer() }
+    // Handle new-style BinaryOp by normalizing to old variants
+    if let Some(normalized) = expr.normalize_to_old() {
+        return extract_bound_from_expr(&normalized);
+    }
     match expr {
         Expr::Gt(l, r) => {
             if let Expr::Identifier(var) = l.as_ref() {

@@ -68,16 +68,71 @@ impl ExprEval for BinaryOpExpr {
 }
 
 impl ExprCodegenLLVM for BinaryOpExpr {
-    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        let v = format!("%bz");
-        crate::backend::llvm::TypedRegister { name: v, ty: Type::Int }
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+        // Reconstruct the old Expr variant for backward-compat codegen
+        let old_expr = match self.kind {
+            BinaryOpKind::Add => Expr::Add(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Sub => Expr::Sub(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Mul => Expr::Mul(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Div => Expr::Div(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Mod => Expr::Mod(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Eq => Expr::Eq(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Ne => Expr::Ne(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Lt => Expr::Lt(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Le => Expr::Le(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Gt => Expr::Gt(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Ge => Expr::Ge(self.left.clone(), self.right.clone()),
+            BinaryOpKind::And => Expr::And(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Or => Expr::Or(self.left.clone(), self.right.clone()),
+            BinaryOpKind::BitAnd => Expr::BitAnd(self.left.clone(), self.right.clone()),
+            BinaryOpKind::BitOr => Expr::BitOr(self.left.clone(), self.right.clone()),
+            BinaryOpKind::BitXor => Expr::BitXor(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Shl => Expr::Shl(self.left.clone(), self.right.clone()),
+            BinaryOpKind::Shr => Expr::Shr(self.left.clone(), self.right.clone()),
+        };
+        ctx.emit_expr(out, &old_expr, "")
     }
 }
 
 
 impl ExprCodegenWebstack for BinaryOpExpr {
     fn emit_js(&self, _ctx: &crate::backend::webstack::WebstackGenerator, _dispatch: &ExprDispatch) -> String {
-        "JsValue::TRUE".to_string()
+        // Webstack handles Expr::BinaryOp directly in expr_to_ts — this trait
+        // path is a fallback for dispatch chains that route through feature structs.
+        let l = match self.left.as_ref() {
+            Expr::Integer(n) => n.to_string(),
+            Expr::Float(f) => f.to_string(),
+            Expr::Bool(b) => b.to_string(),
+            Expr::Identifier(name) => name.clone(),
+            _ => "value".to_string(),
+        };
+        let r = match self.right.as_ref() {
+            Expr::Integer(n) => n.to_string(),
+            Expr::Float(f) => f.to_string(),
+            Expr::Bool(b) => b.to_string(),
+            Expr::Identifier(name) => name.clone(),
+            _ => "value".to_string(),
+        };
+        match self.kind {
+            BinaryOpKind::Add => format!("({} + {})", l, r),
+            BinaryOpKind::Sub => format!("({} - {})", l, r),
+            BinaryOpKind::Mul => format!("({} * {})", l, r),
+            BinaryOpKind::Div => format!("({} / {})", l, r),
+            BinaryOpKind::Mod => format!("({} % {})", l, r),
+            BinaryOpKind::Eq => format!("({} === {})", l, r),
+            BinaryOpKind::Ne => format!("({} !== {})", l, r),
+            BinaryOpKind::Lt => format!("({} < {})", l, r),
+            BinaryOpKind::Le => format!("({} <= {})", l, r),
+            BinaryOpKind::Gt => format!("({} > {})", l, r),
+            BinaryOpKind::Ge => format!("({} >= {})", l, r),
+            BinaryOpKind::And => format!("({} && {})", l, r),
+            BinaryOpKind::Or => format!("({} || {})", l, r),
+            BinaryOpKind::BitAnd => format!("({} & {})", l, r),
+            BinaryOpKind::BitOr => format!("({} | {})", l, r),
+            BinaryOpKind::BitXor => format!("({} ^ {})", l, r),
+            BinaryOpKind::Shl => format!("({} << {})", l, r),
+            BinaryOpKind::Shr => format!("({} >> {})", l, r),
+        }
     }
 }
 

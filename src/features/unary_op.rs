@@ -60,7 +60,20 @@ impl ExprCodegenLLVM for UnaryOpExpr {
 
 impl ExprCodegenWebstack for UnaryOpExpr {
     fn emit_js(&self, _ctx: &crate::backend::webstack::WebstackGenerator, _dispatch: &ExprDispatch) -> String {
-        "JsValue::TRUE".to_string()
+        // Webstack handles Expr::UnaryOp directly in expr_to_ts — this trait
+        // path is a fallback for dispatch chains that route through feature structs.
+        let op = match self.operand.as_ref() {
+            Expr::Integer(n) => n.to_string(),
+            Expr::Float(f) => f.to_string(),
+            Expr::Bool(b) => b.to_string(),
+            Expr::Identifier(name) => name.clone(),
+            _ => "value".to_string(),
+        };
+        match self.kind {
+            UnaryOpKind::Neg => format!("(-{})", op),
+            UnaryOpKind::Not => format!("(!{})", op),
+            UnaryOpKind::BitNot => format!("(~{})", op),
+        }
     }
 }
 

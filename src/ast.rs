@@ -1353,6 +1353,55 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// Normalize BinaryOp/UnaryOp to old-style variants for backward compatibility.
+    /// Recursively normalizes nested expressions.
+    /// Returns None if already in old-style form (no conversion needed).
+    pub fn normalize_to_old(&self) -> Option<Expr> {
+        match self {
+            Expr::BinaryOp(bop) => {
+                let l = Box::new(bop.left.normalize_to_old_recursive());
+                let r = Box::new(bop.right.normalize_to_old_recursive());
+                Some(match bop.kind {
+                    crate::features::binary_op::BinaryOpKind::Add => Expr::Add(l, r),
+                    crate::features::binary_op::BinaryOpKind::Sub => Expr::Sub(l, r),
+                    crate::features::binary_op::BinaryOpKind::Mul => Expr::Mul(l, r),
+                    crate::features::binary_op::BinaryOpKind::Div => Expr::Div(l, r),
+                    crate::features::binary_op::BinaryOpKind::Mod => Expr::Mod(l, r),
+                    crate::features::binary_op::BinaryOpKind::Eq => Expr::Eq(l, r),
+                    crate::features::binary_op::BinaryOpKind::Ne => Expr::Ne(l, r),
+                    crate::features::binary_op::BinaryOpKind::Lt => Expr::Lt(l, r),
+                    crate::features::binary_op::BinaryOpKind::Le => Expr::Le(l, r),
+                    crate::features::binary_op::BinaryOpKind::Gt => Expr::Gt(l, r),
+                    crate::features::binary_op::BinaryOpKind::Ge => Expr::Ge(l, r),
+                    crate::features::binary_op::BinaryOpKind::And => Expr::And(l, r),
+                    crate::features::binary_op::BinaryOpKind::Or => Expr::Or(l, r),
+                    crate::features::binary_op::BinaryOpKind::BitAnd => Expr::BitAnd(l, r),
+                    crate::features::binary_op::BinaryOpKind::BitOr => Expr::BitOr(l, r),
+                    crate::features::binary_op::BinaryOpKind::BitXor => Expr::BitXor(l, r),
+                    crate::features::binary_op::BinaryOpKind::Shl => Expr::Shl(l, r),
+                    crate::features::binary_op::BinaryOpKind::Shr => Expr::Shr(l, r),
+                })
+            }
+            Expr::UnaryOp(uop) => {
+                let op = Box::new(uop.operand.normalize_to_old_recursive());
+                Some(match uop.kind {
+                    crate::features::unary_op::UnaryOpKind::Neg => Expr::Neg(op),
+                    crate::features::unary_op::UnaryOpKind::Not => Expr::Not(op),
+                    crate::features::unary_op::UnaryOpKind::BitNot => Expr::BitNot(op),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Recursively normalize, always returning an owned Expr in old-style form.
+    fn normalize_to_old_recursive(&self) -> Expr {
+        match self.normalize_to_old() {
+            Some(normalized) => normalized,
+            None => self.clone(),
+        }
+    }
+
     /// Set the file path on a DbvlTable expression (used by import resolver).
     pub fn set_dbvl_path(&mut self, file_path: &str) {
         if let Self::DbvlTable { path, .. } = self {
