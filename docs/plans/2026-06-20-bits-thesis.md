@@ -1447,6 +1447,121 @@ No backend changes are needed — the projections compile through the
 existing `emit_expr` path, and the intrinsics go through the existing
 intrinsic table.
 
+### 13.11 Autogenous Binding Generation
+
+The compiler already has the exact bit-precise layout map (`@/`) for every
+type in `ResolvedType`. It can auto-generate foreign language bindings
+alongside the `.o` library:
+
+| Output | Format | Contents |
+|--------|--------|----------|
+| C `.h` header | `typedef struct { ... }` | Bit-exact struct layouts, function declarations for exported txns |
+| Rust crate | `#[repr(C)]` struct + `extern "C"` fn | Same layouts, safe wrappers around exported symbols |
+| Python extension | `ctypes` / `pyo3` stub | Memory maps to Brief's exported struct layouts |
+| Zig bindings | `extern struct` | Native Zig layout declarations |
+
+**How it works:** The compiler iterates `ResolvedType::projections` and
+`@/` bit-ranges for each type. For each exported transaction, it reads
+the parameter types from the transaction's type signature, looks up each
+parameter's layout in the TypeUniverse, and emits the corresponding struct
+definition in the target language. No manual wrapper code.
+
+```brief
+// In Brief:
+sig #export fn process(packet: Packet) -> Result<Int, Error>;
+
+// Generated C header:
+// typedef struct { uint64_t field_a; uint8_t field_b; } Packet;
+// int64_t process(Packet packet);
+```
+
+**Implementation cost:** A new `emit_bindings` backend module that reads
+from `TypeUniverse` + `TopLevel::Transaction` with `sig #export`.
+Estimated effort: 3-5 days for C + Rust generation.
+
+### 13.12 Foreign Destructor Binding
+
+When Brief imports a foreign type (e.g., Rust `Vec<T>` or C++
+`std::vector`), the type's physical layout is native, but the
+allocation lifecycle must be respected. If Brief drops or mutates
+the foreign value without calling its destructor, memory corruption
+or double-frees result.
+
+**The pattern:**
+
+```brief
+type RustVec <: Bits @/0..191 {
+    Ptr  = _ @/0..63;  // data pointer
+    Len  = _ @/64..127; // length
+    Cap  = _ @/128..191; // capacity
+    // OnExit: call rust_vec::drop on self
+};
+```
+
+The compiler associates a foreign destructor with the type via an
+`OnExit` binding:
+
+```brief
+type RustVec <: Bits {
+    Bytes = 24;
+    OnExit = __rust_vec_drop#;   // called when value goes out of scope
+};
+```
+
+When the value's last reference is released, the backend emits a call
+to `OnExit` with the value's pointer. If no `OnExit` is declared, no
+cleanup is emitted — the type is treated as plain `Bits` with no
+ownership semantics (safe for C/POD types).
+
+**Implementation cost:**
+- `OnExit: Option<String>` on `ResolvedType` — 1 field
+- TypeDef `OnExit = <fn>;` binding — already works (stored in `projections`)
+- LLVM backend: at each `term`/`term!` for the value's scope, emit
+  `call @OnExit_fn(ptr)` — moderate (~2 days)
+
+### 13.13 Export Symbol Mangling and the `#export` Directive
+
+To make Brief transactions callable from other languages, the compiler
+needs to export symbols with the target language's calling convention
+and name mangling scheme.
+
+**The `#export` directive:**
+
+```brief
+sig #export("process_data") fn process(p: Packet) -> Result<Int, Error>;
+```
+
+This tells the backend to emit a globally-visible symbol with:
+
+| Target | Symbol name | ABI |
+|--------|------------|-----|
+| C | `process_data` | System V AMD64 / AArch64 |
+| C++ | `process_data` | `extern "C"` linkage |
+| Rust | `process_data` | `#[no_mangle] extern "C" fn` |
+| Python | `process_data` | PyObject* calling convention |
+
+The `#export` sigil marks the transaction for export. The optional
+string argument specifies the exported name (defaults to the Brief
+identifier name).
+
+**Calling convention for exported txns:** Exported transactions receive
+a pointer to the program state struct as their first argument, followed
+by the transaction parameters. The state pointer is the Brief runtime's
+equivalent of a `self` parameter:
+
+```c
+// Generated C declaration:
+int64_t process(State* state, Packet packet);
+```
+
+The caller is responsible for allocating and initializing the state
+(which the Brief compiler can also generate as a `state_init()` helper).
+
+**Implementation cost:**
+- `sig #export` parser support — already partially modeled by `SigModifier`
+- LLVM backend: emit global symbols with `dso_local` — ~1 day
+- State init helper generation — ~1 day
+
 ---
 
 ## 14. Work Items — Implementation Phases
