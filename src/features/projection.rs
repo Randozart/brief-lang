@@ -191,6 +191,18 @@ impl ExprEval for ProjectionExpr {
                 Value::List(items) => Ok(Value::Queue(std::collections::VecDeque::from(items.clone()))),
                 _ => Err(RuntimeError::TypeMismatch("AsQueue requires List".into())),
             },
+            ProjectionTarget::UserDefined(name) => {
+                Err(RuntimeError::UnsupportedProjection(format!(
+                    "user-defined projection '{}' is not supported at runtime; \
+                     define it in a type declaration", name
+                )))
+            }
+            ProjectionTarget::UserDefinedWithArg(name, _) => {
+                Err(RuntimeError::UnsupportedProjection(format!(
+                    "user-defined projection '{}' is not supported at runtime; \
+                     define it in a type declaration", name
+                )))
+            }
         }
     }
 }

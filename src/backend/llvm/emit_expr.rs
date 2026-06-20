@@ -2598,6 +2598,9 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, v, len).ok();
                         writeln!(out, "{}{} = zext i1 {} to i64", indent, v, v).ok();
                     }
+                    ProjectionTarget::UserDefined(_) | ProjectionTarget::UserDefinedWithArg(_, _) => {
+                        writeln!(out, "{}{} = add i64 0, 0 ; user-defined projection stub", indent, v).ok();
+                    }
                     _ => {
                         writeln!(out, "{}{} = add i64 0, 0 ; projection catch-all", indent, v).ok();
                     }

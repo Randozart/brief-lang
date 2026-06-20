@@ -5932,16 +5932,20 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             "Elements" => Ok(ProjectionTarget::Elements),
             "AsStack" => Ok(ProjectionTarget::AsStack),
             "AsQueue" => Ok(ProjectionTarget::AsQueue),
-            _ => Err(SyntaxError::InvalidExpression {
-                reason: format!(
-                    "expected projection target (Size, Bytes, Ptr, Alignment, Range, \
-                     Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match, \
-                     Keys, Values, Contains, IsEmpty, Get, Top, Front, Elements, AsStack, AsQueue), \
-                     found '{}'",
-                    name
-                ),
-                span: self.current_span().unwrap_or_else(Span::dummy),
-            }),
+            _ => {
+                // User-defined projection — check for parameterized form
+                if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+                    self.advance();
+                    let expr = self.parse_expression()?;
+                    self.expect(Token::RParen)?;
+                    Ok(ProjectionTarget::UserDefinedWithArg(
+                        name,
+                        Box::new(expr),
+                    ))
+                } else {
+                    Ok(ProjectionTarget::UserDefined(name))
+                }
+            }
         }
     }
 
@@ -8371,10 +8375,28 @@ mod parser_tests {
     }
 
     #[test]
-    fn test_parse_projection_invalid_target() {
+    fn test_parse_projection_user_defined() {
         let mut parser = Parser::new("x :> Invalid");
-        let result = parser.parse_expression();
-        assert!(result.is_err());
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Projection { source: _, target: ProjectionTarget::UserDefined(name) } => {
+                assert_eq!(name, "Invalid");
+            }
+            _ => panic!("Expected UserDefined projection, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_projection_user_defined_with_arg() {
+        let mut parser = Parser::new("x :> MyField(42)");
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Projection { source: _, target: ProjectionTarget::UserDefinedWithArg(name, arg) } => {
+                assert_eq!(name, "MyField");
+                assert_eq!(arg.as_integer(), Some(42));
+            }
+            _ => panic!("Expected UserDefinedWithArg projection, got {:?}", expr),
+        }
     }
 
     #[test]

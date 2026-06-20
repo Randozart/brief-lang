@@ -387,6 +387,22 @@ pub enum TypeProperty {
     Codec(String),
 }
 
+/// A named binding inside a `Type Name <: Base { ... }` block.
+/// Each binding is a `Name = Expr;` or `Name(args) = Expr;` assignment.
+/// This is the unified representation — both built-in metadata properties
+/// and user-defined projections use this same struct.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TypeBinding {
+    /// The binding name (e.g., "Bytes", "Size", "At").
+    pub name: String,
+    /// Optional parameter names for parameterized projections (e.g., `At(i)`, `Contains(k)`).
+    pub params: Vec<String>,
+    /// The expression this binding resolves to.
+    pub value: Box<Expr>,
+    /// Source span for error reporting.
+    pub span: Option<Span>,
+}
+
 /// Body of a `Type Name <: Base { ... }` declaration.
 #[derive(Debug, Clone)]
 pub struct TypeDefBody {
@@ -448,6 +464,10 @@ pub enum ProjectionTarget {
     AsStack,
     /// List → Queue conversion: `list :> AsQueue` → Queue
     AsQueue,
+    /// User-defined projection from a type declaration: `value :> MyField`
+    UserDefined(String),
+    /// User-defined parameterized projection: `value :> At(0)`
+    UserDefinedWithArg(String, Box<Expr>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -144,6 +144,8 @@ pub enum RuntimeError {
     Escaped,
     /// Proof oracle fuel exhausted — state was rolled back, handler executed
     FuelExhausted,
+    /// User-defined projection not found in type bindings
+    UnsupportedProjection(String),
 }
 
 // Helper functions for JSON serialization stdlib

@@ -2002,6 +2002,15 @@ impl TypeChecker {
                             }
                         }
                     }
+                    ProjectionTarget::UserDefined(name) => {
+                        // User-defined projections are resolved against the source type's
+                        // binding table during monomorphization. For now, return Void.
+                        Type::Void
+                    }
+                    ProjectionTarget::UserDefinedWithArg(name, _) => {
+                        // User-defined parameterized projection — same resolution strategy.
+                        Type::Void
+                    }
                 }
             }
             Expr::PatternMatch { .. } => Type::Bool,
