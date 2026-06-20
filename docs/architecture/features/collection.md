@@ -1,7 +1,7 @@
 # Universal Bracket Syntax
 
 **Date added:** 2026-06-11
-**Status:** Implementation complete (Phases 1-5); Tuple index support added 2026-06-20
+**Status:** Implementation complete (Phases 1-5); Tuple index & IsEmpty added 2026-06-20
 
 ## Purpose
 

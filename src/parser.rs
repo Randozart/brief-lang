@@ -5894,12 +5894,6 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
     }
 
     fn parse_projection_target(&mut self) -> Result<ProjectionTarget, SyntaxError> {
-        // Handle integer index: `:> 0`, `:> 1`, etc.
-        if let Some(Ok(Token::Integer(n))) = self.current_token() {
-            let idx = *n as usize;
-            self.advance();
-            return Ok(ProjectionTarget::Index(idx));
-        }
         let name = self.expect_identifier()?;
         match name.as_str() {
             "Size" => Ok(ProjectionTarget::Size),
@@ -5919,8 +5913,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             }
             "Keys" => Ok(ProjectionTarget::Keys),
             "Values" => Ok(ProjectionTarget::Values),
+            "IsEmpty" => Ok(ProjectionTarget::IsEmpty),
             "Contains" => {
-                // Contains(expr) — check if HashMap/HashSet contains key/element
                 self.expect(Token::LParen)?;
                 let expr = self.parse_expression()?;
                 self.expect(Token::RParen)?;
@@ -5942,8 +5936,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 reason: format!(
                     "expected projection target (Size, Bytes, Ptr, Alignment, Range, \
                      Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match, \
-                     Keys, Values, Contains, Get, Top, Front, Elements, AsStack, AsQueue, \
-                     or integer index), \
+                     Keys, Values, Contains, IsEmpty, Get, Top, Front, Elements, AsStack, AsQueue), \
                      found '{}'",
                     name
                 ),

@@ -7505,10 +7505,10 @@ mod tests {
         let result = i.eval_expr(&Expr::SubtypeProjection {
             source: Box::new(Expr::Identifier("items".to_string())),
             ops: vec![
-                SubtypeOp::Group(Box::new(Expr::Projection {
-                    source: Box::new(Expr::Identifier("_".to_string())),
-                    target: ProjectionTarget::Index(0),
-                })),
+                SubtypeOp::Group(Box::new(Expr::ListIndex(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                ))),
             ],
         }).unwrap();
         // Result is a list of (key, list) tuples
@@ -7583,10 +7583,10 @@ mod tests {
         ]));
         let result = i.eval_expr(&Expr::SubtypeProjection {
             source: Box::new(Expr::Identifier("items".to_string())),
-            ops: vec![SubtypeOp::Sort(Box::new(Expr::Projection {
-                source: Box::new(Expr::Identifier("_".to_string())),
-                target: ProjectionTarget::Index(0),
-            }))],
+            ops: vec![SubtypeOp::Sort(Box::new(Expr::ListIndex(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(0)),
+            )))],
         }).unwrap();
         if let Value::List(sorted) = result {
             assert_eq!(sorted.len(), 2);
@@ -7651,10 +7651,10 @@ mod tests {
             source: Box::new(Expr::Identifier("left".to_string())),
             ops: vec![SubtypeOp::Join(
                 Box::new(Expr::Identifier("right".to_string())),
-                Box::new(Expr::Projection {
-                    source: Box::new(Expr::Identifier("_".to_string())),
-                    target: ProjectionTarget::Index(0),
-                }),
+                Box::new(Expr::ListIndex(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                )),
             )],
         }).unwrap();
         if let Value::List(joined) = result {

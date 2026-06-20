@@ -1892,29 +1892,19 @@ impl TypeChecker {
                         }
                         Type::Bool
                     }
-                    ProjectionTarget::Index(n) => {
+                    ProjectionTarget::IsEmpty => {
                         match &src_ty {
-                            Type::Tuple(types) => {
-                                if *n < types.len() {
-                                    types[*n].clone()
-                                } else {
-                                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                                        expected: format!("tuple with at least {} elements", n + 1),
-                                        found: format!("tuple of length {}", types.len()),
-                                        context: "Index projection".to_string(),
-                                    });
-                                    Type::Int
-                                }
-                            }
+                            Type::Applied(name, _) if name == "List" || name == "HashMap" || name == "HashSet" => {}
+                            Type::Tuple(_) | Type::String => {}
                             _ => {
                                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                                    expected: "Tuple".to_string(),
+                                    expected: "List, Tuple, HashMap, HashSet, or String".to_string(),
                                     found: self.type_to_string(&src_ty),
-                                    context: "Index projection".to_string(),
+                                    context: "IsEmpty projection".to_string(),
                                 });
-                                Type::Int
                             }
                         }
+                        Type::Bool
                     }
                     ProjectionTarget::Get(_) => {
                         match &src_ty {

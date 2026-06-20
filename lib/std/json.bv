@@ -73,11 +73,11 @@ defn json_get(v: JsonValue, key: String) -> Result<String, String> {
 };
 
 txn find_pair(pairs: List<(String, JsonValue)>, key: String, i: Int)
-    [i < pairs :> Size][i >= pairs :> Size || pairs[i] :> 0 == key]
+    [i < pairs :> Size][i >= pairs :> Size || pairs[i][0] == key]
     -> Result<JsonValue, String>
 {
-    [pairs[i] :> 0 == key] {
-        term ok_value(pairs[i] :> 1);
+    [pairs[i][0] == key] {
+        term ok_value(pairs[i][1]);
     };
     &i = i + 1;
     [i >= pairs :> Size] {

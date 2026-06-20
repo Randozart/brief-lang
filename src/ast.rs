@@ -434,8 +434,8 @@ pub enum ProjectionTarget {
     Values,
     /// Checks if a HashMap or HashSet contains a value: `map :> Contains("key")`
     Contains(Box<Expr>),
-    /// Index into a tuple: `pair :> 0` returns first element
-    Index(usize),
+    /// Returns true if the collection/string/tuple has zero elements: `list :> IsEmpty`
+    IsEmpty,
     /// Non-mutating HashMap read: `map :> Get(key)` → Option<V>
     Get(Box<Expr>),
     /// Stack peek: `stack :> Top` → Option<V>

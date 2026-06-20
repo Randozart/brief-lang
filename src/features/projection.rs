@@ -108,10 +108,14 @@ impl ExprEval for ProjectionExpr {
                     _ => Err(RuntimeError::TypeMismatch("Contains requires HashMap or HashSet".into())),
                 }
             }
-            ProjectionTarget::Index(n) => match &source_val {
-                Value::Tuple(items) if *n < items.len() => Ok(items[*n].clone()),
-                _ => Err(RuntimeError::TypeMismatch("Index requires Tuple".into())),
-            },
+            ProjectionTarget::IsEmpty => Ok(Value::Bool(match &source_val {
+                Value::List(items) => items.is_empty(),
+                Value::Tuple(items) => items.is_empty(),
+                Value::HashMap(m) => m.is_empty(),
+                Value::HashSet(s) => s.is_empty(),
+                Value::String(s) => s.is_empty(),
+                _ => return Err(RuntimeError::TypeMismatch("IsEmpty requires List, Tuple, HashMap, HashSet, or String".into())),
+            })),
             ProjectionTarget::Get(key_expr) => {
                 let key_val = ctx.eval_expr(key_expr)?;
                 let key_str = ctx.value_to_string(&key_val)?;

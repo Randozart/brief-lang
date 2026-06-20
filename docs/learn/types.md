@@ -60,7 +60,7 @@ let x = t[1];   // 20
 let y = t[0];   // 10
 ```
 
-Indices are zero-based and bounds-checked at runtime. The `:> 0` / `:> 1` projection syntax also works for tuple element access (`pair :> 0`).
+Indices are zero-based and bounds-checked at runtime. Use bracket syntax (`pair[0]`) instead of the deprecated `:> 0` projection.
 
 ### Memory Layout
 
@@ -97,6 +97,21 @@ Type PositiveInt <: Int {
 ```
 
 The implicit subject is `_` (the value itself). Constraints are validated against literals at compile time; runtime guards are synthesized for dynamic values.
+
+### Metadata Queries (`:>`)
+
+The projection operator `:>` extracts metadata from any value without mutation:
+
+| Expression | Returns | Works on |
+|---|---|---|
+| `val :> Size` | `Int` — number of elements/bytes | List, Tuple, String, HashMap, HashSet |
+| `val :> IsEmpty` | `Bool` — `true` if zero elements | List, Tuple, String, HashMap, HashSet |
+| `val :> Type` | `Int` — type discriminant | Any value |
+| `val :> Keys` | `List<K>` — all keys | HashMap |
+| `val :> Values` | `List<V>` — all values | HashMap |
+| `val :> Contains(k)` | `Bool` — key membership | HashMap, HashSet |
+
+Tuple element access via `:> N` (integer index) is **deprecated** — use `val[N]` bracket syntax instead.
 
 ### InsertAt / ExtractFrom
 

@@ -2518,13 +2518,6 @@ impl LlvmBackend {
                     ProjectionTarget::AsStack | ProjectionTarget::AsQueue => {
                         writeln!(out, "{}{} = add i64 0, {} ; as_stack/as_queue (identity)", indent, v, src_val.name).ok();
                     }
-                    ProjectionTarget::Index(i) => {
-                        let hp = format!("%pihp{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
-                        let dp = format!("%pidp{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, dp, hp, (*i as i64) + 2).ok();
-                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, dp).ok();
-                    }
                     ProjectionTarget::PtrBang => {
                         let hp = format!("%pbhp{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
@@ -2594,6 +2587,16 @@ impl LlvmBackend {
                     }
                     ProjectionTarget::Elements => {
                         writeln!(out, "{}{} = add i64 0, {} ; elements", indent, v, src_val.name).ok();
+                    }
+                    ProjectionTarget::IsEmpty => {
+                        let hp = format!("%ieh{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                        let lp = format!("%iel{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                        let len = format!("%ien{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
+                        writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, v, len).ok();
+                        writeln!(out, "{}{} = zext i1 {} to i64", indent, v, v).ok();
                     }
                     _ => {
                         writeln!(out, "{}{} = add i64 0, 0 ; projection catch-all", indent, v).ok();
