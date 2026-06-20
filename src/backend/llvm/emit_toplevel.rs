@@ -71,7 +71,7 @@ impl LlvmBackend {
     pub(super) fn emit_declares(&self, out: &mut String) {
         writeln!(out).ok();
         writeln!(out, "declare void @llvm.assume(i1) #1").ok();
-        writeln!(out, "declare void @llvm.trap() #1").ok();
+        writeln!(out, "declare void @llvm.trap() noreturn").ok();
         // Intrinsic declares used by name#() instrinsic calls in emit_expr.
         // Previously these came from std/llvm.bv via as intrinsic, but the
         // name#() mechanism emits them directly without frgn_map entries.
@@ -396,7 +396,7 @@ impl LlvmBackend {
     }
 
     pub(super) fn emit_init_state(&mut self, out: &mut String) {
-        writeln!(out, "define void @init_state(%State* noalias nocapture %state) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define void @init_state(%State* noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         let mut reg = 0u32;
         let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
@@ -683,7 +683,7 @@ impl LlvmBackend {
         self.fn_ret_ty = ll_ret_ty.to_string();
         self.returns_i64 = !is_float_fn;
         write!(out, "define {} @{}(", ll_ret_ty, d.name).ok();
-        write!(out, "%State* noalias nocapture %state").ok();
+        write!(out, "%State* noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
         }
@@ -831,7 +831,7 @@ impl LlvmBackend {
             });
 
         if let Some(action) = assume_action {
-            writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             writeln!(out, "  br i1 true, label %body, label %rollback").ok();
             writeln!(out, "  body:").ok();
@@ -869,7 +869,7 @@ impl LlvmBackend {
             }
             writeln!(out, "}}").ok();
         } else {
-            writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             self.txn_counter = 0;
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
@@ -937,7 +937,7 @@ impl LlvmBackend {
         let inline_str = inline_attr.as_deref().unwrap_or("");
 
         write!(out, "define {} @{}(", ret_llvm, name).ok();
-        write!(out, "%State* noalias nocapture %state").ok();
+        write!(out, "%State* noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
         }
@@ -1089,7 +1089,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
-        writeln!(out, "define internal i1 @pre_{}(%State* noalias nocapture %state) #0 {{", name).ok();
+        writeln!(out, "define internal i1 @pre_{}(%State* noalias nocapture align 8 %state) #0 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
@@ -1114,7 +1114,7 @@ impl LlvmBackend {
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         let async_name = format!("async_body_{}", name);
         let async_attr = self.slp_attr(&async_name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
+        writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
@@ -1147,7 +1147,7 @@ impl LlvmBackend {
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
         let fused_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined {
@@ -1160,7 +1160,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_shape_guarded_body(&mut self, out: &mut String, body: &[Statement], name: &str, action: &str) {
         let fused_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
@@ -1188,7 +1188,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
         let fused_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body {

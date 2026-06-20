@@ -1392,7 +1392,7 @@ fn empty_program() -> Program {
             "reactor_tick should not be emitted (A006 direct SSA loop)");
         assert!(output.contains("attributes #0"),
             "attributes #0 should still be present for terminating functions");
-        assert!(output.contains("define void @init_state(%State* noalias nocapture %state) local_unnamed_addr #0"),
+        assert!(output.contains("define void @init_state(%State* noalias nocapture align 8 %state) local_unnamed_addr #0"),
             "init_state() should still use #0 with willreturn");
     }
 
