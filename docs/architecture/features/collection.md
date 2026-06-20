@@ -1,14 +1,14 @@
-# Universal Bracket Syntax
+# Universal Bracket Syntax — The Partition Operator
 
 **Date added:** 2026-06-11
 **Status:** Implementation complete (Phases 1-5); Tuple index & IsEmpty added 2026-06-20
 
 ## Purpose
 
-Extend bracket syntax (`[]`) to work universally on every type. Every value
-decomposes to visual `Char` fragments under bracket operations. Bracket
-operations select, filter, stride, or transform these fragments. The result
-reconstructs to the original type.
+Bracket syntax (`[]`) is Brief's **Partition Operator** — it segments any value
+into addressable sub-ranges. Every value decomposes to visual `Char` fragments
+under bracket operations. Bracket operations select, filter, stride, or
+transform these fragments. The result reconstructs to the original type.
 
 ## Syntax
 

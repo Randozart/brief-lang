@@ -97,6 +97,18 @@ import "link/zig_lib.zig";   // Zig library
 | `@stack:OFFSET` | Stack-relative |
 | `@heap:OFFSET` | Heap-relative |
 
+### Operator Taxonomy
+
+Brief's operators belong to three conceptual groups:
+
+| Group | Operators | Purpose |
+|-------|-----------|---------|
+| **Lens Operators** | `<:` (Derivation), `:>` (Projection) | Type boundaries and semantic lenses — derivation restricts what conforms, projection reveals meaning |
+| **Partition Operators** | `[]`, `@/` | Segment layouts into addressable sub-ranges |
+| **Transfer Operator** | `<-` | Directional data movement across boundaries |
+
+The **Anchor** (`@`) is a universal modifier for spatial/temporal location across all contexts.
+
 ### Control Flow
 
 ```brief

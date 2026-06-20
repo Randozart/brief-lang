@@ -85,32 +85,36 @@
 
 ### Operators
 
-| Operator | Description |
-|----------|-------------|
-| `=` | Assignment |
-| `==` | Equality |
-| `!=` | Inequality |
-| `<` | Less than |
-| `<=` | Less or equal |
-| `>` | Greater than |
-| `>=` | Greater or equal |
-| `<<` | Shift left |
-| `>>` | Shift right |
-| `&` | Mutable reference / Bitwise AND |
-| `\|` | Bitwise OR |
-| `\|\|` | Logical OR |
-| `&&` | Logical AND |
-| `!` | Logical NOT |
-| `-` | Negation |
-| `~` | Bitwise NOT |
-| `~/` | Prior state toggle |
-| `+` | Addition |
-| `*` | Multiplication |
-| `/` | Division |
-| `^` | Bitwise XOR |
-| `->` | Arrow/return type |
-| `@` | Address / Prior state |
-| `?` | Optional watchdog prefix |
+| Operator | Description | Group |
+|----------|-------------|-------|
+| `=` | Assignment | — |
+| `==` | Equality | — |
+| `!=` | Inequality | — |
+| `<` | Less than | — |
+| `<=` | Less or equal | — |
+| `>` | Greater than | — |
+| `>=` | Greater or equal | — |
+| `<<` | Shift left | — |
+| `>>` | Shift right | — |
+| `&` | Mutable reference / Bitwise AND | — |
+| `\|` | Bitwise OR | — |
+| `\|\|` | Logical OR | — |
+| `&&` | Logical AND | — |
+| `!` | Logical NOT | — |
+| `-` | Negation | — |
+| `~` | Bitwise NOT | — |
+| `~/` | Prior state toggle | — |
+| `+` | Addition | — |
+| `*` | Multiplication | — |
+| `/` | Division | — |
+| `^` | Bitwise XOR | — |
+| `->` | Arrow/return type | — |
+| `<-` | Mutation / Discard | **Transfer** |
+| `:>` | Metadata extraction / projection | **Lens (Projection)** |
+| `<:` | Type derivation | **Lens (Derivation)** |
+| `[]` | Brackets / Contracts / Partitioning | **Partition** |
+| `@` | Address / Prior state / Anchor | **Anchor** |
+| `?` | Optional watchdog prefix | — |
 
 ### Punctuation
 

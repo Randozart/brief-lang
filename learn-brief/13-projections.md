@@ -1,11 +1,12 @@
-# Projections: `:>` and `<:` Operators
+# Projections: The Lens Operators
 
-**Brief has two projection operators: `:>` for compile-time metadata extraction,
-and `<:` for compile-time-optimized queries and subtype projections.**
+**Brief has two Lens Operators: `:>` (Projection) for compile-time metadata
+extraction, and `<:` (Derivation) for type-constrained queries and subtype
+derivation.**
 
 ---
 
-## `:>` — Metadata Lens
+## `:>` — The Projection Lens
 
 The `:>` (metadata lens) operator reads compile-time-known properties from
 values without runtime overhead. All targets map to either a constant or a
@@ -194,9 +195,9 @@ compiler to verify safety.
 
 ---
 
-## `<:` — Subtype Projection
+## `<:` — The Derivation Lens
 
-The `<:` operator performs a **compile-time optimized projection** from a source
+The `<:` operator (Derivation lens) performs a **compile-time optimized projection** from a source
 value into a derived value. Two forms exist depending on the source type.
 
 ### Collection Projection

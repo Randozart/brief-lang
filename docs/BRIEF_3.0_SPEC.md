@@ -50,23 +50,24 @@ Brief's symbols are not arbitrary. Each symbol's **visual shape** maps to a **co
 
 ### 2.1 Symbol-to-System Mapping
 
-| Symbol | Cognitive Metaphor | Systems Meaning |
-|:---:|---|---|
-| **`;`** | A hard stop, a reset | Universal statement termination |
-| **`.`** | Puncturing, reaching into | Struct field access / UFCS |
-| **`->`** | Forward motion | Dataflow / State transition |
-| **`<-`** | Backward motion | Mutation / Discard |
-| **`:`** | Identity, equivalence | Static type / definition |
-| **`:>`** | Identity projecting outward | Compile-time metadata extraction |
-| **`[]`** | Containment, boundary | Constraints, bounds, guards |
-| **`{}`** | Grouping, bundling | Code block / organizational unit |
-| **`()`** | Holding, containing | Parameter / argument enclosure |
-| **`@`** | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor |
-| **`&`** | Connection, conjunction | Mutation marker (required for all state mutation) |
-| **`!`** | An exclamation, a warning | Control flow anomaly / fire-and-forget |
-| **`~`** | Oscillation, flipping | Boolean toggle / atomic lock |
-| **`?`** | A question, a check | Watchdog / timeout |
-| **`_`** | A gap, a placeholder | Ignored / unused value |
+| Symbol | Cognitive Metaphor | Systems Meaning | Group |
+|:---:|---|---|---|
+| **`;`** | A hard stop, a reset | Universal statement termination | — |
+| **`.`** | Puncturing, reaching into | Struct field access / UFCS | — |
+| **`->`** | Forward motion | Dataflow / State transition | — |
+| **`<-`** | Backward motion | Mutation / Discard | **Transfer** |
+| **`:`** | Identity, equivalence | Static type / definition | — |
+| **`:>`** | Identity projecting outward | Compile-time metadata extraction — reveals meaning through a semantic lens | **Lens (Projection)** |
+| **`<:`** | Identity projecting inward | Type derivation — restricts what conforms to a type | **Lens (Derivation)** |
+| **`[]`** | Containment, boundary | Constraints, guards, partitions — segments a layout into addressable sub-ranges | **Partition** |
+| **`{}`** | Grouping, bundling | Code block / organizational unit | — |
+| **`()`** | Holding, containing | Parameter / argument enclosure | — |
+| **`@`** | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor | **Anchor** |
+| **`&`** | Connection, conjunction | Mutation marker (required for all state mutation) | — |
+| **`!`** | An exclamation, a warning | Control flow anomaly / fire-and-forget | — |
+| **`~`** | Oscillation, flipping | Boolean toggle / atomic lock | — |
+| **`?`** | A question, a check | Watchdog / timeout | — |
+| **`_`** | A gap, a placeholder | Ignored / unused value | — |
 
 ### 2.2 Detailed Symbol Specifications
 

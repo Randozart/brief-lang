@@ -67,26 +67,38 @@ Lexer → Parser → Type Checker → Proof Engine → Backend
 
 Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
 
-| Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning |
-|:---:|---|---|---|
-| **`;`** | A dot with a tail falling away | A hard stop, a reset | Universal statement termination |
-| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / UFCS |
-| **`->`** | An arrow pointing right | Forward motion | Dataflow / State transition |
-| **`<-`** | An arrow pointing left | Backward motion | Mutation / Discard |
-| **`:`** | Two stacked dots | Identity, equivalence | Static type definition |
-| **`:>`** | Colon + right-arrow | Projecting identity outward | Compile-time metadata extraction |
-| **`<:`** | Left-arrow + colon | Derived projection inward | Compile-time optimized query / subtype projection |
-| **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards |
-| **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organization |
-| **`()`** | Parentheses that cup | Holding, containing | Argument enclosure |
-| **`@`** | The at-sign (loop + 'a') | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor |
-| **`&`** | Ampersand (et-ligature) | Connection, conjunction | Mutation marker (required) |
-| **`!`** | Vertical line + dot | Exclamation, warning | Control flow anomaly / fire-and-forget |
-| **`~`** | A wavy line | Oscillation, flipping | Boolean toggle / atomic lock |
-| **`?`** | A hook | A question, a check | Watchdog / timeout |
-| **`_`** | A small horizontal line | A gap, a placeholder | Ignored / unused value |
+| Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning | Group |
+|:---:|---|---|---|---|
+| **`;`** | A dot with a tail falling away | A hard stop, a reset | Universal statement termination | — |
+| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / UFCS | — |
+| **`->`** | An arrow pointing right | Forward motion | Dataflow / State transition | — |
+| **`<-`** | An arrow pointing left | Backward motion | Mutation / Discard | **Transfer** |
+| **`:`** | Two stacked dots | Identity, equivalence | Static type definition | — |
+| **`:>`** | Colon + right-arrow | Projecting identity outward | Compile-time metadata extraction — reveals meaning through a semantic lens | **Lens (Projection)** |
+| **`<:`** | Left-arrow + colon | Derived projection inward | Type derivation — restricts what conforms to a type | **Lens (Derivation)** |
+| **`[]`** | Brackets that enclose | Containment, boundary | Constraints, guards, partitions — segments a layout into addressable sub-ranges | **Partition** |
+| **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organization | — |
+| **`()`** | Parentheses that cup | Holding, containing | Argument enclosure | — |
+| **`@`** | The at-sign (loop + 'a') | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor | **Anchor** |
+| **`&`** | Ampersand (et-ligature) | Connection, conjunction | Mutation marker (required) | — |
+| **`!`** | Vertical line + dot | Exclamation, warning | Control flow anomaly / fire-and-forget | — |
+| **`~`** | A wavy line | Oscillation, flipping | Boolean toggle / atomic lock | — |
+| **`?`** | A hook | A question, a check | Watchdog / timeout | — |
+| **`_`** | A small horizontal line | A gap, a placeholder | Ignored / unused value | — |
 
 **The principle:** If an operation has distinct physical, temporal, or compiler-level behavior, its visual representation must explicitly reflect that boundary. No hidden transformations.
+
+### Operator Taxonomy
+
+Brief's operators fall into three conceptual groups that govern how types relate, how data is partitioned, and how data moves:
+
+| Group | Collective Name | Operators | Purpose |
+|-------|----------------|-----------|---------|
+| **Lens Operators** | The `<:` and `:>` pair | `<:` (Derivation), `:>` (Projection) | Establish the relationship between a raw bit layout and its high-level meaning. `<:` restricts what can conform to a type; `:>` reveals meaning through a semantic lens. |
+| **Partition Operators** | Bracket and bit-anchor | `[]`, `@/` | Constrain focus to a spatial sub-range of a layout. `list[3]` selects the 4th element; `bits @/0..3` selects bits 0-3. |
+| **Transfer Operator** | The arrow | `<-` | Directional data movement across layout boundaries. `&list <- x` pushes x into list; `val <- &list` pops from list. |
+
+The **Anchor** (`@`) is not itself an operator but a universal modifier — it anchors a value to a position in space or time, used across all three groups (e.g., `@` for prior state, `@/` for bit position, `@"..."` for compile-time strings).
 
 ---
 

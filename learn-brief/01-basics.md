@@ -1,5 +1,11 @@
 # Brief Basics
 
+> **Operator quick reference:** Brief's operators fall into three groups
+> — **Lens Operators** (`<:`, `:>`), **Partition Operators** (`[]`, `@/`),
+> and the **Transfer Operator** (`<-`). The **Anchor** (`@`) is the universal
+> symbol for spatial/temporal location. See `00a-base-design.md` for the full
+> taxonomy.
+
 ## 1. State Declarations
 
 All state in Brief is declared globally with `let`:

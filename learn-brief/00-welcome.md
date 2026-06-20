@@ -19,6 +19,17 @@ txn withdraw(amount: Int)
 
 The compiler **verifies** that your code actually satisfies these contracts.
 
+### 1b. Transparent Operator Taxonomy
+Brief's operators are organized into three conceptual groups:
+
+| Group | Operators | Purpose |
+|-------|-----------|---------|
+| **Lens Operators** | `<:` (Derivation), `:>` (Projection) | Type boundaries and semantic lenses |
+| **Partition Operators** | `[]`, `@/` | Segment layouts into addressable sub-ranges |
+| **Transfer Operator** | `<-` | Directional data movement across boundaries |
+
+The **Anchor** (`@`) is the universal symbol for spatial/temporal location — prior state, bit position, string slots, and hardware links all share this single metaphor.
+
 ### 2. Reactive by Default
 Transactions fire automatically when their preconditions are met:
 

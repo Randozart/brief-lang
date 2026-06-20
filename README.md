@@ -89,6 +89,18 @@ There is no `if/else` in Brief. There are guarded blocks: `[condition] { body }`
 
 Friction without explanation is frustration. Every denied sugar, every strict-mode requirement, every full-contract demand should tell you *why* and *what to do instead*. If the compiler says "no," it should say "here is the path I can accept." This is why the language design keeps error messages concrete. A warning like `sugar syntax [[post]] not allowed in .cbv files, write [pre][post] explicitly` is better than `invalid syntax`. The friction exists to make you think, not to waste your time. The compiler's job is to make sure you know the difference.
 
+### Operator Taxonomy
+
+Brief's operators are organized into three conceptual groups:
+
+| Group | Operators | Purpose |
+|-------|-----------|---------|
+| **Lens Operators** | `<:` (Derivation), `:>` (Projection) | Type boundaries and semantic lenses — restricts what conforms to a type, or reveals meaning through a lens |
+| **Partition Operators** | `[]`, `@/` | Segment layouts into addressable sub-ranges — constrains focus to a spatial slice |
+| **Transfer Operator** | `<-` | Directional data movement across layout boundaries — push, pop, discard, transfer |
+
+The **Anchor** (`@`) is the universal symbol for spatial and temporal location, used across all groups: prior state (`@balance`), bit positions (`@/0..3`), string literals (`@"..."`), and hardware links (`trg timer @ 1kHz`).
+
 ## Quick Start
 
 ### 1. Build the Compiler

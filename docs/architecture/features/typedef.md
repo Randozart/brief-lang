@@ -1,4 +1,4 @@
-# TypeDef — Type Derivation System
+# TypeDef — The Derivation Lens Operator
 
 **Date:** 2026-06-20  
 **Phase:** 2 (Unified TypeDef Bodies)  
@@ -6,7 +6,7 @@
 
 ## Design
 
-`Type Name <: Base { ... }` — a top-level declaration that defines a new type by deriving from an existing one. The compiler natively recognizes well-known metadata binding names (~13); everything else is a user-defined projection stored in `ResolvedType::projections`.
+`Type Name <: Base { ... }` — a top-level declaration that defines a new type by deriving from an existing one using the **Derivation lens** (`<:`). The compiler natively recognizes well-known metadata binding names (~13); everything else is a user-defined projection stored in `ResolvedType::projections`.
 
 Phase 2 replaced the 13-variant `TypeProperty` enum with a unified `TypeBinding` struct. Every TypeDef body entry is parsed as `Name[(params)] = Expr;`. The `TypeUniverse::apply_binding` method dispatches known names to `ResolvedType` fields and stores unknown names as projections.
 

@@ -8,24 +8,24 @@
 
 Brief's symbols are not arbitrary ASCII choices. Each symbol's **visual shape** maps to a **cognitive metaphor**, which maps to a **systems meaning**. All uses of a given symbol share that core metaphor.
 
-| Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning |
-|--------|-------------|-------------------|----------------|
-| **`;`** | A dot with a tail falling away | A hard stop, a reset | Universal statement termination. The parser syncs here. |
-| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / UFCS — you reach into a thing. |
-| **`->`** | An arrow pointing right | Forward motion, transformation | Dataflow / State transition — something becomes something else. |
-| **`<-`** | An arrow pointing left | Backward motion, extraction | Mutation / Discard — something comes out of something. |
-| **`:`** | Two stacked dots | Identity, equivalence | Static type / definition — "This IS that." |
-| **`:>`** | Colon combined with right-arrow | Identity that projects outward | Compile-time metadata extraction — the compiler's knowledge ABOUT this. |
-| **`<:`** | Left-arrow combined with colon | Derived projection inward | Compile-time optimized queries and subtype projections — the compiler's knowledge FROM this. |
-| **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards — everything inside `[]` is bounded. |
-| **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organizational unit. |
-| **`()`** | Parentheses that cup | Holding, containing | Parameter / argument enclosure. |
-| **`@`** | The at-sign — a loop with an 'a' | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor. |
-| **`&`** | Ampersand — ligature of "et" (and) | Connection, conjunction | Mutation marker — links the name to the mutable location. |
-| **`!`** | A vertical line with a dot | An exclamation, a warning | Control flow anomaly / boundary — "pay attention." |
-| **`~`** | A wavy line | Oscillation, flipping | Boolean toggle — flip back and forth like a waveform. |
-| **`?`** | A hook | A question, a check | Watchdog / timeout — "is this still OK?" |
-| **`_`** | A small horizontal line | A gap, a placeholder | Ignored / unused value. |
+| Symbol | Visual Shape | Cognitive Metaphor | Systems Meaning | Group |
+|--------|-------------|-------------------|----------------|-------|
+| **`;`** | A dot with a tail falling away | A hard stop, a reset | Universal statement termination. The parser syncs here. | — |
+| **`.`** | A single pinpoint | Puncturing, reaching into | Struct field access / UFCS — you reach into a thing. | — |
+| **`->`** | An arrow pointing right | Forward motion, transformation | Dataflow / State transition — something becomes something else. | — |
+| **`<-`** | An arrow pointing left | Backward motion, extraction | Mutation / Discard — something comes out of something. | **Transfer** |
+| **`:`** | Two stacked dots | Identity, equivalence | Static type / definition — "This IS that." | — |
+| **`:>`** | Colon combined with right-arrow | Identity that projects outward | Compile-time metadata extraction — the compiler's knowledge ABOUT this. | **Lens (Projection)** |
+| **`<:`** | Left-arrow combined with colon | Derived projection inward | Compile-time optimized queries and subtype projections — the compiler's knowledge FROM this. | **Lens (Derivation)** |
+| **`[]`** | Brackets that enclose | Containment, boundary | Constraints, bounds, guards — everything inside `[]` is bounded. | **Partition** |
+| **`{}`** | Curly braces that hug | Grouping, bundling | Code block / organizational unit. | — |
+| **`()`** | Parentheses that cup | Holding, containing | Parameter / argument enclosure. | — |
+| **`@`** | The at-sign — a loop with an 'a' | Position, location, anchor | Spatial / Temporal / Dimensional / Chronological anchor. | **Anchor** |
+| **`&`** | Ampersand — ligature of "et" (and) | Connection, conjunction | Mutation marker — links the name to the mutable location. | — |
+| **`!`** | A vertical line with a dot | An exclamation, a warning | Control flow anomaly / boundary — "pay attention." | — |
+| **`~`** | A wavy line | Oscillation, flipping | Boolean toggle — flip back and forth like a waveform. | — |
+| **`?`** | A hook | A question, a check | Watchdog / timeout — "is this still OK?" | — |
+| **`_`** | A small horizontal line | A gap, a placeholder | Ignored / unused value. | — |
 
 ### The Principle: Syntactic Radical Honesty
 
@@ -140,7 +140,7 @@ result.value         // Result unwrapping
 
 ---
 
-### `:>` - The Metadata Lens
+### `:>` — The Projection Lens (Lens Operator)
 
 `:>` reads compile-time-known metadata from a value. Think of it as "ask the
 compiler for a property of this thing":
@@ -168,24 +168,33 @@ See `learn-brief/13-projections.md` for the complete reference.
 
 ---
 
-### `@` - The Prior State
+### `@` — The Universal Anchor
 
-`@` always means "value at the **start** of this transaction":
+`@` is Brief's universal **Anchor** — a single symbol for spatial and temporal location across every context:
+
+| Context | Example | What it anchors |
+|---------|---------|----------------|
+| Prior state | `@balance` | Anchors to the value at the start of this tick |
+| String literal | `@"..."` | Anchors the string to a compile-time memory slot |
+| Bit position | `@/0..3` | Anchors a field to an absolute bit offset |
+| Hardware link | `trg timer @ 1kHz` | Anchors a timer to a hardware or OS resource |
+| Memory address | `let led: Bool @ 0x40020000` | Anchors a variable to a physical address |
 
 ```brief
+// Prior-state anchor — @balance = balance BEFORE this txn ran
 txn withdraw(amount: Int)
     [balance >= amount]
-    [balance == @balance - amount]    // @balance = balance BEFORE this txn ran
+    [balance == @balance - amount]
 {
     &balance = balance - amount;
     term;
 };
-```
 
-Also used for memory-mapped addresses in Embedded Brief:
+// Bit-position anchor — extract bits 0-3
+let nibble = word @/0..3;
 
-```brief
-let led: Bool @ 0x40020000;    // Address, not prior state
+// String anchor — compile-time memory slot
+@"hello world" :> Size   // 11
 ```
 
 ---

@@ -1,4 +1,4 @@
-# Projection — The `:>` Operator
+# Projection — The Projection Lens Operator
 
 **Date:** 2026-06-20  
 **Phase:** 1 (mechanical), extended by Phases 2-3  
