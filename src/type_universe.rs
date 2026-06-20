@@ -19,7 +19,7 @@
 //   D-6 (Volatile/Atomic pragmas), D-7 (Runtime guard synthesis).
 
 use std::collections::HashMap;
-use crate::ast::{Expr, Program, TopLevel, TypeDef, TypeDefBody, TypeProperty};
+use crate::ast::{Expr, Program, TopLevel, TypeBinding, TypeDef, TypeDefBody};
 
 /// Resolved metadata for a single type in the universe.
 #[derive(Debug, Clone)]
@@ -56,6 +56,8 @@ pub struct ResolvedType {
     pub allow_arrow: bool,
     /// Codec struct name (if any).
     pub codec: Option<String>,
+    /// User-defined projections not matching any known metadata property name.
+    pub projections: HashMap<String, TypeBinding>,
     /// Source TypeDef for reference.
     pub source: TypeDef,
 }
@@ -131,6 +133,7 @@ impl TypeUniverse {
             allow_slice: true,
             allow_arrow: true,
             codec: None,
+            projections: HashMap::new(),
             source: td.clone(),
         };
 
@@ -147,76 +150,87 @@ impl TypeUniverse {
             rt.allow_arrow = base.allow_arrow;
         }
 
-        // Apply overrides from this TypeDef's property body
+        // Apply bindings — known metadata names populate ResolvedType fields,
+        // unknown names are stored as user-defined projections
         // DEFERRED (D-7): Evaluate constraint expressions
-        for prop in &td.body.properties {
-            self.apply_property(&mut rt, prop);
+        for binding in &td.body.bindings {
+            self.apply_binding(&mut rt, binding);
         }
 
         Some(rt)
     }
 
-    /// Apply a TypeProperty to a ResolvedType, overriding inherited value.
-    fn apply_property(&self, rt: &mut ResolvedType, prop: &TypeProperty) {
-        match prop {
-            TypeProperty::Bytes(e) => {
-                if let Expr::Integer(n) = e.as_ref() {
+    /// Apply a TypeBinding to a ResolvedType.
+    /// Known metadata property names override the corresponding field;
+    /// unknown names are stored in the projections map.
+    fn apply_binding(&self, rt: &mut ResolvedType, binding: &TypeBinding) {
+        match binding.name.as_str() {
+            "Bytes" => {
+                if let Expr::Integer(n) = binding.value.as_ref() {
                     rt.bytes = *n as u64;
                 }
             }
-            TypeProperty::Alignment(e) => {
-                if let Expr::Integer(n) = e.as_ref() {
+            "Alignment" => {
+                if let Expr::Integer(n) = binding.value.as_ref() {
                     rt.alignment = *n as u64;
                 }
             }
-            TypeProperty::Endian(e) => {
-                if let Expr::Identifier(name) = e.as_ref() {
+            "Endian" => {
+                if let Expr::Identifier(name) = binding.value.as_ref() {
                     rt.endian = if name == "Big" || name == "big" { 1 } else { 0 };
                 }
             }
-            TypeProperty::Volatile(e) => {
-                if let Expr::Bool(b) = e.as_ref() {
+            "Volatile" => {
+                if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.volatile = *b;
                 }
             }
-            TypeProperty::Atomic(e) => {
-                if let Expr::Bool(b) = e.as_ref() {
+            "Atomic" => {
+                if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.atomic = *b;
                 }
             }
-            TypeProperty::ElementType(e) => {
-                if let Expr::TypeRef(name) = e.as_ref() {
+            "ElementType" => {
+                if let Expr::TypeRef(name) = binding.value.as_ref() {
                     rt.element_type = Some(name.clone());
                 }
             }
-            TypeProperty::FixedSize(e) => {
-                if let Expr::Bool(b) = e.as_ref() {
+            "FixedSize" => {
+                if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.fixed_size = Some(*b);
                 }
             }
-            TypeProperty::InsertAt(e) => {
-                rt.insert_at = type_universe_expr_to_string(e);
+            "InsertAt" => {
+                rt.insert_at = type_universe_expr_to_string(&binding.value);
             }
-            TypeProperty::ExtractFrom(e) => {
-                rt.extract_from = type_universe_expr_to_string(e);
+            "ExtractFrom" => {
+                rt.extract_from = type_universe_expr_to_string(&binding.value);
             }
-            TypeProperty::AllowIndex(e) => {
-                if let Expr::Bool(b) = e.as_ref() {
+            "AllowIndex" => {
+                if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.allow_index = *b;
                 }
             }
-            TypeProperty::AllowSlice(e) => {
-                if let Expr::Bool(b) = e.as_ref() {
+            "AllowSlice" => {
+                if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.allow_slice = *b;
                 }
             }
-            TypeProperty::AllowArrow(e) => {
-                if let Expr::Bool(b) = e.as_ref() {
+            "AllowArrow" => {
+                if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.allow_arrow = *b;
                 }
             }
-            TypeProperty::Codec(name) => {
-                rt.codec = Some(name.clone());
+            "Codec" => {
+                match &binding.value.as_ref() {
+                    Expr::String(s) => rt.codec = Some(s.clone()),
+                    Expr::Identifier(id) => rt.codec = Some(id.clone()),
+                    _ => {}
+                }
+            }
+            // Unknown name → user-defined projection
+            _ => {
+                rt.projections.insert(binding.name.clone(), binding.clone());
             }
         }
     }
@@ -260,7 +274,7 @@ fn type_universe_expr_to_string(e: &Expr) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Comment, DispatchMode, Expr, StrictMode, TopLevel, TypeDef, TypeDefBody, TypeProperty, Program};
+    use crate::ast::{Comment, DispatchMode, Expr, StrictMode, TopLevel, TypeBinding, TypeDef, TypeDefBody, Program};
 
     fn make_program(items: Vec<TopLevel>) -> Program {
         Program {
@@ -283,11 +297,10 @@ mod tests {
             type_params: vec![],
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
-                properties: vec![
-                    TypeProperty::Bytes(Box::new(Expr::Integer(1))),
-                    TypeProperty::Alignment(Box::new(Expr::Integer(1))),
+                bindings: vec![
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
+                    TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
                 ],
-                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -301,11 +314,10 @@ mod tests {
             type_params: vec![],
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
-                properties: vec![
-                    TypeProperty::Bytes(Box::new(Expr::Integer(4))),
-                    TypeProperty::Alignment(Box::new(Expr::Integer(4))),
+                bindings: vec![
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
+                    TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                 ],
-                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -344,12 +356,11 @@ mod tests {
             type_params: vec!["T".into()],
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
-                properties: vec![
-                    TypeProperty::Bytes(Box::new(Expr::Integer(8))),
-                    TypeProperty::ElementType(Box::new(Expr::TypeRef("T".into()))),
-                    TypeProperty::AllowIndex(Box::new(Expr::Bool(true))),
+                bindings: vec![
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
+                    TypeBinding { name: "ElementType".into(), params: vec![], value: Box::new(Expr::TypeRef("T".into())), span: None },
+                    TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(true)), span: None },
                 ],
-                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -360,10 +371,9 @@ mod tests {
             type_params: vec!["T".into()],
             base: Box::new(Expr::TypeRef("BaseList".into())),
             body: TypeDefBody {
-                properties: vec![
-                    TypeProperty::AllowIndex(Box::new(Expr::Bool(false))),
+                bindings: vec![
+                    TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(false)), span: None },
                 ],
-                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -388,8 +398,9 @@ mod tests {
             type_params: vec![],
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
-                properties: vec![TypeProperty::AllowIndex(Box::new(Expr::Bool(false)))],
-                bindings: vec![],
+                bindings: vec![
+                    TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(false)), span: None },
+                ],
                 constraints: vec![],
                 span: None,
             },
@@ -408,10 +419,9 @@ mod tests {
             type_params: vec![],
             base: Box::new(Expr::TypeRef("U32".into())),
             body: TypeDefBody {
-                properties: vec![
-                    TypeProperty::Volatile(Box::new(Expr::Bool(true))),
+                bindings: vec![
+                    TypeBinding { name: "Volatile".into(), params: vec![], value: Box::new(Expr::Bool(true)), span: None },
                 ],
-                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -434,8 +444,9 @@ mod tests {
             type_params: vec![],
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
-                properties: vec![TypeProperty::Codec("Utf8".into())],
-                bindings: vec![],
+                bindings: vec![
+                    TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
+                ],
                 constraints: vec![],
                 span: None,
             },
@@ -454,11 +465,10 @@ mod tests {
             type_params: vec![],
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
-                properties: vec![
-                    TypeProperty::Bytes(Box::new(Expr::Integer(4))),
-                    TypeProperty::Endian(Box::new(Expr::Identifier("Big".into()))),
+                bindings: vec![
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
+                    TypeBinding { name: "Endian".into(), params: vec![], value: Box::new(Expr::Identifier("Big".into())), span: None },
                 ],
-                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },

@@ -21,11 +21,10 @@
 // collected and resolved by type_universe.rs in Pass 1, then become
 // read-only. The interpreter skips them at runtime.
 
-use crate::ast::{Expr, Type, TypeDef, TypeDefBody, TypeProperty};
+use crate::ast::{Expr, Type, TypeBinding, TypeDef, TypeDefBody};
 use crate::errors::TypeError;
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
-use crate::parser::Parser;
 use crate::typechecker::TypeChecker;
 
 // ── Stub trait implementations ──────────────────────────────────────
@@ -83,91 +82,72 @@ impl ExprCodegenWebstack for TypeDef {
     }
 }
 
-// ── TypeProperty helper ─────────────────────────────────────────────
-// Resolves a TypeProperty to its i64 value if it's a simple integer
-// literal. Used by type_universe.rs to extract Bytes, Alignment, etc.
-pub fn resolve_property_as_i64(prop: &TypeProperty) -> Option<i64> {
-    match prop {
-        TypeProperty::Bytes(e)
-        | TypeProperty::Alignment(e)
-        | TypeProperty::Endian(e)
-        | TypeProperty::Volatile(e)
-        | TypeProperty::Atomic(e)
-        | TypeProperty::ElementType(e)
-        | TypeProperty::FixedSize(e)
-        | TypeProperty::InsertAt(e)
-        | TypeProperty::ExtractFrom(e)
-        | TypeProperty::AllowIndex(e)
-        | TypeProperty::AllowSlice(e)
-        | TypeProperty::AllowArrow(e) => match e.as_ref() {
-            Expr::Integer(n) => Some(*n),
-            _ => None,
-        },
-        TypeProperty::Codec(_) => None,
-    }
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_type_property_bytes_roundtrip() {
-        let prop = TypeProperty::Bytes(Box::new(Expr::Integer(8)));
-        assert_eq!(resolve_property_as_i64(&prop), Some(8));
-    }
-
-    #[test]
-    fn test_type_property_alignment_roundtrip() {
-        let prop = TypeProperty::Alignment(Box::new(Expr::Integer(4)));
-        assert_eq!(resolve_property_as_i64(&prop), Some(4));
-    }
-
-    #[test]
-    fn test_type_property_endian_expr_only() {
-        let prop = TypeProperty::Endian(Box::new(Expr::Identifier("Little".into())));
-        // resolve_property_as_i64 returns None for non-integer exprs
-        assert_eq!(resolve_property_as_i64(&prop), None);
-    }
-
-    #[test]
-    fn test_type_property_codec_is_string() {
-        let prop = TypeProperty::Codec("Utf8".into());
-        match prop {
-            TypeProperty::Codec(name) => assert_eq!(name, "Utf8"),
-            _ => panic!("Wrong variant"),
+    fn make_binding(name: &str, value: Expr) -> TypeBinding {
+        TypeBinding {
+            name: name.into(),
+            params: vec![],
+            value: Box::new(value),
+            span: None,
         }
     }
 
     #[test]
-    fn test_type_def_body_construct() {
-        let body = TypeDefBody {
-            properties: vec![
-                TypeProperty::Bytes(Box::new(Expr::Integer(8))),
-                TypeProperty::Alignment(Box::new(Expr::Integer(8))),
-            ],
-            bindings: vec![],
-            constraints: vec![],
-            span: None,
-        };
-        assert_eq!(body.properties.len(), 2);
-        let bytes = resolve_property_as_i64(&body.properties[0]);
-        assert_eq!(bytes, Some(8));
+    fn test_type_binding_bytes() {
+        let binding = make_binding("Bytes", Expr::Integer(8));
+        assert_eq!(binding.name, "Bytes");
+        assert_eq!(binding.value.as_integer(), Some(8));
     }
 
     #[test]
-    fn test_type_def_struct_construct() {
+    fn test_type_binding_alignment() {
+        let binding = make_binding("Alignment", Expr::Integer(4));
+        assert_eq!(binding.name, "Alignment");
+        assert_eq!(binding.value.as_integer(), Some(4));
+    }
+
+    #[test]
+    fn test_type_binding_codec() {
+        let binding = make_binding("Codec", Expr::String("Utf8".into()));
+        assert_eq!(binding.name, "Codec");
+        assert_eq!(binding.value.as_string(), Some("Utf8"));
+    }
+
+    #[test]
+    fn test_type_binding_endian() {
+        let binding = make_binding("Endian", Expr::Identifier("Big".into()));
+        assert_eq!(binding.name, "Endian");
+    }
+
+    #[test]
+    fn test_type_def_body_with_bindings() {
+        let body = TypeDefBody {
+            bindings: vec![
+                make_binding("Bytes", Expr::Integer(8)),
+                make_binding("Alignment", Expr::Integer(8)),
+            ],
+            constraints: vec![],
+            span: None,
+        };
+        assert_eq!(body.bindings.len(), 2);
+        assert_eq!(body.bindings[0].value.as_integer(), Some(8));
+    }
+
+    #[test]
+    fn test_type_def_struct_with_bindings() {
         let def = TypeDef {
             name: "U64".into(),
             type_params: vec![],
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
-                properties: vec![
-                    TypeProperty::Bytes(Box::new(Expr::Integer(8))),
-                    TypeProperty::Alignment(Box::new(Expr::Integer(8))),
+                bindings: vec![
+                    make_binding("Bytes", Expr::Integer(8)),
+                    make_binding("Alignment", Expr::Integer(8)),
                 ],
-                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -184,8 +164,8 @@ mod tests {
 mod kani_tests {
     use super::*;
 
-    // DEFERRED (D-1): TypeProperty dispatch uses Box<Expr> which requires heap
-    // allocation. Move to kani_full until TypeProperty is refactored to use
+    // DEFERRED (D-1): TypeBinding uses Box<Expr> which requires heap
+    // allocation. Move to kani_full until TypeBinding is refactored to use
     // a non-heap representation for the primitive kernel.
 }
 
@@ -194,46 +174,59 @@ mod kani_full_tests {
     use super::*;
 
     #[kani::proof]
-    fn verify_type_property_bytes_dispatch() {
-        let prop = TypeProperty::Bytes(Box::new(Expr::Integer(8)));
-        match prop {
-            TypeProperty::Bytes(ref e) => match e.as_ref() {
-                Expr::Integer(n) => assert_eq!(*n, 8),
-                _ => panic!("wrong expr variant"),
-            },
-            _ => panic!("wrong property variant"),
+    fn verify_type_binding_bytes_dispatch() {
+        let binding = TypeBinding {
+            name: "Bytes".into(),
+            params: vec![],
+            value: Box::new(Expr::Integer(8)),
+            span: None,
+        };
+        match binding.value.as_ref() {
+            Expr::Integer(n) => assert_eq!(*n, 8),
+            _ => panic!("wrong expr variant"),
         }
     }
 
     #[kani::proof]
-    fn verify_type_property_alignment_dispatch() {
-        let prop = TypeProperty::Alignment(Box::new(Expr::Integer(4)));
-        match prop {
-            TypeProperty::Alignment(ref e) => match e.as_ref() {
-                Expr::Integer(n) => assert_eq!(*n, 4),
-                _ => panic!("wrong expr variant"),
-            },
-            _ => panic!("wrong property variant"),
+    fn verify_type_binding_alignment_dispatch() {
+        let binding = TypeBinding {
+            name: "Alignment".into(),
+            params: vec![],
+            value: Box::new(Expr::Integer(4)),
+            span: None,
+        };
+        match binding.value.as_ref() {
+            Expr::Integer(n) => assert_eq!(*n, 4),
+            _ => panic!("wrong expr variant"),
         }
     }
 
     #[kani::proof]
-    fn verify_type_property_codec_dispatch() {
-        let prop = TypeProperty::Codec("Utf8".into());
-        match prop {
-            TypeProperty::Codec(ref name) => assert_eq!(name, "Utf8"),
-            _ => panic!("wrong property variant"),
+    fn verify_type_binding_codec_dispatch() {
+        let binding = TypeBinding {
+            name: "Codec".into(),
+            params: vec![],
+            value: Box::new(Expr::String("Utf8".into())),
+            span: None,
+        };
+        match binding.value.as_ref() {
+            Expr::String(s) => assert_eq!(s, "Utf8"),
+            _ => panic!("wrong expr variant"),
         }
     }
 
     #[kani::proof]
-    fn verify_type_def_body_construct() {
+    fn verify_type_def_body_with_bindings() {
         let body = TypeDefBody {
-            properties: vec![TypeProperty::Bytes(Box::new(Expr::Integer(8)))],
-            bindings: vec![],
+            bindings: vec![TypeBinding {
+                name: "Bytes".into(),
+                params: vec![],
+                value: Box::new(Expr::Integer(8)),
+                span: None,
+            }],
             constraints: vec![],
             span: None,
         };
-        assert_eq!(body.properties.len(), 1);
+        assert_eq!(body.bindings.len(), 1);
     }
 }

@@ -2578,7 +2578,6 @@ impl<'a> Parser<'a> {
         // Parse body `{ ... }`
         self.expect(Token::LBrace)?;
 
-        let mut properties = Vec::new();
         let mut bindings = Vec::new();
         let mut constraints = Vec::new();
 
@@ -2623,45 +2622,13 @@ impl<'a> Parser<'a> {
             self.expect(Token::Eq)?;
             let value = self.parse_expression()?;
 
-            // Create binding (always)
+            // Create binding
             bindings.push(TypeBinding {
-                name: binding_name.clone(),
+                name: binding_name,
                 params,
-                value: Box::new(value.clone()),
+                value: Box::new(value),
                 span: self.current_span(),
             });
-
-            // For recognized metadata property names, also create TypeProperty
-            let prop = match binding_name.as_str() {
-                "Bytes" => Some(TypeProperty::Bytes(Box::new(value.clone()))),
-                "Alignment" => Some(TypeProperty::Alignment(Box::new(value.clone()))),
-                "Endian" => Some(TypeProperty::Endian(Box::new(value.clone()))),
-                "Volatile" => Some(TypeProperty::Volatile(Box::new(value.clone()))),
-                "Atomic" => Some(TypeProperty::Atomic(Box::new(value.clone()))),
-                "ElementType" => Some(TypeProperty::ElementType(Box::new(value.clone()))),
-                "FixedSize" => Some(TypeProperty::FixedSize(Box::new(value.clone()))),
-                "InsertAt" => Some(TypeProperty::InsertAt(Box::new(value.clone()))),
-                "ExtractFrom" => Some(TypeProperty::ExtractFrom(Box::new(value.clone()))),
-                "AllowIndex" => Some(TypeProperty::AllowIndex(Box::new(value.clone()))),
-                "AllowSlice" => Some(TypeProperty::AllowSlice(Box::new(value.clone()))),
-                "AllowArrow" => Some(TypeProperty::AllowArrow(Box::new(value.clone()))),
-                "Codec" => {
-                    // Codec takes a string expression: Codec = "my_codec";
-                    // or an identifier for backward compat
-                    let codec_name = match &value {
-                        Expr::String(s) => s.clone(),
-                        Expr::Identifier(id) => id.clone(),
-                        other => return self.spanned_err(
-                            format!("Codec expects a string or identifier, got {:?}", other),
-                        ),
-                    };
-                    Some(TypeProperty::Codec(codec_name))
-                }
-                _ => None,
-            };
-            if let Some(prop_val) = prop {
-                properties.push(prop_val);
-            }
 
             // Expect semicolon after binding
             if let Some(Ok(Token::Semicolon)) = self.current_token() {
@@ -2681,7 +2648,6 @@ impl<'a> Parser<'a> {
             type_params,
             base,
             body: TypeDefBody {
-                properties,
                 bindings,
                 constraints,
                 span: self.current_span(),

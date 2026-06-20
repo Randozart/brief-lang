@@ -355,38 +355,6 @@ pub enum BracketOp {
     Stride(Box<Expr>),
 }
 
-/// A property assignment inside a `Type Name <: Base { ... }` block.
-/// Each property is either a metadata constraint or a syntax gate.
-#[derive(Debug, Clone, PartialEq)]
-pub enum TypeProperty {
-    /// Physical width in bytes. Required for all Bits-derived types.
-    Bytes(Box<Expr>),
-    /// Alignment boundary. Defaults to Bytes if unset.
-    Alignment(Box<Expr>),
-    /// Byte order: Big or Little. Defaults to Little.
-    Endian(Box<Expr>),
-    /// LLVM `load volatile`/`store volatile`. Defaults to false.
-    Volatile(Box<Expr>),
-    /// LLVM atomic operations. Defaults to false.
-    Atomic(Box<Expr>),
-    /// The element type — unlocks `[]` and slicing.
-    ElementType(Box<Expr>),
-    /// Whether size is fixed at compile time. false unlocks `<-`/`->`.
-    FixedSize(Box<Expr>),
-    /// Index expression for insertion position: `0`, `:> Size`, `:> Size - N`.
-    InsertAt(Box<Expr>),
-    /// Index or `<:{}` query for extraction position.
-    ExtractFrom(Box<Expr>),
-    /// Override: block `[]` access. Defaults to true.
-    AllowIndex(Box<Expr>),
-    /// Override: block slicing. Defaults to true.
-    AllowSlice(Box<Expr>),
-    /// Override: block `<-`/`->`. Defaults to true.
-    AllowArrow(Box<Expr>),
-    /// Codec struct name — must have encode/decode.
-    Codec(String),
-}
-
 /// A named binding inside a `Type Name <: Base { ... }` block.
 /// Each binding is a `Name = Expr;` or `Name(args) = Expr;` assignment.
 /// This is the unified representation — both built-in metadata properties
@@ -406,10 +374,8 @@ pub struct TypeBinding {
 /// Body of a `Type Name <: Base { ... }` declaration.
 #[derive(Debug, Clone)]
 pub struct TypeDefBody {
-    /// Metadata property assignments (legacy — being replaced by bindings).
-    pub properties: Vec<TypeProperty>,
     /// Unified bindings: every `Name = Expr;` entry, including both metadata
-    /// properties and user-defined projections. Replaces `properties` over time.
+    /// properties and user-defined projections.
     pub bindings: Vec<TypeBinding>,
     /// Refinement constraints with implicit self: `[ > 0 ]`.
     pub constraints: Vec<Expr>,
