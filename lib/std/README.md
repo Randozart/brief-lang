@@ -291,6 +291,7 @@ let fallback = result_or_else(chained, |err| Ok(0));
 ```
 lib/std/
 ├── README.md              # This file
+├── from-bits.bv           # How every type derives from Bits (educational)
 ├── math.bv                # Mathematical functions
 ├── string.bv              # String manipulation
 ├── collections.bv         # List operations

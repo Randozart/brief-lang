@@ -1,0 +1,245 @@
+// ─────────────────────────────────────────────────────────────
+// from-bits.bv — How Every Type Derives from Bits
+//
+// This file demonstrates the Bits Thesis: every Brief type is a
+// lens over a raw bit layout. The compiler uses fast paths for
+// performance; these are the conceptual definitions.
+//
+// WARNING: This is an EDUCATIONAL file. It shows the "why" and
+// "how" of type derivation, not production code. Some patterns
+// reference intrinsics (strlen#, fadd#) that may be planned.
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// 1. Int — A 64-bit signed integer
+//
+// Actual implementation: the compiler has a fast path. The
+// conceptual definition shows what Int IS.
+// ─────────────────────────────────────────────────────────────
+
+type Int <: Bits @/0..63 {
+    // Silent defaults (you don't need to write these):
+    Bytes     = 8;
+    Alignment = 8;
+    Endian    = 0;         // 0 = little, 1 = big
+
+    // Operator projections (conceptual — compiler fast-paths these):
+    Add(rhs)   = _ + rhs;
+    Sub(rhs)   = _ - rhs;
+    Mul(rhs)   = _ * rhs;
+    Div(rhs)   = _ / rhs;
+    Mod(rhs)   = _ % rhs;
+    Eq(rhs)    = _ == rhs;
+    Ne(rhs)    = _ != rhs;
+    Lt(rhs)    = _ < rhs;
+    Le(rhs)    = _ <= rhs;
+    Gt(rhs)    = _ > rhs;
+    Ge(rhs)    = _ >= rhs;
+    BitAnd(rhs) = _ & rhs;
+    BitOr(rhs)  = _ | rhs;
+    BitXor(rhs) = _ ^ rhs;
+    Shl(rhs)    = _ << rhs;
+    Shr(rhs)    = _ >> rhs;
+    Neg         = - _;
+    BitNot      = ~ _;
+};
+
+// ─────────────────────────────────────────────────────────────
+// 2. Float — IEEE 754 single-precision
+//
+// Compiled via fadd#/fsub#/fmul#/fdiv# intrinsics.
+// ─────────────────────────────────────────────────────────────
+
+type Float <: Bits @/0..31 {
+    Bytes     = 4;
+    Alignment = 8;
+
+    // Arithmetic via #-intrinsics (compiler provides these):
+    Add(rhs)  = _ :> fadd#(rhs);
+    Sub(rhs)  = _ :> fsub#(rhs);
+    Mul(rhs)  = _ :> fmul#(rhs);
+    Div(rhs)  = _ :> fdiv#(rhs);
+    Neg       = _:> fneg#;
+    Eq(rhs)   = _ :> fcmp_oq#(rhs);
+    Lt(rhs)   = _ :> fcmp_olt#(rhs);
+    Gt(rhs)   = _ :> fcmp_ogt#(rhs);
+};
+
+// ─────────────────────────────────────────────────────────────
+// 3. String — Length-prefixed UTF-8
+//
+// slot(n) is a macro defined below using $ template syntax.
+// ─────────────────────────────────────────────────────────────
+
+type String <: Bits @/0..127 {
+    Bytes = 16;
+
+    //    field         offset    width
+    Ptr          = _ @/0..63;     // Pointer to UTF-8 data
+    Len          = _ @/64..127;   // Length in bytes
+
+    Size         = _ :> Len;         // Number of bytes
+    IsEmpty      = _ :> Size == 0;
+    At(i)        = _ :> Ptr :> load_u8#(i);   // Read char at index
+};
+
+// ─────────────────────────────────────────────────────────────
+// 4. List<T> — Dynamic array
+// ─────────────────────────────────────────────────────────────
+
+type List <: Bits @/0..191 {
+    Bytes = 24;
+
+    //    field         offset    width
+    Ptr          = _ @/0..63;     // Element data pointer
+    Len          = _ @/64..127;   // Element count
+    Cap          = _ @/128..191;  // Allocated capacity
+
+    Size         = _ :> Len;
+    IsEmpty      = _ :> Size == 0;
+    At(i)        = _ :> Ptr :> load_elem#(i);
+};
+
+// ─────────────────────────────────────────────────────────────
+// 5. The slot(n) Template Macro
+//
+// Defines a bit-field at position n*8..n*8+7 (one byte slot).
+// Uses the $ template system for hygienic expansion.
+// ─────────────────────────────────────────────────────────────
+
+$ slot(n) {
+    quote {
+        _ @/(n * 8)..(n * 8 + 7)
+    }
+}
+
+// Example: a 3-field struct using slot(n)
+type Point <: Bits @/0..191 {
+    Bytes = 24;
+
+    X = slot(0);   // _ @/0..7
+    Y = slot(1);   // _ @/8..15
+    Z = slot(2);   // _ @/16..23
+};
+
+// ─────────────────────────────────────────────────────────────
+// 6. HashMap<K,V> — Two Views
+//
+// View A: Bits-native (hash table over a slot array)
+// The hash table is an array of (hash, key, value) slots.
+// ─────────────────────────────────────────────────────────────
+
+type HashMap_KV <: Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
+    Bytes      = BUCKETS * ENTRY_SIZE as Int;
+    FixedSize  = true;
+
+    // Uses a _lookup# intrinsic for O(1) hashed access
+    Contains(k)  = _ :> _lookup#(k) > -1;
+    Get(k)       = _ :> _lookup#(k) :> At;
+    Insert(k,v)  = _ :> _insert#(k, v);
+};
+
+// View B: List<(K,V)>-inherited
+// Inherits all List operations, adds hash-based lookup.
+// Both views compile to the same LLVM IR for matching shapes.
+
+type HashMap <: List {
+    ElementType = (K, V);
+    Contains(k)  = _ :> _lookup#(k) > -1;
+    Get(k)       = _ :> _lookup#(k) :> At;
+};
+
+// ─────────────────────────────────────────────────────────────
+// 7. User-Defined: Matrix4x4 with Custom Projections
+// ─────────────────────────────────────────────────────────────
+
+type Matrix4x4 <: Bits @/0..(16 * 8 - 1) {
+    Bytes = 64;   // 16 floats × 4 bytes
+
+    // Column-major access
+    At(col, row) = _ @/((col * 4 + row) * 32)..((col * 4 + row) * 32 + 31);
+
+    // Custom projections
+    Transpose    = _ :> _transpose_matrix#;
+    Determinant  = _ :> _det_matrix#;
+    Multiply(m)  = _ :> _mul_matrix#(m);
+};
+
+// ─────────────────────────────────────────────────────────────
+// 8. RISC-V Instruction Decode
+//
+// Demonstrates @/ bit-fields for real hardware decoding.
+// ─────────────────────────────────────────────────────────────
+
+type RV32I <: Bits @/0..31 {
+    Bytes = 4;
+
+    // RISC-V R-type instruction layout:
+    Opcode    = _ @/0..6;       // bits 0-6:  always 0x33 for R-type
+    Rd        = _ @/7..11;      // bits 7-11: destination register
+    Funct3    = _ @/12..14;     // bits 12-14: function selector
+    Rs1       = _ @/15..19;     // bits 15-19: source register 1
+    Rs2       = _ @/20..24;     // bits 20-24: source register 2
+    Funct7    = _ @/25..31;     // bits 25-31: function selector
+
+    IsAdd      = Funct7 == 0 && Funct3 == 0 && Opcode == 0x33;
+    IsSub      = Funct7 == 0x20 && Funct3 == 0 && Opcode == 0x33;
+    IsXor      = Funct7 == 0 && Funct3 == 4 && Opcode == 0x33;
+};
+
+// ─────────────────────────────────────────────────────────────
+// 9. Tier-Ignorance Example
+//
+// CBV (Circuit Brief) ignores Codec, ElementType, AllowIndex,
+// AllowSlice, AllowArrow — these are host-tier metadata that
+// have no meaning in hardware.
+// ─────────────────────────────────────────────────────────────
+
+type Counter <: Bits @/0..7 {
+    Bytes = 1;
+    // These bindings have no effect in CBV:
+    Codec        = "binary";     // Ignored by CBV
+    ElementType  = "Int";        // Ignored by CBV
+    AllowIndex   = false;        // Ignored by CBV — no index instr in HW
+
+    Incr         = _ :> _count_inc#;
+    Reset        = _ :> _count_rst#;
+};
+
+// ─────────────────────────────────────────────────────────────
+// 10. Lazy Foreign Lens: CString
+//
+// A zero-copy lens over C's char* — strlen runs only on
+// explicit Size query, not on character access.
+// ─────────────────────────────────────────────────────────────
+
+type CString <: Bits @/0..63 {
+    Bytes = 8;       // Just a pointer
+
+    // Zero-cost: reads char via pointer arithmetic, no strlen
+    At(i)     = _ :> Ptr :> load_u8#(i);
+
+    // O(N) cost: strlen only when Size is explicitly queried
+    Size      = _ :> Ptr :> strlen#;
+
+    IsEmpty   = _ :> Ptr :> load_u8#(0) == '\0';
+};
+
+// ─────────────────────────────────────────────────────────────
+// Compiler Notes
+//
+// "The actual implementation uses a fast path for this."
+//
+// The conceptual definitions above show the type system's
+// mathematical derivation. The compiler DOES NOT interpret
+// these definitions dynamically — it recognizes the shapes
+// at compile time and emits native LLVM IR directly:
+//
+//   Add  → add i64  (fast path in emit_expr.rs)
+//   Size → gep + load (fast path in try_projection_fast_path)
+//   @/   → lshr + and (fast path in BitRange handler)
+//
+// This means: zero runtime overhead. The abstraction is
+// compile-time only. User-defined types that match built-in
+// shapes get the same optimized codegen automatically.
+// ─────────────────────────────────────────────────────────────
