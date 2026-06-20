@@ -568,8 +568,14 @@ impl Annotator {
             }
             Expr::SigCall { modifier, expr } => {
                 let tag = match modifier {
-                    crate::ast::SigModifier::Out => "#out",
-                    crate::ast::SigModifier::Inline => "#inline",
+                    crate::ast::SigModifier::Out => "#out".to_string(),
+                    crate::ast::SigModifier::Inline => "#inline".to_string(),
+                    crate::ast::SigModifier::Export(name) => {
+                        match name {
+                            Some(n) => format!("#export(\"{}\")", n),
+                            None => "#export".to_string(),
+                        }
+                    }
                 };
                 format!("sig {} {}", tag, self.format_expr(expr))
             }

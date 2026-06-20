@@ -3,6 +3,21 @@ use crate::backend::llvm::{float_to_llvm_hex, LlvmBackend, TypedRegister};
 use std::fmt::Write;
 
 impl LlvmBackend {
+    /// Check if any modifier has the given name and extract its export name.
+    /// Returns Some(export_name) if #export or #export("name") was found.
+    fn get_export_name(modifiers: &[crate::ast::Hashtag]) -> Option<String> {
+        for tag in modifiers {
+            if tag.name == "export" {
+                let export_name = tag.value.clone().unwrap_or_else(|| tag.name.clone());
+                // If no explicit name was given, "export" is not useful — return None
+                if export_name == "export" {
+                    return None;
+                }
+                return Some(export_name);
+            }
+        }
+        None
+    }
     pub(super) fn emit_header(&self, out: &mut String) {
         writeln!(out, "; ModuleID = 'program.ll'").ok();
         writeln!(out, "source_filename = \"program.bv\"").ok();
@@ -679,6 +694,23 @@ impl LlvmBackend {
             }
         }
         writeln!(out, "}}").ok();
+        // Phase 4.5: Emit dso_local export wrapper if #export modifier present
+        if let Some(export_name) = Self::get_export_name(&d.modifiers) {
+            writeln!(out, "define dso_local {} @{}(" , ll_ret_ty, export_name).ok();
+            write!(out, "%State* %state").ok();
+            for (i, (n, t)) in d.parameters.iter().enumerate() {
+                write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
+            }
+            writeln!(out, ") local_unnamed_addr #0 {{").ok();
+            write!(out, "  %res = call {} @{}(", ll_ret_ty, d.name).ok();
+            write!(out, "%State* %state").ok();
+            for (i, (n, t)) in d.parameters.iter().enumerate() {
+                write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
+            }
+            writeln!(out, ") local_unnamed_addr #0").ok();
+            writeln!(out, "  ret {} %res", ll_ret_ty).ok();
+            writeln!(out, "}}").ok();
+        }
     }
     // 2026-06-13: Added %State* %state param — definitions can access global state.
     // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).

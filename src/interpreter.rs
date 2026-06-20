@@ -1583,7 +1583,7 @@ impl Interpreter {
             Expr::ArrowTransfer { dest, source, filter } => ArrowTransferExpr {
                 dest: dest.clone(), source: source.clone(), filter: filter.clone(),
             }.evaluate(self, &ExprDispatch),
-            Expr::SigCall { modifier, expr } => SigCallExpr { modifier: *modifier, expr: expr.clone() }.evaluate(self, &ExprDispatch),
+            Expr::SigCall { modifier, expr } => SigCallExpr { modifier: modifier.clone(), expr: expr.clone() }.evaluate(self, &ExprDispatch),
             Expr::Ellipsis => EllipsisExpr.evaluate(self, &ExprDispatch),
             Expr::Call(name, args) =>
                 crate::features::call::CallExpr::new(name.clone(), args.clone()).evaluate(self, &ExprDispatch),

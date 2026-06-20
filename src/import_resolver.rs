@@ -213,7 +213,7 @@ impl ImportResolver {
             dispatch_mode: program.dispatch_mode,
             exit_condition: program.exit_condition.clone(),
             out_pragmas: program.out_pragmas.clone(),
-            default_sig_modifier: program.default_sig_modifier,
+            default_sig_modifier: program.default_sig_modifier.clone(),
         })
     }
 

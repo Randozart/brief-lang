@@ -1036,7 +1036,8 @@ impl<'a> Parser<'a> {
             }
 
             Some(Ok(Token::Defn)) => {
-                let defn = self.parse_definition()?;
+                let mut defn = self.parse_definition()?;
+                defn.modifiers = modifiers;
                 Ok(wrap_test(TopLevel::Definition(defn), &test_groups))
             }
             Some(Ok(Token::Trg)) => {
@@ -1362,10 +1363,30 @@ impl<'a> Parser<'a> {
                         self.advance();
                         Some(SigModifier::Inline)
                     }
-                    _ => return self.spanned_err("Expected 'out' or 'inline' after '#' in sig".to_string()),
+                    "export" => {
+                        // #export or #export("symbol_name")
+                        self.advance();
+                        let export_name = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+                            self.advance();
+                            let name = match self.current_token() {
+                                Some(Ok(Token::String(s))) => {
+                                    let s = s.clone();
+                                    self.advance();
+                                    Some(s)
+                                }
+                                _ => return self.spanned_err("Expected string literal for export name".to_string()),
+                            };
+                            self.expect(Token::RParen)?;
+                            name
+                        } else {
+                            None
+                        };
+                        Some(SigModifier::Export(export_name))
+                    }
+                    _ => return self.spanned_err("Expected 'out', 'inline', or 'export' after '#' in sig".to_string()),
                 }
             } else {
-                return self.spanned_err("Expected 'out' or 'inline' after '#' in sig".to_string());
+                return self.spanned_err("Expected 'out', 'inline', or 'export' after '#' in sig".to_string());
             }
         } else {
             None

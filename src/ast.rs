@@ -1832,12 +1832,16 @@ impl Contract {
 }
 
 /// Side-effect modifier for sig declarations.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SigModifier {
     /// `sig #out` — function has observable external effects
     Out,
     /// `sig #inline` — function is pure, safe to fold/eliminate
     Inline,
+    /// `sig #export("name")` — emit globally-visible symbol with C ABI.
+    /// The optional string specifies the exported symbol name
+    /// (defaults to the Brief identifier name).
+    Export(Option<String>),
 }
 
 #[derive(Debug, Clone)]

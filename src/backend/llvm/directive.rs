@@ -26,6 +26,9 @@ pub enum DirectiveEffect {
     /// Request GPU offloading for the current loop/txn body.
     /// The optional string is a user-specified threshold or config.
     GpuOffload(Option<String>),
+    /// Export this function with a globally-visible symbol for cross-language
+    /// FFI. The string is the exported symbol name.
+    Export(String),
     /// No effect in this context — directive is not applicable.
     None,
 }
@@ -42,6 +45,7 @@ pub fn resolve_directives(tags: &[Hashtag], context: DirectiveCtx) -> Vec<Direct
             "unroll" => resolve_unroll(tag, context),
             "vectorize" => resolve_vectorize(tag, context),
             "gpu" => resolve_gpu(tag, context),
+            "export" => resolve_export(tag, context),
             _ => None,
         };
         if let Some(e) = effect {
@@ -112,6 +116,19 @@ fn resolve_gpu(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> 
         // GPU offloading is applicable to both loops and full transaction bodies.
         DirectiveCtx::Loop | DirectiveCtx::Transaction | DirectiveCtx::CallableTxn => {
             Some(DirectiveEffect::GpuOffload(tag.value.clone()))
+        }
+        _ => None,
+    }
+}
+
+/// Resolve #export / #export("name") for the given context.
+/// Causes the function to be emitted as a dso_local global symbol
+/// with C calling convention, making it callable from other languages.
+fn resolve_export(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> {
+    match context {
+        DirectiveCtx::Transaction | DirectiveCtx::CallableTxn => {
+            let export_name = tag.value.clone().unwrap_or_else(|| tag.name.clone());
+            Some(DirectiveEffect::Export(export_name))
         }
         _ => None,
     }
