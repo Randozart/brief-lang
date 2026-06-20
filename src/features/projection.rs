@@ -108,8 +108,6 @@ impl ExprEval for ProjectionExpr {
                     _ => Err(RuntimeError::TypeMismatch("Contains requires HashMap or HashSet".into())),
                 }
             }
-            ProjectionTarget::Pop => Err(RuntimeError::TypeMismatch(
-                "Pop projection not supported — use '<- &set' instead".into())),
             ProjectionTarget::Index(n) => match &source_val {
                 Value::Tuple(items) if *n < items.len() => Ok(items[*n].clone()),
                 _ => Err(RuntimeError::TypeMismatch("Index requires Tuple".into())),

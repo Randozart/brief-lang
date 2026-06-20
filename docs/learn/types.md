@@ -1,6 +1,6 @@
 # Types in Brief — Learning Guide
 
-**Last updated:** 2026-06-09
+**Last updated:** 2026-06-20
 
 ## Type Derivation (`<:`)
 
@@ -40,7 +40,33 @@ Type List<T> <: Bits {
 
 `ElementType = T` unlocks `[]` brackets. `FixedSize = false` unlocks `<-`/`->` arrows.
 
-### Syntax Gates
+### Tuples
+
+Tuples are fixed-size heterogeneous collections. Unlike `List<T>` (which holds zero or more elements of a single type), a Tuple's length and element types are part of its type signature:
+
+```brief
+defn pair() -> (Int, String) {
+    term (42, "hello");
+};
+```
+
+### Bracket Indexing
+
+Tuples support the same `[index]` bracket syntax as Lists:
+
+```brief
+let t = (10, 20, 30);
+let x = t[1];   // 20
+let y = t[0];   // 10
+```
+
+Indices are zero-based and bounds-checked at runtime. The `:> 0` / `:> 1` projection syntax also works for tuple element access (`pair :> 0`).
+
+### Memory Layout
+
+In the LLVM backend, Tuples share the same memory layout as Lists: `[data_ptr, len, elem0, elem1, ...]`. This means all existing GEP-based indexing code works for both List and Tuple without modification.
+
+## Syntax Gates
 
 Override to restrict access:
 

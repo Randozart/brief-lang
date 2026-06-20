@@ -2525,21 +2525,6 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, dp, hp, (*i as i64) + 2).ok();
                         writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, dp).ok();
                     }
-                    ProjectionTarget::Pop => {
-                        let hp = format!("%pphp{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
-                        let lp = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
-                        let len = format!("%ppln{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
-                        let pi = format!("%pppi{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = add i64 {}, -1", indent, pi, len).ok();
-                        let dpp = format!("%ppdp{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dpp, hp).ok();
-                        let ep = format!("%ppep{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dpp, pi).ok();
-                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
-                    }
                     ProjectionTarget::PtrBang => {
                         let hp = format!("%pbhp{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();

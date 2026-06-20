@@ -154,6 +154,11 @@ impl ExprEval for ListIndexExpr {
                     Err(RuntimeError::TypeMismatch("Index out of bounds".into()))
                 } else { Ok(items[idx as usize].clone()) }
             }
+            (Value::Tuple(items), Value::Int(idx)) => {
+                if idx < 0 || idx as usize >= items.len() {
+                    Err(RuntimeError::TypeMismatch("Tuple index out of bounds".into()))
+                } else { Ok(items[idx as usize].clone()) }
+            }
             (Value::DbvlTable(table), Value::String(key)) => {
                 let results = ctx.resolve_dbvl_key(&table, &key)?;
                 if results.len() == 1 { Ok(results.into_iter().next().unwrap()) }
@@ -283,20 +288,24 @@ impl ExprEval for MultiSliceExpr {
             } else { ctx.apply_multi_slice_coords(&base, &coords)? }
         };
 
+        let is_tuple_type = matches!(current, Value::Tuple(_));
         for op in &self.ops {
             match op {
                 BracketOp::Coord(_) => {}
                 BracketOp::Stride(stride_expr) => {
-                    let list = match current { Value::List(ref items) => items.clone(), _ => return Err(RuntimeError::TypeMismatch("Stride requires list".into())) };
-                    match ctx.eval_expr(stride_expr)? { Value::Int(n) if n > 0 => current = Value::List(list.into_iter().step_by(n as usize).collect()), _ => return Err(RuntimeError::TypeMismatch("Stride must be positive Int".into())) }
+                    let items = match current { Value::List(ref items) => items.clone(), Value::Tuple(ref items) => items.clone(), _ => return Err(RuntimeError::TypeMismatch("Stride requires list or tuple".into())) };
+                    match ctx.eval_expr(stride_expr)? { Value::Int(n) if n > 0 => {
+                        let stepped: Vec<Value> = items.into_iter().step_by(n as usize).collect();
+                        current = if is_tuple_type { Value::Tuple(stepped) } else { Value::List(stepped) };
+                    }, _ => return Err(RuntimeError::TypeMismatch("Stride must be positive Int".into())) }
                 }
                 BracketOp::Mask(mask_expr) => {
-                    let list = match current { Value::List(ref items) => items.clone(), _ => return Err(RuntimeError::TypeMismatch("Mask requires list".into())) };
+                    let items = match current { Value::List(ref items) => items.clone(), Value::Tuple(ref items) => items.clone(), _ => return Err(RuntimeError::TypeMismatch("Mask requires list or tuple".into())) };
                     let mut filtered = Vec::new();
-                    for item in list {
+                    for item in items {
                         if eval_mask_condition(ctx, mask_expr, &item)? { filtered.push(item); }
                     }
-                    current = Value::List(filtered);
+                    current = if is_tuple_type { Value::Tuple(filtered) } else { Value::List(filtered) };
                 }
             }
         }

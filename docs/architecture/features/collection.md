@@ -1,7 +1,7 @@
 # Universal Bracket Syntax
 
 **Date added:** 2026-06-11
-**Status:** Implementation complete (Phases 1-5)
+**Status:** Implementation complete (Phases 1-5); Tuple index support added 2026-06-20
 
 ## Purpose
 
@@ -48,10 +48,23 @@ val["pattern"]                  // Desugars to val[; @"pattern"]
 | `Char` | `Char` | `'a'` | `['a']` |
 | `String` | `Char` | `"hi"` | `['h','i']` |
 | `List<T>` | `T` | `[1,2,3]` | `[1,2,3]` |
+| `Tuple` | element | `(1, "a")` | `[1, "a"]` |
 | `HashMap<K,V>` | `(K,V)` | `{"a":1}` | `[("a",1)]` |
 | `Struct` | field `(String,Value)` | `{x:5}` | `[("x",5)]` |
 
 ## Evaluation
+
+### ListIndexExpr (`val[idx]`)
+
+`src/features/collection.rs` — `ListIndexExpr::evaluate()`
+
+1. Evaluate `value` expression → `Value`
+2. Evaluate `index` expression → `Int`
+3. Dispatch on value type:
+   - `Value::List(items)`: `items[idx]` — bounds checked
+   - `Value::Tuple(items)`: `items[idx]` — bounds checked
+   - `Value::DbvlTable`: string-keyed lookup
+4. Returns the element at the given index.
 
 ### SliceExpr (`val[start..end;stride;mask]`)
 
@@ -70,7 +83,9 @@ val["pattern"]                  // Desugars to val[; @"pattern"]
 1. Evaluate `value` → `Value`
 2. If atomic: decompose to `Vec<Value::Char>`, apply ops sequentially,
    reconstruct via `reconstruct_from_chars()`. Early return.
-3. If non-atomic: coordinate indexing, stride, mask on list (existing behavior)
+3. If non-atomic: coordinate indexing, stride, mask on list or tuple.
+   Tuple elements are indexed identically to list elements; stride/mask
+   on a Tuple produce another Tuple (preserving the tuple type).
 
 ### Type-Directed Desugar
 
@@ -110,8 +125,12 @@ walks the DFA table in O(n) with zero allocation.
 - `Expr::Slice` / `Expr::MultiSlice` on atomic types: passthrough for
   coord-only, stub for stride/mask
   (atomic bracket codegen returns 0 for stride/mask ops)
-- `Expr::Slice` / `Expr::MultiSlice` on list types: pointer-based list
-  access (existing behavior, unchanged)
+- `Expr::Slice` / `Expr::MultiSlice` on list/tuple types: pointer-based
+  access (existing behavior, unchanged). Tuple memory layout matches List
+  (`[data_ptr, len, elem0, ...]`) so existing GEP-based indexing works
+  without modification.
+- `Expr::ListIndex` on tuples: handled by same GEP path as List — no
+  backend change needed.
 
 ## Key Files
 
@@ -122,5 +141,5 @@ walks the DFA table in O(n) with zero allocation.
 | `src/interpreter.rs` | `Value::Regex` variant, `Expr::RegexLiteral` eval |
 | `src/ast.rs` | `Expr::RegexLiteral(String)`, `Value::Regex(RegexPattern)` |
 | `src/parser.rs` | `@"..."` regex literal parsing, state decl address loop skip |
-| `src/typechecker.rs` | Type inference for slice/multislice/regex literal |
+| `src/typechecker.rs` | Type inference for slice/multislice/regex literal, `Type::Tuple` indexing |
 | `src/backend/llvm/emit_expr.rs` | Atomic type passthrough in MultiSlice/Slice |

@@ -5926,7 +5926,6 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 self.expect(Token::RParen)?;
                 Ok(ProjectionTarget::Contains(Box::new(expr)))
             }
-            "Pop" => Ok(ProjectionTarget::Pop),
             "Get" => {
                 // Get(key) — non-mutating HashMap read → Option<V>
                 self.expect(Token::LParen)?;
@@ -5943,7 +5942,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 reason: format!(
                     "expected projection target (Size, Bytes, Ptr, Alignment, Range, \
                      Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match, \
-                     Keys, Values, Contains, Pop, Get, Top, Front, Elements, AsStack, AsQueue, \
+                     Keys, Values, Contains, Get, Top, Front, Elements, AsStack, AsQueue, \
                      or integer index), \
                      found '{}'",
                     name

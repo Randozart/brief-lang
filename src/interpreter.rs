@@ -839,9 +839,10 @@ impl Interpreter {
         let rest = &coords[1..];
         match first {
             SliceCoordinate::Index(idx_expr) => {
-                let list = match value {
+                let list: &Vec<Value> = match value {
                     Value::List(items) => items,
-                    _ => return Err(RuntimeError::TypeMismatch("Cannot index non-list in multi-slice".to_string())),
+                    Value::Tuple(items) => items,
+                    _ => return Err(RuntimeError::TypeMismatch("Cannot index non-list/non-tuple in multi-slice".to_string())),
                 };
                 let idx_val = self.eval_expr(idx_expr)?;
                 let n = match idx_val {
@@ -855,9 +856,10 @@ impl Interpreter {
                 if rest.is_empty() { Ok(extracted) } else { self.apply_multi_slice_coords(&extracted, rest) }
             }
             SliceCoordinate::Range { start, end } => {
-                let list = match value {
-                    Value::List(items) => items,
-                    _ => return Err(RuntimeError::TypeMismatch("Cannot slice non-list in multi-slice".to_string())),
+                let (list, is_tuple): (&Vec<Value>, bool) = match value {
+                    Value::List(items) => (items, false),
+                    Value::Tuple(items) => (items, true),
+                    _ => return Err(RuntimeError::TypeMismatch("Cannot slice non-list/non-tuple in multi-slice".to_string())),
                 };
                 let len = list.len();
                 let start_idx = match start {
@@ -883,13 +885,24 @@ impl Interpreter {
                 let lo = start_idx.min(len);
                 let hi = end_idx.min(len);
                 let sublist: Vec<Value> = if lo < hi { list[lo..hi].to_vec() } else { vec![] };
-                if rest.is_empty() {
-                    Ok(Value::List(sublist))
+                if is_tuple {
+                    if rest.is_empty() {
+                        Ok(Value::Tuple(sublist))
+                    } else {
+                        let results: Result<Vec<Value>, RuntimeError> = sublist.iter()
+                            .map(|item| self.apply_multi_slice_coords(item, rest))
+                            .collect();
+                        Ok(Value::Tuple(results?))
+                    }
                 } else {
-                    let results: Result<Vec<Value>, RuntimeError> = sublist.iter()
-                        .map(|item| self.apply_multi_slice_coords(item, rest))
-                        .collect();
-                    Ok(Value::List(results?))
+                    if rest.is_empty() {
+                        Ok(Value::List(sublist))
+                    } else {
+                        let results: Result<Vec<Value>, RuntimeError> = sublist.iter()
+                            .map(|item| self.apply_multi_slice_coords(item, rest))
+                            .collect();
+                        Ok(Value::List(results?))
+                    }
                 }
             }
             SliceCoordinate::Named { coord, .. } => self.apply_multi_slice_coords(value, &[coord.as_ref().clone()]),
@@ -7924,6 +7937,23 @@ mod tests {
             }
             _ => panic!("Expected TypeMismatch error, got: {:?}", err),
         }
+    }
+
+    #[test]
+    fn test_tuple_bracket_index() {
+        let mut i = Interpreter::new();
+        i.state.insert("result".to_string(), Value::Int(0));
+        let stmt = Statement::Assignment {
+            lhs: Expr::OwnedRef("result".to_string()),
+            expr: Expr::ListIndex(
+                Box::new(Expr::Tuple(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
+                Box::new(Expr::Integer(1)),
+            ),
+            timeout: None,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("result"), Some(&Value::Int(20)));
     }
 
     #[test]

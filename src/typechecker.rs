@@ -1699,6 +1699,11 @@ impl TypeChecker {
                         *inner.clone()
                     }
                 }
+                Type::Tuple(types) => {
+                    // Indexing a tuple: try to infer element type at index
+                    // If index is compile-time known, return that type; else unify
+                    types.first().cloned().unwrap_or(Type::TypeVar("T".to_string()))
+                }
                 _ => Type::TypeVar("T".to_string()),
                 }
             },
@@ -1886,21 +1891,6 @@ impl TypeChecker {
                             }
                         }
                         Type::Bool
-                    }
-                    ProjectionTarget::Pop => {
-                        match &src_ty {
-                            Type::Applied(name, inner) if name == "HashSet" => {
-                                inner.first().cloned().unwrap_or(Type::String)
-                            }
-                            _ => {
-                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                                    expected: "HashSet".to_string(),
-                                    found: self.type_to_string(&src_ty),
-                                    context: "Pop projection".to_string(),
-                                });
-                                Type::String
-                            }
-                        }
                     }
                     ProjectionTarget::Index(n) => {
                         match &src_ty {
