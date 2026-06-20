@@ -76,18 +76,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn with_strict_mode(mut self, strict: bool) -> Self {
-        self.strict_mode = if strict { StrictMode::Strict } else { StrictMode::Off };
-        self
-    }
-
-    pub fn with_gpu_mode(mut self, gpu: bool) -> Self {
-        if gpu {
-            self.strict_mode = StrictMode::Gpu;
-        }
-        self
-    }
-
     pub fn take_sed_item_names(&mut self) -> Vec<String> {
         std::mem::take(&mut self.sed_item_names)
     }
@@ -6174,6 +6162,19 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     source: Box::new(expr),
                     target,
                 };
+            } else if let Some(Ok(Token::At)) = self.current_token() {
+                // @/ — bit-range extraction in expression context: x @/0..7
+                if let Some(Ok(Token::Slash)) = self.peek_token() {
+                    self.advance(); // consume @
+                    self.advance(); // consume /
+                    let br = self.parse_bit_range()?;
+                    expr = Expr::Projection {
+                        source: Box::new(expr),
+                        target: ProjectionTarget::BitRange(br),
+                    };
+                } else {
+                    break;
+                }
             } else if let Some(Ok(Token::Hash)) = self.current_token() {
                 // Only treat `#` as intrinsic call if followed by `(`
                 if matches!(self.peek_token(), Some(Ok(Token::LParen))) {
@@ -9498,6 +9499,47 @@ mod kani_full_tests {
             }
         } else {
             panic!("Expected Transaction");
+        }
+    }
+
+    #[test]
+    fn test_parse_typedef_underscore_bitrange() {
+        let s = "type MyType <: Bits { Field = _ @/0..7; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse _ @/ in TypeDef: {:?}", result.err());
+        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+            assert_eq!(td.name, "MyType");
+            assert_eq!(td.body.bindings.len(), 1);
+            assert_eq!(td.body.bindings[0].name, "Field");
+            let val = &td.body.bindings[0].value;
+            assert!(matches!(val.as_ref(),
+                Expr::Projection { source, target: ProjectionTarget::BitRange(_) }
+                if matches!(source.as_ref(), Expr::Identifier(name) if name == "_")
+            ), "Expected Projection(Identifier(_), BitRange), got {:?}", val);
+        } else {
+            panic!("Expected TypeDef");
+        }
+    }
+
+    #[test]
+    fn test_parse_expr_bitrange_after_identifier() {
+        let s = "defn f() -> Int { term x @/0..7; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse x @/0..7: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_typedef_bits_bitrange() {
+        let s = "type MyInt <: Bits @/0..63 { Bytes = 8; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse Bits @/0..63 base: {:?}", result.err());
+        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+            assert_eq!(td.bit_range, Some(crate::ast::BitRange::Range(0, 63)));
+        } else {
+            panic!("Expected TypeDef");
         }
     }
 }

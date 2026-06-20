@@ -368,6 +368,7 @@ mod tests {
             allow_arrow: true,
             codec: None,
             on_exit: None,
+            guards: vec![],
             projections: HashMap::new(),
             source: TypeDef {
                 name: name.to_string(),

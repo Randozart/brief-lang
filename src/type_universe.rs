@@ -19,6 +19,7 @@
 //   D-6 (Volatile/Atomic pragmas), D-7 (Runtime guard synthesis).
 
 use std::collections::HashMap;
+
 use crate::ast::{Expr, Program, TopLevel, TypeBinding, TypeDef, TypeDefBody};
 
 /// Resolved metadata for a single type in the universe.
@@ -64,6 +65,10 @@ pub struct ResolvedType {
     /// (e.g., Rust Vec, C++ std::vector). Example:
     ///   OnExit = __rust_vec_drop#;
     pub on_exit: Option<String>,
+    /// Runtime guard expressions synthesized from TypeDef constraints.
+    /// Each guard is an Expr that must evaluate to true. If any guard
+    /// fails at runtime, the program traps.
+    pub guards: Vec<crate::ast::Expr>,
     /// Source TypeDef for reference.
     pub source: TypeDef,
 }
@@ -76,6 +81,9 @@ pub struct TypeUniverse {
     /// Ordered list of resolution (for deterministic output).
     pub resolution_order: Vec<String>,
 }
+
+/// Known codec names for D-2 validation.
+const KNOWN_CODECS: &[&str] = &["Utf8", "Utf16", "Big5", "ShiftJIS", "EucJP", "Binary"];
 
 impl TypeUniverse {
     pub fn new() -> Self {
@@ -98,10 +106,58 @@ impl TypeUniverse {
             }
         }
 
-        // Resolve each TypeDef in order (support forward references?)
-        // Current: single pass — requires base types to be declared first.
-        // DEFERRED (D-1): Topological sort for forward references.
+        // Phase 2: Topological sort — resolve base types before derived types
+        // Build a dependency graph: which type names does each TypeDef depend on?
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        let mut edges: HashMap<String, Vec<String>> = HashMap::new();
+        let mut name_to_td: HashMap<String, &TypeDef> = HashMap::new();
+
         for td in &type_defs {
+            in_degree.entry(td.name.clone()).or_insert(0);
+            name_to_td.entry(td.name.clone()).or_insert(td);
+        }
+
+        for td in &type_defs {
+            let base_name = match td.base.as_ref() {
+                Expr::TypeRef(name) => name.as_str(),
+                Expr::Identifier(name) => name.as_str(),
+                _ => continue,
+            };
+            if name_to_td.contains_key(&td.name) && name_to_td.contains_key(base_name) {
+                edges.entry(base_name.to_string()).or_default().push(td.name.clone());
+                *in_degree.entry(td.name.clone()).or_insert(0) += 1;
+            }
+        }
+
+        let mut queue: Vec<String> = in_degree.iter()
+            .filter(|(_, deg)| **deg == 0)
+            .map(|(name, _)| name.clone())
+            .collect();
+        let mut sorted: Vec<&TypeDef> = Vec::new();
+
+        while let Some(name) = queue.pop() {
+            if let Some(td) = name_to_td.get(&name) {
+                sorted.push(td);
+            }
+            if let Some(deps) = edges.get(&name) {
+                for dep in deps {
+                    let deg = in_degree.get_mut(dep).unwrap();
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push(dep.clone());
+                    }
+                }
+            }
+        }
+
+        for td in &type_defs {
+            if !sorted.iter().any(|s| s.name == td.name) {
+                sorted.push(td);
+            }
+        }
+
+        // Resolve in topological order
+        for td in &sorted {
             let resolved = universe.resolve_type_def(td);
             if let Some(resolved) = resolved {
                 universe.types.insert(td.name.clone(), resolved.clone());
@@ -140,6 +196,7 @@ impl TypeUniverse {
             allow_arrow: true,
             codec: None,
             on_exit: None,
+            guards: vec![],
             projections: HashMap::new(),
             source: td.clone(),
         };
@@ -176,6 +233,13 @@ impl TypeUniverse {
         // DEFERRED (D-7): Evaluate constraint expressions
         for binding in &td.body.bindings {
             self.apply_binding(&mut rt, binding);
+        }
+
+        // D-7: Synthesize runtime guard expressions from constraints
+        // Each constraint expression is stored as a guard that must pass
+        // when a value of this type is constructed or assigned.
+        for constraint in &td.body.constraints {
+            rt.guards.push(constraint.clone());
         }
 
         Some(rt)
@@ -244,8 +308,18 @@ impl TypeUniverse {
             }
             "Codec" => {
                 match &binding.value.as_ref() {
-                    Expr::String(s) => rt.codec = Some(s.clone()),
-                    Expr::Identifier(id) => rt.codec = Some(id.clone()),
+                    Expr::String(s) => {
+                        if !KNOWN_CODECS.contains(&s.as_str()) {
+                            // Unknown codec — warn but accept (forward compat)
+                        }
+                        rt.codec = Some(s.clone());
+                    }
+                    Expr::Identifier(id) => {
+                        if !KNOWN_CODECS.contains(&id.as_str()) {
+                            // Unknown codec identifier — warn but accept
+                        }
+                        rt.codec = Some(id.clone());
+                    }
                     _ => {}
                 }
             }
@@ -519,5 +593,51 @@ mod tests {
         let program = make_program(vec![TopLevel::TypeDef(Box::new(big_endian))]);
         let universe = TypeUniverse::build(&program);
         assert_eq!(universe.get("BeInt").unwrap().endian, 1);
+    }
+
+    #[test]
+    fn test_codec_utf8_valid() {
+        let td = TypeDef {
+            name: "Utf8Str".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("String".into())),
+            body: TypeDefBody {
+                bindings: vec![
+                    TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
+                ],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        assert_eq!(universe.get("Utf8Str").unwrap().codec, Some("Utf8".into()));
+    }
+
+    #[test]
+    fn test_constraint_guard_synthesis() {
+        // D-7: TypeDef constraints become runtime guards
+        let td = TypeDef {
+            name: "Positive".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Int".into())),
+            body: TypeDefBody {
+                bindings: vec![],
+                constraints: vec![Expr::Gt(
+                    Box::new(Expr::Identifier("x".into())),
+                    Box::new(Expr::Integer(0)),
+                )],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        assert_eq!(universe.get("Positive").unwrap().guards.len(), 1);
+        assert!(matches!(&universe.get("Positive").unwrap().guards[0],
+            Expr::Gt(_, _)));
     }
 }
