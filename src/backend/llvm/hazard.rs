@@ -390,6 +390,48 @@ impl LlvmBackend {
             _ => 0,
         }
     }
+    /// Select the optimal loop unroll factor based on register pressure analysis.
+    ///
+    /// Uses `compute_peak_live_floats` to estimate how many float registers are
+    /// live simultaneously in the loop body. Unrolling multiplies register demand;
+    /// if demand exceeds available registers, LLVM spills to stack, negating the
+    /// benefit. Also considers body instruction count for very simple loops.
+    ///
+    /// Returns 1, 4, or 8. 1 = no unrolling (high register pressure, avoid spills),
+    /// 4 = moderate unrolling (default), 8 = aggressive unrolling (simple body).
+    ///
+    /// 2026-06-20: Phase 0b — replaces hardcoded `let uf = 4`.
+    pub(super) fn optimal_unroll_factor(&self, body: &[Statement]) -> usize {
+        let mut local_floats = std::collections::HashSet::new();
+        for stmt in body {
+            if let Statement::Let { name, ty, expr, .. } = stmt {
+                let is_float = ty.as_ref() == Some(&Type::Float)
+                    || expr.as_ref().map_or(false, |e| self.is_float_expr_pre_cg(e, &local_floats));
+                if is_float {
+                    local_floats.insert(name.clone());
+                }
+            }
+        }
+        let float_names: Vec<String> = local_floats.into_iter().collect();
+        let peak = if float_names.is_empty() { 0 } else { compute_peak_live_floats(body, &float_names) };
+        let (regs, _) = match self.spec.as_ref() {
+            Some(spec) => self.target_hardware(spec),
+            None => (16, 4),
+        };
+        let inst_count = body.len() as u32;
+
+        // High register pressure: peak live floats exceed 1/4 of available registers
+        if peak > 0 && peak > regs / 4 {
+            return 1usize;
+        }
+        if inst_count <= 3 && peak <= 1 {
+            return 8usize;
+        }
+        if peak <= regs / 8 {
+            return 8usize;
+        }
+        4usize
+    }
 }
 
 #[cfg(test)]

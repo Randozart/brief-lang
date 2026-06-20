@@ -551,7 +551,9 @@ impl LlvmBackend {
         if use_phi {
             writeln!(out, "  br label %case_phi_entry").ok();
         }
-        let uf = if !use_phi && body.is_some() { 4 } else { 1 };
+        let uf = if let Some(body_stmts) = body {
+            if !use_phi { self.optimal_unroll_factor(body_stmts) } else { 1 }
+        } else { 1 };
         self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body, uf, false, None);
         let saved = std::mem::take(&mut self.pending_post_hoist);
         self.emit_hoisted_post_loop_prints(out, &saved);
