@@ -367,6 +367,11 @@ Resource constants: `RLIMIT_CPU=0`, `RLIMIT_FSIZE=1`, `RLIMIT_DATA=2`, `RLIMIT_S
 | `dlsym#` | `(handle: Int, symbol: String) -> Int` | returns 0 on error | handle from dlopen# | Shim (`__dlsym__`) |
 | `dlclose#` | `(handle: Int) -> Int` | returns -1 on error | handle from dlopen# | Shim (`__dlclose__`) |
 | `ttyname#` | `(fd: Int) -> String` | returns empty on error | fd is a terminal | Shim (`__ttyname__`) |
+| `strlen#` | `(ptr: Ptr<Byte>) -> Int` | C string length, no bounds check | ptr != null | Direct (`@strlen`) |
+
+`strlen#` is the pure-read strlen(3) wrap. Used by the CString lazy lens pattern:
+`Size = _ :> Ptr :> strlen#;`. Zero-cost: `strlen` runs only when `Size`
+is explicitly queried; character access via `At(i)` never calls strlen.
 
 ### Phase I–VI — D12–D18 + Extras (completed 2026-06-19)
 

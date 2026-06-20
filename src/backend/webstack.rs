@@ -840,6 +840,13 @@ impl WebstackGenerator {
                     Intrinsic::GetEnvInt => {
                         format!("Number(process.env[{}] || \"0\")", ts_args.join(", "))
                     }
+                    Intrinsic::Strlen => {
+                        // strlen# in JS/WASM: use string length property
+                        match args.first() {
+                            Some(_) => format!("({}).length", ts_args[0]),
+                            None => "0".to_string(),
+                        }
+                    }
                     _ => ts_args.join(", "),
                 }
             }

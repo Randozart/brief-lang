@@ -2072,6 +2072,20 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = add i64 0, 0 ; int_to_str no-arg", indent, v).ok();
                         }
                     }
+                    Intrinsic::Strlen => {
+                        // strlen# takes a Ptr<Byte> (i64 boxed pointer) and
+                        // returns the C string length via @strlen.
+                        // Used by CString lazy lens: Size = _ :> Ptr :> strlen#;
+                        if let Some(first) = args.first() {
+                            let ptr = self.emit_expr(out, first, indent);
+                            let ptr_name = self.adapt_to_i64(out, indent, &ptr);
+                            let unbox = format!("%pstr{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, unbox, ptr_name).ok();
+                            writeln!(out, "{}{} = call i64 @strlen(ptr {})", indent, v, unbox).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0 ; strlen no-arg", indent, v).ok();
+                        }
+                    }
                     Intrinsic::FloatToStr => {
                         if let Some(arg) = args.first() {
                             let n = self.emit_expr(out, arg, indent);

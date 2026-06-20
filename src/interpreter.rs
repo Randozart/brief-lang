@@ -1688,6 +1688,18 @@ impl Interpreter {
                             v => Err(RuntimeError::TypeMismatch(format!("bytes not implemented for {:?}", v))),
                         }
                     }
+                    Intrinsic::Strlen => {
+                        // strlen# returns the length of a C string.
+                        // In the interpreter, operates on Value::String.
+                        // Used by the CString lazy lens pattern.
+                        let v = values.remove(0);
+                        match v {
+                            Value::String(s) => Ok(Value::Int(s.len() as i64)),
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "strlen# requires a string".into()
+                            )),
+                        }
+                    }
                     Intrinsic::Size => {
                         let v = values.remove(0);
                         match v {

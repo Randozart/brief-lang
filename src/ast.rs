@@ -482,6 +482,10 @@ pub enum Intrinsic {
     FindFrom,
     SplitN,
     IntToStr,
+    /// strlen#(ptr: Ptr<Byte>) -> Int — returns length of a C string.
+    /// Used by the CString lazy lens pattern: Size = _ :> Ptr :> strlen#;
+    /// Zero-cost: strlen runs only when Size is explicitly queried.
+    Strlen,
 
     // ===== Phase A: Terminal / TTY (intrinsics.md D4) =====
     TtyRawMode,
@@ -726,7 +730,7 @@ impl Intrinsic {
             | Intrinsic::TrimLeft | Intrinsic::TrimRight
             | Intrinsic::ToLower | Intrinsic::ContainsAt
             | Intrinsic::FindFrom | Intrinsic::SplitN
-            | Intrinsic::IntToStr
+            | Intrinsic::IntToStr | Intrinsic::Strlen
             | Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
             | Intrinsic::FloatToStr | Intrinsic::ToStr
             // GPU compute queries — pure (read-only state queries)
@@ -775,6 +779,7 @@ impl Intrinsic {
             "find_from" => Some(Intrinsic::FindFrom),
             "splitn" => Some(Intrinsic::SplitN),
             "int_to_str" => Some(Intrinsic::IntToStr),
+            "strlen" => Some(Intrinsic::Strlen),
             "sin" => Some(Intrinsic::Sin),
             "cos" => Some(Intrinsic::Cos),
             "pow" => Some(Intrinsic::Pow),
@@ -968,6 +973,7 @@ impl Intrinsic {
             Intrinsic::FindFrom => "find_from",
             Intrinsic::SplitN => "splitn",
             Intrinsic::IntToStr => "int_to_str",
+            Intrinsic::Strlen => "strlen",
             Intrinsic::Sin => "sin",
             Intrinsic::Cos => "cos",
             Intrinsic::Pow => "pow",
@@ -3393,6 +3399,12 @@ mod tests {
     fn test_intrinsic_from_name_extra_ttyname() {
         assert_eq!(Intrinsic::from_name("ttyname"), Some(Intrinsic::TtyName));
         assert_eq!(Intrinsic::TtyName.name(), "ttyname");
+    }
+
+    #[test]
+    fn test_intrinsic_from_name_strlen() {
+        assert_eq!(Intrinsic::from_name("strlen"), Some(Intrinsic::Strlen));
+        assert_eq!(Intrinsic::Strlen.name(), "strlen");
     }
 
     #[test]

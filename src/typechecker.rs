@@ -1522,7 +1522,7 @@ impl TypeChecker {
                 match intrinsic {
                     Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil | Intrinsic::Floor => Type::Float,
                     Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz | Intrinsic::Abs | Intrinsic::Bitreverse => Type::Int,
-                    Intrinsic::Bytes | Intrinsic::Size => Type::Int,
+                    Intrinsic::Bytes | Intrinsic::Size | Intrinsic::Strlen => Type::Int,
                     Intrinsic::Pop => Type::Int,
                     Intrinsic::Contains => Type::Bool,
                     Intrinsic::Keys | Intrinsic::Values => Type::Custom("List".to_string()),

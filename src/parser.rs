@@ -9403,6 +9403,7 @@ mod kani_full_tests {
             ("contains", Intrinsic::Contains),
             ("keys", Intrinsic::Keys),
             ("values", Intrinsic::Values),
+            ("strlen", Intrinsic::Strlen),
         ] {
             let s = format!("defn f() -> Int {{ term {name}#(0); }};");
             let mut parser = Parser::new(&s);
