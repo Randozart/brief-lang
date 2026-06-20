@@ -567,6 +567,10 @@ impl LlvmBackend {
     /// statements) and linearity cannot be proven — avoids phi %State dominance issues.
     ///
     /// 2026-06-13: A005b — memory path for non-linear bodies.
+    /// 2026-06-20: Phase 1 — counter phi replaces GEP+load+store for induction
+    /// variable. The phi provides a canonical counted loop structure that helps
+    /// LLVM's loop optimizations (rotation, induction variable, vectorization)
+    /// compared to the raw GEP+load+store counter.
     pub(crate) fn emit_folded_memory_main(
         &mut self,
         out: &mut String,
@@ -580,6 +584,17 @@ impl LlvmBackend {
         self.main_body = true;
         let attr = self.slp_attr("main", "#0");
         let c0 = self.txn_counter;
+        // Recover counter field name from index for phi override.
+        let counter_name = {
+            let mut found = None;
+            for (name, &idx) in &self.field_index_map {
+                if idx == counter_idx {
+                    found = Some(name.clone());
+                    break;
+                }
+            }
+            found
+        };
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
@@ -587,11 +602,6 @@ impl LlvmBackend {
         self.emit_trg_init(out);
         // Bound loading — use numbered positional args ({0}, {1}) to avoid
         // LLVM IR brace chars being parsed as named format placeholders.
-        // 2026-06-20: Fixed format string bug — GEP uses %gt{0}_{1} (c0, ti) and
-        // load must also use %gt{0}_{1} to reference the same register. Previously
-        // the load used %gt{0}_{0} (self-reference), which produced %gt132_132 when
-        // c0=132 but the GEP was %gt132_0 (field 0). Same fix applied to %gp/%lp
-        // and %lp/%lt comparison at lines 593-596.
         let bound_suffix = total_idx.unwrap_or(c0);
         if let Some(ti) = total_idx {
             writeln!(out, "  %gt{0}_{1} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", c0, ti).ok();
@@ -603,14 +613,24 @@ impl LlvmBackend {
         }
         writeln!(out, "  br label %_hdr").ok();
         writeln!(out, "_hdr:").ok();
-        writeln!(out, "  %gp{0}_{1} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", c0 + 1, counter_idx).ok();
-        writeln!(out, "  %lp{0}_{1} = load i64, i64* %gp{0}_{1}, align 8", c0 + 1, counter_idx).ok();
+        // Counter phi: initial value is 0 (first tick); subsequent values
+        // come from the latch (counter_next). The counter is stored back to
+        // %state at the end of the body via the body's GEP+store, but the
+        // phi-driven induction variable is what LLVM sees as the loop counter.
+        let phi_reg = format!("%phi{}", c0);
+        let next_reg = format!("%cnt_next{}", self.txn_counter); self.txn_counter += 1;
+        writeln!(out, "  {0} = phi i64 [ 0, %entry ], [ {1}, %_body ]", phi_reg, next_reg).ok();
         let cmp_reg = format!("%cp{}", c0 + 2);
-        writeln!(out, "  {0} = icmp slt i64 %lp{1}_{2}, %lt{3}_{4}", cmp_reg, c0 + 1, counter_idx, c0, bound_suffix).ok();
+        writeln!(out, "  {0} = icmp slt i64 {1}, %lt{2}_{3}", cmp_reg, phi_reg, c0, bound_suffix).ok();
         writeln!(out, "  br i1 {}, label %_body, label %_done", cmp_reg).ok();
         writeln!(out, "_body:").ok();
         self.ssa_state_reg = None; // memory mode: writes go through GEP+store
         self.returns_i64 = false;
+        // Override counter field with phi register so body reads use the
+        // pre-tick value rather than a stale GEP load from %state.
+        if let Some(ref cname) = counter_name {
+            self.ssa_old_int_regs.insert(cname.clone(), phi_reg.clone());
+        }
         self.pre_load_all_fields(out, "%state");
         for s in body {
             if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
@@ -619,12 +639,10 @@ impl LlvmBackend {
         }
         self.ssa_old_float_regs.clear();
         self.ssa_old_int_regs.clear();
-        // Increment counter via GEP+store
-        let inc = format!("%inc{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "  {0} = add i64 %lp{1}_{2}, 1", inc, c0 + 1, counter_idx).ok();
-        let sg = format!("%sg{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "  {0} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", sg, counter_idx).ok();
-        writeln!(out, "  store i64 {}, i64* {}, align 8", inc, sg).ok();
+        // Phi latch: increment phi counter.
+        // The body's GEP+store for the counter field stores the same value
+        // (via ssa_old_int_regs → body sees phi, writes back phi+1).
+        writeln!(out, "  {0} = add i64 {1}, 1", next_reg, phi_reg).ok();
         super::emit_loop_metadata(out, "  ", "_hdr", &mut self.metadata_counter);
         writeln!(out, "_done:").ok();
         let saved = std::mem::take(&mut self.pending_post_hoist);
