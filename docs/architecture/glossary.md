@@ -48,5 +48,11 @@
 | **Struct derivation** | The mechanism by which a struct inherits fields from a parent struct. Resolved recursively (chain inheritance supported). Field name collisions produce a compile error. |
 | **Upcast** | Implicit type conversion from a derived struct to its parent type. Validated by `is_derived_from()` which walks the parent chain. |
 | **Call argument type checking** | Phase 1 feature. `check_call_argument_types()` validates argument types against parameter types at call sites for `defn`/`txn`/`sig`/`frgn` targets. Unknown functions are silently skipped. |
+| **Bits Thesis** | The core language philosophy: every type is a lens over `Bits`. Type operators (`<:`, `:>`, `@/`, `[]`, `<-`) are spatial layout operations, not nominal abstractions. See `lib/std/from-bits.bv`. |
+| **Fast Path** | Compile-time shape recognition that bypasses generic projection evaluation. When a `UserDefinedWithArg("Add", rhs)` matches a known (type, operator) pair, the backend emits native `add i64` instead of interpreting the binding expression. |
+| **Silent Defaults** | Metadata properties like `Bytes`, `Alignment`, `Endian` that the compiler infers from the `@/` bit range. Users don't need to write them for standard types. |
+| **Lazy Projection** | A projection whose cost is deferred until explicitly queried. E.g., `CString :> Size` runs `strlen` only when `Size` is queried; `CString :> At(i)` never calls strlen. |
+| **#export** | Sig modifier that marks a transaction for cross-language export. The backend emits a globally-visible symbol with the target language's calling convention and name mangling. |
+| **Autogenous Binding** | Auto-generated FFI headers (`.h`, Rust crate, Python stub) produced by the compiler alongside the `.o` library, derived from `ResolvedType` layout info. |
 
 (End of file - total 38 lines)
