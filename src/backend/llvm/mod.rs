@@ -433,9 +433,53 @@ pub(super) fn tbaa_node(ty_str: &str) -> i32 {
     }
 }
 
-/// Returns true if the expression is a direct reference to one of the given
-/// trigger names (i.e., the precondition is `trg_name` with no operators).
+/// Emit `!llvm.loop` metadata for a backedge branch and the branch itself.
+///
+/// Follows the `foreach.rs` pattern: emit metadata entries (default:
+/// `!llvm.loop.vectorize.enable`), build the self-referencing loop metadata
+/// node, and attach it to the backedge branch.
+///
+/// Called from `loop_engine.rs` main loop emission paths (emit_folded_loop,
+/// emit_folded_memory_main, emit_main). Always emits at minimum
+/// `!llvm.loop.vectorize.enable = true` since all Brief counted loops
+/// have known bounds and are vectorizable.
+///
+/// 2026-06-20: Phase 0a — retrofitted from foreach.rs to main loop paths.
+pub(super) fn emit_loop_metadata(
+    out: &mut String,
+    indent: &str,
+    backedge_label: &str,
+    metadata_counter: &mut usize,
+) {
+    let md_idx = emit_loop_metadata_nodes(out, indent, metadata_counter);
+    writeln!(out, "{0}br label %{1} !llvm.loop !{2}", indent, backedge_label, md_idx).ok();
+}
 
+/// Emit loop metadata nodes (without the branch) and return the self-referencing
+/// metadata node ID. The caller is responsible for attaching `!llvm.loop !N`
+/// to their branch instruction.
+///
+/// Use this variant when the backedge is a conditional branch or when multiple
+/// backedges need to share the same metadata node.
+pub(super) fn emit_loop_metadata_nodes(
+    out: &mut String,
+    indent: &str,
+    metadata_counter: &mut usize,
+) -> usize {
+    let start = *metadata_counter;
+    let mut md_count = 1;
+    let mut md_entries = Vec::new();
+    // Default: vectorize.enable for all counted loops
+    let vd_md = start + md_count;
+    writeln!(out, "{}!{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}", indent, vd_md).ok();
+    md_entries.push(format!("!{}", vd_md));
+    md_count += 1;
+
+    let entries = md_entries.join(", ");
+    writeln!(out, "{}!{} = !{{!{}, {}}}", indent, start, start, entries).ok();
+    *metadata_counter += md_count;
+    start
+}
 
 fn extract_trigger_keys(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> Option<Vec<i64>> {
     let mut keys = Vec::new();
