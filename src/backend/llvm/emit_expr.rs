@@ -3054,6 +3054,9 @@ impl LlvmBackend {
                 let elem_val = self.emit_expr(out, val, indent);
                 let list_boxed = self.adapt_to_i64(out, indent, &list_val);
                 let elem_boxed = self.adapt_to_i64(out, indent, &elem_val);
+                // Check InsertAt strategy for this target
+                let prepend = self.check_insert_strategy(target).map_or(false,
+                    |s| s == crate::type_universe::InsertStrategy::Prepend);
                 // Unbox list header: inttoptr i64 to i64*
                 let hp = format!("%ahp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_boxed).ok();
@@ -3086,18 +3089,28 @@ impl LlvmBackend {
                 let new_len = format!("%anl{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 1", indent, new_len, old_len).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, new_len, nlp).ok();
-                // Copy old elements: memcpy from old_hp + 2 to new_hp + 2
+                // Copy old elements: for prepend, shift right by 1; for append, same position
                 let old_dp = format!("%aod{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, old_dp, hp).ok();
-                let new_dp = format!("%and{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, new_dp, new_hp).ok();
+                let copy_dst = if prepend {
+                    // Prepend: copy to position 1 (one slot after base)
+                    let cd = format!("%acd{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 3", indent, cd, new_hp).ok();
+                    cd
+                } else {
+                    // Append: copy to position old_len (same position as before)
+                    let cd = format!("%acd{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, cd, new_hp).ok();
+                    cd
+                };
                 let copy_bytes = format!("%acb{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, copy_bytes, old_len).ok();
                 writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
-                    indent, new_dp, old_dp, copy_bytes).ok();
-                // Store new element at position old_len
+                    indent, copy_dst, old_dp, copy_bytes).ok();
+                // Store new element at position 0 for prepend, or old_len for append
                 let ne_ptr = format!("%aep{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ne_ptr, new_dp, old_len).ok();
+                let new_elem_pos = if prepend { "2".to_string() } else { old_len.clone() };
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ne_ptr, new_hp, new_elem_pos).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, elem_boxed, ne_ptr).ok();
                 // Store new list handle back to state field if target is OwnedRef
                 if let Expr::OwnedRef(field_name) = target.as_ref() {

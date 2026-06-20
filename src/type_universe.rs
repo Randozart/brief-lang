@@ -85,6 +85,32 @@ pub struct TypeUniverse {
 /// Known codec names for D-2 validation.
 const KNOWN_CODECS: &[&str] = &["Utf8", "Utf16", "Big5", "ShiftJIS", "EucJP", "Binary"];
 
+/// Strategy for inserting into a collection.
+/// Maps from InsertAt binding strings to dispatch logic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum InsertStrategy {
+    /// Append to end (List::push / queue::push_back). Default for List.
+    Append,
+    /// Insert at front (List::unshift / queue::push_front).
+    Prepend,
+    /// Binary search + insert at correct position (sorted list).
+    Sorted,
+    /// Hash-based insert (HashMap insert).
+    Hash,
+}
+
+/// Strategy for extracting from a collection.
+/// Maps from ExtractFrom binding strings to dispatch logic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ExtractStrategy {
+    /// Pop from end (List::pop / stack::pop). Default for List/Stack.
+    Pop,
+    /// Remove from front (List::shift / queue::pop_front). Default for Queue.
+    Shift,
+    /// Hash-based extract (HashMap remove).
+    Hash,
+}
+
 impl TypeUniverse {
     pub fn new() -> Self {
         TypeUniverse {
@@ -348,6 +374,35 @@ impl TypeUniverse {
         self.types.get(name)
     }
 
+    /// Resolve the InsertAt strategy string to a known InsertStrategy.
+    /// Returns None if the type has no InsertAt binding or the strategy
+    /// is unrecognized.
+    pub fn insert_strategy(&self, type_name: &str) -> Option<InsertStrategy> {
+        let rt = self.types.get(type_name)?;
+        let strat = rt.insert_at.as_ref()?;
+        match strat.as_str() {
+            "append" => Some(InsertStrategy::Append),
+            "prepend" => Some(InsertStrategy::Prepend),
+            "sorted" => Some(InsertStrategy::Sorted),
+            "hash" => Some(InsertStrategy::Hash),
+            _ => None,
+        }
+    }
+
+    /// Resolve the ExtractFrom strategy string to a known ExtractStrategy.
+    pub fn extract_strategy(&self, type_name: &str) -> Option<ExtractStrategy> {
+        let rt = self.types.get(type_name)?;
+        let strat = rt.extract_from.as_ref()?;
+        match strat.as_str() {
+            "pop" => Some(ExtractStrategy::Pop),
+            "shift" => Some(ExtractStrategy::Shift),
+            "head" => Some(ExtractStrategy::Shift),
+            "tail" => Some(ExtractStrategy::Pop),
+            "hash" => Some(ExtractStrategy::Hash),
+            _ => None,
+        }
+    }
+
     /// Check if a type allows bracket indexing.
     pub fn allows_index(&self, name: &str) -> bool {
         self.types.get(name).map(|t| t.allow_index).unwrap_or(true)
@@ -370,9 +425,10 @@ fn type_universe_expr_to_string(e: &Expr) -> Option<String> {
             let tgt = format!("{:?}", target);
             Some(format!("{} :> {}", src, tgt))
         }
-        Expr::SubtypeProjection { ops, .. } => {
-            // DEFERRED: serialize ops for heap strategy synthesis
-            Some("<: { ... }".into())
+        Expr::SubtypeProjection { source, ops } => {
+            let src = type_universe_expr_to_string(source).unwrap_or_default();
+            let ops_str = ops.iter().map(|o| format!("{:?}", o)).collect::<Vec<_>>().join(", ");
+            Some(format!("{} :< [{}]", src, ops_str))
         }
         _ => None,
     }
@@ -639,5 +695,51 @@ mod tests {
         assert_eq!(universe.get("Positive").unwrap().guards.len(), 1);
         assert!(matches!(&universe.get("Positive").unwrap().guards[0],
             Expr::Gt(_, _)));
+    }
+
+    #[test]
+    fn test_insert_strategy_resolution() {
+        let td = TypeDef {
+            name: "Fifo".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("List".into())),
+            body: TypeDefBody {
+                bindings: vec![
+                    TypeBinding { name: "InsertAt".into(), params: vec![], value: Box::new(Expr::Identifier("append".into())), span: None },
+                    TypeBinding { name: "ExtractFrom".into(), params: vec![], value: Box::new(Expr::Identifier("shift".into())), span: None },
+                ],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        assert_eq!(universe.get("Fifo").unwrap().insert_at, Some("append".into()));
+        assert_eq!(universe.get("Fifo").unwrap().extract_from, Some("shift".into()));
+        assert_eq!(universe.insert_strategy("Fifo"), Some(InsertStrategy::Append));
+        assert_eq!(universe.extract_strategy("Fifo"), Some(ExtractStrategy::Shift));
+    }
+
+    #[test]
+    fn test_insert_strategy_resolution_unknown() {
+        let td = TypeDef {
+            name: "Custom".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("List".into())),
+            body: TypeDefBody {
+                bindings: vec![
+                    TypeBinding { name: "InsertAt".into(), params: vec![], value: Box::new(Expr::Identifier("custom_strat".into())), span: None },
+                ],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        assert_eq!(universe.insert_strategy("Custom"), None);
     }
 }

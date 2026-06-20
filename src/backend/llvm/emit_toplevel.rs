@@ -42,6 +42,25 @@ impl LlvmBackend {
         }
     }
 
+    /// Check the target expression for an InsertAt strategy by looking up
+    /// the variable's type in the TypeUniverse.
+    pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::InsertStrategy> {
+        let tu = self.type_universe.as_ref()?;
+        let var_name = match target {
+            crate::ast::Expr::OwnedRef(n) => n,
+            crate::ast::Expr::Identifier(n) => n,
+            _ => return None,
+        };
+        // Look up the variable's declared type
+        let ty = self.let_original_types.get(var_name)?;
+        let type_name = match ty {
+            crate::ast::Type::Custom(n) => n,
+            crate::ast::Type::Applied(n, _) => n,
+            _ => return None,
+        };
+        tu.insert_strategy(type_name)
+    }
+
     pub(super) fn emit_header(&self, out: &mut String) {
         writeln!(out, "; ModuleID = 'program.ll'").ok();
         writeln!(out, "source_filename = \"program.bv\"").ok();

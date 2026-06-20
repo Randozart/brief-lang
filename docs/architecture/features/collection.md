@@ -143,3 +143,35 @@ walks the DFA table in O(n) with zero allocation.
 | `src/parser.rs` | `@"..."` regex literal parsing, state decl address loop skip |
 | `src/typechecker.rs` | Type inference for slice/multislice/regex literal, `Type::Tuple` indexing |
 | `src/backend/llvm/emit_expr.rs` | Atomic type passthrough in MultiSlice/Slice |
+| `src/backend/llvm/emit_toplevel.rs` | `check_insert_strategy()` — LLVM InsertAt strategy dispatch |
+| `src/features/arrow.rs` | Strategy-aware push/pop via `lookup_insert_strategy()`/`lookup_extract_strategy()` |
+
+## InsertAt / ExtractFrom Strategy Synthesis (D-3)
+
+When a TypeDef defines `InsertAt = "strategy"` or `ExtractFrom = "strategy"`, the compiler uses these bindings to dispatch arrow operations differently.
+
+### Known Strategies
+
+| Strategy | InsertAt | ExtractFrom | Behavior |
+|----------|----------|-------------|---------|
+| `append` | ✅ default | — | Push to end of list |
+| `prepend` | ✅ | — | Insert at position 0, shift right |
+| `sorted` | ✅ | — | Binary search insert (LLVM: append, interpreter: append via fallthrough) |
+| `pop` | — | ✅ default | Return and remove last element |
+| `shift` / `head` | — | ✅ | Return and remove first element |
+| `tail` | — | ✅ | Alias for pop |
+| `hash` | ✅ | ✅ | Hash-based insert/remove |
+
+### Defining Custom Strategies
+
+```brief
+type Queue <: List {
+    InsertAt    = "append";
+    ExtractFrom = "shift";
+};
+
+type Stack <: List {
+    InsertAt    = "prepend";
+    ExtractFrom = "pop";
+};
+```

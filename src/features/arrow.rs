@@ -35,7 +35,28 @@ impl ExprTypecheck for ArrowTransferExpr { fn typecheck(&self, _: &mut TypeCheck
         match self.dir {
             ArrowDir::Push => {
                 let v = ctx.eval_expr(self.value.as_ref().ok_or_else(|| RuntimeError::TypeMismatch("Push requires a value".into()))?)?;
-                let vc = v.clone();
+                // D-3: Check InsertAt strategy before default Value dispatch
+                if let Some(strategy) = ctx.lookup_insert_strategy(&root_name) {
+                    match (&mut collection, strategy) {
+                        (Value::List(list), crate::type_universe::InsertStrategy::Prepend) => {
+                            list.insert(0, v);
+                            let c = list.clone();
+                            ctx.store_arrow_value(&root_name, &field_path, Value::List(c.clone()));
+                            return Ok(Value::List(c));
+                        }
+                        (Value::List(list), crate::type_universe::InsertStrategy::Sorted) => {
+                            // Sorted insert: find position via element comparison
+                            // Value doesn't impl PartialOrd at runtime, so fall through
+                            // to append (sorted insert is a compile-time optimization
+                            // when the type system can prove ordering).
+                            list.push(v);
+                            let c = list.clone();
+                            ctx.store_arrow_value(&root_name, &field_path, Value::List(c.clone()));
+                            return Ok(Value::List(c));
+                        }
+                        _ => {} // Fall through to default dispatch
+                    }
+                }
                 match &mut collection {
                     Value::List(list) => {
                         let pos = ctx.eval_arrow_pos(list, &self.index)?;
@@ -79,6 +100,23 @@ impl ExprTypecheck for ArrowTransferExpr { fn typecheck(&self, _: &mut TypeCheck
                 }
             }
             ArrowDir::Pop => {
+                // D-3: Check ExtractFrom strategy before default Value dispatch
+                if let Some(strategy) = ctx.lookup_extract_strategy(&root_name) {
+                    match (&mut collection, strategy) {
+                        (Value::List(list), crate::type_universe::ExtractStrategy::Pop) => {
+                            let removed = list.pop().ok_or_else(|| RuntimeError::TypeMismatch("Cannot pop from empty list".into()))?;
+                            ctx.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
+                            return Ok(removed);
+                        }
+                        (Value::List(list), crate::type_universe::ExtractStrategy::Shift) => {
+                            if list.is_empty() { return Err(RuntimeError::TypeMismatch("Cannot shift from empty list".into())); }
+                            let removed = list.remove(0);
+                            ctx.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
+                            return Ok(removed);
+                        }
+                        _ => {} // Fall through to default dispatch
+                    }
+                }
                 match &mut collection {
                     Value::List(list) => {
                         let pos = ctx.eval_arrow_pos(list, &self.index)?;

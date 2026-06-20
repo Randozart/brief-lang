@@ -273,6 +273,9 @@ pub struct Interpreter {
     /// Proof oracle fuel — decremented on every statement when set.
     /// When it hits zero, FuelExhausted is returned.
     oracle_fuel: Option<u64>,
+    /// TypeUniverse for resolving InsertAt/ExtractFrom strategies and
+    /// user-defined projection bindings during evaluation.
+    pub type_universe: Option<crate::type_universe::TypeUniverse>,
 }
 
 impl Interpreter {
@@ -296,6 +299,7 @@ impl Interpreter {
             enum_variants: HashMap::new(),
             dbvl_cache: HashMap::new(),
             oracle_fuel: None,
+            type_universe: None,
         }
     }
 
@@ -770,6 +774,31 @@ impl Interpreter {
                 }
             }
         }
+    }
+
+    /// Try to apply an InsertAt strategy from TypeUniverse for the given scope/root name.
+    /// Returns Some(InsertStrategy) if a matching type is found with InsertAt defined.
+    /// Falls back to None (caller uses default behavior).
+    pub(crate) fn lookup_insert_strategy(&self, root_name: &str) -> Option<crate::type_universe::InsertStrategy> {
+        let tu = self.type_universe.as_ref()?;
+        // Try the root variable name as a type name directly
+        if let Some(s) = tu.insert_strategy(root_name) {
+            return Some(s);
+        }
+        // Check if root is a known collection by value type fallback
+        // We don't have per-variable type info, so this is a best-effort heuristic.
+        // The canonical case is: variable named after its type, or a type in universe
+        // that derives from a collection type with the strategy.
+        None
+    }
+
+    /// Try to apply an ExtractFrom strategy from TypeUniverse.
+    pub(crate) fn lookup_extract_strategy(&self, root_name: &str) -> Option<crate::type_universe::ExtractStrategy> {
+        let tu = self.type_universe.as_ref()?;
+        if let Some(s) = tu.extract_strategy(root_name) {
+            return Some(s);
+        }
+        None
     }
 
     /// Convert a Value to a String for use as a HashMap key.
