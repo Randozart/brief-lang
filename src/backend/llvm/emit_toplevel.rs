@@ -411,6 +411,16 @@ impl LlvmBackend {
                     let v = c as i32;
                     writeln!(out, "  store i32 {}, i32* {}, align {}", v, p, self.align_of("i32")).ok();
                 }
+                // 2026-06-20: Handle LiteralExpr::Float directly, matching Expr::Float arm above.
+                // Same rationale as emit_inline_init_stores arm at line ~560.
+                Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Float(_)) => {
+                    if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                        let h = crate::backend::llvm::float_to_llvm_hex(*f);
+                        let bits_reg = format!("%ip{}b", reg - 1);
+                        writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
+                        writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
+                    }
+                }
                 Some(expr) => {
                     let val_reg = self.emit_expr(out, &expr, "  ");
                     let boxed = self.adapt_to_i64(out, "  ", &val_reg);
@@ -557,6 +567,18 @@ impl LlvmBackend {
                 Some(Expr::Char(c)) => {
                     let v = c as i32;
                     writeln!(out, "{}store i32 {}, i32* {}, align {}", indent, v, p, self.align_of("i32")).ok();
+                }
+                // 2026-06-20: Handle LiteralExpr::Float directly, matching Expr::Float arm above.
+                // Without this, the catch-all boxes the float to i64 and immediately unboxes it
+                // back, producing dead IR. LLVM DCE would clean them, but they may cause verifier
+                // errors if they cross adapt_to_i64 before DCE runs.
+                Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Float(_)) => {
+                    if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                        let h = crate::backend::llvm::float_to_llvm_hex(*f);
+                        let bits_reg = format!("%ip_{}b", idx);
+                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                        writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
+                    }
                 }
                 Some(expr) => {
                     let val_reg = self.emit_expr(out, &expr, indent);

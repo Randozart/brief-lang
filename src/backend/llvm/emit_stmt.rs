@@ -25,13 +25,25 @@ impl LlvmBackend {
             let p = format!("%rp{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
             p
+        // 2026-06-20: Check reg_float_cache before bitcasting — guarantees correctness if
+        // the register name is i64-boxed but Type::Float (e.g. intrinsic float returns,
+        // callable txn param marshaling). The cache maps i64 register names to their native
+        // float counterpart. Without this check, bitcast float %i64_reg causes LLVM verifier
+        // errors. See docs/plans/2026-06-20-float-boxing-dual-path-plan.md.
         } else if r.ty == Type::Float {
-            // 2026-06-17: Box native float to i64 for uniform storage
-            let bi = format!("%rbi{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, r.name).ok();
-            let ze = format!("%rze{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
-            ze
+            if let Some(cached) = self.reg_float_cache.get(&r.name) {
+                let bi = format!("%rbi{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, cached).ok();
+                let ze = format!("%rze{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                ze
+            } else {
+                let bi = format!("%rbi{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, r.name).ok();
+                let ze = format!("%rze{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                ze
+            }
         } else {
             r.name.clone()
         }

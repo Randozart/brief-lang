@@ -284,7 +284,14 @@ impl LlvmBackend {
         is_decreasing: bool,
         bound_literal: Option<i64>,
     ) {
-        let c0 = self.txn_counter;
+        // 2026-06-20: Use a dedicated counter (c_once) for all register names in this function
+        // call, incremented once. Previously used self.txn_counter (c0) which could collide
+        // across multiple calls when the same label_prefix was used with different txn_counter
+        // values, producing e.g. %gt132_0 (call 1) and %lt132_132 (call 2) where the latter
+        // references an undefined %gt132_132. Using a locally-incrementing counter guarantees
+        // uniqueness within each label_prefix scope.
+        let c_once = self.txn_counter;
+        self.txn_counter += 1;
         if use_phi {
             let entry_label = format!("{}_phi_entry", label_prefix);
             let hdr_label = format!("{}_hdr", label_prefix);
@@ -293,42 +300,42 @@ impl LlvmBackend {
             writeln!(out, "{}:", entry_label).ok();
             // Load bound once
             if let Some(ti) = total_idx {
-                writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, ti).ok();
-                writeln!(out, "  %lt_{}_{} = load i64, i64* %gt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+                writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c_once, ti).ok();
+                writeln!(out, "  %lt_{}_{} = load i64, i64* %gt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
             } else if let Some(cn) = total_const_name {
-                writeln!(out, "  %lt_{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
+                writeln!(out, "  %lt_{}_{} = load i64, i64* @{}, align 8", label_prefix, c_once, cn).ok();
             } else {
-                writeln!(out, "  %lt_{}_{} = add i64 0, 0", label_prefix, c0).ok();
+                writeln!(out, "  %lt_{}_{} = add i64 0, 0", label_prefix, c_once).ok();
             }
             // Load counter once, precompute remaining iterations
-            writeln!(out, "  %gcnt_{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, counter_idx).ok();
-            writeln!(out, "  %init_{}_{} = load i64, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+            writeln!(out, "  %gcnt_{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c_once, counter_idx).ok();
+            writeln!(out, "  %init_{}_{} = load i64, i64* %gcnt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
             // Counted-down loop: remaining = bound - initial, count down to 0.
             // This eliminates the cmp instruction (sub sets ZF for jne) and
             // matches what clang emits for C for-loops.
-            writeln!(out, "  %rem_{}_{} = sub i64 %lt_{}_{}, %init_{}_{}", label_prefix, c0 + 1, label_prefix, c0, label_prefix, c0).ok();
+            writeln!(out, "  %rem_{}_{} = sub i64 %lt_{}_{}, %init_{}_{}", label_prefix, c_once + 1, label_prefix, c_once, label_prefix, c_once).ok();
             writeln!(out, "  br label %{}", hdr_label).ok();
             writeln!(out, "{}:", hdr_label).ok();
-            writeln!(out, "  %i_{}_{} = phi i64 [ %rem_{}_{}, %{} ], [ %dec_{}_{}, %{} ]", label_prefix, c0 + 2, label_prefix, c0 + 1, entry_label, label_prefix, c0 + 2, body_label).ok();
-            writeln!(out, "  %cp_{}_{} = icmp sgt i64 %i_{}_{}, 0", label_prefix, c0 + 3, label_prefix, c0 + 2).ok();
-            writeln!(out, "  br i1 %cp_{}_{}, label %{}, label %{}", label_prefix, c0 + 3, body_label, done_label).ok();
+            writeln!(out, "  %i_{}_{} = phi i64 [ %rem_{}_{}, %{} ], [ %dec_{}_{}, %{} ]", label_prefix, c_once + 2, label_prefix, c_once + 1, entry_label, label_prefix, c_once + 2, body_label).ok();
+            writeln!(out, "  %cp_{}_{} = icmp sgt i64 %i_{}_{}, 0", label_prefix, c_once + 3, label_prefix, c_once + 2).ok();
+            writeln!(out, "  br i1 %cp_{}_{}, label %{}, label %{}", label_prefix, c_once + 3, body_label, done_label).ok();
             writeln!(out, "{}:", body_label).ok();
-            writeln!(out, "  %dec_{}_{} = sub i64 %i_{}_{}, 1", label_prefix, c0 + 2, label_prefix, c0 + 2).ok();
+            writeln!(out, "  %dec_{}_{} = sub i64 %i_{}_{}, 1", label_prefix, c_once + 2, label_prefix, c_once + 2).ok();
             writeln!(out, "  br label %{}", hdr_label).ok();
             writeln!(out, "{}:", done_label).ok();
             // Final counter value is always the bound after counted-down loop
-            writeln!(out, "  store i64 %lt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+            writeln!(out, "  store i64 %lt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
         } else if let Some(stmts) = body {
             // SSA mode: load once, phi in header, inline unrolled body with extract/insert, store once
             if let Some(bl) = bound_literal {
-                writeln!(out, "  %lt{}_{} = add i64 0, {}", label_prefix, c0, bl).ok();
+                writeln!(out, "  %lt{}_{} = add i64 0, {}", label_prefix, c_once, bl).ok();
             } else if let Some(ti) = total_idx {
-                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, ti).ok();
-                writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c_once, ti).ok();
+                writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
             } else if let Some(cn) = total_const_name {
-                writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
+                writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c_once, cn).ok();
             } else {
-                writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c0).ok();
+                writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c_once).ok();
             }
             let phi_reg = format!("%ssa_phi_{}", label_prefix);
             let unroll = unroll_factor.max(1);
@@ -461,9 +468,9 @@ impl LlvmBackend {
             if unroll > 1 {
                 let adj = format!("%adj{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
                 if is_decreasing {
-                    writeln!(out, "  {} = add i64 %lt{}_{}, {}", adj, label_prefix, c0, unroll_minus_1).ok();
+                    writeln!(out, "  {} = add i64 %lt{}_{}, {}", adj, label_prefix, c_once, unroll_minus_1).ok();
                 } else {
-                    writeln!(out, "  {} = add i64 %lt{}_{}, -{}", adj, label_prefix, c0, unroll_minus_1).ok();
+                    writeln!(out, "  {} = add i64 %lt{}_{}, -{}", adj, label_prefix, c_once, unroll_minus_1).ok();
                 }
                 let cp4 = format!("%cp{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
                 if is_decreasing {
@@ -476,9 +483,9 @@ impl LlvmBackend {
             }
             let cp1 = format!("%cp{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
             if is_decreasing {
-                writeln!(out, "  {} = icmp sgt i64 {}, %lt{}_{}", cp1, ex_reg, label_prefix, c0).ok();
+                writeln!(out, "  {} = icmp sgt i64 {}, %lt{}_{}", cp1, ex_reg, label_prefix, c_once).ok();
             } else {
-                writeln!(out, "  {} = icmp slt i64 {}, %lt{}_{}", cp1, ex_reg, label_prefix, c0).ok();
+                writeln!(out, "  {} = icmp slt i64 {}, %lt{}_{}", cp1, ex_reg, label_prefix, c_once).ok();
             }
             writeln!(out, "  br i1 {}, label %{}_body1, label %{}_done", cp1, label_prefix, label_prefix).ok();
 
@@ -493,24 +500,24 @@ impl LlvmBackend {
             writeln!(out, "  store %State {}, %State* %state, align 8", final_reg).ok();
         } else {
             if let Some(bl) = bound_literal {
-                writeln!(out, "  %lt{}_{} = add i64 0, {}", label_prefix, c0, bl).ok();
+                writeln!(out, "  %lt{}_{} = add i64 0, {}", label_prefix, c_once, bl).ok();
             } else if let Some(ti) = total_idx {
-                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0, ti).ok();
-                writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c0, label_prefix, c0).ok();
+                writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c_once, ti).ok();
+                writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
             } else if let Some(cn) = total_const_name {
-                writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c0, cn).ok();
+                writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c_once, cn).ok();
             } else {
-                writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c0).ok();
+                writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c_once).ok();
             }
             writeln!(out, "  br label %{}_hdr", label_prefix).ok();
             writeln!(out, "{}_hdr:", label_prefix).ok();
-            writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c0 + 1, counter_idx).ok();
-            writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c0 + 1, label_prefix, c0 + 1).ok();
-            let cmp_reg = format!("%cp{}_{}", label_prefix, c0 + 2);
+            writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", label_prefix, c_once + 1, counter_idx).ok();
+            writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c_once + 1, label_prefix, c_once + 1).ok();
+            let cmp_reg = format!("%cp{}_{}", label_prefix, c_once + 2);
             if is_decreasing {
-                writeln!(out, "  {} = icmp sgt i64 %lp{}_{}, %lt{}_{}", cmp_reg, label_prefix, c0 + 1, label_prefix, c0).ok();
+                writeln!(out, "  {} = icmp sgt i64 %lp{}_{}, %lt{}_{}", cmp_reg, label_prefix, c_once + 1, label_prefix, c_once).ok();
             } else {
-                writeln!(out, "  {} = icmp slt i64 %lp{}_{}, %lt{}_{}", cmp_reg, label_prefix, c0 + 1, label_prefix, c0).ok();
+                writeln!(out, "  {} = icmp slt i64 %lp{}_{}, %lt{}_{}", cmp_reg, label_prefix, c_once + 1, label_prefix, c_once).ok();
             }
             writeln!(out, "  br i1 {}, label %{}_body, label %{}_done", cmp_reg, label_prefix, label_prefix).ok();
             writeln!(out, "{}_body:", label_prefix).ok();
@@ -573,9 +580,15 @@ impl LlvmBackend {
         self.emit_trg_init(out);
         // Bound loading — use numbered positional args ({0}, {1}) to avoid
         // LLVM IR brace chars being parsed as named format placeholders.
+        // 2026-06-20: Fixed format string bug — GEP uses %gt{0}_{1} (c0, ti) and
+        // load must also use %gt{0}_{1} to reference the same register. Previously
+        // the load used %gt{0}_{0} (self-reference), which produced %gt132_132 when
+        // c0=132 but the GEP was %gt132_0 (field 0). Same fix applied to %gp/%lp
+        // and %lp/%lt comparison at lines 593-596.
+        let bound_suffix = total_idx.unwrap_or(c0);
         if let Some(ti) = total_idx {
             writeln!(out, "  %gt{0}_{1} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", c0, ti).ok();
-            writeln!(out, "  %lt{0}_{0} = load i64, i64* %gt{0}_{0}, align 8", c0).ok();
+            writeln!(out, "  %lt{0}_{1} = load i64, i64* %gt{0}_{1}, align 8", c0, ti).ok();
         } else if let Some(cn) = total_const_name {
             writeln!(out, "  %lt{0}_{0} = load i64, i64* @{1}, align 8", c0, cn).ok();
         } else {
@@ -584,9 +597,9 @@ impl LlvmBackend {
         writeln!(out, "  br label %_hdr").ok();
         writeln!(out, "_hdr:").ok();
         writeln!(out, "  %gp{0}_{1} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", c0 + 1, counter_idx).ok();
-        writeln!(out, "  %lp{0}_{0} = load i64, i64* %gp{0}_{1}, align 8", c0 + 1, counter_idx).ok();
+        writeln!(out, "  %lp{0}_{1} = load i64, i64* %gp{0}_{1}, align 8", c0 + 1, counter_idx).ok();
         let cmp_reg = format!("%cp{}", c0 + 2);
-        writeln!(out, "  {0} = icmp slt i64 %lp{1}_{1}, %lt{2}_{2}", cmp_reg, c0 + 1, c0).ok();
+        writeln!(out, "  {0} = icmp slt i64 %lp{1}_{2}, %lt{3}_{4}", cmp_reg, c0 + 1, counter_idx, c0, bound_suffix).ok();
         writeln!(out, "  br i1 {}, label %_body, label %_done", cmp_reg).ok();
         writeln!(out, "_body:").ok();
         self.ssa_state_reg = None; // memory mode: writes go through GEP+store
@@ -601,7 +614,7 @@ impl LlvmBackend {
         self.ssa_old_int_regs.clear();
         // Increment counter via GEP+store
         let inc = format!("%inc{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "  {0} = add i64 %lp{1}_{1}, 1", inc, c0 + 1).ok();
+        writeln!(out, "  {0} = add i64 %lp{1}_{2}, 1", inc, c0 + 1, counter_idx).ok();
         let sg = format!("%sg{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "  {0} = getelementptr inbounds %State, %State* %state, i32 0, i32 {1}", sg, counter_idx).ok();
         writeln!(out, "  store i64 {}, i64* {}, align 8", inc, sg).ok();

@@ -93,15 +93,15 @@ impl ExprCodegenLLVM for LiteralExpr {
                 }
                 crate::backend::llvm::TypedRegister { name: v, ty: Type::Bool }
             }
+            // 2026-06-20: Return native float register, matching Expr::Float (emit_expr.rs:22-28).
+            // Previously returned the i64-boxed value with Type::Float, which caused adapt_to_i64
+            // to bitcast an i64 register as float. See docs/plans/2026-06-20-float-boxing-dual-path-plan.md
             LiteralExpr::Float(f) => {
                 let bits = crate::backend::llvm::float_to_llvm_hex(*f);
                 let fl = format!("%ff{}", ctx.txn_counter); ctx.txn_counter += 1;
                 writeln!(out, "{indent}{fl} = bitcast i32 {bits} to float", indent = "", fl = fl, bits = bits).ok();
-                let i32r = format!("%fi{}", ctx.txn_counter); ctx.txn_counter += 1;
-                writeln!(out, "{indent}{i32r} = bitcast float {fl} to i32", indent = "", i32r = i32r, fl = fl).ok();
-                writeln!(out, "{indent}{v} = zext i32 {i32r} to i64", indent = "", v = v, i32r = i32r).ok();
-                ctx.reg_float_cache.insert(v.clone(), fl.clone());
-                crate::backend::llvm::TypedRegister { name: v, ty: Type::Float }
+                ctx.reg_float_cache.insert(fl.clone(), fl.clone());
+                crate::backend::llvm::TypedRegister { name: fl, ty: Type::Float }
             }
             LiteralExpr::String(s) => {
                 let si = ctx.string_constants.iter().position(|x| x == s).unwrap_or(0);
