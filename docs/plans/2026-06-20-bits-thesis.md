@@ -1215,6 +1215,238 @@ proven at compile time.
 | Java (JNI) | `NewStringUTF` copies, env ptr overhead | GC-managed |
 | **Brief** | **Zero-copy re-lensing** | **Proof-checked layout compatibility** |
 
+### 13.8 Foreign Types as First-Class Natives
+
+#### The Principle
+
+The Bits Thesis does not distinguish "native" types from "foreign"
+types. A type is a lens over memory — nothing more. If you know the
+memory layout of a foreign structure, you can define it as a Brief type
+and use it with the same syntax, optimization, and safety guarantees as
+any built-in type.
+
+Foreign types are **not** second-class citizens wrapped in opaque
+pointers. They are first-class native Brief types whose bit layout
+happens to match another language's ABI.
+
+#### Example: C++ `std::string` as a Native Brief Type
+
+```brief
+// C++ std::string on x86_64 libstdc++:
+// { pointer: i8*, length: u64, capacity: u64 }
+type CppString <: Bits @/0..191 {
+    Bytes = 24;
+
+    // Raw field access — matches C++ ABI exactly
+    Ptr = _ @/0..63;
+    Len = _ @/64..127;
+    Cap = _ @/128..191;
+
+    // Native projections — same interface as Brief String
+    Size  = _ :> Len;
+    At(i) = _ :> Ptr :> load_u8#(i);
+};
+```
+
+After defining this type, any `std::string` returned by a C++ library
+can be used as a native Brief value:
+
+```brief
+frgn get_message() -> CppString from "rust" with "cpp_bridge";
+
+let msg: CppString = get_message();
+let first: Char = msg[0];    // O(1) — GEP + load
+let len: Int = msg :> Size;  // O(1) — load from offset 64
+```
+
+#### What LLVM Sees
+
+The backend compiles `msg[0]` to:
+
+```llvm
+; load the Ptr field (offset 0)
+%ptr_ptr = getelementptr i64, i64* %msg, i64 0
+%ptr = load i64, i64* %ptr_ptr, align 8
+; load byte at index 0
+%elem_ptr = inttoptr i64 %ptr to i8*
+%char = load i8, i8* %elem_ptr, align 1
+```
+
+This is identical to what Brief's native `String` emits for character
+access. LLVM does not know — and does not need to know — that the
+underlying allocation was created by a C++ allocator.
+
+#### Contrast with Traditional FFI
+
+| Aspect | Traditional approach (opaque pointer) | Bits Thesis (first-class lens) |
+|--------|--------------------------------------|-------------------------------|
+| Representation | `void*` or `size_t` handle | Full struct layout as `Bits @/` |
+| Element access | Call `cpp_string_at(idx)` helper function | `msg[idx]` native bracket syntax |
+| Field access | Call `cpp_string_size()` | `msg :> Size` native projection |
+| Optimization | Opaque to LLVM — calls are black boxes | Direct GEP + load — LLVM sees all |
+| Safety | Manual — user must call correct helpers | Proof-engine checked — layout verified |
+| Extensibility | Per-library wrapper code | Define the layout once, use everywhere |
+
+### 13.9 Zero-Cost CString Interop
+
+#### The Problem
+
+Converting a C `char*` (null-terminated, no explicit length) to a
+managed string traditionally costs:
+
+1. **O(N) time**: `strlen` to compute the length
+2. **O(N) allocation + copy**: new buffer, copy characters, null-free
+
+For FFI-heavy code, these costs dominate. A function that calls many
+C-string-returning APIs spends more time converting strings than doing
+actual work.
+
+#### The Solution: Lazy `CString` Lens
+
+A `CString` is defined as a single 8-byte pointer with lazy projections:
+
+```brief
+type CString <: Bits @/0..63 {
+    Bytes = 8;
+    // The raw char* pointer — zero-cost to capture
+    Ptr = _ @/0..63;
+
+    // Zero-cost indexing — no strlen needed
+    At(i) = _ :> Ptr :> load_u8#(i);
+
+    // Deferred length calculation — only if explicitly requested
+    Size = _ :> Ptr :> strlen#;
+
+    // Conversion to native Brief String — materializes on demand
+    ToString() = _ :> rebuild#(Size, Ptr);
+};
+```
+
+#### Properties
+
+| Operation | Cost | When |
+|-----------|------|------|
+| Capture C `char*` as `CString` | **0 instructions** — pure metadata change | At FFI boundary |
+| Index `cstr[0]` | **1 load** — GEP + load `i8` | Immediate |
+| Slice `cstr[0..5]` | **5 loads** — no `strlen` needed | Immediate |
+| Call `cstr :> Size` | **O(N)** — `strlen` on first call, cached | On explicit request |
+| Convert to `String` | **O(N)** — `strlen` + allocation, cached | On explicit request |
+
+#### Why the Lazy Pattern Matters
+
+If Brief code only reads characters from a C-string, `strlen` is
+**never called**. This eliminates the single largest cost of C
+string interop (the mandatory O(N) scan) when it is not needed.
+
+```brief
+frgn getenv(name: CString) -> CString from "c";
+
+let path: CString = getenv("PATH");
+let first_char: Char = path[0];    // 1 load — strlen never runs
+// strlen runs only if we explicitly ask:
+let len: Int = path :> Size;       // O(N) — first and only scan
+```
+
+#### The Reverse Direction: Brief String → C `char*`
+
+Passing a Brief string to a C function that expects `const char*` is
+**zero-cost in both common cases**:
+
+**Static string literals:**
+```brief
+frgn puts(s: CString) -> Int from "c";
+puts("hello");  // Zero-cost — already null-terminated in .rodata
+```
+
+The compiler ensures all string constants in `.rodata` have a trailing
+`\0`. The pointer at offset 0 of the Brief String struct is already a
+valid C string.
+
+**Dynamic strings:**
+```brief
+let s: String = read_file("input.txt")?;
+let result = puts(s :> Ptr as CString);  // Zero-cost
+```
+
+If the dynamic string allocator reserves one extra byte and writes `\0`
+at `ptr[len]`, then `s.Ptr` is already a valid C string. No copy, no
+reallocation.
+
+The allocator can guarantee this with negligible overhead (1 byte per
+allocation, zero runtime cost if the null byte is written once during
+initialization and kept valid through all mutations).
+
+### 13.10 Design Pattern: Lazy Foreign Projections
+
+#### The General Pattern
+
+Many foreign types carry data that is expensive to interpret eagerly
+but cheap to access lazily. The pattern is:
+
+1. **Capture** the raw foreign pointer as a minimal `Bits`-width type
+   (typically `@/0..63` for a single pointer)
+2. **Attach projections** that read from the pointed-to memory on demand
+3. **Defer O(N) computation** to the specific projection that needs it
+4. **Cache** the result of expensive projections (optional, when the
+   foreign data is immutable)
+
+```
+Foreign pointer ──→ Minimal Bits lens ──→ Lazy projections
+  (8 bytes)           (zero cost at edge)     (cost deferred to use)
+```
+
+#### Examples
+
+| Foreign data | Lens type | Lazy projection | Trigger |
+|-------------|-----------|-----------------|---------|
+| C `char*` | `CString (8 bytes)` | `Size = strlen#` | Explicit `.Size` call |
+| Network buffer | `NetBuf (8 bytes)` | `Headers = parse_headers#` | Accessing `.Headers` field |
+| `mmap`'d file | `Mmap (16 bytes: ptr + len)` | `Line(i) = find_nth_newline#` | Accessing `.Line(5)` |
+| GPU buffer | `DevPtr (8 bytes)` | `Download() = cuda_memcpy#` | Explicit `.Download()` |
+| RISC-V instruction | `Instr (4 bytes)` | `Decode() = lookup_opcode#` | Accessing `.Opcode` |
+
+#### Safety
+
+The proof engine (`?#`) can verify properties about lazy projections:
+
+```brief
+defn safe_read(c: CString) -> Char {
+    // Mistake: accessing index without checking Size
+    // The proof engine can warn: "strlen may not have been called"
+    term c[0];  // This is safe — indexing does not depend on Size
+};
+
+defn safe_read2(c: CString) -> Char {
+    // The engine can prove: c[5] reads within bounds if Size was checked
+    [c :> Size > 5] {
+        term c[5];  // Safe — bounded by precondition
+    };
+    term '\0';
+};
+```
+
+Because indexing (`At(i)`) and sizing (`Size`) are separate projections,
+the engine can track which have been called and warn about potential
+out-of-bounds access when Size is unknown.
+
+| Check | How | Verified |
+|-------|-----|----------|
+| Index without size | Projection dependency analysis | Warn: "Size not queried — out-of-bounds possible" |
+| Index after size check | Contract precondition `[i < :> Size]` | Safe — bounded |
+| Double-free | Ownership tracking on `ToString()` | Prevented by linearity |
+| Null pointer deref | `Ptr` projection is typed as non-null or `Option` | Enforced by type |
+
+#### Implementation Cost
+
+Adding a lazy foreign projection type requires:
+- A type definition in user-space Brief (no compiler changes)
+- An intrinsic for the O(N) operation (`strlen#`, `parse_headers#`, etc.)
+  that the compiler already provides or can be added as a `name#` entry
+
+No backend changes are needed — the projections compile through the
+existing `emit_expr` path, and the intrinsics go through the existing
+intrinsic table.
+
 ---
 
 ## 14. Work Items — Implementation Phases
