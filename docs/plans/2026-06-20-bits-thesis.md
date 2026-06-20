@@ -20,12 +20,13 @@ Author: Design discussion between randozart and OpenCode
 10. [Bracket Syntax and Bit Precision](#10-bracket-syntax-and-bit-precision)
 11. [Macro Demonstration — The `slot` Template](#11-macro-demonstration--the-slot-template)
 12. [HashMap Under the Bits Thesis](#12-hashmap-under-the-bits-thesis)
-13. [Work Items — Implementation Phases](#13-work-items--implementation-phases)
-14. [What Does NOT Change](#14-what-does-not-change)
-15. [Architectural Tradeoffs and Rationale](#15-architectural-tradeoffs-and-rationale)
-16. [Performance Guarantee](#16-performance-guarantee)
-17. [Migration Guide](#17-migration-guide)
-18. [Glossary of Terms](#18-glossary-of-terms)
+13. [Cross-Language FFI and ABI Compatibility](#13-cross-language-ffi-and-abi-compatibility)
+14. [Work Items — Implementation Phases](#14-work-items--implementation-phases)
+15. [What Does NOT Change](#15-what-does-not-change)
+16. [Architectural Tradeoffs and Rationale](#16-architectural-tradeoffs-and-rationale)
+17. [Performance Guarantee](#17-performance-guarantee)
+18. [Migration Guide](#18-migration-guide)
+19. [Glossary of Terms](#19-glossary-of-terms)
 
 ---
 
@@ -37,7 +38,7 @@ types — is `Bits` with properties attached. There are zero "built-in types" in
 sense. The compiler provides convenience fast-paths for well-known types, but the *semantics*
 are always traceable back to a `Bits`-based definition.
 
-The thesis has four pillars:
+The thesis has five pillars:
 
 1. **`Bits` is the only primitive.** A type is just `Bits` + bindings (properties + projections).
 2. **Operator sigils desugar to projections.** `a + b` becomes `a :> Add(b)`. The type defines
@@ -47,6 +48,9 @@ The thesis has four pillars:
 4. **The educational stdlib documents the transparency.** `lib/std/from-bits.bv` shows how
    every fundamental type *could* be defined from `Bits`. The actual compiler uses hardcoded
    fast paths for performance — the file is documentation, not code.
+5. **Nominal interface, structural transparency.** Common types look like primitives on the
+   surface. The `Bits` representation is always reachable, never mandatory. The abstraction
+   is honest — the machine representation is never hidden, just abstracted by default.
 
 ---
 
@@ -99,6 +103,70 @@ type Header <: Bits @/0..31 {
 ```
 
 `Bits @/0..63` and `Bits { Bytes = 8 }` are surface-sugar for the same thing.
+
+### 2.5 Nominal Interface, Structural Transparency
+
+#### The Principle
+
+The Bits Thesis does not force developers to program in binary. Common
+types (`Int`, `Float`, `String`, `List<T>`) are treated as **nominal
+primitives** for everyday use. The `Bits` representation is a
+transparency layer — always reachable for debugging and optimization,
+never imposed during normal development.
+
+This is best described as **nominal interface, structural
+transparency**:
+
+| Layer | What the user writes | What the compiler sees |
+|-------|---------------------|----------------------|
+| Monday morning | `let x: Int = 5; x + 3` | Nominal types, familiar syntax |
+| Friday afternoon | `x :> Add(sadd#(3))` | Low-level intrinsic, same semantics |
+| Debugger | `x @/0..63` | Raw bit pattern, no abstraction |
+
+The abstraction is still there to protect cognitive load, but it is
+no longer an impenetrable black box. The machine representation is
+never hidden — just abstracted by default.
+
+#### Why This Matters for Ergonomics
+
+If every value appeared as `Bits` in error messages, autocomplete, and
+documentation, the language would be unusable. The nominal layer exists
+for human comprehension:
+
+- **IDE integration**: autocomplete shows `Int` methods, not generic
+  `Bits` projections
+- **Documentation**: `Float` has a clear abstract specification (IEEE
+  754), not "Bits { Bytes = 8 }"
+- **API contracts**: `json_get(v: JsonValue, key: String)` reads as
+  self-documenting — the types express intent
+
+#### The Transparency Guarantee
+
+The nominal layer is **always peelable**. For any value `v`, the
+developer can reach its `Bits` representation through:
+
+```brief
+let raw: Bits = v as Bits;           // Strip the nominal lens
+let field = raw @/64..127;           // Access raw bit field
+let restored: String = raw as String; // Reapply the nominal lens
+```
+
+This is the "honest abstraction" property: the nominal type is a
+convenient default view, not a hidden implementation detail.
+
+#### Relationship to the Four Pillars
+
+This principle is the **fifth pillar** of the Bits Thesis:
+
+5. **Nominal interface, structural transparency.** Common types look
+   like primitives on the surface. The `Bits` representation is always
+   reachable, never mandatory. The abstraction is honest — the machine
+   representation is never hidden, just abstracted by default.
+
+It binds the other four pillars together: pillars 1-4 describe the
+mechanical reality (Bits, desugaring, intrinsics, stdlib transparency),
+while pillar 5 describes the user experience (nominal primitives,
+progressive disclosure, honest abstractions).
 
 ---
 
@@ -340,6 +408,104 @@ recognitions, but is always optional — the generic fallback handles anything.
 | `AsStack` | List | Lazy view → materialized on use |
 | `AsQueue` | List | Lazy view → materialized on use |
 
+### 5.5 Two-Pass Resolution for Generic Projections
+
+#### The Problem
+
+When `T` is a generic type parameter (`T <: Bits`), operator projections
+cannot be resolved at declaration time. The binding `Add` on `T` is
+unknown until `T` is concretely instantiated:
+
+```brief
+defn double<T: Bits>(x: T) -> T {
+    term x + x;  // What is `+` on T? Unknown until T is known.
+};
+```
+
+A naive single-pass resolver would either:
+1. Error eagerly — "cannot resolve Add on generic type T"
+2. Defer everything to monomorphization — exploding the amount of
+   work done during codegen
+
+#### The Solution: Two-Pass Resolution
+
+The TypeUniverse resolves projection bindings in two passes:
+
+**Pass 1 (Structural):** Runs during early type checking, before
+monomorphization. Verifies constraints that hold for *any* `T`:
+
+```
+double<T: Bits>(x: T) → T
+└─ x + x desugars to x :> Add(x)
+   └─ Check: T must define Add or have a Bits default
+      └─ Bits default for Add? NO — arithmetic is not silent
+      └─ Error: T does not define Add → user adds constraint:
+         double<T: Bits where Add(T)>
+```
+
+Pass 1 can check:
+- Is the projection name defined on the type or any base?
+- Are the argument arities correct?
+- Does the return type unify with context?
+- Are bit-width and alignment constraints satisfied?
+
+Pass 1 does **not** resolve which intrinsic to call — it only checks
+structural validity.
+
+**Pass 2 (Concrete):** Runs after `T` is monomorphized to a concrete
+type (e.g., `double<Int>`). Resolves `Add` to the specific intrinsic
+(`sadd#` for Int, `fadd#` for Float):
+
+```
+double<Int>(x: Int) → Int
+└─ x + x → x :> Add(x)
+   └─ Int::Add(rhs) = _ :> sadd#(rhs)
+   └─ Emit: sadd#
+```
+
+Pass 2 always succeeds if Pass 1 passed — the structural check
+guarantees that the projection will have a concrete binding.
+
+#### Syntax for Constrained Generics
+
+To support Pass 1 checking, Brief introduces `where` clauses on
+generic type parameters:
+
+```brief
+defn double<T: Bits where Add(T)>(x: T) -> T {
+    term x + x;
+};
+
+defn sum<T: Bits where Add(T)>(list: List<T>) -> T { ... };
+```
+
+The `where` clause lists the projection names that the generic type
+must provide. The compiler verifies the constraint at each call site:
+
+```brief
+let i: Int = double(5);       // ✓ Int defines Add
+let f: Float = double(3.14);  // ✓ Float defines Add
+let s: String = double("x");  // ✗ String does not define Add
+```
+
+#### Comparison with Other Languages
+
+| Language | Generics mechanism | How `+` resolves | Brief advantage |
+|----------|-------------------|------------------|----------------|
+| Rust | Trait bounds (`T: Add`) | Trait resolution, associated types | Same model — Brief's `where` is explicit |
+| C++ | Templates (SFINAE) | Late binding, substitution failure | Earlier errors, no template bloat |
+| Java | Type erasure | Boxing + virtual dispatch | No boxing, zero-cost |
+| **Brief** | **`where` clauses + two-pass** | **Pass 1: structural. Pass 2: intrinsic.** | **TypeUniverse freeze = fast resolution** |
+
+#### Implementation
+
+| Phase | What | Cost |
+|-------|------|------|
+| Phase 2 | Add `where` clause parsing to `defn`/`txn` parameter lists | Parser change |
+| Phase 3 | Pass 1 structural check in typechecker: verify projection name exists in TypeUniverse | Typechecker change |
+| Phase 3 | Pass 2 concrete resolution: map name + type to intrinsic at monomorphization | Desugarer/codegen change |
+| Phase 3 | Error messages: "type `String` does not define projection `Add`" — never "Bits" | Using `original_type_name` |
+
 ---
 
 ## 6. Unified TypeDef Bodies
@@ -502,38 +668,131 @@ applies integer optimizations.
 **The type never mattered to LLVM. Only the opcode did.** The `#`-intrinsic is what
 selects the opcode. The type name is irrelevant.
 
-### 7.4 Shape Matching for User-Defined Types
+### 7.4 Heap TBAA for Allocated Structures
 
-If a user defines a type whose projection expressions happen to match the shapes
-that the backend recognizes for fast-path optimization, the user's type gets the
-same optimized code as the built-in:
+#### The Problem
 
-```brief
-type MyInt <: Bits @/0..63 {
-    Bytes = 8;
-    Popcount = _ :> ctpop#;    // Same expression as built-in Int
-    Add(rhs) = _ :> sadd#(rhs);
-};
+Section 7.2 covers TBAA for the global state struct (`state_field_N#`),
+where field-index-based disambiguation works perfectly — two adjacent
+state fields never alias because they are at different GEP offsets.
+
+But heap-allocated structures (`List<T>` elements, `HashMap` entries)
+are a different story. Two lists of different element types (`List<Int>`
+and `List<Float>`) both store their elements as `i64` values in
+heap-allocated buffers. To LLVM, both buffers are just `i64*` pointers.
+Without additional TBAA information, LLVM conservatively assumes they
+may alias — blocking load hoisting, store forwarding, and loop
+vectorization.
+
 ```
-
-The backend's fast-path registry checks expression *shape*, not type *name*:
-
-```rust
-fn try_fast_path(name: &str, source: &Expr, rhs: &[Expr]) -> Option<TypedRegister> {
-    match name {
-        "Popcount" if matches!(body, Expr::Intrinsic("ctpop", _)) => {
-            // Emit call llvm.ctpop.i64 — same as built-in
-        }
-        "Add" if matches!(body, Expr::Intrinsic("sadd", _)) => {
-            // Emit add i64 — same as built-in
-        }
-        _ => None,  // Unknown shape → generic compilation
-    }
+%State {
+  i64 list_a  ; ptr to List<Int>  buffer (i64*)
+  i64 list_b  ; ptr to List<Float> buffer (i64*) — same type to LLVM
 }
 ```
 
-The expressions don't need to be textually identical — the equality saturation
-pass normalizes them first. So `_ :> ctpop#` and `ctpop#(_)` both match.
+If a transaction reads both `list_a[0]` and `list_b[0]`, LLVM may
+reload both from memory on every iteration because it cannot prove
+they point to different allocations.
+
+#### The Solution: Virtual TBAA Tree for Heap Types
+
+When the backend emits a load from a heap-allocated `List<T>` element,
+it attaches a TBAA node that encodes the **element type identity**, not
+just the "it's an i64" structural fact:
+
+```llvm
+; TBAA tree:
+!0 = !{!"Brief"}
+!1 = !{!"state_field_0#", !0}       ; field index for list_a
+!2 = !{!"state_field_1#", !0}       ; field index for list_b
+!3 = !{!"heap_List_Int_element", !1}   ; List<Int> elements loaded via list_a
+!4 = !{!"heap_List_Float_element", !2} ; List<Float> elements loaded via list_b
+```
+
+The key insight: the heap TBAA node is **parented to the state field**
+that holds the pointer, not to a global type-name root. Two lists at
+different state fields never alias, even if they hold the same element
+type. Two lists at the same state field (same pointer) naturally alias
+because they share the same parent.
+
+#### Implementation
+
+| Step | What changes | Affects |
+|------|-------------|---------|
+| 1. Track element type identity per state field | Analysis pass annotates each `List<T>` state field with `(field_index, element_type_name)` | `analysis/region.rs` |
+| 2. Emit heap TBAA nodes | For each annotated field, emit `!N = !{!"heap_{elem_type}", !"state_field_N#"}` | `emit_expr.rs` — GEP+load for list elements |
+| 3. Annotate all heap loads | Every `load i64, i64* %elem_ptr` from a list buffer gets `!tbaa !N` | All list element access sites |
+
+#### Performance Impact
+
+The virtual tree adds <10 TBAA metadata nodes per compilation — a
+negligible IR size increase. The benefit is substantial: LLVM can
+prove that modifying `list_a[0]` does not affect `list_b[0]`, enabling
+load elimination, store-to-load forwarding, and loop-invariant code
+motion across list operations.
+
+### 7.5 Optimizer Friction — Aggressive Fast-Path Emission
+
+#### The Risk
+
+Under the Bits Thesis, every operation desugars to a projection
+expression. If the backend naively emits the desugared form as generic
+IR, the result is verbose `bitcast` / `extractvalue` / `insertvalue`
+chains:
+
+```llvm
+; Naive: box → call intrinsic → unbox
+%boxed_l = bitcast double %l to i64
+%boxed_r = bitcast double %r to i64
+%raw = call i64 @fadd#_intrinsic(i64 %boxed_l, i64 %boxed_r)
+%result = bitcast i64 %raw to double
+```
+
+LLVM's optimizer can clean this up (SROA + InstCombine fold the
+bitcasts), but it has **finite iteration budgets**. A single function
+with many such patterns may exhaust the budget before SROA runs,
+leaving the bitcasts in place. The result: missed vectorization,
+missed inlining, missed FMA formation.
+
+#### The Mitigation: Emit Clean Native Ops Early
+
+The fast-path registry (Section 5.4) is **not optional polish** — it is
+essential for keeping LLVM's optimizer within budget. For every
+well-known projection shape, the backend must emit the cleanest
+possible LLVM IR **directly**, without intermediate boxing:
+
+```llvm
+; Good: direct fadd — LLVM sees fadd immediately
+%result = fadd double %l, %r
+```
+
+The rule: **if the shape detector recognizes the projection, the
+backend never enters the generic expression compilation path.** It
+routes directly to a dedicated emission function that produces
+native LLVM IR.
+
+#### Budget Sizing
+
+| Scenario | Default LLVM iteration budget | Risk |
+|----------|------------------------------|------|
+| Current (hardcoded ops) | 1000 (sroa-limit) | None — direct IR |
+| Generic projection, simple | 1000 | Low — a few extractvalue chains |
+| Generic projection, nested (e.g., matrix multiply expressed as generic `Add`/`Mul` projections) | 1000 | **High** — nested boxing may exceed budget |
+
+For the high-risk case, the backend should emit a LLVM `llvm.assume`
+that hints at the simplification, or use `llvm.mem2reg`-compatible
+alloca patterns instead of extractvalue/insertvalue.
+
+#### Enforcement
+
+A CI test compiles a projection-heavy benchmark and checks the
+resulting `.ll` for unexpected bitcast chains. If the count exceeds
+a threshold, the test fails — forcing the developer to add a fast-path
+entry for the new projection shape before the regression lands.
+
+This ensures the fast-path registry stays comprehensive as the
+language evolves.
 
 ---
 
@@ -843,7 +1102,122 @@ results for the same inputs.
 
 ---
 
-## 13. Work Items — Implementation Phases
+## 13. Cross-Language FFI and ABI Compatibility
+
+### 13.1 The Problem
+
+Cross-language FFI is one of the most error-prone areas in systems
+programming. Passing a `String` from Brief to Rust or C typically
+requires serialization wrappers, memory copies, and manual layout
+verification. Under the Bits Thesis, this becomes a zero-cost
+"re-lensing" operation.
+
+### 13.2 Principle: Layout Compatibility is Bit Equality
+
+If two types occupy the same bit pattern, converting between them is
+free. The proof engine (`?#`) checks:
+
+```
+∀x: Bits. layout_A(x) ≡ layout_B(x)  →  reinterpret<B>(x) is identity
+```
+
+If the layouts are not identical but structurally embeddable, the
+conversion compiles to a stack-frame re-layout — pointer copying
+without touching payload data.
+
+### 13.3 Scalar Example: Float as CFloat
+
+```brief
+let bf: Float = 1.23;
+let cf: CFloat = reinterpret<CFloat>(bf);
+```
+
+This compiles to **zero machine instructions**. `Float` and `CFloat`
+are both `Bits @/0..63` with `Bytes = 8` and `Alignment = 8`. The
+only difference is TBAA metadata node — LLVM sees the same register.
+The `reinterpret` tells the backend: "Swap the TBAA metadata node for
+alias analysis; emit no move, no conversion, no copy."
+
+### 13.4 Complex Structure Example: Brief String → Rust String
+
+Rust's standard `String` is 24 bytes:
+
+```
+RustString = { ptr: i8*, capacity: u64, length: u64 }
+```
+
+Brief's standard `String` is 16 bytes:
+
+```
+BriefString = { ptr: i8*, length: u64 }
+```
+
+Under the Bits Thesis, define `RustString` to match Rust's ABI:
+
+```brief
+type RustString <: Bits @/0..191 {
+    Bytes = 24;
+    Ptr  = _ @/0..63;
+    Cap  = _ @/64..127;
+    Len  = _ @/128..191;
+};
+```
+
+Convert without copying character data:
+
+```brief
+let brief: String = read_file("data.txt")?;
+let rust: RustString = (brief.Ptr, brief.Len, brief.Len) as RustString;
+```
+
+Rust's `String::from_raw_parts` can take ownership of the pointer
+because `capacity = length` signals "no spare capacity." The character
+buffer is never copied — only the 24-byte stack-framed `RustString`
+header is constructed.
+
+### 13.5 What the Type Checker Verifies
+
+Before permitting the cast, the type checker proves:
+
+1. **Bit width match** — the source layout fits the target layout
+2. **Pointer provenance** — the cast does not create aliased mutable
+   pointers (linearity check)
+3. **Field alignment** — each field's alignment constraints are
+   satisfied in the target layout
+4. **Proof engine (`?#`) confirmation** — the `reinterpret` is
+   annotated with a contract if the developer wants formal guarantees
+
+### 13.6 FFI Without Serialization Boilerplate
+
+Standard Brief FFI (`frgn from "c"` or `frgn from "rust"`) uses
+these layout proofs to pass complex types across the boundary:
+
+```brief
+frgn process_string(s: RustString) -> Int from "rust";
+
+let brief_str: String = read_file("input.txt")?;
+let rust_str: RustString = (brief_str.Ptr, brief_str.Len, brief_str.Len) as RustString;
+let result: Int = process_string(rust_str);
+// After the call, brief_str's pointer is owned by Rust.
+// The Borrow Checker / linearity analysis tracks this.
+```
+
+No `CString::new()`, no `malloc`, no `memcpy`. The ABI boundary is
+proven at compile time.
+
+### 13.7 Contrast with Other Languages
+
+| Language | FFI String Overhead | Safety Model |
+|----------|---------------------|--------------|
+| C | Manual malloc + free, strlen | None |
+| Rust FFI | `CString::new()` heap alloc + copy | Unsafe block required |
+| Go (cgo) | `C.CString()` alloc + copy, must free | Manual |
+| Java (JNI) | `NewStringUTF` copies, env ptr overhead | GC-managed |
+| **Brief** | **Zero-copy re-lensing** | **Proof-checked layout compatibility** |
+
+---
+
+## 14. Work Items — Implementation Phases
 
 ### Phase 1 — Mechanical Cleanup
 
@@ -942,7 +1316,7 @@ Estimated: 1 day
 
 ---
 
-## 14. What Does NOT Change
+## 15. What Does NOT Change
 
 | Thing | Status | Reason |
 |-------|--------|--------|
@@ -963,9 +1337,9 @@ Estimated: 1 day
 
 ---
 
-## 15. Architectural Tradeoffs and Rationale
+## 16. Architectural Tradeoffs and Rationale
 
-### 15.1 Complexity Tradeoff: Desugaring
+### 16.1 Complexity Tradeoff: Desugaring
 
 **Cost**: Every operator expression goes through an extra desugaring pass.
 Every projection evaluation may need a TypeUniverse lookup.
@@ -978,7 +1352,7 @@ via the same mechanism.
 TypeUniverse lookup is O(1) (HashMap). The extra pass adds <1% to compile
 time. The benefit (transparency, extensibility) is unbounded.
 
-### 15.2 Complexity Tradeoff: Generic Expression Compilation
+### 16.2 Complexity Tradeoff: Generic Expression Compilation
 
 **Cost**: User-defined projection expressions must be compiled inline by
 backends. This is more complex than matching an AST variant.
@@ -990,7 +1364,7 @@ The backend already has `emit_expr()` — this is reusing existing infrastructur
 that hit fast paths. The generic path is a fallback for novelty. It is not
 the common case.
 
-### 15.3 Complexity Tradeoff: Unified TypeDef Bodies
+### 16.3 Complexity Tradeoff: Unified TypeDef Bodies
 
 **Cost**: The TypeDef parser becomes slightly more complex. The TypeUniverse
 resolution must distinguish well-known names from user-defined names.
@@ -1002,7 +1376,7 @@ add arbitrary properties. The syntax is uniform: `Name = Expr;`.
 let analysis sort them. The TypeUniverse change is a single HashMap lookup
 instead of a match on 13 variants.
 
-### 15.4 Performance Tradeoff: Float Optimization
+### 16.4 Performance Tradeoff: Float Optimization
 
 **Cost**: If the Bits thesis required reinterpreting Float as generic Bits,
 LLVM might lose optimization opportunities.
@@ -1011,7 +1385,7 @@ LLVM might lose optimization opportunities.
 is the same instruction regardless of whether the frontend calls the type
 "Float" or "MyFloatBits." Zero performance impact.
 
-### 15.5 Performance Tradeoff: TBAA
+### 16.5 Performance Tradeoff: TBAA
 
 **Cost**: Moving from type-name-based TBAA to field-index-based TBAA.
 
@@ -1022,14 +1396,14 @@ them because they share a TBAA node).
 **Reality**: The field-index approach is *more* correct. It also eliminates
 the need for the TBAA tree to know type names at all.
 
-### 15.6 Counter-Argument: "Why not just keep hardcoded operators?"
+### 16.6 Counter-Argument: "Why not just keep hardcoded operators?"
 
 **Response**: The plan DOES keep hardcoded fast paths. The change is strictly
 additive: operators desugar to projections, but the backend recognizes
 well-known projection shapes and emits the same code as today. The only
 difference is architectural transparency — the semantics are traceable.
 
-### 15.7 Counter-Argument: "Does this overcomplicate the type system for simple cases?"
+### 16.7 Counter-Argument: "Does this overcomplicate the type system for simple cases?"
 
 **Response**: Simple cases remain simple. Writing `let x: Int = 5; x + 3`
 works exactly as before. The desugaring happens transparently. The Bits
@@ -1037,11 +1411,68 @@ thesis only becomes visible when a user defines a new type and wonders
 "how do I add `+` support?" — at which point the answer is clear: define
 `Add(rhs) = ...` in your type body.
 
+### 16.8 Diagnostic Degradation — The "Opaque Bits" Problem
+
+#### The Risk
+
+When every type is `Bits` under the hood, error messages can degrade to
+useless noise:
+
+| Source error | Naive `Bits`-uniform message | User impact |
+|---|---|---|
+| Passed `Float` to a `String` parameter | `expected Bits { Bytes = 16 }, found Bits { Bytes = 8 }` | Confusing — user wrote `String` and `Float`, not `Bits` |
+| Passed `List<Int>` to `HashMap<K,V>` parameter | `expected projection 'Contains' on Bits { Bytes = 24 }` | Does not mention List or HashMap |
+| Wrong enum variant | `expected Bits { discriminant=2 }, found Bits { discriminant=5 }` | Discriminant numbers are meaningless |
+
+#### The Mitigation: Nominal Type Identity in Diagnostics
+
+The typechecker **never** reasons in terms of `Bits`. It preserves the
+nominal type identity (`String`, `Float`, `List<Int>`) throughout all
+analysis passes. The `Bits` desugaring is strictly a codegen concern.
+
+Rule: **The error message shows what the user wrote, not what the
+compiler lowered it to.**
+
+```
+// Good — typechecker preserves nominal names:
+Error: expected `String` (argument 1 of `process`), found `Float`
+  --> lib/main.bv:42:22
+
+// Bad — never leak Bits representation:
+Error: expected Bits { Bytes = 16 }, found Bits { Bytes = 8 }
+```
+
+#### Implementation
+
+| Phase | What changes | Impact |
+|-------|-------------|--------|
+| Parser | Parses types into nominal AST nodes (`Type::String`, `Type::Applied("List", ...)`) | No change — already works this way |
+| Typechecker | Reports errors using `type_to_string()` which emits the nominal name | No change — already works this way |
+| TypeUniverse | Preserves `source: TypeDef` in `ResolvedType` — the original type definition is always reachable | Already implemented |
+| Desugarer (Phase 3) | Strips nominal info for codegen, but a parallel metadata field `original_type_name` is preserved in the lowered IR for diagnostics | New — must be added |
+| Backend | Diagnostics from codegen (e.g., "can't load this field") use the original type name | Must reference `original_type_name` |
+
+The `original_type_name` metadata is a single `String` field attached to
+every `Bits` type during desugaring. It is:
+- **Preserved** during analysis (type inference, region analysis, proof)
+- **Referenced** by error messages
+- **Ignored** by codegen (LLVM never sees it)
+- **Zero cost** at runtime (compile-time metadata only)
+
+#### Why This Works
+
+The compiler already has all the information needed for high-quality
+diagnostics. The `Type` enum carries nominal names. The `type_to_string()`
+method formats them. The only change is a rule: **never let `Bits` leak
+into an error message.** The desugarer is the last place that knows the
+original type name — it must preserve it as metadata for the error
+reporting path.
+
 ---
 
-## 16. Performance Guarantee
+## 17. Performance Guarantee
 
-### 16.1 Zero Runtime Overhead
+### 17.1 Zero Runtime Overhead
 
 | Concern | Answer |
 |---------|--------|
@@ -1052,7 +1483,7 @@ thesis only becomes visible when a user defines a new type and wonders
 | Does TBAA correctness degrade? | No — field-index-based TBAA is *more* precise than type-name-based. |
 | Does compile time increase? | ~1-3% from the desugaring pass. Negligible. |
 
-### 16.2 Shape Matching Preserves Fast Paths
+### 17.2 Shape Matching Preserves Fast Paths
 
 The backend fast-path registry checks expression shape, not type name:
 
@@ -1069,7 +1500,7 @@ fn try_fast_path(name: &str, body: &Expr) -> Option<Codegen> {
 }
 ```
 
-### 16.3 Fallback Costs Are the User's Choice
+### 17.3 Fallback Costs Are the User's Choice
 
 If a user defines a novel projection like `Determinant` with a complex
 expression, the generic path compiles that expression inline. This is
@@ -1081,9 +1512,9 @@ proportional to their novelty.**
 
 ---
 
-## 17. Migration Guide
+## 18. Migration Guide
 
-### 17.1 Breaking Changes
+### 18.1 Breaking Changes
 
 | Change | Impact | Migration |
 |--------|--------|-----------|
@@ -1093,7 +1524,7 @@ proportional to their novelty.**
 | `Alignment` returns real value instead of 8 | Changes output for Bool (1), Char (4) | Verify contracts |
 | `Range` returns real bounds instead of [MIN,MAX] | Changes output for constrained values | Verify contracts |
 
-### 17.2 Additive Changes (no migration needed)
+### 18.2 Additive Changes (no migration needed)
 
 | Change | Impact |
 |--------|--------|
@@ -1103,7 +1534,7 @@ proportional to their novelty.**
 | `projections { }` block | New TypeDef syntax |
 | `@/` in TypeDef bindings | Extended syntax |
 
-### 17.3 Phase-by-Phase Migration
+### 18.3 Phase-by-Phase Migration
 
 **Phase 1**: Only breaking change is Index removal. Steps:
 1. Add bracket support for tuples
@@ -1121,7 +1552,7 @@ operators transparently. No migration needed.
 
 ---
 
-## 18. Glossary of Terms
+## 19. Glossary of Terms
 
 | Term | Definition |
 |------|------------|
@@ -1238,7 +1669,49 @@ type Matrix4x4 <: Float[16] {
 };
 ```
 
----
+### RISC-V Instruction Decode (Bit-Field Hardware Mapping)
+
+Demonstrates bit-precise `@/` field access for hardware co-design,
+directly decodable to GEP + mask in software or wire slicing in
+Verilog/CIRCT:
+
+```brief
+type RISC_V_Instruction <: Bits @/0..31 {
+    Bytes = 4;
+    Opcode = _ @/0..6;
+    Rd     = _ @/7..11;
+    Funct3 = _ @/12..14;
+    Rs1    = _ @/15..19;
+    Rs2    = _ @/20..24;
+    Funct7 = _ @/25..31;
+};
+```
+
+Usage in a disassembler:
+
+```brief
+defn decode(instr: RISC_V_Instruction) -> String {
+    [instr.Opcode == 0x33] {   // OP-type (RISC-V spec)
+        let s = "";
+        &s = s + register_name(instr.Rd);
+        &s = s + ", ";
+        &s = s + register_name(instr.Rs1);
+        &s = s + ", ";
+        &s = s + register_name(instr.Rs2);
+        term s;
+    };
+    term "unknown";
+};
+```
+
+Key properties:
+- Each field is defined at its exact bit position — no manual masking
+- The `@/` ranges are the source of truth for layout, in both software
+  (LLVM backend emits GEP + load + mask) and hardware (CIRCT backend
+  emits wire slicing directly)
+- The type is exactly 32 bits (`Bytes = 4`) — fits in a register
+- No abstraction penalty: `instr.Opcode` compiles to the same
+  instructions as a hand-coded `(instr >> 0) & 0x7F`
 
 ## Appendix B: Tier Ignorance Examples
 
