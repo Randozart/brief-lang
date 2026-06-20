@@ -2579,6 +2579,7 @@ impl<'a> Parser<'a> {
         self.expect(Token::LBrace)?;
 
         let mut properties = Vec::new();
+        let mut bindings = Vec::new();
         let mut constraints = Vec::new();
 
         // Parse properties and constraints until `}`
@@ -2598,45 +2599,75 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            // Otherwise parse a property: ident = expr ;
-            let prop_name = self.expect_identifier()?;
-            self.expect(Token::Eq)?;
-            let prop = match prop_name.as_str() {
-                "Bytes" => TypeProperty::Bytes(Box::new(self.parse_expression()?)),
-                "Alignment" => TypeProperty::Alignment(Box::new(self.parse_expression()?)),
-                "Endian" => TypeProperty::Endian(Box::new(self.parse_expression()?)),
-                "Volatile" => TypeProperty::Volatile(Box::new(self.parse_expression()?)),
-                "Atomic" => TypeProperty::Atomic(Box::new(self.parse_expression()?)),
-                "ElementType" => TypeProperty::ElementType(Box::new(self.parse_expression()?)),
-                "FixedSize" => TypeProperty::FixedSize(Box::new(self.parse_expression()?)),
-                "InsertAt" => TypeProperty::InsertAt(Box::new(self.parse_expression()?)),
-                "ExtractFrom" => TypeProperty::ExtractFrom(Box::new(self.parse_expression()?)),
-                "AllowIndex" => TypeProperty::AllowIndex(Box::new(self.parse_expression()?)),
-                "AllowSlice" => TypeProperty::AllowSlice(Box::new(self.parse_expression()?)),
-                "AllowArrow" => TypeProperty::AllowArrow(Box::new(self.parse_expression()?)),
-                "Codec" => {
-                    let codec_name = self.expect_identifier()?;
-                    // Consume optional semicolon (expression parser handles this for expr-based props)
-                    TypeProperty::Codec(codec_name)
-                }
-                other => return self.spanned_err(
-                    format!("Unknown type property '{}'. Expected: Bytes, Alignment, Endian, Volatile, Atomic, ElementType, FixedSize, InsertAt, ExtractFrom, AllowIndex, AllowSlice, AllowArrow, or Codec", other),
-                ),
-            };
-            properties.push(prop);
+            // Parse a binding: ident [ ( params ) ]? = expr ;
+            let binding_name = self.expect_identifier()?;
 
-            // Expect semicolon after property (but not after Codec since it's already consumed)
-            if prop_name != "Codec" {
-                if let Some(Ok(Token::Semicolon)) = self.current_token() {
-                    self.advance();
-                } else {
-                    return self.spanned_err("Expected ';' after type property".to_string());
+            // Check for optional params: Name(param1, param2)
+            let params = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+                self.advance();
+                let mut ps = Vec::new();
+                loop {
+                    ps.push(self.expect_identifier()?);
+                    if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                        self.advance();
+                    } else {
+                        break;
+                    }
                 }
+                self.expect(Token::RParen)?;
+                ps
             } else {
-                // Codec may or may not have semicolon — handle both
-                if let Some(Ok(Token::Semicolon)) = self.current_token() {
-                    self.advance();
+                Vec::new()
+            };
+
+            self.expect(Token::Eq)?;
+            let value = self.parse_expression()?;
+
+            // Create binding (always)
+            bindings.push(TypeBinding {
+                name: binding_name.clone(),
+                params,
+                value: Box::new(value.clone()),
+                span: self.current_span(),
+            });
+
+            // For recognized metadata property names, also create TypeProperty
+            let prop = match binding_name.as_str() {
+                "Bytes" => Some(TypeProperty::Bytes(Box::new(value.clone()))),
+                "Alignment" => Some(TypeProperty::Alignment(Box::new(value.clone()))),
+                "Endian" => Some(TypeProperty::Endian(Box::new(value.clone()))),
+                "Volatile" => Some(TypeProperty::Volatile(Box::new(value.clone()))),
+                "Atomic" => Some(TypeProperty::Atomic(Box::new(value.clone()))),
+                "ElementType" => Some(TypeProperty::ElementType(Box::new(value.clone()))),
+                "FixedSize" => Some(TypeProperty::FixedSize(Box::new(value.clone()))),
+                "InsertAt" => Some(TypeProperty::InsertAt(Box::new(value.clone()))),
+                "ExtractFrom" => Some(TypeProperty::ExtractFrom(Box::new(value.clone()))),
+                "AllowIndex" => Some(TypeProperty::AllowIndex(Box::new(value.clone()))),
+                "AllowSlice" => Some(TypeProperty::AllowSlice(Box::new(value.clone()))),
+                "AllowArrow" => Some(TypeProperty::AllowArrow(Box::new(value.clone()))),
+                "Codec" => {
+                    // Codec takes a string expression: Codec = "my_codec";
+                    // or an identifier for backward compat
+                    let codec_name = match &value {
+                        Expr::String(s) => s.clone(),
+                        Expr::Identifier(id) => id.clone(),
+                        other => return self.spanned_err(
+                            format!("Codec expects a string or identifier, got {:?}", other),
+                        ),
+                    };
+                    Some(TypeProperty::Codec(codec_name))
                 }
+                _ => None,
+            };
+            if let Some(prop_val) = prop {
+                properties.push(prop_val);
+            }
+
+            // Expect semicolon after binding
+            if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                self.advance();
+            } else {
+                return self.spanned_err("Expected ';' after type binding".to_string());
             }
         }
 
@@ -2651,6 +2682,7 @@ impl<'a> Parser<'a> {
             base,
             body: TypeDefBody {
                 properties,
+                bindings,
                 constraints,
                 span: self.current_span(),
             },

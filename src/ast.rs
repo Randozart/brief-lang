@@ -406,8 +406,11 @@ pub struct TypeBinding {
 /// Body of a `Type Name <: Base { ... }` declaration.
 #[derive(Debug, Clone)]
 pub struct TypeDefBody {
-    /// Metadata property assignments.
+    /// Metadata property assignments (legacy — being replaced by bindings).
     pub properties: Vec<TypeProperty>,
+    /// Unified bindings: every `Name = Expr;` entry, including both metadata
+    /// properties and user-defined projections. Replaces `properties` over time.
+    pub bindings: Vec<TypeBinding>,
     /// Refinement constraints with implicit self: `[ > 0 ]`.
     pub constraints: Vec<Expr>,
     /// Source span for error reporting.

@@ -147,6 +147,7 @@ mod tests {
                 TypeProperty::Bytes(Box::new(Expr::Integer(8))),
                 TypeProperty::Alignment(Box::new(Expr::Integer(8))),
             ],
+            bindings: vec![],
             constraints: vec![],
             span: None,
         };
@@ -166,6 +167,7 @@ mod tests {
                     TypeProperty::Bytes(Box::new(Expr::Integer(8))),
                     TypeProperty::Alignment(Box::new(Expr::Integer(8))),
                 ],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -228,6 +230,7 @@ mod kani_full_tests {
     fn verify_type_def_body_construct() {
         let body = TypeDefBody {
             properties: vec![TypeProperty::Bytes(Box::new(Expr::Integer(8)))],
+            bindings: vec![],
             constraints: vec![],
             span: None,
         };

@@ -287,6 +287,7 @@ mod tests {
                     TypeProperty::Bytes(Box::new(Expr::Integer(1))),
                     TypeProperty::Alignment(Box::new(Expr::Integer(1))),
                 ],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -304,6 +305,7 @@ mod tests {
                     TypeProperty::Bytes(Box::new(Expr::Integer(4))),
                     TypeProperty::Alignment(Box::new(Expr::Integer(4))),
                 ],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -347,6 +349,7 @@ mod tests {
                     TypeProperty::ElementType(Box::new(Expr::TypeRef("T".into()))),
                     TypeProperty::AllowIndex(Box::new(Expr::Bool(true))),
                 ],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -360,6 +363,7 @@ mod tests {
                 properties: vec![
                     TypeProperty::AllowIndex(Box::new(Expr::Bool(false))),
                 ],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -385,6 +389,7 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 properties: vec![TypeProperty::AllowIndex(Box::new(Expr::Bool(false)))],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -406,6 +411,7 @@ mod tests {
                 properties: vec![
                     TypeProperty::Volatile(Box::new(Expr::Bool(true))),
                 ],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -429,6 +435,7 @@ mod tests {
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
                 properties: vec![TypeProperty::Codec("Utf8".into())],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
@@ -451,6 +458,7 @@ mod tests {
                     TypeProperty::Bytes(Box::new(Expr::Integer(4))),
                     TypeProperty::Endian(Box::new(Expr::Identifier("Big".into()))),
                 ],
+                bindings: vec![],
                 constraints: vec![],
                 span: None,
             },
