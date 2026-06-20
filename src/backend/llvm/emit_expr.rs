@@ -2608,6 +2608,23 @@ impl LlvmBackend {
                     ProjectionTarget::UserDefined(_) => {
                         writeln!(out, "{}{} = add i64 0, 0 ; user-defined projection stub", indent, v).ok();
                     }
+                    ProjectionTarget::BitRange(br) => {
+                        // Extract bits via lshr + and
+                        let (lo, hi) = match br {
+                            crate::ast::BitRange::Single(i) => (*i, *i),
+                            crate::ast::BitRange::Range(l, h) => (*l, *h),
+                            crate::ast::BitRange::Any(w) => (0, *w - 1),
+                        };
+                        let width = hi - lo + 1;
+                        let shifted = format!("%pbr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = lshr i64 {}, {}", indent, shifted, src_val.name, lo).ok();
+                        if width >= 64 {
+                            writeln!(out, "{}{} = add i64 0, {}", indent, v, shifted).ok();
+                        } else {
+                            let mask_lit = (1u64 << width) - 1;
+                            writeln!(out, "{}{} = and i64 {}, {}", indent, v, shifted, mask_lit).ok();
+                        }
+                    }
                     _ => {
                         writeln!(out, "{}{} = add i64 0, 0 ; projection catch-all", indent, v).ok();
                     }

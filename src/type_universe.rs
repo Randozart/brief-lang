@@ -150,6 +150,19 @@ impl TypeUniverse {
             rt.allow_arrow = base.allow_arrow;
         }
 
+        // Phase 4: Auto-compute Bytes from bit_range for `Bits @/lo..hi` syntax
+        if let Some(ref br) = td.bit_range {
+            let bits = match br {
+                crate::ast::BitRange::Single(_) => 1,
+                crate::ast::BitRange::Range(lo, hi) => hi - lo + 1,
+                crate::ast::BitRange::Any(w) => *w,
+            };
+            let bytes = if bits == 0 { 0 }
+                        else { (bits + 7) / 8 };
+            rt.bytes = bytes as u64;
+            rt.fixed_size = Some(true);
+        }
+
         // Apply bindings — known metadata names populate ResolvedType fields,
         // unknown names are stored as user-defined projections
         // DEFERRED (D-7): Evaluate constraint expressions
@@ -295,6 +308,7 @@ mod tests {
         TypeDef {
             name: "U8".into(),
             type_params: vec![],
+            bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 bindings: vec![
@@ -312,6 +326,7 @@ mod tests {
         TypeDef {
             name: "U32".into(),
             type_params: vec![],
+            bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 bindings: vec![
@@ -354,6 +369,7 @@ mod tests {
         let base = TypeDef {
             name: "BaseList".into(),
             type_params: vec!["T".into()],
+            bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 bindings: vec![
@@ -369,6 +385,7 @@ mod tests {
         let derived = TypeDef {
             name: "Stack".into(),
             type_params: vec!["T".into()],
+            bit_range: None,
             base: Box::new(Expr::TypeRef("BaseList".into())),
             body: TypeDefBody {
                 bindings: vec![
@@ -396,6 +413,7 @@ mod tests {
         let disable_index = TypeDef {
             name: "NoIndex".into(),
             type_params: vec![],
+            bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 bindings: vec![
@@ -417,6 +435,7 @@ mod tests {
         let mmio = TypeDef {
             name: "MmioReg".into(),
             type_params: vec![],
+            bit_range: None,
             base: Box::new(Expr::TypeRef("U32".into())),
             body: TypeDefBody {
                 bindings: vec![
@@ -442,6 +461,7 @@ mod tests {
         let string_def = TypeDef {
             name: "String".into(),
             type_params: vec![],
+            bit_range: None,
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
                 bindings: vec![
@@ -463,6 +483,7 @@ mod tests {
         let big_endian = TypeDef {
             name: "BeInt".into(),
             type_params: vec![],
+            bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 bindings: vec![

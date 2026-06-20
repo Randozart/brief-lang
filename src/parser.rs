@@ -2577,6 +2577,19 @@ impl<'a> Parser<'a> {
         // Parse base type expression
         let base = self.parse_type_expr_for_typedef()?;
 
+        // Parse optional bit-range suffix: `Bits @/0..7`
+        let bit_range = if let Some(Ok(Token::At)) = self.current_token() {
+            if let Some(Ok(Token::Slash)) = self.peek_token() {
+                self.advance(); // consume @
+                self.advance(); // consume /
+                Some(self.parse_bit_range()?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         // Parse body `{ ... }`
         self.expect(Token::LBrace)?;
 
@@ -2649,6 +2662,7 @@ impl<'a> Parser<'a> {
             name,
             type_params,
             base,
+            bit_range,
             body: TypeDefBody {
                 bindings,
                 constraints,
@@ -6004,6 +6018,19 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     source: Box::new(expr),
                     target,
                 };
+            } else if let Some(Ok(Token::At)) = self.current_token() {
+                // @/ — bit-range extraction in expression context: word @/0..3
+                if let Some(Ok(Token::Slash)) = self.peek_token() {
+                    self.advance(); // consume @
+                    self.advance(); // consume /
+                    let br = self.parse_bit_range()?;
+                    expr = Expr::Projection {
+                        source: Box::new(expr),
+                        target: ProjectionTarget::BitRange(br),
+                    };
+                } else {
+                    break;
+                }
             } else if let Some(Ok(Token::Hash)) = self.current_token() {
                 // Only treat `#` as intrinsic call if followed by `(`
                 if matches!(self.peek_token(), Some(Ok(Token::LParen))) {

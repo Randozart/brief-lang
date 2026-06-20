@@ -143,6 +143,7 @@ mod tests {
             name: "U64".into(),
             type_params: vec![],
             base: Box::new(Expr::TypeRef("Bits".into())),
+            bit_range: None,
             body: TypeDefBody {
                 bindings: vec![
                     make_binding("Bytes", Expr::Integer(8)),

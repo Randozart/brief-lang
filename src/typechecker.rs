@@ -1995,10 +1995,7 @@ impl TypeChecker {
                     }
                     ProjectionTarget::AsQueue => {
                         match &src_ty {
-                            Type::Applied(name, inner) if name == "List" => {
-                                let elem_ty = inner.first().cloned().unwrap_or(Type::String);
-                                Type::Applied("Queue".to_string(), vec![elem_ty])
-                            }
+                            Type::Applied(n, _) if n == "List" => Type::Applied("Queue".to_string(), vec![Type::String]),
                             _ => {
                                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
                                     expected: "List".to_string(),
@@ -2006,6 +2003,19 @@ impl TypeChecker {
                                     context: "AsQueue projection".to_string(),
                                 });
                                 Type::Applied("Queue".to_string(), vec![Type::String])
+                            }
+                        }
+                    }
+                    ProjectionTarget::BitRange(_) => {
+                        match &src_ty {
+                            Type::Int | Type::UInt => Type::Int,
+                            _ => {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Int".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: "BitRange projection requires integer source".to_string(),
+                                });
+                                Type::Int
                             }
                         }
                     }

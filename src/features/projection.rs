@@ -191,6 +191,30 @@ impl ExprEval for ProjectionExpr {
                 Value::List(items) => Ok(Value::Queue(std::collections::VecDeque::from(items.clone()))),
                 _ => Err(RuntimeError::TypeMismatch("AsQueue requires List".into())),
             },
+            ProjectionTarget::BitRange(br) => match &source_val {
+                Value::Int(n) => {
+                    let (lo, hi) = match br {
+                        crate::ast::BitRange::Single(i) => (*i, *i),
+                        crate::ast::BitRange::Range(l, h) => (*l, *h),
+                        crate::ast::BitRange::Any(w) => (0, *w - 1),
+                    };
+                    if hi > 63 {
+                        return Err(RuntimeError::TypeMismatch(
+                            "BitRange exceeds 64-bit integer width".into()
+                        ));
+                    }
+                    let width = hi - lo + 1;
+                    let shifted = (*n as u64) >> lo;
+                    let result = if width >= 64 {
+                        shifted as i64
+                    } else {
+                        let mask = (1u64 << width) - 1;
+                        (shifted & mask) as i64
+                    };
+                    Ok(Value::Int(result))
+                }
+                _ => Err(RuntimeError::TypeMismatch("BitRange requires Int".into())),
+            },
             ProjectionTarget::UserDefined(name) => {
                 let val = source_val.clone();
                 match name.as_str() {
@@ -298,5 +322,55 @@ fn eval_user_projection_fast_path(
         _ => Err(RuntimeError::UnsupportedProjection(format!(
             "projection '{}' not applicable to source type", name
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::interpreter::Value;
+
+    fn extract_bits(n: i64, lo: usize, hi: usize) -> i64 {
+        if hi > 63 { return n; }
+        let width = hi - lo + 1;
+        let shifted = (n as u64) >> lo;
+        if width >= 64 { shifted as i64 }
+        else { (shifted & ((1u64 << width) - 1)) as i64 }
+    }
+
+    #[test]
+    fn test_bit_range_single() {
+        // Bit 2 of 0b1101 (13) = 1
+        assert_eq!(extract_bits(0b1101, 2, 2), 1);
+        // Bit 0 of 0b1101 (13) = 1
+        assert_eq!(extract_bits(0b1101, 0, 0), 1);
+        // Bit 3 of 0b1101 (13) = 1
+        assert_eq!(extract_bits(0b1101, 3, 3), 1);
+    }
+
+    #[test]
+    fn test_bit_range_range() {
+        // Bits 0-1 of 0b1101 (13) = 0b01 = 1
+        assert_eq!(extract_bits(0b1101, 0, 1), 0b01);
+        // Bits 1-2 of 0b1101 (13) = 0b10 = 2
+        assert_eq!(extract_bits(0b1101, 1, 2), 0b10);
+        // Bits 0-3 of 0b1101 (13) = 0b1101 = 13
+        assert_eq!(extract_bits(0b1101, 0, 3), 0b1101);
+    }
+
+    #[test]
+    fn test_bit_range_wide() {
+        // Bits 0-7 of 255 = 255
+        assert_eq!(extract_bits(255, 0, 7), 255);
+        // Bits 8-11 of 0xFF00 = 0xF = 15
+        assert_eq!(extract_bits(0xFF00, 8, 11), 0xF);
+        // Bits 8-15 of 0xFF00 = 0xFF = 255
+        assert_eq!(extract_bits(0xFF00, 8, 15), 0xFF);
+    }
+
+    #[test]
+    fn test_bit_range_exceeds_64() {
+        // hi > 63 should return original
+        assert_eq!(extract_bits(42, 0, 100), 42);
     }
 }

@@ -392,6 +392,8 @@ pub struct TypeDef {
     pub type_params: Vec<String>,
     /// The base type expression (e.g. `Bits`, `List<T>`).
     pub base: Box<Expr>,
+    /// Optional bit range for `Bits @/0..7` syntax.
+    pub bit_range: Option<BitRange>,
     /// Property body.
     pub body: TypeDefBody,
     /// Source span.
@@ -433,6 +435,9 @@ pub enum ProjectionTarget {
     AsStack,
     /// List → Queue conversion: `list :> AsQueue` → Queue
     AsQueue,
+    /// Bit-range extraction: `word @/0..3` → extracts bits 0-3 via shift+mask
+    /// Also used in TypeDef base types: `type MyInt <: Bits @/0..7`
+    BitRange(BitRange),
     /// User-defined projection from a type declaration: `value :> MyField`
     UserDefined(String),
     /// User-defined parameterized projection: `value :> At(0)`
