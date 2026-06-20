@@ -48,8 +48,33 @@ impl ExprEval for ProjectionExpr {
                 Ok(Value::Int(size))
             }
             ProjectionTarget::Ptr => Ok(Value::Int(0)),
-            ProjectionTarget::Alignment => Ok(Value::Int(8)),
-            ProjectionTarget::Range => Ok(Value::List(vec![Value::Int(i64::MIN), Value::Int(i64::MAX)])),
+            ProjectionTarget::Alignment => {
+                let align = match &source_val {
+                    Value::Int(_) | Value::Float(_) => 8,
+                    Value::Bool(_) => 1,
+                    Value::Char(_) => 4,
+                    Value::String(_) | Value::List(_) | Value::Tuple(_)
+                        | Value::HashMap(_) | Value::HashSet(_) | Value::Data(_)
+                        | Value::Stack(_) | Value::Queue(_) | Value::Enum(..)
+                        | Value::Instance { .. } | Value::StringBuilder(_)
+                        | Value::Defn(_) | Value::DbvlTable(_) | Value::Regex(_) => 8,
+                    Value::Void => 0,
+                    Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Type(..) => {
+                        return Err(RuntimeError::TypeMismatch("Alignment on compile-time value".into()));
+                    }
+                };
+                Ok(Value::Int(align))
+            }
+            ProjectionTarget::Range => {
+                let range = match &source_val {
+                    Value::Int(_) => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
+                    Value::Bool(_) => vec![Value::Int(0), Value::Int(1)],
+                    Value::Char(_) => vec![Value::Int(0), Value::Int(0x10FFFF)],
+                    Value::Float(_) => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
+                    _ => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
+                };
+                Ok(Value::List(range))
+            }
             ProjectionTarget::Popcount => match source_val {
                 Value::Int(n) => Ok(Value::Int(n.count_ones() as i64)),
                 _ => Err(RuntimeError::TypeMismatch("Popcount requires Int".into())),
