@@ -21,10 +21,9 @@ impl LlvmBackend {
             Expr::Bool(b) => { if *b { writeln!(out, "{}{} = and i1 true, true", indent, v).ok(); } else { writeln!(out, "{}{} = xor i1 true, true", indent, v).ok(); } return TypedRegister { name: v, ty: Type::Bool }; }
             Expr::Float(f) => {
                 let bits = float_to_llvm_hex(*f);
-                let fl = format!("%ff{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, bits).ok();
-                self.reg_float_cache.insert(fl.clone(), fl.clone());
-                return TypedRegister { name: fl, ty: Type::Float };
+                writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, bits).ok();
+                self.reg_float_cache.insert(v.clone(), v.clone());
+                return TypedRegister { name: v, ty: Type::Float };
             }
             Expr::String(s) | Expr::RegexLiteral(s) => {
                 let si = self.string_constants.iter().position(|x| x == s).unwrap_or(0);
@@ -235,17 +234,15 @@ impl LlvmBackend {
                     let rng = self.field_to_meta_idx.get(name).map(|m| format!(", !range !{}", m)).unwrap_or_default();
                     match ty {
                         s if s == "i8" => {
-                            let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, ld, p, self.align_of("i8")).ok();
+                            writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, v, p, self.align_of("i8")).ok();
                             let tr = format!("%tr_{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = trunc i8 {} to i1", indent, tr, ld).ok();
+                            writeln!(out, "{}{} = trunc i8 {} to i1", indent, tr, v).ok();
                             return TypedRegister { name: tr, ty: Type::Bool };
                         }
                         s if s == "float" => {
-                            let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = load float, float* {}, align 4", indent, ld, p).ok();
-                            self.reg_float_cache.insert(ld.clone(), ld.clone());
-                            return TypedRegister { name: ld.clone(), ty: Type::Float };
+                            writeln!(out, "{}{} = load float, float* {}, align 4", indent, v, p).ok();
+                            self.reg_float_cache.insert(v.clone(), v.clone());
+                            return TypedRegister { name: v.clone(), ty: Type::Float };
                         }
                         s if s == "i8*" => {
                             let ld = format!("%ild{}", self.txn_counter); self.txn_counter += 1;
@@ -353,10 +350,9 @@ impl LlvmBackend {
                 let inner = self.emit_expr(out, e, indent);
                 if inner.ty == Type::Float {
                     let fl = self.ensure_float_reg(out, indent, &inner);
-                    let fs = format!("%nfs{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = fsub fast float -0.0, {}", indent, fs, fl).ok();
-                    self.reg_float_cache.insert(fs.clone(), fs.clone());
-                    return TypedRegister { name: fs, ty: Type::Float };
+                    writeln!(out, "{}{} = fsub fast float -0.0, {}", indent, v, fl).ok();
+                    self.reg_float_cache.insert(v.clone(), v.clone());
+                    return TypedRegister { name: v, ty: Type::Float };
                 } else {
                     writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner.name).ok();
                     return TypedRegister { name: v, ty: Type::Int };

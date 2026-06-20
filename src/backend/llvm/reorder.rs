@@ -8,15 +8,36 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Reorder body statements to maximize instruction-level parallelism.
 /// Independent statements (no read-write conflicts) are grouped together
 /// so LLVM's scheduler can issue them simultaneously.
+/// Term and TermBang statements are always placed last — they set a
+/// "terminated" flag that stops body emission in emit_stmt. If reordered
+/// to an earlier position, subsequent statements would be silently dropped.
 /// Returns (reordered_statements, has_cycle) where has_cycle indicates
 /// a dependency cycle was detected and sorted order may be suboptimal.
 pub(crate) fn reorder_body_statements(body: &[Statement]) -> (Vec<Statement>, bool) {
     if body.len() < 3 {
         return (body.to_vec(), false);
     }
-    let sets: Vec<ReadWriteSet> = body.iter().map(rw_set_of).collect();
+    // Separate term statements (always last) from non-term statements
+    let mut terms: Vec<Statement> = Vec::new();
+    let mut non_terms: Vec<Statement> = Vec::new();
+    for s in body {
+        if matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+            terms.push(s.clone());
+        } else {
+            non_terms.push(s.clone());
+        }
+    }
+    if non_terms.len() < 2 {
+        return (body.to_vec(), false);
+    }
+    let sets: Vec<ReadWriteSet> = non_terms.iter().map(rw_set_of).collect();
     let deps = build_dependency_graph(&sets);
-    topological_sort(body, &deps)
+    let (mut reordered, has_cycle) = topological_sort(&non_terms, &deps);
+    // Append term statements at the end
+    for s in &terms {
+        reordered.push(s.clone());
+    }
+    (reordered, has_cycle)
 }
 
 /// Read and write sets for a single statement.
@@ -114,6 +135,10 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
         }
         Expr::Not(e) | Expr::Neg(e) => collect_reads_from_expr(e, reads),
         Expr::PriorState(_) => {},
+        Expr::BinaryOp(bop) => {
+            collect_reads_from_expr(&bop.left, reads);
+            collect_reads_from_expr(&bop.right, reads);
+        }
         Expr::UnaryOp(op) => collect_reads_from_expr(&op.operand, reads),
         Expr::Call(_, args) => {
             for a in args { collect_reads_from_expr(a, reads); }

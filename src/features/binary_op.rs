@@ -2,6 +2,7 @@ use crate::ast::{Expr, Type};
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
 use crate::typechecker::TypeChecker;
+use std::fmt::Write;
 
 /// Kind of binary operation
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -69,28 +70,42 @@ impl ExprEval for BinaryOpExpr {
 
 impl ExprCodegenLLVM for BinaryOpExpr {
     fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        // Reconstruct the old Expr variant for backward-compat codegen
-        let old_expr = match self.kind {
-            BinaryOpKind::Add => Expr::Add(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Sub => Expr::Sub(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Mul => Expr::Mul(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Div => Expr::Div(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Mod => Expr::Mod(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Eq => Expr::Eq(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Ne => Expr::Ne(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Lt => Expr::Lt(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Le => Expr::Le(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Gt => Expr::Gt(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Ge => Expr::Ge(self.left.clone(), self.right.clone()),
-            BinaryOpKind::And => Expr::And(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Or => Expr::Or(self.left.clone(), self.right.clone()),
-            BinaryOpKind::BitAnd => Expr::BitAnd(self.left.clone(), self.right.clone()),
-            BinaryOpKind::BitOr => Expr::BitOr(self.left.clone(), self.right.clone()),
-            BinaryOpKind::BitXor => Expr::BitXor(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Shl => Expr::Shl(self.left.clone(), self.right.clone()),
-            BinaryOpKind::Shr => Expr::Shr(self.left.clone(), self.right.clone()),
-        };
-        ctx.emit_expr(out, &old_expr, "")
+        // Emit the operands and select the correct operation directly,
+        // avoiding a nested emit_expr call that would waste %tN registers.
+        match self.kind {
+            BinaryOpKind::Add => ctx.emit_binop(out, "", &self.left, &self.right, "add", "fadd"),
+            BinaryOpKind::Sub => ctx.emit_binop(out, "", &self.left, &self.right, "sub", "fsub"),
+            BinaryOpKind::Mul => ctx.emit_binop(out, "", &self.left, &self.right, "mul", "fmul"),
+            BinaryOpKind::Div => ctx.emit_binop(out, "", &self.left, &self.right, "sdiv", "fdiv"),
+            BinaryOpKind::Mod => {
+                let (a, b) = (ctx.emit_expr(out, &self.left, ""), ctx.emit_expr(out, &self.right, ""));
+                let v = format!("%t{}", ctx.txn_counter); ctx.txn_counter += 1;
+                writeln!(out, "{} = srem i64 {}, {}", v, a, b).ok();
+                crate::backend::llvm::TypedRegister { name: v, ty: crate::ast::Type::Int }
+            }
+            // Comparison operators return Bool
+            BinaryOpKind::Eq => ctx.emit_fcmp(out, "", &self.left, &self.right, "oeq"),
+            BinaryOpKind::Ne => ctx.emit_fcmp(out, "", &self.left, &self.right, "one"),
+            BinaryOpKind::Lt => ctx.emit_fcmp(out, "", &self.left, &self.right, "olt"),
+            BinaryOpKind::Le => ctx.emit_fcmp(out, "", &self.left, &self.right, "ole"),
+            BinaryOpKind::Gt => ctx.emit_fcmp(out, "", &self.left, &self.right, "ogt"),
+            BinaryOpKind::Ge => ctx.emit_fcmp(out, "", &self.left, &self.right, "oge"),
+            BinaryOpKind::And | BinaryOpKind::Or => {
+                // Fall through to old Expr::And/Or via nested emit_expr
+                let old = if self.kind == BinaryOpKind::And {
+                    Expr::And(self.left.clone(), self.right.clone())
+                } else {
+                    Expr::Or(self.left.clone(), self.right.clone())
+                };
+                ctx.emit_expr(out, &old, "")
+            }
+            // Bitwise operators return Int
+            BinaryOpKind::BitAnd => ctx.emit_binop(out, "", &self.left, &self.right, "and", "and"),
+            BinaryOpKind::BitOr => ctx.emit_binop(out, "", &self.left, &self.right, "or", "or"),
+            BinaryOpKind::BitXor => ctx.emit_binop(out, "", &self.left, &self.right, "xor", "xor"),
+            BinaryOpKind::Shl => ctx.emit_binop(out, "", &self.left, &self.right, "shl", "shl"),
+            BinaryOpKind::Shr => ctx.emit_binop(out, "", &self.left, &self.right, "lshr", "lshr"),
+        }
     }
 }
 
