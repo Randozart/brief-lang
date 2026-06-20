@@ -5,11 +5,10 @@ use std::fmt::Write;
 impl LlvmBackend {
     /// Check if any modifier has the given name and extract its export name.
     /// Returns Some(export_name) if #export or #export("name") was found.
-    fn get_export_name(modifiers: &[crate::ast::Hashtag]) -> Option<String> {
+    pub fn get_export_name(modifiers: &[crate::ast::Hashtag]) -> Option<String> {
         for tag in modifiers {
             if tag.name == "export" {
                 let export_name = tag.value.clone().unwrap_or_else(|| tag.name.clone());
-                // If no explicit name was given, "export" is not useful — return None
                 if export_name == "export" {
                     return None;
                 }
@@ -18,6 +17,31 @@ impl LlvmBackend {
         }
         None
     }
+
+    /// Emit cleanup calls for all local variables whose type has an
+    /// OnExit foreign destructor. Called at scope exit points.
+    fn emit_on_exit_cleanup(&mut self, out: &mut String, indent: &str) {
+        let Some(ref universe) = self.type_universe else { return };
+        for (name, ty) in &self.let_binding_types {
+            let type_name = match ty {
+                crate::ast::Type::Custom(n) => n,
+                crate::ast::Type::Applied(n, _) => n,
+                _ => continue,
+            };
+            let Some(resolved) = universe.types.get(type_name) else { continue };
+            let Some(ref on_exit_fn) = resolved.on_exit else { continue };
+            let Some(reg) = self.let_bindings.get(name) else { continue };
+            // Emit: call void @on_exit_fn(i64 %reg)
+            writeln!(out, "{}{} = call i64 @{}(i64 {})",
+                indent,
+                format!("%pcl{}", self.txn_counter),
+                on_exit_fn,
+                reg
+            ).ok();
+            self.txn_counter += 1;
+        }
+    }
+
     pub(super) fn emit_header(&self, out: &mut String) {
         writeln!(out, "; ModuleID = 'program.ll'").ok();
         writeln!(out, "source_filename = \"program.bv\"").ok();
@@ -686,6 +710,8 @@ impl LlvmBackend {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
+        // Foreign destructor cleanup: emit OnExit calls before returning
+        self.emit_on_exit_cleanup(out, "  ");
         if !self.terminated {
             if is_float_fn {
                 writeln!(out, "  ret float 0.0").ok();
@@ -972,6 +998,9 @@ impl LlvmBackend {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
+
+        // Foreign destructor cleanup: emit OnExit calls before loop exit
+        self.emit_on_exit_cleanup(out, "  ");
 
         if !self.terminated {
             writeln!(out, "  br label %post").ok();

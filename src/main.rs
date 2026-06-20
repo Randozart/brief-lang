@@ -1588,6 +1588,9 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
     let verbose = args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string());
     let explain = args.contains(&"--explain".to_string());
     let emit_memory_spec = args.contains(&"--emit-memory-spec".to_string());
+    let emit_bindings_dir: Option<String> = args.iter()
+        .position(|a| a == "--emit-bindings")
+        .and_then(|i| args.get(i + 1).cloned());
     let memory_spec_format = if args.contains(&"--memory-spec-toml".to_string()) {
         "toml"
     } else {
@@ -2540,6 +2543,40 @@ fn run_llvm_compile(
         if !spirv_total.is_empty() {
             fs::write(&spv_file, &spirv_total)?;
             println!("  GPU kernels: {} ({} bytes)", spv_file.display(), spirv_total.len());
+        }
+    }
+
+    // ── Autogenous Binding Generation ──
+    // When --emit-bindings <dir> is passed, generate C/Rust/Python bindings
+    // from the TypeUniverse and any #export directives.
+    if let Some(ref bind_dir) = emit_bindings_dir {
+        let mut exports = Vec::new();
+        for item in &program.items {
+            match item {
+                crate::ast::TopLevel::Definition(defn) => {
+                    let export_name = crate::backend::llvm::emit_toplevel::get_export_name(&defn.modifiers);
+                    if let Some(ename) = export_name {
+                        let params: Vec<crate::backend::bindgen::ExportParam> = defn.parameters.iter()
+                            .map(|(n, t)| crate::backend::bindgen::ExportParam {
+                                name: n.clone(),
+                                ty: t.clone(),
+                            }).collect();
+                        exports.push(crate::backend::bindgen::ExportDecl {
+                            export_name: ename,
+                            orig_name: defn.name.clone(),
+                            params,
+                            ret_ty: crate::ast::Type::Int,
+                        });
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !exports.is_empty() {
+            match crate::backend::bindgen::emit_all(&tu, &exports, bind_dir) {
+                Ok(()) => println!("  Bindings: {}/brief_types.h, brief_bindings.rs, brief_bindings.py", bind_dir),
+                Err(e) => eprintln!("error: bindgen: {}", e),
+            }
         }
     }
 

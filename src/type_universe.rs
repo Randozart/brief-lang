@@ -58,6 +58,12 @@ pub struct ResolvedType {
     pub codec: Option<String>,
     /// User-defined projections not matching any known metadata property name.
     pub projections: HashMap<String, TypeBinding>,
+    /// Optional foreign destructor function name. When a value of this type
+    /// goes out of scope, the backend emits a call to this function with
+    /// the value's pointer. Used for FFI types with ownership semantics
+    /// (e.g., Rust Vec, C++ std::vector). Example:
+    ///   OnExit = __rust_vec_drop#;
+    pub on_exit: Option<String>,
     /// Source TypeDef for reference.
     pub source: TypeDef,
 }
@@ -133,6 +139,7 @@ impl TypeUniverse {
             allow_slice: true,
             allow_arrow: true,
             codec: None,
+            on_exit: None,
             projections: HashMap::new(),
             source: td.clone(),
         };
@@ -148,6 +155,7 @@ impl TypeUniverse {
             rt.allow_index = base.allow_index;
             rt.allow_slice = base.allow_slice;
             rt.allow_arrow = base.allow_arrow;
+            rt.on_exit = base.on_exit.clone();
         }
 
         // Phase 4: Auto-compute Bytes from bit_range for `Bits @/lo..hi` syntax
@@ -238,6 +246,19 @@ impl TypeUniverse {
                 match &binding.value.as_ref() {
                     Expr::String(s) => rt.codec = Some(s.clone()),
                     Expr::Identifier(id) => rt.codec = Some(id.clone()),
+                    _ => {}
+                }
+            }
+            "OnExit" => {
+                // Foreign destructor function: OnExit = __rust_vec_drop#;
+                // The value is the function name (string or identifier).
+                match &binding.value.as_ref() {
+                    Expr::String(s) => rt.on_exit = Some(s.clone()),
+                    Expr::Identifier(id) => rt.on_exit = Some(id.clone()),
+                    // For Expr::IntrinsicCall like __rust_vec_drop#, extract name
+                    Expr::IntrinsicCall { intrinsic, .. } => {
+                        rt.on_exit = Some(intrinsic.name().to_string());
+                    }
                     _ => {}
                 }
             }

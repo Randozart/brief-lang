@@ -1,3 +1,4 @@
+pub mod bindgen;
 pub mod circt;
 pub mod llvm;
 pub mod webstack;
