@@ -346,32 +346,32 @@ found by audit (2026-06-21).
 |------------------|--------------|
 | **Slice stride/mask** | `stride` and `mask` are read but silently ignored — the copy loop copies all consecutive elements (line 2904). |
 | **MultiSlice stride/mask/range** | Only `BracketOp::Coord(SliceCoordinate::Index(_))` is handled. `Mask`, `Stride`, and `SliceCoordinate::Range` are read but ignored (line 2784). |
-| **`FloatToStr` working path** | 3 bugs: uses `adapt_to_i64` (passes i64 bits as `double`), calls non-existent `@__snprintf__`, references undeclared `@.str.float_fmt` (line 2087). |
-| **`ToStr` working path** | Always calls `@__int_to_str__` regardless of input type (line 2097). `Float` → garbage, `Char` → wrong, `String` → pointer-as-decimal. |
-| **`bytes` projection** | Returns 0 for unknown/custom types (line 2482). Should compute struct/union footprint. |
-| **`FieldAccess` field not found** | Emits `add i64 0, 0` instead of `unreachable` (line 2747). |
-| **`UserDefined`/`UserDefinedWithArg` projections** | Falls through to `add i64 0, 0` when `try_projection_fast_path` fails (lines 2616, 2619). Should look up field in TypeUniverse. |
 
-### Missing LLVM Declare Statements
+### Error-Guard Stubs — All Fixed (2026-06-21)
 
-Six runtime functions in `brief_rt.c` are called without `declare` in the LLVM
-IR. The LLVM verifier would reject these programs:
+The following error-guard stubs previously emitted `add i64 0, 0` silently;
+all now emit `call void @llvm.trap()` before the zero return:
 
-- `@__trim_left__(ptr)` — `brief_rt.c:693`
-- `@__trim_right__(ptr)` — `brief_rt.c:699`
-- `@__to_lower__(ptr)` — `brief_rt.c:712`
-- `@__contains_at__(ptr, ptr, i64)` — `brief_rt.c:724`
-- `@__find_from__(ptr, ptr, i64)` — `brief_rt.c:730`
-- `@__splitn__(ptr, ptr, i64)` — `brief_rt.c:742`
+**Intrinsic error-guards (wrong arg count)**: `sort`, `reverse`, `range`,
+`trim_left`, `trim_right`, `to_lower`, `contains_at`, `splitn`, `int_to_str`,
+`strlen`, `float_to_str`, `to_str`, `size`, `pop`, `contains`, `keys`/`values`,
+`read_file`.
 
-### Error-Guard Stubs (Silent 0 Return)
+**Projection error-guards (unrecognized field/type)**: `Expr::Identifier` not
+found, `ProjectionTarget::Bytes` for unknown type, `ProjectionTarget::UserDefined`
+and `UserDefinedWithArg` fallthrough, `Expr::FieldAccess` field not found.
 
-The following intrinsics emit `add i64 0, 0` when called with the wrong
-argument count instead of emitting `unreachable` (compile error). All are in
-`emit_expr.rs`:
+**`bytes` projection for struct types**: Now computes `fields.len() * 8` when
+the source type is `Type::Custom(name)` and the struct is in `struct_types`.
 
-`sort`, `reverse`, `range`, `trim_left`, `trim_right`, `to_lower`,
-`contains_at`, `splitn`, `int_to_str`, `strlen`, `float_to_str`, `to_str`
+**`FloatToStr`/`ToStr` working paths**: Replaced buggy `@__snprintf__`-based
+implementation with `@__float_to_str` / `@__to_str` C runtime functions.
+Return type changed from `i8*` to `i64` to match C functions.
+
+**Missing declares**: 8 `declare` statements for runtime functions
+(`__trim_left__`, `__trim_right__`, `__to_lower__`, `__contains_at__`,
+`__find_from__`, `__splitn__`, `__float_to_str`, `__to_str`) were added to
+`emit_toplevel.rs`.
 
 ### Top-Level — Struct/Enum Layout
 | TopLevel | Notes |
