@@ -3756,17 +3756,47 @@ impl Interpreter {
                         Ok(Value::String(sym))
                     }
                     // GPU compute intrinsics — interpreter stubs (no GPU simulation)
+                    // These accept their standard dimension arguments for validation
+                    // but return constant values since the interpreter cannot simulate a GPU.
                     Intrinsic::GetGlobalId => {
-                        Ok(Value::Int(0))
+                        let dim = values.remove(0);
+                        match dim {
+                            Value::Int(d) if d >= 0 && d < 3 => Ok(Value::Int(0)),
+                            Value::Int(d) => Err(RuntimeError::TypeMismatch(
+                                format!("get_global_id: dimension {} out of range [0,2]", d))),
+                            v => Err(RuntimeError::TypeMismatch(
+                                format!("get_global_id expects Int dimension, got {:?}", v))),
+                        }
                     }
                     Intrinsic::GetLocalId => {
-                        Ok(Value::Int(0))
+                        let dim = values.remove(0);
+                        match dim {
+                            Value::Int(d) if d >= 0 && d < 3 => Ok(Value::Int(0)),
+                            Value::Int(d) => Err(RuntimeError::TypeMismatch(
+                                format!("get_local_id: dimension {} out of range [0,2]", d))),
+                            v => Err(RuntimeError::TypeMismatch(
+                                format!("get_local_id expects Int dimension, got {:?}", v))),
+                        }
                     }
                     Intrinsic::GetGroupId => {
-                        Ok(Value::Int(0))
+                        let dim = values.remove(0);
+                        match dim {
+                            Value::Int(d) if d >= 0 && d < 3 => Ok(Value::Int(0)),
+                            Value::Int(d) => Err(RuntimeError::TypeMismatch(
+                                format!("get_group_id: dimension {} out of range [0,2]", d))),
+                            v => Err(RuntimeError::TypeMismatch(
+                                format!("get_group_id expects Int dimension, got {:?}", v))),
+                        }
                     }
                     Intrinsic::GetNumGroups => {
-                        Ok(Value::Int(1))
+                        let dim = values.remove(0);
+                        match dim {
+                            Value::Int(d) if d >= 0 && d < 3 => Ok(Value::Int(1)),
+                            Value::Int(d) => Err(RuntimeError::TypeMismatch(
+                                format!("get_num_groups: dimension {} out of range [0,2]", d))),
+                            v => Err(RuntimeError::TypeMismatch(
+                                format!("get_num_groups expects Int dimension, got {:?}", v))),
+                        }
                     }
                     Intrinsic::SubGroupBarrier => {
                         Ok(Value::Bool(true))
@@ -8681,6 +8711,87 @@ mod tests {
         let constraint = Expr::RegexLiteral("^hello".to_string());
         let result = i.eval_constraint(&val, &constraint);
         assert!(result.is_err(), "Regex literal alone is not a valid constraint expression");
+    }
+
+    // ── GPU compute intrinsic stubs ──────────────────────────────
+
+    #[test]
+    fn test_gpu_get_global_id() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetGlobalId,
+            args: vec![Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0));
+    }
+
+    #[test]
+    fn test_gpu_get_local_id() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetLocalId,
+            args: vec![Expr::Integer(1)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0));
+    }
+
+    #[test]
+    fn test_gpu_get_group_id() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetGroupId,
+            args: vec![Expr::Integer(2)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(0));
+    }
+
+    #[test]
+    fn test_gpu_get_num_groups() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetNumGroups,
+            args: vec![Expr::Integer(0)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_gpu_barrier() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::SubGroupBarrier,
+            args: vec![],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_gpu_intrinsic_invalid_dimension_errors() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetGlobalId,
+            args: vec![Expr::Integer(5)],
+        };
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("out of range"), "Expected out-of-range error, got: {}", err);
+    }
+
+    #[test]
+    fn test_gpu_intrinsic_wrong_arg_type_errors() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::GetGlobalId,
+            args: vec![Expr::String("x".to_string())],
+        };
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err());
     }
 }
 

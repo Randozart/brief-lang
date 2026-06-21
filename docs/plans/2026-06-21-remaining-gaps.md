@@ -43,8 +43,12 @@ placeholder strings, and degraded code paths across the compiler.
 - `ProjectionTarget::Bytes` in feature module: same additions (was only missing Data, Tuple, Stack, Queue, StringBuilder — all fell to `_ => 0`)
 - 5 new tests (projection + intrinsic forms on Instance, Data, Tuple, unsupported type error)
 
-### #7: GPU intrinsics in interpreter
-- `src/interpreter.rs:3752-3764` — `get_global_id#`, `get_local_id#`, etc. return 0/1 stubs
+### #7: GPU intrinsics in interpreter ✅ DONE (2026-06-21)
+- All 5 GPU intrinsics now consume and validate their dimension argument
+- `get_global_id#(d)`, `get_local_id#(d)`, `get_group_id#(d)` validate 0 ≤ d < 3
+- `get_num_groups#(d)` validates dimension, returns 1
+- `barrier#()` validates no args
+- 7 new tests (basic id queries, barrier, dimension error, type error)
 
 ## Medium (small, self-contained)
 
