@@ -1780,6 +1780,7 @@ impl Interpreter {
                     Intrinsic::Size => {
                         let v = values.remove(0);
                         match v {
+                            Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
                             Value::List(l) => Ok(Value::Int(l.len() as i64)),
                             Value::String(s) => Ok(Value::Int(s.len() as i64)),
                             Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
@@ -6011,6 +6012,54 @@ mod tests {
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(5));
+    }
+
+    #[test]
+    fn test_projection_size_on_int() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(42));
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("x".to_string())),
+            target: ProjectionTarget::Size,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_projection_size_on_float() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Float(3.14));
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("x".to_string())),
+            target: ProjectionTarget::Size,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_projection_size_on_bool() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Bool(true));
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("x".to_string())),
+            target: ProjectionTarget::Size,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1));
+    }
+
+    #[test]
+    fn test_projection_size_on_char() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Char('a'));
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("x".to_string())),
+            target: ProjectionTarget::Size,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(1));
     }
 
     #[test]

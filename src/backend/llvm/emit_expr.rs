@@ -2468,11 +2468,17 @@ impl LlvmBackend {
                 let src_val = self.emit_expr(out, source, indent);
                 match target {
                     ProjectionTarget::Size => {
-                        let hp = format!("%php{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
-                        let lp = format!("%plp{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
-                        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
+                        if matches!(source.as_ref(),
+                            Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_))
+                        {
+                            writeln!(out, "{}{} = add i64 0, 1", indent, v).ok();
+                        } else {
+                            let hp = format!("%php{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                            let lp = format!("%plp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
+                        }
                     }
                     ProjectionTarget::Bytes => {
                         let bs = match &src_val.ty {

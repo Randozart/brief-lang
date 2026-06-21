@@ -1774,6 +1774,7 @@ impl TypeChecker {
                 match target {
                     ProjectionTarget::Size => {
                         match &src_ty {
+                            Type::Int | Type::Float | Type::Bool | Type::Char => {}
                             Type::Applied(name, _) if name == "List" || name == "Vector" || name == "String" => {}
                             Type::Custom(n) if n == "String" || n == "str" => {}
                             Type::String => {}
@@ -1976,6 +1977,9 @@ impl TypeChecker {
                         }
                     }
                     ProjectionTarget::AsStack => {
+                        self.diagnostics.borrow_mut().push(Diagnostic::new("D001",
+                            Severity::Warning,
+                            "AsStack is deprecated, use InsertAt/ExtractFrom type metadata instead"));
                         match &src_ty {
                             Type::Applied(name, inner) if name == "List" => {
                                 let elem_ty = inner.first().cloned().unwrap_or(Type::String);
@@ -1992,6 +1996,9 @@ impl TypeChecker {
                         }
                     }
                     ProjectionTarget::AsQueue => {
+                        self.diagnostics.borrow_mut().push(Diagnostic::new("D001",
+                            Severity::Warning,
+                            "AsQueue is deprecated, use InsertAt/ExtractFrom type metadata instead"));
                         match &src_ty {
                             Type::Applied(n, _) if n == "List" => Type::Applied("Queue".to_string(), vec![Type::String]),
                             _ => {

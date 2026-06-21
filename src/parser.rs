@@ -2657,6 +2657,32 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
+            // Check for pragma shorthand: #ident  →  Name = true;
+            // Also accepts #!ident (mandatory) and ?#ident (speculative).
+            let is_pragma = matches!(self.current_token(), Some(Ok(Token::Hash | Token::HashBang | Token::HashQuestion)));
+            if is_pragma {
+                self.advance();
+                let pragma_name = self.expect_identifier()?;
+                // Capitalize first letter to match TypeDef binding convention (Volatile, Atomic)
+                let capitalized = if let Some(c) = pragma_name.chars().next() {
+                    c.to_uppercase().collect::<String>() + &pragma_name[1..]
+                } else {
+                    pragma_name
+                };
+                bindings.push(TypeBinding {
+                    name: capitalized,
+                    params: vec![],
+                    value: Box::new(Expr::Bool(true)),
+                    span: self.current_span(),
+                });
+                if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                    self.advance();
+                } else {
+                    return self.spanned_err("Expected ';' after pragma in type body".to_string());
+                }
+                continue;
+            }
+
             // Parse a binding: ident [ ( params ) ]? = expr ;
             let binding_name = self.expect_identifier()?;
 
@@ -9241,6 +9267,36 @@ mod parser_tests {
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Constraint without type should parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_typedef_pragma_volatile() {
+        let s = "type VolatileFlag <: Bool { #volatile; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse #volatile pragma in TypeDef: {:?}", result.err());
+        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+            assert_eq!(td.name, "VolatileFlag");
+            assert_eq!(td.body.bindings.len(), 1, "Should have 1 binding from pragma");
+            assert_eq!(td.body.bindings[0].name, "Volatile");
+            assert_eq!(td.body.bindings[0].value.as_ref(), &Expr::Bool(true));
+        } else {
+            panic!("Expected TypeDef");
+        }
+    }
+
+    #[test]
+    fn test_parse_typedef_pragma_atomic() {
+        let s = "type AtomicCounter <: Int { Bytes = 4; #atomic; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse #atomic pragma in TypeDef: {:?}", result.err());
+        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+            assert_eq!(td.body.bindings.len(), 2, "Should have Bytes + Atomic binding");
+            assert!(td.body.bindings.iter().any(|b| b.name == "Atomic"));
+        } else {
+            panic!("Expected TypeDef");
+        }
     }
 }
 

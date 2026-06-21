@@ -26,6 +26,7 @@ impl ExprEval for ProjectionExpr {
         let source_val = ctx.eval_expr(&self.source)?;
         match &self.target {
             ProjectionTarget::Size => match &source_val {
+                Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
                 Value::List(items) => Ok(Value::Int(items.len() as i64)),
                 Value::Tuple(items) => Ok(Value::Int(items.len() as i64)),
                 Value::String(s) => Ok(Value::Int(s.len() as i64)),
