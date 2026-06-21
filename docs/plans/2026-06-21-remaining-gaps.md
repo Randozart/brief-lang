@@ -11,9 +11,11 @@ placeholder strings, and degraded code paths across the compiler.
 - All Statement types emit real TS code (no more `// statement omitted`)
 - ARM bare-metal path emits native Rust code for all Statement/Expr variants
 
-### #2: CIRCT backend — Expr::Call returns None
-- `src/backend/circt.rs:349` — `Expr::Call(name, _args) => None`
-- Most expression types return `None` (unsupported)
+### #2: CIRCT backend — Expr::Call returns None ✅ FIXED (2026-06-21)
+- `Expr::Call` now emits `hw.instance` submodule instantiation
+- `Expr::IntrinsicCall` handles Abs, Ctpop, Ctlz, Cttz, Bitreverse, Size, Sqrt, Fabs, Ceil, Floor, Sin, Cos, Pow
+- Fixed duplicate trigger processing bug
+- 5 new tests
 
 ## High (incomplete features)
 
