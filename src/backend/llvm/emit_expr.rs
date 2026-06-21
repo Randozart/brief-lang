@@ -2760,7 +2760,8 @@ impl LlvmBackend {
                         return TypedRegister { name: v, ty: ft };
                     }
                 } else {
-                    writeln!(out, "{}{} = add i64 0, 0 ; field", indent, v).ok();
+                    writeln!(out, "{}  call void @llvm.trap()", indent).ok();
+                    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                 }
             }
             // ── PatternMatch ────────────────────────────────────

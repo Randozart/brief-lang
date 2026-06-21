@@ -2715,8 +2715,8 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("add i64 0, 0 ; field"),
-            "Unknown struct FieldAccess should emit fallback. Got: {}", output);
+        assert!(output.contains("call void @llvm.trap()"),
+            "Unknown struct FieldAccess should emit @llvm.trap(). Got: {}", output);
     }
 
     #[test]
