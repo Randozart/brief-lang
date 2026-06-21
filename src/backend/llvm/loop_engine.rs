@@ -57,7 +57,10 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = load float, float* {}, align 4", indent, l, p).ok();
                             writeln!(out, "{}{} = bitcast float {} to i64", indent, v, l).ok();
                         }
-                        _ => { writeln!(out, "{}{} = add i64 0, 0 ; unknown field type", indent, v).ok(); }
+                        _ => {
+                            writeln!(out, "{}call void @llvm.trap()", indent).ok();
+                            writeln!(out, "{}{} = add i64 undef, 0 ; unknown field type", indent, v).ok();
+                        }
                     }
                 } else if self.constants.contains_key(name) {
                     writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
@@ -65,10 +68,12 @@ impl LlvmBackend {
                     if let Some(t) = self.triggers.get(name).cloned() {
                         self.emit_trg_load(out, indent, &v, &t.address, &t.ty);
                     } else {
-                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                        writeln!(out, "{}call void @llvm.trap()", indent).ok();
+                        writeln!(out, "{}{} = add i64 undef, 0 ; trigger not found", indent, v).ok();
                     }
                 } else {
-                    writeln!(out, "{}{} = add i64 0, 0 ; unknown id '{}'", indent, v, name).ok();
+                    writeln!(out, "{}call void @llvm.trap()", indent).ok();
+                    writeln!(out, "{}{} = add i64 undef, 0 ; unknown exit id '{}'", indent, v, name).ok();
                 }
                 v
             }
@@ -141,7 +146,8 @@ impl LlvmBackend {
                 v
             }
             _ => {
-                writeln!(out, "{}{} = add i64 0, 0 ; unsupported exit expr", indent, v).ok();
+                writeln!(out, "{}call void @llvm.trap()", indent).ok();
+                writeln!(out, "{}{} = add i64 undef, 0 ; unsupported exit expr", indent, v).ok();
                 v
             }
         }

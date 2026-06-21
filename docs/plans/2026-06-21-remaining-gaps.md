@@ -52,13 +52,17 @@ placeholder strings, and degraded code paths across the compiler.
 
 ## Medium (small, self-contained)
 
-### #8: atomic_store/fence/halt LLVM stubs
-- `src/backend/llvm/emit_expr.rs:1408,1440,2332,2398`
-- Void-returning intrinsics emit `add i64 0, 0` as dummy value
+### #8: atomic_store/fence/halt LLVM stubs ✅ DONE (2026-06-21)
+- Void-returning intrinsics (AtomicStore, Fence, ThreadExit, Halt) now emit `add i64 undef, 0` instead of `add i64 0, 0`
+- `undef` signals to LLVM that the value is meaningless, enabling more aggressive DCE
+- 2 new tests for Fence and Halt
 
-### #9: Exit expression LLVM stubs
-- `src/backend/llvm/loop_engine.rs:60,68,71,144`
-- Unknown fields/identifiers in exit expressions return 0
+### #9: Exit expression LLVM stubs ✅ DONE (2026-06-21)
+- Unknown field types, missing triggers, unknown identifiers, and unsupported exit expressions now emit `call void @llvm.trap()` before the dummy value
+- Previously returned 0 silently (could mask bugs)
+- `@llvm.trap()` immediately crashes the program if these compiler-bug paths are reached
+
+## All nine gaps from survey are now closed.
 
 ## Principle
 - Use intrinsics (`#`-syntax, `Intrinsic` enum) instead of `frgn` declarations

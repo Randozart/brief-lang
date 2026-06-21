@@ -5196,3 +5196,83 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("br i1"),
             "Passing constraint should still emit br i1 guard. Got:\n{}", output);
     }
+
+    #[test]
+    fn test_void_intrinsic_fence_uses_undef() {
+        let mut backend = LlvmBackend::new();
+        // Construct a defn whose body calls fence#(0) via IntrinsicCall
+        let mut body = Vec::new();
+        body.push(Statement::Expression(Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Fence,
+            args: vec![Expr::Integer(0)],
+        }));
+        body.push(Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None });
+        let defn = TopLevel::Definition(Definition {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![Type::Int],
+            output_type: Some(OutputType::Single(Type::Int)),
+            output_names: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+                watchdog: None,
+            },
+            body,
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+        let program = Program {
+            items: vec![defn],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        // Should contain undef instead of add i64 0, 0 for the void intrinsic
+        assert!(output.contains("add i64 undef, 0"),
+            "Fence should emit add i64 undef, not add i64 0, 0.\nGot:\n{}", output);
+        assert!(!output.contains("add i64 0, 0 ; fence"),
+            "Fence should not emit the old add i64 0, 0 pattern.\nGot:\n{}", output);
+    }
+
+    #[test]
+    fn test_void_intrinsic_halt_uses_undef() {
+        let mut backend = LlvmBackend::new();
+        let mut body = Vec::new();
+        body.push(Statement::Expression(Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Halt,
+            args: vec![],
+        }));
+        body.push(Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None });
+        let defn = TopLevel::Definition(Definition {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![Type::Int],
+            output_type: Some(OutputType::Single(Type::Int)),
+            output_names: vec![],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                span: None,
+                watchdog: None,
+            },
+            body,
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+        let program = Program {
+            items: vec![defn],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("add i64 undef, 0 ; halt is void"),
+            "Halt should emit add i64 undef.\nGot:\n{}", output);
+    }

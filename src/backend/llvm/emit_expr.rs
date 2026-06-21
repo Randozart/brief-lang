@@ -1405,7 +1405,7 @@ impl LlvmBackend {
                         let ptr = format!("%aptr{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
                         writeln!(out, "{}store atomic i64 {}, ptr {} release, align 8", indent, val.name, ptr).ok();
-                        writeln!(out, "{}{} = add i64 0, 0 ; atomic_store returns void, stub", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 undef, 0 ; atomic_store is void", indent, v).ok();
                     }
                     Intrinsic::AtomicCas => {
                         let addr = self.emit_expr(out, &args[0], indent);
@@ -1437,7 +1437,7 @@ impl LlvmBackend {
                     Intrinsic::Fence => {
                         let _order = self.emit_expr(out, &args[0], indent);
                         writeln!(out, "{}fence acquire", indent).ok();
-                        writeln!(out, "{}{} = add i64 0, 0 ; fence returns void, stub", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 undef, 0 ; fence is void", indent, v).ok();
                     }
                     Intrinsic::Futex => {
                         // Evaluate all arguments for side effects (futex is a real
@@ -2329,7 +2329,7 @@ impl LlvmBackend {
                     Intrinsic::ThreadExit => {
                         let code = self.emit_expr(out, &args[0], indent);
                         writeln!(out, "{}  call void @__thread_exit__(i64 {})", indent, code.name).ok();
-                        writeln!(out, "{}  {} = add i64 0, 0 ; unreachable", indent, v).ok();
+                        writeln!(out, "{}  {} = add i64 undef, 0 ; thread_exit is noreturn", indent, v).ok();
                     }
                     Intrinsic::MutexLock => {
                         let mptr = self.emit_expr(out, &args[0], indent);
@@ -2395,7 +2395,7 @@ impl LlvmBackend {
                         // CPU halt: WFI on ARM, HLT on x86, WFI on RISC-V
                         // The target triple determines the instruction.
                         writeln!(out, "{}call void asm sideeffect \"wfi\", \"\"()", indent).ok();
-                        writeln!(out, "{}{} = add i64 0, 0 ; halt returns void", indent, v).ok();
+                        writeln!(out, "{}{} = add i64 undef, 0 ; halt is void", indent, v).ok();
                     }
                 }
             }
