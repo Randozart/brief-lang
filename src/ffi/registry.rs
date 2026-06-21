@@ -1115,24 +1115,69 @@ fn encoding_html_unescape_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
     }
 }
 
-fn encoding_md5_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
-    Ok(Value::String("not_implemented".to_string()))
+fn hash_bytes_md5(data: &[u8]) -> String {
+    use md5::Digest;
+    format!("{:x}", md5::Md5::digest(data))
 }
 
-fn encoding_sha1_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
-    Ok(Value::String("not_implemented".to_string()))
+fn hash_bytes_sha1(data: &[u8]) -> String {
+    use sha1::Digest;
+    format!("{:x}", sha1::Sha1::digest(data))
 }
 
-fn encoding_sha256_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
-    Ok(Value::String("not_implemented".to_string()))
+fn hash_bytes_sha256(data: &[u8]) -> String {
+    use sha2::Digest;
+    format!("{:x}", sha2::Sha256::digest(data))
 }
 
-fn encoding_sha512_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
-    Ok(Value::String("not_implemented".to_string()))
+fn hash_bytes_sha512(data: &[u8]) -> String {
+    use sha2::Digest;
+    format!("{:x}", sha2::Sha512::digest(data))
 }
 
-fn encoding_uuid_v4_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
-    Ok(Value::String("not_implemented".to_string()))
+fn encoding_md5_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => Ok(Value::String(hash_bytes_md5(s.as_bytes()))),
+        Some(Value::Data(d)) => Ok(Value::String(hash_bytes_md5(d))),
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::md5 expects 1 argument (string)".to_string())),
+    }
+}
+
+fn encoding_sha1_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha1(s.as_bytes()))),
+        Some(Value::Data(d)) => Ok(Value::String(hash_bytes_sha1(d))),
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::sha1 expects 1 argument (string)".to_string())),
+    }
+}
+
+fn encoding_sha256_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha256(s.as_bytes()))),
+        Some(Value::Data(d)) => Ok(Value::String(hash_bytes_sha256(d))),
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::sha256 expects 1 argument (string)".to_string())),
+    }
+}
+
+fn encoding_sha512_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha512(s.as_bytes()))),
+        Some(Value::Data(d)) => Ok(Value::String(hash_bytes_sha512(d))),
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("encoding::sha512 expects 1 argument (string)".to_string())),
+    }
+}
+
+fn encoding_uuid_v4_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.is_empty() {
+        let uuid = uuid::Uuid::new_v4();
+        Ok(Value::String(uuid.to_string()))
+    } else {
+        Err(RuntimeError::TypeMismatch("encoding::uuid_v4 expects 0 arguments".to_string()))
+    }
 }
 
 // ===== JSON Implementations =====
@@ -1244,12 +1289,36 @@ fn json_length_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 // ===== HTTP Implementations =====
 
-fn http_get_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
-    Ok(Value::String("HTTP not implemented in native runtime".to_string()))
+fn http_get_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match args.first() {
+        Some(Value::String(url)) => {
+            let response = ureq::get(url)
+                .call()
+                .map_err(|e| RuntimeError::TypeMismatch(format!("http::get failed: {}", e)))?;
+            let body = response
+                .into_string()
+                .map_err(|e| RuntimeError::TypeMismatch(format!("http::get response read failed: {}", e)))?;
+            Ok(Value::String(body))
+        }
+        Some(other) => Ok(other.clone()),
+        None => Err(RuntimeError::TypeMismatch("http::get expects 1 argument (URL string)".to_string())),
+    }
 }
 
-fn http_post_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
-    Ok(Value::String("HTTP not implemented in native runtime".to_string()))
+fn http_post_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    match (args.first(), args.get(1)) {
+        (Some(Value::String(url)), Some(Value::String(body))) => {
+            let response = ureq::post(url)
+                .send_string(body)
+                .map_err(|e| RuntimeError::TypeMismatch(format!("http::post failed: {}", e)))?;
+            let body = response
+                .into_string()
+                .map_err(|e| RuntimeError::TypeMismatch(format!("http::post response read failed: {}", e)))?;
+            Ok(Value::String(body))
+        }
+        (Some(other), _) => Ok(other.clone()),
+        (None, _) => Err(RuntimeError::TypeMismatch("http::post expects 2 arguments (URL string, body string)".to_string())),
+    }
 }
 
 #[cfg(test)]
@@ -1373,5 +1442,73 @@ mod tests {
         for loc in &new_locations {
             assert!(registry.contains(loc), "New binding impl missing: {}", loc);
         }
+    }
+
+    #[test]
+    fn test_encoding_md5() {
+        let result = encoding_md5_impl(vec![Value::String("hello".to_string())]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::String("5d41402abc4b2a76b9719d911017c592".to_string()));
+    }
+
+    #[test]
+    fn test_encoding_sha1() {
+        let result = encoding_sha1_impl(vec![Value::String("hello".to_string())]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::String("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d".to_string()));
+    }
+
+    #[test]
+    fn test_encoding_sha256() {
+        let result = encoding_sha256_impl(vec![Value::String("hello".to_string())]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::String("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string()));
+    }
+
+    #[test]
+    fn test_encoding_sha512() {
+        let result = encoding_sha512_impl(vec![Value::String("hello".to_string())]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::String("9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043".to_string()));
+    }
+
+    #[test]
+    fn test_encoding_md5_data() {
+        let result = encoding_md5_impl(vec![Value::Data(vec![104, 101, 108, 108, 111])]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::String("5d41402abc4b2a76b9719d911017c592".to_string()));
+    }
+
+    #[test]
+    fn test_encoding_uuid_v4() {
+        let result = encoding_uuid_v4_impl(vec![]);
+        assert!(result.is_ok());
+        if let Value::String(uuid) = result.unwrap() {
+            assert_eq!(uuid.len(), 36, "UUID should be 36 chars");
+            assert_eq!(uuid.chars().nth(8), Some('-'));
+            assert_eq!(uuid.chars().nth(14), Some('4'), "UUID v4 should have version nibble 4");
+        } else {
+            panic!("Expected String");
+        }
+    }
+
+    #[test]
+    fn test_encoding_uuid_v4_errors_with_args() {
+        let result = encoding_uuid_v4_impl(vec![Value::String("bad".to_string())]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encoding_md5_no_args_errors() {
+        let result = encoding_md5_impl(vec![]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_encoding_sha256_passthrough_non_string() {
+        // Non-string, non-data inputs pass through unchanged
+        let result = encoding_sha256_impl(vec![Value::Int(42)]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Value::Int(42));
     }
 }

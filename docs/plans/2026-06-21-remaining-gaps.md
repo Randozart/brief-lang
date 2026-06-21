@@ -31,9 +31,12 @@ placeholder strings, and degraded code paths across the compiler.
 - 3 new tests: basic expansion, undefined macro error, full E2E parse→expand→interpret
 - `collect_macro_defs` and `expand_macro_calls_in_items` made `pub(crate)` for external use
 
-### #5: Crypto/HTTP FFI functions
-- `src/ffi/registry.rs:1118-1252` — md5, sha1, sha256, sha512, uuid_v4, http::get, http::post
-- All return `Value::String("not_implemented")` placeholder strings
+### #5: Crypto/HTTP FFI functions ✅ DONE (2026-06-21)
+- MD5, SHA-1, SHA-256, SHA-512: use `md-5`, `sha-1`, `sha2` crates — verified against known test vectors
+- UUID v4: uses `uuid` crate with v4 feature — validates format and version nibble
+- HTTP GET/POST: uses `ureq` synchronous client — returns real HTTP response body
+- All handle String and Data inputs, pass through non-string values, error on missing args
+- 9 new tests (hash vectors, data input, UUID format, error cases, passthrough)
 
 ### #6: `bytes` projection in interpreter
 - `src/interpreter.rs:1759` — Not implemented for `Value::Instance` / `Value::Float`
