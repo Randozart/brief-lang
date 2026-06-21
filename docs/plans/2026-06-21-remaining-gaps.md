@@ -5,10 +5,11 @@ placeholder strings, and degraded code paths across the compiler.
 
 ## Critical (blocks functionality)
 
-### #1: Webstack backend — transaction body emits placeholder
-- `src/backend/webstack.rs:271-277` — Transaction body generates `true` placeholder
-- `src/backend/webstack.rs:1050-1060` — Legacy stubs (generate_rust_code, generate_transaction, etc.)
-- No real statement codegen for the active web target
+### #1: Webstack backend — transaction body emits placeholder ✅ FIXED (2026-06-21)
+- `src/backend/webstack.rs:271-277` — Transaction body generates `true` placeholder → replaced with real `statement_to_rust()` / `expr_to_rust()` codegen
+- TS path: intrinsic handler expanded from 4 to 25+ variants (Math.*, String(), Date.now(), etc.)
+- All Statement types emit real TS code (no more `// statement omitted`)
+- ARM bare-metal path emits native Rust code for all Statement/Expr variants
 
 ### #2: CIRCT backend — Expr::Call returns None
 - `src/backend/circt.rs:349` — `Expr::Call(name, _args) => None`

@@ -495,6 +495,7 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
 - **Variadic `fprintf` syntax** fixed: 3 call sites now use `(ptr, ptr, ...)` prototype (loop_engine.rs:872, emit_expr.rs:1747, emit_expr.rs:1769)
 - **TBAA metadata** implemented: 6-node type tree (Brief/Int/Bool/Char/String/Float), annotated on all state field loads and stores + struct FieldAccess. Enables LLVM type-based alias analysis for i64-boxed types.
 - **`!range` metadata** implemented: replaces `@llvm.assume` for simple `[x < N]` precondition patterns with `!range !{ 0, N }` on the field load.
+- **Webstack backend gaps closed** (2026-06-21): ARM bare-metal codegen path no longer emits `true` placeholder — `statement_to_rust()`/`expr_to_rust()` cover all Statement and Expr variants with native Rust codegen. TS path: intrinsic handler expanded from 4 to 25+ variants (Math.*, String(), Date.now(), etc.), all Statement types (Foreach, SyncBlock, OnExit, Oracle, Await, Async, AsyncAwait, Unification, InlineAsm) emit real TS code instead of `// statement omitted`. 9 new tests, 1128 total passing.
 - **`<-` arrow push** implemented for `List<T>`: reads header, allocates new buffer, copies elements, appends value, writes back to state field. No longer returns 0.
 - **`<-` arrow pop** implemented for `List<T>`: reads header, loads element at index, allocates buffer with len-1, copies before/after elements, writes back to state.
 - **`<-` arrow discard** implemented for `List<T>`: removes element at index, allocates buffer with len-1, stores updated list back.
