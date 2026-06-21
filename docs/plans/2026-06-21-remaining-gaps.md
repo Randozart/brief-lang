@@ -19,13 +19,17 @@ placeholder strings, and degraded code paths across the compiler.
 
 ## High (incomplete features)
 
-### #3: Pattern B AssignmentStmt
-- `src/features/stmt/assignment.rs:28-34` — All 4 trait impls are empty stubs
-- `evaluate` returns `Err("not yet dispatched")`, `emit_llvm` is empty body
+### #3: Pattern B AssignmentStmt ✅ DONE (2026-06-21)
+- `StmtEval` implemented: handles Identifier, ListIndex, TupleDestructure LHS forms
+- `StmtTypecheck`, `StmtCodegenLLVM`, `StmtCodegenWebstack`: stubs (dual-path, Phase 4)
+- 3 new tests (simple eval, list index mutation, tuple destructure)
+- Old inline dispatch remains active in all 4 passes
 
-### #4: Macro expansion
-- `src/features/macros/macro_.rs:5-11` — Parsing done, expansion returns error
-- Phase 1b AST/parser implemented but actual expansion stubbed
+### #4: Macro expansion ✅ DONE (2026-06-21)
+- `macro_.rs::expand_macro_call()` — dead code from original design, now wired to delegate to `template::expand_macro()`
+- Real expansion was always in `template.rs::expand_macro()` + `expand.rs` orchestration (20 existing tests)
+- 3 new tests: basic expansion, undefined macro error, full E2E parse→expand→interpret
+- `collect_macro_defs` and `expand_macro_calls_in_items` made `pub(crate)` for external use
 
 ### #5: Crypto/HTTP FFI functions
 - `src/ffi/registry.rs:1118-1252` — md5, sha1, sha256, sha512, uuid_v4, http::get, http::post

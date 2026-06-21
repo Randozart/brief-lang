@@ -35,7 +35,7 @@ fn collect_template_defs(program: &mut Program, ctx: &mut MacroContext) {
     }
 }
 
-fn collect_macro_defs(program: &mut Program, ctx: &mut MacroContext) {
+pub(crate) fn collect_macro_defs(program: &mut Program, ctx: &mut MacroContext) {
     let mut i = 0;
     while i < program.items.len() {
         if let TopLevel::MacroDef { name, params, return_type, body } = &program.items[i] {
@@ -254,7 +254,7 @@ fn expand_template_in_expr(
 
 // ── Macro expansion (Phase 1b) ────────────────────────────────
 
-fn expand_macro_calls_in_items(
+pub(crate) fn expand_macro_calls_in_items(
     items: &mut Vec<TopLevel>,
     ctx: &mut MacroContext,
 ) -> Result<(), String> {
