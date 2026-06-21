@@ -328,24 +328,49 @@ New features follow the Pattern-B convention: a single directory with `mod.rs` +
 
 Note: Rust 2021 reserves `macro` as a keyword, so the directory is `macros/` (plural) and the macro-specific expansion file is `macro_.rs` (trailing underscore).
 
-## LLVM Backend — Real Remaining Gaps
+## LLVM Backend — All Gaps Closed (2026-06-21)
 
 Additive only — never weaken existing optimization paths.
 
-Most expression types from the original gaps list (`Slice`, `MultiSlice`,
+All expression types from the original gaps list (`Slice`, `MultiSlice`,
 `Tuple`, `StructInstance`, `ObjectLiteral`, `FieldAccess`, `MapLiteral`,
 `SetLiteral`, `ArrowTransfer`, `<-` push/pop/discard, and all projection
 operators including `Keys`, `Values`, `Contains`, `Pop`, `Index`) have been
 **fully implemented** in `emit_expr.rs`. `ForAll`/`Exists` were **removed**
-from the AST entirely. The table below reflects the **actual** remaining gaps
-found by audit (2026-06-21).
+from the AST entirely. As of 2026-06-21, there are **no known stub or
+degraded expression paths** in the LLVM backend.
 
-### Expressions — Known Stubs or Degraded Paths
+### Expressions — All Fixed (2026-06-21)
 
-| Expr / Intrinsic | What's Wrong |
-|------------------|--------------|
-| **Slice stride/mask** | `stride` and `mask` are read but silently ignored — the copy loop copies all consecutive elements (line 2904). |
-| **MultiSlice stride/mask/range** | Only `BracketOp::Coord(SliceCoordinate::Index(_))` is handled. `Mask`, `Stride`, and `SliceCoordinate::Range` are read but ignored (line 2784). |
+The following expression codegen gaps were fixed:
+
+**Slice stride/mask** — Stride is now used in the copy loop (`src[start + i*stride]`)
+with ceiling-division count. Mask applies a second-pass filter loop that binds `_`
+to each element and evaluates the mask expression. Both implemented inline with
+LLVM IR loops.
+
+**MultiSlice stride/mask/range** — `Coord(Range)` allocates a new list and copies
+the sub-range `[lo..hi)`. `Stride` emits a step-by copy loop. `Mask` emits a
+filter loop with `_` binding. All three produce native LLVM IR loops without
+runtime library calls.
+
+**`FloatToStr`/`ToStr` working paths** — Replaced buggy `@__snprintf__`-based
+implementation with `@__float_to_str` / `@__to_str` C runtime functions.
+Return type changed from `i8*` to `i64` to match C functions.
+
+**`bytes` projection for struct types** — Now computes `fields.len() * 8` when
+the source type is `Type::Custom(name)` and the struct is in `struct_types`.
+
+**`FieldAccess` field not found** — Now emits `call void @llvm.trap()` instead
+of silent `add i64 0, 0 ; field`.
+
+**`UserDefined`/`UserDefinedWithArg` projections** — Now emit `@llvm.trap()`
+when `try_projection_fast_path` fails (instead of silent `add i64 0, 0`).
+
+**Missing declares** — 8 `declare` statements for runtime functions
+(`__trim_left__`, `__trim_right__`, `__to_lower__`, `__contains_at__`,
+`__find_from__`, `__splitn__`, `__float_to_str`, `__to_str`) were added to
+`emit_toplevel.rs`.
 
 ### Error-Guard Stubs — All Fixed (2026-06-21)
 
@@ -361,17 +386,7 @@ all now emit `call void @llvm.trap()` before the zero return:
 found, `ProjectionTarget::Bytes` for unknown type, `ProjectionTarget::UserDefined`
 and `UserDefinedWithArg` fallthrough, `Expr::FieldAccess` field not found.
 
-**`bytes` projection for struct types**: Now computes `fields.len() * 8` when
-the source type is `Type::Custom(name)` and the struct is in `struct_types`.
 
-**`FloatToStr`/`ToStr` working paths**: Replaced buggy `@__snprintf__`-based
-implementation with `@__float_to_str` / `@__to_str` C runtime functions.
-Return type changed from `i8*` to `i64` to match C functions.
-
-**Missing declares**: 8 `declare` statements for runtime functions
-(`__trim_left__`, `__trim_right__`, `__to_lower__`, `__contains_at__`,
-`__find_from__`, `__splitn__`, `__float_to_str`, `__to_str`) were added to
-`emit_toplevel.rs`.
 
 ### Top-Level — Struct/Enum Layout
 | TopLevel | Notes |
