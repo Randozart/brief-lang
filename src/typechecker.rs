@@ -1293,7 +1293,6 @@ impl TypeChecker {
             Statement::Assignment { lhs, expr, timeout, .. } => {
                 match lhs {
                     Expr::TupleDestructure(names, _) => {
-                        // &(a, b) = tuple_expr — destructuring assignment
                         self.check_expr_for_ffi_errors(expr);
                         let expr_ty = self.infer_expression(expr);
                         if let Type::Tuple(elem_types) = &expr_ty {
@@ -1333,7 +1332,6 @@ impl TypeChecker {
                         }
 
                         if !self.check_geometry(&lhs_ty, &expr_ty) {
-                            // Auto-declare implicit state variable on first &N = ... assignment
                             if let Expr::OwnedRef(var_name) = lhs {
                                 if self.trigger_names.contains(var_name.as_str()) {
                                     self.errors.borrow_mut().push(TypeError::TypeMismatch {

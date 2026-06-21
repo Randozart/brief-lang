@@ -285,7 +285,6 @@ impl LlvmBackend {
                             _ => { writeln!(out, "{}; assign list[idx] = {}", indent, val_reg).ok(); return; }
                         };
                         let idx_val = self.emit_expr(out, index_expr, indent);
-                        // Resolve the list pointer from state (SSA or non-SSA) or let bindings
                         let list_ptr: Option<String> =
                             if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
                                 if let Some(&field_idx) = self.field_index_map.get(&list_name) {
@@ -331,7 +330,6 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
                             let elem = format!("%tdr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, elem, ep).ok();
-                            // Store to variable — same patterns as single-variable assignment
                             if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
                                 if let Some(&idx) = self.field_index_map.get(name) {
                                     let new_reg = format!("%in{}", self.txn_counter); self.txn_counter += 1;
@@ -383,14 +381,12 @@ impl LlvmBackend {
                     _ => { writeln!(out, "{}; assign {}", indent, val).ok(); return; }
                 };
                 let is_volatile = modifiers.iter().any(|h| h.name == "volatile");
-                // const trg check: reject writes to const triggers
                 if let Some(trg) = self.triggers.get(&fname) {
                     if trg.is_const {
                         writeln!(out, "{}; error: cannot write to const trigger '{}'", indent, fname).ok();
                         return;
                     }
                 }
-                // SSA mode: use insertvalue instead of GEP + store
                 if let Some(ssa_reg) = self.ssa_state_reg.clone() {
                     if let Some(&idx) = self.field_index_map.get(&fname) {
                         if !is_volatile {
@@ -404,7 +400,7 @@ impl LlvmBackend {
                                     writeln!(out, "{}{} = insertvalue %State {}, i8 {}, {}", indent, new_reg, ssa_reg, tr, idx).ok();
                                 }
                                 "i32" => {
-                                    let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
+                                    let tr = format!("%tri{}", self.txn_counter); self.txn_counter += 1;
                                     writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val_boxed).ok();
                                     writeln!(out, "{}{} = insertvalue %State {}, i32 {}, {}", indent, new_reg, ssa_reg, tr, idx).ok();
                                 }
@@ -421,13 +417,6 @@ impl LlvmBackend {
                                     writeln!(out, "{}{} = insertvalue %State {}, i64 {}, {}", indent, new_reg, ssa_reg, val_boxed, idx).ok();
                                 }
                             }
-                            // 2026-06-17: Re-extract written field so intra-body reads
-                            // see the updated value. Without this, subsequent reads of
-                            // a field written earlier in the same body use the pre-tick
-                            // value from pre_extract_int_fields, not the freshly stored
-                            // value — causes incorrect results when a field is both
-                            // written and read in the same txn body (e.g. fannkuch_redux_sym:
-                            // &seed = p0 → checksum + seed % 13 reads p0_old, not seed_old).
                             if ty != "float" {
                                 let re = format!("%re_{}_{}", fname, self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = extractvalue %State {}, {}", indent, re, new_reg, idx).ok();
@@ -478,7 +467,6 @@ impl LlvmBackend {
                 } else if let Some(slot) = self.param_slots.get(&fname).cloned() {
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val_boxed, slot).ok();
-                    // Update let_bindings so subsequent reads see the boxed i64 value
                     self.let_bindings.insert(fname.clone(), val_boxed.clone());
                     self.let_binding_types.insert(fname.clone(), Type::Int);
                 } else {
