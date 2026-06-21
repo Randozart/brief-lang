@@ -82,11 +82,16 @@ fn rw_set_of(stmt: &Statement) -> ReadWriteSet {
                 writes.extend(inner.writes);
             }
         }
-        Statement::Term { values, .. } | Statement::TermBang { values, .. } => {
+        Statement::Term { values, swan_song, .. } | Statement::TermBang { values, swan_song, .. } => {
             for v in values {
                 if let Some(e) = v {
                     collect_reads_from_expr(e, &mut reads);
                 }
+            }
+            if let Some(ss) = swan_song {
+                let inner = rw_set_of(ss);
+                reads.extend(inner.reads);
+                writes.extend(inner.writes);
             }
         }
         Statement::SyncBlock { body } => {
