@@ -42,7 +42,12 @@ impl ExprEval for ProjectionExpr {
                     Value::Bool(_) => 1, Value::Char(_) => 4,
                     Value::String(s) => s.len() as i64,
                     Value::List(items) => items.len() as i64 * 8,
+                    Value::Data(d) => d.len() as i64,
                     Value::Instance { fields, .. } => fields.len() as i64 * 8,
+                    Value::Tuple(items) => items.len() as i64 * 8,
+                    Value::Stack(v) => v.len() as i64 * 8,
+                    Value::Queue(q) => q.len() as i64 * 8,
+                    Value::StringBuilder(sb) => sb.len() as i64,
                     _ => 0,
                 };
                 Ok(Value::Int(size))

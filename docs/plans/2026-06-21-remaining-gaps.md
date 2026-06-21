@@ -38,8 +38,10 @@ placeholder strings, and degraded code paths across the compiler.
 - All handle String and Data inputs, pass through non-string values, error on missing args
 - 9 new tests (hash vectors, data input, UUID format, error cases, passthrough)
 
-### #6: `bytes` projection in interpreter
-- `src/interpreter.rs:1759` — Not implemented for `Value::Instance` / `Value::Float`
+### #6: `bytes` projection in interpreter ✅ DONE (2026-06-21)
+- `Intrinsic::Bytes` handler: added Data, Instance, Tuple, Stack, Queue, StringBuilder
+- `ProjectionTarget::Bytes` in feature module: same additions (was only missing Data, Tuple, Stack, Queue, StringBuilder — all fell to `_ => 0`)
+- 5 new tests (projection + intrinsic forms on Instance, Data, Tuple, unsupported type error)
 
 ### #7: GPU intrinsics in interpreter
 - `src/interpreter.rs:3752-3764` — `get_global_id#`, `get_local_id#`, etc. return 0/1 stubs

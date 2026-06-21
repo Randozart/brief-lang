@@ -1756,6 +1756,12 @@ impl Interpreter {
                             Value::Char(_) => Ok(Value::Int(4)),
                             Value::String(s) => Ok(Value::Int(s.len() as i64)),
                             Value::List(l) => Ok(Value::Int((l.len() * 8) as i64)),
+                            Value::Data(d) => Ok(Value::Int(d.len() as i64)),
+                            Value::Instance { fields, .. } => Ok(Value::Int((fields.len() * 8) as i64)),
+                            Value::Tuple(t) => Ok(Value::Int((t.len() * 8) as i64)),
+                            Value::Stack(v) => Ok(Value::Int((v.len() * 8) as i64)),
+                            Value::Queue(q) => Ok(Value::Int((q.len() * 8) as i64)),
+                            Value::StringBuilder(sb) => Ok(Value::Int(sb.len() as i64)),
                             v => Err(RuntimeError::TypeMismatch(format!("bytes not implemented for {:?}", v))),
                         }
                     }
@@ -5975,6 +5981,81 @@ mod tests {
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(5));
+    }
+
+    #[test]
+    fn test_projection_bytes_on_instance() {
+        let mut i = Interpreter::new();
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("x".to_string(), Value::Int(1));
+        fields.insert("y".to_string(), Value::Int(2));
+        let val = Value::Instance {
+            typename: "Point".to_string(),
+            fields,
+        };
+        i.state.insert("p".to_string(), val);
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("p".to_string())),
+            target: ProjectionTarget::Bytes,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(16)); // 2 fields * 8 bytes
+    }
+
+    #[test]
+    fn test_projection_bytes_on_data() {
+        let mut i = Interpreter::new();
+        i.state.insert("d".to_string(), Value::Data(vec![1, 2, 3, 4]));
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("d".to_string())),
+            target: ProjectionTarget::Bytes,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(4));
+    }
+
+    #[test]
+    fn test_projection_bytes_on_tuple() {
+        let mut i = Interpreter::new();
+        i.state.insert("t".to_string(), Value::Tuple(vec![Value::Int(10), Value::Int(20), Value::Int(30)]));
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("t".to_string())),
+            target: ProjectionTarget::Bytes,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(24)); // 3 elements * 8 bytes
+    }
+
+    #[test]
+    fn test_bytes_intrinsic_on_instance() {
+        let mut i = Interpreter::new();
+        let mut fields = std::collections::HashMap::new();
+        fields.insert("x".to_string(), Value::Int(1));
+        let val = Value::Instance {
+            typename: "Point".to_string(),
+            fields,
+        };
+        i.state.insert("p".to_string(), val);
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bytes,
+            args: vec![Expr::Identifier("p".to_string())],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(8)); // 1 field * 8 bytes
+    }
+
+    #[test]
+    fn test_bytes_intrinsic_on_unsupported_type_errors() {
+        let mut i = Interpreter::new();
+        i.state.insert("m".to_string(), Value::HashMap(std::collections::HashMap::new()));
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::Bytes,
+            args: vec![Expr::Identifier("m".to_string())],
+        };
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("not implemented"), "Expected error about not implemented, got: {}", err);
     }
 
     #[test]
