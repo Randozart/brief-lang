@@ -473,7 +473,7 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 1114 tests pass, 0 fail
+- 1162 tests pass, 0 fail
 - **Constraint unification (B1/B2/B3)** complete: `RangeConstraint` + `Type::ContractBound` removed; `Statement::Let.constraint` + `StateDecl.constraint` unified to `Option<Box<Expr>>`; `_`-binding in `eval_constraint()`/`emit_guard_check()`; TypeDef body guards in `ResolvedType.guards`; LLVM constraint codegen with `@llvm.trap()` + `unreachable`
 - **Phase 3.5 (Backend Fast-Path Registry)** complete:
   - TypeUniverse wired into main.rs pipeline (constructed after desugar, passed to typechecker + LLVM backend)
@@ -497,6 +497,13 @@ All optimization sprints, benchmark timing tables, bug diagnoses, and implementa
 - **`!range` metadata** implemented: replaces `@llvm.assume` for simple `[x < N]` precondition patterns with `!range !{ 0, N }` on the field load.
 - **Webstack backend gaps closed** (2026-06-21): ARM bare-metal codegen path no longer emits `true` placeholder — `statement_to_rust()`/`expr_to_rust()` cover all Statement and Expr variants with native Rust codegen. TS path: intrinsic handler expanded from 4 to 25+ variants (Math.*, String(), Date.now(), etc.), all Statement types (Foreach, SyncBlock, OnExit, Oracle, Await, Async, AsyncAwait, Unification, InlineAsm) emit real TS code instead of `// statement omitted`. 9 new tests.
 - **CIRCT backend gaps closed** (2026-06-21): `Expr::Call` emits `hw.instance` submodule instantiation instead of returning `None`. `Expr::IntrinsicCall` handles Abs (comb.neg+comb.mux), Ctpop/Ctlz/Cttz (comb.*), Bitreverse (comb.rev), Size, Sqrt/Fabs/Ceil/Floor/Sin/Cos/Pow (comb.*f f64). Fixed duplicate trigger processing bug. 5 new tests.
+- **Pattern B AssignmentStmt** (2026-06-21): `StmtEval` trait impl handles Identifier, ListIndex, TupleDestructure LHS forms. 3 new tests. StmtTypecheck/StmtCodegen stubs ready for Phase 4.
+- **`$!` macro expansion wired** (2026-06-21): `macro_.rs::expand_macro_call()` now delegates to `template::expand_macro()`. `collect_macro_defs`/`expand_macro_calls_in_items` made `pub(crate)`. 3 new E2E tests (parse→expand→interpret).
+- **Crypto/HTTP FFI implemented** (2026-06-21): md5 (`md-5` crate), sha1 (`sha-1`), sha256/sha512 (`sha2`), uuid v4 (`uuid`), HTTP GET/POST (`ureq`). All handle String and Data inputs. 9 new tests with known test vectors.
+- **`bytes` projection extended** (2026-06-21): Intrinsic::Bytes and ProjectionTarget::Bytes now handle Data, Instance, Tuple, Stack, Queue, StringBuilder. Feature module and interpreter stay in sync. 5 new tests.
+- **GPU intrinsics dimension validation** (2026-06-21): `get_global_id#`, `get_local_id#`, `get_group_id#`, `get_num_groups#` validate dimension arg (0 ≤ d < 3). `barrier#` validates no args. 7 new tests.
+- **Void intrinsic stubs → `undef`** (2026-06-21): AtomicStore, Fence, ThreadExit, Halt emit `add i64 undef, 0` instead of `add i64 0, 0`. 2 new tests.
+- **Exit expression stubs → `llvm.trap()`** (2026-06-21): Unknown field types, missing triggers, unknown identifiers, and unsupported exit exprs in exit conditions now emit `call void @llvm.trap()` instead of silently returning 0.
 - **`<-` arrow push** implemented for `List<T>`: reads header, allocates new buffer, copies elements, appends value, writes back to state field. No longer returns 0.
 - **`<-` arrow pop** implemented for `List<T>`: reads header, loads element at index, allocates buffer with len-1, copies before/after elements, writes back to state.
 - **`<-` arrow discard** implemented for `List<T>`: removes element at index, allocates buffer with len-1, stores updated list back.
