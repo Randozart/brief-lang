@@ -2780,7 +2780,6 @@ impl LlvmBackend {
             Expr::MultiSlice { value, ops } => {
                 let src_val = self.emit_expr(out, value, indent);
                 // Atomic value literals: coord returns self, stride/mask return 0
-                // Check by expression kind since LLVM types are ambiguous (Int vs List pointer)
                 let is_atomic_literal = matches!(value.as_ref(), Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_));
                 if is_atomic_literal {
                     let has_coord = ops.iter().any(|op| matches!(op, BracketOp::Coord(_)));
@@ -2790,28 +2789,272 @@ impl LlvmBackend {
                     } else {
                         writeln!(out, "{}{} = add i64 0, {} ; atomic multislice", indent, v, src_val.name).ok();
                     }
-                } else {
-                    // List/String: pointer-based list access
-                    let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
-                    let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
-                    let de = format!("%mde{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
-                    let mut coord_idx = 0i64;
-                    for op in ops {
-                        if let BracketOp::Coord(SliceCoordinate::Index(expr)) = op {
-                            let cv = self.emit_expr(out, expr, indent);
-                            coord_idx = cv.name.parse::<i64>().unwrap_or(0);
+                    return TypedRegister { name: v, ty: src_val.ty };
+                }
+                // Non-atomic: process ops as a sequential pipeline.
+                // Phase 1: apply all Coord ops (index/slice) to extract sublist/element.
+                // Phase 2: apply Stride ops (step-by filter).
+                // Phase 3: apply Mask ops (element-wise boolean filter).
+                let mut result_reg = src_val.clone();
+                let saved_bindings = self.let_bindings.clone();
+                let mut reboxed = false; // true if result is a freshly-boxed list
+
+                for op in ops {
+                    match op {
+                        BracketOp::Coord(SliceCoordinate::Index(idx_expr)) => {
+                            // If the current result is a freshly-boxed list (not the
+                            // original source), unbox it to get the data pointer.
+                            let hp = if reboxed {
+                                let rhp = format!("%mrhp{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, rhp, result_reg.name).ok();
+                                rhp
+                            } else {
+                                let ihp = format!("%mihp{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, ihp, result_reg.name).ok();
+                                ihp
+                            };
+                            let dp = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                            let de = format!("%mde{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                            let cv = self.emit_expr(out, idx_expr, indent);
                             let ep = format!("%mep{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, cv.name).ok();
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, ep).ok();
+                            let lv = format!("%mlv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, lv, ep).ok();
+                            result_reg = TypedRegister { name: lv, ty: Type::Int };
+                            reboxed = false;
+                        }
+                        BracketOp::Coord(SliceCoordinate::Range { start, end }) => {
+                            // Extract sub-range [start, end) into a new list
+                            let hp = format!("%mrhp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, result_reg.name).ok();
+                            let dp = format!("%mrdp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                            let de = format!("%mrde{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                            let slp = format!("%mrlp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, slp, hp).ok();
+                            let src_len = format!("%mrsl{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, src_len, slp).ok();
+                            // Start bound
+                            let start_reg = start.as_ref().map(|s| self.emit_expr(out, s, indent));
+                            let end_reg = end.as_ref().map(|e| self.emit_expr(out, e, indent));
+                            let lo = format!("%mrlo{}", self.txn_counter); self.txn_counter += 1;
+                            if let Some(s) = &start_reg {
+                                writeln!(out, "{}{} = add i64 0, {}", indent, lo, s.name).ok();
+                            } else {
+                                writeln!(out, "{}{} = add i64 0, 0", indent, lo).ok();
+                            }
+                            let hi = format!("%mrhi{}", self.txn_counter); self.txn_counter += 1;
+                            if let Some(e) = &end_reg {
+                                writeln!(out, "{}{} = add i64 0, {}", indent, hi, e.name).ok();
+                            } else {
+                                writeln!(out, "{}{} = add i64 0, {}", indent, hi, src_len).ok();
+                            }
+                            let rcnt = format!("%mrcnt{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = sub i64 {}, {}", indent, rcnt, hi, lo).ok();
+                            // Allocate new list
+                            let rab = format!("%mrab{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = mul i64 {}, 8", indent, rab, rcnt).ok();
+                            let rrm = format!("%mrrm{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, rrm, rab).ok();
+                            let rai = format!("%mrai{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, rai, rrm).ok();
+                            // Copy loop
+                            let r_entry = format!("mr_entry{}", self.txn_counter); self.txn_counter += 1;
+                            let r_hdr = format!("mr_hdr{}", self.txn_counter); self.txn_counter += 1;
+                            let r_body = format!("mr_body{}", self.txn_counter); self.txn_counter += 1;
+                            let r_done = format!("mr_done{}", self.txn_counter); self.txn_counter += 1;
+                            let ri = format!("%mri{}", self.txn_counter); self.txn_counter += 1;
+                            let rc = format!("%mrc{}", self.txn_counter); self.txn_counter += 1;
+                            let rn = format!("%mrn{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}br label %{}", indent, r_entry).ok();
+                            writeln!(out, "{}{}:", indent, r_entry).ok();
+                            writeln!(out, "{}br label %{}", indent, r_hdr).ok();
+                            writeln!(out, "{}{}:", indent, r_hdr).ok();
+                            writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, ri, r_entry, rn, r_body).ok();
+                            writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, rc, ri, rcnt).ok();
+                            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, rc, r_body, r_done).ok();
+                            writeln!(out, "{}{}:", indent, r_body).ok();
+                            let r_src = format!("%mrsrc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = add i64 {}, {}", indent, r_src, lo, ri).ok();
+                            let r_gep = format!("%mrgep{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, r_gep, de, r_src).ok();
+                            let r_el = format!("%mrel{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, r_el, r_gep).ok();
+                            let r_dst = format!("%mrdst{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, r_dst, rai, ri).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, r_el, r_dst).ok();
+                            writeln!(out, "{}{} = add i64 {}, 1", indent, rn, ri).ok();
+                            writeln!(out, "{}br label %{}", indent, r_hdr).ok();
+                            writeln!(out, "{}{}:", indent, r_done).ok();
+                            // Store header (data_ptr, length)
+                            let r_dpp = format!("%mrdpp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, r_dpp, rai).ok();
+                            let r_dpv = format!("%mrdpv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, r_dpv, r_dpp).ok();
+                            let rs0 = format!("%mrs0{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, rs0, rai).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, r_dpv, rs0).ok();
+                            let rs1 = format!("%mrs1{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, rs1, rai).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, rcnt, rs1).ok();
+                            let rv = format!("%mrv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, rv, rai).ok();
+                            result_reg = TypedRegister { name: rv, ty: Type::Int };
+                            reboxed = true;
+                        }
+                        BracketOp::Coord(_) => {
+                            // Named/AtDimension/Ellipsis coords are desugared before
+                            // codegen; treat as passthrough.
+                        }
+                        BracketOp::Stride(stride_expr) => {
+                            // Step-by filter: keep every Nth element
+                            let sv = self.emit_expr(out, stride_expr, indent);
+                            // Unbox current list
+                            let hp = format!("%mshp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, result_reg.name).ok();
+                            let dp = format!("%msdp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                            let de = format!("%msde{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                            let lp = format!("%mslp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                            let len = format!("%mslen{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, len, lp).ok();
+                            // Allocate stride-filtered buffer
+                            let sab = format!("%msab{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = mul i64 {}, 8", indent, sab, len).ok();
+                            let srm = format!("%msrm{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, srm, sab).ok();
+                            let sai = format!("%msai{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, sai, srm).ok();
+                            // Loop: j = 0; k = 0; while j < len { copy[j]; j += stride; k++ }
+                            let s_entry = format!("ms_entry{}", self.txn_counter); self.txn_counter += 1;
+                            let s_hdr = format!("ms_hdr{}", self.txn_counter); self.txn_counter += 1;
+                            let s_body = format!("ms_body{}", self.txn_counter); self.txn_counter += 1;
+                            let s_done = format!("ms_done{}", self.txn_counter); self.txn_counter += 1;
+                            let sj = format!("%msj{}", self.txn_counter); self.txn_counter += 1;
+                            let sc = format!("%msc{}", self.txn_counter); self.txn_counter += 1;
+                            let sn = format!("%msn{}", self.txn_counter); self.txn_counter += 1;
+                            let sk = format!("%msk{}", self.txn_counter); self.txn_counter += 1;
+                            let snk = format!("%msnk{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}br label %{}", indent, s_entry).ok();
+                            writeln!(out, "{}{}:", indent, s_entry).ok();
+                            writeln!(out, "{}br label %{}", indent, s_hdr).ok();
+                            writeln!(out, "{}{}:", indent, s_hdr).ok();
+                            writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, sj, s_entry, sn, s_body).ok();
+                            writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, sk, s_entry, snk, s_body).ok();
+                            writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, sc, sj, len).ok();
+                            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, sc, s_body, s_done).ok();
+                            writeln!(out, "{}{}:", indent, s_body).ok();
+                            let s_gep = format!("%msgep{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, s_gep, de, sj).ok();
+                            let s_el = format!("%msel{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, s_el, s_gep).ok();
+                            let s_dst = format!("%msdst{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, s_dst, sai, sk).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, s_el, s_dst).ok();
+                            writeln!(out, "{}{} = add i64 {}, {}", indent, sn, sj, sv.name).ok();
+                            writeln!(out, "{}{} = add i64 {}, 1", indent, snk, sk).ok();
+                            writeln!(out, "{}br label %{}", indent, s_hdr).ok();
+                            writeln!(out, "{}{}:", indent, s_done).ok();
+                            // Store header
+                            let s_dpp = format!("%msdpp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, s_dpp, sai).ok();
+                            let s_dpv = format!("%msdpv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, s_dpv, s_dpp).ok();
+                            let ss0 = format!("%mss0{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, ss0, sai).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, s_dpv, ss0).ok();
+                            let ss1 = format!("%mss1{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ss1, sai).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, sk, ss1).ok();
+                            let sv_reg = format!("%msv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, sv_reg, sai).ok();
+                            result_reg = TypedRegister { name: sv_reg, ty: Type::Int };
+                            reboxed = true;
+                        }
+                        BracketOp::Mask(mask_expr) => {
+                            // Element-wise filter: evaluate mask for each element
+                            let hp = format!("%mmhp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, result_reg.name).ok();
+                            let dp = format!("%mmdp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                            let de = format!("%mmde{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                            let lp = format!("%mmlp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                            let len = format!("%mmlen{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, len, lp).ok();
+                            // Allocate mask-filtered buffer (max size = len)
+                            let mab = format!("%mmab{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = mul i64 {}, 8", indent, mab, len).ok();
+                            let mrm = format!("%mmrm{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, mrm, mab).ok();
+                            let mai = format!("%mmai{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, mai, mrm).ok();
+                            // Loop: j = 0; k = 0; while j < len
+                            let m_entry = format!("mm_entry{}", self.txn_counter); self.txn_counter += 1;
+                            let m_hdr = format!("mm_hdr{}", self.txn_counter); self.txn_counter += 1;
+                            let m_body = format!("mm_body{}", self.txn_counter); self.txn_counter += 1;
+                            let m_done = format!("mm_done{}", self.txn_counter); self.txn_counter += 1;
+                            let mj = format!("%mmj{}", self.txn_counter); self.txn_counter += 1;
+                            let mc = format!("%mmc{}", self.txn_counter); self.txn_counter += 1;
+                            let mn = format!("%mmn{}", self.txn_counter); self.txn_counter += 1;
+                            let mk = format!("%mmk{}", self.txn_counter); self.txn_counter += 1;
+                            let mnk = format!("%mmnk{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}br label %{}", indent, m_entry).ok();
+                            writeln!(out, "{}{}:", indent, m_entry).ok();
+                            writeln!(out, "{}br label %{}", indent, m_hdr).ok();
+                            writeln!(out, "{}{}:", indent, m_hdr).ok();
+                            writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, mj, m_entry, mn, m_body).ok();
+                            writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, mk, m_entry, mnk, m_body).ok();
+                            writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, mc, mj, len).ok();
+                            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, mc, m_body, m_done).ok();
+                            writeln!(out, "{}{}:", indent, m_body).ok();
+                            let m_gep = format!("%mmgep{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, m_gep, de, mj).ok();
+                            let m_el = format!("%mmel{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, m_el, m_gep).ok();
+                            // Bind _ to element, evaluate mask
+                            self.let_bindings.insert("_".to_string(), m_el.clone());
+                            let mask_r = self.emit_expr(out, mask_expr, indent);
+                            let mask_b = self.as_bool_reg(out, indent, &mask_r);
+                            let m_store_l = format!("mm_store{}", self.txn_counter); self.txn_counter += 1;
+                            let m_skip_l = format!("mm_skip{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, mask_b, m_store_l, m_skip_l).ok();
+                            writeln!(out, "{}{}:", indent, m_store_l).ok();
+                            let m_dst = format!("%mmdst{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, m_dst, mai, mk).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_el, m_dst).ok();
+                            writeln!(out, "{}{} = add i64 {}, 1", indent, mnk, mk).ok();
+                            writeln!(out, "{}br label %{}", indent, m_skip_l).ok();
+                            writeln!(out, "{}{}:", indent, m_skip_l).ok();
+                            writeln!(out, "{}{} = add i64 {}, 1", indent, mn, mj).ok();
+                            writeln!(out, "{}br label %{}", indent, m_hdr).ok();
+                            writeln!(out, "{}{}:", indent, m_done).ok();
+                            // Store header
+                            let m_dpp = format!("%mmdpp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, m_dpp, mai).ok();
+                            let m_dpv = format!("%mmdpv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, m_dpv, m_dpp).ok();
+                            let ms0 = format!("%mms0{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, ms0, mai).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_dpv, ms0).ok();
+                            let ms1 = format!("%mms1{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ms1, mai).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, mk, ms1).ok();
+                            let mv_reg = format!("%mmv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, mv_reg, mai).ok();
+                            result_reg = TypedRegister { name: mv_reg, ty: Type::Int };
+                            reboxed = true;
                         }
                     }
-                    if !ops.iter().any(|op| matches!(op, BracketOp::Coord(SliceCoordinate::Index(_)))) {
-                        writeln!(out, "{}{} = add i64 0, {} ; multislice no-coord", indent, v, dp).ok();
-                    }
                 }
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, result_reg.name).ok();
+                self.let_bindings = saved_bindings;
             }
             // ── Match ───────────────────────────────────────────
             Expr::Match { value, arms } => {
@@ -2886,7 +3129,6 @@ impl LlvmBackend {
                 // Atomic value literals: pass through (single element is itself)
                 let is_atomic_literal = matches!(value.as_ref(), Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_));
                 if is_atomic_literal {
-                    let _ = start; let _ = end; let _ = stride; let _ = mask;
                     writeln!(out, "{}{} = add i64 0, {} ; atomic slice passthrough", indent, v, src_val.name).ok();
                     return crate::backend::llvm::TypedRegister { name: v, ty: src_val.ty };
                 }
@@ -2904,11 +3146,24 @@ impl LlvmBackend {
 
                 let start_reg = start.as_ref().map(|s| self.emit_expr(out, s, indent));
                 let end_reg = end.as_ref().map(|e| self.emit_expr(out, e, indent));
-                let count_reg = format!("%scnt{}", self.txn_counter); self.txn_counter += 1;
+                let stride_reg = stride.as_ref().map(|s| self.emit_expr(out, s, indent));
+                // Compute raw range = end - start
+                let raw_count = format!("%sraw{}", self.txn_counter); self.txn_counter += 1;
                 if let (Some(s), Some(e)) = (&start_reg, &end_reg) {
-                    writeln!(out, "{}{} = sub i64 {}, {}", indent, count_reg, e.name, s.name).ok();
+                    writeln!(out, "{}{} = sub i64 {}, {}", indent, raw_count, e.name, s.name).ok();
                 } else {
-                    writeln!(out, "{}{} = add i64 0, {}", indent, count_reg, src_len_reg).ok();
+                    writeln!(out, "{}{} = add i64 0, {}", indent, raw_count, src_len_reg).ok();
+                }
+                // Compute effective count with stride: ceil(raw_count / stride)
+                let count_reg = format!("%scnt{}", self.txn_counter); self.txn_counter += 1;
+                if let Some(str) = &stride_reg {
+                    let adj = format!("%sadj{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = add i64 {}, -1", indent, adj, raw_count).ok();
+                    let div = format!("%sdiv{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = udiv i64 {}, {}", indent, div, adj, str.name).ok();
+                    writeln!(out, "{}{} = add i64 {}, 1", indent, count_reg, div).ok();
+                } else {
+                    writeln!(out, "{}{} = add i64 0, {}", indent, count_reg, raw_count).ok();
                 }
 
                 // Allocate new list header via malloc (avoids invalid dynamic alloca in non-entry block)
@@ -2918,8 +3173,6 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, rm, ab).ok();
                 let ai = format!("%sai{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, ai, rm).ok();
-                let _ = mask; // silence unused warning
-                let _ = stride; // silence unused warning
 
                 let entry_label = format!("s_entry{}", self.txn_counter); self.txn_counter += 1;
                 let header_label = format!("s_hdr{}", self.txn_counter); self.txn_counter += 1;
@@ -2937,12 +3190,24 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cond_reg, i_reg, count_reg).ok();
                 writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_reg, body_label, done_label).ok();
                 writeln!(out, "{}{}:", indent, body_label).ok();
-                // Copy element: src[start + i]
+                // Copy element: src[start + i*stride]
                 let src_idx = format!("%ssi{}", self.txn_counter); self.txn_counter += 1;
                 if let Some(s) = &start_reg {
-                    writeln!(out, "{}{} = add i64 {}, {}", indent, src_idx, s.name, i_reg).ok();
+                    if let Some(str) = &stride_reg {
+                        let si_stride = format!("%sist{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = mul i64 {}, {}", indent, si_stride, i_reg, str.name).ok();
+                        writeln!(out, "{}{} = add i64 {}, {}", indent, src_idx, s.name, si_stride).ok();
+                    } else {
+                        writeln!(out, "{}{} = add i64 {}, {}", indent, src_idx, s.name, i_reg).ok();
+                    }
                 } else {
-                    writeln!(out, "{}{} = add i64 0, {}", indent, src_idx, i_reg).ok();
+                    if let Some(str) = &stride_reg {
+                        let si_stride = format!("%sist{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = mul i64 {}, {}", indent, si_stride, i_reg, str.name).ok();
+                        writeln!(out, "{}{} = add i64 0, {}", indent, src_idx, si_stride).ok();
+                    } else {
+                        writeln!(out, "{}{} = add i64 0, {}", indent, src_idx, i_reg).ok();
+                    }
                 }
                 let src_ep = format!("%ssep{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, src_ep, de, src_idx).ok();
@@ -2957,7 +3222,7 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 {}, 1", indent, next_reg, i_reg).ok();
                 writeln!(out, "{}br label %{}", indent, header_label).ok();
                 writeln!(out, "{}{}:", indent, done_label).ok();
-                // Store data_ptr and length
+                // Store data_ptr and length in the strided-result header
                 let dp_ptr = format!("%sdp2{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, ai).ok();
                 let dp_val = format!("%sdv2{}", self.txn_counter); self.txn_counter += 1;
@@ -2968,7 +3233,82 @@ impl LlvmBackend {
                 let s1 = format!("%ss1{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, ai).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, count_reg, s1).ok();
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+
+                // ── Mask filter (second pass) ──
+                // If a mask expression is present, walk the strided result and
+                // keep only elements where mask(_, elem) evaluates to true.
+                if let Some(mask_expr) = mask {
+                    let saved_bindings = self.let_bindings.clone();
+                    let old_count = count_reg;
+                    let old_ai = ai;
+                    let m_entry = format!("sm_entry{}", self.txn_counter); self.txn_counter += 1;
+                    let m_hdr = format!("sm_hdr{}", self.txn_counter); self.txn_counter += 1;
+                    let m_body = format!("sm_body{}", self.txn_counter); self.txn_counter += 1;
+                    let m_done = format!("sm_done{}", self.txn_counter); self.txn_counter += 1;
+                    let m_j = format!("%smj{}", self.txn_counter); self.txn_counter += 1;
+                    let m_cond = format!("%smcond{}", self.txn_counter); self.txn_counter += 1;
+                    let m_next = format!("%smnext{}", self.txn_counter); self.txn_counter += 1;
+                    let m_k = format!("%smk{}", self.txn_counter); self.txn_counter += 1;
+                    // Allocate max-size filtered buffer
+                    let m_ab = format!("%smab{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = mul i64 {}, 8", indent, m_ab, old_count).ok();
+                    let m_rm = format!("%smrm{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, m_rm, m_ab).ok();
+                    let m_ai = format!("%smai{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, m_ai, m_rm).ok();
+                    let zero_reg = format!("%smz{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = add i64 0, 0", indent, zero_reg).ok();
+
+                    writeln!(out, "{}br label %{}", indent, m_entry).ok();
+                    writeln!(out, "{}{}:", indent, m_entry).ok();
+                    writeln!(out, "{}br label %{}", indent, m_hdr).ok();
+                    writeln!(out, "{}{}:", indent, m_hdr).ok();
+                    writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, m_j, m_entry, m_next, m_body).ok();
+                    writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]", indent, m_k, m_entry, m_k, m_body).ok();
+                    writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, m_cond, m_j, old_count).ok();
+                    writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, m_cond, m_body, m_done).ok();
+                    writeln!(out, "{}{}:", indent, m_body).ok();
+                    // Load element from strided result
+                    let m_gep = format!("%smgep{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, m_gep, old_ai, m_j).ok();
+                    let m_elem = format!("%smelem{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, m_elem, m_gep).ok();
+                    // Bind _ to element, evaluate mask
+                    self.let_bindings.insert("_".to_string(), m_elem.clone());
+                    let mask_reg = self.emit_expr(out, mask_expr, indent);
+                    let mask_bool = self.as_bool_reg(out, indent, &mask_reg);
+                    writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, mask_bool, m_done, m_hdr);
+                    // If mask true, append to filtered buffer
+                    // (true branch already jumps to m_done — use a separate skip label)
+                    let m_store = format!("sm_store{}", self.txn_counter); self.txn_counter += 1;
+                    let m_next_label = format!("sm_next{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{}:", indent, m_store).ok();
+                    let m_dst = format!("%smdst{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, m_dst, m_ai, m_k).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_elem, m_dst).ok();
+                    writeln!(out, "{}{} = add i64 {}, 1", indent, m_next, m_k).ok();
+                    writeln!(out, "{}br label %{}", indent, m_next_label).ok();
+                    writeln!(out, "{}{}:", indent, m_next_label).ok();
+                    writeln!(out, "{}{} = add i64 {}, 1", indent, m_next, m_j).ok();
+                    writeln!(out, "{}br label %{}", indent, m_hdr).ok();
+
+                    writeln!(out, "{}{}:", indent, m_done).ok();
+                    // Store filtered header
+                    let m_dp_ptr = format!("%smdp2{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, m_dp_ptr, m_ai).ok();
+                    let m_dp_val = format!("%smdv2{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, m_dp_val, m_dp_ptr).ok();
+                    let ms0 = format!("%sms0{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, ms0, m_ai).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_dp_val, ms0).ok();
+                    let ms1 = format!("%sms1{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ms1, m_ai).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_k, ms1).ok();
+                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, m_ai).ok();
+                    self.let_bindings = saved_bindings;
+                } else {
+                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                }
             }
             // — Subtype projection (e.g. list :> Size) —
             Expr::SubtypeProjection { source, .. } => {

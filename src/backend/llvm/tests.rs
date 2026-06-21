@@ -3350,6 +3350,215 @@ let spec = crate::target_spec::TargetSpec {
     }
 
     #[test]
+    fn test_slice_with_stride_emits_step_loop() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "xs".into(), ty: Type::Int,
+                    expr: Some(Expr::ListLiteral(vec![
+                        Expr::Integer(10), Expr::Integer(20), Expr::Integer(30),
+                        Expr::Integer(40), Expr::Integer(50),
+                    ])),
+                    address: None, bit_range: None, is_override: false, os_mode: false,
+                    span: None, attrs: vec![], constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "slice_stride".into(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("xs".into()),
+                            expr: Expr::Slice {
+                                value: Box::new(Expr::Identifier("xs".into())),
+                                start: Some(Box::new(Expr::Integer(0))),
+                                end: Some(Box::new(Expr::Integer(5))),
+                                stride: Some(Box::new(Expr::Integer(2))),
+                                mask: None,
+                            },
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Stride 2 should produce ceil(5/2)=3 copied elements (indices 0,2,4)
+        assert!(output.contains("udiv"), "Strided slice should emit udiv for ceil division. Output:\n{}", output);
+        assert!(output.contains("mul"), "Strided slice should emit mul for i*stride. Output:\n{}", output);
+    }
+
+    #[test]
+    fn test_slice_with_mask_emits_filter() {
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".into(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false, os_mode: false,
+                    span: None, attrs: vec![], constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "slice_mask".into(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("x".into()),
+                            expr: Expr::Slice {
+                                value: Box::new(Expr::ListLiteral(vec![
+                                    Expr::Integer(1), Expr::Integer(2), Expr::Integer(3),
+                                ])),
+                                start: Some(Box::new(Expr::Integer(0))),
+                                end: Some(Box::new(Expr::Integer(3))),
+                                stride: None,
+                                mask: Some(Box::new(Expr::Gt(
+                                    Box::new(Expr::Identifier("_".into())),
+                                    Box::new(Expr::Integer(1)),
+                                ))),
+                            },
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Mask should emit @llvm.trap() or icmp/br for mask evaluation
+        assert!(output.contains("icmp") || output.contains("br i1"),
+            "Sliced mask should emit comparison and branch. Output:\n{}", output);
+    }
+
+    #[test]
+    fn test_multislice_range_emits_copy_loop() {
+        let mut backend = LlvmBackend::new();
+        let mkv: Vec<Expr> = (0..5).map(|i| Expr::Integer(i)).collect();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "v".into(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false, os_mode: false,
+                    span: None, attrs: vec![], constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "mr".into(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("v".into()),
+                            expr: Expr::MultiSlice {
+                                value: Box::new(Expr::ListLiteral(mkv)),
+                                ops: vec![BracketOp::Coord(SliceCoordinate::Range {
+                                    start: Some(Box::new(Expr::Integer(1))),
+                                    end: Some(Box::new(Expr::Integer(4))),
+                                })],
+                            },
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Range should emit a copy loop (phi + icmp)
+        assert!(output.contains("phi i64"), "MultiSlice Range should emit phi. Output:\n{}", output);
+        assert!(output.contains("icmp slt"), "MultiSlice Range should emit icmp. Output:\n{}", output);
+    }
+
+    #[test]
+    fn test_multislice_stride_emits_step_loop() {
+        let mut backend = LlvmBackend::new();
+        let mkv: Vec<Expr> = (0..6).map(|i| Expr::Integer(i)).collect();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "v".into(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false, os_mode: false,
+                    span: None, attrs: vec![], constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "ms".into(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("v".into()),
+                            expr: Expr::MultiSlice {
+                                value: Box::new(Expr::ListLiteral(mkv)),
+                                ops: vec![BracketOp::Stride(Box::new(Expr::Integer(2)))],
+                            },
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Stride should emit a step loop with phi + add + icmp
+        assert!(output.contains("phi i64"), "MultiSlice Stride should emit phi. Output:\n{}", output);
+        assert!(output.contains("icmp slt"), "MultiSlice Stride should emit icmp. Output:\n{}", output);
+    }
+
+    #[test]
+    fn test_multislice_mask_emits_filter_loop() {
+        let mut backend = LlvmBackend::new();
+        let mkv: Vec<Expr> = (0..4).map(|i| Expr::Integer(i)).collect();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "v".into(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false, os_mode: false,
+                    span: None, attrs: vec![], constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "mm".into(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("v".into()),
+                            expr: Expr::MultiSlice {
+                                value: Box::new(Expr::ListLiteral(mkv)),
+                                ops: vec![BracketOp::Mask(Box::new(Expr::Gt(
+                                    Box::new(Expr::Identifier("_".into())),
+                                    Box::new(Expr::Integer(1)),
+                                )))],
+                            },
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // Mask should emit a filter loop with br i1 branching on mask eval
+        assert!(output.contains("phi i64"), "MultiSlice Mask should emit phi. Output:\n{}", output);
+        assert!(output.contains("br i1"), "MultiSlice Mask should emit conditional branch. Output:\n{}", output);
+    }
+
+    #[test]
     fn test_map_literal_emitted() {
         let mut backend = LlvmBackend::new();
         let program = Program {
