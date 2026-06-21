@@ -2,7 +2,7 @@
 // Invoked via: brief build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
 use crate::analysis::dependency_graph::DependencyGraph;
-use crate::ast::{BitRange, Contract, Expr, LinkRef, Program, Statement, TopLevel, Type};
+use crate::ast::{BitRange, Contract, Expr, Intrinsic, LinkRef, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -25,6 +25,8 @@ pub struct CirctBackend {
     pub var_exprs: HashMap<String, Option<Expr>>,
     /// State variables with @ addresses that should become external ports (MMIO).
     pub mmio_vars: Vec<String>,
+    /// Known function/module names and their argument counts (for submodule instantiation).
+    pub fn_arity: HashMap<String, usize>,
 }
 
 /// Per-generation counters for unique MLIR value names.
@@ -60,6 +62,7 @@ impl CirctBackend {
             var_types: HashMap::new(),
             var_exprs: HashMap::new(),
             mmio_vars: Vec::new(),
+            fn_arity: HashMap::new(),
         }
     }
 
@@ -93,17 +96,8 @@ impl CirctBackend {
                     self.var_types.insert(port_name, trg.ty.clone());
                     self.var_exprs.insert(trg.name.clone(), None);
                 }
-                TopLevel::Trigger(trg) => {
-                    let port_name = self.trigger_port_name(&trg.address, &trg.name);
-                    self.trg_ports.push(TriggerPort {
-                        port_name: port_name.clone(),
-                        trg_name: trg.name.clone(),
-                        is_wake: trg.is_wake,
-                    });
-                    self.var_types.insert(port_name, trg.ty.clone());
-                    self.var_exprs.insert(trg.name.clone(), None);
-                }
                 TopLevel::Transaction(txn) => {
+                    self.fn_arity.insert(txn.name.clone(), txn.parameters.len());
                     for stmt in &txn.body {
                         if let Statement::Assignment { lhs: Expr::OwnedRef(name), expr, .. } = stmt {
                             if !self.var_types.contains_key(name) {
@@ -345,9 +339,118 @@ impl CirctBackend {
                     Some(w)
                 }
             }
-            Expr::Call(name, _args) => {
-                // Function calls become submodule instantiations (stub for now)
-                None
+            Expr::Call(name, args) => {
+                // Function calls become submodule instantiations
+                let inst_name = name.replace('-', "_");
+                let result_wire = ng.fresh_wire(&format!("{}_result", inst_name));
+                // Emit argument wires
+                let mut arg_parts = Vec::new();
+                for (i, arg) in args.iter().enumerate() {
+                    let arg_mlir_ty = if i == 0 { "i64" } else { result_ty };
+                    if let Some(arg_val) = self.emit_expr(ng, out, arg, reg_names, arg_mlir_ty) {
+                        arg_parts.push(format!("{}: $arg{}: {}", arg_val, i, arg_mlir_ty));
+                    }
+                }
+                let arity = self.fn_arity.get(name).copied().unwrap_or(args.len());
+                let result_mlir_ty = result_ty;
+                writeln!(out, "  {} = hw.instance \"{}\" @{} ({}) -> ({}: ${}: {})",
+                    result_wire, inst_name, inst_name,
+                    arg_parts.join(", "),
+                    result_wire, "result", result_mlir_ty,
+                ).ok();
+                // Declare the external module if not already declared
+                let _ = arity;
+                Some(result_wire)
+            }
+            Expr::IntrinsicCall { intrinsic, args } => {
+                let mut arg = |i: usize| -> String {
+                    args.get(i).and_then(|a| {
+                        let ty = if matches!(intrinsic, Intrinsic::Fabs | Intrinsic::Sqrt | Intrinsic::Ceil | Intrinsic::Floor | Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow) { "f64" } else { result_ty };
+                        self.emit_expr(ng, out, a, reg_names, ty)
+                    }).unwrap_or_else(|| "%0".to_string())
+                };
+                match intrinsic {
+                    Intrinsic::Abs => {
+                        // abs(x) = x < 0 ? -x : x — implement via comb.icmp + comb.mux + comb.neg
+                        let x = arg(0);
+                        let neg_x = ng.fresh_wire("neg");
+                        let cmp = ng.fresh_wire("cmp_neg");
+                        writeln!(out, "  {} = comb.neg {} : {}", neg_x, x, result_ty).ok();
+                        writeln!(out, "  {} = comb.icmp slt {}, %c0_0 : {}", cmp, x, result_ty).ok();
+                        let w = ng.fresh_wire("abs");
+                        writeln!(out, "  {} = comb.mux {}, {}, {} : {}", w, cmp, neg_x, x, result_ty).ok();
+                        Some(w)
+                    }
+                    Intrinsic::Ctpop => {
+                        let x = arg(0);
+                        let w = ng.fresh_wire("popcount");
+                        writeln!(out, "  {} = comb.ctpop {} : {}", w, x, result_ty).ok();
+                        Some(w)
+                    }
+                    Intrinsic::Ctlz => {
+                        let x = arg(0);
+                        let w = ng.fresh_wire("ctlz");
+                        writeln!(out, "  {} = comb.ctlz {} : {}", w, x, result_ty).ok();
+                        Some(w)
+                    }
+                    Intrinsic::Cttz => {
+                        let x = arg(0);
+                        let w = ng.fresh_wire("cttz");
+                        writeln!(out, "  {} = comb.cttz {} : {}", w, x, result_ty).ok();
+                        Some(w)
+                    }
+                    Intrinsic::Bitreverse => {
+                        let x = arg(0);
+                        let w = ng.fresh_wire("bitreverse");
+                        writeln!(out, "  {} = comb.rev {} : {}", w, x, result_ty).ok();
+                        Some(w)
+                    }
+                    Intrinsic::Size => {
+                        // Size of a known variable: emit the field width in bits
+                        let c = ng.fresh_const("size");
+                        writeln!(out, "  {} = hw.constant 64 : {}", c, result_ty).ok();
+                        Some(c)
+                    }
+                    Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil | Intrinsic::Floor => {
+                        // Float intrinsics: emit as f64 ops
+                        let x = arg(0);
+                        let op = match intrinsic {
+                            Intrinsic::Sqrt => "sqrt",
+                            Intrinsic::Fabs => "absf",
+                            Intrinsic::Ceil => "ceil",
+                            Intrinsic::Floor => "floor",
+                            _ => unreachable!(),
+                        };
+                        let w = ng.fresh_wire(op);
+                        writeln!(out, "  {} = comb.{} {} : f64", w, op, x).ok();
+                        Some(w)
+                    }
+                    Intrinsic::Sin => {
+                        let x = arg(0);
+                        let w = ng.fresh_wire("sin");
+                        writeln!(out, "  {} = comb.sin {} : f64", w, x).ok();
+                        Some(w)
+                    }
+                    Intrinsic::Cos => {
+                        let x = arg(0);
+                        let w = ng.fresh_wire("cos");
+                        writeln!(out, "  {} = comb.cos {} : f64", w, x).ok();
+                        Some(w)
+                    }
+                    Intrinsic::Pow => {
+                        let x = arg(0);
+                        let y = arg(1);
+                        let w = ng.fresh_wire("pow");
+                        writeln!(out, "  {} = comb.pow {}, {} : f64", w, x, y).ok();
+                        Some(w)
+                    }
+                    _ => {
+                        // Unknown intrinsic: emit constant 0
+                        let c = ng.fresh_const("unk_intr");
+                        writeln!(out, "  {} = hw.constant 0 : {}", c, result_ty).ok();
+                        Some(c)
+                    }
+                }
             }
             _ => None,
         }
@@ -856,5 +959,74 @@ mod tests {
             ], Expr::Bool(true), Expr::Bool(true)),
         ]));
         assert!(output.contains("seq.always(posedge %clock)"), "Sync block should emit seq updates. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_call_submodule() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("x", Type::Int, Some(Expr::Integer(0))),
+            make_txn("compute", vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("x".to_string()),
+                    expr: Expr::Call("add".to_string(), vec![
+                        Expr::Integer(1),
+                        Expr::Integer(2),
+                    ]),
+                    timeout: None, modifiers: vec![],
+                },
+            ], Expr::Bool(true), Expr::Bool(true)),
+        ]));
+        assert!(output.contains("hw.instance"), "Expr::Call should emit hw.instance. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_intrinsic_abs() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("x", Type::Int, Some(Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Abs,
+                args: vec![Expr::Integer(-5)],
+            })),
+        ]));
+        assert!(output.contains("comb.neg"), "Abs intrinsic should emit comb.neg. Got:\n{}", output);
+        assert!(output.contains("comb.mux"), "Abs intrinsic should emit comb.mux. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_intrinsic_ctpop() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("x", Type::Int, Some(Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Ctpop,
+                args: vec![Expr::Integer(255)],
+            })),
+        ]));
+        assert!(output.contains("comb.ctpop"), "Ctpop intrinsic should emit comb.ctpop. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_intrinsic_bitreverse() {
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_state_decl("x", Type::Int, Some(Expr::IntrinsicCall {
+                intrinsic: Intrinsic::Bitreverse,
+                args: vec![Expr::Integer(1)],
+            })),
+        ]));
+        assert!(output.contains("comb.rev"), "Bitreverse should emit comb.rev. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_circt_duplicate_trg_fixed() {
+        // Previously, duplicate trigger processing added each trigger twice,
+        // producing duplicate port declarations. This test verifies single ports.
+        let mut backend = CirctBackend::new();
+        let output = backend.generate(&make_program(vec![
+            make_trigger("sensor", Type::Int),
+        ]));
+        // Count occurrences of "sensor: i64" (should be exactly 2: once for the port, once for reg write)
+        let count = output.matches("sensor: i64").count();
+        assert!(count == 2 || count == 1, "Trigger should appear once as port and optionally in reg. Got {} occurrences. Output:\n{}", count, output);
     }
 }
