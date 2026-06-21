@@ -113,16 +113,6 @@ pub enum BitRange {
     Any(usize), // /xN
 }
 
-/// A value-range or regex constraint on a variable declaration.
-/// Used with `<: [lo..hi]` or `<: [@"pattern"]` syntax.
-#[derive(Debug, Clone, PartialEq)]
-pub enum RangeConstraint {
-    /// Integer or float range: `Int <: [0..100]`, `Float <: [0.0..1.0]`
-    Range(Box<Expr>, Box<Expr>),
-    /// Regex pattern: `String <: [@"\A..."]`
-    Regex(Box<Expr>),
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum Dimension {
     Anonymous(usize),
@@ -145,7 +135,6 @@ pub enum Type {
     Custom(String),
     Union(Vec<Type>),
     Tuple(Vec<Type>),
-    ContractBound(Box<Type>, Box<Expr>),
     TypeVar(String),
     Generic(String, Vec<Type>),
     Applied(String, Vec<Type>),
@@ -1720,7 +1709,7 @@ pub enum Statement {
         address: Option<u64>,
         address_expr: Option<Box<Expr>>,
         bit_range: Option<BitRange>,
-        range_constraint: Option<RangeConstraint>,
+        constraint: Option<Box<Expr>>,
         is_override: bool,
         modifiers: Vec<Hashtag>,
     },
@@ -1978,7 +1967,7 @@ pub struct StateDecl {
     pub expr: Option<Expr>,
     pub address: Option<u64>,
     pub bit_range: Option<BitRange>,
-    pub range_constraint: Option<RangeConstraint>,
+    pub constraint: Option<Box<Expr>>,
     pub is_override: bool,
     pub os_mode: bool, // In OS mode, address is requested via ioctl/mmap; else embedded mode uses raw address
     pub span: Option<Span>,
@@ -2347,7 +2336,7 @@ impl Program {
             expr: Some(Expr::Integer(0)),
             address: None,
             bit_range: None,
-            range_constraint: None,
+            constraint: None,
             is_override: false,
             os_mode: false,
             attrs: vec![],

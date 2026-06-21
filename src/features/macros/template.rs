@@ -106,7 +106,7 @@ fn substitute_in_stmt(stmt: &Statement, bindings: &[(String, Expr)]) -> Statemen
         Statement::Expression(expr) => {
             Statement::Expression(substitute_in_expr(expr, bindings))
         }
-        Statement::Let { name, ty, expr, address, address_expr, bit_range, range_constraint, is_override, modifiers } => {
+        Statement::Let { name, ty, expr, address, address_expr, bit_range, constraint, is_override, modifiers } => {
             Statement::Let {
                 name: name.clone(),
                 ty: ty.clone(),
@@ -114,7 +114,7 @@ fn substitute_in_stmt(stmt: &Statement, bindings: &[(String, Expr)]) -> Statemen
                 address: *address,
                 address_expr: address_expr.as_ref().map(|e| Box::new(substitute_in_expr(e, bindings))),
                 bit_range: bit_range.clone(),
-                range_constraint: range_constraint.clone(),
+                constraint: constraint.clone(),
                 is_override: *is_override,
                 modifiers: modifiers.clone(),
             }

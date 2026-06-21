@@ -739,6 +739,21 @@ int64_t __int_to_str__(int64_t n) {
     return buf_to_brief(buf, (int64_t)len);
 }
 
+int64_t __float_to_str(float f) {
+    char buf[64];
+    int len = snprintf(buf, sizeof(buf), "%.9g", (double)f);
+    return buf_to_brief(buf, (int64_t)len);
+}
+
+int64_t __to_str(int64_t v) {
+    char buf[64];
+    // Generic converter: default to integer representation.
+    // For Float and String inputs, the LLVM backend should
+    // dispatch before calling this function.
+    int len = snprintf(buf, sizeof(buf), "%lld", (long long)v);
+    return buf_to_brief(buf, (int64_t)len);
+}
+
 int64_t __splitn__(const char* s, const char* delim, int64_t n_val) {
     (void)n_val;
     if (!s || !delim) return 0;

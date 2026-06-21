@@ -440,7 +440,7 @@ fn peephole_optimize_stmt(stmt: &Statement) -> Option<Statement> {
                 bit_range: bit_range.clone(),
                 is_override: *is_override,
                 modifiers: modifiers.clone(),
-                range_constraint: None,
+                constraint: None,
             })
         }
         Statement::Expression(expr) => {

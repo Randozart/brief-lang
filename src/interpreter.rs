@@ -1205,9 +1205,15 @@ impl Interpreter {
                     _ => return Err(RuntimeError::TypeMismatch("Invalid LHS".to_string())),
                 }
             }
-            Statement::Let { name, expr, .. } => {
+            Statement::Let { name, expr, constraint, ty, .. } => {
                 if let Some(expr) = expr {
                     let value = self.eval_expr(expr)?;
+                    if let Some(constraint_expr) = constraint {
+                        self.eval_constraint(&value, constraint_expr)?;
+                    }
+                    if let Some(ann_ty) = ty {
+                        self.check_type_guards(ann_ty, &value)?;
+                    }
                     self.state.insert(name.clone(), value);
                 }
             }
@@ -1379,6 +1385,42 @@ impl Interpreter {
             }
         }
         Ok(())
+    }
+
+    /// Check TypeUniverse guards for a given type annotation on a value.
+    /// TypeDef body constraints (`type Foo <: Int { [> 0]; }`) are stored as
+    /// guards on the resolved type. This evaluates each guard with `_` bound
+    /// to the value.
+    pub(crate) fn check_type_guards(&mut self, ty: &Type, value: &Value) -> Result<(), RuntimeError> {
+        let guards: Vec<Expr> = match self.type_universe.as_ref() {
+            Some(tu) => match ty {
+                Type::Custom(name) => match tu.get(name) {
+                    Some(r) => r.guards.clone(),
+                    None => return Ok(()),
+                },
+                _ => return Ok(()),
+            },
+            None => return Ok(()),
+        };
+        for guard in &guards {
+            self.eval_constraint(value, guard)?;
+        }
+        Ok(())
+    }
+
+    /// Evaluate a constraint expression with `_` bound to the given value.
+    /// Returns Ok(()) if the constraint passes, Err(RuntimeError::TypeMismatch) if violated.
+    pub fn eval_constraint(&mut self, value: &Value, constraint: &Expr) -> Result<(), RuntimeError> {
+        let prior = self.state.insert("_".to_string(), value.clone());
+        let result = self.eval_expr(constraint)?;
+        match prior {
+            Some(v) => { self.state.insert("_".to_string(), v); }
+            None => { self.state.remove("_"); }
+        }
+        match result {
+            Value::Bool(true) => Ok(()),
+            _ => Err(RuntimeError::TypeMismatch("constraint violated".into())),
+        }
     }
 
     /// Dispatch a pipe-syntax frgn call.
@@ -8429,6 +8471,136 @@ mod tests {
             Value::Enum(_, v, _) if v == "Ok"),
             "Expected Ok variant, got {:?}", result);
     }
+
+    #[test]
+    fn test_constraint_expression_violated() {
+        let mut i = Interpreter::new();
+        // let x: Int <: [_ > 0] = -5; — should fail
+        let stmt = Statement::Let {
+            name: "x".to_string(),
+            ty: Some(Type::Int),
+            expr: Some(Expr::Integer(-5)),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: Some(Box::new(Expr::Gt(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(0)),
+            ))),
+            is_override: false,
+            modifiers: vec![],
+        };
+        let result = i.exec_stmt(&stmt);
+        assert!(result.is_err(), "Expected constraint violation for -5");
+    }
+
+    #[test]
+    fn test_type_def_guard_enforced() {
+        let mut i = Interpreter::new();
+        // Build TypeUniverse with a Positive type
+        let td = crate::ast::TypeDef {
+            name: "Positive".to_string(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Int".into())),
+            body: crate::ast::TypeDefBody {
+                bindings: vec![],
+                constraints: vec![Expr::Gt(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                )],
+                span: None,
+            },
+            span: None,
+        };
+        use crate::ast::{TopLevel, Program};
+        let program = Program {
+            items: vec![TopLevel::TypeDef(Box::new(td))],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        i.type_universe = Some(crate::type_universe::TypeUniverse::build(&program));
+        let stmt = Statement::Let {
+            name: "x".to_string(),
+            ty: Some(Type::Custom("Positive".to_string())),
+            expr: Some(Expr::Integer(-5)),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: None,
+            is_override: false,
+            modifiers: vec![],
+        };
+        let result = i.exec_stmt(&stmt);
+        assert!(result.is_err(), "Expected TypeDef guard violation for -5");
+    }
+
+    #[test]
+    fn test_type_def_guard_passes() {
+        let mut i = Interpreter::new();
+        let td = crate::ast::TypeDef {
+            name: "Positive".to_string(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Int".into())),
+            body: crate::ast::TypeDefBody {
+                bindings: vec![],
+                constraints: vec![Expr::Gt(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                )],
+                span: None,
+            },
+            span: None,
+        };
+        use crate::ast::{TopLevel, Program};
+        let program = Program {
+            items: vec![TopLevel::TypeDef(Box::new(td))],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        i.type_universe = Some(crate::type_universe::TypeUniverse::build(&program));
+        let stmt = Statement::Let {
+            name: "x".to_string(),
+            ty: Some(Type::Custom("Positive".to_string())),
+            expr: Some(Expr::Integer(42)),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: None,
+            is_override: false,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("x"), Some(&Value::Int(42)));
+    }
+
+    #[test]
+    fn test_constraint_regex_evaluates_to_non_bool() {
+        // Regex literals evaluate to Value::Regex(dfa), not Bool(true).
+        // Using @"pattern" alone as a constraint always violates because
+        // eval_constraint requires Value::Bool(true). A future enhancement
+        // could auto-apply regex against _ in constraint context.
+        let mut i = Interpreter::new();
+        let val = Value::String("hello".to_string());
+        let constraint = Expr::RegexLiteral("^hello".to_string());
+        let result = i.eval_constraint(&val, &constraint);
+        assert!(result.is_err(), "Regex literal alone is not a valid constraint expression");
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
@@ -10280,5 +10452,154 @@ mod kani_full_tests {
         };
         i.exec_stmt(&stmt).unwrap();
         assert_eq!(i.state.get("result"), Some(&Value::Int(99)));
+    }
+
+    // --- Constraint evaluation tests (Phase B) ---
+
+    #[test]
+    fn test_constraint_passes() {
+        let mut i = Interpreter::new();
+        let val = Value::Int(50);
+        // Constraint: _ >= 0 && _ <= 100 (desugared from 0..100)
+        let constraint = Expr::And(
+            Box::new(Expr::Ge(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(0)),
+            )),
+            Box::new(Expr::Le(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(100)),
+            )),
+        );
+        assert!(i.eval_constraint(&val, &constraint).is_ok());
+    }
+
+    #[test]
+    fn test_constraint_violated_low() {
+        let mut i = Interpreter::new();
+        let val = Value::Int(-1);
+        let constraint = Expr::And(
+            Box::new(Expr::Ge(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(0)),
+            )),
+            Box::new(Expr::Le(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(100)),
+            )),
+        );
+        assert!(i.eval_constraint(&val, &constraint).is_err());
+    }
+
+    #[test]
+    fn test_constraint_violated_high() {
+        let mut i = Interpreter::new();
+        let val = Value::Int(200);
+        let constraint = Expr::And(
+            Box::new(Expr::Ge(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(0)),
+            )),
+            Box::new(Expr::Le(
+                Box::new(Expr::Identifier("_".to_string())),
+                Box::new(Expr::Integer(100)),
+            )),
+        );
+        assert!(i.eval_constraint(&val, &constraint).is_err());
+    }
+
+    #[test]
+    fn test_constraint_let_statement_passes() {
+        let mut i = Interpreter::new();
+        // let x: Int <: [0..100] = 50;
+        let stmt = Statement::Let {
+            name: "x".to_string(),
+            ty: Some(Type::Int),
+            expr: Some(Expr::Integer(50)),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: Some(Box::new(Expr::And(
+                Box::new(Expr::Ge(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                )),
+                Box::new(Expr::Le(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(100)),
+                )),
+            ))),
+            is_override: false,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("x"), Some(&Value::Int(50)));
+    }
+
+    #[test]
+    fn test_constraint_let_statement_violated() {
+        let mut i = Interpreter::new();
+        // let x: Int <: [0..100] = 200; — should fail
+        let stmt = Statement::Let {
+            name: "x".to_string(),
+            ty: Some(Type::Int),
+            expr: Some(Expr::Integer(200)),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: Some(Box::new(Expr::And(
+                Box::new(Expr::Ge(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                )),
+                Box::new(Expr::Le(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(100)),
+                )),
+            ))),
+            is_override: false,
+            modifiers: vec![],
+        };
+        let result = i.exec_stmt(&stmt);
+        assert!(result.is_err(), "Expected constraint violation error, got ok");
+    }
+
+    #[test]
+    fn test_constraint_passes_with_prior_underscore() {
+        let mut i = Interpreter::new();
+        // Bind _ first, then constraint should shadow it temporarily
+        i.state.insert("_".to_string(), Value::Int(999));
+        let val = Value::Int(50);
+        let constraint = Expr::Ge(
+            Box::new(Expr::Identifier("_".to_string())),
+            Box::new(Expr::Integer(0)),
+        );
+        assert!(i.eval_constraint(&val, &constraint).is_ok());
+        // After eval_constraint, _ should be restored
+        assert_eq!(i.state.get("_"), Some(&Value::Int(999)));
+    }
+
+    #[kani::proof]
+    fn verify_eval_constraint_passes() {
+        let mut i = Interpreter::new();
+        let val = Value::Int(50);
+        let constraint = Expr::Ge(
+            Box::new(Expr::Identifier("_".to_string())),
+            Box::new(Expr::Integer(0)),
+        );
+        let result = i.eval_constraint(&val, &constraint);
+        assert!(result.is_ok());
+    }
+
+    #[kani::proof]
+    fn verify_eval_constraint_violated() {
+        let mut i = Interpreter::new();
+        let val = Value::Int(-5);
+        let constraint = Expr::Gt(
+            Box::new(Expr::Identifier("_".to_string())),
+            Box::new(Expr::Integer(0)),
+        );
+        let result = i.eval_constraint(&val, &constraint);
+        assert!(result.is_err());
     }
 }

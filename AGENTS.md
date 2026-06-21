@@ -328,28 +328,56 @@ New features follow the Pattern-B convention: a single directory with `mod.rs` +
 
 Note: Rust 2021 reserves `macro` as a keyword, so the directory is `macros/` (plural) and the macro-specific expansion file is `macro_.rs` (trailing underscore).
 
-## LLVM Backend Gaps
+## LLVM Backend — Real Remaining Gaps
 
 Additive only — never weaken existing optimization paths.
 
-### Expressions — Stub (Returns 0 or Degraded)
-| Expr | What's Missing |
-|------|----------------|
-| **Slice** | Only handles `start` offset. Missing `end`, `stride`, `mask`, buffer allocation + copy. |
-| **MultiSlice** | Returns base pointer unchanged. Missing coordinate-based indexing. |
-| **Tuple / TupleDestructure** | No LLVM struct type for user types. Returns 0. |
-| **StructInstance / ObjectLiteral** | Returns 0. Missing allocation + GEP + stores. |
-| **FieldAccess** | Returns object pointer as-is. Missing GEP at known field offset. |
-| **ForAll** | Returns 1 always. Matches interpreter stub. |
-| **MapLiteral / SetLiteral** | No LLVM emission. Falls through to `add i64 0, 0`. |
-| **ArrowTransfer** | No LLVM emission. Falls through to generic `add i64 0, 0`. |
-| **Keys, Values, Contains, Pop, Index projections** | Stubs returning `add i64 0, 0`. |
+Most expression types from the original gaps list (`Slice`, `MultiSlice`,
+`Tuple`, `StructInstance`, `ObjectLiteral`, `FieldAccess`, `MapLiteral`,
+`SetLiteral`, `ArrowTransfer`, `<-` push/pop/discard, and all projection
+operators including `Keys`, `Values`, `Contains`, `Pop`, `Index`) have been
+**fully implemented** in `emit_expr.rs`. `ForAll`/`Exists` were **removed**
+from the AST entirely. The table below reflects the **actual** remaining gaps
+found by audit (2026-06-21).
 
-### Top-Level — Silently Skipped
-| TopLevel | Impact |
-|----------|--------|
-| **Struct** | No LLVM struct type generated. StructInstance/FieldAccess stubs are symptoms. |
-| **Enum** | No tagged union layout. Enum constructors work via ad-hoc stack alloca + discriminant prefix. |
+### Expressions — Known Stubs or Degraded Paths
+
+| Expr / Intrinsic | What's Wrong |
+|------------------|--------------|
+| **Slice stride/mask** | `stride` and `mask` are read but silently ignored — the copy loop copies all consecutive elements (line 2904). |
+| **MultiSlice stride/mask/range** | Only `BracketOp::Coord(SliceCoordinate::Index(_))` is handled. `Mask`, `Stride`, and `SliceCoordinate::Range` are read but ignored (line 2784). |
+| **`FloatToStr` working path** | 3 bugs: uses `adapt_to_i64` (passes i64 bits as `double`), calls non-existent `@__snprintf__`, references undeclared `@.str.float_fmt` (line 2087). |
+| **`ToStr` working path** | Always calls `@__int_to_str__` regardless of input type (line 2097). `Float` → garbage, `Char` → wrong, `String` → pointer-as-decimal. |
+| **`bytes` projection** | Returns 0 for unknown/custom types (line 2482). Should compute struct/union footprint. |
+| **`FieldAccess` field not found** | Emits `add i64 0, 0` instead of `unreachable` (line 2747). |
+| **`UserDefined`/`UserDefinedWithArg` projections** | Falls through to `add i64 0, 0` when `try_projection_fast_path` fails (lines 2616, 2619). Should look up field in TypeUniverse. |
+
+### Missing LLVM Declare Statements
+
+Six runtime functions in `brief_rt.c` are called without `declare` in the LLVM
+IR. The LLVM verifier would reject these programs:
+
+- `@__trim_left__(ptr)` — `brief_rt.c:693`
+- `@__trim_right__(ptr)` — `brief_rt.c:699`
+- `@__to_lower__(ptr)` — `brief_rt.c:712`
+- `@__contains_at__(ptr, ptr, i64)` — `brief_rt.c:724`
+- `@__find_from__(ptr, ptr, i64)` — `brief_rt.c:730`
+- `@__splitn__(ptr, ptr, i64)` — `brief_rt.c:742`
+
+### Error-Guard Stubs (Silent 0 Return)
+
+The following intrinsics emit `add i64 0, 0` when called with the wrong
+argument count instead of emitting `unreachable` (compile error). All are in
+`emit_expr.rs`:
+
+`sort`, `reverse`, `range`, `trim_left`, `trim_right`, `to_lower`,
+`contains_at`, `splitn`, `int_to_str`, `strlen`, `float_to_str`, `to_str`
+
+### Top-Level — Struct/Enum Layout
+| TopLevel | Notes |
+|----------|-------|
+| **Struct** | No LLVM struct type generated. StructInstance/FieldAccess use field-offset arithmetic (GEP), not LLVM struct types. No TBAA on struct fields. |
+| **Enum** | Tagged union layout via ad-hoc stack alloca + discriminant prefix. No LLVM struct type. |
 | Signature, Import, LinkDependency | Correctly skipped — frontend-only. |
 
 ## Key Philosophy for Backend Work
@@ -430,7 +458,8 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md`.
 
 ### Current State
-- 1087 tests pass, 0 fail
+- 1114 tests pass, 0 fail
+- **Constraint unification (B1/B2/B3)** complete: `RangeConstraint` + `Type::ContractBound` removed; `Statement::Let.constraint` + `StateDecl.constraint` unified to `Option<Box<Expr>>`; `_`-binding in `eval_constraint()`/`emit_guard_check()`; TypeDef body guards in `ResolvedType.guards`; LLVM constraint codegen with `@llvm.trap()` + `unreachable`
 - **Phase 3.5 (Backend Fast-Path Registry)** complete:
   - TypeUniverse wired into main.rs pipeline (constructed after desugar, passed to typechecker + LLVM backend)
   - LLVM fast-path: `try_projection_fast_path()` emits native IR for 45+ (type, operator) pairs

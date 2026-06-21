@@ -485,7 +485,7 @@ fn simplify_stmt(stmt: &Statement) -> Statement {
             bit_range: bit_range.clone(),
             is_override: *is_override,
             modifiers: modifiers.clone(),
-            range_constraint: None,
+            constraint: None,
         },
         Statement::Expression(e) => Statement::Expression(simplify_expr(e)),
         Statement::Guarded { condition, statements } => Statement::Guarded {
@@ -508,8 +508,8 @@ pub fn simplify_body(body: &[Statement]) -> Vec<Statement> {
     }
     fn lit_stmt(s: &Statement) -> Statement {
         match s {
-            Statement::Let { name, ty, expr, address, address_expr, bit_range, range_constraint, is_override, modifiers } => {
-                Statement::Let { name: name.clone(), ty: ty.clone(), expr: expr.as_ref().map(|e| lit_to_int(e)), address: address.clone(), address_expr: address_expr.clone(), bit_range: bit_range.clone(), range_constraint: range_constraint.clone(), is_override: is_override.clone(), modifiers: modifiers.clone() }
+            Statement::Let { name, ty, expr, address, address_expr, bit_range, constraint, is_override, modifiers } => {
+                Statement::Let { name: name.clone(), ty: ty.clone(), expr: expr.as_ref().map(|e| lit_to_int(e)), address: address.clone(), address_expr: address_expr.clone(), bit_range: bit_range.clone(), constraint: constraint.clone(), is_override: is_override.clone(), modifiers: modifiers.clone() }
             }
             Statement::Assignment { lhs, expr, timeout, modifiers } => {
                 Statement::Assignment { lhs: lhs.clone(), expr: lit_to_int(expr), timeout: timeout.clone(), modifiers: modifiers.clone() }
@@ -1182,7 +1182,7 @@ mod tests {
             os_mode: false,
             span: None,
             attrs: vec![],
-        range_constraint: None,
+        constraint: None,
         })
     }
 

@@ -2830,7 +2830,6 @@ impl ProofEngine {
                 .map(|t| self.type_name(t))
                 .collect::<Vec<_>>()
                 .join(", ")),
-            Type::ContractBound(inner, _) => self.type_name(inner),
             Type::TypeVar(name) => name.clone(),
             Type::Generic(name, type_args) => {
                 format!(

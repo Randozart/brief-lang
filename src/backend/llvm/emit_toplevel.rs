@@ -97,6 +97,14 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__sort_list__(i64)").ok();
         writeln!(out, "declare i64 @__reverse_list__(i64)").ok();
         writeln!(out, "declare i64 @__range__(i64)").ok();
+        writeln!(out, "declare i64 @__trim_left__(ptr)").ok();
+        writeln!(out, "declare i64 @__trim_right__(ptr)").ok();
+        writeln!(out, "declare i64 @__to_lower__(ptr)").ok();
+        writeln!(out, "declare i64 @__contains_at__(ptr, ptr, i64)").ok();
+        writeln!(out, "declare i64 @__find_from__(ptr, ptr, i64)").ok();
+        writeln!(out, "declare i64 @__splitn__(ptr, ptr, i64)").ok();
+        writeln!(out, "declare i64 @__float_to_str(float)").ok();
+        writeln!(out, "declare i64 @__to_str(i64)").ok();
         writeln!(out, "declare i64 @__stack_top__(i64)").ok();
         writeln!(out, "declare i64 @__queue_front__(i64)").ok();
         writeln!(out, "declare i64 @__hashmap_get__(i64, i64)").ok();

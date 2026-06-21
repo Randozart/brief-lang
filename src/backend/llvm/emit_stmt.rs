@@ -209,7 +209,7 @@ impl LlvmBackend {
                     self.terminated = true;
                 }
             }
-            Statement::Let { name, expr, ty, address_expr, .. } => {
+            Statement::Let { name, expr, ty, address_expr, constraint, .. } => {
                 // Handle TupleDestructure: extract tuple elements and bind each name
                 if let Some(Expr::TupleDestructure(names, tuple_expr)) = expr {
                     let tuple_val = self.emit_expr(out, tuple_expr, indent);
@@ -251,6 +251,27 @@ impl LlvmBackend {
                     writeln!(out, "{}; let {} = {}", indent, name, r).ok();
                 } else {
                     writeln!(out, "{}; let {} = undef", indent, name).ok();
+                }
+                // Inline constraint check: <: [expr]
+                if let Some(c) = constraint {
+                    self.emit_guard_check(out, indent, name, c);
+                }
+                // TypeUniverse guard check: TypeDef body constraints on the annotated type
+                if let Some(ann_ty) = ty.as_ref() {
+                    let ann_ref: &Type = ann_ty;
+                    let type_name: &str = match ann_ref {
+                        Type::Custom(n) => n.as_str(),
+                        _ => "",
+                    };
+                    if !type_name.is_empty() {
+                        let guards: Vec<crate::ast::Expr> = self.type_universe.as_ref()
+                            .and_then(|u| u.types.get(type_name))
+                            .map(|r| r.guards.clone())
+                            .unwrap_or_default();
+                        for guard in &guards {
+                            self.emit_guard_check(out, indent, name, guard);
+                        }
+                    }
                 }
             }
             Statement::Assignment { lhs, expr, modifiers, .. } => {
@@ -690,6 +711,37 @@ impl LlvmBackend {
             }
         }
     }
+
+    /// Emit a runtime constraint/guard check for a variable bound in this tick.
+    /// Temporarily binds `_` to the variable's register, evaluates the expression,
+    /// and branches to `@llvm.trap()` on false.
+    fn emit_guard_check(&mut self, out: &mut String, indent: &str, var_name: &str, guard: &Expr) {
+        let Some(reg) = self.let_bindings.get(var_name).cloned() else { return };
+        let prior_ = self.let_bindings.get("_").cloned();
+        let prior_ty = self.let_binding_types.get("_").cloned();
+        self.let_bindings.insert("_".to_string(), reg);
+        if let Some(ty) = self.let_binding_types.get(var_name).cloned() {
+            self.let_binding_types.insert("_".to_string(), ty);
+        }
+        let ok = self.emit_expr(out, guard, indent);
+        let i1 = self.as_bool_reg(out, indent, &ok);
+        let cc = format!("%cc{}", self.txn_counter); self.txn_counter += 1;
+        let cp = format!("%cp{}", self.txn_counter); self.txn_counter += 1;
+        self.txn_counter += 2;
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, cc, cp).ok();
+        writeln!(out, "{}{}:", indent, cp).ok();
+        writeln!(out, "{}  call void @llvm.trap()", indent).ok();
+        writeln!(out, "{}  unreachable", indent).ok();
+        writeln!(out, "{}{}:", indent, cc).ok();
+        match prior_ {
+            Some(r) => { self.let_bindings.insert("_".to_string(), r); }
+            None => { self.let_bindings.remove("_"); }
+        }
+        match prior_ty {
+            Some(t) => { self.let_binding_types.insert("_".to_string(), t); }
+            None => { self.let_binding_types.remove("_"); }
+        }
+    }
 }
 
 /// Bind pattern fields from a Unification pattern to let_bindings.
@@ -706,7 +758,6 @@ fn bind_pattern_fields(
                 let_binding_types.insert(name.clone(), Type::Int);
             }
             crate::ast::Pattern::Tuple(subfields) => {
-                // For tuple patterns, bind each subfield to the payload
                 for sub in subfields {
                     if let crate::ast::Pattern::Var(name) = sub {
                         let_bindings.insert(name.clone(), payload_reg.to_string());
@@ -714,7 +765,7 @@ fn bind_pattern_fields(
                     }
                 }
             }
-            _ => {} // Wildcard, literals — no binding
+            _ => {}
         }
     }
 }

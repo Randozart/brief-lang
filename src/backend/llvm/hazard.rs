@@ -456,7 +456,7 @@ mod tests {
             address: None,
             address_expr: None,
             bit_range: None,
-            range_constraint: None,
+            constraint: None,
             is_override: false,
             modifiers: vec![],
         }

@@ -575,7 +575,7 @@ mod tests {
             expr,
             address: None,
             bit_range: None,
-            range_constraint: None,
+            constraint: None,
             is_override: false,
             os_mode: false,
             span: None,

@@ -155,11 +155,11 @@ impl RegionAnalyzer {
             match item {
                 TopLevel::StateDecl(decl) => {
                     let interval = decl.expr.as_ref().and_then(|e| Self::expr_to_interval(e));
-                    // Check for `<: [lo..hi]` range constraint
+                    // Check for `<: [lo..hi]` range constraint (desugared as `_ >= lo && _ <= hi`)
                     let mut range_interval: Option<Interval> = None;
                     let mut range_size: Option<u64> = None;
-                    if let Some(rc) = &decl.range_constraint {
-                        if let crate::ast::RangeConstraint::Range(lo_expr, hi_expr) = rc {
+                    if let Some(constraint) = &decl.constraint {
+                        if let Some((lo_expr, hi_expr)) = Self::extract_range_from_constraint(constraint) {
                             if let (Some(lo), Some(hi)) = (
                                 Self::eval_expr_simple(lo_expr, &HashMap::new()),
                                 Self::eval_expr_simple(hi_expr, &HashMap::new()),
@@ -1061,6 +1061,28 @@ impl RegionAnalyzer {
         }
     }
 
+    /// Extract range bounds from a desugared constraint expression.
+    /// Recognizes the pattern: `_ >= lo && _ <= hi` produced by `lo..hi` sugar.
+    fn extract_range_from_constraint(expr: &Expr) -> Option<(&Expr, &Expr)> {
+        match expr {
+            Expr::And(ge_expr, le_expr) => {
+                if let Expr::Ge(ge_lhs, lo_expr) = ge_expr.as_ref() {
+                    if let Expr::Identifier(l1) = ge_lhs.as_ref() {
+                        if let Expr::Le(le_lhs, hi_expr) = le_expr.as_ref() {
+                            if let Expr::Identifier(l2) = le_lhs.as_ref() {
+                                if l1 == "_" && l2 == "_" {
+                                    return Some((lo_expr.as_ref(), hi_expr.as_ref()));
+                                }
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
     fn var_is_chain_internal(&self, var: &str, chain: &[String], all_txn_names: &HashSet<String>) -> bool {
         for txn in all_txn_names {
             if chain.contains(txn) { continue; }
@@ -1505,7 +1527,7 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
                 bit_range: bit_range.clone(),
                 is_override: *is_override,
                 modifiers: modifiers.clone(),
-                range_constraint: None,
+                constraint: None,
             }
         }
         Statement::Guarded { condition, statements } => {
@@ -1720,7 +1742,7 @@ mod tests {
             os_mode: false,
             span: None,
             attrs: vec![],
-            range_constraint: None,
+            constraint: None,
         })
     }
 

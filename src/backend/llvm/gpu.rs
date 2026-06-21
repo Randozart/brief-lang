@@ -1724,7 +1724,7 @@ mod tests {
                 address: None,
                 address_expr: None,
                 bit_range: None,
-                range_constraint: None,
+                constraint: None,
                 is_override: false,
                 modifiers: vec![],
             },
@@ -1746,7 +1746,7 @@ mod tests {
                 address: None,
                 address_expr: None,
                 bit_range: None,
-                range_constraint: None,
+                constraint: None,
                 is_override: false,
                 modifiers: vec![],
             },
@@ -1763,12 +1763,12 @@ mod tests {
             Statement::Let {
                 name: "a".to_string(), ty: None, expr: Some(Expr::SharedMem(128)),
                 address: None, address_expr: None, bit_range: None,
-                range_constraint: None, is_override: false, modifiers: vec![],
+                constraint: None, is_override: false, modifiers: vec![],
             },
             Statement::Let {
                 name: "b".to_string(), ty: None, expr: Some(Expr::SharedMem(32)),
                 address: None, address_expr: None, bit_range: None,
-                range_constraint: None, is_override: false, modifiers: vec![],
+                constraint: None, is_override: false, modifiers: vec![],
             },
         ];
         let sizes = collect_shared_mem_sizes(&body);

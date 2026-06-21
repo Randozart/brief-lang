@@ -39,7 +39,7 @@ fn empty_program() -> Program {
                     os_mode: false,
                     span: None,
                     attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             comments: vec![],
@@ -73,7 +73,7 @@ fn empty_program() -> Program {
                     os_mode: false,
                     span: None,
                     attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "increment".to_string(),
@@ -138,7 +138,7 @@ fn empty_program() -> Program {
                     os_mode: false,
                     span: None,
                     attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "increment".to_string(),
@@ -233,7 +233,7 @@ fn empty_program() -> Program {
             os_mode: false,
             span: None,
             attrs: vec![],
-            range_constraint: None,
+            constraint: None,
         })
     }
 
@@ -598,7 +598,7 @@ fn empty_program() -> Program {
                     os_mode: false,
                     span: None,
                     attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "pump".to_string(),
@@ -711,7 +711,7 @@ fn empty_program() -> Program {
                     os_mode: false,
                     span: None,
                     attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
@@ -775,7 +775,7 @@ fn empty_program() -> Program {
                     os_mode: false,
                     span: None,
                     attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
@@ -836,7 +836,7 @@ fn empty_program() -> Program {
                     os_mode: false,
                     span: None,
                     attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "y".to_string(),
@@ -848,7 +848,7 @@ fn empty_program() -> Program {
                     os_mode: false,
                     span: None,
                     attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
@@ -1121,7 +1121,7 @@ fn empty_program() -> Program {
                     address: None, bit_range: None,
                     is_override: false, os_mode: false,
                     span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
@@ -1182,7 +1182,7 @@ fn empty_program() -> Program {
                     address: None, bit_range: None,
                     is_override: false, os_mode: false,
                     span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
@@ -1296,7 +1296,7 @@ fn empty_program() -> Program {
                     address: None, bit_range: None,
                     is_override: false, os_mode: false,
                     span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             comments: vec![],
@@ -1330,7 +1330,7 @@ fn empty_program() -> Program {
                     address: None, bit_range: None,
                     is_override: false, os_mode: false,
                     span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
@@ -1419,7 +1419,7 @@ fn empty_program() -> Program {
                 expr: Some(Expr::Integer(*val)),
                 address: None, bit_range: None, is_override: false,
                 os_mode: false, span: None, attrs: vec![],
-                range_constraint: None,
+                constraint: None,
             }));
         }
         if let Some((trg_name, trg_ty)) = trigger {
@@ -1689,7 +1689,7 @@ fn empty_program() -> Program {
                     expr: Some(int_s(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "b".to_string(),
@@ -1697,7 +1697,7 @@ fn empty_program() -> Program {
                     expr: Some(int_s(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "inc_a".to_string(),
@@ -1827,7 +1827,7 @@ fn empty_program() -> Program {
                 expr: Some(int_s(0)),
                 address: None, bit_range: None, is_override: false,
                 os_mode: false, span: None, attrs: vec![],
-                range_constraint: None,
+                constraint: None,
             }),
         ];
         items.push(TopLevel::Constant(Constant {
@@ -2158,7 +2158,7 @@ fn empty_program() -> Program {
                 os_mode: false,
                 span: None,
                 attrs: vec![],
-                range_constraint: None,
+                constraint: None,
             }));
         }
         // Add counter field so bounded_pre can work
@@ -2172,7 +2172,7 @@ fn empty_program() -> Program {
             os_mode: false,
             span: None,
             attrs: vec![],
-            range_constraint: None,
+            constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "total".to_string(),
@@ -2184,7 +2184,7 @@ fn empty_program() -> Program {
             os_mode: false,
             span: None,
             attrs: vec![],
-            range_constraint: None,
+            constraint: None,
         }));
         items.push(TopLevel::Transaction(Transaction {
             name: "tick".to_string(),
@@ -2395,7 +2395,7 @@ let spec = crate::target_spec::TargetSpec {
                     os_mode: false,
                     span: None,
                     attrs: Vec::new(),
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -2425,7 +2425,7 @@ let spec = crate::target_spec::TargetSpec {
                     os_mode: false,
                     span: None,
                     attrs: Vec::new(),
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -2452,7 +2452,7 @@ let spec = crate::target_spec::TargetSpec {
                     os_mode: false,
                     span: None,
                     attrs: Vec::new(),
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -2494,7 +2494,7 @@ let spec = crate::target_spec::TargetSpec {
                     os_mode: false,
                     span: None,
                     attrs: Vec::new(),
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -2528,7 +2528,7 @@ let spec = crate::target_spec::TargetSpec {
                     os_mode: false,
                     span: None,
                     attrs: Vec::new(),
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -2594,7 +2594,7 @@ let spec = crate::target_spec::TargetSpec {
                     expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "main".to_string(),
@@ -2631,7 +2631,7 @@ let spec = crate::target_spec::TargetSpec {
                 ])),
                 address: None, address_expr: None, bit_range: None,
                 is_override: false, modifiers: vec![],
-                range_constraint: None,
+                constraint: None,
             },
         ];
         let output = backend.generate(&make_point_program(body));
@@ -2658,7 +2658,7 @@ let spec = crate::target_spec::TargetSpec {
                 ])),
                 address: None, address_expr: None, bit_range: None,
                 is_override: false, modifiers: vec![],
-                range_constraint: None,
+                constraint: None,
             },
             Statement::Assignment {
                 lhs: Expr::Identifier("pt".to_string()),
@@ -2688,7 +2688,7 @@ let spec = crate::target_spec::TargetSpec {
                     expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "bad".to_string(),
@@ -2733,7 +2733,7 @@ let spec = crate::target_spec::TargetSpec {
                     expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "make_obj".to_string(),
@@ -2749,7 +2749,7 @@ let spec = crate::target_spec::TargetSpec {
                             ])),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                     ],
                     reactor_speed: None, span: None, is_lambda: false,
@@ -2816,7 +2816,7 @@ let spec = crate::target_spec::TargetSpec {
                     expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "wrap".to_string(), is_reactive: false,
@@ -2832,7 +2832,7 @@ let spec = crate::target_spec::TargetSpec {
                             expr: Some(Expr::Call("Ok".to_string(), vec![Expr::Integer(42)])),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                     ],
                     reactor_speed: None, span: None, is_lambda: false,
@@ -2870,7 +2870,7 @@ let spec = crate::target_spec::TargetSpec {
                     expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "test".to_string(), is_reactive: false,
@@ -2886,7 +2886,7 @@ let spec = crate::target_spec::TargetSpec {
                             expr: Some(Expr::Call("Error".to_string(), vec![])),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Let {
                             name: "matched".to_string(), ty: None,
@@ -2897,7 +2897,7 @@ let spec = crate::target_spec::TargetSpec {
                             }),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                     ],
                     reactor_speed: None, span: None, is_lambda: false,
@@ -2933,7 +2933,7 @@ let spec = crate::target_spec::TargetSpec {
                     expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "unwrap".to_string(), is_reactive: false,
@@ -3016,7 +3016,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "lst".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "mklist".to_string(), is_reactive: false, parameters: vec![],
@@ -3053,7 +3053,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "elem".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "idx".to_string(), is_reactive: false, parameters: vec![],
@@ -3092,7 +3092,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "len".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "chk_len".to_string(), is_reactive: false, parameters: vec![],
@@ -3127,7 +3127,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "sliced".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "slice_op".to_string(), is_reactive: false, parameters: vec![],
@@ -3170,7 +3170,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "v".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "m".to_string(), is_reactive: false, parameters: vec![],
@@ -3210,7 +3210,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "t".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "mktup".to_string(), is_reactive: false, parameters: vec![],
@@ -3245,7 +3245,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "val".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "destr".to_string(), is_reactive: false, parameters: vec![],
@@ -3259,7 +3259,7 @@ let spec = crate::target_spec::TargetSpec {
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Assignment {
                             lhs: Expr::Identifier("val".to_string()),
@@ -3290,7 +3290,7 @@ let spec = crate::target_spec::TargetSpec {
                     expr: Some(Expr::ListLiteral(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "update".to_string(), is_reactive: false, parameters: vec![],
@@ -3326,7 +3326,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "xs".into(), ty: Type::Int,
                     expr: Some(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3), Expr::Integer(4), Expr::Integer(5)])),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "slice".into(), is_reactive: false, parameters: vec![],
@@ -3358,7 +3358,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "m".into(), ty: Type::Custom("Map".into()),
                     expr: Some(Expr::MapLiteral(vec![(Expr::String("a".into()), Expr::Integer(1))])),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -3377,7 +3377,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "s".into(), ty: Type::Custom("Set".into()),
                     expr: Some(Expr::SetLiteral(vec![Expr::Integer(1), Expr::Integer(2)])),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -3395,7 +3395,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "k".into(), ty: Type::Int,
                     expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into())), target: ProjectionTarget::Keys }),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -3413,7 +3413,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "c".into(), ty: Type::Bool,
                     expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into())), target: ProjectionTarget::Contains(Box::new(Expr::String("k".into()))) }),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    range_constraint: None,
+                    constraint: None,
                 }),
             ],
             ..empty_program()
@@ -3425,6 +3425,31 @@ let spec = crate::target_spec::TargetSpec {
     // (intrinsic_name field removed — intrinsics use name#() syntax instead)
 
     // ── IntrinsicCall codegen tests ─────────────────────────────
+
+    fn make_let_check_program(
+        body: Vec<Statement>,
+        type_defs: Vec<TopLevel>,
+    ) -> Program {
+        let mut items: Vec<TopLevel> = type_defs;
+        items.push(TopLevel::Transaction(Transaction {
+            name: "main".into(),
+            is_async: false,
+            is_reactive: false,
+            parameters: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+            body,
+            reactor_speed: None,
+            span: None,
+            is_lambda: false,
+            dependencies: vec![],
+            attrs: vec![],
+            modifiers: vec![],
+            variant_bodies: vec![],
+            outputs: vec![],
+            output_type: None,
+        }));
+        Program { items, ..empty_program() }
+    }
 
     fn make_intrinsic_program(intrinsic: Expr) -> Program {
         Program {
@@ -3442,7 +3467,7 @@ let spec = crate::target_spec::TargetSpec {
                             expr: Some(intrinsic),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3567,7 +3592,7 @@ let spec = crate::target_spec::TargetSpec {
                             }),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3610,7 +3635,7 @@ let spec = crate::target_spec::TargetSpec {
                             }),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3653,7 +3678,7 @@ let spec = crate::target_spec::TargetSpec {
                             }),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3696,7 +3721,7 @@ let spec = crate::target_spec::TargetSpec {
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3739,7 +3764,7 @@ let spec = crate::target_spec::TargetSpec {
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3778,7 +3803,7 @@ let spec = crate::target_spec::TargetSpec {
                                 Box::new(Expr::Integer(1)),
                             )),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3804,7 +3829,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "x".to_string(), ty: Type::Int,
                     expr: Some(Expr::Integer(0)), address: None,
                     bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], range_constraint: None,
+                    span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
@@ -3822,7 +3847,7 @@ let spec = crate::target_spec::TargetSpec {
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
-                            range_constraint: None,
+                            constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3865,7 +3890,7 @@ let spec = crate::target_spec::TargetSpec {
                                 Type::String,
                             )),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3901,7 +3926,7 @@ let spec = crate::target_spec::TargetSpec {
                                 Type::Int,
                             )),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3937,7 +3962,7 @@ let spec = crate::target_spec::TargetSpec {
                                 Type::String,
                             )),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -3975,7 +4000,7 @@ let spec = crate::target_spec::TargetSpec {
                                 Type::Float,
                             )),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -4003,7 +4028,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "flag".to_string(), ty: Type::Bool,
                     expr: Some(Expr::Bool(false)), address: None,
                     bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], range_constraint: None,
+                    span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
@@ -4090,7 +4115,7 @@ let spec = crate::target_spec::TargetSpec {
                                 Expr::Integer(42),
                             ])),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -4116,7 +4141,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "s".to_string(), ty: Type::String,
                     expr: Some(Expr::String("hello".to_string())), address: None,
                     bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], range_constraint: None,
+                    span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
@@ -4127,7 +4152,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "x".into(), ty: None,
                             expr: Some(Expr::Identifier("s".to_string())),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -4153,7 +4178,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "ch".to_string(), ty: Type::Char,
                     expr: Some(Expr::Char('A')), address: None,
                     bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], range_constraint: None,
+                    span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: true,
@@ -4164,7 +4189,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "c".into(), ty: None,
                             expr: Some(Expr::Identifier("ch".to_string())),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -4224,7 +4249,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "flag".to_string(), ty: Type::Bool,
                     expr: Some(Expr::Bool(true)), address: None,
                     bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], range_constraint: None,
+                    span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
@@ -4266,7 +4291,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "list".to_string(), ty: Type::Int,
                     expr: Some(Expr::ListLiteral(vec![])),
                     address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                    os_mode: false, span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "push".into(), is_async: false, is_reactive: true,
@@ -4309,7 +4334,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "list".to_string(), ty: Type::Int,
                     expr: Some(Expr::ListLiteral(vec![])),
                     address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                    os_mode: false, span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "pop_main".into(), is_async: false, is_reactive: true,
@@ -4350,7 +4375,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "list".to_string(), ty: Type::Int,
                     expr: Some(Expr::ListLiteral(vec![])),
                     address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                    os_mode: false, span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "discard".into(), is_async: false, is_reactive: true,
@@ -4389,13 +4414,13 @@ let spec = crate::target_spec::TargetSpec {
                     name: "dest".to_string(), ty: Type::Int,
                     expr: Some(Expr::ListLiteral(vec![])),
                     address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                    os_mode: false, span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "src".to_string(), ty: Type::Int,
                     expr: Some(Expr::ListLiteral(vec![])),
                     address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], range_constraint: None,
+                    os_mode: false, span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "transfer".into(), is_async: false, is_reactive: true,
@@ -4682,7 +4707,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "buf".to_string(), ty: Type::String,
                     expr: Some(Expr::String("".to_string())),
-                    address: None, bit_range: None, range_constraint: None,
+                    address: None, bit_range: None, constraint: None,
                     is_override: false, os_mode: false, span: None, attrs: vec![],
                 }),
             ],
@@ -4732,7 +4757,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "counter".to_string(), ty: Type::Int,
                     expr: Some(Expr::Integer(0)),
-                    address: None, bit_range: None, range_constraint: None,
+                    address: None, bit_range: None, constraint: None,
                     is_override: false, os_mode: false, span: None, attrs: vec![],
                 }),
             ],
@@ -4817,7 +4842,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "s".to_string(), ty: Type::String,
                     expr: Some(Expr::String("x".to_string())),
                     address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], range_constraint: None,
+                    span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
@@ -4835,7 +4860,7 @@ let spec = crate::target_spec::TargetSpec {
                                 Box::new(Expr::String("world".to_string())),
                             )),
                             address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], range_constraint: None,
+                            is_override: false, modifiers: vec![], constraint: None,
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
@@ -4867,4 +4892,98 @@ let spec = crate::target_spec::TargetSpec {
                     "Old -2 mask must not be used in concat header read. Line: {}", line);
             }
         }
+    }
+
+    #[test]
+    fn test_llvm_let_constraint_emits_guard_check() {
+        let mut backend = LlvmBackend::new();
+        let body = vec![
+            Statement::Let {
+                name: "x".to_string(),
+                ty: Some(Type::Int),
+                expr: Some(Expr::Integer(-5)),
+                address: None, address_expr: None, bit_range: None,
+                is_override: false, modifiers: vec![],
+                constraint: Some(Box::new(Expr::Gt(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                ))),
+            },
+            Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+        ];
+        let output = backend.generate(&make_let_check_program(body, vec![]));
+        assert!(output.contains("@llvm.trap"),
+            "Constraint violation should emit @llvm.trap(). Got:\n{}", output);
+        assert!(output.contains("unreachable"),
+            "Constraint violation should emit unreachable. Got:\n{}", output);
+        assert!(output.contains("br i1"),
+            "Constraint check should emit br i1. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_llvm_typedef_guard_emits_check() {
+        let mut backend = LlvmBackend::new();
+        let td = TypeDef {
+            name: "Positive".to_string(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Int".into())),
+            body: TypeDefBody {
+                bindings: vec![],
+                constraints: vec![Expr::Gt(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                )],
+                span: None,
+            },
+            span: None,
+        };
+        // Build TypeUniverse so the backend can look up guards
+        let tu_program = Program {
+            items: vec![TopLevel::TypeDef(Box::new(td))],
+            ..empty_program()
+        };
+        let tu = crate::type_universe::TypeUniverse::build(&tu_program);
+        backend = LlvmBackend::new().with_type_universe(tu);
+        let body = vec![
+            Statement::Let {
+                name: "x".to_string(),
+                ty: Some(Type::Custom("Positive".to_string())),
+                expr: Some(Expr::Integer(-5)),
+                address: None, address_expr: None, bit_range: None,
+                is_override: false, modifiers: vec![],
+                constraint: None,
+            },
+            Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+        ];
+        let output = backend.generate(&make_let_check_program(body, vec![]));
+        assert!(output.contains("@llvm.trap"),
+            "TypeDef guard violation should emit @llvm.trap(). Got:\n{}", output);
+        assert!(output.contains("unreachable"),
+            "TypeDef guard violation should emit unreachable. Got:\n{}", output);
+    }
+
+    #[test]
+    fn test_llvm_let_constraint_passes_no_trap() {
+        let mut backend = LlvmBackend::new();
+        let body = vec![
+            Statement::Let {
+                name: "x".to_string(),
+                ty: Some(Type::Int),
+                expr: Some(Expr::Integer(5)),
+                address: None, address_expr: None, bit_range: None,
+                is_override: false, modifiers: vec![],
+                constraint: Some(Box::new(Expr::Gt(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(Expr::Integer(0)),
+                ))),
+            },
+            Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
+        ];
+        let output = backend.generate(&make_let_check_program(body, vec![]));
+        // IR for passing constraint should contain the guard check sructure
+        // (br i1 branching to trap or continue) but NOT the trap label in
+        // a reachable path. The check still appears as code.
+        assert!(output.contains("br i1"),
+            "Passing constraint should still emit br i1 guard. Got:\n{}", output);
     }

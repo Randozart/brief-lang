@@ -1056,7 +1056,6 @@ impl VhdlGenerator {
             Type::Enum(name) => {
                 format!("std_logic_vector(7 downto 0) -- enum {}", name)
             }
-            Type::ContractBound(inner, _) => self.brief_type_to_vhdl(inner),
             Type::TypeVar(name) => format!("std_logic_vector(31 downto 0) -- typevar {}", name),
             Type::Generic(name, _) => format!("std_logic_vector(31 downto 0) -- generic {}", name),
             Type::Applied(name, _) => format!("std_logic_vector(31 downto 0) -- applied {}", name),
@@ -1092,7 +1091,6 @@ impl VhdlGenerator {
                 BitRange::Any(n) => *n,
             },
             Type::Enum(_) => 8,
-            Type::ContractBound(inner, _) => self.get_type_width(inner),
             _ => 32,
         }
     }

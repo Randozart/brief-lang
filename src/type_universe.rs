@@ -683,7 +683,7 @@ mod tests {
             body: TypeDefBody {
                 bindings: vec![],
                 constraints: vec![Expr::Gt(
-                    Box::new(Expr::Identifier("x".into())),
+                    Box::new(Expr::Identifier("_".into())),
                     Box::new(Expr::Integer(0)),
                 )],
                 span: None,
@@ -694,7 +694,7 @@ mod tests {
         let universe = TypeUniverse::build(&program);
         assert_eq!(universe.get("Positive").unwrap().guards.len(), 1);
         assert!(matches!(&universe.get("Positive").unwrap().guards[0],
-            Expr::Gt(_, _)));
+            Expr::Gt(e, _) if matches!(e.as_ref(), Expr::Identifier(name) if name == "_")));
     }
 
     #[test]

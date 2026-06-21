@@ -2597,7 +2597,7 @@ mod tests {
                 outputs: vec![Type::Int], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![
-                    Statement::Let { name: "x".into(), ty: Some(Type::Int), expr: Some(Expr::Identifier("y".into())), address: None, address_expr: None, bit_range: None, is_override: false, modifiers: vec![], range_constraint: None },
+                    Statement::Let { name: "x".into(), ty: Some(Type::Int), expr: Some(Expr::Identifier("y".into())), address: None, address_expr: None, bit_range: None, is_override: false, modifiers: vec![], constraint: None },
                     Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None },
                 ],
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
@@ -2613,7 +2613,7 @@ mod tests {
             TopLevel::StateDecl(StateDecl {
                 name: "x".into(), ty: Type::Int, expr: Some(Expr::String("hello".into())),
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-            range_constraint: None,
+            constraint: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -2626,7 +2626,7 @@ mod tests {
             TopLevel::StateDecl(StateDecl {
                 name: "x".into(), ty: Type::Int, expr: Some(Expr::Integer(5)),
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-            range_constraint: None,
+            constraint: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -2639,7 +2639,7 @@ mod tests {
             TopLevel::StateDecl(StateDecl {
                 name: "x".into(), ty: Type::Int, expr: None,
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-            range_constraint: None,
+            constraint: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -2745,7 +2745,7 @@ mod tests {
             TopLevel::StateDecl(StateDecl {
                 name: "unused".into(), ty: Type::Int, expr: None,
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-            range_constraint: None,
+            constraint: None,
             }),
         ]);
         let _ = tc.check_program(&mut prog);

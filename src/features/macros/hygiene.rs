@@ -149,7 +149,7 @@ mod tests {
         let mut stmts = vec![Statement::Let {
             name: "temp".to_string(), ty: None, expr: Some(Expr::Integer(42)),
             address: None, address_expr: None, bit_range: None,
-            range_constraint: None, is_override: false, modifiers: Vec::new(),
+            constraint: None, is_override: false, modifiers: Vec::new(),
         }];
         let mut counter = 0u64;
         let mut gensym = move || { let n = counter; counter += 1; format!("__gensym_{}", n) };
@@ -167,7 +167,7 @@ mod tests {
             Statement::Let {
                 name: "temp".to_string(), ty: None, expr: Some(Expr::Integer(42)),
                 address: None, address_expr: None, bit_range: None,
-                range_constraint: None, is_override: false, modifiers: Vec::new(),
+                constraint: None, is_override: false, modifiers: Vec::new(),
             },
             Statement::Expression(Expr::Identifier("temp".to_string())),
         ];
@@ -197,7 +197,7 @@ mod tests {
             Statement::Let {
                 name: "temp".to_string(), ty: None, expr: Some(Expr::Integer(1)),
                 address: None, address_expr: None, bit_range: None,
-                range_constraint: None, is_override: false, modifiers: Vec::new(),
+                constraint: None, is_override: false, modifiers: Vec::new(),
             },
             Statement::Expression(Expr::Identifier("state_val".to_string())),
             Statement::Expression(Expr::Identifier("temp".to_string())),

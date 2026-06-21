@@ -344,6 +344,30 @@ impl<'a> Parser<'a> {
         matches!(self.current_token(), Some(Ok(Token::LtColon)))
     }
 
+    /// Parse a constraint expression inside `[expr]` after `<:`.
+    /// `lo..hi` range syntax is desugared to `_ >= lo && _ <= hi`.
+    fn parse_constraint_expr(&mut self) -> Result<Box<Expr>, SyntaxError> {
+        let first = self.parse_expression()?;
+        if let Some(Ok(Token::DotDot)) = self.current_token() {
+            self.advance();
+            let second = self.parse_expression()?;
+            // Desugar: lo..hi → _ >= lo && _ <= hi
+            Ok(Box::new(Expr::And(
+                Box::new(Expr::Ge(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(first),
+                )),
+                Box::new(Expr::Le(
+                    Box::new(Expr::Identifier("_".to_string())),
+                    Box::new(second),
+                )),
+            )))
+        } else {
+            // Single expression — the constraint itself references `_`
+            Ok(Box::new(first))
+        }
+    }
+
     fn parse_hashtag_modifiers(&mut self) -> Result<Vec<Hashtag>, SyntaxError> {
         let mut mods = Vec::new();
         loop {
@@ -3052,22 +3076,14 @@ impl<'a> Parser<'a> {
             }
         }
 
-        // `<: [lo..hi]` range constraint after type
-        let mut range_constraint: Option<RangeConstraint> = None;
+        // `<: [lo..hi]` or `<: [expr]` constraint after type
+        let mut constraint: Option<Box<Expr>> = None;
         if self.check_lt_colon() {
             self.advance();
             if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
-                let lo = self.parse_expression()?;
-                if let Some(Ok(Token::DotDot)) = self.current_token() {
-                    self.advance();
-                    let hi = self.parse_expression()?;
-                    self.expect(Token::RBracket)?;
-                    range_constraint = Some(RangeConstraint::Range(Box::new(lo), Box::new(hi)));
-                } else {
-                    self.expect(Token::RBracket)?;
-                    range_constraint = Some(RangeConstraint::Regex(Box::new(lo)));
-                }
+                constraint = Some(self.parse_constraint_expr()?);
+                self.expect(Token::RBracket)?;
             }
         }
 
@@ -3085,7 +3101,7 @@ let span = self.current_span();
             expr,
             address,
             bit_range,
-            range_constraint,
+            constraint,
             is_override,
             os_mode: false,
             span,
@@ -4510,7 +4526,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                             bit_range: None,
                             is_override: false,
                             modifiers: Vec::new(),
-                            range_constraint: None,
+                            constraint: None,
                         });
                     }
                     
@@ -4530,33 +4546,57 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         bit_range: None,
                         is_override: false,
                         modifiers: Vec::new(),
-                        range_constraint: None,
+                        constraint: None,
                     })
                 } else {
                     let name = self.expect_identifier()?;
 
-                    // Check for `<:` subtype projection
+                    // Check for `<:` — constraint or subtype projection
                     if self.check_lt_colon() {
                         self.advance(); // consume `<:`
-                        // Parse source expression, but stop before `{` (struct literal)
-                        // parse_expression would consume `{...}` as struct literal fields
-                        let source = self.parse_projection_source()?;
-                        let ops = self.parse_subtype_ops()?;
-                        self.expect(Token::Semicolon)?;
-                        return Ok(Statement::Let {
-                            name,
-                            ty: None,
-                            expr: Some(Expr::SubtypeProjection {
-                                source: Box::new(source),
-                                ops,
-                            }),
-                            address: None,
-                            address_expr: None,
-                            bit_range: None,
-                            is_override: false,
-                            modifiers: Vec::new(),
-                            range_constraint: None,
-                        });
+                        if let Some(Ok(Token::LBracket)) = self.current_token() {
+                            // Constraint syntax: let name <: [expr];
+                            self.advance();
+                            let constraint = Some(self.parse_constraint_expr()?);
+                            self.expect(Token::RBracket)?;
+                            let expr = if let Some(Ok(Token::Eq)) = self.current_token() {
+                                self.advance();
+                                Some(self.parse_expression()?)
+                            } else {
+                                None
+                            };
+                            self.expect(Token::Semicolon)?;
+                            return Ok(Statement::Let {
+                                name,
+                                ty: None,
+                                expr,
+                                address: None,
+                                address_expr: None,
+                                bit_range: None,
+                                is_override: false,
+                                modifiers: Vec::new(),
+                                constraint,
+                            });
+                        } else {
+                            // Subtype projection: let name <: SOURCE . OPS
+                            let source = self.parse_projection_source()?;
+                            let ops = self.parse_subtype_ops()?;
+                            self.expect(Token::Semicolon)?;
+                            return Ok(Statement::Let {
+                                name,
+                                ty: None,
+                                expr: Some(Expr::SubtypeProjection {
+                                    source: Box::new(source),
+                                    ops,
+                                }),
+                                address: None,
+                                address_expr: None,
+                                bit_range: None,
+                                is_override: false,
+                                modifiers: Vec::new(),
+                                constraint: None,
+                            });
+                        }
                     }
 
                 let mut modifiers = self.parse_hashtag_modifiers()?;
@@ -4613,24 +4653,14 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     None
                 };
 
-                // `<: [lo..hi]` range constraint after type
-                let mut range_constraint: Option<RangeConstraint> = None;
+                // `<: [lo..hi]` or `<: [expr]` constraint after type
+                let mut constraint: Option<Box<Expr>> = None;
                 if self.check_lt_colon() {
                     self.advance();
                     if let Some(Ok(Token::LBracket)) = self.current_token() {
                         self.advance();
-                        // Check for double-dot range: lo..hi
-                        let lo = self.parse_expression()?;
-                        if let Some(Ok(Token::DotDot)) = self.current_token() {
-                            self.advance();
-                            let hi = self.parse_expression()?;
-                            self.expect(Token::RBracket)?;
-                            range_constraint = Some(RangeConstraint::Range(Box::new(lo), Box::new(hi)));
-                        } else {
-                            // Single expression — regex or exact value constraint
-                            self.expect(Token::RBracket)?;
-                            range_constraint = Some(RangeConstraint::Regex(Box::new(lo)));
-                        }
+                        constraint = Some(self.parse_constraint_expr()?);
+                        self.expect(Token::RBracket)?;
                     }
                 }
 
@@ -4652,7 +4682,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     address,
                     address_expr,
                     bit_range,
-                    range_constraint,
+                    constraint,
                     is_override,
                     modifiers,
                 })
@@ -5442,13 +5472,45 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             // If @ is not followed by /, don't consume it - let the caller handle it
         }
 
-        // Check for contract bound: Type[expr] (e.g. Int[product > 0])
+        // Type[expr] bracket syntax: generic application like `Option[Int]`.
+        // The old `Type[expr]` contract-bound syntax is removed — use `<: [expr]` instead.
         if allow_contract_bound {
             if let Some(Ok(Token::LBracket)) = self.current_token() {
                 self.advance();
-                let contract_expr = self.parse_expression()?;
+                let inner = self.parse_expression()?;
                 self.expect(Token::RBracket)?;
-                ty = Type::ContractBound(Box::new(ty), Box::new(contract_expr));
+                let arg_type = match inner {
+                    Expr::Identifier(name) => match name.as_str() {
+                        "Int" => Type::Int,
+                        "Float" => Type::Float,
+                        "Bool" => Type::Bool,
+                        "String" => Type::String,
+                        "Char" => Type::Char,
+                        "Void" => Type::Void,
+                        _ => Type::Custom(name),
+                    },
+                    Expr::Integer(n) => Type::Custom(format!("Literal({})", n)),
+                    Expr::Literal(lit) => match lit.as_ref() {
+                        crate::features::literal::LiteralExpr::Integer(n) => {
+                            Type::Custom(format!("Literal({})", n))
+                        }
+                        _ => return self.spanned_err(
+                            "Invalid generic type argument. Use a type name (e.g. `Option[Int]`) or integer (e.g. `Byte[4096]`). \
+                             For constraints use `<: [expr]` syntax instead (e.g. `let x: Int <: [product > 0]`)."
+                                .to_string(),
+                        ),
+                    },
+                    _ => return self.spanned_err(
+                        "Invalid generic type argument. Use a type name (e.g. `Option[Int]`) or integer (e.g. `Byte[4096]`). \
+                         For constraints use `<: [expr]` syntax instead (e.g. `let x: Int <: [product > 0]`)."
+                            .to_string(),
+                    ),
+                };
+                let base_name = match &ty {
+                    Type::Custom(name) => name.clone(),
+                    _ => return self.spanned_err("Generic type must have a base name".to_string()),
+                };
+                ty = Type::Applied(base_name, vec![arg_type]);
             }
         }
 
@@ -6619,6 +6681,10 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 }
                 self.expect(Token::RBracket)?;
                 Ok(Expr::ListLiteral(elements))
+            }
+            Some(Ok(Token::Underscore)) => {
+                self.advance();
+                Ok(Expr::Identifier("_".to_string()))
             }
             Some(Ok(Token::TildeSlash)) => {
                 self.advance();
@@ -9102,6 +9168,79 @@ mod parser_tests {
         } else {
             panic!("Expected Import");
         }
+    }
+
+    // --- Constraint syntax tests (Phase C/D) ---
+
+    #[test]
+    fn test_parse_let_constraint_range_sugar() {
+        let s = r#"defn f() -> Int { let x: Int <: [0..100] = 50; term x; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Range sugar should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Let { constraint: Some(c), expr: Some(_), name, .. } => {
+                    assert_eq!(name, "x");
+                    // Desugared to: _ >= lo && _ <= hi
+                    let s = format!("{:?}", c);
+                    assert!(s.contains("Ge") || s.contains("Gt"), "Expected comparison in constraint, got: {}", s);
+                    assert!(s.contains("Le") || s.contains("Lt"), "Expected comparison in constraint, got: {}", s);
+                    assert!(s.contains("And"), "Expected And in constraint, got: {}", s);
+                }
+                _ => panic!("Expected Let with constraint"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_let_constraint_expression() {
+        let s = r#"defn f(x: Int) -> Int { let y: Int <: [_ > 0] = x; term y; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Expression constraint should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Let { constraint: Some(c), expr: Some(_), name, .. } => {
+                    assert_eq!(name, "y");
+                    assert!(matches!(c.as_ref(), Expr::Gt(_, _) | Expr::BinaryOp(_)),
+                        "Expected comparison expression, got {:?}", c);
+                }
+                _ => panic!("Expected Let with constraint"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_let_constraint_no_type() {
+        let s = r#"defn f() -> Int { let x <: [0..100] = 50; term x; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Constraint without type should parse: {:?}", result.err());
+        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+            match &defn.body[0] {
+                Statement::Let { constraint: Some(_), ty: None, expr: Some(_), name, .. } => {
+                    assert_eq!(name, "x");
+                }
+                _ => panic!("Expected Let with constraint, no type"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_state_decl_constraint() {
+        let s = r#"let x: Int <: [0..255] = 128;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "State decl constraint should parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_constraint_same_name() {
+        let s = r#"defn f() -> Int { let x <: [_ > 0] = 10; term x; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Constraint without type should parse: {:?}", result.err());
     }
 }
 

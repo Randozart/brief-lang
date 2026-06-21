@@ -821,7 +821,6 @@ impl RustBackend {
                     format!("{}<{}>", name, args_str.join(", "))
                 }
             }
-            Type::ContractBound(inner, _) => Self::get_rust_type(inner),
             Type::Constrained(inner, _) => Self::get_rust_type(inner),
         }
     }

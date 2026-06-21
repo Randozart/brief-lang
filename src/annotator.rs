@@ -177,7 +177,6 @@ impl Annotator {
                 .map(|t| self.type_to_string(t))
                 .collect::<Vec<_>>()
                 .join(", ")),
-            Type::ContractBound(inner, _) => self.type_to_string(inner),
             Type::Generic(name, type_args) => {
                 format!(
                     "{}<{}>",
