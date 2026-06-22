@@ -1,0 +1,12 @@
+// let-order — Tests that Let statements are emitted in source order
+#!exit x == 100;
+
+let x: Int = 0;
+
+rct txn tick [x < 100][x == 100] {
+    let a: Int = 1;
+    let b: Int = 2;
+    let c: Int = a + b;
+    &x = x + c;
+    term;
+};
