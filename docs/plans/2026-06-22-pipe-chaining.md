@@ -274,10 +274,19 @@ after the subtype projection block. Future work if needed.
 
 | File | Change |
 |------|--------|
-| `src/ast.rs` | Add `PipeStep`, `Expr::PipeChain` |
+| `src/ast.rs` | Add `PipeChain` struct, `PipeStep` struct, `Expr::PipeChain` variant |
 | `src/lexer.rs` | Add `PipeGreater` token |
-| `src/parser.rs` | Add `parse_pipe_chain`, modify `parse_expression`, modify `parse_let` for `<:\|>` compat |
-| `src/desugarer.rs` | Add `desugar_expr`, `desugar_pipe_chain`, call from `desugar` |
+| `src/parser.rs` | Add `peek2` field, `parse_pipe_chain`, dot-skip guard in `parse_postfix` |
+| `src/desugarer.rs` | Add `desugar_expr`/`stmt`/`toplevel` walkers, `desugar_pipe_chain` |
+| `src/interpreter.rs` | E2E tests for pipe chaining |
+| `src/analysis/dependency_graph.rs` | `unreachable!` arm |
+| `src/backend/llvm/mod.rs` | `unreachable!` arm |
+| `src/proof_engine.rs` | `unreachable!` arm |
+| `src/symbolic.rs` | `unreachable!` arm |
+| `docs/architecture/features/pipe.md` | Architecture doc |
+| `learn-brief/01-basics.md` | Pipe chaining tutorial section |
+| `examples/pipe-chain.bv` | Example program |
+| `examples/pipe-skip.bv` | Example program |
 | `docs/plans/2026-06-22-pipe-chaining.md` | This file |
 
 ## 9. Example .bv Files
@@ -285,73 +294,39 @@ after the subtype projection block. Future work if needed.
 ### `examples/pipe-chain.bv` — Basic pipe chaining
 
 ```brief
-frgn __print_int(n: Int) -> Bool;
-
 defn add_one(x: Int) -> Int { term x + 1; };
 defn double(x: Int) -> Int { term x * 2; };
-defn to_string(x: Int) -> String { term int_to_str#(x); };
 
 txn main() [true][true] -> Bool {
-    let result: Int = 5
-        |> add_one()
-        |> double()
-        |> add_one();
-    // result = ((5+1)*2)+1 = 13
-    term! -> __print_int(result);   // prints 13
+    let result: Int = 5 |> add_one() |> double() |> add_one();
+    term! -> print_int#(result);   // prints 13
 };
 ```
 
 ### `examples/pipe-skip.bv` — Dot-skip chaining
 
 ```brief
-frgn __print_int(n: Int) -> Bool;
-
 defn square(x: Int) -> Int { term x * x; };
 defn add_one(x: Int) -> Int { term x + 1; };
-defn sum(a: Int, b: Int) -> Int { term a + b; };
+defn double(x: Int) -> Int { term x * 2; };
 
 txn main() [true][true] -> Bool {
-    // Pipeline: 3 |> square() |> add_one() .|> sum(_, _1)
-    // square(3) = 9
-    // add_one(9) = 10
-    // .|> skips add_one's result, uses square's result (9) as first arg to sum
-    // sum's second arg comes from intervening value (10)
-    let result: Int = 3
-        |> square()      // pos 1: 9
-        |> add_one()     // pos 2: 10
-        .|> sum(_, _1);  // pos 3: sum(9, 10) = 19
-    term! -> __print_int(result);   // prints 19
+    let result: Int = 3 |> square() |> add_one() .2|> double();
+    term! -> print_int#(result);   // prints 6
 };
 ```
 
-### `examples/pipe-query.bv` — Pipe with `<:` query
+### `examples/pipe-query.bv` — Pipe with `<:` query (two-statement form)
 
 ```brief
-// Note: This demonstrates the two-statement pattern.
-// The <: query syntax produces a collection via subtype projection.
+struct Record { id: Int, active: Bool };
 
-frgn __print_int(n: Int) -> Bool;
-
-struct Record {
-    id: Int,
-    active: Bool,
-};
-
-defn active_ids(records: List<Record>) -> List<Int> {
-    // Count active records, return their IDs (simplified)
-    term [];  // placeholder
-};
+defn print_count(n: Int) -> Bool { term print_int#(n); };
 
 txn main() [true][true] -> Bool {
-    let data: List<Record> = [
-        Record { id: 1, active: true },
-        Record { id: 2, active: false },
-        Record { id: 3, active: true },
-    ];
-    let result <: data { FILTER(.active); COUNT; };
-    result |> active_ids();
-    // result is the count of active records
-    term! -> __print_int(result);
+    let result <: database { FILTER(.active); };
+    result |> print_count();
+    term;
 };
 ```
 

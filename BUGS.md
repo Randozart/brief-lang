@@ -1610,3 +1610,54 @@ to the whitelist.
 **Files**: `mod.rs:318`, `emit_toplevel.rs:99-103`, `emit_expr.rs` (`emit_fcmp`), `loop_engine.rs:622`, `brief_rt.c`
 
 **Lesson**: `@ link` should load raw byte values from the linked address, consistent with all other types. The `i8*` storage type was inconsistent with the byte-oriented nature of the trigger mechanism. String triggers now compare by first-byte value, not by pointer identity.
+
+---
+
+## 2026-06-22 — `.N|>` consumed as field access by `parse_postfix`
+
+**Issue**: `x |> f() .2|> g()` failed to parse. The error was "pipe target must be a function call" because `.2` was consumed as `FieldAccess(Call("f", []), "2")` before `parse_pipe_chain` could see it.
+
+**Root Cause**: The `parse_postfix` function's Dot handler consumed `.` + `Integer` as numeric field access (`.N` selects a struct field by index). The existing guard only checked for `. |> ` (Dot + PipeGreater peek) but not `.N|>` (Dot + Integer peek + PipeGreater peek2). The parser only had single-token lookahead (`peek`), so it couldn't check two tokens ahead.
+
+**Fix**: 
+1. Added `peek2: Option<(Result<Token, ()>, logos::Span)>` field to `Parser` struct
+2. Updated `advance()` to shift current→peek→peek2→lexer (three-stage pipeline)
+3. Updated `put_back()` to preserve peek2
+4. Added `peek_token2()` accessor method
+5. Extended `parse_postfix` Dot guard to also check `.N|>` via `peek_token2`: `if matches!(peek, Integer) && matches!(peek2, PipeGreater) { break; }`
+
+**Files**: `src/parser.rs` — `Parser` struct, `advance`, `put_back`, `peek_token2`, `parse_postfix` Dot guard
+
+**Lesson**: When an expression-level prefix (like `.`) can start two different constructs at different precedence levels, looking ahead is necessary. Single-token lookahead is insufficient when the second token (`Integer`) and third token (`|>`) must both be checked. A `peek2` field is the minimal infrastructure for two-token lookahead — no reason to add a full token-ring buffer.
+
+---
+
+## 2026-06-22 — Pipe skip overflow silently clamped to 0
+
+**Issue**: `3 |> square() .2|> double()` silently returned `double(3) = 6` instead of flagging an error. Skip=2 but only 1 command precedes `.2|>`, so no value exists at that pipeline depth.
+
+**Root Cause**: The desugarer's read-index calculation clamped overflow to 0: `let read_idx = if step.skip > pos { 0usize } else { pos - 1 - step.skip };`. This hid programmer errors — `.2|>` on a 1-command pipeline should be a compile-time error.
+
+**Fix**: Changed to an assertion that panics on overflow:
+```rust
+assert!(step.skip <= pos - 1);
+let read_idx = pos - 1 - step.skip;
+```
+
+**Files**: `src/desugarer.rs:717-721`
+
+**Lesson**: Never silently handle incorrect input. A skip that exceeds the pipeline position is a programmer error and should fail loudly.
+
+---
+
+## 2026-06-22 — Examples used `frgn __print_int` instead of `print_int#` intrinsic
+
+**Issue**: Example files (`examples/pipe-chain.bv`, `examples/pipe-skip.bv`) and architecture docs declared `frgn __print_int(n: Int) -> Bool;` instead of using the `print_int#` intrinsic.
+
+**Root Cause**: `print_int#(value)` is already defined as `Intrinsic::PrintInt` at `src/ast.rs:576` and handled in all three active backends (LLVM, Webstack, CIRCT). The `frgn` approach violates the "Intrinsics Before Frgn" rule — no `frgn` declaration should duplicate functionality already available as an intrinsic.
+
+**Fix**: Replaced all `frgn __print_int` + `__print_int(result)` with `print_int#(result)` across examples, architecture docs, and learn-brief.
+
+**Files**: `examples/pipe-chain.bv`, `examples/pipe-skip.bv`, `docs/architecture/features/pipe.md`, `learn-brief/01-basics.md`
+
+**Lesson**: Check for existing intrinsics before reaching for `frgn`. `print_int#`, `put_char#`, `print_float#` all exist and should be used in examples.

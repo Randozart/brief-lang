@@ -58,6 +58,23 @@ postcondition (defaults to `true`).
 **Banned in**: `.sbv`, `.srbv`, `.sebv`, `.cbv` (strict tiers require explicit both-sided contracts).
 **Allowed in**: `.abv`, `.bv`, `.ebv`, `.rbv` (sugar is the recommended style).
 
+### Pipe Chaining Sugar
+
+Brief provides pipe chaining (`|>`) as a syntactic sugar that desugars to
+flat let-bindings before typechecking. All three active backends see only
+the desugared form — zero runtime overhead.
+
+```brief
+x |> f()            // f(x) — pipeline value prepended as first arg
+x |> f() |> g()     // g(f(x)) — multi-step chain
+x |> f() .|> g()    // .|> reads from 1 position back in pipeline stack
+x |> f() .2|> g()   // .N|> reads from N positions back
+x |> f              // auto-wrapped: f(x)
+f() |> g()          // chain starts with function call (no initial input)
+```
+
+See `docs/architecture/features/pipe.md` for full documentation.
+
 ### Critical Philosophy
 
 **CONTRACT-FIRST**: Contracts are the source of truth. Never weaken contracts to match lazy code.
