@@ -160,6 +160,7 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
             for item in items { collect_reads_from_expr(item, reads); }
         }
         Expr::Cast(inner, _) => collect_reads_from_expr(inner, reads),
+        Expr::FieldAccess(obj, _) => collect_reads_from_expr(obj, reads),
         Expr::Block(_, body) => collect_reads_from_expr(body, reads),
         Expr::MapLiteral(entries) => {
             for (k, v) in entries {
@@ -179,6 +180,15 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
             if let Some(m) = mask { collect_reads_from_expr(m, reads); }
         }
         Expr::Tuple(items) => {
+            for item in items { collect_reads_from_expr(item, reads); }
+        }
+        Expr::StructInstance(_, fields) => {
+            for (_name, val) in fields { collect_reads_from_expr(val, reads); }
+        }
+        Expr::ObjectLiteral(fields) => {
+            for (_name, val) in fields { collect_reads_from_expr(val, reads); }
+        }
+        Expr::SetLiteral(items) => {
             for item in items { collect_reads_from_expr(item, reads); }
         }
         _ => {}
