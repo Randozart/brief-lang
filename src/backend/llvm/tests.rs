@@ -5449,3 +5449,52 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("phi i64"),
             "Hot Dual path should have phi to merge cached vs computed: {}", output);
     }
+
+    #[test]
+    fn test_meld_route_expression_evaluation() {
+        // Phase 2: Verify that try_meld_projection evaluates meld route expressions.
+        let mut backend = LlvmBackend::new();
+        // Set up a TypeUniverse with a meld from CString <:> String
+        let meld_decl = MeldDeclaration {
+            name_a: "CString".into(),
+            name_b: "String".into(),
+            routes: vec![
+                MeldRouteDef {
+                    accessor: "Ptr".into(),
+                    dest_expr: Expr::Identifier("Ptr".into()),
+                },
+                MeldRouteDef {
+                    accessor: "Size".into(),
+                    dest_expr: Expr::IntrinsicCall {
+                        intrinsic: crate::ast::Intrinsic::Strlen,
+                        args: vec![Expr::Identifier("Ptr".into())],
+                    },
+                },
+            ],
+            span: None,
+        };
+        let mut universe = crate::type_universe::TypeUniverse::new();
+        universe.melds.insert(
+            ("CString".into(), "String".into()),
+            meld_decl,
+        );
+        backend.type_universe = Some(universe);
+
+        // Test 1: Identity route "Ptr" → emits add i64 0, <src> ; ptr
+        let mut out = String::new();
+        let src_val = TypedRegister { name: "%x".into(), ty: Type::Custom("CString".into()) };
+        let result = backend.try_meld_projection(&mut out, &src_val, "Ptr", "  ");
+        assert!(result.is_some(), "try_meld_projection should find Ptr route");
+        assert!(out.contains("ptr"), "should emit Ptr projection: {}", out);
+
+        // Test 2: Intrinsic route "Size" → calls strlen#(Ptr)
+        let mut out2 = String::new();
+        let result2 = backend.try_meld_projection(&mut out2, &src_val, "Size", "  ");
+        assert!(result2.is_some(), "try_meld_projection should find Size route");
+        assert!(out2.contains("__strlen__"), "should call __strlen__: {}", out2);
+
+        // Test 3: Unknown target → returns None
+        let mut out3 = String::new();
+        let result3 = backend.try_meld_projection(&mut out3, &src_val, "Type", "  ");
+        assert!(result3.is_none(), "no route for 'Type' → None");
+    }

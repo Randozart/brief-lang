@@ -4648,12 +4648,121 @@ impl LlvmBackend {
     }
 
     /// Phase 2: Check if the source type has a meld route for the given projection target.
-    /// Currently a structural hook — returns None to fall through to default projection
-    /// dispatch. Route expression evaluation (substituting type references with SSA registers)
-    /// will be implemented in a follow-up.
-    pub(crate) fn try_meld_projection(&mut self, _out: &mut String, _src_val: &TypedRegister,
-        _target_name: &str, _indent: &str) -> Option<TypedRegister>
+    /// When a meld route exists, evaluates the route's destination expression to derive
+    /// the projection result from the backing value. Handles:
+    /// - `Expr::Identifier(name)` where name is a projection target → emit direct projection
+    /// - `Expr::IntrinsicCall { intrinsic, args }` → emit intrinsic with args as projections
+    /// - `Expr::Projection { source, target }` → emit projection with substituted source
+    pub(crate) fn try_meld_projection(&mut self, out: &mut String, src_val: &TypedRegister,
+        target_name: &str, indent: &str) -> Option<TypedRegister>
     {
-        None
+        let custom_name = match &src_val.ty {
+            crate::ast::Type::Custom(n) => n.clone(),
+            _ => return None,
+        };
+        let universe = self.type_universe.as_ref()?;
+        // Find meld — clone data to avoid borrow conflict with mutable self
+        let meld_entry = universe.melds.iter().find(|((a, b), _decl)| {
+            a == &custom_name || b == &custom_name
+        });
+        let ((name_a, name_b), meld_decl) = meld_entry?;
+        let partner = if *name_a == custom_name { name_b.clone() } else { name_a.clone() };
+        let route = meld_decl.routes.iter().find(|r| r.accessor == target_name)?;
+        let route_dest = route.dest_expr.clone();
+
+        self.emit_route_expression(out, &route_dest, src_val, &partner, indent)
+    }
+
+    /// Evaluate a meld route's destination expression, substituting the meld partner's
+    /// type name with the actual source value and treating known projection target names
+    /// as projections on the backing value.
+    fn emit_route_expression(&mut self, out: &mut String, expr: &Expr,
+        src_val: &TypedRegister, partner: &str, indent: &str) -> Option<TypedRegister>
+    {
+        match expr {
+            // Pattern 1: identity projection — "Ptr" or "Size" on the backing value
+            Expr::Identifier(name) if name == "Ptr" || name == "Size"
+                || name == "Bytes" || name == "Alignment" || name == "Type" => {
+                self.emit_direct_projection(out, src_val, name, indent)
+            }
+            // Pattern 2: intrinsic call — "strlen#(Ptr)" etc.
+            Expr::IntrinsicCall { intrinsic, args } => {
+                let v = format!("%t{}", self.txn_counter);
+                self.txn_counter += 1;
+                // Handle strlen#(arg) — the common meld route for CString.Size
+                if let crate::ast::Intrinsic::Strlen = intrinsic {
+                    if args.len() == 1 {
+                        let arg_name = match &args[0] {
+                            Expr::Identifier(n) => Some(n.clone()),
+                            _ => None,
+                        };
+                        if let Some(ref name) = arg_name {
+                            if name == "Ptr" || name == "Size" || name == "Bytes" {
+                                let proj_reg = self.emit_direct_projection(out, src_val, name, indent)?;
+                                writeln!(out, "{}{} = call i64 @__strlen__(i64 {})", indent, v, proj_reg.name).ok();
+                                return Some(TypedRegister { name: v, ty: Type::Int });
+                            }
+                        }
+                    }
+                }
+                None
+            }
+            // Pattern 3: projection on the partner type — "CString :> Size"
+            Expr::Projection { source: sub_source, target: sub_target } => {
+                let sub_name = match sub_source.as_ref() {
+                    Expr::Identifier(n) => Some(n.clone()),
+                    _ => None,
+                };
+                if let Some(ref name) = sub_name {
+                    if name == partner {
+                        // Substitute with the actual source value and emit the projection
+                        // without going through the meld check again (avoid recursion)
+                        let target_name = crate::analysis::transition_graph::projection_target_name(sub_target);
+                        self.emit_direct_projection(out, src_val, &target_name, indent)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Emit a direct projection on a value without going through the meld route check.
+    /// This avoids infinite recursion when a meld route maps to the same projection target.
+    fn emit_direct_projection(&mut self, out: &mut String, src_val: &TypedRegister,
+        target_name: &str, indent: &str) -> Option<TypedRegister>
+    {
+        let v = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
+        match target_name {
+            "Ptr" => {
+                writeln!(out, "{}{} = add i64 0, {} ; ptr", indent, v, src_val.name).ok();
+                Some(TypedRegister { name: v, ty: Type::Int })
+            }
+            "Size" => {
+                let hp = format!("%drphp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                let lp = format!("%drplp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
+                Some(TypedRegister { name: v, ty: Type::Int })
+            }
+            "Bytes" => {
+                writeln!(out, "{}{} = add i64 0, 8 ; bytes", indent, v).ok();
+                Some(TypedRegister { name: v, ty: Type::Int })
+            }
+            "Alignment" => {
+                writeln!(out, "{}{} = add i64 0, 8 ; alignment", indent, v).ok();
+                Some(TypedRegister { name: v, ty: Type::Int })
+            }
+            "Type" => {
+                writeln!(out, "{}{} = add i64 0, 6 ; type=custom", indent, v).ok();
+                Some(TypedRegister { name: v, ty: Type::Int })
+            }
+            _ => None,
+        }
     }
 }
