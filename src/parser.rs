@@ -188,6 +188,7 @@ impl<'a> Parser<'a> {
             Token::Frgn => "frgn".into(),
             Token::Inop => "inop".into(),
             Token::InopBang => "inop!".into(),
+            Token::Meld => "meld".into(),
             Token::Import => "import".into(),
             Token::Struct => "struct".into(),
             Token::Enum => "enum".into(),
@@ -263,6 +264,7 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Frgn)) => { self.advance(); Ok("frgn".to_string()) }
             Some(Ok(Token::Inop)) => { self.advance(); Ok("inop".to_string()) }
             Some(Ok(Token::InopBang)) => { self.advance(); Ok("inop!".to_string()) }
+            Some(Ok(Token::Meld)) => { self.advance(); Ok("meld".to_string()) }
             Some(Ok(Token::Struct)) => { self.advance(); Ok("struct".to_string()) }
             Some(Ok(Token::Enum)) => { self.advance(); Ok("enum".to_string()) }
             Some(Ok(Token::Import)) => { self.advance(); Ok("import".to_string()) }
@@ -1102,6 +1104,10 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::InopBang)) => {
                 let inop = self.parse_inop_decl(true)?;
                 Ok(wrap_test(TopLevel::Inop(inop), &test_groups))
+            }
+            Some(Ok(Token::Meld)) => {
+                let meld = self.parse_meld_decl()?;
+                Ok(wrap_test(TopLevel::Meld(meld), &test_groups))
             }
             Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) | Some(Ok(Token::Registry)) => {
                 let resource = self.parse_resource()?;
@@ -2062,6 +2068,45 @@ impl<'a> Parser<'a> {
             llvm_body,
             fallback,
             has_side_effects: bang,
+            span: None,
+        })
+    }
+
+    /// Parse a meld declaration:
+    ///   `meld A <:> B;` — infer all routes from `@/` bit-range matching
+    ///   `meld A <:> B { Ptr -> B.ptr; Size -> B :> Size; };` — explicit routes
+    fn parse_meld_decl(&mut self) -> Result<MeldDeclaration, SyntaxError> {
+        self.expect(Token::Meld)?;
+        let name_a = self.expect_identifier()?;
+        self.expect(Token::LtColonGt)?;
+        let name_b = self.expect_identifier()?;
+
+        let routes = if let Some(Ok(Token::LBrace)) = self.current_token() {
+            self.advance();
+            let mut r = Vec::new();
+            while !matches!(self.current_token(), Some(Ok(Token::RBrace)) | None) {
+                let accessor = self.expect_identifier()?;
+                self.expect(Token::Arrow)?;
+                let dest_expr = self.parse_expression()?;
+                r.push(MeldRouteDef { accessor, dest_expr });
+                if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                    self.advance();
+                }
+            }
+            self.expect(Token::RBrace)?;
+            r
+        } else {
+            Vec::new()
+        };
+
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
+
+        Ok(MeldDeclaration {
+            name_a,
+            name_b,
+            routes,
             span: None,
         })
     }
@@ -9650,6 +9695,53 @@ mod parser_tests {
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "inop# call should parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_meld_simple() {
+        let s = "meld A <:> B;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "meld should parse: {:?}", result.err());
+        if let TopLevel::Meld(meld) = &result.unwrap().items[0] {
+            assert_eq!(meld.name_a, "A");
+            assert_eq!(meld.name_b, "B");
+            assert!(meld.routes.is_empty(), "no routes for simple meld");
+        } else {
+            panic!("Expected TopLevel::Meld");
+        }
+    }
+
+    #[test]
+    fn test_parse_meld_with_routes() {
+        let s = "meld A <:> B { Ptr -> B.ptr; Size -> B :> Size; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "meld with routes should parse: {:?}", result.err());
+        if let TopLevel::Meld(meld) = &result.unwrap().items[0] {
+            assert_eq!(meld.name_a, "A");
+            assert_eq!(meld.name_b, "B");
+            assert_eq!(meld.routes.len(), 2, "should have 2 routes");
+            assert_eq!(meld.routes[0].accessor, "Ptr");
+            assert_eq!(meld.routes[1].accessor, "Size");
+        } else {
+            panic!("Expected TopLevel::Meld");
+        }
+    }
+
+    #[test]
+    fn test_parse_meld_empty_routes_brace() {
+        let s = "meld A <:> B { };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "meld with empty routes should parse: {:?}", result.err());
+        if let TopLevel::Meld(meld) = &result.unwrap().items[0] {
+            assert_eq!(meld.name_a, "A");
+            assert_eq!(meld.name_b, "B");
+            assert!(meld.routes.is_empty(), "empty routes should be empty");
+        } else {
+            panic!("Expected TopLevel::Meld");
+        }
     }
 }
 

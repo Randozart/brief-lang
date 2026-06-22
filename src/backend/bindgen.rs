@@ -388,6 +388,7 @@ mod tests {
         TypeUniverse {
             types,
             resolution_order: vec!["Packet".to_string(), "Header".to_string()],
+            melds: HashMap::new(),
         }
     }
 

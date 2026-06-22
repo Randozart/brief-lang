@@ -93,6 +93,11 @@ especially critical in `.abv` (Accelerated Brief) files, where `frgn` is banned:
 - **Name-based interpreter dispatch**: Matching on `fn_name == "insert"` instead of dispatching on `Value::HashMap` — dispatch on the type, not on a string.
 - **`"None"`/`"Err"` discriminant magic**: Never match on variant names for discriminants. Use the enum declaration order.
 - **Type-based dispatch**: In the interpreter, dispatch on `Value` variant, not on string-matching the function name.
+- **Runtime type tags for dispatch**: Never add a runtime tag to a value to determine "which type it really is." The type is determined statically at each site by the expression's type annotation (`TypedRegister.ty`). Runtime tags add overhead to every operation and contradict the zero-cost abstraction goal.
+- **Implicit coercions between types**: Never allow `let x: B = a_val` where `a_val: A` to silently reinterpret the bits. All type reinterpretations must be explicit via `as` casts. Implicit coercions violate the principle of least surprise and make control flow harder to reason about.
+- **Dynamic optimization path switching**: Never switch between memory layouts or optimization strategies at runtime based on usage counters. All optimization paths (short, hot dual, unpacked) must be chosen statically at compile time based on liveness evidence. Wrong predictions mean wasted memory, never incorrectness.
+- **Transitive compatibility inference**: If `A` is compatible with `B` and `B` is compatible with `C`, never infer that `A` is compatible with `C`. Each compatibility relationship must be explicitly declared. Inference across the graph introduces invisible couplings that break with non-trivial layouts.
+- **Weakening existing optimization paths for new features**: Every addition to optimization passes (fast-path registry, projection dispatch, etc.) must be an **additional match arm**. Never modify existing arms. The `_ => return None;` fallthrough must remain unchanged — non-feature types must continue to work exactly as before.
 
 ### Observability as Liveness
 

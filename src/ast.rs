@@ -1161,6 +1161,28 @@ pub struct InopDeclaration {
     pub span: Option<Span>,
 }
 
+/// A single route in a `meld A <:> B` declaration.
+/// Maps a field/accessor from type A to the corresponding expression in type B.
+/// Example: `@0..63 -> B.ptr` maps bits 0-63 of A to B's `ptr` field.
+#[derive(Debug, Clone)]
+pub struct MeldRouteDef {
+    /// The accessor on the source type (e.g. `@0..63` for a bit range, or `Len` for a field name)
+    pub accessor: String,
+    /// The destination expression to compute the corresponding value
+    pub dest_expr: Expr,
+}
+
+/// A `meld A <:> B;` declaration with optional explicit route definitions.
+/// If routes are empty, the compiler infers them from `@/` bit-range matching.
+#[derive(Debug, Clone)]
+pub struct MeldDeclaration {
+    pub name_a: String,
+    pub name_b: String,
+    /// Optional explicit routes. Empty means "infer all routes."
+    pub routes: Vec<MeldRouteDef>,
+    pub span: Option<Span>,
+}
+
 /// Target for the `is` check expression: either a Type or a Variant name.
 /// Variant names (Some, None, Ok, Err) are resolved against the LHS enum type.
 #[derive(Debug, Clone, PartialEq)]
@@ -2108,6 +2130,10 @@ pub enum TopLevel {
     Enum(EnumDefinition),
     /// `Type Name <: Base { ... }` — type derivation system (Phase 1.5)
     TypeDef(Box<TypeDef>),
+    /// `meld A <:> B;` — bidirectional type compatibility declaration.
+    /// Establishes that A and B are mutually lens-compatible.
+    /// The value's physical layout adapts based on usage across both lenses.
+    Meld(MeldDeclaration),
     /// `#test("group")` pragma — wraps an item with test group membership.
     /// Skipped in production; included in test mode.
     Test {

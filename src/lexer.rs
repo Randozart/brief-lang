@@ -121,6 +121,9 @@ pub enum Token {
     #[token("INOP!")]
     #[token("inop#!")]
     InopBang,
+    #[token("meld")]
+    #[token("MELD")]
+    Meld,
     #[token("syscall")]
     #[token("SYSCALL")]
     Syscall,
@@ -340,6 +343,9 @@ pub enum Token {
     HashBang,
     #[token(";")]
     Semicolon,
+    #[token("<:>")]
+    LtColonGt,
+
     #[token("<:")]
     LtColon,
 
@@ -538,6 +544,7 @@ impl std::fmt::Display for Token {
             Token::FrgnBang => write!(f, "frgn!"),
             Token::Inop => write!(f, "inop"),
             Token::InopBang => write!(f, "inop!"),
+            Token::Meld => write!(f, "meld"),
             Token::Syscall => write!(f, "syscall"),
             Token::SyscallBang => write!(f, "syscall!"),
             Token::Resource => write!(f, "resource"),
@@ -612,6 +619,7 @@ impl std::fmt::Display for Token {
             Token::Hash => write!(f, "#"),
             Token::HashBang => write!(f, "#!"),
             Token::Semicolon => write!(f, ";"),
+            Token::LtColonGt => write!(f, "<:>"),
             Token::LtColon => write!(f, "<:"),
             Token::ColonGreaterThan => write!(f, ":>"),
             Token::Colon => write!(f, ":"),

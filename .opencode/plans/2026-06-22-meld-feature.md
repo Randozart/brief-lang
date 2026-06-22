@@ -935,4 +935,63 @@ Every variant, every match arm, every code path in the meld feature must be full
 
 ---
 
+## 12. Known Gotchas (Must Handle)
+
+### 12.1 FFI Escape — Cache Invalidation on Raw Pointer Mutation
+
+**Scenario:** A `CString`-typed chimera in Hot Dual mode (holding both `ptr` and a cached `strlen` value). The raw pointer `cs :> Ptr` is passed to an external C function via `frgn`. The C function mutates the character data in-place (inserting `\0`, truncating, etc.). Because the mutation happens inside compiled C code, Brief's compiler cannot trace this write statically.
+
+**Bug:** The cached `strlen` value remains marked `valid = true` after the FFI call returns. Subsequent reads of `:> Size` return a stale, corrupted length.
+
+**Mitigation (Phase 2):** Implement a transitive volatile degradation rule:
+
+1. Whenever a raw pointer (`:> Ptr`) belonging to a mutable chimera escapes to an FFI call, the compiler must immediately invalidate any associated cache flags (`store i8 0` to `cache_valid`) after the call returns.
+2. If the FFI call site is in a loop, degrade that variable from Hot Dual path to Short Path — force fresh `strlen#` on every access rather than risking stale cache.
+
+**Refinement (Phase 3+):** Allow the user to annotate FFI parameters as `readonly` to suppress invalidation:
+
+```brief
+frgn puts(s: CString) -> Int from "c";  // readonly by convention
+frgn strcat(buf: CString!, src: CString) -> CString from "c";  // mutates buf
+```
+
+### 12.2 Transitive Meld — E006 Error Code
+
+**Scenario:** Developer declares `meld A <:> B;` and `meld B <:> C;` then attempts `let c: C = a as C;` where `a: A`.
+
+**Bug:** If the compiler silently follows meld chains, the typechecker must perform recursive graph search (DFS/BFS) across the entire TypeUniverse to find paths between arbitrary types. In large codebases with complex meld graphs, this search is exponential-time and unpredictable.
+
+**Mitigation (Phase 0):** Strictly prohibit transitive melds at the typechecker level. A cast `A as C` is only valid if there is an explicit `meld A <:> C;` declaration.
+
+**New error code:**
+
+```
+error[E006]: unlinked meld — no direct meld between `A` and `C`
+  --> file.bv:12:17
+   |
+12 |     let c: C = a as C;
+   |                 ^^^^^
+   |
+   = `A` is melded with `B` (file.bv:3) and `B` is melded with `C` (file.bv:7)
+   = but there is no direct meld between `A` and `C`
+   |
+help: add an explicit meld declaration:
+  |
+  | meld A <:> C;
+  |
+```
+
+### 12.3 SSA Register Drift Under SROA (Phase 2)
+
+**Scenario:** In Hot Dual mode, the chimera is emitted as an LLVM struct `{ i64, i64, i64, i8 }` (ptr, len, cache, valid). LLVM's SROA pass decomposes this struct into four scalar SSA registers `%ptr`, `%len`, `%cache`, `%valid`. A write occurs in a conditional branch — one path updates the backing data, the other does not.
+
+**Bug:** If SSA phi nodes are not generated correctly at the branch merge point, the `%valid` register could say `true` (cache is fresh) while `%len` (or `%ptr`) holds a value that doesn't match the cache. The cache validity invariant is violated.
+
+**Mitigation (Phase 2):** During LLVM codegen for chimera-backed state fields:
+1. Every write to a chimera field must be emitted as a full `insertvalue` on the aggregate, not as a scalar store. This forces SROA to see the entire struct as a unit and correctly phi all elements.
+2. Alternatively, emit cache-invalidation stores in every branch that touches any field of the chimera — not just the branches that mutate the cached data. Caches should be pessimistically invalidated.
+3. Add LLVM IR test assertions that verify no Phi-node-based cache-validity violations survive optimization.
+
+---
+
 *End of plan.*

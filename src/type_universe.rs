@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Expr, Program, TopLevel, TypeBinding, TypeDef, TypeDefBody};
+use crate::ast::{Expr, MeldDeclaration, Program, TopLevel, TypeBinding, TypeDef, TypeDefBody};
 
 /// Resolved metadata for a single type in the universe.
 #[derive(Debug, Clone)]
@@ -80,6 +80,9 @@ pub struct TypeUniverse {
     pub types: HashMap<String, ResolvedType>,
     /// Ordered list of resolution (for deterministic output).
     pub resolution_order: Vec<String>,
+    /// Meld declarations indexed by sorted (name_a, name_b) pair.
+    /// Casts `a as B` are valid only if a direct meld exists between A and B.
+    pub melds: HashMap<(String, String), MeldDeclaration>,
 }
 
 /// Known codec names for D-2 validation.
@@ -116,6 +119,7 @@ impl TypeUniverse {
         TypeUniverse {
             types: HashMap::new(),
             resolution_order: Vec::new(),
+            melds: HashMap::new(),
         }
     }
 
@@ -188,6 +192,18 @@ impl TypeUniverse {
             if let Some(resolved) = resolved {
                 universe.types.insert(td.name.clone(), resolved.clone());
                 universe.resolution_order.push(td.name.clone());
+            }
+        }
+
+        // Phase 3: Collect meld declarations
+        for item in &program.items {
+            if let TopLevel::Meld(meld) = item {
+                let key = if meld.name_a <= meld.name_b {
+                    (meld.name_a.clone(), meld.name_b.clone())
+                } else {
+                    (meld.name_b.clone(), meld.name_a.clone())
+                };
+                universe.melds.insert(key, meld.clone());
             }
         }
 
@@ -374,6 +390,18 @@ impl TypeUniverse {
         self.types.get(name)
     }
 
+    /// Check if a direct meld exists between types `a` and `b`.
+    /// Transitive melds are NOT resolved — only explicit `meld A <:> B` declarations.
+    /// Returns the MeldDeclaration if found.
+    pub fn find_meld(&self, a: &str, b: &str) -> Option<&MeldDeclaration> {
+        let key = if a <= b {
+            (a.to_string(), b.to_string())
+        } else {
+            (b.to_string(), a.to_string())
+        };
+        self.melds.get(&key)
+    }
+
     /// Resolve the InsertAt strategy string to a known InsertStrategy.
     /// Returns None if the type has no InsertAt binding or the strategy
     /// is unrecognized.
@@ -438,7 +466,7 @@ fn type_universe_expr_to_string(e: &Expr) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Comment, DispatchMode, Expr, StrictMode, TopLevel, TypeBinding, TypeDef, TypeDefBody, Program};
+    use crate::ast::{Comment, DispatchMode, Expr, MeldDeclaration, StrictMode, TopLevel, TypeBinding, TypeDef, TypeDefBody, Program};
 
     fn make_program(items: Vec<TopLevel>) -> Program {
         Program {
@@ -741,5 +769,20 @@ mod tests {
         let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
         let universe = TypeUniverse::build(&program);
         assert_eq!(universe.insert_strategy("Custom"), None);
+    }
+
+    #[test]
+    fn test_meld_registration() {
+        let meld = TopLevel::Meld(MeldDeclaration {
+            name_a: "A".into(),
+            name_b: "B".into(),
+            routes: vec![],
+            span: None,
+        });
+        let program = make_program(vec![meld]);
+        let universe = TypeUniverse::build(&program);
+        assert!(universe.find_meld("A", "B").is_some(), "meld A <:> B should be found");
+        assert!(universe.find_meld("B", "A").is_some(), "meld B <:> A should also be found (bidirectional)");
+        assert!(universe.find_meld("A", "C").is_none(), "meld A <:> C should NOT be found (no declaration)");
     }
 }

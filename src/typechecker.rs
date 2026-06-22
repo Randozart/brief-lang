@@ -2341,7 +2341,8 @@ Expr::ObjectLiteral(fields) => {
     /// Check whether a type conversion is valid.
     fn is_cast_valid(&self, src: &Type, dst: &Type) -> bool {
         if src == dst { return true; }
-        matches!((src, dst),
+        // Check primitive cast pairs
+        if matches!((src, dst),
             (Type::Int, Type::Float) | (Type::Float, Type::Int) |
             (Type::Int, Type::Char) | (Type::Char, Type::Int) |
             (Type::Int, Type::UInt) | (Type::UInt, Type::Int) |
@@ -2353,7 +2354,16 @@ Expr::ObjectLiteral(fields) => {
             (Type::UInt, Type::Char) | (Type::Char, Type::UInt) |
             (Type::UInt, Type::String) | (Type::String, Type::UInt) |
             (Type::Bool, Type::String) | (Type::String, Type::Bool)
-        )
+        ) { return true; }
+        // Check meld-backed cast between custom types
+        if let (Type::Custom(src_name), Type::Custom(dst_name)) = (src, dst) {
+            if let Some(ref universe) = self.type_universe {
+                if universe.find_meld(src_name, dst_name).is_some() {
+                    return true;
+                }
+            }
+        }
+        false
     }
 
     /// Check if struct `child` derives from (or transitively derives from) `parent`.
@@ -4178,5 +4188,24 @@ mod kani_full_tests {
         let ty = ctx.infer_expression(&expr);
         assert_eq!(ty, Type::Char, "Cast Int -> Char should return Char");
         assert!(ctx.errors.borrow().is_empty(), "Int -> Char should be valid");
+    }
+
+    #[test]
+    fn test_infer_cast_meld_direct() {
+        let meld = TopLevel::Meld(MeldDeclaration {
+            name_a: "String".into(),
+            name_b: "CString".into(),
+            routes: vec![],
+            span: None,
+        });
+        let mut prog = make_program(vec![meld]);
+        let universe = crate::type_universe::TypeUniverse::build(&prog);
+        let ctx = TypeChecker::new().with_type_universe(universe);
+        assert!(ctx.is_cast_valid(&Type::Custom("String".into()), &Type::Custom("CString".into())),
+            "meld String <:> CString should allow cast String -> CString");
+        assert!(ctx.is_cast_valid(&Type::Custom("CString".into()), &Type::Custom("String".into())),
+            "meld String <:> CString should allow cast CString -> String (bidirectional)");
+        assert!(!ctx.is_cast_valid(&Type::Custom("String".into()), &Type::Custom("Int".into())),
+            "no meld String <:> Int, cast should be invalid");
     }
 }
