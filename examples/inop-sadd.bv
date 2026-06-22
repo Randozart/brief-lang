@@ -1,11 +1,12 @@
 // inop-sadd: user-defined intrinsic for saturating addition
 //
 // Demonstrates:
-//   1. inop declaration with LLVM IR body
+//   1. inop declaration with BILD body (Brief's Inop LLVM Dialect)
 //   2. fallback expression for interpreter/non-LLVM backends
 //   3. Call via name#(args) — same syntax as built-in intrinsics
-//   4. term lowering (term %res → ret i64 %res)
+//   4. BILD term lowering (term %res → ret i64 %res)
 //   5. Side-effect annotation: inop (no !) = pure
+//   6. BILD type mapping: Int → i64, parameters by name (%a, %b)
 
 inop sadd(a: Int, b: Int) -> Int {
   %res = add i64 %a, %b;

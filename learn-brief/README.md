@@ -1,8 +1,8 @@
 # Learn Brief - Complete Tutorial
 
 **Version:** 0.16.0  
-**Last Updated:** 2026-06-18  
-**Status:** Complete ✅
+**Last Updated:** 2026-06-22  
+**Status:** Complete ✅ (14-bild Added)
 
 ---
 
@@ -64,11 +64,11 @@
    - Split and join
 
 8. **[07-ffi.md](07-ffi.md)** - Foreign Function Interface
-   - FFI signatures (`frgn`)
-   - Error handling
-   - Metropolitan FFI (zero-copy)
-   - Type mapping
-   - Complete examples
+    - FFI signatures (`frgn`)
+    - Error handling
+    - Metropolitan FFI (zero-copy)
+    - Type mapping
+    - Complete examples
 
 ### Advanced
 
@@ -108,6 +108,12 @@
     - Reflection (Type, Ptr!, Keys, Values, Contains, Pop, Index, Get, Top, Front, Elements)
     - `<:` subtype projections (FILTER, MAP, SORT, GROUP, aggregates)
     - String match via `<:[...]`
+
+14. **[14-bild.md](14-bild.md)** - BILD: Brief's Low-Level Escape Hatch
+    - When to use inop/BILD vs frgn vs pure Brief
+    - Writing BILD bodies with LLVM IR and inline assembly
+    - Type mapping, term lowering, side effect flags
+    - Compiling, debugging, and optimizing
 
 ---
 

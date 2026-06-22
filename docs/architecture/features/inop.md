@@ -6,9 +6,12 @@
 ## Purpose
 
 `inop`/`inop!` allows the standard library and systems programmers to implement
-high-performance low-level primitives in LLVM IR without modifying compiler
-source code. This is the user-facing counterpart of the builtin `#`-intrinsic
-system.
+high-performance low-level primitives in **BILD** (Brief's Inop LLVM Dialect)
+without modifying compiler source code. BILD is a subset of LLVM IR with
+Brief-flavored syntax — see `docs/architecture/features/bild.md` for the
+full dialect reference.
+
+This is the user-facing counterpart of the builtin `#`-intrinsic system.
 
 ## Syntax
 
@@ -43,18 +46,24 @@ let n = write_buf#(ptr, len);
 The parser checks `Intrinsic::from_name(name)` first (built-in intrinsics),
 then falls back to the program's `inop_decls` map via `Intrinsic::UserDefined(name)`.
 
-### Parameter type mapping
+### Parameter type mapping (BILD)
 
-| Brief type | LLVM type | Example |
-|------------|-----------|---------|
-| `Int` | `i64` | `%x` |
-| `Float` | `float` | `%f` |
-| `Bool` | `i8` | `%b` |
-| `Char` | `i32` | `%c` |
-| `String` / `Data` | `i8*` | `%s` |
+| Brief type | LLVM type | BILD name | Example |
+|------------|-----------|-----------|---------|
+| `Int` | `i64` | `%x` | `add i64 %x, %y` |
+| `Float` | `float` | `%f` | `fadd float %f, %g` |
+| `Bool` | `i8` | `%b` | `trunc i8 %b to i1` |
+| `Char` | `i32` | `%c` | `add i32 %c, 1` |
+| `String` / `Data` | `i8*` | `%s` | `call i64 @strlen(i8* %s)` |
 
-### LLVM body rules
+### BILD body
 
+The body uses **BILD** (Brief's Inop LLVM Dialect), a subset of LLVM IR with
+Brief-flavored syntax. See `docs/architecture/features/bild.md` for the full
+dialect reference, including inline assembly support, type mapping, and
+`term` lowering rules.
+
+Key rules:
 - Statements are separated by `;`
 - Newlines are lexer whitespace (discarded)
 - `term` / `term!` is the unified terminator — `term %val` lowers to `ret i64 %val`
@@ -92,7 +101,7 @@ If no fallback exists, a `RuntimeError::MissingInopFallback(name)` is raised.
 
 ### LLVM backend
 
-- Declaration: `emit_inop()` emits `define i64 @name(%State* %state, <native ty> %param1, ...)`
+- Declaration: `emit_inop()` emits the BILD body as `define i64 @name(%State* %state, <native ty> %param1, ...)`
 - Call site: pre-evaluates args, emits `call <native_ty> @name(%State* %state, <native_ty> arg1, ...)`
 - `term %res` → `ret i64 %res`
 - `term!` → `ret i64` (with swan song if present)
@@ -101,7 +110,7 @@ If no fallback exists, a `RuntimeError::MissingInopFallback(name)` is raised.
 ### Webstack / CIRCT
 
 Both fall through to the fallback expression on `Intrinsic::UserDefined`.
-No LLVM IR codegen is attempted.
+No BILD codegen is attempted.
 
 ## Transition graph integration
 
@@ -134,6 +143,8 @@ and `compute_effectively_pure`.
 | `tests/fixtures/inop_sadd.bv` | E2E test fixture |
 | `tests/llvm_backend_test.rs` | IR verification + binary execution test |
 
-## Examples
+## See also
 
-See `examples/inop-sadd.bv` for a complete working example.
+- `docs/architecture/features/bild.md` — BILD dialect reference (grammar, type mapping, inline asm, lowering)
+- `learn-brief/14-bild.md` — tutorial: writing your first BILD program
+- `examples/inop-sadd.bv` — complete working example
