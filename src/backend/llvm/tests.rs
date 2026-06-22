@@ -5446,7 +5446,10 @@ let spec = crate::target_spec::TargetSpec {
         let output = backend.generate(&program);
         // With dual-lens usage, cache slots should be appended and cache IR emitted.
         assert!(backend.cache_slots.contains_key("x"),
-            "dual-lens → cache slots for x: {:?}", backend.cache_slots);
+            "dual-lens → cache slots field for x: {:?}", backend.cache_slots);
+        let x_targets = backend.cache_slots.get("x").expect("x should have cache targets");
+        assert!(x_targets.contains_key("Size") || x_targets.contains_key("Ptr"),
+            "dual-lens → x should have Size or Ptr cache: {:?}", x_targets);
         assert!(output.contains("icmp ne i8"),
             "Hot Dual path should have cache_valid check (icmp ne i8): {}", output);
         assert!(output.contains("phi i64"),

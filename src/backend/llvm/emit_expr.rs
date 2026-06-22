@@ -383,6 +383,8 @@ impl LlvmBackend {
                     for (i, (_, arg_ty)) in inputs.iter().enumerate() {
                         if i < args.len() {
                             let raw = self.emit_expr(out, &args[i], indent);
+                            // Phase 3: Decay chimera arguments before FFI call
+                            let raw = self.emit_decay(out, &raw, Some(arg_ty), indent);
                             match arg_ty {
                                 Type::Int | Type::UInt => marshaled.push(format!("i64 {}", raw)),
                                 Type::Bool => {
@@ -4661,8 +4663,9 @@ impl LlvmBackend {
             Expr::Identifier(n) => n.clone(),
             _ => return None,
         };
-        // Check if this field has a cache slot
-        let &(cache_idx, valid_idx) = self.cache_slots.get(&field_name)?;
+        // Check if this field has a cache slot for this projection target
+        let &(cache_idx, valid_idx) = self.cache_slots.get(&field_name)
+            .and_then(|targets| targets.get(target_name))?;
 
         let v = format!("%t{}", self.txn_counter);
         self.txn_counter += 1;

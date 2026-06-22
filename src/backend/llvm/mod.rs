@@ -690,7 +690,7 @@ pub struct LlvmBackend {
     /// Cache slot indices for LazyCached fields. Maps field name → (cache_idx, valid_idx)
     /// where cache_idx is the %State index for the cached value and valid_idx is the
     /// %State index for the valid-flag (i8).
-    pub(crate) cache_slots: HashMap<String, (usize, usize)>,
+    pub(crate) cache_slots: HashMap<String, HashMap<String, (usize, usize)>>,
 
     // ── Chimera tracking (Phase 3) ─────────────────────────
     /// Tracks which SSA registers contain chimera values and their backing type.
@@ -918,8 +918,10 @@ impl LlvmBackend {
                 .map(|m| format!("{:?}", m))
                 .unwrap_or_else(|| "Always".to_string());
             out.push_str(&format!("  {} @[{}]: {} (mode: {})", name, idx, ty, mode));
-            if let Some(&(cache_idx, valid_idx)) = self.cache_slots.get(*name) {
-                out.push_str(&format!(" | cache: [{}](i64), valid: [{}](i8)", cache_idx, valid_idx));
+            if let Some(targets) = self.cache_slots.get(*name) {
+                for (target_name, &(cache_idx, valid_idx)) in targets {
+                    out.push_str(&format!(" | cache[{}]: [{}](i64), [{}](i8)", target_name, cache_idx, valid_idx));
+                }
             }
             out.push('\n');
         }
@@ -1322,6 +1324,24 @@ impl LlvmBackend {
         {
             let projection_usage = crate::analysis::transition_graph::compute_projection_usage(program);
             self.apply_field_modes(program, &analysis.transition_graph.live_fields, &projection_usage);
+        }
+
+        // W001: Detect dead cache slots — allocated but no loop context (one-shot program).
+        if !self.cache_slots.is_empty() {
+            // Check if ANY transaction has bounded convergence (loop context)
+            let has_loop_context = analysis.transition_graph.nodes.iter().any(|n| {
+                n.bounded_pre.is_some()
+                    && n.increments.as_ref().map_or(false, |i| i.delta > 0)
+            });
+            if !has_loop_context {
+                let field_list: Vec<String> = self.cache_slots.keys().cloned().collect();
+                self.warnings.push(format!(
+                    "W001: dead cache slot(s) — `{}` allocated cache slots but the program has no loop context.\n\
+                      note: cache slots are only useful when a projection appears multiple times in a loop body.\n\
+                      help: remove the meld routes that trigger dual-lens access, or add a loop.",
+                    field_list.join(", "),
+                ));
+            }
         }
 
         // Build variant → (enum_name, discriminant, field_count) mapping.
@@ -2605,14 +2625,29 @@ self.emit_declares(&mut out);
             }
         }
 
-        // Phase 2: Append cache slots for LazyCached fields.
+        // Phase 2: Append cache slots — one per (field, projection_target) pair.
         for (name, mode) in &self.field_modes {
             if let crate::analysis::FieldMode::LazyCached { cache_index: _ } = mode {
-                let cache_idx = self.field_types.len();
-                self.field_types.push("i64".to_string());  // cached value
-                let valid_idx = self.field_types.len();
-                self.field_types.push("i8".to_string());   // valid flag
-                self.cache_slots.insert(name.clone(), (cache_idx, valid_idx));
+                let targets = projection_usage.get(name);
+                let mut target_map: HashMap<String, (usize, usize)> = HashMap::new();
+                if let Some(targets) = targets {
+                    for target_name in targets {
+                        let cache_idx = self.field_types.len();
+                        self.field_types.push("i64".to_string());
+                        let valid_idx = self.field_types.len();
+                        self.field_types.push("i8".to_string());
+                        target_map.insert(target_name.clone(), (cache_idx, valid_idx));
+                    }
+                }
+                // Fallback: at least one cache slot even if projection_usage is empty
+                if target_map.is_empty() {
+                    let cache_idx = self.field_types.len();
+                    self.field_types.push("i64".to_string());
+                    let valid_idx = self.field_types.len();
+                    self.field_types.push("i8".to_string());
+                    target_map.insert("_".to_string(), (cache_idx, valid_idx));
+                }
+                self.cache_slots.insert(name.clone(), target_map);
             }
         }
     }

@@ -681,13 +681,15 @@ impl LlvmBackend {
             }
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
-        for (_field_name, (cache_idx, valid_idx)) in &self.cache_slots {
-            let cp = format!("%icp_{}", cache_idx);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
-            writeln!(out, "{}store i64 0, i64* {}, align {}", indent, cp, self.align_of("i64")).ok();
-            let vp = format!("%ivp_{}", valid_idx);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, vp, state_ptr, valid_idx).ok();
-            writeln!(out, "{}store i8 0, i8* {}, align {}", indent, vp, self.align_of("i8")).ok();
+        for (_field_name, targets) in &self.cache_slots {
+            for (_target_name, &(cache_idx, valid_idx)) in targets {
+                let cp = format!("%icp_{}", cache_idx);
+                writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
+                writeln!(out, "{}store i64 0, i64* {}, align {}", indent, cp, self.align_of("i64")).ok();
+                let vp = format!("%ivp_{}", valid_idx);
+                writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, vp, state_ptr, valid_idx).ok();
+                writeln!(out, "{}store i8 0, i8* {}, align {}", indent, vp, self.align_of("i8")).ok();
+            }
         }
     }
 

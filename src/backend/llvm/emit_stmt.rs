@@ -418,11 +418,15 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = extractvalue %State {}, {}", indent, re, new_reg, idx).ok();
                             self.ssa_old_int_regs.insert(fname.clone(), re);
                             }
-                            // Phase 2: Invalidate cache on SSA field store
-                            let ssa_result = if let Some(&(_cache_idx, valid_idx)) = self.cache_slots.get(&fname) {
-                                let inv_reg = format!("%civssa{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = insertvalue %State {}, i8 0, {}", indent, inv_reg, new_reg, valid_idx).ok();
-                                inv_reg
+                            // Phase 2: Invalidate ALL cache targets on SSA field store
+                            let ssa_result = if let Some(targets) = self.cache_slots.get(&fname) {
+                                let mut reg = new_reg.clone();
+                                for (_target, &(_cache_idx, valid_idx)) in targets {
+                                    let inv = format!("%civssa{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = insertvalue %State {}, i8 0, {}", indent, inv, reg, valid_idx).ok();
+                                    reg = inv;
+                                }
+                                reg
                             } else {
                                 new_reg.clone()
                             };
@@ -468,12 +472,14 @@ impl LlvmBackend {
                             writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty), tn).ok();
                         }
                     }
-                    // Phase 2: Invalidate cache on field store (if this field has a cache slot)
-                    if let Some(&(_cache_idx, valid_idx)) = self.cache_slots.get(&fname) {
-                        let inv_gep = format!("%civ{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                            indent, inv_gep, valid_idx).ok();
-                        writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
+                    // Phase 2: Invalidate ALL cache targets on field store
+                    if let Some(targets) = self.cache_slots.get(&fname) {
+                        for (_target, &(_cache_idx, valid_idx)) in targets {
+                            let inv_gep = format!("%civ{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+                                indent, inv_gep, valid_idx).ok();
+                            writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
+                        }
                     }
                 } else if let Some(slot) = self.param_slots.get(&fname).cloned() {
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
@@ -538,12 +544,14 @@ impl LlvmBackend {
                                         writeln!(out, "{}store{} i64 {}, i64* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }
                                 }
-                                // Phase 2: Invalidate cache on select store
-                                if let Some(&(_cache_idx, valid_idx)) = self.cache_slots.get(n) {
-                                    let inv_gep = format!("%civs{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                                        indent, inv_gep, valid_idx).ok();
-                                    writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
+                                // Phase 2: Invalidate ALL cache targets on select store
+                                if let Some(targets) = self.cache_slots.get(n) {
+                                    for (_target, &(_cache_idx, valid_idx)) in targets {
+                                        let inv_gep = format!("%civs{}", self.txn_counter); self.txn_counter += 1;
+                                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+                                            indent, inv_gep, valid_idx).ok();
+                                        writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
+                                    }
                                 }
                                 return;
                     }
