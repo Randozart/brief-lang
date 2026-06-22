@@ -1042,6 +1042,14 @@ pub fn compute_referenced_fields(program: &crate::ast::Program) -> HashSet<Strin
         }
     }
 
+    // If any %state-accessing inop exists, all state fields are live
+    // (conservative — Phase 2, precise GEP-index tracking is Phase 3)
+    if program.items.iter().any(|item| {
+        matches!(item, crate::ast::TopLevel::Inop(inop) if inop.has_state_access)
+    }) {
+        referenced.extend(state_fields);
+    }
+
     referenced
 }
 

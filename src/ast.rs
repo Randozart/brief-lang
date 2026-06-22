@@ -1158,6 +1158,7 @@ pub struct InopDeclaration {
     pub llvm_body: Vec<String>,
     pub fallback: Option<Expr>,
     pub has_side_effects: bool,
+    pub has_state_access: bool,
     pub span: Option<Span>,
 }
 
@@ -1401,6 +1402,16 @@ pub enum Expr {
     },
     // Pattern B — packed dbvl table
     DbvlTableExpr(DbvlTableExpr),
+    /// Pipe chain: `initial |> step1 |> step2 .|> step3`
+    /// Desugared to block with let-bound temporaries before typechecking.
+    PipeChain(PipeChain),
+}
+
+/// A full pipe chain: initial value followed by chained transformation steps.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PipeChain {
+    pub initial: Box<Expr>,
+    pub steps: Vec<PipeStep>,
 }
 
 impl Expr {
@@ -1512,6 +1523,14 @@ impl Expr {
     pub fn is_term(&self) -> bool {
         matches!(self, Expr::Term) || matches!(self, Expr::Literal(lit) if matches!(lit.as_ref(), LiteralExpr::Term))
     }
+}
+
+/// A single step in a pipe chain (`|>`, `.N|>`).
+/// Captures the target expression and how far back in the pipeline stack to read.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PipeStep {
+    pub target: Box<Expr>,
+    pub skip: usize,
 }
 
 /// A pattern in a match arm: `Variant(f1, f2)` or `_`

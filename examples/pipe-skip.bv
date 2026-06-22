@@ -1,0 +1,25 @@
+// ── Pipe Chain Dot-Skip Example ─────────────────────────────────────
+//
+// Demonstrates .|> (skip=1) operator.
+// .|> reads the value from one position back in the pipeline stack.
+// The skipped-to value is prepended as the first argument to the target.
+//
+// Pipeline: 3 |> square() |> add_one() .|> double()
+//
+//   Step 1 (|>):  square(3)       = 9
+//   Step 2 (|>):  add_one(9)      = 10
+//   Step 3 (.|>): double(initial) = double(3) = 6
+//                 (skip=1, reads from pos 1 = 3)
+//
+// Run: brief-compiler rbv examples/pipe-skip.bv
+
+frgn __print_int(n: Int) -> Bool;
+
+defn square(x: Int) -> Int { term x * x; };
+defn add_one(x: Int) -> Int { term x + 1; };
+defn double(x: Int) -> Int { term x * 2; };
+
+txn main() [true][true] -> Bool {
+    let result: Int = 3 |> square() |> add_one() .|> double();
+    term! -> __print_int(result);   // prints 6
+};

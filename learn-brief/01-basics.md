@@ -175,7 +175,68 @@ txn validate(x: Int) [x >= 0][state == @state] {
 };
 ```
 
-## 8. Complete Example
+## 8. Pipe Chaining
+
+Brief supports pipe chaining (`|>`) for chaining function calls in dataflow
+order — like Unix pipes, but at the expression level:
+
+```brief
+// Instead of: g(f(x))
+// Write:
+x |> f() |> g()
+```
+
+The pipeline value is automatically passed as the first argument to each
+function. Existing arguments follow:
+
+```brief
+x |> f(a, b)    // f(x, a, b)
+```
+
+### Dot-Skip
+
+The dot-skip variant (`.|>`, `..|>`) lets a downstream step read from an
+earlier position in the pipeline, not just the immediately preceding one:
+
+```brief
+a |> f() |> g() .|> h()
+// h receives f(a) — the same value g received
+```
+
+This is equivalent to `h(f(a))`, skipping `g`'s result.
+
+### Auto-Wrap
+
+If the target is a bare identifier, it is auto-wrapped as a function call:
+
+```brief
+x |> f           // same as: x |> f()
+```
+
+### Starting with a Function
+
+A pipe chain can start with a function call (no initial value):
+
+```brief
+f() |> g()       // initial value is the result of f()
+```
+
+### Desugaring
+
+Pipe chains are syntactic sugar — they desugar to flat let-bindings
+before typechecking, with zero runtime overhead:
+
+```brief
+// x |> f() |> g() desugars to:
+{
+    let __pipe_0 = x;
+    let __pipe_1 = f(__pipe_0);
+    let __pipe_2 = g(__pipe_1);
+    __pipe_2
+}
+```
+
+## 9. Complete Example
 
 ```brief
 // counter.bv

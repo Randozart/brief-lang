@@ -543,6 +543,34 @@ impl TypeChecker {
                         let diag = err.to_diagnostic(&inop.name);
                         self.diagnostics.borrow_mut().push(diag);
                     }
+                    // %state access requires inop! (side-effecting) and contract
+                    if inop.has_state_access {
+                        if !inop.has_side_effects {
+                            let diag = crate::errors::Diagnostic::new(
+                                "B003",
+                                crate::errors::Severity::Error,
+                                "%%state access requires inop!",
+                            ).with_explanation(&format!(
+                                "inop `{}`: (%state) marker requires `inop!` (side-effecting), \
+                                 use `inop! {}` instead of `inop {}`",
+                                inop.name, inop.name, inop.name
+                            ));
+                            self.diagnostics.borrow_mut().push(diag);
+                        }
+                        if matches!(inop.contract.pre_condition, Expr::Bool(true))
+                            && matches!(inop.contract.post_condition, Expr::Bool(true))
+                        {
+                            let diag = crate::errors::Diagnostic::new(
+                                "B004",
+                                crate::errors::Severity::Error,
+                                "%%state access requires contract",
+                            ).with_explanation(&format!(
+                                "inop `{}`: (%state) marker requires [pre][post] contract",
+                                inop.name
+                            ));
+                            self.diagnostics.borrow_mut().push(diag);
+                        }
+                    }
                 }
                 TopLevel::Enum(enum_def) => {
                     for variant in &enum_def.variants {
@@ -3046,13 +3074,17 @@ mod tests {
     fn test_inop_user_defined_return_type() {
         let mut ctx = super::TypeChecker::new();
         let inop = InopDeclaration {
-            name: "sadd".to_string(),
-            params: vec![("a".to_string(), Type::Int), ("b".to_string(), Type::Int)],
+            name: "test_sadd".into(),
+            params: vec![("a".into(), Type::Int), ("b".into(), Type::Int)],
             outputs: vec![Type::Int],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            llvm_body: vec!["term %res".to_string()],
-            fallback: None,
+            contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec![],
+            fallback: Some(crate::ast::Expr::Add(
+                Box::new(crate::ast::Expr::Identifier("a".into())),
+                Box::new(crate::ast::Expr::Identifier("b".into())),
+            )),
             has_side_effects: false,
+            has_state_access: false,
             span: None,
         };
         ctx.inop_decls.insert("sadd".to_string(), inop);

@@ -3,6 +3,7 @@ use crate::ast::*;
 pub struct Desugarer {
     generated_signatures: Vec<Signature>,
     generated_state: Vec<StateDecl>,
+    pipe_counter: usize,
 }
 
 impl Desugarer {
@@ -10,6 +11,7 @@ impl Desugarer {
         Desugarer {
             generated_signatures: Vec::new(),
             generated_state: Vec::new(),
+            pipe_counter: 0,
         }
     }
 
@@ -372,7 +374,7 @@ impl Desugarer {
                     }
                 }
                 _ => {
-                    items.push(item.clone());
+                    items.push(self.desugar_toplevel(item));
                 }
             }
         }
@@ -405,6 +407,9 @@ impl Desugarer {
             }
         }
 
+        // Final pass: desugar any remaining pipe chains in the program
+        let items = items.into_iter().map(|item| self.desugar_toplevel(&item)).collect();
+
         Program {
                     attrs: Vec::new(),
             items,
@@ -413,9 +418,57 @@ impl Desugarer {
             ffi: program.ffi.clone(),
             strict_mode: StrictMode::Off,
             dispatch_mode: program.dispatch_mode,
-            exit_condition: program.exit_condition.clone(),
+            exit_condition: program.exit_condition.clone().map(|e| Box::new(self.desugar_expr(*e))),
             out_pragmas: program.out_pragmas.clone(),
             default_sig_modifier: program.default_sig_modifier.clone(),
+        }
+    }
+
+    /// Desugar pipe chains in a single TopLevel item.
+    fn desugar_toplevel(&mut self, item: &TopLevel) -> TopLevel {
+        match item {
+            TopLevel::Transaction(txn) => {
+                let mut new_txn = txn.clone();
+                new_txn.body = self.desugar_body(&txn.body);
+                new_txn.contract = self.desugar_contract(&txn.contract);
+                TopLevel::Transaction(new_txn)
+            }
+            TopLevel::Definition(defn) => {
+                let mut new_defn = defn.clone();
+                new_defn.body = self.desugar_body(&defn.body);
+                new_defn.contract = self.desugar_contract(&defn.contract);
+                TopLevel::Definition(new_defn)
+            }
+            TopLevel::StateDecl(state) => {
+                let mut new_state = state.clone();
+                new_state.expr = state.expr.as_ref().map(|e| self.desugar_expr(e.clone()));
+                TopLevel::StateDecl(new_state)
+            }
+            TopLevel::Constant(c) => {
+                let mut new_c = c.clone();
+                new_c.expr = self.desugar_expr(c.expr.clone());
+                TopLevel::Constant(new_c)
+            }
+            TopLevel::Signature(_sig) => {
+                // Signature has no expression field to desugar
+                item.clone()
+            }
+            TopLevel::Trigger(trig) => {
+                let mut new_trig = trig.clone();
+                new_trig.condition = trig.condition.as_ref().map(|e| self.desugar_expr(e.clone()));
+                TopLevel::Trigger(new_trig)
+            }
+            TopLevel::Struct(s) => {
+                let mut new_s = s.clone();
+                new_s.transactions = s.transactions.iter().map(|txn| {
+                    let mut new_txn = txn.clone();
+                    new_txn.body = self.desugar_body(&txn.body);
+                    new_txn.contract = self.desugar_contract(&txn.contract);
+                    new_txn
+                }).collect();
+                TopLevel::Struct(new_s)
+            }
+            other => other.clone(),
         }
     }
 
@@ -636,6 +689,513 @@ impl Desugarer {
             other => other,
         }
     }
+
+    // ── Pipe Chain Desugaring ──────────────────────────────────────────
+
+    /// Desugar `Expr::PipeChain` into `Expr::Block` with let-bound temporaries.
+    fn desugar_pipe_chain(&mut self, pipe: &crate::ast::PipeChain) -> Expr {
+        let crate::ast::PipeChain { initial, steps } = pipe;
+        let mut stmts: Vec<Statement> = Vec::with_capacity(steps.len() + 1);
+
+        // First binding: __pipe_0 = <initial expression>
+        let p0_name = "__pipe_0".to_string();
+        stmts.push(Statement::Let {
+            name: p0_name,
+            ty: None,
+            expr: Some(self.desugar_expr(*initial.clone())),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: None,
+            is_override: false,
+            modifiers: Vec::new(),
+        });
+
+        // Subsequent bindings: __pipe_i = <target>(__pipe_{i-1-skip})
+        for (i, step) in steps.iter().enumerate() {
+            let pos = i + 1; // 1-indexed pipe position
+            let read_idx = if step.skip > pos {
+                // Clamp: can't read before position 0
+                0usize
+            } else {
+                pos - 1 - step.skip
+            };
+            let read_name = format!("__pipe_{}", read_idx);
+            let read_expr = Expr::Identifier(read_name);
+
+            // Build the call expression: prepend pipeline value as first arg
+            let call_expr = self.prepend_pipeline_arg(&step.target, read_expr);
+
+            let binding_name = format!("__pipe_{}", pos);
+            stmts.push(Statement::Let {
+                name: binding_name,
+                ty: None,
+                expr: Some(self.desugar_expr(call_expr)),
+                address: None,
+                address_expr: None,
+                bit_range: None,
+                constraint: None,
+                is_override: false,
+                modifiers: Vec::new(),
+            });
+        }
+
+        let final_expr = if steps.is_empty() {
+            self.desugar_expr(*initial.clone())
+        } else {
+            Expr::Identifier(format!("__pipe_{}", steps.len()))
+        };
+
+        Expr::Block(stmts, Box::new(final_expr))
+    }
+
+    /// Prepend the pipeline value as the first argument to a call expression.
+    /// If target is a bare `Identifier`, wrap it as `f(pipeline_val)`.
+    fn prepend_pipeline_arg(&self, target: &Expr, pipeline_val: Expr) -> Expr {
+        match target {
+            Expr::Call(name, args) => {
+                let mut new_args = vec![pipeline_val];
+                new_args.extend(args.iter().cloned());
+                Expr::Call(name.clone(), new_args)
+            }
+            Expr::Identifier(name) => {
+                // Auto-wrap bare identifier as function call
+                Expr::Call(name.clone(), vec![pipeline_val])
+            }
+            other => {
+                // Non-callable: wrap as generic call for the typechecker to reject
+                // This should be a parse error, but belt-and-suspenders:
+                // also emit Call so it survives to typechecking.
+                Expr::Identifier("__pipe_error_non_callable".to_string())
+            }
+        }
+    }
+
+    /// Recursively desugar pipe chains in an expression tree.
+    fn desugar_expr(&mut self, expr: Expr) -> Expr {
+        match expr {
+            Expr::PipeChain(pc) => {
+                // Desugar the pipe chain itself
+                self.desugar_pipe_chain(&pc)
+            }
+            // Binary ops — recurse into children
+            Expr::Add(l, r) => Expr::Add(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Sub(l, r) => Expr::Sub(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Mul(l, r) => Expr::Mul(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Div(l, r) => Expr::Div(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Mod(l, r) => Expr::Mod(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Eq(l, r) => Expr::Eq(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Ne(l, r) => Expr::Ne(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Lt(l, r) => Expr::Lt(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Le(l, r) => Expr::Le(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Gt(l, r) => Expr::Gt(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Ge(l, r) => Expr::Ge(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::And(l, r) => Expr::And(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Or(l, r) => Expr::Or(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Concat(l, r) => Expr::Concat(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::BitAnd(l, r) => Expr::BitAnd(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::BitOr(l, r) => Expr::BitOr(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::BitXor(l, r) => Expr::BitXor(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Shl(l, r) => Expr::Shl(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Shr(l, r) => Expr::Shr(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            // Unary ops
+            Expr::Not(e) => Expr::Not(Box::new(self.desugar_expr(*e))),
+            Expr::Neg(e) => Expr::Neg(Box::new(self.desugar_expr(*e))),
+            Expr::BitNot(e) => Expr::BitNot(Box::new(self.desugar_expr(*e))),
+            // Calls — recurse into args and callee
+            Expr::Call(name, args) => Expr::Call(
+                name,
+                args.into_iter().map(|a| self.desugar_expr(a)).collect(),
+            ),
+            Expr::IntrinsicCall { intrinsic, args } => Expr::IntrinsicCall {
+                intrinsic,
+                args: args.into_iter().map(|a| self.desugar_expr(a)).collect(),
+            },
+            // Lists, tuples, maps, sets
+            Expr::ListLiteral(items) => {
+                Expr::ListLiteral(items.into_iter().map(|i| self.desugar_expr(i)).collect())
+            }
+            Expr::Tuple(items) => {
+                Expr::Tuple(items.into_iter().map(|i| self.desugar_expr(i)).collect())
+            }
+            Expr::MapLiteral(pairs) => Expr::MapLiteral(
+                pairs
+                    .into_iter()
+                    .map(|(k, v)| (self.desugar_expr(k), self.desugar_expr(v)))
+                    .collect(),
+            ),
+            Expr::SetLiteral(items) => {
+                Expr::SetLiteral(items.into_iter().map(|i| self.desugar_expr(i)).collect())
+            }
+            // Blocks — recurse into statements and trailing expr
+            Expr::Block(stmts, trailing) => {
+                let new_stmts = stmts.into_iter().map(|s| self.desugar_stmt(s)).collect();
+                Expr::Block(new_stmts, Box::new(self.desugar_expr(*trailing)))
+            }
+            // Field access, list index — recurse
+            Expr::FieldAccess(obj, name) => {
+                Expr::FieldAccess(Box::new(self.desugar_expr(*obj)), name)
+            }
+            Expr::ListIndex(obj, idx) => Expr::ListIndex(
+                Box::new(self.desugar_expr(*obj)),
+                Box::new(self.desugar_expr(*idx)),
+            ),
+            Expr::StructInstance(name, fields) => Expr::StructInstance(
+                name,
+                fields
+                    .into_iter()
+                    .map(|(n, v)| (n, self.desugar_expr(v)))
+                    .collect(),
+            ),
+            Expr::ObjectLiteral(fields) => Expr::ObjectLiteral(
+                fields
+                    .into_iter()
+                    .map(|(n, v)| (n, self.desugar_expr(v)))
+                    .collect(),
+            ),
+            Expr::Slice {
+                value,
+                start,
+                end,
+                stride,
+                mask,
+            } => Expr::Slice {
+                value: Box::new(self.desugar_expr(*value)),
+                start: start.map(|s| Box::new(self.desugar_expr(*s))),
+                end: end.map(|e| Box::new(self.desugar_expr(*e))),
+                stride: stride.map(|s| Box::new(self.desugar_expr(*s))),
+                mask: mask.map(|m| Box::new(self.desugar_expr(*m))),
+            },
+            Expr::MultiSlice { value, ops } => Expr::MultiSlice {
+                value: Box::new(self.desugar_expr(*value)),
+                ops,
+            },
+            Expr::Match { value, arms } => {
+                let new_arms = arms
+                    .into_iter()
+                    .map(|arm| MatchArm {
+                        pattern: arm.pattern,
+                        guard: arm.guard.map(|g| Box::new(self.desugar_expr(*g))),
+                        body: Box::new(self.desugar_expr(*arm.body)),
+                    })
+                    .collect();
+                Expr::Match {
+                    value: Box::new(self.desugar_expr(*value)),
+                    arms: new_arms,
+                }
+            }
+            Expr::Cast(e, ty) => Expr::Cast(Box::new(self.desugar_expr(*e)), ty),
+            Expr::IsType(e, target) => Expr::IsType(Box::new(self.desugar_expr(*e)), target),
+            Expr::FromCheck(e, ty) => Expr::FromCheck(Box::new(self.desugar_expr(*e)), ty),
+            Expr::Like(l, r) => Expr::Like(
+                Box::new(self.desugar_expr(*l)),
+                Box::new(self.desugar_expr(*r)),
+            ),
+            Expr::Projection { source, target } => Expr::Projection {
+                source: Box::new(self.desugar_expr(*source)),
+                target,
+            },
+            Expr::TemplateCall {
+                name,
+                args,
+                block,
+                span,
+            } => Expr::TemplateCall {
+                name,
+                args: args.into_iter().map(|a| self.desugar_expr(a)).collect(),
+                block,
+                span,
+            },
+            Expr::MacroCall {
+                name,
+                args,
+                block,
+                span,
+            } => Expr::MacroCall {
+                name,
+                args: args.into_iter().map(|a| self.desugar_expr(a)).collect(),
+                block,
+                span,
+            },
+            Expr::SubtypeProjection { source, ops } => Expr::SubtypeProjection {
+                source: Box::new(self.desugar_expr(*source)),
+                ops,
+            },
+            // Arrow ops — recurse
+            Expr::ArrowMut {
+                dir,
+                target,
+                index,
+                value,
+            } => Expr::ArrowMut {
+                dir,
+                target: Box::new(self.desugar_expr(*target)),
+                index: Box::new(self.desugar_expr(*index)),
+                value: value.map(|v| Box::new(self.desugar_expr(*v))),
+            },
+            Expr::ArrowDiscard { target, index } => Expr::ArrowDiscard {
+                target: Box::new(self.desugar_expr(*target)),
+                index: Box::new(self.desugar_expr(*index)),
+            },
+            Expr::ArrowTransfer {
+                dest,
+                source,
+                filter,
+            } => Expr::ArrowTransfer {
+                dest: Box::new(self.desugar_expr(*dest)),
+                source: Box::new(self.desugar_expr(*source)),
+                filter: filter.map(|f| Box::new(self.desugar_expr(*f))),
+            },
+            Expr::QuoteBlock {
+                statements,
+                trailing_expr,
+            } => Expr::QuoteBlock {
+                statements: statements.into_iter().map(|s| self.desugar_stmt(s)).collect(),
+                trailing_expr: trailing_expr.map(|e| Box::new(self.desugar_expr(*e))),
+            },
+            Expr::InterpolateExpr(e) => {
+                Expr::InterpolateExpr(Box::new(self.desugar_expr(*e)))
+            }
+            Expr::PatternMatch {
+                value,
+                variant,
+                fields,
+            } => Expr::PatternMatch {
+                value: Box::new(self.desugar_expr(*value)),
+                variant,
+                fields,
+            },
+            Expr::TupleDestructure(names, e) => {
+                Expr::TupleDestructure(names, Box::new(self.desugar_expr(*e)))
+            }
+            Expr::SigCall { modifier, expr } => Expr::SigCall {
+                modifier,
+                expr: Box::new(self.desugar_expr(*expr)),
+            },
+            // Pattern B variants — recurse into inner expressions
+            Expr::BinaryOp(bop) => Expr::BinaryOp(Box::new(crate::features::binary_op::BinaryOpExpr {
+                kind: bop.kind,
+                left: Box::new(self.desugar_expr(*bop.left)),
+                right: Box::new(self.desugar_expr(*bop.right)),
+            })),
+            Expr::UnaryOp(uop) => {
+                Expr::UnaryOp(Box::new(crate::features::unary_op::UnaryOpExpr {
+                    kind: uop.kind,
+                    operand: Box::new(self.desugar_expr(*uop.operand)),
+                }))
+            }
+            Expr::CallExpr(ce) => {
+                let crate::features::call::CallExpr { name, args } = ce;
+                Expr::CallExpr(crate::features::call::CallExpr {
+                    name,
+                    args: args.into_iter().map(|a| self.desugar_expr(a)).collect(),
+                })
+            }
+            // Pass through: no child expressions with pipe chains
+            other => other,
+        }
+    }
+
+    /// Recursively desugar pipe chains in statements.
+    fn desugar_stmt(&mut self, stmt: Statement) -> Statement {
+        match stmt {
+            Statement::Let {
+                name,
+                ty,
+                expr,
+                address,
+                address_expr,
+                bit_range,
+                constraint,
+                is_override,
+                modifiers,
+            } => Statement::Let {
+                name,
+                ty,
+                expr: expr.map(|e| self.desugar_expr(e)),
+                address,
+                address_expr: address_expr.map(|a| Box::new(self.desugar_expr(*a))),
+                bit_range,
+                constraint: constraint.map(|c| Box::new(self.desugar_expr(*c))),
+                is_override,
+                modifiers,
+            },
+            Statement::Assignment {
+                lhs,
+                expr,
+                timeout,
+                modifiers,
+            } => Statement::Assignment {
+                lhs: self.desugar_expr(lhs),
+                expr: self.desugar_expr(expr),
+                timeout,
+                modifiers,
+            },
+            Statement::Expression(e) => Statement::Expression(self.desugar_expr(e)),
+            Statement::Term {
+                values,
+                swan_song,
+                modifiers,
+            } => Statement::Term {
+                values: values
+                    .into_iter()
+                    .map(|v| v.map(|e| self.desugar_expr(e)))
+                    .collect(),
+                swan_song: swan_song.map(|s| Box::new(self.desugar_stmt(*s))),
+                modifiers,
+            },
+            Statement::TermBang {
+                values,
+                swan_song,
+                modifiers,
+            } => Statement::TermBang {
+                values: values
+                    .into_iter()
+                    .map(|v| v.map(|e| self.desugar_expr(e)))
+                    .collect(),
+                swan_song: swan_song.map(|s| Box::new(self.desugar_stmt(*s))),
+                modifiers,
+            },
+            Statement::Guarded {
+                condition,
+                statements,
+            } => Statement::Guarded {
+                condition: self.desugar_expr(condition),
+                statements: statements.into_iter().map(|s| self.desugar_stmt(s)).collect(),
+            },
+            Statement::Escape(e) => Statement::Escape(e.map(|e| self.desugar_expr(e))),
+            Statement::SyncBlock { body } => {
+                Statement::SyncBlock { body: body.into_iter().map(|s| self.desugar_stmt(s)).collect() }
+            }
+            Statement::Foreach {
+                item,
+                list,
+                body,
+                modifiers,
+            } => Statement::Foreach {
+                item,
+                list: Box::new(self.desugar_expr(*list)),
+                body: body.into_iter().map(|s| self.desugar_stmt(s)).collect(),
+                modifiers,
+            },
+            Statement::Unification {
+                name,
+                variant,
+                fields,
+                expr,
+            } => Statement::Unification {
+                name,
+                variant,
+                fields,
+                expr: self.desugar_expr(expr),
+            },
+            Statement::LocalTrigger {
+                name,
+                ty,
+                expr,
+                span,
+            } => Statement::LocalTrigger {
+                name,
+                ty,
+                expr: expr.map(|e| self.desugar_expr(e)),
+                span,
+            },
+            Statement::OnExit { body, span } => {
+                Statement::OnExit { body: body.into_iter().map(|s| self.desugar_stmt(s)).collect(), span }
+            }
+            Statement::Oracle { handler, body, span } => Statement::Oracle {
+                handler: handler.into_iter().map(|s| self.desugar_stmt(s)).collect(),
+                body: body.into_iter().map(|s| self.desugar_stmt(s)).collect(),
+                span,
+            },
+            Statement::Await { expr, modifiers } => Statement::Await {
+                expr: self.desugar_expr(expr),
+                modifiers,
+            },
+            Statement::Async { body, modifiers } => Statement::Async {
+                body: Box::new(self.desugar_stmt(*body)),
+                modifiers,
+            },
+            Statement::AsyncAwait { body, lhs, modifiers } => Statement::AsyncAwait {
+                body: Box::new(self.desugar_stmt(*body)),
+                lhs,
+                modifiers,
+            },
+            Statement::InlineAsm { .. } | Statement::Alka(_) => stmt,
+        }
+    }
+
+    /// Desugar pipe chains in contracts (pre/post conditions).
+    fn desugar_contract(&mut self, contract: &Contract) -> Contract {
+        Contract {
+            pre_condition: self.desugar_expr(contract.pre_condition.clone()),
+            post_condition: self.desugar_expr(contract.post_condition.clone()),
+            watchdog: contract.watchdog.clone(),
+            span: contract.span,
+        }
+    }
+
+    /// Desugar pipe chains in a block of statements (e.g. txn body, defn body).
+    fn desugar_body(&mut self, body: &[Statement]) -> Vec<Statement> {
+        body.iter().map(|s| self.desugar_stmt(s.clone())).collect()
+    }
 }
 
 impl Default for Desugarer {
@@ -739,5 +1299,192 @@ mod tests {
         let result = desugarer.expand_implicit_terms_defn(&defn);
 
         assert!(!result.body.is_empty(), "Should preserve existing body");
+    }
+
+    // ── Pipe Chain Desugaring Tests ──────────────────────────────────
+
+    #[test]
+    fn test_desugar_basic_pipe() {
+        // x |> f() → { let __pipe_0 = x; let __pipe_1 = f(__pipe_0); __pipe_1 }
+        let pipe = PipeChain {
+            initial: Box::new(Expr::Identifier("x".to_string())),
+            steps: vec![PipeStep {
+                target: Box::new(Expr::Call("f".to_string(), vec![])),
+                skip: 0,
+            }],
+        };
+        let mut desugarer = Desugarer::new();
+        let result = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        // Should desugar to a Block expression
+        match &result {
+            Expr::Block(stmts, trailing) => {
+                assert_eq!(stmts.len(), 2, "Should have 2 let statements");
+                // First let: __pipe_0 = x
+                if let Statement::Let { name, expr: Some(expr), .. } = &stmts[0] {
+                    assert_eq!(name, "__pipe_0");
+                    assert_eq!(expr, &Expr::Identifier("x".to_string()));
+                } else {
+                    panic!("Expected Let statement");
+                }
+                // Second let: __pipe_1 = f(__pipe_0)
+                if let Statement::Let { name, expr: Some(expr), .. } = &stmts[1] {
+                    assert_eq!(name, "__pipe_1");
+                    assert!(matches!(expr, Expr::Call(name, args)
+                        if name == "f" && args.len() == 1
+                        && args[0] == Expr::Identifier("__pipe_0".to_string())
+                    ));
+                } else {
+                    panic!("Expected Let statement");
+                }
+                // Trailing expr should be __pipe_1
+                assert_eq!(trailing.as_ref(), &Expr::Identifier("__pipe_1".to_string()));
+            }
+            _ => panic!("Expected Block, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_desugar_pipe_chaining() {
+        // x |> f() |> g() → two let bindings
+        let pipe = PipeChain {
+            initial: Box::new(Expr::Identifier("x".to_string())),
+            steps: vec![
+                PipeStep { target: Box::new(Expr::Call("f".to_string(), vec![])), skip: 0 },
+                PipeStep { target: Box::new(Expr::Call("g".to_string(), vec![])), skip: 0 },
+            ],
+        };
+        let mut desugarer = Desugarer::new();
+        let result = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        match &result {
+            Expr::Block(stmts, trailing) => {
+                assert_eq!(stmts.len(), 3);
+                // __pipe_0 = x
+                // __pipe_1 = f(__pipe_0)
+                if let Statement::Let { name, expr: Some(expr), .. } = &stmts[1] {
+                    assert_eq!(name, "__pipe_1");
+                    assert!(matches!(expr, Expr::Call(name, args)
+                        if name == "f" && args.len() == 1
+                        && args[0] == Expr::Identifier("__pipe_0".to_string())
+                    ));
+                }
+                // __pipe_2 = g(__pipe_1) — adjacent read
+                if let Statement::Let { name, expr: Some(expr), .. } = &stmts[2] {
+                    assert_eq!(name, "__pipe_2");
+                    assert!(matches!(expr, Expr::Call(name, args)
+                        if name == "g" && args.len() == 1
+                        && args[0] == Expr::Identifier("__pipe_1".to_string())
+                    ));
+                }
+                assert_eq!(trailing.as_ref(), &Expr::Identifier("__pipe_2".to_string()));
+            }
+            _ => panic!("Expected Block"),
+        }
+    }
+
+    #[test]
+    fn test_desugar_pipe_dot_skip() {
+        // x |> f() .|> g() → second binding reads from __pipe_0 (skip=1)
+        let pipe = PipeChain {
+            initial: Box::new(Expr::Identifier("x".to_string())),
+            steps: vec![
+                PipeStep { target: Box::new(Expr::Call("f".to_string(), vec![])), skip: 0 },
+                PipeStep { target: Box::new(Expr::Call("g".to_string(), vec![])), skip: 1 },
+            ],
+        };
+        let mut desugarer = Desugarer::new();
+        let result = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        match &result {
+            Expr::Block(stmts, trailing) => {
+                assert_eq!(stmts.len(), 3);
+                // __pipe_1 = f(__pipe_0) — step 0, adjacent
+                if let Statement::Let { name, expr: Some(expr), .. } = &stmts[1] {
+                    assert_eq!(name, "__pipe_1");
+                    assert!(matches!(expr, Expr::Call(name, args)
+                        if name == "f" && args[0] == Expr::Identifier("__pipe_0".to_string())
+                    ));
+                }
+                // __pipe_2 = g(__pipe_0) — step 1, skip=1 reads __pipe_{2-1-1}=__pipe_0
+                if let Statement::Let { name, expr: Some(expr), .. } = &stmts[2] {
+                    assert_eq!(name, "__pipe_2");
+                    assert!(matches!(expr, Expr::Call(name, args)
+                        if name == "g" && args.len() == 1
+                        && args[0] == Expr::Identifier("__pipe_0".to_string())
+                    ));
+                }
+                assert_eq!(trailing.as_ref(), &Expr::Identifier("__pipe_2".to_string()));
+            }
+            _ => panic!("Expected Block"),
+        }
+    }
+
+    #[test]
+    fn test_desugar_pipe_auto_wrap_identifier() {
+        // x |> f — bare identifier target, auto-wrapped to f(__pipe_0)
+        let pipe = PipeChain {
+            initial: Box::new(Expr::Identifier("x".to_string())),
+            steps: vec![PipeStep {
+                target: Box::new(Expr::Identifier("f".to_string())),
+                skip: 0,
+            }],
+        };
+        let mut desugarer = Desugarer::new();
+        let result = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        match &result {
+            Expr::Block(stmts, _) => {
+                assert_eq!(stmts.len(), 2);
+                if let Statement::Let { expr: Some(expr), .. } = &stmts[1] {
+                    assert!(matches!(expr, Expr::Call(name, args)
+                        if name == "f" && args.len() == 1
+                        && args[0] == Expr::Identifier("__pipe_0".to_string())
+                    ), "Auto-wrap should produce Call(f, [__pipe_0]), got {:?}", expr);
+                }
+            }
+            _ => panic!("Expected Block"),
+        }
+    }
+
+    #[test]
+    fn test_desugar_pipe_three_step() {
+        // x |> f() |> g() .|> h() ..|> i()
+        let pipe = PipeChain {
+            initial: Box::new(Expr::Identifier("x".to_string())),
+            steps: vec![
+                PipeStep { target: Box::new(Expr::Call("f".to_string(), vec![])), skip: 0 },
+                PipeStep { target: Box::new(Expr::Call("g".to_string(), vec![])), skip: 0 },
+                PipeStep { target: Box::new(Expr::Call("h".to_string(), vec![])), skip: 1 },
+                PipeStep { target: Box::new(Expr::Call("i".to_string(), vec![])), skip: 2 },
+            ],
+        };
+        let mut desugarer = Desugarer::new();
+        let result = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        match &result {
+            Expr::Block(stmts, trailing) => {
+                // 4 steps + initial = 5 let bindings
+                assert_eq!(stmts.len(), 5);
+                // Step 0: __pipe_1 = f(__pipe_0)
+                assert!(matches!(&stmts[1], Statement::Let { name, expr: Some(Expr::Call(n, args)), .. }
+                    if name == "__pipe_1" && n == "f" && args[0] == Expr::Identifier("__pipe_0".to_string())
+                ));
+                // Step 1: __pipe_2 = g(__pipe_1)
+                assert!(matches!(&stmts[2], Statement::Let { name, expr: Some(Expr::Call(n, args)), .. }
+                    if name == "__pipe_2" && n == "g" && args[0] == Expr::Identifier("__pipe_1".to_string())
+                ));
+                // Step 2 (skip=1): __pipe_3 = h(__pipe_1)
+                assert!(matches!(&stmts[3], Statement::Let { name, expr: Some(Expr::Call(n, args)), .. }
+                    if name == "__pipe_3" && n == "h" && args[0] == Expr::Identifier("__pipe_1".to_string())
+                ));
+                // Step 3 (skip=2): __pipe_4 = i(__pipe_{4-1-2}=__pipe_1)
+                assert!(matches!(&stmts[4], Statement::Let { name, expr: Some(Expr::Call(n, args)), .. }
+                    if name == "__pipe_4" && n == "i" && args[0] == Expr::Identifier("__pipe_1".to_string())
+                ));
+                assert_eq!(trailing.as_ref(), &Expr::Identifier("__pipe_4".to_string()));
+            }
+            _ => panic!("Expected Block"),
+        }
     }
 }

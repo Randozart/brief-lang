@@ -2406,14 +2406,20 @@ impl LlvmBackend {
                         // Clone the inop declaration to avoid borrow conflicts with emit_expr.
                         let inop_clone = self.inop_decls.get(name).cloned();
                         let ret_ty = inop_clone.as_ref().map_or("i64", |d| {
-                            if d.outputs.iter().any(|t| matches!(t, Type::Float)) {
+                            if d.outputs.iter().any(|t| {
+                                let resolved = self.resolve_bild_type(t);
+                                matches!(resolved, Type::Float)
+                            }) {
                                 "float"
                             } else {
                                 "i64"
                             }
                         });
                         let param_tys: Vec<String> = inop_clone.as_ref().map_or_else(Vec::new, |d| {
-                            d.params.iter().map(|(_, t)| self.llvm_type(t).to_string()).collect()
+                            d.params.iter().map(|(_, t)| {
+                                let resolved = self.resolve_bild_type(t);
+                                self.llvm_type(&resolved).to_string()
+                            }).collect()
                         });
                         // Pre-evaluate all arguments before emitting the call,
                         // so argument computation code appears before the call instruction.
@@ -2422,14 +2428,75 @@ impl LlvmBackend {
                             let r = self.emit_expr(out, arg, indent);
                             arg_regs.push(r.name.clone());
                         }
-                        // Emit the call with native types for each parameter
-                        write!(out, "{}{} = call {} @{}(", indent, v, ret_ty, name).ok();
-                        write!(out, "%State* %state").ok();
-                        for (i, rn) in arg_regs.iter().enumerate() {
-                            let native_ty = param_tys.get(i).map(|s| s.as_str()).unwrap_or("i64");
-                            write!(out, ", {} {}", native_ty, rn).ok();
+                        // Detect multi-output: outputs.len() > 1
+                        let has_state_access = inop_clone.as_ref()
+                            .map(|d| d.has_state_access).unwrap_or(false);
+                        let is_multi = inop_clone.as_ref()
+                            .map(|d| d.outputs.len() > 1).unwrap_or(false);
+
+                        if is_multi {
+                            // Multi-output call: emit struct-return call, then
+                            // extract values into a boxed tuple matching Brief's format.
+                            let count = inop_clone.as_ref().map(|d| d.outputs.len()).unwrap_or(2);
+                            let struct_ty = (0..count).map(|_| "i64").collect::<Vec<_>>().join(", ");
+                            let struct_ty = format!("{{{}}}", struct_ty);
+
+                            // Emit the call
+                            let call_reg = format!("%mc{}", self.txn_counter); self.txn_counter += 1;
+                            write!(out, "{}{} = call {} @{}(", indent, call_reg, struct_ty, name).ok();
+                            if has_state_access {
+                                write!(out, " %State* %state").ok();
+                            }
+                            for (i, rn) in arg_regs.iter().enumerate() {
+                                let native_ty = param_tys.get(i).map(|s| s.as_str()).unwrap_or("i64");
+                                if has_state_access || i > 0 {
+                                    write!(out, ", {} {}", native_ty, rn).ok();
+                                } else {
+                                    write!(out, "{} {}", native_ty, rn).ok();
+                                }
+                            }
+                            writeln!(out, ")").ok();
+
+                            // Allocate boxed tuple: [header_ptr, len, elem0, elem1, ...]
+                            let total = count as i64 + 2;
+                            let ai = format!("%mai{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = alloca i64, i64 {}", indent, ai, total).ok();
+                            let dp_ptr = format!("%mdp{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, ai).ok();
+                            let dp_val = format!("%mdv{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
+                            let s0 = format!("%ms0{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, ai).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp_val, s0).ok();
+                            let s1 = format!("%ms1{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, ai).ok();
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, count as i64, s1).ok();
+
+                            for i in 0..count {
+                                let ev = format!("%mev{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = extractvalue {} {}, {}", indent, ev, struct_ty, call_reg, i).ok();
+                                let ep = format!("%mep{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, ai, (i as i64) + 2).ok();
+                                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, ev, ep).ok();
+                            }
+
+                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                        } else {
+                            // Emit the call with native types for each parameter
+                            write!(out, "{}{} = call {} @{}(", indent, v, ret_ty, name).ok();
+                            if has_state_access {
+                                write!(out, "%State* %state").ok();
+                            }
+                            for (i, rn) in arg_regs.iter().enumerate() {
+                                let native_ty = param_tys.get(i).map(|s| s.as_str()).unwrap_or("i64");
+                                if has_state_access || i > 0 {
+                                    write!(out, ", {} {}", native_ty, rn).ok();
+                                } else {
+                                    write!(out, "{} {}", native_ty, rn).ok();
+                                }
+                            }
+                            writeln!(out, ")").ok();
                         }
-                        writeln!(out, ")").ok();
                     }
                 }
             }

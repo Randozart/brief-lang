@@ -125,6 +125,7 @@ mod tests {
             llvm_body: body.into_iter().map(|s| s.to_string()).collect(),
             fallback: None,
             has_side_effects: false,
+            has_state_access: false,
             span: None,
         }
     }

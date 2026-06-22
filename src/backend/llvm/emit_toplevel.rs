@@ -1223,18 +1223,40 @@ impl LlvmBackend {
     /// The body is pasted verbatim from the inop# declaration, with `term`
     /// replaced by `ret` (or `br %post_label` in callable txn context).
     pub(super) fn emit_inop(&mut self, out: &mut String, inop: &crate::ast::InopDeclaration) {
-        let is_float_fn = inop.outputs.iter().any(|t| matches!(t, Type::Float));
-        let ll_ret_ty = if is_float_fn { "float" } else { "i64" };
-        self.fn_ret_ty = ll_ret_ty.to_string();
-        self.returns_i64 = !is_float_fn;
+        let is_float_fn = inop.outputs.iter().any(|t| {
+            let resolved = self.resolve_bild_type(t);
+            matches!(resolved, Type::Float)
+        });
+
+        // Detect multi-output: term %q, %r — has comma-separated registers
+        let is_multi_output = inop.llvm_body.iter().any(|line| {
+            let trimmed = line.trim();
+            (trimmed.starts_with("term ") || trimmed.starts_with("term!"))
+                && trimmed.contains(',')
+        });
+
+        let ll_ret_ty = if is_multi_output {
+            let count = inop.outputs.len().max(2);
+            let tys: Vec<&str> = (0..count).map(|_| if is_float_fn { "float" } else { "i64" }).collect();
+            format!("{{{}}}", tys.join(", "))
+        } else if is_float_fn {
+            "float".to_string()
+        } else {
+            "i64".to_string()
+        };
+        self.fn_ret_ty = ll_ret_ty.clone();
+        self.returns_i64 = !is_float_fn && !is_multi_output;
 
         write!(out, "define {} @{}(", ll_ret_ty, inop.name).ok();
-        write!(out, "%State* noalias nocapture align 8 %state").ok();
+        if inop.has_state_access {
+            write!(out, "%State* noalias nocapture align 8 %state").ok();
+        }
         for (n, t) in &inop.params {
-            let native_ty = self.llvm_type(t);
+            let resolved = self.resolve_bild_type(t);
+            let native_ty = self.llvm_type(&resolved);
             write!(out, ", {} %{}", native_ty, n).ok();
             self.let_bindings.insert(n.clone(), format!("%{}", n));
-            self.let_binding_types.insert(n.clone(), t.clone());
+            self.let_binding_types.insert(n.clone(), resolved.clone());
             self.let_original_types.insert(n.clone(), t.clone());
         }
         writeln!(out, ") local_unnamed_addr #0 {{").ok();
@@ -1254,7 +1276,20 @@ impl LlvmBackend {
             } else if trimmed == "term" || trimmed.starts_with("term ") {
                 let after = trimmed.strip_prefix("term").map(|s| s.trim()).unwrap_or("");
                 if !after.is_empty() {
-                    if is_float_fn { writeln!(out, "  ret float {}", after).ok(); }
+                    if is_multi_output {
+                        // Multi-output: term %q, %r → insertvalue chain + ret struct
+                        let regs: Vec<&str> = after.split(',').map(|s| s.trim()).collect();
+                        for (i, reg) in regs.iter().enumerate() {
+                            let base_ty = if is_float_fn { "float" } else { "i64" };
+                            if i == 0 {
+                                writeln!(out, "  %mv{} = insertvalue {} undef, {} {}, 0", self.txn_counter, ll_ret_ty, base_ty, reg).ok();
+                            } else {
+                                writeln!(out, "  %mv{} = insertvalue {} %mv{}, {} {}, {}", self.txn_counter, ll_ret_ty, self.txn_counter - 1, base_ty, reg, i).ok();
+                            }
+                            self.txn_counter += 1;
+                        }
+                        writeln!(out, "  ret {} %mv{}", ll_ret_ty, self.txn_counter - 1).ok();
+                    } else if is_float_fn { writeln!(out, "  ret float {}", after).ok(); }
                     else { writeln!(out, "  ret i64 {}", after).ok(); }
                 } else {
                     if is_float_fn { writeln!(out, "  ret float 0.0").ok(); }

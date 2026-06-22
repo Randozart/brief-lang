@@ -2675,6 +2675,8 @@ impl ProofEngine {
             Expr::TemplateCall { .. } | Expr::MacroCall { .. } | Expr::Interpolate(..) | Expr::InterpolateExpr(..) | Expr::QuoteBlock { .. } => {
                 unreachable!("macro/template should have been expanded")
             }
+            // Pipe chains — desugared before this pass
+            Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
         }
     }
 

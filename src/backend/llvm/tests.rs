@@ -5308,30 +5308,33 @@ let spec = crate::target_spec::TargetSpec {
 
     #[test]
     fn test_inop_declaration_emission() {
-        let mut backend = LlvmBackend::new();
         let inop = TopLevel::Inop(InopDeclaration {
-            name: "sadd".to_string(),
-            params: vec![("a".to_string(), Type::Int), ("b".to_string(), Type::Int)],
+            name: "sadd".into(),
+            params: vec![("a".into(), Type::Int), ("b".into(), Type::Int)],
             outputs: vec![Type::Int],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            llvm_body: vec!["%res = add i64 %a, %b".to_string(), "term %res".to_string()],
+            llvm_body: vec!["%res = add i64 %a, %b;".into(), "term %res;".into()],
             fallback: None,
             has_side_effects: false,
+            has_state_access: false,
             span: None,
         });
-        let program = Program {
-            items: vec![inop],
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
-            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-        };
+        let program = Program { items: vec![inop], ..empty_program() };
+        let mut backend = LlvmBackend::new();
         let output = backend.generate(&program);
-        assert!(output.contains("define i64 @sadd(%State* noalias nocapture align 8 %state, i64 %a, i64 %b)"),
+        assert!(output.contains("define i64 @sadd("),
             "inop# function should have correct LLVM signature.\nGot:\n{}", output);
-        assert!(output.contains("ret i64 %res"),
-            "term should be lowered to ret.\nGot:\n{}", output);
+        // Extract the define line for @sadd and verify %State* is NOT in it
+        let sadd_line: Vec<&str> = output.lines()
+            .filter(|l| l.contains("define i64 @sadd("))
+            .collect();
+        assert!(!sadd_line.is_empty(), "should find @sadd definition");
+        assert!(!sadd_line[0].contains("%State"),
+            "@sadd should NOT receive %State*.\nLine: {}", sadd_line[0]);
         assert!(output.contains("add i64 %a, %b"),
             "LLVM IR body should contain the add instruction.\nGot:\n{}", output);
+        assert!(output.contains("ret i64 %res"),
+            "term should be lowered to ret.\nGot:\n{}", output);
     }
 
     #[test]
@@ -5342,18 +5345,19 @@ let spec = crate::target_spec::TargetSpec {
             params: vec![("val".to_string(), Type::Int)],
             outputs: vec![Type::Bool],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            llvm_body: vec!["term %val".to_string()],
+            llvm_body: vec!["term %val;".to_string()],
             fallback: None,
             has_side_effects: true,
+            has_state_access: false,
             span: None,
         });
         let program = Program {
             items: vec![inop],
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
-            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            ..empty_program()
         };
-        backend.generate(&program);
+        let output = backend.generate(&program);
+        assert!(output.contains("define i64 @write_buf"),
+            "inop should be named write_buf.\nGot:\n{}", output);
         let decl = backend.inop_decls.get("write_buf");
         assert!(decl.is_some(), "inop! should be stored in backend.inop_decls");
         assert!(decl.unwrap().has_side_effects, "inop! should have has_side_effects = true");
@@ -5498,3 +5502,79 @@ let spec = crate::target_spec::TargetSpec {
         let result3 = backend.try_meld_projection(&mut out3, &src_val, "Type", "  ");
         assert!(result3.is_none(), "no route for 'Type' → None");
     }
+
+    #[test]
+    fn test_resolve_bild_type_alias() {
+        // Build a TypeUniverse with a type alias: type MyInt <: Int {}
+        let program = Program {
+            items: vec![
+                TopLevel::TypeDef(Box::new(TypeDef {
+                    name: "MyInt".into(),
+                    type_params: vec![],
+                    base: Box::new(Expr::Identifier("Int".into())),
+                    bit_range: None,
+                    body: TypeDefBody { bindings: vec![], constraints: vec![], span: None },
+                    span: None,
+                })),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: crate::ast::StrictMode::Off,
+            dispatch_mode: crate::ast::DispatchMode::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let tu = crate::type_universe::TypeUniverse::build(&program);
+        let mut backend = LlvmBackend::new();
+        backend = backend.with_type_universe(tu);
+
+        let resolved = backend.resolve_bild_type(&Type::Custom("MyInt".into()));
+        assert_eq!(resolved, Type::Int, "MyInt should resolve to Int");
+
+        // Unknown custom type should stay unchanged
+        let unknown = backend.resolve_bild_type(&Type::Custom("Unknown".into()));
+        assert_eq!(unknown, Type::Custom("Unknown".into()));
+    }
+
+    #[test]
+    fn test_resolve_bild_type_meld() {
+        // Build a TypeUniverse with a meld: meld Meters <:> Float {}
+        let program = Program {
+            items: vec![
+                TopLevel::Meld(MeldDeclaration {
+                    name_a: "Meters".into(),
+                    name_b: "Float".into(),
+                    routes: vec![],
+                    span: None,
+                }),
+            ],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: crate::ast::StrictMode::Off,
+            dispatch_mode: crate::ast::DispatchMode::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+        };
+        let tu = crate::type_universe::TypeUniverse::build(&program);
+        let mut backend = LlvmBackend::new();
+        backend = backend.with_type_universe(tu);
+
+        let resolved = backend.resolve_bild_type(&Type::Custom("Meters".into()));
+        assert_eq!(resolved, Type::Float, "Meters should resolve to Float via meld");
+    }
+
+    #[test]
+    fn test_resolve_bild_type_primitive_unchanged() {
+        let mut backend = LlvmBackend::new();
+        assert_eq!(backend.resolve_bild_type(&Type::Int), Type::Int);
+        assert_eq!(backend.resolve_bild_type(&Type::Float), Type::Float);
+        assert_eq!(backend.resolve_bild_type(&Type::Bool), Type::Bool);
+        assert_eq!(backend.resolve_bild_type(&Type::String), Type::String);
+    }
+

@@ -275,6 +275,8 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } | Expr::MapLiteral(_) | Expr::SetLiteral(_) | Expr::SigCall { .. } | Expr::SubtypeProjection { .. } | Expr::DbvlTable { .. } => SymbolicValue::Unknown,
             Expr::Ellipsis => SymbolicValue::Unknown,
             Expr::SharedMem(_) => SymbolicValue::Unknown,
+            // Pipe chains — desugared before this pass
+            Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
         }
     }
 

@@ -4562,6 +4562,8 @@ impl Interpreter {
             Expr::QuoteBlock { statements, .. } => {
                 Ok(Value::Block(statements.clone()))
             }
+            // Pipe chains — desugared before this pass
+            Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
         }
     }
 
@@ -8882,13 +8884,17 @@ mod tests {
     fn test_inop_fallback_evaluation() {
         let mut i = Interpreter::new();
         let inop = InopDeclaration {
-            name: "sadd".to_string(),
-            params: vec![("a".to_string(), Type::Int), ("b".to_string(), Type::Int)],
+            name: "test_add".into(),
+            params: vec![("x".into(), Type::Int), ("y".into(), Type::Int)],
             outputs: vec![Type::Int],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            llvm_body: vec!["%res = add i64 %a, %b".to_string(), "term %res".to_string()],
-            fallback: Some(Expr::Add(Box::new(Expr::Identifier("a".to_string())), Box::new(Expr::Identifier("b".to_string())))),
+            contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec!["%res = add i64 %x, %y;".into(), "term %res;".into()],
+            fallback: Some(Expr::Add(
+                Box::new(Expr::Identifier("x".into())),
+                Box::new(Expr::Identifier("y".into())),
+            )),
             has_side_effects: false,
+            has_state_access: false,
             span: None,
         };
         i.inop_decls.insert("sadd".to_string(), inop);
@@ -8917,13 +8923,14 @@ mod tests {
     fn test_inop_fallback_missing_body_error() {
         let mut i = Interpreter::new();
         let inop = InopDeclaration {
-            name: "void_inop".to_string(),
-            params: vec![],
-            outputs: vec![],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            llvm_body: vec!["ret void".to_string()],
+            name: "no_fallback".into(),
+            params: vec![("x".into(), Type::Int)],
+            outputs: vec![Type::Int],
+            contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec!["%res = add i64 %x, %x;".into(), "term %res;".into()],
             fallback: None,
             has_side_effects: false,
+            has_state_access: false,
             span: None,
         };
         i.inop_decls.insert("void_inop".to_string(), inop);
@@ -10936,5 +10943,349 @@ mod kani_full_tests {
         assert!(i.eval_constraint(&val, &constraint).is_ok());
         // After eval_constraint, _ should be restored
         assert_eq!(i.state.get("_"), Some(&Value::Int(999)));
+    }
+
+    // ── Pipe Chain E2E Tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_pipe_chain_e2e_basic() {
+        // Test desugared pipe chain through interpreter.
+        // Pipeline: 5 |> add_one() |> double()  →  double(add_one(5)) = 12
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Integer(5)),
+            steps: vec![
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("add_one".to_string(), vec![])),
+                    skip: 0,
+                },
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("double".to_string(), vec![])),
+                    skip: 0,
+                },
+            ],
+        };
+
+        // Desugar the pipe chain
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let desugared = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        // Evaluate in interpreter (must register function defs)
+        let mut interp = Interpreter::new();
+        interp.definitions.insert("add_one".to_string(), Definition {
+            name: "add_one".to_string(),
+            type_params: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Add(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ))],
+                modifiers: vec![],
+                swan_song: None,
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+        interp.definitions.insert("double".to_string(), Definition {
+            name: "double".to_string(),
+            type_params: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Mul(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(2)),
+                ))],
+                modifiers: vec![],
+                swan_song: None,
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+
+        let result = interp.eval_expr(&desugared).unwrap();
+        assert_eq!(result, Value::Int(12), "5 |> add_one() |> double() should be 12");
+    }
+
+    #[test]
+    fn test_pipe_chain_e2e_dot_skip() {
+        // Pipeline: 10 |> add_one() .|> double()
+        // add_one(10) = 11 (pos 1)
+        // .|> skips pos 1, reads initial 10: double(10) = 20
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Integer(10)),
+            steps: vec![
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("add_one".to_string(), vec![])),
+                    skip: 0,
+                },
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("double".to_string(), vec![])),
+                    skip: 1,
+                },
+            ],
+        };
+
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let desugared = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        let mut interp = Interpreter::new();
+        interp.definitions.insert("add_one".to_string(), Definition {
+            name: "add_one".to_string(),
+            type_params: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Add(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ))],
+                modifiers: vec![],
+                swan_song: None,
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+        interp.definitions.insert("double".to_string(), Definition {
+            name: "double".to_string(),
+            type_params: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Mul(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(2)),
+                ))],
+                modifiers: vec![],
+                swan_song: None,
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+
+        let result = interp.eval_expr(&desugared).unwrap();
+        assert_eq!(result, Value::Int(20), "10 |> add_one() .|> double() should be 20");
+    }
+
+    #[test]
+    fn test_pipe_chain_e2e_with_args() {
+        // Pipeline: 7 |> sum(3) — sum(7, 3) = 10
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Integer(7)),
+            steps: vec![
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("sum".to_string(), vec![Expr::Integer(3)])),
+                    skip: 0,
+                },
+            ],
+        };
+
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let desugared = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        let mut interp = Interpreter::new();
+        interp.definitions.insert("sum".to_string(), Definition {
+            name: "sum".to_string(),
+            type_params: vec![],
+            parameters: vec![("a".to_string(), Type::Int), ("b".to_string(), Type::Int)],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Add(
+                    Box::new(Expr::Identifier("a".to_string())),
+                    Box::new(Expr::Identifier("b".to_string())),
+                ))],
+                modifiers: vec![],
+                swan_song: None,
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+
+        let result = interp.eval_expr(&desugared).unwrap();
+        assert_eq!(result, Value::Int(10), "7 |> sum(3) should be sum(7, 3) = 10");
+    }
+
+    #[test]
+    fn test_pipe_chain_e2e_three_step() {
+        // Pipeline: 2 |> square() |> add_one() .|> double()
+        // square(2) = 4 (pos 1)
+        // add_one(4) = 5 (pos 2)
+        // .|> reads pos 2-1 = pos 1 = 4: double(4) = 8
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Integer(2)),
+            steps: vec![
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("square".to_string(), vec![])), skip: 0,
+                },
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("add_one".to_string(), vec![])), skip: 0,
+                },
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("double".to_string(), vec![])), skip: 1,
+                },
+            ],
+        };
+
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let desugared = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        let mut interp = Interpreter::new();
+        for (name, params, body_expr) in vec![
+            ("square", vec![("x", Type::Int)], Expr::Mul(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Identifier("x".to_string())),
+            )),
+            ("add_one", vec![("x", Type::Int)], Expr::Add(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Integer(1)),
+            )),
+            ("double", vec![("x", Type::Int)], Expr::Mul(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Integer(2)),
+            )),
+        ] {
+            interp.definitions.insert(name.to_string(), Definition {
+                name: name.to_string(),
+                type_params: vec![],
+                parameters: params.into_iter()
+                    .map(|(n, t)| (n.to_string(), t))
+                    .collect(),
+                outputs: vec![],
+                output_type: None,
+                output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![Statement::Term {
+                    values: vec![Some(body_expr)],
+                    modifiers: vec![],
+                    swan_song: None,
+                }],
+                is_lambda: false,
+                modifiers: vec![],
+                variant_bodies: vec![],
+            });
+        }
+
+        let result = interp.eval_expr(&desugared).unwrap();
+        assert_eq!(result, Value::Int(8), "2 |> square() |> add_one() .|> double() should be 8");
+    }
+
+    #[test]
+    fn test_pipe_chain_e2e_auto_wrap() {
+        // Pipeline: 5 |> add_one — bare identifier auto-wrapped
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Integer(5)),
+            steps: vec![
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Identifier("add_one".to_string())), skip: 0,
+                },
+            ],
+        };
+
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let desugared = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        let mut interp = Interpreter::new();
+        interp.definitions.insert("add_one".to_string(), Definition {
+            name: "add_one".to_string(),
+            type_params: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Add(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ))],
+                modifiers: vec![],
+                swan_song: None,
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+
+        let result = interp.eval_expr(&desugared).unwrap();
+        assert_eq!(result, Value::Int(6), "5 |> add_one should be 6");
+    }
+
+    #[test]
+    fn test_pipe_chain_e2e_function_start() {
+        // Pipeline: f() |> g() — starts with a function call
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Call("forty_two".to_string(), vec![])),
+            steps: vec![
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("add_one".to_string(), vec![])), skip: 0,
+                },
+            ],
+        };
+
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let desugared = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        let mut interp = Interpreter::new();
+        interp.definitions.insert("forty_two".to_string(), Definition {
+            name: "forty_two".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Integer(42))],
+                modifiers: vec![],
+                swan_song: None,
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+        interp.definitions.insert("add_one".to_string(), Definition {
+            name: "add_one".to_string(),
+            type_params: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Term {
+                values: vec![Some(Expr::Add(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ))],
+                modifiers: vec![],
+                swan_song: None,
+            }],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+
+        let result = interp.eval_expr(&desugared).unwrap();
+        assert_eq!(result, Value::Int(43), "f() |> add_one() should be 43");
     }
 }

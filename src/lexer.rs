@@ -293,6 +293,8 @@ pub enum Token {
     Shl,
     #[token(">>")]
     Shr,
+    #[token("|>")]
+    PipeGreater,
     #[token("|")]
     Pipe,
     #[token("||")]
@@ -595,6 +597,7 @@ impl std::fmt::Display for Token {
             Token::Ge => write!(f, ">="),
             Token::Shl => write!(f, "<<"),
             Token::Shr => write!(f, ">>"),
+            Token::PipeGreater => write!(f, "|>"),
             Token::Pipe => write!(f, "|"),
             Token::OrOr => write!(f, "||"),
             Token::AndAnd => write!(f, "&&"),

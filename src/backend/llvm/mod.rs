@@ -65,6 +65,20 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
         _ => None,
     }
 }
+/// Map a type name string to its primitive Type variant.
+/// Used by `resolve_bild_type` to resolve aliases and melds.
+fn primitive_from_name(name: &str) -> Option<Type> {
+    match name {
+        "Int" | "UInt" | "Signed" | "Unsigned" => Some(Type::Int),
+        "Float" => Some(Type::Float),
+        "Bool" => Some(Type::Bool),
+        "Char" => Some(Type::Char),
+        "String" => Some(Type::String),
+        "Data" | "Bytes" => Some(Type::Data),
+        _ => None,
+    }
+}
+
 /// Detect terminating guard at end of body and hoist it.
 /// Returns (body_without_guard, vec_of_(field_name, intrinsic_name)).
 pub(crate) fn hoist_terminating_guard(
@@ -387,6 +401,8 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::TemplateCall { .. } | Expr::MacroCall { .. } | Expr::Interpolate(..) | Expr::InterpolateExpr(..) | Expr::QuoteBlock { .. } => {
             unreachable!("macro/template should have been expanded")
         }
+        // Pipe chains — desugared before this pass
+        Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
     }
 }
 
@@ -2368,6 +2384,35 @@ self.emit_declares(&mut out);
     /// instead of `#0` if the function is hazardous, or `#5` instead of `#3`.
     /// Check if an expression produces a `Ptr<T>` value.
     /// Used by `ListIndex` to decide between direct pointer GEP vs 2-slot header load.
+    /// Resolve a Brief type to its underlying LLVM type for BILD purposes.
+    /// Walks through type aliases and melds to find the concrete primitive.
+    pub(crate) fn resolve_bild_type(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Custom(name) => {
+                // Check type universe for type definition (alias like `type UserId = Int`)
+                if let Some(tu) = &self.type_universe {
+                    if let Some(resolved) = tu.types.get(name) {
+                        if let Some(primitive) = primitive_from_name(&resolved.base) {
+                            return primitive;
+                        }
+                    }
+                    // Check melds: if this type has a meld with a primitive partner,
+                    // resolve to the primitive (e.g. `meld Meters(f: Float)` → Float)
+                    for ((a, b), _) in &tu.melds {
+                        let partner = if a == name { Some(b) } else if b == name { Some(a) } else { None };
+                        if let Some(pname) = partner {
+                            if let Some(primitive) = primitive_from_name(pname) {
+                                return primitive;
+                            }
+                        }
+                    }
+                }
+                ty.clone()
+            }
+            _ => ty.clone(),
+        }
+    }
+
     fn is_ptr_expr(&self, expr: &Expr) -> bool {
         match expr {
             Expr::Projection { target, .. } => matches!(target, ProjectionTarget::Ptr),

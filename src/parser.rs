@@ -1840,6 +1840,23 @@ impl<'a> Parser<'a> {
             contract = self.parse_contract()?;
         }
 
+        // Parse optional (%state) access marker — signals that BILD body uses %State*
+        let has_state_access = if let Some(Ok(Token::LParen)) = self.current_token() {
+            self.advance();
+            // Consume % token before "state"
+            if matches!(self.current_token(), Some(Ok(Token::Percent))) {
+                self.advance();
+            }
+            let ident = self.expect_identifier()?;
+            if ident != "state" {
+                return self.spanned_err("expected 'state' in (%state) marker".to_string());
+            }
+            self.expect(Token::RParen)?;
+            true
+        } else {
+            false
+        };
+
         // Parse LLVM IR body: { ... }
         let llvm_body = if let Some(Ok(Token::LBrace)) = self.current_token() {
             self.advance();
@@ -2068,6 +2085,7 @@ impl<'a> Parser<'a> {
             llvm_body,
             fallback,
             has_side_effects: bang,
+            has_state_access,
             span: None,
         })
     }
@@ -6057,7 +6075,78 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
     }
 
     fn parse_expression(&mut self) -> Result<Expr, SyntaxError> {
-        self.parse_or()
+        self.parse_pipe_chain()
+    }
+
+    /// Parse pipe chain: `initial |> step |> step .|> step ..|> step`.
+    /// Pipe has the lowest precedence, wrapping `parse_or`.
+    /// Supports:
+    ///   `|>`   — skip=0 (adjacent)
+    ///   `.|>`  — skip=1 (one back)
+    ///   `..|>` — skip=2 (two back)
+    ///
+    /// `.N|>` with explicit integer is reserved for future use.
+    fn parse_pipe_chain(&mut self) -> Result<Expr, SyntaxError> {
+        let initial = self.parse_or()?;
+        let mut steps = Vec::new();
+
+        loop {
+            let skip = match self.current_token() {
+                Some(Ok(Token::PipeGreater)) => {
+                    self.advance();
+                    0usize
+                }
+                Some(Ok(Token::Dot)) => {
+                    // .|> — check peek without consuming
+                    match self.peek_token() {
+                        Some(Ok(Token::PipeGreater)) => {
+                            self.advance(); // consume '.'
+                            self.advance(); // consume '|>'
+                            1usize
+                        }
+                        _ => break,
+                    }
+                }
+                Some(Ok(Token::DotDot)) => {
+                    // ..|> — check peek without consuming
+                    match self.peek_token() {
+                        Some(Ok(Token::PipeGreater)) => {
+                            self.advance(); // consume '..'
+                            self.advance(); // consume '|>'
+                            2usize
+                        }
+                        _ => break,
+                    }
+                }
+                _ => break,
+            };
+
+            // Parse the target expression at or-level (full expression)
+            let target = self.parse_or()?;
+            // Validate target is callable or an identifier (auto-wrapped in desugaring)
+            match &target {
+                Expr::Identifier(_) | Expr::Call(_, _) => {}
+                _ => {
+                    return Err(SyntaxError::InvalidStatement {
+                        reason: "pipe target must be a function call".to_string(),
+                        span: self.current_span().unwrap_or_else(Span::dummy),
+                    });
+                }
+            }
+            steps.push(PipeStep {
+                target: Box::new(target),
+                skip,
+            });
+        }
+
+        if steps.is_empty() {
+            Ok(initial)
+        } else {
+            Ok(Expr::PipeChain(crate::ast::PipeChain {
+                initial: Box::new(initial),
+                steps,
+            }))
+        }
     }
 
     fn parse_or(&mut self) -> Result<Expr, SyntaxError> {
@@ -6573,6 +6662,10 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     expr = Expr::ListIndex(Box::new(expr), Box::new(first));
                 }
             } else if let Some(Ok(Token::Dot)) = self.current_token() {
+                // Don't consume '.' if it's a dot-skip pipe (.|>)
+                if matches!(self.peek_token(), Some(Ok(Token::PipeGreater))) {
+                    break;
+                }
                 self.advance();
                 let member_name = if let Some(Ok(Token::Integer(n))) = self.current_token() {
                     let s = n.to_string();
@@ -9741,6 +9834,169 @@ mod parser_tests {
             assert!(meld.routes.is_empty(), "empty routes should be empty");
         } else {
             panic!("Expected TopLevel::Meld");
+        }
+    }
+
+    // ── Pipe Chain Parser Tests ──────────────────────────────────────
+
+    #[test]
+    fn test_parse_basic_pipe() {
+        let s = "x |> f()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 1);
+                assert_eq!(pc.steps[0].skip, 0);
+                match &*pc.steps[0].target {
+                    Expr::Call(name, args) => {
+                        assert_eq!(name, "f");
+                        assert!(args.is_empty());
+                    }
+                    _ => panic!("Expected Call, got {:?}", pc.steps[0].target),
+                }
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_chaining() {
+        let s = "x |> f() |> g()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 2);
+                assert_eq!(pc.steps[0].skip, 0);
+                assert_eq!(pc.steps[1].skip, 0);
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_dot_skip() {
+        let s = "x |> f() .|> g()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 2);
+                assert_eq!(pc.steps[0].skip, 0);
+                assert_eq!(pc.steps[1].skip, 1);
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_dotdot_skip() {
+        let s = "x |> f() ..|> g()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 2);
+                assert_eq!(pc.steps[0].skip, 0);
+                assert_eq!(pc.steps[1].skip, 2);
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_no_pipe() {
+        let s = "x + y";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        assert!(
+            !matches!(expr, Expr::PipeChain(_)),
+            "Should not be a PipeChain"
+        );
+    }
+
+    #[test]
+    fn test_parse_pipe_precedence_add() {
+        let s = "a + b |> f()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                // initial should be a BinaryOp with Add kind (Pattern B form)
+                assert!(matches!(&*pc.initial, Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Add));
+                assert_eq!(pc.steps.len(), 1);
+                assert_eq!(pc.steps[0].skip, 0);
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_three_chain() {
+        let s = "x |> f() |> g() |> h()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 3);
+                for step in &pc.steps {
+                    assert_eq!(step.skip, 0);
+                }
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_with_args() {
+        let s = "x |> f(a, b)";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 1);
+                match &*pc.steps[0].target {
+                    Expr::Call(name, args) => {
+                        assert_eq!(name, "f");
+                        assert_eq!(args.len(), 2);
+                    }
+                    _ => panic!("Expected Call"),
+                }
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_bare_identifier_target() {
+        let s = "x |> f";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 1);
+                assert!(
+                    matches!(&*pc.steps[0].target, Expr::Identifier(name) if name == "f"),
+                    "Expected bare Identifier target"
+                );
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_function_start() {
+        let s = "f() |> g()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 1);
+                assert!(matches!(&*pc.initial, Expr::Call(_, _)),
+                    "Initial should be a call expression");
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
         }
     }
 }

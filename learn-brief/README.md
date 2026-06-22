@@ -2,7 +2,7 @@
 
 **Version:** 0.16.0  
 **Last Updated:** 2026-06-22  
-**Status:** Complete ✅ (14-bild Added)
+**Status:** Complete ✅ (Pipe chaining added)
 
 ---
 
@@ -26,6 +26,7 @@
    - Transaction syntax
    - Scripting mode (top-level statements)
    - Guards and escape
+   - Pipe chaining (`|>`, `.|>`, `..|>`)
 
 3. **[02-contracts.md](02-contracts.md)** - Preconditions & Postconditions
    - Writing meaningful contracts
