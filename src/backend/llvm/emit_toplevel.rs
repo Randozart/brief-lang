@@ -690,7 +690,10 @@ impl LlvmBackend {
         let ll_ret_ty = if is_float_fn { "float" } else { "i64" };
         self.fn_ret_ty = ll_ret_ty.to_string();
         self.returns_i64 = !is_float_fn;
-        write!(out, "define {} @{}(", ll_ret_ty, d.name).ok();
+        // Rename user `main` to `brief_main` to avoid collision with
+        // the runtime entry point `define i32 @main()` in loop_engine.rs.
+        let ll_name: &str = if d.name == "main" { "brief_main" } else { &d.name };
+        write!(out, "define {} @{}(", ll_ret_ty, ll_name).ok();
         write!(out, "%State* noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
@@ -755,7 +758,7 @@ impl LlvmBackend {
                 write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
             }
             writeln!(out, ") local_unnamed_addr #0 {{").ok();
-            write!(out, "  %res = call {} @{}(", ll_ret_ty, d.name).ok();
+            write!(out, "  %res = call {} @{}(", ll_ret_ty, ll_name).ok();
             write!(out, "%State* %state").ok();
             for (i, (n, t)) in d.parameters.iter().enumerate() {
                 write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
@@ -1204,6 +1207,59 @@ impl LlvmBackend {
             self.emit_stmt(out, s, "  ");
         }
         if !self.terminated { writeln!(out, "  ret void").ok(); }
+        writeln!(out, "}}").ok();
+    }
+
+    /// Emit a user-defined `inop#` / `inop!#` intrinsic as a private LLVM function.
+    /// The body is pasted verbatim from the inop# declaration, with `term`
+    /// replaced by `ret` (or `br %post_label` in callable txn context).
+    pub(super) fn emit_inop(&mut self, out: &mut String, inop: &crate::ast::InopDeclaration) {
+        let is_float_fn = inop.outputs.iter().any(|t| matches!(t, Type::Float));
+        let ll_ret_ty = if is_float_fn { "float" } else { "i64" };
+        self.fn_ret_ty = ll_ret_ty.to_string();
+        self.returns_i64 = !is_float_fn;
+
+        write!(out, "define {} @{}(", ll_ret_ty, inop.name).ok();
+        write!(out, "%State* noalias nocapture align 8 %state").ok();
+        for (n, t) in &inop.params {
+            let native_ty = self.llvm_type(t);
+            write!(out, ", {} %{}", native_ty, n).ok();
+            self.let_bindings.insert(n.clone(), format!("%{}", n));
+            self.let_binding_types.insert(n.clone(), t.clone());
+            self.let_original_types.insert(n.clone(), t.clone());
+        }
+        writeln!(out, ") local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+        self.txn_counter = 0;
+        self.terminated = false;
+
+        for line in &inop.llvm_body {
+            let trimmed = line.trim();
+            if trimmed.starts_with("term!") {
+                let after = trimmed.strip_prefix("term!").unwrap_or("").trim();
+                if !after.is_empty() {
+                    writeln!(out, "  store i64 {}, ptr %state, align 8", after).ok();
+                }
+                writeln!(out, "  br label %done").ok();
+                self.terminated = true;
+            } else if trimmed == "term" || trimmed.starts_with("term ") {
+                let after = trimmed.strip_prefix("term").map(|s| s.trim()).unwrap_or("");
+                if !after.is_empty() {
+                    if is_float_fn { writeln!(out, "  ret float {}", after).ok(); }
+                    else { writeln!(out, "  ret i64 {}", after).ok(); }
+                } else {
+                    if is_float_fn { writeln!(out, "  ret float 0.0").ok(); }
+                    else { writeln!(out, "  ret i64 0").ok(); }
+                }
+                self.terminated = true;
+            } else {
+                writeln!(out, "  {}", line).ok();
+            }
+        }
+        if !self.terminated {
+            if is_float_fn { writeln!(out, "  ret float 0.0").ok(); }
+            else { writeln!(out, "  ret i64 0").ok(); }
+        }
         writeln!(out, "}}").ok();
     }
 }

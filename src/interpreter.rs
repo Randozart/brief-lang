@@ -273,9 +273,8 @@ pub struct Interpreter {
     /// Proof oracle fuel — decremented on every statement when set.
     /// When it hits zero, FuelExhausted is returned.
     oracle_fuel: Option<u64>,
-    /// TypeUniverse for resolving InsertAt/ExtractFrom strategies and
-    /// user-defined projection bindings during evaluation.
     pub type_universe: Option<crate::type_universe::TypeUniverse>,
+    pub inop_decls: HashMap<String, InopDeclaration>,
 }
 
 impl Interpreter {
@@ -300,14 +299,20 @@ impl Interpreter {
             dbvl_cache: HashMap::new(),
             oracle_fuel: None,
             type_universe: None,
+            inop_decls: HashMap::new(),
         }
     }
 
     pub fn load_program(&mut self, program: &Program) {
         self.ffi_bindings.clear();
+        self.ffi_bindings.clear();
         self.ffi_name_to_location.clear();
+        self.inop_decls.clear();
 
         for item in &program.items {
+            if let TopLevel::Inop(inop) = item {
+                self.inop_decls.insert(inop.name.clone(), inop.clone());
+            }
             if let TopLevel::ForeignBinding {
                 name,
                 signature,
@@ -4440,6 +4445,33 @@ impl Interpreter {
                         {
                             let _ = fd;
                             Ok(Value::String(String::new()))
+                        }
+                    }
+                    Intrinsic::UserDefined(name) => {
+                        let inop = self.inop_decls.get(name).cloned();
+                        if let Some(inop) = inop {
+                            if let Some(fallback) = inop.fallback {
+                                let mut local_state = self.state.clone();
+                                for (i, (param_name, _)) in inop.params.iter().enumerate() {
+                                    if i < values.len() {
+                                        local_state.insert(param_name.clone(), values[i].clone());
+                                    }
+                                }
+                                let prev_state = self.state.clone();
+                                self.state = local_state;
+                                let result = self.eval_expr(&fallback);
+                                self.state = prev_state;
+                                result
+                            } else {
+                                Err(RuntimeError::TypeMismatch(format!(
+                                    "inop# `{}` has no fallback expression and cannot be evaluated in the interpreter",
+                                    name
+                                )))
+                            }
+                        } else {
+                            Err(RuntimeError::TypeMismatch(format!(
+                                "unknown user-defined intrinsic: {}#", name
+                            )))
                         }
                     }
                 }
@@ -8841,6 +8873,65 @@ mod tests {
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_inop_fallback_evaluation() {
+        let mut i = Interpreter::new();
+        let inop = InopDeclaration {
+            name: "sadd".to_string(),
+            params: vec![("a".to_string(), Type::Int), ("b".to_string(), Type::Int)],
+            outputs: vec![Type::Int],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec!["%res = add i64 %a, %b".to_string(), "term %res".to_string()],
+            fallback: Some(Expr::Add(Box::new(Expr::Identifier("a".to_string())), Box::new(Expr::Identifier("b".to_string())))),
+            has_side_effects: false,
+            span: None,
+        };
+        i.inop_decls.insert("sadd".to_string(), inop);
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UserDefined("sadd".to_string()),
+            args: vec![Expr::Integer(3), Expr::Integer(7)],
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(10), "inop# fallback should compute 3 + 7 = 10");
+    }
+
+    #[test]
+    fn test_inop_fallback_missing_decl_error() {
+        let mut i = Interpreter::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UserDefined("nonexistent".to_string()),
+            args: vec![],
+        };
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err(), "missing inop# declaration should error");
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("unknown"), "error should mention 'unknown', got: {}", err);
+    }
+
+    #[test]
+    fn test_inop_fallback_missing_body_error() {
+        let mut i = Interpreter::new();
+        let inop = InopDeclaration {
+            name: "void_inop".to_string(),
+            params: vec![],
+            outputs: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec!["ret void".to_string()],
+            fallback: None,
+            has_side_effects: false,
+            span: None,
+        };
+        i.inop_decls.insert("void_inop".to_string(), inop);
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UserDefined("void_inop".to_string()),
+            args: vec![],
+        };
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err(), "inop# without fallback should error in interpreter");
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(err.contains("no fallback"), "error should mention 'no fallback', got: {}", err);
     }
 }
 

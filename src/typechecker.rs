@@ -67,6 +67,7 @@ pub struct TypeChecker {
     struct_files: HashMap<String, PathBuf>,  // struct_name -> defining file
     struct_parents: HashMap<String, Option<Type>>,  // struct_name -> parent type (for derivation upcast)
     trigger_names: std::collections::HashSet<String>,  // names of declared @ link triggers (read-only)
+    inop_decls: HashMap<String, InopDeclaration>,
     type_universe: Option<crate::type_universe::TypeUniverse>,
 }
 
@@ -92,6 +93,7 @@ impl TypeChecker {
             struct_files: HashMap::new(),
             struct_parents: HashMap::new(),
             trigger_names: std::collections::HashSet::new(),
+            inop_decls: HashMap::new(),
             type_universe: None,
         }
     }
@@ -534,6 +536,9 @@ impl TypeChecker {
                     self.foreign_bindings
                         .insert(name.clone(), signature.clone());
                 }
+                TopLevel::Inop(inop) => {
+                    self.inop_decls.insert(inop.name.clone(), inop.clone());
+                }
                 TopLevel::Enum(enum_def) => {
                     for variant in &enum_def.variants {
                         let variant_name = match variant {
@@ -971,7 +976,21 @@ impl TypeChecker {
                     self.check_expr_for_function_calls(arg);
                 }
             }
-            Expr::IntrinsicCall { intrinsic: _, args } => {
+            Expr::IntrinsicCall { intrinsic, args } => {
+                if let Intrinsic::UserDefined(name) = intrinsic {
+                    if !self.inop_decls.contains_key(name) {
+                        let diag = crate::errors::Diagnostic::new("U001", crate::errors::Severity::Error, "Unknown user-defined intrinsic")
+                            .with_explanation(&format!(
+                                "`{}#` is not a known intrinsic. Did you forget to declare `inop {}`?",
+                                name, name
+                            ));
+                        self.diagnostics.borrow_mut().push(diag);
+                        self.errors.borrow_mut().push(crate::errors::TypeError::InvalidOperation {
+                            operation: format!("{}#", name),
+                            type_name: "intrinsic".to_string(),
+                        });
+                    }
+                }
                 for arg in args {
                     self.check_expr_for_function_calls(arg);
                 }
@@ -1623,6 +1642,11 @@ impl TypeChecker {
                     // Macro/template intrinsics (compile-time only)
                     Intrinsic::Compile | Intrinsic::MacroError
                     | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Data,
+                    Intrinsic::UserDefined(name) => {
+                        self.inop_decls.get(name)
+                            .and_then(|d| d.outputs.first().cloned())
+                            .unwrap_or(Type::Void)
+                    }
                 }
             }
             Expr::Call(name, args) => {
@@ -2960,6 +2984,40 @@ mod tests {
             "Error".into(),
             vec![Expr::Identifier("msg".into())],
         )));
+    }
+
+    #[test]
+    fn test_inop_user_defined_return_type() {
+        let mut ctx = super::TypeChecker::new();
+        let inop = InopDeclaration {
+            name: "sadd".to_string(),
+            params: vec![("a".to_string(), Type::Int), ("b".to_string(), Type::Int)],
+            outputs: vec![Type::Int],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec!["term %res".to_string()],
+            fallback: None,
+            has_side_effects: false,
+            span: None,
+        };
+        ctx.inop_decls.insert("sadd".to_string(), inop);
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UserDefined("sadd".to_string()),
+            args: vec![Expr::Integer(1), Expr::Integer(2)],
+        };
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int, "UserDefined inop should return output type Int");
+    }
+
+    #[test]
+    fn test_inop_user_defined_unknown_name_emits_diagnostic() {
+        let mut ctx = super::TypeChecker::new();
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UserDefined("bogus".to_string()),
+            args: vec![],
+        };
+        ctx.check_expr_for_function_calls(&expr);
+        let has_diag = ctx.diagnostics.borrow().iter().any(|d| d.code == "U001");
+        assert!(has_diag, "Unknown inop# should emit U001 diagnostic");
     }
 }
 

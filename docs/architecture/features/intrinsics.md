@@ -1,8 +1,8 @@
 # `name#()` — Compiler Intrinsic System (The Airlock)
 
 **Date added:** 2026-06-15
-**Updated:** 2026-06-19 — D12–D18 + 9 extras implemented (35 new intrinsics, 166 total)
-**Status:** All 18 domains complete. **166** intrinsic variants. **131** emit direct libc or inline LLVM IR, **35** use brief_rt.c shims.
+**Updated:** 2026-06-22 — `inop`/`inop!` user-defined intrinsics added (see `inop.md`)
+**Status:** All 18 domains complete. **166** built-in variants + user-defined `inop`/`inop!`.
 
 ## Migration to Direct Libc (2026-06-16 — 2026-06-17)
 
@@ -70,6 +70,10 @@ Where `name` is a known intrinsic identifier from `Intrinsic::from_name()`.
 The `#` suffix is the dispatch marker — the parser sees `#(` and creates
 `Expr::IntrinsicCall { intrinsic, args }`. No import, no `frgn` declaration,
 no binding files.
+
+User-defined intrinsics (`inop`/`inop!`) use the same calling convention:
+the parser falls back to `Intrinsic::UserDefined(name)` when `from_name()` fails.
+See `docs/architecture/features/inop.md` for details.
 
 ```brief
 // Before (frgn):

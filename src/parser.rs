@@ -186,6 +186,8 @@ impl<'a> Parser<'a> {
             Token::Await => "await".into(),
             Token::Term => "term".into(),
             Token::Frgn => "frgn".into(),
+            Token::Inop => "inop".into(),
+            Token::InopBang => "inop!".into(),
             Token::Import => "import".into(),
             Token::Struct => "struct".into(),
             Token::Enum => "enum".into(),
@@ -259,6 +261,8 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Txn)) => { self.advance(); Ok("txn".to_string()) }
             Some(Ok(Token::Rct)) => { self.advance(); Ok("rct".to_string()) }
             Some(Ok(Token::Frgn)) => { self.advance(); Ok("frgn".to_string()) }
+            Some(Ok(Token::Inop)) => { self.advance(); Ok("inop".to_string()) }
+            Some(Ok(Token::InopBang)) => { self.advance(); Ok("inop!".to_string()) }
             Some(Ok(Token::Struct)) => { self.advance(); Ok("struct".to_string()) }
             Some(Ok(Token::Enum)) => { self.advance(); Ok("enum".to_string()) }
             Some(Ok(Token::Import)) => { self.advance(); Ok("import".to_string()) }
@@ -1091,6 +1095,14 @@ impl<'a> Parser<'a> {
                 let frgn_binding = self.parse_frgn_binding()?;
                 Ok(wrap_test(frgn_binding, &test_groups))
             }
+            Some(Ok(Token::Inop)) => {
+                let inop = self.parse_inop_decl(false)?;
+                Ok(wrap_test(TopLevel::Inop(inop), &test_groups))
+            }
+            Some(Ok(Token::InopBang)) => {
+                let inop = self.parse_inop_decl(true)?;
+                Ok(wrap_test(TopLevel::Inop(inop), &test_groups))
+            }
             Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) | Some(Ok(Token::Registry)) => {
                 let resource = self.parse_resource()?;
                 Ok(wrap_test(resource, &test_groups))
@@ -1155,6 +1167,7 @@ impl<'a> Parser<'a> {
                     TopLevel::Enum(e) => Some(e.name.clone()),
                     TopLevel::Constant(c) => Some(c.name.clone()),
                     TopLevel::RStruct(r) => Some(r.name.clone()),
+                    TopLevel::Inop(i) => Some(i.name.clone()),
                     _ => None,
                 };
                 if let Some(name) = name {
@@ -1756,6 +1769,299 @@ impl<'a> Parser<'a> {
             toml_path: String::new(), // No longer used - profile-based
             signature: frgn_sig,
             target: ForeignTarget::Native,
+            span: None,
+        })
+    }
+
+    /// Parse an intrinsic operation declaration: `inop[#][!] name(params) -> Ret [pre][post] { llvm_body } fallback { expr }`
+    fn parse_inop_decl(&mut self, bang: bool) -> Result<InopDeclaration, SyntaxError> {
+        // Consume the `inop` / `inop!` / `inop#` / `inop#!` token.
+        // bang = true means `inop!` was used (side-effecting).
+        if bang {
+            self.expect(Token::InopBang)?;
+        } else {
+            self.expect(Token::Inop)?;
+        }
+        let name = self.expect_identifier()?;
+        let params = if let Some(Ok(Token::LParen)) = self.current_token() {
+            self.advance();
+            let mut p = Vec::new();
+            loop {
+                let param_result = self.expect_identifier();
+                match param_result {
+                    Ok(param_name) => {
+                        self.expect(Token::Colon)?;
+                        let param_type = self.parse_type()?;
+                        p.push((param_name, param_type));
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            self.expect(Token::RParen)?;
+            p
+        } else {
+            Vec::new()
+        };
+
+        // Parse optional [pre][post] contract (before -> return type, to avoid
+        // parse_type greedily consuming [ as generic type parameter)
+        let mut contract = if let Some(Ok(Token::LBracket)) = self.current_token() {
+            self.parse_contract()?
+        } else {
+            Contract::new(Expr::Bool(true), Expr::Bool(true))
+        };
+
+        // Parse optional -> ReturnType
+        // Use parse_type_inner(false) to prevent greedy [ consumption as generic
+        // type parameter — [ belongs to the contract, not the return type.
+        let outputs = if let Some(Ok(Token::Arrow)) = self.current_token() {
+            self.advance();
+            vec![self.parse_type_inner(false)?]
+        } else {
+            Vec::new()
+        };
+
+        // If contract wasn't before ->, try after
+        if matches!(contract.pre_condition, Expr::Bool(true))
+            && matches!(contract.post_condition, Expr::Bool(true))
+            && matches!(self.current_token(), Some(Ok(Token::LBracket)))
+        {
+            contract = self.parse_contract()?;
+        }
+
+        // Parse LLVM IR body: { ... }
+        let llvm_body = if let Some(Ok(Token::LBrace)) = self.current_token() {
+            self.advance();
+            let mut lines = Vec::new();
+            let mut depth = 1u32;
+            let mut current_line = String::new();
+            let mut need_space = false;
+            while let Some(tok) = self.current_token().cloned() {
+                match tok {
+                    Ok(Token::LBrace) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('{');
+                        depth += 1;
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::RBrace) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            if !current_line.trim().is_empty() {
+                                lines.push(current_line.trim().to_string());
+                            }
+                            self.advance(); // consume }
+                            break;
+                        }
+                        if need_space { current_line.push(' '); }
+                        current_line.push('}');
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::Semicolon) => {
+                        current_line.push(';');
+                        if !current_line.trim().is_empty() {
+                            lines.push(current_line.trim().to_string());
+                        }
+                        current_line = String::new();
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::Identifier(s)) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push_str(&s);
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::Hash) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('#');
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::Percent) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('%');
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::At) => {
+                        current_line.push('@');
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::Dot) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('.');
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::Comma) => {
+                        // No space before comma (LLVM convention)
+                        current_line.push(',');
+                        need_space = true; // space after comma
+                        self.advance();
+                    }
+                    Ok(Token::Colon) => {
+                        current_line.push(':');
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::Eq) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('=');
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::Not) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('!');
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::Plus) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('+');
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::Minus) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('-');
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::Star) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('*');
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::Slash) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('/');
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::LParen) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('(');
+                        need_space = false;
+                        self.advance();
+                    }
+                    Ok(Token::RParen) => {
+                        // No space before closing paren
+                        current_line.push(')');
+                        need_space = true; // space after closing paren
+                        self.advance();
+                    }
+                    Ok(Token::Lt) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('<');
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::Gt) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('>');
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::Integer(n)) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push_str(&n.to_string());
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::Float(f)) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push_str(&f.to_string());
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::String(s)) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push('"');
+                        current_line.push_str(&s);
+                        current_line.push('"');
+                        need_space = true;
+                        self.advance();
+                    }
+                    // LLVM IR type keywords (lexed as Brief type tokens)
+                    Ok(Token::TypeVoid) | Ok(Token::TypeBool) | Ok(Token::TypeChar)
+                    | Ok(Token::TypeI8) | Ok(Token::TypeU8)
+                    | Ok(Token::TypeI16) | Ok(Token::TypeU16)
+                    | Ok(Token::TypeI32) | Ok(Token::TypeU32)
+                    | Ok(Token::TypeI64) | Ok(Token::TypeU64)
+                    | Ok(Token::TypeInt) | Ok(Token::TypeUInt) | Ok(Token::TypeUnsigned) | Ok(Token::TypeUSgn)
+                    | Ok(Token::TypeSigned) | Ok(Token::TypeSgn)
+                    | Ok(Token::TypeData) | Ok(Token::TypeFloat) | Ok(Token::TypeString) => {
+                        if need_space { current_line.push(' '); }
+                        let s = Self::token_display(&tok.unwrap());
+                        current_line.push_str(&s);
+                        need_space = true;
+                        self.advance();
+                    }
+                    // Brief keywords used as LLVM IR tokens: term and term!
+                    Ok(Token::Term) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push_str("term");
+                        need_space = true;
+                        self.advance();
+                    }
+                    Ok(Token::TermBang) => {
+                        if need_space { current_line.push(' '); }
+                        current_line.push_str("term!");
+                        need_space = true;
+                        self.advance();
+                    }
+                    // LLVM IR keywords like i1, i8, i16, i32, i64, half, float, double, ptr
+                    // These are lexed as type tokens above. For other LLVM type names like
+                    // "float", "double", "ptr", they may be Identifier tokens — handle in Identifier arm.
+                    _ => {
+                        if need_space { current_line.push(' '); }
+                        need_space = false;
+                        self.advance();
+                    }
+                }
+            }
+            lines
+        } else {
+            return self.spanned_err("expected `{` for inop# LLVM IR body".to_string());
+        };
+
+        // Parse optional fallback block: `fallback expr`
+        let fallback = if let Some(Ok(Token::Identifier(kw))) = self.current_token() {
+            if kw == "fallback" {
+                self.advance();
+                let expr = self.parse_expression()?;
+                Some(expr)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Consume optional trailing semicolon (matches other top-level items)
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
+
+        Ok(InopDeclaration {
+            name,
+            params,
+            outputs,
+            contract,
+            llvm_body,
+            fallback,
+            has_side_effects: bang,
             span: None,
         })
     }
@@ -6160,7 +6466,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         if let Some(intrinsic) = Intrinsic::from_name(name) {
                             expr = Expr::IntrinsicCall { intrinsic, args };
                         } else {
-                            return self.spanned_err(format!("unknown intrinsic function: {name}"));
+                            // Could be a user-defined `inop#` — defer validation to typechecker
+                            expr = Expr::IntrinsicCall { intrinsic: Intrinsic::UserDefined(name.clone()), args };
                         }
                     } else {
                         return self.spanned_err("intrinsic call requires an identifier".to_string());
@@ -6295,7 +6602,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         if let Some(intrinsic) = Intrinsic::from_name(name) {
                             expr = Expr::IntrinsicCall { intrinsic, args };
                         } else {
-                            return self.spanned_err(format!("unknown intrinsic function: {name}"));
+                            // Could be a user-defined `inop#` — defer validation to typechecker
+                            expr = Expr::IntrinsicCall { intrinsic: Intrinsic::UserDefined(name.clone()), args };
                         }
                     } else {
                         return self.spanned_err("intrinsic call requires an identifier".to_string());
@@ -9298,6 +9606,51 @@ mod parser_tests {
             panic!("Expected TypeDef");
         }
     }
+
+    #[test]
+    fn test_parse_inop_decl() {
+        let s = "inop foo(a: Int, b: Int) -> Int [true][a + b == 100] { %res = add i64 %a, %b; term %res } fallback (a + b)";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "inop# declaration should parse: {:?}", result.err());
+        if let TopLevel::Inop(inop) = &result.unwrap().items[0] {
+            assert_eq!(inop.name, "foo");
+            assert_eq!(inop.params.len(), 2);
+            assert_eq!(inop.params[0].0, "a");
+            assert_eq!(inop.params[0].1, Type::Int);
+            assert_eq!(inop.outputs.len(), 1);
+            assert_eq!(inop.outputs[0], Type::Int);
+            assert!(!inop.has_side_effects);
+            assert!(inop.fallback.is_some());
+            assert!(!inop.llvm_body.is_empty());
+        } else {
+            panic!("Expected TopLevel::Inop");
+        }
+    }
+
+    #[test]
+    fn test_parse_inop_bang_decl() {
+        let s = "inop! write_buf(ptr: Ptr<Byte>) -> Bool { %res = call i32 @write(i32 1, i8* %ptr, i64 %len); term %res }";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "inop!# declaration should parse: {:?}", result.err());
+        if let TopLevel::Inop(inop) = &result.unwrap().items[0] {
+            assert_eq!(inop.name, "write_buf");
+            assert!(inop.has_side_effects);
+            assert!(inop.fallback.is_none());
+        } else {
+            panic!("Expected TopLevel::Inop");
+        }
+    }
+
+    #[test]
+    fn test_parse_inop_call_site() {
+        // Test that `sadd#(1, 2)` parses as IntrinsicCall with UserDefined
+        let s = "defn main() -> Int { term sadd#(1, 2); }";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "inop# call should parse: {:?}", result.err());
+    }
 }
 
 enum BracketElement {
@@ -9748,4 +10101,5 @@ mod kani_full_tests {
             panic!("Expected TypeDef");
         }
     }
-}
+
+} // end of file (kani_full_tests module or file module)

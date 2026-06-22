@@ -1210,7 +1210,11 @@ fn format_expr(expr: &Expr) -> String {
                 .map(|a| format_expr(a))
                 .collect::<Vec<_>>()
                 .join(", ");
-            format!("{}#({})", intrinsic.name(), args_str)
+            let name = match intrinsic {
+                Intrinsic::UserDefined(n) => n.as_str(),
+                _ => intrinsic.name(),
+            };
+            format!("{}#({})", name, args_str)
         }
         _ => "<expr>".to_string(),
     }

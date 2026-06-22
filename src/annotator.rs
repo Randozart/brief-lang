@@ -418,7 +418,11 @@ impl Annotator {
                     .map(|a| self.format_expr(a))
                     .collect::<Vec<_>>()
                     .join(", ");
-                format!("{}#({})", intrinsic.name(), args_str)
+                let name = match intrinsic {
+                    Intrinsic::UserDefined(n) => n.as_str(),
+                    _ => intrinsic.name(),
+                };
+                format!("{}#({})", name, args_str)
             }
             Expr::Add(l, r) => format!("({} + {})", self.format_expr(l), self.format_expr(r)),
             Expr::Sub(l, r) => format!("({} - {})", self.format_expr(l), self.format_expr(r)),

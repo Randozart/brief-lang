@@ -684,6 +684,7 @@ impl LspServer {
                 TopLevel::Struct(_) => 23,         // Struct
                 TopLevel::Enum(_) => 10,           // Module
                 TopLevel::ForeignBinding { .. } => 24, // Operator
+                TopLevel::Inop(_) => 12,           // Function
                 TopLevel::Definition(_) => 12,     // Function
                 TopLevel::Constant(_) => 14,       // Constant
                 TopLevel::Signature(_) => 12,      // Function
@@ -771,6 +772,7 @@ fn item_span(item: &TopLevel) -> Option<Span> {
         TopLevel::Struct(s) => s.span,
         TopLevel::Enum(e) => e.span,
         TopLevel::ForeignBinding { span, .. } => *span,
+        TopLevel::Inop(i) => i.span,
         TopLevel::Definition(d) => d.contract.span,
         _ => None,
     }
@@ -787,6 +789,7 @@ fn item_name(item: &TopLevel) -> String {
         TopLevel::Struct(s) => s.name.clone(),
         TopLevel::Enum(e) => e.name.clone(),
         TopLevel::ForeignBinding { name, .. } => name.clone(),
+        TopLevel::Inop(i) => i.name.clone(),
         _ => "unnamed".to_string(),
     }
 }
@@ -806,6 +809,7 @@ fn item_description(item: &TopLevel) -> String {
         TopLevel::Struct(_) => "struct".to_string(),
         TopLevel::Enum(_) => "enum".to_string(),
         TopLevel::ForeignBinding { .. } => "foreign binding".to_string(),
+        TopLevel::Inop(_) => "user-defined intrinsic".to_string(),
         _ => "".to_string(),
     }
 }

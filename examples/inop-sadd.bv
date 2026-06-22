@@ -1,0 +1,27 @@
+// inop-sadd: user-defined intrinsic for saturating addition
+//
+// Demonstrates:
+//   1. inop declaration with LLVM IR body
+//   2. fallback expression for interpreter/non-LLVM backends
+//   3. Call via name#(args) — same syntax as built-in intrinsics
+//   4. term lowering (term %res → ret i64 %res)
+//   5. Side-effect annotation: inop (no !) = pure
+
+inop sadd(a: Int, b: Int) -> Int {
+  %res = add i64 %a, %b;
+  term %res;
+} fallback a + b;
+
+let tick: Int = 0;
+
+rct txn run [tick < 1][tick == 1] {
+    [tick == 0] {
+        let x: Int = sadd#(10, 20);
+        term! -> print_int#(x);
+    };
+    &tick = tick + 1;
+    term;
+};
+
+// Compile:   ./target/release/brief-compiler build examples/inop-sadd.bv
+// Expected:  prints "30"

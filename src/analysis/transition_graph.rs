@@ -1,6 +1,6 @@
-use crate::ast::{ArrowDir, BracketOp, Expr, Hashtag, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
+use crate::ast::{ArrowDir, BracketOp, Expr, Hashtag, Intrinsic, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
 use crate::features::literal::LiteralExpr;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Copy)]
 pub enum ConvergeDirection {
@@ -60,6 +60,15 @@ impl ReactorTransitionGraph {
         let mut nodes = Vec::new();
         let mut has_triggers = false;
 
+        // Collect inop declarations for side-effect analysis
+        let inop_decls: HashMap<String, bool> = program.items.iter().filter_map(|item| {
+            if let TopLevel::Inop(inop) = item {
+                Some((inop.name.clone(), inop.has_side_effects))
+            } else {
+                None
+            }
+        }).collect();
+
         for item in &program.items {
             match item {
                 TopLevel::Transaction(txn) => {
@@ -94,7 +103,7 @@ impl ReactorTransitionGraph {
                             }
                         })
                         .collect();
-                    let is_pure = is_pure_body(&simplified_body, &state_field_names, &increments);
+                    let is_pure = is_pure_body(&simplified_body, &state_field_names, &increments, &inop_decls);
                     let write_set = extract_write_set(&simplified_body, &state_field_names);
                     let lexicographic_vars = detect_lexicographic_ranking(&txn.contract.pre_condition, &simplified_body);
 
@@ -144,7 +153,7 @@ impl ReactorTransitionGraph {
 
         let live_fields = compute_live_fields(&program.exit_condition, &program.out_pragmas, &nodes);
         for node in &mut nodes {
-            compute_effectively_pure(node, &live_fields);
+            compute_effectively_pure(node, &live_fields, &inop_decls);
         }
 
         ReactorTransitionGraph { nodes, has_triggers, live_fields }
@@ -727,6 +736,7 @@ fn is_pure_body(
     body: &[Statement],
     state_fields: &HashSet<String>,
     increments: &Option<IncrementInfo>,
+    inop_decls: &HashMap<String, bool>,
 ) -> bool {
     let inc_var = increments.as_ref().map(|i| &i.var);
     for stmt in body {
@@ -748,33 +758,33 @@ fn is_pure_body(
             }
             Statement::Let { expr, .. } => {
                 if let Some(e) = expr {
-                    if references_triggers_or_ffi(e) {
+                    if references_triggers_or_ffi_with_decls(e, inop_decls) {
                         return false;
                     }
                 }
             }
             Statement::Assignment { expr, .. } => {
-                if references_triggers_or_ffi(expr) {
+                if references_triggers_or_ffi_with_decls(expr, inop_decls) {
                     return false;
                 }
             }
             Statement::Expression(e) => {
-                if references_triggers_or_ffi(e) {
+                if references_triggers_or_ffi_with_decls(e, inop_decls) {
                     return false;
                 }
             }
             Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => {
                 if let Some(swan) = swan_song {
-                    if statement_contains_ffi(swan) { return false; }
+                    if statement_contains_ffi_with_decls(swan, inop_decls) { return false; }
                 }
             }
             Statement::Escape(_) => return false,
             Statement::OnExit { .. } => return false,
             Statement::Guarded { condition, statements } => {
-                if references_triggers_or_ffi(condition) {
+                if references_triggers_or_ffi_with_decls(condition, inop_decls) {
                     return false;
                 }
-                if statements.iter().any(|s| statement_contains_ffi(s)) {
+                if statements.iter().any(|s| statement_contains_ffi_with_decls(s, inop_decls)) {
                     return false;
                 }
             }
@@ -784,25 +794,36 @@ fn is_pure_body(
     true
 }
 
+fn intrinsic_has_side_effects(intrinsic: &Intrinsic, inop_decls: &HashMap<String, bool>) -> bool {
+    match intrinsic {
+        Intrinsic::UserDefined(name) => inop_decls.get(name).copied().unwrap_or(true),
+        other => other.has_side_effects(),
+    }
+}
+
 fn references_triggers_or_ffi(expr: &Expr) -> bool {
+    references_triggers_or_ffi_with_decls(expr, &HashMap::new())
+}
+
+fn references_triggers_or_ffi_with_decls(expr: &Expr, inop_decls: &HashMap<String, bool>) -> bool {
     match expr {
         Expr::Call(_, _) => true,
-        Expr::IntrinsicCall { intrinsic, .. } => intrinsic.has_side_effects(),
+        Expr::IntrinsicCall { intrinsic, .. } => intrinsic_has_side_effects(intrinsic, inop_decls),
         Expr::Identifier(_) | Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) | Expr::Char(_) => false,
         Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b)
         | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b)
         | Expr::Ge(a, b) | Expr::And(a, b) | Expr::Or(a, b) | Expr::BitAnd(a, b)
         | Expr::BitOr(a, b) | Expr::BitXor(a, b) | Expr::Shl(a, b) | Expr::Shr(a, b) => {
-            references_triggers_or_ffi(a) || references_triggers_or_ffi(b)
+            references_triggers_or_ffi_with_decls(a, inop_decls) || references_triggers_or_ffi_with_decls(b, inop_decls)
         }
-        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) => references_triggers_or_ffi(a),
-        Expr::Cast(a, _) => references_triggers_or_ffi(a),
-        Expr::Block(_, last) | Expr::TupleDestructure(_, last) => references_triggers_or_ffi(last),
-        Expr::ListLiteral(elems) => elems.iter().any(|e| references_triggers_or_ffi(e)),
-        Expr::ListIndex(list, idx) => references_triggers_or_ffi(list) || references_triggers_or_ffi(idx),
-        Expr::Projection { source: inner, .. } => references_triggers_or_ffi(inner),
-        Expr::Tuple(elems) => elems.iter().any(|e| references_triggers_or_ffi(e)),
-        Expr::FieldAccess(obj, _) => references_triggers_or_ffi(obj),
+        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) => references_triggers_or_ffi_with_decls(a, inop_decls),
+        Expr::Cast(a, _) => references_triggers_or_ffi_with_decls(a, inop_decls),
+        Expr::Block(_, last) | Expr::TupleDestructure(_, last) => references_triggers_or_ffi_with_decls(last, inop_decls),
+        Expr::ListLiteral(elems) => elems.iter().any(|e| references_triggers_or_ffi_with_decls(e, inop_decls)),
+        Expr::ListIndex(list, idx) => references_triggers_or_ffi_with_decls(list, inop_decls) || references_triggers_or_ffi_with_decls(idx, inop_decls),
+        Expr::Projection { source: inner, .. } => references_triggers_or_ffi_with_decls(inner, inop_decls),
+        Expr::Tuple(elems) => elems.iter().any(|e| references_triggers_or_ffi_with_decls(e, inop_decls)),
+        Expr::FieldAccess(obj, _) => references_triggers_or_ffi_with_decls(obj, inop_decls),
         _ => false,
     }
 }
@@ -939,9 +960,9 @@ fn expr_name(expr: &Expr) -> Option<String> {
     }
 }
 
-fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String>) {
+fn compute_effectively_pure(node: &mut ReactorNode, live_fields: &HashSet<String>, inop_decls: &HashMap<String, bool>) {
     // FFI calls have side effects — cannot fold to pure counter
-    if node.body.iter().any(|s| statement_contains_ffi(s)) {
+    if node.body.iter().any(|s| statement_contains_ffi_with_decls(s, inop_decls)) {
         return;
     }
     // term/term! with swan song is an observable side effect — prevents fold
@@ -975,21 +996,25 @@ fn statement_has_swan_song(stmt: &Statement) -> bool {
 }
 
 pub(crate) fn statement_contains_ffi(stmt: &Statement) -> bool {
+    statement_contains_ffi_with_decls(stmt, &HashMap::new())
+}
+
+pub(crate) fn statement_contains_ffi_with_decls(stmt: &Statement, inop_decls: &HashMap<String, bool>) -> bool {
     match stmt {
-        Statement::Assignment { expr, .. } => references_triggers_or_ffi(expr),
-        Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| references_triggers_or_ffi(e)),
-        Statement::Expression(e) => references_triggers_or_ffi(e),
+        Statement::Assignment { expr, .. } => references_triggers_or_ffi_with_decls(expr, inop_decls),
+        Statement::Let { expr, .. } => expr.as_ref().map_or(false, |e| references_triggers_or_ffi_with_decls(e, inop_decls)),
+        Statement::Expression(e) => references_triggers_or_ffi_with_decls(e, inop_decls),
         Statement::Term { values, swan_song, .. } => {
-            values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi(e)))
-                || swan_song.as_ref().map_or(false, |s| statement_contains_ffi(s))
+            values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi_with_decls(e, inop_decls)))
+                || swan_song.as_ref().map_or(false, |s| statement_contains_ffi_with_decls(s, inop_decls))
         }
         Statement::TermBang { values, swan_song, .. } => {
-            values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi(e)))
-                || swan_song.as_ref().map_or(false, |s| statement_contains_ffi(s))
+            values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi_with_decls(e, inop_decls)))
+                || swan_song.as_ref().map_or(false, |s| statement_contains_ffi_with_decls(s, inop_decls))
         }
         Statement::Guarded { condition, statements } => {
-            references_triggers_or_ffi(condition)
-                || statements.iter().any(|s| statement_contains_ffi(s))
+            references_triggers_or_ffi_with_decls(condition, inop_decls)
+                || statements.iter().any(|s| statement_contains_ffi_with_decls(s, inop_decls))
         }
         _ => false,
     }
@@ -1226,7 +1251,7 @@ mod tests {
             modifiers: vec![],
         }];
         let inc = detect_increments(&body);
-        assert!(is_pure_body(&body, &fields, &inc));
+        assert!(is_pure_body(&body, &fields, &inc, &HashMap::new()));
     }
 
     #[test]
@@ -1250,7 +1275,7 @@ mod tests {
             },
         ];
         let inc = detect_increments(&body);
-        assert!(!is_pure_body(&body, &fields, &inc));
+        assert!(!is_pure_body(&body, &fields, &inc, &HashMap::new()));
     }
 
     #[test]

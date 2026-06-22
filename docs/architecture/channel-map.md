@@ -12,6 +12,7 @@ Lexer ──────────► Vec<Token>
   │
   ▼
 Parser ─────────► Program { items: Vec<TopLevel>, comments, attrs, exit_condition }
+  │               TopLevel::Inop(InopDeclaration) — user-defined intrinsics (inop/inop!)
   │               TopLevel::Statement(Box<Statement>) — top-level executable stmts
   │               Expression parsing now has a new `parse_check()` level:
   │                 parse_equality → parse_check → parse_comparison
@@ -120,22 +121,29 @@ Program::synthesize_init_txn() called after import resolution:
 
 ```
 Parser produces Expr::IntrinsicCall { intrinsic, args }
+  │             If Intrinsic::from_name(name) fails:
+  │               falls back to Intrinsic::UserDefined(name)
+  │               (checked against inop_decls later in pipeline)
   │
   ▼
-Typechecker: infers return type per intrinsic table (29 entries)
+Typechecker: infers return type per intrinsic table (29 entries + UserDefined from inop_decls)
+  │             Unknown UserDefined names → diagnostic U001
   │
   ▼
 Interpreter: dispatches on Intrinsic enum — native Rust implementation
   │             ├── println# → println!("{}", v)
   │             ├── read_file# → std::fs::read_to_string
-  │             └── sort# → passthrough (no-op in interpreter)
+  │             ├── sort# → passthrough (no-op in interpreter)
+  │             └── UserDefined(name) → inop_decls[name].fallback or RuntimeError
   │
   ▼
 LLVM Backend: dispatches on Intrinsic enum
                 ├── Sqrt → call float @llvm.sqrt.f32
                 ├── Println → printf with per-type format
                 ├── ReadFile → call ptr @brief_read_file(ptr) via inttoptr/ptrtoint marshaling
-                └── Socket → add i64 0, -1 (stub)
+                ├── Socket → add i64 0, -1 (stub)
+                └── UserDefined(name) → call <ret_ty> @name(%State* %state, <native_ty> args...)
+```
 ```
 
 ## Universal Bracket Routing

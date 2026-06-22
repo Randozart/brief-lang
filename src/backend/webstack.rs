@@ -946,6 +946,11 @@ impl WebstackGenerator {
                     Intrinsic::CpuCount => "navigator.hardwareConcurrency || 4".to_string(),
                     Intrinsic::Hostname => "window.location.hostname".to_string(),
                     Intrinsic::Errno => "0".to_string(),
+                    Intrinsic::UserDefined(name) => {
+                        // User-defined inop# — emit a JS call; in the web target,
+                        // the user must provide a JS implementation or use a fallback
+                        format!("{}({})", name, joined)
+                    }
                     _ => {
                         // Fallback: if the function has a JS impl from frgn "javascript", use it
                         if let Intrinsic::GetGlobalId | Intrinsic::GetLocalId | Intrinsic::GetGroupId = intrinsic {
@@ -1307,6 +1312,7 @@ impl WebstackGenerator {
                     Intrinsic::Sqrt => format!("({} as f64).sqrt() as i64", joined),
                     Intrinsic::Ceil => format!("({} as f64).ceil() as i64", joined),
                     Intrinsic::Floor => format!("({} as f64).floor() as i64", joined),
+                    Intrinsic::UserDefined(name) => format!("{}({})", name, joined),
                     _ => format!("{}({})", format!("{:?}", intrinsic).to_lowercase(), joined),
                 }
             }

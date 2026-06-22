@@ -764,6 +764,9 @@ impl ImportResolver {
                     // type declarations that a kept defn/txn body may reference.
                     return true;
                 }
+                if matches!(item, TopLevel::Inop(_)) {
+                    return true;
+                }
                 if matches!(item, TopLevel::LinkDependency(_)) {
                     return true;
                 }
@@ -778,6 +781,7 @@ impl ImportResolver {
                     TopLevel::RenderBlock(rb) => Some(rb.struct_name.as_str()),
                     TopLevel::Trigger(t) => Some(t.name.as_str()),
                     TopLevel::StateDecl(s) => Some(s.name.as_str()),
+                    TopLevel::Inop(i) => Some(i.name.as_str()),
                     _ => None,
                 };
                 let name = match name {
@@ -851,6 +855,7 @@ fn dedup_items(items: Vec<TopLevel>) -> Vec<TopLevel> {
             TopLevel::RenderBlock(r) => Some(("render", &r.struct_name)),
             TopLevel::LinkDependency(l) => Some(("link", &l.path)),
             TopLevel::ResourceDecl(r) => Some(("rsrc", &r.name)),
+            TopLevel::Inop(i) => Some(("inop", &i.name)),
             _ => None,
         };
         match key {

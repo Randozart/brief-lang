@@ -622,6 +622,8 @@ pub struct LlvmBackend {
     pub(crate) trigger_names: Vec<String>,
     program_txns: Vec<String>,
     frgn_map: HashMap<String, ForeignSignature>,
+    /// User-defined inop# declarations — name → declaration for LLVM codegen.
+    pub(crate) inop_decls: HashMap<String, crate::ast::InopDeclaration>,
     defn_params: HashMap<String, Vec<Type>>,
     defn_return_types: HashMap<String, Vec<Type>>,
     fused_to_first: HashMap<String, String>,
@@ -737,6 +739,7 @@ impl LlvmBackend {
             trigger_names: Vec::new(),
             program_txns: Vec::new(),
             frgn_map: HashMap::new(),
+            inop_decls: HashMap::new(),
             defn_params: HashMap::new(),
             defn_return_types: HashMap::new(),
             string_constants: Vec::new(),
@@ -1228,6 +1231,9 @@ impl LlvmBackend {
                 TopLevel::ForeignBinding { name, signature, .. } => {
                     self.frgn_map.insert(name.clone(), signature.clone());
                 }
+                TopLevel::Inop(inop) => {
+                    self.inop_decls.insert(inop.name.clone(), inop.clone());
+                }
                 TopLevel::Struct(s) => {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
@@ -1537,6 +1543,13 @@ self.emit_declares(&mut out);
         for item in &program.items {
             if let TopLevel::Definition(d) = item {
                 self.emit_definition(&mut out, d);
+                writeln!(out).ok();
+            }
+        }
+        // User-defined inop# intrinsics
+        for item in &program.items {
+            if let TopLevel::Inop(inop) = item {
+                self.emit_inop(&mut out, inop);
                 writeln!(out).ok();
             }
         }

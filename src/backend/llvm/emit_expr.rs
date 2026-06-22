@@ -2109,10 +2109,12 @@ impl LlvmBackend {
                         let n = self.emit_expr(out, &args[0], indent);
                         let so = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
                         let fmt = format!("%pfi{}", self.txn_counter); self.txn_counter += 1;
+                        let pi = format!("%ppi{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                         writeln!(out, "{}{} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", indent, fmt).ok();
                         writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, i64 {})",
-                            indent, v, so, fmt, n).ok();
+                            indent, pi, so, fmt, n).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, pi).ok();
                     }
                     Intrinsic::PutChar => {
                         let c = self.emit_expr(out, &args[0], indent);
@@ -2130,11 +2132,13 @@ impl LlvmBackend {
                         let fd = format!("%pfd{}", self.txn_counter); self.txn_counter += 1;
                         let so = format!("%pso{}", self.txn_counter); self.txn_counter += 1;
                         let fmt = format!("%pff{}", self.txn_counter); self.txn_counter += 1;
+                        let pf = format!("%ppf{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = fpext float {} to double", indent, fd, fl).ok();
                         writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                         writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt).ok();
                         writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
-                            indent, v, so, fmt, fd).ok();
+                            indent, pf, so, fmt, fd).ok();
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, v, pf).ok();
                     }
                     Intrinsic::GetEnvInt => {
                         let name = self.emit_expr(out, &args[0], indent);
@@ -2396,6 +2400,36 @@ impl LlvmBackend {
                         // The target triple determines the instruction.
                         writeln!(out, "{}call void asm sideeffect \"wfi\", \"\"()", indent).ok();
                         writeln!(out, "{}{} = add i64 undef, 0 ; halt is void", indent, v).ok();
+                    }
+                    Intrinsic::UserDefined(name) => {
+                        // Extract return and param type info before any mutable borrows.
+                        // Clone the inop declaration to avoid borrow conflicts with emit_expr.
+                        let inop_clone = self.inop_decls.get(name).cloned();
+                        let ret_ty = inop_clone.as_ref().map_or("i64", |d| {
+                            if d.outputs.iter().any(|t| matches!(t, Type::Float)) {
+                                "float"
+                            } else {
+                                "i64"
+                            }
+                        });
+                        let param_tys: Vec<String> = inop_clone.as_ref().map_or_else(Vec::new, |d| {
+                            d.params.iter().map(|(_, t)| self.llvm_type(t).to_string()).collect()
+                        });
+                        // Pre-evaluate all arguments before emitting the call,
+                        // so argument computation code appears before the call instruction.
+                        let mut arg_regs = Vec::new();
+                        for arg in args {
+                            let r = self.emit_expr(out, arg, indent);
+                            arg_regs.push(r.name.clone());
+                        }
+                        // Emit the call with native types for each parameter
+                        write!(out, "{}{} = call {} @{}(", indent, v, ret_ty, name).ok();
+                        write!(out, "%State* %state").ok();
+                        for (i, rn) in arg_regs.iter().enumerate() {
+                            let native_ty = param_tys.get(i).map(|s| s.as_str()).unwrap_or("i64");
+                            write!(out, ", {} {}", native_ty, rn).ok();
+                        }
+                        writeln!(out, ")").ok();
                     }
                 }
             }

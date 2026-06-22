@@ -5276,3 +5276,56 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("add i64 undef, 0 ; halt is void"),
             "Halt should emit add i64 undef.\nGot:\n{}", output);
     }
+
+    #[test]
+    fn test_inop_declaration_emission() {
+        let mut backend = LlvmBackend::new();
+        let inop = TopLevel::Inop(InopDeclaration {
+            name: "sadd".to_string(),
+            params: vec![("a".to_string(), Type::Int), ("b".to_string(), Type::Int)],
+            outputs: vec![Type::Int],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec!["%res = add i64 %a, %b".to_string(), "term %res".to_string()],
+            fallback: None,
+            has_side_effects: false,
+            span: None,
+        });
+        let program = Program {
+            items: vec![inop],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("define i64 @sadd(%State* noalias nocapture align 8 %state, i64 %a, i64 %b)"),
+            "inop# function should have correct LLVM signature.\nGot:\n{}", output);
+        assert!(output.contains("ret i64 %res"),
+            "term should be lowered to ret.\nGot:\n{}", output);
+        assert!(output.contains("add i64 %a, %b"),
+            "LLVM IR body should contain the add instruction.\nGot:\n{}", output);
+    }
+
+    #[test]
+    fn test_inop_bang_side_effects_flag() {
+        let mut backend = LlvmBackend::new();
+        let inop = TopLevel::Inop(InopDeclaration {
+            name: "write_buf".to_string(),
+            params: vec![("val".to_string(), Type::Int)],
+            outputs: vec![Type::Bool],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec!["term %val".to_string()],
+            fallback: None,
+            has_side_effects: true,
+            span: None,
+        });
+        let program = Program {
+            items: vec![inop],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        backend.generate(&program);
+        let decl = backend.inop_decls.get("write_buf");
+        assert!(decl.is_some(), "inop! should be stored in backend.inop_decls");
+        assert!(decl.unwrap().has_side_effects, "inop! should have has_side_effects = true");
+    }

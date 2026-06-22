@@ -113,6 +113,14 @@ pub enum Token {
     #[token("frgn!")]
     #[token("FRGN!")]
     FrgnBang,
+    #[token("inop")]
+    #[token("INOP")]
+    #[token("inop#")]
+    Inop,
+    #[token("inop!")]
+    #[token("INOP!")]
+    #[token("inop#!")]
+    InopBang,
     #[token("syscall")]
     #[token("SYSCALL")]
     Syscall,
@@ -528,6 +536,8 @@ impl std::fmt::Display for Token {
             Token::As => write!(f, "as"),
             Token::Frgn => write!(f, "frgn"),
             Token::FrgnBang => write!(f, "frgn!"),
+            Token::Inop => write!(f, "inop"),
+            Token::InopBang => write!(f, "inop!"),
             Token::Syscall => write!(f, "syscall"),
             Token::SyscallBang => write!(f, "syscall!"),
             Token::Resource => write!(f, "resource"),

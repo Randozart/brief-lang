@@ -705,6 +705,10 @@ pub enum Intrinsic {
     MacroWarn,
     /// gensym#() -> String — generate unique identifier during macro expansion
     MacroGenSym,
+    /// User-defined intrinsic via `inop#` / `inop!#` declaration.
+    /// The String stores the name for display/lookup; validation happens
+    /// in the typechecker against the program's `inop_decls` map.
+    UserDefined(String),
 }
 
 impl Intrinsic {
@@ -1116,6 +1120,16 @@ impl Intrinsic {
             Intrinsic::MacroError => "error",
             Intrinsic::MacroWarn => "warn",
             Intrinsic::MacroGenSym => "gensym",
+            Intrinsic::UserDefined(_) => "__user__",
+        }
+    }
+
+    /// Return the user-defined name for `UserDefined` intrinsics, or `None`.
+    /// Used by display/formatting code that needs the actual name string.
+    pub fn user_defined_name(&self) -> Option<&str> {
+        match self {
+            Intrinsic::UserDefined(n) => Some(n.as_str()),
+            _ => None,
         }
     }
 
@@ -1130,6 +1144,21 @@ impl Intrinsic {
             | Intrinsic::MacroGenSym
         )
     }
+}
+
+/// User-defined intrinsic operation (`inop#` / `inop!#`).
+/// Contains the declaration signature, LLVM IR body, optional Brief fallback,
+/// and the side-effect flag derived from the `inop!` vs `inop` keyword.
+#[derive(Debug, Clone)]
+pub struct InopDeclaration {
+    pub name: String,
+    pub params: Vec<(String, Type)>,
+    pub outputs: Vec<Type>,
+    pub contract: Contract,
+    pub llvm_body: Vec<String>,
+    pub fallback: Option<Expr>,
+    pub has_side_effects: bool,
+    pub span: Option<Span>,
 }
 
 /// Target for the `is` check expression: either a Type or a Variant name.
@@ -2071,6 +2100,8 @@ pub enum TopLevel {
         target: ForeignTarget,
         span: Option<Span>,
     },
+    /// User-defined intrinsic operation via `inop#` / `inop!#` declaration.
+    Inop(InopDeclaration),
     ResourceDecl(ResourceDeclaration), // NEW: rsrc/resource
     Struct(StructDefinition),
     RStruct(RStructDefinition),

@@ -126,3 +126,18 @@ fn test_llvm_backend_no_wake_busy_loop() {
         Err(e) => panic!("{}", e),
     }
 }
+
+#[test]
+fn test_llvm_backend_inop_sadd() {
+    match compile_and_verify_llvm("tests/fixtures/inop_sadd.bv", "inop_sadd") {
+        Ok(ir) => {
+            assert!(ir.contains("define i64 @sadd"),
+                "LLVM IR should contain definition of @sadd");
+            assert!(ir.contains("add i64 %a, %b"),
+                "LLVM IR should contain the inop add instruction");
+            assert!(ir.contains("ret i64 %res"),
+                "LLVM IR should contain term→ret lowering");
+        }
+        Err(e) => panic!("{}", e),
+    }
+}
