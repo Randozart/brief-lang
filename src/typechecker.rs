@@ -849,6 +849,35 @@ impl TypeChecker {
                             }
                         }
                     }
+
+                    // E004: Field type mismatch — check if fields at matching names have compatible types
+                    let fields_a = self.struct_fields.get(&meld.name_a);
+                    let fields_b = self.struct_fields.get(&meld.name_b);
+                    if let (Some(fa), Some(fb)) = (fields_a, fields_b) {
+                        for name in fa.keys() {
+                            if let Some(ty_b) = fb.get(name) {
+                                let ty_a = &fa[name];
+                                if ty_a != ty_b && !self.types_are_width_compatible(ty_a, ty_b) {
+                                    let diag = crate::errors::Diagnostic::new(
+                                        "E004", crate::errors::Severity::Warning,
+                                        &format!("field type mismatch — `{}.{}` is `{}` but `{}.{}` is `{}`",
+                                            meld.name_a, name, self.type_to_string(ty_a),
+                                            meld.name_b, name, self.type_to_string(ty_b),
+                                        ),
+                                    ).with_explanation(&format!(
+                                        "Both fields occupy the same @/ bit range but have incompatible types. \
+                                         The bits are the same width, so the meld is valid, but operations \
+                                         on these fields may produce unexpected results.",
+                                    )).with_hint("Add an explicit route to override the default identity mapping.");
+                                    if let Some(span) = meld.span {
+                                        self.diagnostics.borrow_mut().push(diag.with_span(span));
+                                    } else {
+                                        self.diagnostics.borrow_mut().push(diag);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -2634,6 +2663,26 @@ Expr::ObjectLiteral(fields) => {
             }
             _ => false,
         }
+    }
+
+    /// Check if two types have the same bit width, ignoring exact type identity.
+    /// Used by E004 to determine if a field type mismatch is significant.
+    fn types_are_width_compatible(&self, a: &Type, b: &Type) -> bool {
+        if a == b { return true; }
+        // All 64-bit types
+        let wide = [Type::Int, Type::UInt, Type::Float, Type::String, Type::Data];
+        // All 32-bit types
+        let narrow = [Type::Char, Type::Bool];
+        // Check if both are in the same width category
+        let a_wide = wide.iter().any(|t| self.types_compatible(a, t));
+        let b_wide = wide.iter().any(|t| self.types_compatible(b, t));
+        if a_wide && b_wide { return true; }
+        let a_narrow = narrow.iter().any(|t| self.types_compatible(a, t));
+        let b_narrow = narrow.iter().any(|t| self.types_compatible(b, t));
+        if a_narrow && b_narrow { return true; }
+        // Custom types default to compatible (both i64 width)
+        matches!((a, b), (Type::Custom(_), Type::Custom(_)))
+            || matches!((a, b), (Type::Custom(_), _) | (_, Type::Custom(_)))
     }
 
     fn validate_type(&self, ty: &Type) {
