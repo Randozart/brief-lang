@@ -1401,7 +1401,7 @@ fn empty_program() -> Program {
             "reactor_tick should not be emitted (A006 direct SSA loop)");
         assert!(output.contains("attributes #0"),
             "attributes #0 should still be present for terminating functions");
-        assert!(output.contains("define void @init_state(%State* noalias nocapture align 8 %state) local_unnamed_addr #0"),
+        assert!(output.contains("define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0"),
             "init_state() should still use #0 with willreturn");
     }
 
@@ -1652,7 +1652,7 @@ fn empty_program() -> Program {
         let output = LlvmBackend::new().with_optimize_budget(0).generate(&program);
         assert!(!output.contains("switch i64"),
             "No enum dispatch without triggers");
-        assert!(output.contains("getelementptr inbounds %State, %State* %state, i32 0, i32"),
+        assert!(output.contains("getelementptr inbounds %State, ptr %state, i32 0, i32"),
             "All-convergent program should use per-field GEP loads");
         assert!(!output.contains("@reactor_tick"),
             "All-convergent program should not emit reactor_tick");
@@ -5331,7 +5331,7 @@ let spec = crate::target_spec::TargetSpec {
             .collect();
         assert!(!sadd_line.is_empty(), "should find @sadd definition");
         assert!(!sadd_line[0].contains("%State"),
-            "@sadd should NOT receive %State*.\nLine: {}", sadd_line[0]);
+            "@sadd should NOT receive ptr (was %State*).\nLine: {}", sadd_line[0]);
 
     }
 

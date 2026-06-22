@@ -217,7 +217,7 @@ impl LlvmBackend {
         // Store epfd in epfd_field slot
         let sge = format!("%sge{}", self.txn_counter); self.txn_counter += 1;
         if let Some(epfd_idx) = self.field_index_map.get("__trg_epfd") {
-            writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", sge, epfd_idx).ok();
+            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, epfd_idx).ok();
             writeln!(out, "  store i32 {}, i32* {}, align 4", epfd, sge).ok();
         }
 
@@ -404,7 +404,7 @@ impl LlvmBackend {
     }
 
     pub(super) fn emit_init_state(&mut self, out: &mut String) {
-        writeln!(out, "define void @init_state(%State* noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         let mut reg = 0u32;
         let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
@@ -413,7 +413,7 @@ impl LlvmBackend {
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, ty) in fields {
             let p = format!("%ip{}", reg); reg += 1;
-            writeln!(out, "  {} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", p, idx).ok();
+            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", p, idx).ok();
             let init_clone = self.field_initializers.get(&name).and_then(|e| e.clone());
             match init_clone {
                 Some(Expr::Integer(n)) => {
@@ -552,7 +552,7 @@ impl LlvmBackend {
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, _ty) in &fields {
             let p = format!("%ip_{}", idx);
-            writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, p, state_ptr, idx).ok();
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, state_ptr, idx).ok();
             let init_clone = self.field_initializers.get(name).and_then(|e| e.clone());
             let ty = self.field_types[*idx].clone();
             match init_clone {
@@ -683,10 +683,10 @@ impl LlvmBackend {
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
         for (_field_name, (cache_idx, valid_idx)) in &self.cache_slots {
             let cp = format!("%icp_{}", cache_idx);
-            writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
             writeln!(out, "{}store i64 0, i64* {}, align {}", indent, cp, self.align_of("i64")).ok();
             let vp = format!("%ivp_{}", valid_idx);
-            writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, vp, state_ptr, valid_idx).ok();
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, vp, state_ptr, valid_idx).ok();
             writeln!(out, "{}store i8 0, i8* {}, align {}", indent, vp, self.align_of("i8")).ok();
         }
     }
@@ -705,14 +705,14 @@ impl LlvmBackend {
         // the runtime entry point `define i32 @main()` in loop_engine.rs.
         let ll_name: &str = if d.name == "main" { "brief_main" } else { &d.name };
         write!(out, "define {} @{}(", ll_ret_ty, ll_name).ok();
-        write!(out, "%State* noalias nocapture align 8 %state").ok();
+        write!(out, "ptr noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
         }
         writeln!(out, ") local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
-        // Make %state accessible via ssa_state_reg so state field identifiers work
-        self.ssa_state_reg = Some("%state".to_string());
+        self.ssa_old_int_regs.clear();
+        self.ssa_old_float_regs.clear();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
             let conv = format!("%ac{}", i);
@@ -766,13 +766,13 @@ impl LlvmBackend {
         // Phase 4.5: Emit dso_local export wrapper if #export modifier present
         if let Some(export_name) = Self::get_export_name(&d.modifiers) {
             writeln!(out, "define dso_local {} @{}(" , ll_ret_ty, export_name).ok();
-            write!(out, "%State* %state").ok();
+            write!(out, "ptr %state").ok();
             for (i, (n, t)) in d.parameters.iter().enumerate() {
                 write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
             }
             writeln!(out, ") local_unnamed_addr #0 {{").ok();
             write!(out, "  %res = call {} @{}(", ll_ret_ty, ll_name).ok();
-            write!(out, "%State* %state").ok();
+            write!(out, "ptr %state").ok();
             for (i, (n, t)) in d.parameters.iter().enumerate() {
                 write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
             }
@@ -855,13 +855,12 @@ impl LlvmBackend {
             });
 
         if let Some(action) = assume_action {
-            writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             writeln!(out, "  br i1 true, label %body, label %rollback").ok();
             writeln!(out, "  body:").ok();
             self.ssa_old_int_regs.clear();
             self.ssa_old_float_regs.clear();
-            self.ssa_state_reg = Some("%state".to_string());
             self.txn_counter = 0;
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
@@ -896,11 +895,10 @@ impl LlvmBackend {
             }
             writeln!(out, "}}").ok();
         } else {
-            writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             self.ssa_old_int_regs.clear();
             self.ssa_old_float_regs.clear();
-            self.ssa_state_reg = Some("%state".to_string());
             self.txn_counter = 0;
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
@@ -969,14 +967,12 @@ impl LlvmBackend {
         let inline_str = inline_attr.as_deref().unwrap_or("");
 
         write!(out, "define {} @{}(", ret_llvm, name).ok();
-        write!(out, "%State* noalias nocapture align 8 %state").ok();
+        write!(out, "ptr noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
         }
         writeln!(out, ") local_unnamed_addr #0{} {{", inline_str).ok();
         writeln!(out, "  entry:").ok();
-        // Make %state accessible via ssa_state_reg so state field identifiers work
-        self.ssa_state_reg = Some("%state".to_string());
 
         writeln!(out, "  %result = alloca i64, align 8").ok();
         writeln!(out, "  store i64 0, i64* %result, align 8").ok();
@@ -1103,7 +1099,7 @@ impl LlvmBackend {
                         let bound = if let Expr::Integer(b) = rhs.as_ref() { *b } else { 0 };
                         let gep = format!("%prg{}", self.txn_counter); self.txn_counter += 1;
                         let ty = &self.field_types[idx];
-                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, gep, idx).ok();
+                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
                         let rl = format!("%prl{}", self.txn_counter); self.txn_counter += 1;
                         let tn = crate::backend::llvm::tbaa_node(ty);
                         writeln!(out, "{}{} = load {}, {}* {}, align {}, !tbaa !{}, !range !{{{}, {}}}",
@@ -1123,7 +1119,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
-        writeln!(out, "define internal i1 @pre_{}(%State* noalias nocapture align 8 %state) #0 {{", name).ok();
+        writeln!(out, "define internal i1 @pre_{}(ptr noalias nocapture align 8 %state) #0 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
@@ -1148,7 +1144,7 @@ impl LlvmBackend {
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         let async_name = format!("async_body_{}", name);
         let async_attr = self.slp_attr(&async_name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
+        writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
@@ -1181,7 +1177,7 @@ impl LlvmBackend {
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
         let fused_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined {
@@ -1194,7 +1190,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_shape_guarded_body(&mut self, out: &mut String, body: &[Statement], name: &str, action: &str) {
         let fused_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
@@ -1222,7 +1218,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
         let fused_attr = self.slp_attr(name, "#0");
-        writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
+        writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body {
@@ -1263,7 +1259,7 @@ impl LlvmBackend {
 
         write!(out, "define {} @{}(", ll_ret_ty, inop.name).ok();
         if inop.has_state_access {
-            write!(out, "%State* noalias nocapture align 8 %state").ok();
+            write!(out, "ptr noalias nocapture align 8 %state").ok();
         }
         for (i, (n, t)) in inop.params.iter().enumerate() {
             let resolved = self.resolve_bild_type(t);

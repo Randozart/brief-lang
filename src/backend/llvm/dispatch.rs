@@ -23,7 +23,7 @@ impl LlvmBackend {
         }
         for (n, t) in txns { if !fused_txns.contains(n) && t.is_reactive { dispatch.push(n.clone()); } }
 
-        writeln!(out, "define void @reactor_tick(%State* noalias nocapture %state) local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
         self.sampled_triggers.clear();
         let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.trigger_names
@@ -42,7 +42,7 @@ impl LlvmBackend {
             && dispatch.len() >= 2
             && crate::analysis::transition_graph::is_uniform_body_group(txns)
         {
-            writeln!(out, "  call void @{}(%State* %state)", dispatch[0]).ok();
+            writeln!(out, "  call void @{}(ptr %state)", dispatch[0]).ok();
             writeln!(out, "  ret void").ok();
         } else {
             let mut pre_regs: Vec<String> = Vec::with_capacity(dispatch.len());
@@ -51,7 +51,7 @@ impl LlvmBackend {
                 if has_pre {
                     let reg = format!("%pr{}", i);
                     let txn = self.resolve_dispatch_first_txn(txn_name);
-                    writeln!(out, "  {} = call i1 @pre_{}(%State* %state)", reg, txn).ok();
+                    writeln!(out, "  {} = call i1 @pre_{}(ptr %state)", reg, txn).ok();
                     pre_regs.push(reg);
                 } else {
                     pre_regs.push("true".to_string());
@@ -64,7 +64,7 @@ impl LlvmBackend {
                 let pr = &pre_regs[i];
                 writeln!(out, "  br i1 {}, label %{}, label %{}", pr, b, c).ok();
                 writeln!(out, "{}:", b).ok();
-                writeln!(out, "  call void @{}(%State* %state)", txn_name).ok();
+                writeln!(out, "  call void @{}(ptr %state)", txn_name).ok();
                 writeln!(out, "  br label %{}", c).ok();
                 writeln!(out, "{}:", c).ok();
             }
@@ -136,7 +136,7 @@ impl LlvmBackend {
         }
         for (n, t) in txns { if !fused_txns.contains(n) && t.is_reactive { dispatch.push(n.clone()); } }
 
-        writeln!(out, "define void @reactor_tick(%State* noalias nocapture %state) local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
         self.sampled_triggers.clear();
         let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.trigger_names
@@ -160,7 +160,7 @@ impl LlvmBackend {
                 let has_pre = self.dispatch_has_pre(txns, txn_name);
                 if has_pre {
                     let first_txn = self.resolve_dispatch_first_txn(txn_name);
-                    writeln!(out, "  %pr{} = call i1 @pre_{}(%State* %state)", i, first_txn).ok();
+                    writeln!(out, "  %pr{} = call i1 @pre_{}(ptr %state)", i, first_txn).ok();
                 } else {
                     writeln!(out, "  %pr{} = add i1 0, 1", i).ok();
                 }
@@ -198,7 +198,7 @@ impl LlvmBackend {
                 let next_c = format!("ck{}", i + 1);
                 let wm = self.txn_write_masks.get(txn_name).copied().unwrap_or(0);
                 writeln!(out, "{}:", b).ok();
-                writeln!(out, "  call void @{}(%State* %state)", txn_name).ok();
+                writeln!(out, "  call void @{}(ptr %state)", txn_name).ok();
                 if wm != 0 {
                     let fm = format!("%fm{}a", i);
                     let fmu = format!("%fm{}b", i);

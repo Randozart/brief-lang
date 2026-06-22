@@ -296,7 +296,7 @@ impl LlvmBackend {
                                 Some(reg)
                             } else if let Some(&field_idx) = self.field_index_map.get(&list_name) {
                                 let p = format!("%lgp{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, field_idx).ok();
+                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, field_idx).ok();
                                 let ld = format!("%lld{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
                                 Some(ld)
@@ -349,7 +349,7 @@ impl LlvmBackend {
                             if let Some(&idx) = self.field_index_map.get(name) {
                                 let ty = self.field_types[idx].clone();
                                 let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
+                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, idx).ok();
                                 match ty.as_str() {
                                     "i8" => {
                                         let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
@@ -440,7 +440,7 @@ impl LlvmBackend {
                 if let Some(&idx) = self.field_index_map.get(&fname) {
                     let ty = self.field_types[idx].clone();
                     let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
+                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, idx).ok();
                     let vol_str = if is_volatile { " volatile" } else { "" };
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
                     let tn = crate::backend::llvm::tbaa_node(&ty);
@@ -471,7 +471,7 @@ impl LlvmBackend {
                     // Phase 2: Invalidate cache on field store (if this field has a cache slot)
                     if let Some(&(_cache_idx, valid_idx)) = self.cache_slots.get(&fname) {
                         let inv_gep = format!("%civ{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                             indent, inv_gep, valid_idx).ok();
                         writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
                     }
@@ -506,7 +506,7 @@ impl LlvmBackend {
                                 let p = format!("%gp{}", self.txn_counter); self.txn_counter += 1;
                                 let av = self.emit_expr(out, expr, indent);
                                 let ty = self.field_types[idx].clone();
-                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
+                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, idx).ok();
                                 let se = format!("%gs{}", self.txn_counter); self.txn_counter += 1;
                                 match ty.as_str() {
                                     "i8" => {
@@ -541,7 +541,7 @@ impl LlvmBackend {
                                 // Phase 2: Invalidate cache on select store
                                 if let Some(&(_cache_idx, valid_idx)) = self.cache_slots.get(n) {
                                     let inv_gep = format!("%civs{}", self.txn_counter); self.txn_counter += 1;
-                                    writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+                                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                                         indent, inv_gep, valid_idx).ok();
                                     writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
                                 }

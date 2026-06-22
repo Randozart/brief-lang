@@ -1,8 +1,6 @@
 // TypeDef Guard Constraint Example
 // Demonstrates TypeDef body constraints enforced on all variables of that type
 
-frgn __print_int(n: Int) -> Bool;
-
 // Define a Positive integer type with a body guard constraint
 type Positive <: Int {
   [_ > 0];
@@ -12,5 +10,5 @@ let x: Positive = 10;  // OK: 10 > 0
 // let y: Positive = -5;  // ERROR at runtime: guard _ > 0 violated
 
 rct txn use_positive [true][true] {
-  term __print_int(x);
+  term print_int#(x);
 };

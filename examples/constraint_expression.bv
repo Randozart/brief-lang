@@ -1,15 +1,13 @@
 // Constraint Expression Example
 // Demonstrates <: [_ > 0 && _ < 100] arbitrary expression constraints
 
-frgn __print_int(n: Int) -> Bool;
-
 let value: Int = 42;
 
 rct txn check_constraint [true][true] {
   let positive: Int <: [_ > 0] = value;
   let even: Int <: [_ % 2 == 0] = value;
   let in_range: Int <: [_ > 0 && _ < 100] = value;
-  term __print_int(even);
+  term print_int#(even);
 };
 
 rct txn update [value > 0][true] {

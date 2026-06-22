@@ -83,6 +83,8 @@ pub struct TypeUniverse {
     /// Meld declarations indexed by sorted (name_a, name_b) pair.
     /// Casts `a as B` are valid only if a direct meld exists between A and B.
     pub melds: HashMap<(String, String), MeldDeclaration>,
+    /// Warnings from meld validation (e.g., circular meld cycles).
+    pub meld_warnings: Vec<String>,
 }
 
 /// Known codec names for D-2 validation.
@@ -120,6 +122,7 @@ impl TypeUniverse {
             types: HashMap::new(),
             resolution_order: Vec::new(),
             melds: HashMap::new(),
+            meld_warnings: Vec::new(),
         }
     }
 
@@ -203,6 +206,13 @@ impl TypeUniverse {
                 } else {
                     (meld.name_b.clone(), meld.name_a.clone())
                 };
+                // E002: Detect cycles — check if a path already exists between the types
+                if universe.has_meld_path(&meld.name_a, &meld.name_b) {
+                    universe.meld_warnings.push(format!(
+                        "warning[E002]: circular meld — `{}` and `{}` are already connected through other melds",
+                        meld.name_a, meld.name_b,
+                    ));
+                }
                 universe.melds.insert(key, meld.clone());
             }
         }
@@ -400,6 +410,35 @@ impl TypeUniverse {
             (b.to_string(), a.to_string())
         };
         self.melds.get(&key)
+    }
+
+    /// Check if a path exists between types `a` and `b` in the meld graph.
+    /// Used for cycle detection (E002). BFS over the undirected meld graph.
+    pub fn has_meld_path(&self, a: &str, b: &str) -> bool {
+        // Build adjacency from existing melds
+        let mut adj: std::collections::HashMap<&str, Vec<&str>> = std::collections::HashMap::new();
+        for (key, _decl) in &self.melds {
+            adj.entry(key.0.as_str()).or_default().push(key.1.as_str());
+            adj.entry(key.1.as_str()).or_default().push(key.0.as_str());
+        }
+        // BFS from a to b
+        let mut visited: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut queue: std::collections::VecDeque<&str> = std::collections::VecDeque::new();
+        visited.insert(a);
+        queue.push_back(a);
+        while let Some(node) = queue.pop_front() {
+            if node == b {
+                return true;
+            }
+            if let Some(neighbors) = adj.get(node) {
+                for n in neighbors {
+                    if visited.insert(n) {
+                        queue.push_back(n);
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Resolve the InsertAt strategy string to a known InsertStrategy.

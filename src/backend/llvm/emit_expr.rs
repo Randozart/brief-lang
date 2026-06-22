@@ -159,7 +159,7 @@ impl LlvmBackend {
                             if let Some(&idx) = self.field_index_map.get(name) {
                                 let ll_ty = &self.field_types[idx];
                                 let sge = format!("%sge_{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, sge, idx).ok();
+                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, sge, idx).ok();
                                 let ev = format!("%ev_{}", self.txn_counter); self.txn_counter += 1;
                                 match ll_ty.as_str() {
                                     "i8" => { writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, ev, sge).ok(); }
@@ -230,7 +230,7 @@ impl LlvmBackend {
                 } else if let Some(&idx) = self.field_index_map.get(name) {
                     let ty = &self.field_types[idx];
                     let p = format!("%fdp{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, p, idx).ok();
+                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, idx).ok();
                     let rng = self.field_to_meta_idx.get(name).map(|m| format!(", !range !{}", m)).unwrap_or_default();
                     match ty {
                         s if s == "i8" => {
@@ -572,7 +572,7 @@ impl LlvmBackend {
                     } else {
                         // 2026-06-13: Pass %state to defns/callable txns — functions need
                         // the state pointer to access module-level fields (SSA is function-scoped).
-                        a_strs.insert(0, "%State* %state".to_string());
+                        a_strs.insert(0, "ptr %state".to_string());
                         let is_float_ret = def_rets.as_ref().map_or(false, |rets| rets.iter().any(|t| matches!(t, Type::Float)));
                         let is_string_ret = def_rets.as_ref().map_or(false, |rets| rets.iter().any(|t| matches!(t, Type::String) || matches!(t, Type::Data)));
                         let call_ret = if is_float_ret { "float" } else { "i64" };
@@ -2445,7 +2445,7 @@ impl LlvmBackend {
                             let call_reg = format!("%mc{}", self.txn_counter); self.txn_counter += 1;
                             write!(out, "{}{} = call {} @{}(", indent, call_reg, struct_ty, name).ok();
                             if has_state_access {
-                                write!(out, " %State* %state").ok();
+                                write!(out, " ptr %state").ok();
                             }
                             for (i, rn) in arg_regs.iter().enumerate() {
                                 let native_ty = param_tys.get(i).map(|s| s.as_str()).unwrap_or("i64");
@@ -2485,7 +2485,7 @@ impl LlvmBackend {
                             // Emit the call with native types for each parameter
                             write!(out, "{}{} = call {} @{}(", indent, v, ret_ty, name).ok();
                             if has_state_access {
-                                write!(out, "%State* %state").ok();
+                                write!(out, "ptr %state").ok();
                             }
                             for (i, rn) in arg_regs.iter().enumerate() {
                                 let native_ty = param_tys.get(i).map(|s| s.as_str()).unwrap_or("i64");
@@ -3585,7 +3585,7 @@ impl LlvmBackend {
                 if let Expr::OwnedRef(field_name) = target.as_ref() {
                     if let Some(&idx) = self.field_index_map.get(field_name) {
                         let ap = format!("%aap{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ap, idx).ok();
+                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                         let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
                     } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
@@ -3674,7 +3674,7 @@ impl LlvmBackend {
                 if let Expr::OwnedRef(field_name) = target.as_ref() {
                     if let Some(&idx) = self.field_index_map.get(field_name) {
                         let ap = format!("%pap{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ap, idx).ok();
+                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                         let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
                     } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
@@ -3752,7 +3752,7 @@ impl LlvmBackend {
                 if let Expr::OwnedRef(field_name) = target.as_ref() {
                     if let Some(&idx) = self.field_index_map.get(field_name) {
                         let ap = format!("%dap{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ap, idx).ok();
+                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                         let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
                     } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
@@ -3831,7 +3831,7 @@ impl LlvmBackend {
                 if let Expr::OwnedRef(field_name) = dest.as_ref() {
                     if let Some(&idx) = self.field_index_map.get(field_name) {
                         let ap = format!("%tap{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ap, idx).ok();
+                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                         let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, dbase, ap, tn).ok();
                     }
@@ -3840,7 +3840,7 @@ impl LlvmBackend {
                 if let Expr::OwnedRef(field_name) = source.as_ref() {
                     if let Some(&idx) = self.field_index_map.get(field_name) {
                         let ap = format!("%sap{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", indent, ap, idx).ok();
+                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                         let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                         // Allocate new empty list for source
                         let ebuf = format!("%seb{}", self.txn_counter); self.txn_counter += 1;
@@ -3895,7 +3895,7 @@ impl LlvmBackend {
                 if !seen.insert(var) { continue; }
                 if let Some(&idx) = self.field_index_map.get(var) {
                     let ty = &self.field_types[idx];
-                    writeln!(out, "  %gp_{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}", var, idx).ok();
+                    writeln!(out, "  %gp_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", var, idx).ok();
                     match ty.as_str() {
                         "float" => {
                             let bits = *val as i32 as u32;
@@ -3946,15 +3946,15 @@ impl LlvmBackend {
         if !self.has_async_txns || self.is_lightweight_async { return; }
         let count = self.async_txn_names.len();
         let fn_list: Vec<String> = self.async_txn_names.iter()
-            .map(|n| format!("i8* bitcast (void (%State*)* @async_body_{} to i8*)", n))
+            .map(|n| format!("i8* bitcast (void (ptr)* @async_body_{} to i8*)", n))
             .collect();
         writeln!(out, "@llvm.thread_pool = constant [{} x i8*] [{}]",
             count, fn_list.join(", ")).ok();
         // Emit a packed array of function pointers for brief_thread_pool_init
-        writeln!(out, "@thread_pool_fns = private constant [{} x void (%State*)*] [{}]",
+        writeln!(out, "@thread_pool_fns = private constant [{} x void (ptr)*] [{}]",
             count,
             self.async_txn_names.iter()
-                .map(|n| format!("void (%State*)* @async_body_{}", n))
+                .map(|n| format!("void (ptr)* @async_body_{}", n))
                 .collect::<Vec<_>>().join(", "),
         ).ok();
     }
@@ -3965,7 +3965,7 @@ impl LlvmBackend {
         if !self.has_async_txns || self.is_lightweight_async { return; }
         writeln!(out, "  call void @__barrier_release__()").ok();
         // Sequential reactor runs in main thread concurrently with workers
-        writeln!(out, "  call void @reactor_tick(%State* noalias nocapture %state)").ok();
+        writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
         writeln!(out, "  call void @__barrier_wait__()").ok();
     }
 
@@ -4668,7 +4668,7 @@ impl LlvmBackend {
         self.txn_counter += 1;
         let valid_gep = format!("%cvp{}", self.txn_counter);
         self.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             indent, valid_gep, valid_idx).ok();
         let valid_load = format!("%cvv{}", self.txn_counter);
         self.txn_counter += 1;
@@ -4685,7 +4685,7 @@ impl LlvmBackend {
         writeln!(out, "{}:", hit_label).ok();
         let cache_gep = format!("%cve{}", self.txn_counter);
         self.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             indent, cache_gep, cache_idx).ok();
         let cache_val = format!("%cvv{}", self.txn_counter);
         self.txn_counter += 1;
@@ -4697,12 +4697,12 @@ impl LlvmBackend {
         // Store the computed value in the cache and set valid flag
         let store_gep = format!("%cse{}", self.txn_counter);
         self.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             indent, store_gep, cache_idx).ok();
         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, v, store_gep).ok();
         let valid_store_gep = format!("%csve{}", self.txn_counter);
         self.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             indent, valid_store_gep, valid_idx).ok();
         writeln!(out, "{}store i8 1, i8* {}, align 1", indent, valid_store_gep).ok();
         writeln!(out, "{}br label %{}", indent, merge_label).ok();

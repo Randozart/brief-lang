@@ -158,3 +158,35 @@ fn test_llvm_backend_inop_divmod() {
         Err(e) => panic!("{}", e),
     }
 }
+
+#[test]
+fn test_llvm_backend_inop_state() {
+    match compile_and_verify_llvm("tests/fixtures/inop_state.bv", "inop_state") {
+        Ok(ir) => {
+            assert!(ir.contains("define i64 @peek_counter"),
+                "LLVM IR should contain definition of @peek_counter");
+            assert!(ir.contains("getelementptr inbounds %State, ptr %state, i64 0, i32 0"),
+                "LLVM IR should load counter field at index 0");
+            assert!(ir.contains("load i64, ptr"),
+                "LLVM IR should load from state field via GEP");
+            assert!(ir.contains("ret i64 %val"),
+                "LLVM IR should contain term→ret lowering");
+        }
+        Err(e) => panic!("{}", e),
+    }
+}
+
+#[test]
+fn test_llvm_backend_inop_alias() {
+    match compile_and_verify_llvm("tests/fixtures/inop_alias.bv", "inop_alias") {
+        Ok(ir) => {
+            assert!(ir.contains("define i64 @double"),
+                "LLVM IR should contain definition of @double");
+            assert!(ir.contains("add i64 %x, %x"),
+                "LLVM IR should contain the add instruction");
+            assert!(ir.contains("ret i64 %res"),
+                "LLVM IR should contain term→ret lowering");
+        }
+        Err(e) => panic!("{}", e),
+    }
+}

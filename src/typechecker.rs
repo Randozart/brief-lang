@@ -728,15 +728,28 @@ impl TypeChecker {
                 }
                 TopLevel::Meld(meld) => {
                     // Phase 4: Validate meld declarations
+                    // First, emit any cycle warnings from TypeUniverse build phase
+                    if let Some(ref tu) = self.type_universe {
+                        for w in &tu.meld_warnings {
+                            let diag = crate::errors::Diagnostic::new(
+                                "E002", crate::errors::Severity::Warning, w,
+                            );
+                            if let Some(span) = meld.span {
+                                self.diagnostics.borrow_mut().push(diag.with_span(span));
+                            } else {
+                                self.diagnostics.borrow_mut().push(diag);
+                            }
+                        }
+                    }
+
+                    let has_type_a = self.type_universe.as_ref()
+                        .and_then(|u| u.types.get(&meld.name_a)).is_some();
+                    let has_type_b = self.type_universe.as_ref()
+                        .and_then(|u| u.types.get(&meld.name_b)).is_some();
+
                     if meld.routes.is_empty() {
                         // E003: Size mismatch without router
-                        let has_type_a = self.type_universe.as_ref()
-                            .and_then(|u| u.types.get(&meld.name_a)).is_some();
-                        let has_type_b = self.type_universe.as_ref()
-                            .and_then(|u| u.types.get(&meld.name_b)).is_some();
                         if has_type_a && has_type_b {
-                            // Both types are known — check if they need explicit routes
-                            // (different struct field count implies size mismatch)
                             let fields_a = self.struct_fields.get(&meld.name_a);
                             let fields_b = self.struct_fields.get(&meld.name_b);
                             match (fields_a, fields_b) {
@@ -759,10 +772,80 @@ impl TypeChecker {
                                         self.diagnostics.borrow_mut().push(diag);
                                     }
                                 }
-                                _ => {
-                                    // W002: Same-size types without explicit routes are fine
-                                    // (inference handles everything)
+                                _ => {}
+                            }
+                        }
+                    } else {
+                        // E001: Check if explicit routes cover all fields of both types
+                        let fields_a = self.struct_fields.get(&meld.name_a);
+                        let fields_b = self.struct_fields.get(&meld.name_b);
+                        let covered: std::collections::HashSet<&str> =
+                            meld.routes.iter().map(|r| r.accessor.as_str()).collect();
+
+                        if let Some(fa) = fields_a {
+                            for field_name in fa.keys() {
+                                if !covered.contains(field_name.as_str()) {
+                                    let diag = crate::errors::Diagnostic::new(
+                                        "E001", crate::errors::Severity::Error,
+                                        &format!("no route for field — `{}` has no route to `{}`",
+                                            meld.name_b, field_name),
+                                    ).with_explanation(&format!(
+                                        "`{}` has field `{}` but no route in the meld defines how to \
+                                         derive it from `{}`.",
+                                        meld.name_a, field_name, meld.name_b,
+                                    )).with_hint(&format!(
+                                        "Add a route: {} -> {}:>Projection; or remove explicit routes to use @/ inference",
+                                        field_name, meld.name_b,
+                                    ));
+                                    if let Some(span) = meld.span {
+                                        self.diagnostics.borrow_mut().push(diag.with_span(span));
+                                    } else {
+                                        self.diagnostics.borrow_mut().push(diag);
+                                    }
                                 }
+                            }
+                        }
+                        if let Some(fb) = fields_b {
+                            for field_name in fb.keys() {
+                                if !covered.contains(field_name.as_str()) {
+                                    let diag = crate::errors::Diagnostic::new(
+                                        "E001", crate::errors::Severity::Error,
+                                        &format!("no route for field — `{}` has no route to `{}`",
+                                            meld.name_a, field_name),
+                                    ).with_explanation(&format!(
+                                        "`{}` has field `{}` but no route in the meld defines how to \
+                                         derive it from `{}`.",
+                                        meld.name_b, field_name, meld.name_a,
+                                    )).with_hint(&format!(
+                                        "Add a route: {} -> {}:>Projection; or remove explicit routes to use @/ inference",
+                                        field_name, meld.name_a,
+                                    ));
+                                    if let Some(span) = meld.span {
+                                        self.diagnostics.borrow_mut().push(diag.with_span(span));
+                                    } else {
+                                        self.diagnostics.borrow_mut().push(diag);
+                                    }
+                                }
+                            }
+                        }
+
+                        // W002: Check if routes are all identity (unnecessary explicit routes)
+                        let all_identity = meld.routes.iter().all(|r| {
+                            matches!(&r.dest_expr, crate::ast::Expr::Identifier(n) if n == &r.accessor)
+                        });
+                        if all_identity && meld.routes.len() >= 1 {
+                            let diag = crate::errors::Diagnostic::new(
+                                "W002", crate::errors::Severity::Note,
+                                "unnecessary meld — explicit routes match the default inference",
+                            ).with_explanation(&format!(
+                                "All routes in `meld {} <:> {}` are identity projections, which is \
+                                 what the compiler would infer automatically.",
+                                meld.name_a, meld.name_b,
+                            )).with_hint("Remove the explicit routes: use `meld A <:> B;` instead.");
+                            if let Some(span) = meld.span {
+                                self.diagnostics.borrow_mut().push(diag.with_span(span));
+                            } else {
+                                self.diagnostics.borrow_mut().push(diag);
                             }
                         }
                     }
@@ -3136,6 +3219,71 @@ mod tests {
         let has_diag = ctx.diagnostics.borrow().iter().any(|d| d.code == "U001");
         assert!(has_diag, "Unknown inop# should emit U001 diagnostic");
     }
+
+    #[test]
+    fn test_meld_e001_missing_route() {
+        let meld = TopLevel::Meld(MeldDeclaration {
+            name_a: "A".into(),
+            name_b: "B".into(),
+            routes: vec![
+                MeldRouteDef {
+                    accessor: "Ptr".into(),
+                    dest_expr: Expr::Identifier("B".into()),
+                },
+            ],
+            span: None,
+        });
+        let prog = make_program(vec![meld]);
+        let universe = crate::type_universe::TypeUniverse::build(&prog);
+        let ctx = super::TypeChecker::new().with_type_universe(universe);
+        assert!(ctx.diagnostics.borrow().is_empty(), "no E001 without struct fields");
+    }
+
+    #[test]
+    fn test_meld_w002_identity_routes() {
+        let meld = TopLevel::Meld(MeldDeclaration {
+            name_a: "A".into(),
+            name_b: "B".into(),
+            routes: vec![
+                MeldRouteDef {
+                    accessor: "x".into(),
+                    dest_expr: Expr::Identifier("x".into()),
+                },
+            ],
+            span: None,
+        });
+        let mut prog = make_program(vec![meld]);
+        let universe = crate::type_universe::TypeUniverse::build(&prog);
+        let mut ctx = super::TypeChecker::new().with_type_universe(universe);
+        ctx.check_program(&mut prog);
+        let diags = ctx.diagnostics.borrow();
+        let w002 = diags.iter().find(|d| d.code == "W002");
+        assert!(w002.is_some(), "W002 should be emitted for identity routes, got: {:?}", diags);
+    }
+
+    #[test]
+    fn test_meld_e002_cycle_detection() {
+        let mut prog = make_program(vec![
+            TopLevel::Meld(MeldDeclaration {
+                name_a: "A".into(), name_b: "B".into(),
+                routes: vec![], span: None,
+            }),
+            TopLevel::Meld(MeldDeclaration {
+                name_a: "B".into(), name_b: "C".into(),
+                routes: vec![], span: None,
+            }),
+            TopLevel::Meld(MeldDeclaration {
+                name_a: "A".into(), name_b: "C".into(),
+                routes: vec![], span: None,
+            }),
+        ]);
+        let universe = crate::type_universe::TypeUniverse::build(&prog);
+        let mut ctx = super::TypeChecker::new().with_type_universe(universe);
+        ctx.check_program(&mut prog);
+        let diags = ctx.diagnostics.borrow();
+        let e002 = diags.iter().find(|d| d.code == "E002");
+        assert!(e002.is_some(), "E002 should be emitted for cycle: {:?}", diags);
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
@@ -4315,4 +4463,5 @@ mod kani_full_tests {
         assert!(!ctx.is_cast_valid(&Type::Custom("String".into()), &Type::Custom("Int".into())),
             "no meld String <:> Int, cast should be invalid");
     }
+
 }

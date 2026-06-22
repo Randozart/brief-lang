@@ -1,13 +1,11 @@
 // Constraint Range Example
 // Demonstrates <: [lo..hi] range sugar which desugars to _ >= lo && _ <= hi
 
-frgn __print_int(n: Int) -> Bool;
-
 let score: Int = 0;
 
 rct txn process_score [true][true] {
   let valid: Int <: [0..100] = score;
-  term __print_int(valid);
+  term print_int#(valid);
 };
 
 rct txn increment [score < 100][true] {

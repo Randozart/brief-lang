@@ -409,7 +409,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// LLVM IR backend — the definitive compiler from Brief AST to `.ll`.
 ///
 /// Every lesson from phases 0–5.5 integrated into one coherent pass:
-/// - `noalias nocapture` on all `%State*` — LLVM sees no pointer aliasing
+/// - \`noalias nocapture\` on all \`%State*\` — LLVM sees no pointer aliasing
 /// - i64-centric expression system — strings/lists become `i64` via `ptrtoint`/`inttoptr`
 /// - Bool (i8) fields trunc on store, zext on load; floats via bitcast+zext; char via zext
 /// - Unique guard labels, `returns_i64` flag, fused txn terminator filtering
@@ -2047,7 +2047,7 @@ self.emit_declares(&mut out);
                 }
                 self.emit_thread_pool_metadata(&mut out);
             } else {
-        writeln!(out, "define void @reactor_tick(%State* noalias nocapture %state) local_unnamed_addr #2 {{").ok();
+        writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
                 writeln!(out, "  entry:").ok();
                 writeln!(out, "  ret void").ok();
                 writeln!(out, "}}").ok();

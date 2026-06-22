@@ -389,6 +389,7 @@ mod tests {
             types,
             resolution_order: vec!["Packet".to_string(), "Header".to_string()],
             melds: HashMap::new(),
+            meld_warnings: Vec::new(),
         }
     }
 
