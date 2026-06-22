@@ -694,6 +694,8 @@ impl LlvmBackend {
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.pending_cleanup.clear();
         self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.ssa_old_int_regs.clear();
+        self.ssa_old_float_regs.clear();
         // 2026-06-17: Use correct LLVM return type (float for Float, otherwise i64)
         let is_float_fn = d.outputs.iter().any(|t| matches!(t, Type::Float));
         let ll_ret_ty = if is_float_fn { "float" } else { "i64" };
@@ -709,6 +711,8 @@ impl LlvmBackend {
         }
         writeln!(out, ") local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
+        // Make %state accessible via ssa_state_reg so state field identifiers work
+        self.ssa_state_reg = Some("%state".to_string());
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
             let conv = format!("%ac{}", i);
@@ -855,6 +859,9 @@ impl LlvmBackend {
             writeln!(out, "  entry:").ok();
             writeln!(out, "  br i1 true, label %body, label %rollback").ok();
             writeln!(out, "  body:").ok();
+            self.ssa_old_int_regs.clear();
+            self.ssa_old_float_regs.clear();
+            self.ssa_state_reg = Some("%state".to_string());
             self.txn_counter = 0;
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
@@ -891,6 +898,9 @@ impl LlvmBackend {
         } else {
             writeln!(out, "define void @{}(%State* noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
+            self.ssa_old_int_regs.clear();
+            self.ssa_old_float_regs.clear();
+            self.ssa_state_reg = Some("%state".to_string());
             self.txn_counter = 0;
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
@@ -928,6 +938,8 @@ impl LlvmBackend {
         self.let_original_types.clear(); self.reg_float_cache.clear();
         self.reg_type_cache.clear();
         self.param_slots.clear();
+        self.ssa_old_int_regs.clear();
+        self.ssa_old_float_regs.clear();
 
         let has_return = if let Some(ref ot) = txn.output_type {
             match ot {
@@ -963,6 +975,8 @@ impl LlvmBackend {
         }
         writeln!(out, ") local_unnamed_addr #0{} {{", inline_str).ok();
         writeln!(out, "  entry:").ok();
+        // Make %state accessible via ssa_state_reg so state field identifiers work
+        self.ssa_state_reg = Some("%state".to_string());
 
         writeln!(out, "  %result = alloca i64, align 8").ok();
         writeln!(out, "  store i64 0, i64* %result, align 8").ok();
@@ -1238,7 +1252,7 @@ impl LlvmBackend {
         let ll_ret_ty = if is_multi_output {
             let count = inop.outputs.len().max(2);
             let tys: Vec<&str> = (0..count).map(|_| if is_float_fn { "float" } else { "i64" }).collect();
-            format!("{{{}}}", tys.join(", "))
+            format!("{{ {} }}", tys.join(", "))
         } else if is_float_fn {
             "float".to_string()
         } else {
@@ -1251,10 +1265,14 @@ impl LlvmBackend {
         if inop.has_state_access {
             write!(out, "%State* noalias nocapture align 8 %state").ok();
         }
-        for (n, t) in &inop.params {
+        for (i, (n, t)) in inop.params.iter().enumerate() {
             let resolved = self.resolve_bild_type(t);
             let native_ty = self.llvm_type(&resolved);
-            write!(out, ", {} %{}", native_ty, n).ok();
+            if inop.has_state_access || i > 0 {
+                write!(out, ", {} %{}", native_ty, n).ok();
+            } else {
+                write!(out, "{} %{}", native_ty, n).ok();
+            }
             self.let_bindings.insert(n.clone(), format!("%{}", n));
             self.let_binding_types.insert(n.clone(), resolved.clone());
             self.let_original_types.insert(n.clone(), t.clone());
@@ -1278,7 +1296,7 @@ impl LlvmBackend {
                 if !after.is_empty() {
                     if is_multi_output {
                         // Multi-output: term %q, %r → insertvalue chain + ret struct
-                        let regs: Vec<&str> = after.split(',').map(|s| s.trim()).collect();
+                        let regs: Vec<&str> = after.split(',').map(|s| s.trim().trim_end_matches(';')).collect();
                         for (i, reg) in regs.iter().enumerate() {
                             let base_ty = if is_float_fn { "float" } else { "i64" };
                             if i == 0 {

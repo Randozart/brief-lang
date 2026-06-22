@@ -1156,6 +1156,8 @@ pub struct InopDeclaration {
     pub outputs: Vec<Type>,
     pub contract: Contract,
     pub llvm_body: Vec<String>,
+    /// Source spans for each line in llvm_body, for error reporting.
+    pub llvm_body_spans: Vec<Span>,
     pub fallback: Option<Expr>,
     pub has_side_effects: bool,
     pub has_state_access: bool,

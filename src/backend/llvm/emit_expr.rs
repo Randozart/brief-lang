@@ -2439,7 +2439,7 @@ impl LlvmBackend {
                             // extract values into a boxed tuple matching Brief's format.
                             let count = inop_clone.as_ref().map(|d| d.outputs.len()).unwrap_or(2);
                             let struct_ty = (0..count).map(|_| "i64").collect::<Vec<_>>().join(", ");
-                            let struct_ty = format!("{{{}}}", struct_ty);
+                            let struct_ty = format!("{{ {} }}", struct_ty);
 
                             // Emit the call
                             let call_reg = format!("%mc{}", self.txn_counter); self.txn_counter += 1;
@@ -3932,8 +3932,8 @@ impl LlvmBackend {
         let count = wake_symbols.len();
         let sym_list = wake_symbols.iter().map(|s| format!("i8* @{}", s)).collect::<Vec<_>>().join(", ");
         writeln!(out, "@llvm.wake_triggers = constant [{} x i8*] [{}]", count, sym_list).ok();
-        writeln!(out, "!llvm.wake_triggers = !{{!0}}").ok();
-        write!(out, "!0 = !{{").ok();
+        writeln!(out, "!llvm.wake_triggers = !{{!6}}").ok();
+        write!(out, "!6 = !{{").ok();
         for (i, sym) in wake_symbols.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
             write!(out, "!\"{}\"", sym).ok();

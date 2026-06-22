@@ -7,15 +7,18 @@
 ## Syntax
 
 Brief supports pipe chaining as a syntactic sugar that desugars to flat
-let-bindings before typechecking. Three forms exist:
+let-bindings before typechecking. All forms use the intrinsic system for
+output — no `frgn` declarations needed:
 
 ```brief
-x |> f()            // Call f(x) — pipeline value is first arg
-x |> f() |> g()     // g(f(x)) — multi-step chain
-x |> f() .|> g()    // g(f(x)) — .|> reads from 1 position back
-x |> f() ..|> g()   // reads from 2 positions back
-x |> f              // auto-wrapped: f(x)
-f() |> g()          // pipeline can start with a function call
+x |> f()              // Call f(x) — pipeline value is first arg
+x |> f() |> g()       // g(f(x)) — multi-step chain
+x |> f() .|> g()      // .|> reads from 1 position back (skip=1)
+x |> f() ..|> g()     // reads from 2 positions back (skip=2)
+x |> f() .2|> g()     // reads from 2 positions back (explicit integer)
+x |> f() .5|> g()     // reads from 5 positions back
+x |> f                // auto-wrapped: f(x)
+f() |> g()            // pipeline can start with a function call
 ```
 
 ### Dot-skip variants
@@ -23,8 +26,9 @@ f() |> g()          // pipeline can start with a function call
 | Syntax | Skip | Reads from |
 |--------|------|------------|
 | `\|>` | 0 | Immediately preceding result (position N-1) |
-| `.\|>` | 1 | Position N-2 (one back from adjacent) |
-| `..\|>` | 2 | Position N-3 (two back from adjacent) |
+| `.\|>` / `.1\|>` | 1 | Position N-2 (one back from adjacent) |
+| `..\|>` / `.2\|>` | 2 | Position N-3 (two back from adjacent) |
+| `.N\|>` | N | Position N-1-N (N back) |
 
 ### Semantics
 
@@ -37,6 +41,13 @@ a |> f() |> g() .|> h()
 // Step 2: g(f(a))            — position 2
 // Step 3 (.|>): h(f(a))      — h receives f(a), as if it were in g's position
 ```
+
+### Skip overflow
+
+A skip that exceeds the pipeline position is a compile-time error caught
+by the desugarer assertion. For example, `3 |> square() .2|> double()`
+is invalid because only 1 command precedes the `.2|>`. Use `.1|>` instead,
+or add more preceding steps.
 
 The pipeline value is always prepended as the **first argument** to the
 target function. Existing arguments follow.
@@ -127,9 +138,6 @@ No special parser support is needed.
 
 ## Future Work
 
-- `.N|>` with explicit integer (`.2|>`, `.3|>`) requires multi-token
-  lookahead in the parser. Supported via `..|>` (lexed as `DotDot +
-  PipeGreater`) which covers skip=2.
 - Inline `let x <: db { ... } |> f()` syntax would require changes to
   the let-statement parser.
 - `_`/`_1`/`_2` placeholders for explicit argument routing in pipe

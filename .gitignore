@@ -231,3 +231,4 @@ benchmarks/mandelbrot
 benchmarks/mandelbrot_cofficina
 nbody_newton_sym
 benchmarks/nbody_sqrt_idio
+inop_sadd

@@ -711,15 +711,16 @@ impl Desugarer {
             modifiers: Vec::new(),
         });
 
-        // Subsequent bindings: __pipe_i = <target>(__pipe_{i-1-skip})
+        // Subsequent bindings: __pipe_i = <target>(__pipe_{pos-1-skip})
         for (i, step) in steps.iter().enumerate() {
             let pos = i + 1; // 1-indexed pipe position
-            let read_idx = if step.skip > pos {
-                // Clamp: can't read before position 0
-                0usize
-            } else {
-                pos - 1 - step.skip
-            };
+            assert!(
+                step.skip <= pos - 1,
+                "PipeStep skip ({}) exceeds pipeline position ({}): \
+                 cannot skip past the initial value",
+                step.skip, pos
+            );
+            let read_idx = pos - 1 - step.skip;
             let read_name = format!("__pipe_{}", read_idx);
             let read_expr = Expr::Identifier(read_name);
 

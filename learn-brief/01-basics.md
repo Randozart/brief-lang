@@ -195,15 +195,21 @@ x |> f(a, b)    // f(x, a, b)
 
 ### Dot-Skip
 
-The dot-skip variant (`.|>`, `..|>`) lets a downstream step read from an
-earlier position in the pipeline, not just the immediately preceding one:
+The dot-skip variants (`.|>`, `..|>`, `.N|>`) let a downstream step read
+from an earlier position in the pipeline, not just the immediately
+preceding one:
 
 ```brief
 a |> f() |> g() .|> h()
-// h receives f(a) — the same value g received
+// h receives f(a) — the same value g received (skip=1)
+
+a |> f() |> g() .2|> h()
+// h receives the initial a (skip=2 — skips f and g)
 ```
 
-This is equivalent to `h(f(a))`, skipping `g`'s result.
+This is equivalent to `h(f(a))` or `h(a)`, skipping the intervening
+results. The skip count cannot exceed the number of preceding steps —
+that's a compile-time error.
 
 ### Auto-Wrap
 

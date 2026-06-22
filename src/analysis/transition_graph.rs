@@ -1080,6 +1080,9 @@ fn scan_for_state_identifiers(stmts: &[crate::ast::Statement], state_fields: &Ha
             crate::ast::Statement::Escape(Some(expr)) => {
                 collect_state_identifiers(expr, state_fields, out);
             }
+            crate::ast::Statement::SyncBlock { body } => {
+                scan_for_state_identifiers(body, state_fields, out);
+            }
             _ => {}
         }
     }

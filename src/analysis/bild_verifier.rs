@@ -17,7 +17,7 @@ impl BildError {
                     "undefined register in BILD body",
                 )
                 .with_explanation(&format!(
-                    "inop `{}`: register `%{}` is used but not defined (parameter or assignment) at BILD line {}",
+                    "inop `{}`: register `%{}` is used but not defined at line {}",
                     inop_name, name, line
                 ))
             }
@@ -52,6 +52,9 @@ pub fn check_bild(inop: &InopDeclaration) -> Vec<BildError> {
             continue;
         }
 
+        // Use source span line number if available
+        let source_line = inop.llvm_body_spans.get(i).map(|s| s.line).unwrap_or(i);
+
         let after_semi = trimmed.strip_suffix(';').unwrap_or(trimmed);
 
         if after_semi.starts_with("term") || after_semi.starts_with("term!") {
@@ -61,7 +64,7 @@ pub fn check_bild(inop: &InopDeclaration) -> Vec<BildError> {
             } else {
                 &after_semi[4..]
             };
-            check_regs(after_keyword, &defined, &mut errors, i);
+            check_regs(after_keyword, &defined, &mut errors, source_line);
             continue;
         }
 
@@ -69,11 +72,11 @@ pub fn check_bild(inop: &InopDeclaration) -> Vec<BildError> {
             let lhs = after_semi[..eq_pos].trim();
             if lhs.starts_with('%') && !lhs.contains(' ') {
                 let rhs = &after_semi[eq_pos + 3..];
-                check_regs(rhs, &defined, &mut errors, i);
+                check_regs(rhs, &defined, &mut errors, source_line);
                 defined.insert(lhs.to_string());
             }
         } else {
-            check_regs(after_semi, &defined, &mut errors, i);
+            check_regs(after_semi, &defined, &mut errors, source_line);
         }
     }
 
@@ -126,6 +129,7 @@ mod tests {
             fallback: None,
             has_side_effects: false,
             has_state_access: false,
+            llvm_body_spans: vec![],
             span: None,
         }
     }

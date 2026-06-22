@@ -141,3 +141,20 @@ fn test_llvm_backend_inop_sadd() {
         Err(e) => panic!("{}", e),
     }
 }
+
+#[test]
+fn test_llvm_backend_inop_divmod() {
+    match compile_and_verify_llvm("tests/fixtures/inop_divmod.bv", "inop_divmod") {
+        Ok(ir) => {
+            assert!(ir.contains("define { i64, i64 } @divmod"),
+                "LLVM IR should contain definition of @divmod with struct return");
+            assert!(ir.contains("sdiv i64 %a, %b"),
+                "LLVM IR should contain the sdiv instruction");
+            assert!(ir.contains("srem i64 %a, %b"),
+                "LLVM IR should contain the srem instruction");
+            assert!(ir.contains("insertvalue"),
+                "LLVM IR should use insertvalue for struct construction");
+        }
+        Err(e) => panic!("{}", e),
+    }
+}

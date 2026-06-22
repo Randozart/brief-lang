@@ -41,6 +41,7 @@ pub struct Parser<'a> {
     pos: usize,
     current: Option<(Result<Token, ()>, logos::Span)>,
     peek: Option<(Result<Token, ()>, logos::Span)>,
+    peek2: Option<(Result<Token, ()>, logos::Span)>,
     comments: Vec<Comment>,
     current_line: usize,
     /// Track if we consumed a >> that should serve as > for parent generic level
@@ -60,12 +61,14 @@ impl<'a> Parser<'a> {
         let mut lexer = Token::lexer(input);
         let current = lexer.next().map(|token| (token, lexer.span()));
         let peek = lexer.next().map(|token| (token, lexer.span()));
+        let peek2 = lexer.next().map(|token| (token, lexer.span()));
         Parser {
             lexer,
             source: input,
             pos: 0,
             current,
             peek,
+            peek2,
             comments: Vec::new(),
             current_line: 1,
             shr_consumed_as_gt: false,
@@ -101,7 +104,8 @@ impl<'a> Parser<'a> {
 
     fn advance(&mut self) {
         self.current = self.peek.take();
-        self.peek = self.lexer.next().map(|token| (token, self.lexer.span()));
+        self.peek = self.peek2.take();
+        self.peek2 = self.lexer.next().map(|token| (token, self.lexer.span()));
 
         if let Some((_, span)) = &self.current {
             self.current_line = span.start;
@@ -110,6 +114,7 @@ impl<'a> Parser<'a> {
     }
 
     fn put_back(&mut self, token: Token, span: logos::Span) {
+        self.peek2 = self.peek.take();
         self.peek = self.current.take();
         self.current = Some((Ok(token), span));
     }
@@ -120,6 +125,10 @@ impl<'a> Parser<'a> {
 
     fn peek_token(&self) -> Option<&Result<Token, ()>> {
         self.peek.as_ref().map(|(t, _)| t)
+    }
+
+    fn peek_token2(&self) -> Option<&Result<Token, ()>> {
+        self.peek2.as_ref().map(|(t, _)| t)
     }
 
     fn current_span(&self) -> Option<Span> {
@@ -1822,12 +1831,19 @@ impl<'a> Parser<'a> {
             Contract::new(Expr::Bool(true), Expr::Bool(true))
         };
 
-        // Parse optional -> ReturnType
+        // Parse optional -> ReturnType(s)
+        // Supports single: -> Int, multi: -> Int, Float, or zero: (no arrow)
         // Use parse_type_inner(false) to prevent greedy [ consumption as generic
         // type parameter — [ belongs to the contract, not the return type.
         let outputs = if let Some(Ok(Token::Arrow)) = self.current_token() {
             self.advance();
-            vec![self.parse_type_inner(false)?]
+            let mut tys = vec![self.parse_type_inner(false)?];
+            // Support multi-output: -> Int, Float, Bool
+            while let Some(Ok(Token::Comma)) = self.current_token() {
+                self.advance();
+                tys.push(self.parse_type_inner(false)?);
+            }
+            tys
         } else {
             Vec::new()
         };
@@ -1858,9 +1874,10 @@ impl<'a> Parser<'a> {
         };
 
         // Parse LLVM IR body: { ... }
-        let llvm_body = if let Some(Ok(Token::LBrace)) = self.current_token() {
+        let (llvm_body, llvm_body_spans) = if let Some(Ok(Token::LBrace)) = self.current_token() {
             self.advance();
             let mut lines = Vec::new();
+            let mut spans = Vec::new();
             let mut depth = 1u32;
             let mut current_line = String::new();
             let mut need_space = false;
@@ -1877,6 +1894,9 @@ impl<'a> Parser<'a> {
                         depth -= 1;
                         if depth == 0 {
                             if !current_line.trim().is_empty() {
+                                if let Some(sp) = self.current_span() {
+                                    spans.push(sp);
+                                }
                                 lines.push(current_line.trim().to_string());
                             }
                             self.advance(); // consume }
@@ -1890,6 +1910,9 @@ impl<'a> Parser<'a> {
                     Ok(Token::Semicolon) => {
                         current_line.push(';');
                         if !current_line.trim().is_empty() {
+                            if let Some(sp) = self.current_span() {
+                                spans.push(sp);
+                            }
                             lines.push(current_line.trim().to_string());
                         }
                         current_line = String::new();
@@ -2054,7 +2077,7 @@ impl<'a> Parser<'a> {
                     }
                 }
             }
-            lines
+            (lines, spans)
         } else {
             return self.spanned_err("expected `{` for inop# LLVM IR body".to_string());
         };
@@ -2083,6 +2106,7 @@ impl<'a> Parser<'a> {
             outputs,
             contract,
             llvm_body,
+            llvm_body_spans,
             fallback,
             has_side_effects: bang,
             has_state_access,
@@ -6078,14 +6102,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         self.parse_pipe_chain()
     }
 
-    /// Parse pipe chain: `initial |> step |> step .|> step ..|> step`.
+    /// Parse pipe chain: `initial |> step |> step .|> step ..|> step .N|> step`.
     /// Pipe has the lowest precedence, wrapping `parse_or`.
     /// Supports:
-    ///   `|>`   — skip=0 (adjacent)
-    ///   `.|>`  — skip=1 (one back)
-    ///   `..|>` — skip=2 (two back)
-    ///
-    /// `.N|>` with explicit integer is reserved for future use.
+    ///   `|>`    — skip=0 (adjacent)
+    ///   `.|>`   — skip=1 (one back)
+    ///   `..|>`  — skip=2 (two back)
+    ///   `.N|>`  — skip=N (N back, e.g. `.2|>`, `.5|>`)
     fn parse_pipe_chain(&mut self) -> Result<Expr, SyntaxError> {
         let initial = self.parse_or()?;
         let mut steps = Vec::new();
@@ -6097,14 +6120,35 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     0usize
                 }
                 Some(Ok(Token::Dot)) => {
-                    // .|> — check peek without consuming
-                    match self.peek_token() {
-                        Some(Ok(Token::PipeGreater)) => {
-                            self.advance(); // consume '.'
-                            self.advance(); // consume '|>'
-                            1usize
+                    // .|> (skip=1) or .N|> (skip=N)
+                    // Safe to consume speculatively: `.N` at top-level expression
+                    // has no other valid meaning (field access `.N` is consumed
+                    // by parse_postfix much earlier in the precedence chain).
+                    if matches!(self.peek_token(), Some(Ok(Token::PipeGreater))) {
+                        self.advance(); // '.'
+                        self.advance(); // '|>'
+                        1usize
+                    } else if let Some(Ok(Token::Integer(n))) = self.peek_token() {
+                        if *n > 0 {
+                            let n = *n as usize;
+                            self.advance(); // '.'
+                            self.advance(); // Integer(n)
+                            if matches!(self.current_token(), Some(Ok(Token::PipeGreater))) {
+                                self.advance(); // '|>'
+                                n
+                            } else {
+                                return Err(SyntaxError::InvalidStatement {
+                                    reason: format!(
+                                        "expected `|>` after `.{}`, found unexpected token", n
+                                    ),
+                                    span: self.current_span().unwrap_or_else(Span::dummy),
+                                });
+                            }
+                        } else {
+                            break; // `.0` not valid (skip=0 is just `|>`)
                         }
-                        _ => break,
+                    } else {
+                        break;
                     }
                 }
                 Some(Ok(Token::DotDot)) => {
@@ -6662,9 +6706,14 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     expr = Expr::ListIndex(Box::new(expr), Box::new(first));
                 }
             } else if let Some(Ok(Token::Dot)) = self.current_token() {
-                // Don't consume '.' if it's a dot-skip pipe (.|>)
+                // Don't consume '.' if it's a dot-skip pipe (.|> or .N|>)
                 if matches!(self.peek_token(), Some(Ok(Token::PipeGreater))) {
-                    break;
+                    break; // .|>
+                }
+                if matches!(self.peek_token(), Some(Ok(Token::Integer(_))))
+                    && matches!(self.peek_token2(), Some(Ok(Token::PipeGreater)))
+                {
+                    break; // .N|>
                 }
                 self.advance();
                 let member_name = if let Some(Ok(Token::Integer(n))) = self.current_token() {
@@ -9995,6 +10044,94 @@ mod parser_tests {
                 assert_eq!(pc.steps.len(), 1);
                 assert!(matches!(&*pc.initial, Expr::Call(_, _)),
                     "Initial should be a call expression");
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    // ── .N|> Explicit Integer Tests ──────────────────────────────
+
+    #[test]
+    fn test_parse_pipe_dot_2_skip() {
+        let s = "x |> f() .2|> g()";
+        // Debug: print tokens
+        let lex = crate::lexer::Token::lexer(s);
+        for (i, t) in lex.enumerate() {
+            match t {
+                Ok(tok) => eprintln!("token[{}] = {:?}", i, tok),
+                Err(_) => eprintln!("token[{}] = ERROR", i),
+            }
+        }
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 2);
+                assert_eq!(pc.steps[0].skip, 0);
+                assert_eq!(pc.steps[1].skip, 2);
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_dot_3_skip() {
+        let s = "x |> f() .3|> g()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 2);
+                assert_eq!(pc.steps[0].skip, 0);
+                assert_eq!(pc.steps[1].skip, 3);
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_dot_5_skip_multi_digit() {
+        let s = "x |> f() .42|> g()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 2);
+                assert_eq!(pc.steps[1].skip, 42);
+            }
+            _ => panic!("Expected PipeChain, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_dot_1_skip_equals_dot_skip() {
+        // .1|> should work the same as .|>
+        let s_dot = "x |> f() .|> g()";
+        let s_dot1 = "x |> f() .1|> g()";
+        let mut p1 = Parser::new(s_dot);
+        let mut p2 = Parser::new(s_dot1);
+        let e1 = p1.parse_expression().unwrap();
+        let e2 = p2.parse_expression().unwrap();
+        if let (Expr::PipeChain(pc1), Expr::PipeChain(pc2)) = (&e1, &e2) {
+            assert_eq!(pc1.steps[1].skip, pc2.steps[1].skip);
+            assert_eq!(pc1.steps[1].skip, 1);
+        } else {
+            panic!("Expected both to be PipeChain");
+        }
+    }
+
+    #[test]
+    fn test_parse_pipe_dot_n_chaining() {
+        // Mixed: |> + .|> + .2|>
+        let s = "x |> f() .|> g() .2|> h()";
+        let mut parser = Parser::new(s);
+        let expr = parser.parse_expression().unwrap();
+        match &expr {
+            Expr::PipeChain(pc) => {
+                assert_eq!(pc.steps.len(), 3);
+                assert_eq!(pc.steps[0].skip, 0);
+                assert_eq!(pc.steps[1].skip, 1);
+                assert_eq!(pc.steps[2].skip, 2);
             }
             _ => panic!("Expected PipeChain, got {:?}", expr),
         }

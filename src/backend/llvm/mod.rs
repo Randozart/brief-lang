@@ -2546,12 +2546,14 @@ self.emit_declares(&mut out);
 
         // Phase 1: Remove Never fields from field_index_map and field_types.
         // Rebuild both from scratch to handle index shifting correctly.
-        let old_map = std::mem::take(&mut self.field_index_map);
+        // IMPORTANT: sort by original index to preserve deterministic field ordering.
+        let mut old_pairs: Vec<(String, usize)> = self.field_index_map.drain().collect();
         let old_types = std::mem::take(&mut self.field_types);
-        self.field_index_map.reserve(old_map.len());
+        self.field_index_map.reserve(old_pairs.len());
         self.field_types.reserve(old_types.len());
+        old_pairs.sort_by_key(|(_, idx)| *idx);
 
-        for (name, _old_idx) in &old_map {
+        for (name, _old_idx) in &old_pairs {
             let mode = self.field_modes.get(name).copied().unwrap_or(crate::analysis::FieldMode::Never);
             match mode {
                 crate::analysis::FieldMode::Never => {
@@ -2559,7 +2561,10 @@ self.emit_declares(&mut out);
                 }
                 crate::analysis::FieldMode::Always | crate::analysis::FieldMode::LazyCached { .. } => {
                     let new_idx = self.field_types.len();
-                    let orig_type_idx = old_map.get(name).copied().unwrap_or(0);
+                    let orig_type_idx = old_pairs.iter()
+                        .find(|(n, _)| n == name)
+                        .map(|(_, i)| *i)
+                        .unwrap_or(0);
                     self.field_index_map.insert(name.clone(), new_idx);
                     self.field_types.push(old_types[orig_type_idx].clone());
                 }

@@ -538,10 +538,32 @@ impl TypeChecker {
                 }
                 TopLevel::Inop(inop) => {
                     self.inop_decls.insert(inop.name.clone(), inop.clone());
-                    let errors = crate::analysis::bild_verifier::check_bild(inop);
-                    for err in &errors {
+                    let verifier_errors = crate::analysis::bild_verifier::check_bild(inop);
+                    for err in &verifier_errors {
                         let diag = err.to_diagnostic(&inop.name);
                         self.diagnostics.borrow_mut().push(diag);
+                    }
+                    // Symbolic verification of BILD body vs fallback
+                    let sym_result = crate::analysis::bild_symexec::verify_inop(inop);
+                    if let Some(bild_expr) = &sym_result.bild_expr {
+                        if let Some(fb_expr) = &sym_result.fallback_expr {
+                            if let Some(msg) = crate::analysis::bild_symexec::compare_bild_with_fallback(
+                                &Some(bild_expr.clone()),
+                                &Some(fb_expr.clone()),
+                                &inop.name,
+                            ) {
+                                let diag = crate::errors::Diagnostic::new(
+                                    "B005",
+                                    if sym_result.has_opaque_ops {
+                                        crate::errors::Severity::Warning
+                                    } else {
+                                        crate::errors::Severity::Error
+                                    },
+                                    "BILD body and fallback mismatch",
+                                ).with_explanation(&msg);
+                                self.diagnostics.borrow_mut().push(diag);
+                            }
+                        }
                     }
                     // %state access requires inop! (side-effecting) and contract
                     if inop.has_state_access {
@@ -1718,7 +1740,13 @@ impl TypeChecker {
                     | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Data,
                     Intrinsic::UserDefined(name) => {
                         self.inop_decls.get(name)
-                            .and_then(|d| d.outputs.first().cloned())
+                            .map(|d| {
+                                if d.outputs.len() > 1 {
+                                    Type::Tuple(d.outputs.clone())
+                                } else {
+                                    d.outputs.first().cloned().unwrap_or(Type::Void)
+                                }
+                            })
                             .unwrap_or(Type::Void)
                     }
                 }
@@ -3085,6 +3113,7 @@ mod tests {
             )),
             has_side_effects: false,
             has_state_access: false,
+            llvm_body_spans: vec![],
             span: None,
         };
         ctx.inop_decls.insert("sadd".to_string(), inop);

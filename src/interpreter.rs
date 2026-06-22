@@ -8895,6 +8895,7 @@ mod tests {
             )),
             has_side_effects: false,
             has_state_access: false,
+            llvm_body_spans: vec![],
             span: None,
         };
         i.inop_decls.insert("sadd".to_string(), inop);
@@ -8931,6 +8932,7 @@ mod tests {
             fallback: None,
             has_side_effects: false,
             has_state_access: false,
+            llvm_body_spans: vec![],
             span: None,
         };
         i.inop_decls.insert("void_inop".to_string(), inop);
@@ -11287,5 +11289,142 @@ mod kani_full_tests {
 
         let result = interp.eval_expr(&desugared).unwrap();
         assert_eq!(result, Value::Int(43), "f() |> add_one() should be 43");
+    }
+
+    // ── .N|> E2E Tests ───────────────────────────────────────────────
+
+    #[test]
+    fn test_pipe_dot_2_e2e() {
+        // 3 |> square() |> add_one() .2|> double()
+        //   = double(initial) = double(3) = 6
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Integer(3)),
+            steps: vec![
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("square".to_string(), vec![])), skip: 0,
+                },
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("add_one".to_string(), vec![])), skip: 0,
+                },
+                crate::ast::PipeStep {
+                    target: Box::new(Expr::Call("double".to_string(), vec![])), skip: 2,
+                },
+            ],
+        };
+
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let desugared = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        let mut interp = Interpreter::new();
+        for (name, params, body_expr) in vec![
+            ("square", vec![("x", Type::Int)], Expr::Mul(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Identifier("x".to_string())),
+            )),
+            ("add_one", vec![("x", Type::Int)], Expr::Add(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Integer(1)),
+            )),
+            ("double", vec![("x", Type::Int)], Expr::Mul(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Integer(2)),
+            )),
+        ] {
+            interp.definitions.insert(name.to_string(), Definition {
+                name: name.to_string(),
+                type_params: vec![],
+                parameters: params.into_iter()
+                    .map(|(n, t)| (n.to_string(), t))
+                    .collect(),
+                outputs: vec![],
+                output_type: None,
+                output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![Statement::Term {
+                    values: vec![Some(body_expr)],
+                    modifiers: vec![],
+                    swan_song: None,
+                }],
+                is_lambda: false,
+                modifiers: vec![],
+                variant_bodies: vec![],
+            });
+        }
+
+        let result = interp.eval_expr(&desugared).unwrap();
+        assert_eq!(result, Value::Int(6), "3 |> square() |> add_one() .2|> double() should be 6");
+    }
+
+    #[test]
+    fn test_pipe_dot_3_e2e() {
+        // 3 |> square() |> add_one() .3|> double() reads __pipe_{4-1-3}=__pipe_0 = 3
+        // double(3) = 6
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Integer(3)),
+            steps: vec![
+                crate::ast::PipeStep { target: Box::new(Expr::Call("square".to_string(), vec![])), skip: 0 },
+                crate::ast::PipeStep { target: Box::new(Expr::Call("add_one".to_string(), vec![])), skip: 0 },
+                crate::ast::PipeStep { target: Box::new(Expr::Call("double".to_string(), vec![])), skip: 3 },
+            ],
+        };
+
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        let desugared = desugarer.desugar_expr(Expr::PipeChain(pipe));
+
+        let mut interp = Interpreter::new();
+        for (name, params, body_expr) in vec![
+            ("square", vec![("x", Type::Int)], Expr::Mul(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Identifier("x".to_string())),
+            )),
+            ("add_one", vec![("x", Type::Int)], Expr::Add(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Integer(1)),
+            )),
+            ("double", vec![("x", Type::Int)], Expr::Mul(
+                Box::new(Expr::Identifier("x".to_string())),
+                Box::new(Expr::Integer(2)),
+            )),
+        ] {
+            interp.definitions.insert(name.to_string(), Definition {
+                name: name.to_string(),
+                type_params: vec![],
+                parameters: params.into_iter()
+                    .map(|(n, t)| (n.to_string(), t))
+                    .collect(),
+                outputs: vec![],
+                output_type: None,
+                output_names: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![Statement::Term {
+                    values: vec![Some(body_expr)],
+                    modifiers: vec![],
+                    swan_song: None,
+                }],
+                is_lambda: false,
+                modifiers: vec![],
+                variant_bodies: vec![],
+            });
+        }
+
+        let result = interp.eval_expr(&desugared).unwrap();
+        assert_eq!(result, Value::Int(6), "3 |> square() |> add_one() .3|> double() should be 6");
+    }
+
+    #[test]
+    #[should_panic(expected = "exceeds pipeline position")]
+    fn test_pipe_skip_overflow_panics() {
+        // 3 |> square() .2|> double() has skip=2 but only 1 step before it
+        let pipe = crate::ast::PipeChain {
+            initial: Box::new(Expr::Integer(3)),
+            steps: vec![
+                crate::ast::PipeStep { target: Box::new(Expr::Call("square".to_string(), vec![])), skip: 0 },
+                crate::ast::PipeStep { target: Box::new(Expr::Call("double".to_string(), vec![])), skip: 2 },
+            ],
+        };
+
+        let mut desugarer = crate::desugarer::Desugarer::new();
+        // This should panic because skip=2 but only 1 step precedes the .2|>
+        let _ = desugarer.desugar_expr(Expr::PipeChain(pipe));
     }
 }
