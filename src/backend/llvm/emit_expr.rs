@@ -4820,15 +4820,93 @@ impl LlvmBackend {
     /// Phase 3: Decay a chimera value to its canonical type at a boundary.
     /// When `target_ty` is `None`, assumes decay to the backing type (identity).
     /// Real field-level materialization will be added per type pair.
-    pub(crate) fn emit_decay(&mut self, _out: &mut String, val: &TypedRegister,
-        _target_ty: Option<&Type>, _indent: &str) -> TypedRegister
+    pub(crate) fn emit_decay(&mut self, out: &mut String, val: &TypedRegister,
+        target_ty: Option<&Type>, indent: &str) -> TypedRegister
     {
         if !self.is_chimera(&val.name) {
             return val.clone();
         }
-        // For now: identity decay (the backing value's bits are valid for any target)
-        // When materialization is implemented, derive fields from the backing value here.
-        val.clone()
+        let backing = match self.chimera_backing(&val.name) {
+            Some(b) => b.to_string(),
+            None => return val.clone(),
+        };
+        let target_name = match target_ty {
+            Some(Type::Custom(n)) => n.clone(),
+            _ => return val.clone(), // primitive target → identity (bits are valid)
+        };
+        if backing == target_name {
+            // Decay to own backing type — identity
+            return val.clone();
+        }
+        // Generic materialization: look up the meld between backing and target,
+        // derive each field of the target type from the backing value via routes.
+        // Clone all data first to avoid borrow conflicts with mutable self.
+        let meld_routes: Vec<crate::ast::MeldRouteDef> = {
+            let universe = match self.type_universe.as_ref() {
+                Some(u) => u,
+                None => return val.clone(),
+            };
+            match universe.find_meld(&backing, &target_name) {
+                Some(m) => m.routes.clone(),
+                None => return val.clone(),
+            }
+        };
+        let target_fields = match self.struct_types.get(&target_name) {
+            Some(f) => f.clone(),
+            None => return val.clone(),
+        };
+
+        // Derive each field value from the backing via meld routes
+        let mut field_results: Vec<(String, Type, String)> = Vec::new(); // name, ty, reg
+        for (field_name, field_ty) in &target_fields {
+            if let Some(route) = meld_routes.iter().find(|r| r.accessor == *field_name) {
+                // Use backing as partner — the route evaluates from backing's perspective
+                if let Some(reg) = self.emit_route_expression(out, &route.dest_expr, val, &backing, indent) {
+                    field_results.push((field_name.clone(), field_ty.clone(), reg.name));
+                } else {
+                    // Route evaluation failed — emit 0 as placeholder
+                    let v = format!("%t{}", self.txn_counter);
+                    self.txn_counter += 1;
+                    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                    field_results.push((field_name.clone(), field_ty.clone(), v));
+                }
+            } else {
+                // No route for this field — emit 0 as placeholder
+                let v = format!("%t{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                field_results.push((field_name.clone(), field_ty.clone(), v));
+            }
+        }
+
+        if field_results.is_empty() {
+            return val.clone();
+        }
+
+        // For single-field types: return the field value directly
+        if field_results.len() == 1 {
+            let (_, ref ty, ref reg) = field_results[0];
+            return TypedRegister { name: reg.clone(), ty: ty.clone() };
+        }
+
+        // For multi-field types: allocate a struct on the heap
+        let total_size = field_results.len() * 8; // each field is i64
+        let alloc = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = call i8* @malloc(i64 {})", indent, alloc, total_size).ok();
+        let struct_ptr = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, struct_ptr, alloc).ok();
+
+        for (i, (_name, _ty, reg)) in field_results.iter().enumerate() {
+            let gep = format!("%t{}", self.txn_counter);
+            self.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, gep, struct_ptr, i).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, reg, gep).ok();
+        }
+
+        let struct_ptr_name = format!("%t{}", self.txn_counter - 1);
+        TypedRegister { name: struct_ptr_name, ty: Type::Custom(target_name.clone()) }
     }
 
     /// Emit a direct projection on a value without going through the meld route check.
