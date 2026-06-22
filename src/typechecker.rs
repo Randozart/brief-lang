@@ -850,6 +850,18 @@ impl TypeChecker {
                         }
                     }
 
+                    // E005: Check each route's dest_expr for invalid references
+                    let known_idents: std::collections::HashSet<&str> = [
+                        meld.name_a.as_str(), meld.name_b.as_str(),
+                        "Ptr", "Size", "Bytes", "Alignment", "Type", "Range",
+                        "Popcount", "LeadingZeros", "TrailingZeros", "Absolute",
+                        "BitReverse", "Keys", "Values", "IsEmpty", "Top", "Front",
+                    ].iter().cloned().collect();
+                    for route in &meld.routes {
+                        self.check_route_expr(&route.dest_expr, &known_idents,
+                            &meld.name_a, &meld.name_b, &meld.span);
+                    }
+
                     // E004: Field type mismatch — check if fields at matching names have compatible types
                     let fields_a = self.struct_fields.get(&meld.name_a);
                     let fields_b = self.struct_fields.get(&meld.name_b);
@@ -2553,6 +2565,96 @@ Expr::ObjectLiteral(fields) => {
     }
 
     /// Check whether a type conversion is valid.
+    /// E005: Check a route's destination expression for invalid references.
+    /// Walks the expression tree and warns about identifiers that aren't
+    /// the meld type names or known projection targets.
+    fn check_route_expr(&self, expr: &Expr, known_idents: &std::collections::HashSet<&str>,
+        name_a: &str, name_b: &str, span: &Option<crate::errors::Span>)
+    {
+        match expr {
+            Expr::Identifier(n) => {
+                if !known_idents.contains(n.as_str()) {
+                    let diag = crate::errors::Diagnostic::new(
+                        "E005", crate::errors::Severity::Warning,
+                        &format!("invalid route expression — `{}` is not a recognized field or projection", n),
+                    ).with_explanation(&format!(
+                        "In the route expression `{}`, the identifier `{}` is not a known field or \
+                         projection of `{}` or `{}`. Route expressions can reference the meld partner \
+                         type name (to access its fields/projections) or standard projection targets \
+                         (Ptr, Size, Bytes, Alignment, Type).",
+                        format!("{:?}", expr), n, name_a, name_b,
+                    )).with_hint(&format!(
+                        "Use `{}:>Projection` or `{}.field`, or remove the route to use @/ inference.",
+                        name_b, name_b,
+                    ));
+                    self.diagnostics.borrow_mut().push(diag);
+                }
+            }
+            Expr::FieldAccess(obj, field) => {
+                self.check_route_expr(obj, known_idents, name_a, name_b, span);
+                // Check if the field exists on the partner type
+                if let Expr::Identifier(n) = obj.as_ref() {
+                    let partner_fields = if n == name_a {
+                        self.struct_fields.get(name_a)
+                    } else if n == name_b {
+                        self.struct_fields.get(name_b)
+                    } else {
+                        None
+                    };
+                    if let Some(fields) = partner_fields {
+                        if !fields.contains_key(field) {
+                            let diag = crate::errors::Diagnostic::new(
+                                "E005", crate::errors::Severity::Error,
+                                &format!("invalid route expression — `{}` has no field `{}`", n, field),
+                            ).with_explanation(&format!(
+                                "Type `{}` doesn't have a field named `{}`. Route expressions can \
+                                 only access fields that exist on the meld partner type.",
+                                n, field,
+                            )).with_hint("Check the field name for typos, or use `:>Projection` instead.");
+                            if let Some(s) = span {
+                                self.diagnostics.borrow_mut().push(diag.with_span(*s));
+                            } else {
+                                self.diagnostics.borrow_mut().push(diag);
+                            }
+                        }
+                    }
+                }
+            }
+            Expr::Projection { source, target } => {
+                self.check_route_expr(source, known_idents, name_a, name_b, span);
+                // Check UserDefined projection targets
+                if let crate::ast::ProjectionTarget::UserDefined(ud_name) = target {
+                    if let Expr::Identifier(n) = source.as_ref() {
+                        if n == name_a || n == name_b {
+                            // UserDefined projections are always valid syntactically —
+                            // they're resolved at codegen time.
+                        }
+                    }
+                }
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+            | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
+            | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+                self.check_route_expr(l, known_idents, name_a, name_b, span);
+                self.check_route_expr(r, known_idents, name_a, name_b, span);
+            }
+            Expr::Not(inner) | Expr::Neg(inner) | Expr::Cast(inner, _) => {
+                self.check_route_expr(inner, known_idents, name_a, name_b, span);
+            }
+            Expr::Call(_, args) => {
+                for arg in args {
+                    self.check_route_expr(arg, known_idents, name_a, name_b, span);
+                }
+            }
+            Expr::IntrinsicCall { args, .. } => {
+                for arg in args {
+                    self.check_route_expr(arg, known_idents, name_a, name_b, span);
+                }
+            }
+            _ => {} // literals, other patterns
+        }
+    }
+
     fn is_cast_valid(&self, src: &Type, dst: &Type) -> bool {
         if src == dst { return true; }
         // Check primitive cast pairs
