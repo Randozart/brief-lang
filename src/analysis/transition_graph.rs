@@ -910,6 +910,155 @@ pub fn compute_live_fields(
     live
 }
 
+/// Scan all transaction bodies for projection expressions on state fields.
+/// Returns a map: state field name → set of projection target strings used on that field.
+/// Used by the Adaptive Layout Engine to determine which fields need cache slots.
+pub fn compute_projection_usage(program: &crate::ast::Program) -> HashMap<String, HashSet<String>> {
+    let state_fields: HashSet<String> = program.items.iter()
+        .filter_map(|item| if let crate::ast::TopLevel::StateDecl(s) = item { Some(s.name.clone()) } else { None })
+        .collect();
+    let mut usage: HashMap<String, HashSet<String>> = HashMap::new();
+    for item in &program.items {
+        if let crate::ast::TopLevel::Transaction(txn) = item {
+            scan_for_projections_in_stmts(&txn.body, &state_fields, &mut usage);
+        }
+    }
+    usage
+}
+
+fn projection_target_name(target: &crate::ast::ProjectionTarget) -> String {
+    use crate::ast::ProjectionTarget;
+    match target {
+        ProjectionTarget::Size => "Size".into(),
+        ProjectionTarget::Bytes => "Bytes".into(),
+        ProjectionTarget::Ptr => "Ptr".into(),
+        ProjectionTarget::Alignment => "Alignment".into(),
+        ProjectionTarget::Range => "Range".into(),
+        ProjectionTarget::Popcount => "Popcount".into(),
+        ProjectionTarget::LeadingZeros => "LeadingZeros".into(),
+        ProjectionTarget::TrailingZeros => "TrailingZeros".into(),
+        ProjectionTarget::Absolute => "Absolute".into(),
+        ProjectionTarget::BitReverse => "BitReverse".into(),
+        ProjectionTarget::Type => "Type".into(),
+        ProjectionTarget::PtrBang => "Ptr!".into(),
+        ProjectionTarget::Keys => "Keys".into(),
+        ProjectionTarget::Values => "Values".into(),
+        ProjectionTarget::Contains(_) => "Contains(...)".into(),
+        ProjectionTarget::IsEmpty => "IsEmpty".into(),
+        ProjectionTarget::Get(_) => "Get(...)".into(),
+        ProjectionTarget::Top => "Top".into(),
+        ProjectionTarget::Front => "Front".into(),
+        ProjectionTarget::Elements => "Elements".into(),
+        ProjectionTarget::AsStack => "AsStack".into(),
+        ProjectionTarget::AsQueue => "AsQueue".into(),
+        ProjectionTarget::BitRange(_) => "BitRange".into(),
+        ProjectionTarget::UserDefined(n) => format!("UserDefined({})", n),
+        ProjectionTarget::UserDefinedWithArg(n, _) => format!("UserDefined({}, ...)", n),
+    }
+}
+
+/// Recursively scan statements for `Expr::Projection` where the source is a state field.
+fn scan_for_projections_in_stmts(stmts: &[crate::ast::Statement], state_fields: &HashSet<String>, usage: &mut HashMap<String, HashSet<String>>) {
+    for stmt in stmts {
+        match stmt {
+            crate::ast::Statement::Expression(expr) => {
+                collect_projection_identifiers(expr, state_fields, usage);
+            }
+            crate::ast::Statement::Let { expr: Some(expr), .. } => {
+                collect_projection_identifiers(expr, state_fields, usage);
+            }
+            crate::ast::Statement::Assignment { expr, .. } => {
+                collect_projection_identifiers(expr, state_fields, usage);
+            }
+            crate::ast::Statement::Guarded { statements, .. } => {
+                scan_for_projections_in_stmts(statements, state_fields, usage);
+            }
+            crate::ast::Statement::Term { swan_song: Some(stmt), .. }
+            | crate::ast::Statement::TermBang { swan_song: Some(stmt), .. } => {
+                scan_for_projections_in_stmts(std::slice::from_ref(stmt.as_ref()), state_fields, usage);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Collect projection identifiers from an expression tree.
+fn collect_projection_identifiers(expr: &crate::ast::Expr, state_fields: &HashSet<String>, usage: &mut HashMap<String, HashSet<String>>) {
+    match expr {
+        crate::ast::Expr::Projection { source, target } => {
+            if let crate::ast::Expr::Identifier(name) = source.as_ref() {
+                if state_fields.contains(name) {
+                    usage.entry(name.clone()).or_default().insert(projection_target_name(target));
+                }
+            }
+            // Also recurse into source (in case it's a chain of projections)
+            collect_projection_identifiers(source, state_fields, usage);
+        }
+        crate::ast::Expr::Add(l, r) | crate::ast::Expr::Sub(l, r)
+        | crate::ast::Expr::Mul(l, r) | crate::ast::Expr::Div(l, r)
+        | crate::ast::Expr::Eq(l, r) | crate::ast::Expr::Ne(l, r)
+        | crate::ast::Expr::Lt(l, r) | crate::ast::Expr::Le(l, r)
+        | crate::ast::Expr::Gt(l, r) | crate::ast::Expr::Ge(l, r)
+        | crate::ast::Expr::And(l, r) | crate::ast::Expr::Or(l, r) => {
+            collect_projection_identifiers(l, state_fields, usage);
+            collect_projection_identifiers(r, state_fields, usage);
+        }
+        crate::ast::Expr::Call(_, args) => {
+            for arg in args {
+                collect_projection_identifiers(arg, state_fields, usage);
+            }
+        }
+        crate::ast::Expr::Cast(inner, _) => {
+            collect_projection_identifiers(inner, state_fields, usage);
+        }
+        crate::ast::Expr::FieldAccess(obj, _field_name) => {
+            collect_projection_identifiers(obj, state_fields, usage);
+        }
+        crate::ast::Expr::Block(_, last) => {
+            collect_projection_identifiers(last, state_fields, usage);
+        }
+        _ => {}
+    }
+}
+
+/// Assign a FieldMode to each state field based on projection usage.
+/// Fields with dual-lens access (≥2 different projection targets) get cache slots (LazyCached).
+/// Fields with unused projections get cache slots as well (conservative — better to have
+/// an unused cache slot than to recompute a deferred projection on every access).
+/// Everything else stays Always.
+/// Never elimination is deferred — the live_fields parameter is reserved for when
+/// the analysis is broadened to include all direct field references.
+pub fn assign_field_modes(
+    _live_fields: &HashSet<String>,
+    projection_usage: &HashMap<String, HashSet<String>>,
+) -> HashMap<String, super::FieldMode> {
+    let mut modes: HashMap<String, super::FieldMode> = HashMap::new();
+    let mut next_cache_index: usize = 0;
+
+    for (field, targets) in projection_usage {
+        if targets.len() >= 2 {
+            // Dual-lens access: field is accessed through ≥2 different projection targets.
+            // Conservatively assign a cache slot — if both lenses are active in a loop,
+            // the deferred projection is computed once and cached.
+            modes.insert(field.clone(), super::FieldMode::LazyCached {
+                cache_index: {
+                    let ci = next_cache_index;
+                    next_cache_index += 1;
+                    ci
+                },
+            });
+        } else {
+            // Single-lens access: no cache needed.
+            modes.insert(field.clone(), super::FieldMode::Always);
+        }
+    }
+
+    // Fields with no projection usage entries are left without a mode entry,
+    // which defaults to FieldMode::Always in apply_field_modes (all fields kept).
+
+    modes
+}
+
 /// Recursively scan a statement for FFI calls and collect identifiers from
 /// their arguments into the live set. This is the liveness seed that makes
 /// `frgn __print_float(energy)` keep `energy` (and transitively `x0`, `p00`, ...) alive.
@@ -1456,6 +1605,98 @@ mod tests {
         assert!(node.bounded_pre.is_some());
         assert!(node.increments.is_some());
         assert!(node.is_pure_body);
+    }
+
+    #[test]
+    fn test_compute_projection_usage_none() {
+        let program = Program {
+            items: vec![
+                make_state("x", Type::Int),
+                TopLevel::Transaction(Transaction {
+                    name: "t".into(),
+                    parameters: vec![],
+                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+                    is_async: false, is_reactive: false, reactor_speed: None, span: None,
+                    is_lambda: false, dependencies: vec![], attrs: vec![],
+                    modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let usage = compute_projection_usage(&program);
+        assert!(usage.is_empty(), "no projections → empty usage");
+    }
+
+    #[test]
+    fn test_compute_projection_usage_single() {
+        let program = Program {
+            items: vec![
+                make_state("x", Type::Int),
+                TopLevel::Transaction(Transaction {
+                    name: "t".into(),
+                    parameters: vec![],
+                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                    body: vec![
+                        Statement::Expression(Expr::Projection {
+                            source: Box::new(Expr::Identifier("x".into())),
+                            target: crate::ast::ProjectionTarget::Size,
+                        }),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_async: false, is_reactive: false, reactor_speed: None, span: None,
+                    is_lambda: false, dependencies: vec![], attrs: vec![],
+                    modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let usage = compute_projection_usage(&program);
+        assert_eq!(usage.len(), 1, "field x should have projection usage");
+        let targets = usage.get("x").expect("x should be in usage");
+        assert!(targets.contains("Size"), "x should have Size projection");
+        assert_eq!(targets.len(), 1, "only one projection target");
+    }
+
+    #[test]
+    fn test_assign_field_modes_single_lens() {
+        let mut usage: HashMap<String, HashSet<String>> = HashMap::new();
+        usage.insert("x".to_string(), {
+            let mut s = HashSet::new();
+            s.insert("Size".to_string());
+            s
+        });
+        let live: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let modes = assign_field_modes(&live, &usage);
+        let mode = modes.get("x").expect("x should have a mode");
+        assert_eq!(*mode, crate::analysis::FieldMode::Always, "single-lens → Always");
+    }
+
+    #[test]
+    fn test_assign_field_modes_dual_lens() {
+        let mut usage: HashMap<String, HashSet<String>> = HashMap::new();
+        usage.insert("x".to_string(), {
+            let mut s = HashSet::new();
+            s.insert("Ptr".to_string());
+            s.insert("Size".to_string());
+            s
+        });
+        let live: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let modes = assign_field_modes(&live, &usage);
+        let mode = modes.get("x").expect("x should have a mode");
+        assert_eq!(*mode, crate::analysis::FieldMode::LazyCached { cache_index: 0 }, "dual-lens → LazyCached");
+    }
+
+    #[test]
+    fn test_assign_field_modes_no_usage() {
+        let usage: HashMap<String, HashSet<String>> = HashMap::new();
+        let live: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let modes = assign_field_modes(&live, &usage);
+        assert!(modes.is_empty(), "no projection usage → no modes assigned (defaults to Always)");
     }
 }
 

@@ -665,6 +665,15 @@ pub struct LlvmBackend {
 
     // ── Type Universe (Phase 3.5) ──────────────────────────
     pub(crate) type_universe: Option<crate::type_universe::TypeUniverse>,
+
+    // ── Adaptive Layout (Phase 1) ──────────────────────────
+    /// Field mode for each state field (Always / LazyCached / Never).
+    /// Never fields are removed from %State; LazyCached fields get cache + valid-flag slots.
+    pub(crate) field_modes: HashMap<String, crate::analysis::FieldMode>,
+    /// Cache slot indices for LazyCached fields. Maps field name → (cache_idx, valid_idx)
+    /// where cache_idx is the %State index for the cached value and valid_idx is the
+    /// %State index for the valid-flag (i8).
+    pub(crate) cache_slots: HashMap<String, (usize, usize)>,
 }
 
 /// Configuration for embedded (bare-metal) LLVM codegen.
@@ -781,6 +790,8 @@ impl LlvmBackend {
             is_embedded: false,
             pending_async_await_count: 0,
             type_universe: None,
+            field_modes: HashMap::new(),
+            cache_slots: HashMap::new(),
         }
     }
 
@@ -1181,6 +1192,14 @@ impl LlvmBackend {
 
         self.exit_condition = program.exit_condition.clone();
         self.build_field_index(program);
+
+        // Phase 1: Apply adaptive layout — eliminate Never fields, append cache slots.
+        {
+            let live_fields = &analysis.transition_graph.live_fields;
+            let projection_usage = crate::analysis::transition_graph::compute_projection_usage(program);
+            self.apply_field_modes(live_fields, &projection_usage);
+        }
+
         // Inject synthetic __trg_epfd field if program has built-in triggers
         let has_builtin_trg = program.items.iter().any(|item| {
             if let TopLevel::Trigger(t) = item {
@@ -2424,6 +2443,49 @@ self.emit_declares(&mut out);
                     .insert(t.name.clone(), self.field_types.len());
                 self.field_types.push(self.llvm_type(&t.ty).to_string());
                 self.field_initializers.insert(t.name.clone(), None);
+            }
+        }
+    }
+
+    // ── Adaptive Layout — apply field modes ──────────────────
+    /// Apply field modes to the %State layout: remove Never fields, append cache slots.
+    /// Called after `build_field_index()` and after the transition graph is available.
+    pub(crate) fn apply_field_modes(&mut self, live_fields: &std::collections::HashSet<String>,
+        projection_usage: &std::collections::HashMap<String, std::collections::HashSet<String>>)
+    {
+        self.field_modes = crate::analysis::transition_graph::assign_field_modes(live_fields, projection_usage);
+        self.cache_slots.clear();
+
+        // Phase 1: Remove Never fields from field_index_map and field_types.
+        // We rebuild both from scratch to handle index shifting correctly.
+        let old_map = std::mem::take(&mut self.field_index_map);
+        let old_types = std::mem::take(&mut self.field_types);
+        self.field_index_map.reserve(old_map.len());
+        self.field_types.reserve(old_types.len());
+
+        // DEAD-FIELD-ELIMINATION: Disabled by default — only enable with a flag.
+        // The current live_fields computation is too conservative (only seeds from
+        // FFI, exit conditions, preconditions). Field elimination requires a broader
+        // "used in any transaction body" analysis. For now, ALL fields stay.
+        //
+        // When re-enabling: fields with FieldMode::Never or no entry in field_modes
+        // should be skipped here. All others get a shifted index.
+
+        for (name, _old_idx) in &old_map {
+            let new_idx = self.field_types.len();
+            let orig_type_idx = old_map.get(name).copied().unwrap_or(0);
+            self.field_index_map.insert(name.clone(), new_idx);
+            self.field_types.push(old_types[orig_type_idx].clone());
+        }
+
+        // Phase 2: Append cache slots for LazyCached fields.
+        for (name, mode) in &self.field_modes {
+            if let crate::analysis::FieldMode::LazyCached { cache_index: _ } = mode {
+                let cache_idx = self.field_types.len();
+                self.field_types.push("i64".to_string());  // cached value
+                let valid_idx = self.field_types.len();
+                self.field_types.push("i8".to_string());   // valid flag
+                self.cache_slots.insert(name.clone(), (cache_idx, valid_idx));
             }
         }
     }

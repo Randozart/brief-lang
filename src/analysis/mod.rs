@@ -16,3 +16,20 @@ pub mod region;
 pub mod schema_validator;
 pub mod transition_graph;
 pub mod watchdog;
+
+/// Determines how a state field behaves in the %State struct layout.
+/// Used by the Adaptive Layout Engine (Phase 1) to eliminate unused fields
+/// and allocate cache slots for meld-backed deferred projections.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FieldMode {
+    /// Field is used and accessed directly — always present in %State.
+    Always,
+    /// Field has deferred projections (e.g. `strlen#` for CString :> Size)
+    /// that are cached. Only used when both lenses are active in a hot loop.
+    LazyCached {
+        /// Index into the cache slot area appended after regular fields.
+        cache_index: usize,
+    },
+    /// Field is never accessed through any lens — eliminated from %State.
+    Never,
+}

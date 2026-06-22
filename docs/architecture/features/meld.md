@@ -3,8 +3,8 @@
 **Purpose:** Declare two types as mutually lens-compatible, enabling zero-cost casting and shared memory representation.
 
 **Date added:** 2026-06-22  
-**Phase:** 0 (Foundation) — AST, parser, TypeUniverse, typechecker  
-**Status:** Complete
+**Phase:** 1 (Adaptive Layout Engine) — FieldMode, projection usage, cache slots  
+**Status:** Core infrastructure complete; field elimination disabled (conservative)
 
 ## Syntax
 
@@ -83,10 +83,58 @@ New field `melds: HashMap<(String, String), MeldDeclaration>` in `TypeUniverse`.
 - 1 TypeUniverse test: registration and bidirectional lookup
 - 1 typechecker test: `is_cast_valid` for melded/non-melded custom types
 
+## Phase 1 — Adaptive Layout Engine
+
+### FieldMode Enum (`src/analysis/mod.rs`)
+
+```rust
+pub enum FieldMode {
+    Always,                              // Always present in %State
+    LazyCached { cache_index: usize },   // Cache slot + valid flag appended
+    Never,                               // Eliminated from %State
+}
+```
+
+### Projection Usage Analysis (`src/analysis/transition_graph.rs`)
+
+`compute_projection_usage()` scans all transaction bodies for `Expr::Projection` where the source is a state field identifier. Returns a map: field name → set of projection target strings.
+
+`assign_field_modes()` uses projection usage to assign `LazyCached` when a field has ≥2 distinct projection targets (dual-lens access). Single-lens fields get `Always`.
+
+### LLVM Backend Integration (`src/backend/llvm/mod.rs`)
+
+New fields on `LlvmBackend`:
+- `field_modes: HashMap<String, FieldMode>`
+- `cache_slots: HashMap<String, (usize, usize)>` — maps field name to `(cache_idx, valid_idx)`
+
+`apply_field_modes()` called after `build_field_index()`:
+1. Iterates all fields, keeps all fields (Never elimination disabled — conservative)
+2. For `LazyCached` fields: appends `{ i64, i8 }` to `field_types` (cache value + valid flag)
+3. Stores cache slot indices in `cache_slots`
+
+### emit_inline_init_stores() (`src/backend/llvm/emit_toplevel.rs`)
+
+Cache slots initialized to `{ 0, 0 }` (no value, not valid) after regular field initialization.
+
+### Key Design Decisions
+
+- **Never elimination disabled** by default because `live_fields` is too conservative (only seeds from FFI, exit conditions, preconditions — not direct field reads). When re-enabled, fields not in `live_fields` with no projection usage entry would be eliminated.
+- **Dual-lens detection** today is based on projection target count (≥2 targets = LazyCached). Future refinement: check if accesses occur in a hot loop body.
+- **Cache slots are NOT in `field_index_map`** — they're appended to `field_types` only. This keeps `pre_load_all_fields()` and field iteration loops from loading/storing cache values as if they were user fields.
+
+### Tests (Phase 1)
+
+- `test_compute_projection_usage_none` — no projections → empty usage
+- `test_compute_projection_usage_single` — single projection on state field detected
+- `test_assign_field_modes_single_lens` — single target → Always
+- `test_assign_field_modes_dual_lens` — two targets → LazyCached
+- `test_assign_field_modes_no_usage` — no usage → no mode assigned
+- `test_adaptive_layout_cache_slots_in_state` — %State output contains expected types
+
 ## Evaluation
 
 Not yet implemented. See Phase 2 of the meld implementation plan.
 
 ## Codegen
 
-Not yet implemented. See Phases 1-3 of the meld implementation plan.
+Phase 1: Cache slots are appended to `%State` and initialized to zero. Phase 2 (Chimera Projection Dispatch) will emit cache load/store logic.

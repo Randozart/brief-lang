@@ -5329,3 +5329,46 @@ let spec = crate::target_spec::TargetSpec {
         assert!(decl.is_some(), "inop! should be stored in backend.inop_decls");
         assert!(decl.unwrap().has_side_effects, "inop! should have has_side_effects = true");
     }
+
+    #[test]
+    fn test_adaptive_layout_cache_slots_in_state() {
+        // Verify that projection usage triggers cache slot appending to %State.
+        // Create a state field "x" with a transaction that applies projections.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".into(), ty: Type::Int, expr: None,
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                    constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".into(),
+                    parameters: vec![],
+                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                    body: vec![
+                        Statement::Expression(Expr::Projection {
+                            source: Box::new(Expr::Identifier("x".into())),
+                            target: ProjectionTarget::Size,
+                        }),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_async: false, is_reactive: false, reactor_speed: None,
+                    span: None, is_lambda: false, dependencies: vec![],
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        // With single-lens usage, no cache slots should be appended.
+        // %State should still be just `{ i64 }`
+        assert!(!output.contains("cache"), "single-lens → no cache slots in %State: {}", output);
+        assert!(backend.field_modes.is_empty() || backend.field_modes.values().all(|m| matches!(m, crate::analysis::FieldMode::Always)),
+            "single-lens → all fields Always");
+        assert!(backend.cache_slots.is_empty(), "single-lens → no cache slots");
+    }
