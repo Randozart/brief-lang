@@ -3,7 +3,7 @@
 
 let value: Int = 42;
 
-rct txn check_constraint [true][true] {
+rct txn check_constraint {
   let positive: Int <: [_ > 0] = value;
   let even: Int <: [_ % 2 == 0] = value;
   let in_range: Int <: [_ > 0 && _ < 100] = value;

@@ -1017,7 +1017,7 @@ fn run_build(
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1040,7 +1040,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1069,7 +1069,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend, None, None);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend, None, None);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1717,7 +1717,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
     let result: Option<PathBuf> = match backend.as_str() {
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, None, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan", None, emit_bindings_dir.clone()) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, false, None, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan", None, emit_bindings_dir.clone()) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -2174,19 +2174,20 @@ fn link_and_optimize(
      dead_info_disabled: bool,
      mmio_addresses: Option<HashMap<String, u64>>,
      pgo_generate: bool,
-     explain: bool,
-     prod_mode: bool,
-     simplify_budget: Option<u64>,
-     no_stdlib: bool,
-     stdlib_path: Option<PathBuf>,
-     safe_compile: bool,
-     macro_budget: Option<u64>,
-     emit_remarks: bool,
-     gpu_offload: bool,
-     gpu_backend: &str,
-     embedded_config: Option<EmbeddedConfig>,
-     emit_bindings_dir: Option<String>,
- ) -> Result<PathBuf, Box<dyn std::error::Error>> {
+      explain: bool,
+      dump_layout: bool,
+      prod_mode: bool,
+      simplify_budget: Option<u64>,
+      no_stdlib: bool,
+      stdlib_path: Option<PathBuf>,
+      safe_compile: bool,
+      macro_budget: Option<u64>,
+      emit_remarks: bool,
+      gpu_offload: bool,
+      gpu_backend: &str,
+      embedded_config: Option<EmbeddedConfig>,
+      emit_bindings_dir: Option<String>,
+  ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let is_gpu = is_gpu_extension(file_path);
     let is_embedded = is_embedded_extension(file_path);
     // Force GPU offload for .abv files
@@ -2429,6 +2430,7 @@ fn link_and_optimize(
         .with_schema_aliases(schema_aliases)
         .with_explain(explain)
         .with_emit_remarks(emit_remarks)
+        .with_dump_layout(dump_layout)
         .with_gpu_offload(gpu_offload)
         .with_gpu_backend(gpu_backend.to_string())
         .with_embedded_mode(is_embedded)
@@ -3550,7 +3552,7 @@ fn main() {
                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                     match ext {
                         "bv" | "sbv" | "ebv" | "sebv" | "abv" => {
-                            let result = run_llvm_compile(&path, out, None, strict, 256, false, None, true, None, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None);
+                            let result = run_llvm_compile(&path, out, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None);
                             match result {
                                 Ok(ll_path) => {
                                     println!("  LLVM IR emitted: {}", ll_path.display());
@@ -3608,6 +3610,7 @@ fn main() {
             let mut optimize_report = false;
             let mut optimize_size: Option<u64> = None;
             let mut dead_info_disabled = false;
+            let mut dump_layout = false;
             let mut hw_handoff: Option<String> = None;
             let mut hw_target: Option<String> = None;
             let mut target_dbv: Option<String> = None;
@@ -3641,6 +3644,9 @@ fn main() {
                 } else if arg == "--optimize-budget" && i + 1 < args.len() {
                     optimize_budget = Some(args[i + 1].parse::<u64>().unwrap_or(256));
                     i += 2;
+                } else if arg == "--layout" {
+                    dump_layout = true;
+                    i += 1;
                 } else if arg == "--optimize-report" {
                     optimize_report = true;
                     i += 1;
@@ -3709,7 +3715,7 @@ fn main() {
                     macro_budget = Some(u64::MAX);
                 }
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget, emit_remarks, gpu_offload, &gpu_backend, None, None);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, dump_layout, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget, emit_remarks, gpu_offload, &gpu_backend, None, None);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);

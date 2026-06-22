@@ -567,6 +567,7 @@ pub struct LlvmBackend {
     // ── Target & Spec ──────────────────────────────────────
     spec: Option<crate::target_spec::TargetSpec>,
     explain: bool,
+    dump_layout: bool,
 
     // ── State Fields ───────────────────────────────────────
     field_index_map: HashMap<String, usize>,
@@ -809,6 +810,7 @@ impl LlvmBackend {
             pending_metadata: String::new(),
             variant_disc: HashMap::new(),
             explain: false,
+            dump_layout: false,
             remarks: Vec::new(),
             emit_remarks: false,
             gpu_offload: false,
@@ -896,6 +898,33 @@ impl LlvmBackend {
     pub fn with_type_universe(mut self, tu: crate::type_universe::TypeUniverse) -> Self {
         self.type_universe = Some(tu);
         self
+    }
+
+    pub fn with_dump_layout(mut self, v: bool) -> Self {
+        self.dump_layout = v;
+        self
+    }
+
+    /// Produce a human-readable layout summary for all state fields.
+    pub fn dump_layout_str(&self) -> String {
+        let mut out = String::new();
+        out.push_str("\n=== Field Layout ===\n");
+        let mut field_names: Vec<&String> = self.field_index_map.keys().collect();
+        field_names.sort();
+        for name in &field_names {
+            let idx = self.field_index_map.get(*name).copied().unwrap_or(0);
+            let ty = self.field_types.get(idx).map(|s| s.as_str()).unwrap_or("?");
+            let mode = self.field_modes.get(*name)
+                .map(|m| format!("{:?}", m))
+                .unwrap_or_else(|| "Always".to_string());
+            out.push_str(&format!("  {} @[{}]: {} (mode: {})", name, idx, ty, mode));
+            if let Some(&(cache_idx, valid_idx)) = self.cache_slots.get(*name) {
+                out.push_str(&format!(" | cache: [{}](i64), valid: [{}](i8)", cache_idx, valid_idx));
+            }
+            out.push('\n');
+        }
+        out.push_str("=== End Layout ===\n");
+        out
     }
 
     pub fn gpu_backend(&self) -> &str {
@@ -2353,6 +2382,11 @@ self.emit_declares(&mut out);
         // Append any compiled SPIR-V kernel blobs to the output for embedding.
         if self.gpu_offload || !self.spirv_blobs.is_empty() {
             out.push_str(&self.emit_spirv_embeds());
+        }
+
+        // Phase 4: --layout diagnostic flag — print field layout after generation
+        if self.dump_layout {
+            eprintln!("{}", self.dump_layout_str());
         }
 
         out

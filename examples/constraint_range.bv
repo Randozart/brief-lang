@@ -3,7 +3,7 @@
 
 let score: Int = 0;
 
-rct txn process_score [true][true] {
+rct txn process_score {
   let valid: Int <: [0..100] = score;
   term print_int#(valid);
 };
