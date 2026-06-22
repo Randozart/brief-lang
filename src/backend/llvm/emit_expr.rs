@@ -4670,7 +4670,13 @@ impl LlvmBackend {
         let route = meld_decl.routes.iter().find(|r| r.accessor == target_name)?;
         let route_dest = route.dest_expr.clone();
 
-        self.emit_route_expression(out, &route_dest, src_val, &partner, indent)
+        let result = self.emit_route_expression(out, &route_dest, src_val, &partner, indent);
+        if let Some(ref reg) = result {
+            // The backing type is the meld partner — the source value is viewed through
+            // the custom_name lens but the actual bits are the partner type's bits.
+            self.mark_chimera(&reg.name, &partner);
+        }
+        result
     }
 
     /// Evaluate a meld route's destination expression, substituting the meld partner's
@@ -4728,6 +4734,20 @@ impl LlvmBackend {
             }
             _ => None,
         }
+    }
+
+    /// Phase 3: Decay a chimera value to its canonical type at a boundary.
+    /// When `target_ty` is `None`, assumes decay to the backing type (identity).
+    /// Real field-level materialization will be added per type pair.
+    pub(crate) fn emit_decay(&mut self, _out: &mut String, val: &TypedRegister,
+        _target_ty: Option<&Type>, _indent: &str) -> TypedRegister
+    {
+        if !self.is_chimera(&val.name) {
+            return val.clone();
+        }
+        // For now: identity decay (the backing value's bits are valid for any target)
+        // When materialization is implemented, derive fields from the backing value here.
+        val.clone()
     }
 
     /// Emit a direct projection on a value without going through the meld route check.

@@ -65,16 +65,8 @@ impl LlvmBackend {
                     // Store value to result slot, branch to post label
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);
-                        if let Some(rs) = self.callable_txn_result.clone() {
-                            self.store_i64_result(out, indent, &r, &rs);
-                        }
-                    }
-                    if let Some(ref pl) = self.callable_txn_post_label {
-                        writeln!(out, "{}br label %{}", indent, pl).ok();
-                    }
-                } else {
-                    if let Some(Some(v)) = values.first() {
-                        let r = self.emit_expr(out, v, indent);
+                        // Phase 3: Decay chimera return value at term boundary
+                        let r = self.emit_decay(out, &r, None, indent);
                         if self.fn_ret_ty == "i32" {
                             if r.ty == Type::Bool {
                                 let z = format!("%rz{}", self.txn_counter); self.txn_counter += 1;
@@ -125,6 +117,8 @@ impl LlvmBackend {
                     // Store value to result slot, branch to post label
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);
+                        // Phase 3: Decay chimera before storing to txn result slot
+                        let r = self.emit_decay(out, &r, None, indent);
                         if let Some(rs) = self.callable_txn_result.clone() {
                             self.store_i64_result(out, indent, &r, &rs);
                         }
@@ -137,6 +131,8 @@ impl LlvmBackend {
                     // instead of ret, so LLVM can unroll the loop.
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);
+                        // Phase 3: Decay chimera before storing to state
+                        let r = self.emit_decay(out, &r, None, indent);
                         self.store_i64_result(out, indent, &r, "%state");
                     }
                     writeln!(out, "{}br label %{}", indent, exit_label).ok();

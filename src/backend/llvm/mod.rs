@@ -674,6 +674,18 @@ pub struct LlvmBackend {
     /// where cache_idx is the %State index for the cached value and valid_idx is the
     /// %State index for the valid-flag (i8).
     pub(crate) cache_slots: HashMap<String, (usize, usize)>,
+
+    // ── Chimera tracking (Phase 3) ─────────────────────────
+    /// Tracks which SSA registers contain chimera values and their backing type.
+    /// Key is the LLVM SSA register name (e.g., "%t42"), value is (is_chimera, backing_type_name).
+    /// Used by emit_decay() to determine if boundary materialization is needed.
+    pub(crate) chimera_map: HashMap<String, ChimeraInfo>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ChimeraInfo {
+    pub is_chimera: bool,
+    pub backing_type: String,
 }
 
 /// Configuration for embedded (bare-metal) LLVM codegen.
@@ -792,6 +804,7 @@ impl LlvmBackend {
             type_universe: None,
             field_modes: HashMap::new(),
             cache_slots: HashMap::new(),
+            chimera_map: HashMap::new(),
         }
     }
 
@@ -2445,6 +2458,27 @@ self.emit_declares(&mut out);
                 self.field_initializers.insert(t.name.clone(), None);
             }
         }
+    }
+
+    // ── Chimera tracking (Phase 3) ──────────────────────────
+    /// Check if a register holds a chimera value.
+    pub(crate) fn is_chimera(&self, reg_name: &str) -> bool {
+        self.chimera_map.get(reg_name).map_or(false, |c| c.is_chimera)
+    }
+
+    /// Get the backing type of a chimera value, if any.
+    pub(crate) fn chimera_backing(&self, reg_name: &str) -> Option<&str> {
+        self.chimera_map.get(reg_name)
+            .filter(|c| c.is_chimera)
+            .map(|c| c.backing_type.as_str())
+    }
+
+    /// Mark a register as a chimera value with the given backing type.
+    pub(crate) fn mark_chimera(&mut self, reg_name: &str, backing_type: &str) {
+        self.chimera_map.insert(reg_name.to_string(), ChimeraInfo {
+            is_chimera: true,
+            backing_type: backing_type.to_string(),
+        });
     }
 
     // ── Adaptive Layout — apply field modes ──────────────────
