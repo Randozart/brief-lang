@@ -671,6 +671,47 @@ impl TypeChecker {
                 TopLevel::Assertion { .. } => {
                     // Assertions are compile-time only — skip in typechecker.
                 }
+                TopLevel::Meld(meld) => {
+                    // Phase 4: Validate meld declarations
+                    if meld.routes.is_empty() {
+                        // E003: Size mismatch without router
+                        let has_type_a = self.type_universe.as_ref()
+                            .and_then(|u| u.types.get(&meld.name_a)).is_some();
+                        let has_type_b = self.type_universe.as_ref()
+                            .and_then(|u| u.types.get(&meld.name_b)).is_some();
+                        if has_type_a && has_type_b {
+                            // Both types are known — check if they need explicit routes
+                            // (different struct field count implies size mismatch)
+                            let fields_a = self.struct_fields.get(&meld.name_a);
+                            let fields_b = self.struct_fields.get(&meld.name_b);
+                            match (fields_a, fields_b) {
+                                (Some(fa), Some(fb)) if fa.len() != fb.len() => {
+                                    let diag = crate::errors::Diagnostic::new(
+                                        "E003", crate::errors::Severity::Warning,
+                                        "meld types may need explicit routes",
+                                    ).with_explanation(&format!(
+                                        "'{}' has {} field(s) but '{}' has {} field(s). \
+                                        Without explicit routes, the compiler will use @/ bit-range matching \
+                                        which may produce unexpected results for fields in different positions.",
+                                        meld.name_a, fa.len(), meld.name_b, fb.len(),
+                                    )).with_hint(&format!(
+                                        "Add explicit routes: meld {} <:> {} {{ Ptr -> {}.ptr; Size -> {}.len; }};",
+                                        meld.name_a, meld.name_b, meld.name_b, meld.name_b,
+                                    ));
+                                    if let Some(span) = meld.span {
+                                        self.diagnostics.borrow_mut().push(diag.with_span(span));
+                                    } else {
+                                        self.diagnostics.borrow_mut().push(diag);
+                                    }
+                                }
+                                _ => {
+                                    // W002: Same-size types without explicit routes are fine
+                                    // (inference handles everything)
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
