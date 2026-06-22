@@ -1,0 +1,65 @@
+// meld-bridge — C ABI ↔ Rust ABI zero-cost bridge
+//
+// Two language runtimes share data with identical bit layouts but incompatible
+// type systems. Brief's meld proves structural equivalence at compile time.
+//
+// Library A (C):  struct { int64_t ptr; int64_t len; } = 16 bytes
+// Library B (Rust): struct { int64_t data; int64_t size; } = 16 bytes
+//
+// The meld proves these are the same 16 bytes — no serialization needed.
+// Without meld: manual field mapping (error-prone, must verify by hand)
+// With meld: compiler guarantees structural equivalence (zero-cost proof)
+//
+// Tag: --runtime (FFI call in hot loop body)
+
+#!exit accum == 1000;
+
+import "link/brief_rt.c";
+
+frgn consume_buffer(data: Int, size: Int) -> Int ;
+frgn print_int(n: Int) -> Bool ;
+
+// ── Two Struct Types, Identical Layout ───
+struct CBuffer {
+    ptr: Int,   // @/0..63
+    len: Int,   // @/64..127
+};
+
+struct RSBuffer {
+    data: Int,  // @/0..63 — same bits as CBuffer.ptr
+    size: Int,  // @/64..127 — same bits as CBuffer.len
+};
+
+// ── Zero-Cost Bridge ────────────────────
+// The compiler proves identical @/ bit-range layouts.
+// At the LLVM level: the cast is a no-op.
+meld CBuffer <:> RSBuffer;
+
+let accum: Int = 0;
+let raw_ptr: Int = 42;
+let raw_len: Int = 16;
+
+rct txn run [accum < 1000][accum == 1000] {
+    // Construct as C type, use as Rust type via meld
+    let buf: CBuffer = CBuffer { ptr: raw_ptr, len: raw_len };
+    let rs: RSBuffer = buf as RSBuffer;
+    let ok: Int = consume_buffer(rs.data, rs.size);
+    [ok != 0] { &accum = accum + 1; };
+
+    // Manual-equivalent path: construct as RS directly
+    let rs2: RSBuffer = RSBuffer { data: raw_ptr, size: raw_len };
+    let ok2: Int = consume_buffer(rs2.data, rs2.size);
+
+    // Both paths must produce the same result (structural identity)
+    // This assertion is compile-time proven by the meld declaration:
+    // mld CBuffer <:> RSBuffer → @/ ranges match → structurally equivalent
+    [ok != ok2] {
+        print_int#(0);  // Should never fire — meld proves equivalence
+    };
+
+    [accum % 200 == 0] {
+        print_int#(accum);
+    };
+
+    term;
+};

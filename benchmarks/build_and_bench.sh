@@ -68,6 +68,8 @@ TAG[iir_filter_runtime]=runtime
 TAG[ring_buffer_runtime]=runtime
 TAG[precompute_sum_runtime]=runtime
 TAG[binary_trees]=runtime
+TAG[meld-bridge]=runtime
+TAG[meld-bridge-sym]=runtime
 
 BENCHMARKS=(
     "iir_filter"
@@ -94,6 +96,8 @@ BENCHMARKS=(
     "queue_drain_idio"
     "interval_step"
     "gpu/saxpy"
+    "meld-bridge"
+    "meld-bridge-sym"
 )
 
 # ── BUILD FUNCTIONS ───────────────────────────────────────────────────

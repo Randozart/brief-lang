@@ -1152,6 +1152,32 @@ fn collect_state_identifiers(expr: &crate::ast::Expr, state_fields: &HashSet<Str
                 collect_state_identifiers(&arm.body, state_fields, out);
             }
         }
+        crate::ast::Expr::StructInstance(_, fields) => {
+            for (_field_name, val) in fields {
+                collect_state_identifiers(val, state_fields, out);
+            }
+        }
+        crate::ast::Expr::ObjectLiteral(fields) => {
+            for (_field_name, val) in fields {
+                collect_state_identifiers(val, state_fields, out);
+            }
+        }
+        crate::ast::Expr::MapLiteral(entries) => {
+            for (k, v) in entries {
+                collect_state_identifiers(k, state_fields, out);
+                collect_state_identifiers(v, state_fields, out);
+            }
+        }
+        crate::ast::Expr::SetLiteral(items) => {
+            for item in items {
+                collect_state_identifiers(item, state_fields, out);
+            }
+        }
+        crate::ast::Expr::IntrinsicCall { args, .. } => {
+            for arg in args {
+                collect_state_identifiers(arg, state_fields, out);
+            }
+        }
         _ => {}
     }
 }
