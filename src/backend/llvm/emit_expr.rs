@@ -4713,7 +4713,21 @@ impl LlvmBackend {
                 }
                 None
             }
-            // Pattern 3: projection on the partner type — "CString :> Size"
+            // Pattern 3: field access on the partner type — "CString.ptr"
+            Expr::FieldAccess(obj, field) => {
+                if let Expr::Identifier(n) = obj.as_ref() {
+                    if n == partner {
+                        // Substitute with the actual source value and emit the field
+                        // as the corresponding projection (Ptr, Size, etc.)
+                        self.emit_direct_projection(out, src_val, field, indent)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+            // Pattern 4: projection on the partner type — "CString :> Size"
             Expr::Projection { source: sub_source, target: sub_target } => {
                 let sub_name = match sub_source.as_ref() {
                     Expr::Identifier(n) => Some(n.clone()),

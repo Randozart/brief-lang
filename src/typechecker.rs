@@ -538,6 +538,11 @@ impl TypeChecker {
                 }
                 TopLevel::Inop(inop) => {
                     self.inop_decls.insert(inop.name.clone(), inop.clone());
+                    let errors = crate::analysis::bild_verifier::check_bild(inop);
+                    for err in &errors {
+                        let diag = err.to_diagnostic(&inop.name);
+                        self.diagnostics.borrow_mut().push(diag);
+                    }
                 }
                 TopLevel::Enum(enum_def) => {
                     for variant in &enum_def.variants {

@@ -1,0 +1,10 @@
+// meld-simple.bv — Basic meld declaration
+// Tests: parsing, TypeUniverse registration, typechecker acceptance
+
+meld Int <:> Float ;
+
+let x: Int = 42 ;
+
+defn main() -> Int {
+    term x as Int ;
+} ;

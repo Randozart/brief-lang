@@ -1,4 +1,5 @@
 pub mod address_space;
+pub mod bild_verifier;
 pub mod call_graph;
 pub mod cross_reference;
 pub mod dataflow;

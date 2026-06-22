@@ -1,0 +1,19 @@
+// meld-routes.bv — Meld with explicit route expressions
+// Tests: parser route parsing, TypeUniverse, route lookup
+
+frgn __print_int(n: Int) -> Bool;
+
+meld Int <:> Float {
+    Ptr -> Ptr;
+    Size -> Size;
+    Bytes -> Bytes;
+};
+
+defn main() -> Int {
+    let a: Int = 100;
+    let b: Float = a as Float;
+    // Access projection on the cast value
+    // (The cast identity means b:>Size == a:>Size in LLVM)
+    let s: Int = b :> Size;
+    term __print_int(s);
+};
