@@ -1193,13 +1193,6 @@ impl LlvmBackend {
         self.exit_condition = program.exit_condition.clone();
         self.build_field_index(program);
 
-        // Phase 1: Apply adaptive layout — eliminate Never fields, append cache slots.
-        {
-            let live_fields = &analysis.transition_graph.live_fields;
-            let projection_usage = crate::analysis::transition_graph::compute_projection_usage(program);
-            self.apply_field_modes(live_fields, &projection_usage);
-        }
-
         // Inject synthetic __trg_epfd field if program has built-in triggers
         let has_builtin_trg = program.items.iter().any(|item| {
             if let TopLevel::Trigger(t) = item {
@@ -1264,6 +1257,13 @@ impl LlvmBackend {
                 }
                 _ => {}
             }
+        }
+
+        // Phase 1: Apply adaptive layout — eliminate Never fields, append cache slots.
+        // Must run AFTER trigger_names is populated (above) to prevent trigger field elimination.
+        {
+            let projection_usage = crate::analysis::transition_graph::compute_projection_usage(program);
+            self.apply_field_modes(program, &analysis.transition_graph.live_fields, &projection_usage);
         }
 
         // Build variant → (enum_name, discriminant, field_count) mapping.
@@ -2450,32 +2450,41 @@ self.emit_declares(&mut out);
     // ── Adaptive Layout — apply field modes ──────────────────
     /// Apply field modes to the %State layout: remove Never fields, append cache slots.
     /// Called after `build_field_index()` and after the transition graph is available.
-    pub(crate) fn apply_field_modes(&mut self, live_fields: &std::collections::HashSet<String>,
+    pub(crate) fn apply_field_modes(&mut self, program: &Program,
+        live_fields: &std::collections::HashSet<String>,
         projection_usage: &std::collections::HashMap<String, std::collections::HashSet<String>>)
     {
-        self.field_modes = crate::analysis::transition_graph::assign_field_modes(live_fields, projection_usage);
+        let all_state_fields: std::collections::HashSet<String> = self.field_index_map.keys().cloned().collect();
+        let referenced_fields = crate::analysis::transition_graph::compute_referenced_fields(program);
+        self.field_modes = crate::analysis::transition_graph::assign_field_modes(
+            &all_state_fields, &referenced_fields, projection_usage);
+        // Triggers must never be eliminated — they're accessed by the event loop,
+        // not by txn body identifiers.
+        for name in &self.trigger_names {
+            self.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
+        }
         self.cache_slots.clear();
 
         // Phase 1: Remove Never fields from field_index_map and field_types.
-        // We rebuild both from scratch to handle index shifting correctly.
+        // Rebuild both from scratch to handle index shifting correctly.
         let old_map = std::mem::take(&mut self.field_index_map);
         let old_types = std::mem::take(&mut self.field_types);
         self.field_index_map.reserve(old_map.len());
         self.field_types.reserve(old_types.len());
 
-        // DEAD-FIELD-ELIMINATION: Disabled by default — only enable with a flag.
-        // The current live_fields computation is too conservative (only seeds from
-        // FFI, exit conditions, preconditions). Field elimination requires a broader
-        // "used in any transaction body" analysis. For now, ALL fields stay.
-        //
-        // When re-enabling: fields with FieldMode::Never or no entry in field_modes
-        // should be skipped here. All others get a shifted index.
-
         for (name, _old_idx) in &old_map {
-            let new_idx = self.field_types.len();
-            let orig_type_idx = old_map.get(name).copied().unwrap_or(0);
-            self.field_index_map.insert(name.clone(), new_idx);
-            self.field_types.push(old_types[orig_type_idx].clone());
+            let mode = self.field_modes.get(name).copied().unwrap_or(crate::analysis::FieldMode::Never);
+            match mode {
+                crate::analysis::FieldMode::Never => {
+                    // Eliminate this field from %State entirely
+                }
+                crate::analysis::FieldMode::Always | crate::analysis::FieldMode::LazyCached { .. } => {
+                    let new_idx = self.field_types.len();
+                    let orig_type_idx = old_map.get(name).copied().unwrap_or(0);
+                    self.field_index_map.insert(name.clone(), new_idx);
+                    self.field_types.push(old_types[orig_type_idx].clone());
+                }
+            }
         }
 
         // Phase 2: Append cache slots for LazyCached fields.

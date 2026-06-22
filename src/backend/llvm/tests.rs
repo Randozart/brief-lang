@@ -1193,6 +1193,15 @@ fn empty_program() -> Program {
                         span: None, watchdog: None,
                     },
                     body: vec![
+                        // Reference the field to prevent elimination (Phase 1 dead-field)
+                        Statement::Let {
+                            name: "_".to_string(),
+                            ty: None,
+                            expr: Some(Expr::Identifier("s".to_string())),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            constraint: None,
+                        },
                         Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
                     is_async: false, is_reactive: false,
@@ -2529,6 +2538,26 @@ let spec = crate::target_spec::TargetSpec {
                     span: None,
                     attrs: Vec::new(),
                     constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".to_string(),
+                    parameters: vec![],
+                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                    body: vec![
+                        Statement::Let {
+                            name: "_".to_string(),
+                            ty: None,
+                            expr: Some(Expr::Identifier("led_0".to_string())),
+                            address: None, address_expr: None, bit_range: None,
+                            is_override: false, modifiers: vec![],
+                            constraint: None,
+                        },
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_async: false, is_reactive: false, reactor_speed: None,
+                    span: None, is_lambda: false, dependencies: vec![],
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: Vec::new(), output_type: None,
                 }),
             ],
             ..empty_program()

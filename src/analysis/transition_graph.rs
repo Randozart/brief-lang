@@ -1021,40 +1021,166 @@ fn collect_projection_identifiers(expr: &crate::ast::Expr, state_fields: &HashSe
     }
 }
 
-/// Assign a FieldMode to each state field based on projection usage.
-/// Fields with dual-lens access (≥2 different projection targets) get cache slots (LazyCached).
-/// Fields with unused projections get cache slots as well (conservative — better to have
-/// an unused cache slot than to recompute a deferred projection on every access).
-/// Everything else stays Always.
-/// Never elimination is deferred — the live_fields parameter is reserved for when
-/// the analysis is broadened to include all direct field references.
+/// Compute the set of state fields that are directly referenced (read or written)
+/// anywhere in transaction bodies or definition bodies. This is broader than
+/// `compute_live_fields` — it catches plain field reads like `&x = x + 1` that
+/// don't involve FFI, exit conditions, or preconditions.
+pub fn compute_referenced_fields(program: &crate::ast::Program) -> HashSet<String> {
+    let state_fields: HashSet<String> = program.items.iter()
+        .filter_map(|item| if let crate::ast::TopLevel::StateDecl(s) = item { Some(s.name.clone()) } else { None })
+        .collect();
+    let mut referenced: HashSet<String> = HashSet::new();
+
+    for item in &program.items {
+        let body: Option<&[crate::ast::Statement]> = match item {
+            crate::ast::TopLevel::Transaction(t) => Some(&t.body),
+            crate::ast::TopLevel::Definition(d) => Some(&d.body),
+            _ => None,
+        };
+        if let Some(body) = body {
+            scan_for_state_identifiers(body, &state_fields, &mut referenced);
+        }
+    }
+
+    referenced
+}
+
+fn scan_for_state_identifiers(stmts: &[crate::ast::Statement], state_fields: &HashSet<String>, out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            crate::ast::Statement::Expression(expr)
+            | crate::ast::Statement::Let { expr: Some(expr), .. } => {
+                collect_state_identifiers(expr, state_fields, out);
+            }
+            crate::ast::Statement::Assignment { lhs, expr, .. } => {
+                // Check LHS for state field references (including nested like ListIndex)
+                collect_state_identifiers(lhs, state_fields, out);
+                collect_state_identifiers(expr, state_fields, out);
+            }
+            crate::ast::Statement::Guarded { statements, .. } => {
+                scan_for_state_identifiers(statements, state_fields, out);
+            }
+            crate::ast::Statement::Term { values, swan_song, .. }
+            | crate::ast::Statement::TermBang { values, swan_song, .. } => {
+                for v in values.iter().flatten() {
+                    collect_state_identifiers(v, state_fields, out);
+                }
+                if let Some(ss) = swan_song {
+                    scan_for_state_identifiers(std::slice::from_ref(ss.as_ref()), state_fields, out);
+                }
+            }
+            crate::ast::Statement::Escape(Some(expr)) => {
+                collect_state_identifiers(expr, state_fields, out);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_state_identifiers(expr: &crate::ast::Expr, state_fields: &HashSet<String>, out: &mut HashSet<String>) {
+    match expr {
+        crate::ast::Expr::Identifier(name) => {
+            if state_fields.contains(name) {
+                out.insert(name.clone());
+            }
+        }
+        crate::ast::Expr::Add(l, r) | crate::ast::Expr::Sub(l, r)
+        | crate::ast::Expr::Mul(l, r) | crate::ast::Expr::Div(l, r)
+        | crate::ast::Expr::Eq(l, r) | crate::ast::Expr::Ne(l, r)
+        | crate::ast::Expr::Lt(l, r) | crate::ast::Expr::Le(l, r)
+        | crate::ast::Expr::Gt(l, r) | crate::ast::Expr::Ge(l, r)
+        | crate::ast::Expr::And(l, r) | crate::ast::Expr::Or(l, r) => {
+            collect_state_identifiers(l, state_fields, out);
+            collect_state_identifiers(r, state_fields, out);
+        }
+        crate::ast::Expr::Not(inner) | crate::ast::Expr::Neg(inner)
+        | crate::ast::Expr::Cast(inner, _) => {
+            collect_state_identifiers(inner, state_fields, out);
+        }
+        crate::ast::Expr::PriorState(_name) => {
+            // PriorState is a string reference to a previous value — not a state field ref.
+        }
+        crate::ast::Expr::Projection { source, .. } => {
+            collect_state_identifiers(source, state_fields, out);
+        }
+        crate::ast::Expr::Call(_, args) => {
+            for arg in args {
+                collect_state_identifiers(arg, state_fields, out);
+            }
+        }
+        crate::ast::Expr::FieldAccess(obj, _) => {
+            collect_state_identifiers(obj, state_fields, out);
+        }
+        crate::ast::Expr::ListIndex(obj, idx) => {
+            collect_state_identifiers(obj, state_fields, out);
+            collect_state_identifiers(idx, state_fields, out);
+        }
+        crate::ast::Expr::Slice { value, start, end, stride, mask } => {
+            collect_state_identifiers(value, state_fields, out);
+            if let Some(s) = start { collect_state_identifiers(s, state_fields, out); }
+            if let Some(e) = end { collect_state_identifiers(e, state_fields, out); }
+            if let Some(s) = stride { collect_state_identifiers(s, state_fields, out); }
+            if let Some(m) = mask { collect_state_identifiers(m, state_fields, out); }
+        }
+        crate::ast::Expr::OwnedRef(name) => {
+            if state_fields.contains(name) {
+                out.insert(name.clone());
+            }
+        }
+        crate::ast::Expr::Block(_, last) => {
+            collect_state_identifiers(last, state_fields, out);
+        }
+        crate::ast::Expr::Tuple(exprs) | crate::ast::Expr::ListLiteral(exprs) => {
+            for e in exprs {
+                collect_state_identifiers(e, state_fields, out);
+            }
+        }
+        crate::ast::Expr::Match { value, arms } => {
+            collect_state_identifiers(value, state_fields, out);
+            for arm in arms {
+                collect_state_identifiers(&arm.body, state_fields, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Assign a FieldMode to each state field based on liveness, referencedness, and projection usage.
+/// Fields that are never referenced anywhere in any transaction body → Never (eliminated).
+/// Fields with dual-lens access (≥2 different projection targets) → LazyCached.
+/// Everything else → Always.
 pub fn assign_field_modes(
-    _live_fields: &HashSet<String>,
+    all_state_fields: &HashSet<String>,
+    referenced_fields: &HashSet<String>,
     projection_usage: &HashMap<String, HashSet<String>>,
 ) -> HashMap<String, super::FieldMode> {
     let mut modes: HashMap<String, super::FieldMode> = HashMap::new();
     let mut next_cache_index: usize = 0;
 
-    for (field, targets) in projection_usage {
-        if targets.len() >= 2 {
-            // Dual-lens access: field is accessed through ≥2 different projection targets.
-            // Conservatively assign a cache slot — if both lenses are active in a loop,
-            // the deferred projection is computed once and cached.
-            modes.insert(field.clone(), super::FieldMode::LazyCached {
-                cache_index: {
-                    let ci = next_cache_index;
-                    next_cache_index += 1;
-                    ci
-                },
-            });
-        } else {
-            // Single-lens access: no cache needed.
+    for field in all_state_fields {
+        let usage = projection_usage.get(field);
+        if let Some(targets) = usage {
+            if targets.len() >= 2 {
+                // Dual-lens access: cache slot needed.
+                modes.insert(field.clone(), super::FieldMode::LazyCached {
+                    cache_index: {
+                        let ci = next_cache_index;
+                        next_cache_index += 1;
+                        ci
+                    },
+                });
+                continue;
+            }
+        }
+
+        // Check if field is referenced anywhere in transaction bodies
+        if referenced_fields.contains(field) {
             modes.insert(field.clone(), super::FieldMode::Always);
+        } else {
+            // Not referenced at all — safe to eliminate
+            modes.insert(field.clone(), super::FieldMode::Never);
         }
     }
-
-    // Fields with no projection usage entries are left without a mode entry,
-    // which defaults to FieldMode::Always in apply_field_modes (all fields kept).
 
     modes
 }
@@ -1670,10 +1796,11 @@ mod tests {
             s.insert("Size".to_string());
             s
         });
-        let live: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
-        let modes = assign_field_modes(&live, &usage);
+        let all: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let referenced: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let modes = assign_field_modes(&all, &referenced, &usage);
         let mode = modes.get("x").expect("x should have a mode");
-        assert_eq!(*mode, crate::analysis::FieldMode::Always, "single-lens → Always");
+        assert_eq!(*mode, crate::analysis::FieldMode::Always, "single-lens + referenced → Always");
     }
 
     #[test]
@@ -1685,18 +1812,31 @@ mod tests {
             s.insert("Size".to_string());
             s
         });
-        let live: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
-        let modes = assign_field_modes(&live, &usage);
+        let all: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let referenced: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let modes = assign_field_modes(&all, &referenced, &usage);
         let mode = modes.get("x").expect("x should have a mode");
         assert_eq!(*mode, crate::analysis::FieldMode::LazyCached { cache_index: 0 }, "dual-lens → LazyCached");
     }
 
     #[test]
-    fn test_assign_field_modes_no_usage() {
+    fn test_assign_field_modes_no_usage_unreferenced() {
         let usage: HashMap<String, HashSet<String>> = HashMap::new();
-        let live: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
-        let modes = assign_field_modes(&live, &usage);
-        assert!(modes.is_empty(), "no projection usage → no modes assigned (defaults to Always)");
+        let all: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let referenced: HashSet<String> = HashSet::new(); // x is NOT referenced
+        let modes = assign_field_modes(&all, &referenced, &usage);
+        let mode = modes.get("x").expect("x should have a mode");
+        assert_eq!(*mode, crate::analysis::FieldMode::Never, "unreferenced + no projection → Never");
+    }
+
+    #[test]
+    fn test_assign_field_modes_no_usage_referenced() {
+        let usage: HashMap<String, HashSet<String>> = HashMap::new();
+        let all: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect();
+        let referenced: HashSet<String> = ["x"].iter().map(|s| s.to_string()).collect(); // x IS referenced
+        let modes = assign_field_modes(&all, &referenced, &usage);
+        let mode = modes.get("x").expect("x should have a mode");
+        assert_eq!(*mode, crate::analysis::FieldMode::Always, "referenced + no projection → Always");
     }
 }
 
