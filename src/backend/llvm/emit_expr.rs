@@ -2499,9 +2499,13 @@ impl LlvmBackend {
             }
             // ── Projection ──────────────────────────────────────
             Expr::Projection { source, target } => {
-                let src_val = self.emit_expr(out, source, indent);
-                // Phase 2: Check if the source type has a meld route for this projection target.
+                let src_val = self.emit_expr(out, &*source, indent);
+                // Phase 2: Check if this is a cached projection (Hot Dual path).
                 let target_name = crate::analysis::transition_graph::projection_target_name(target);
+                if let Some(tr) = self.try_cached_projection(out, source.as_ref(), &src_val, &target_name, indent) {
+                    return tr;
+                }
+                // Phase 2: Check if the source type has a meld route for this projection target.
                 if let Some(tr) = self.try_meld_projection(out, &src_val, &target_name, indent) {
                     return tr;
                 }
@@ -4577,6 +4581,70 @@ impl LlvmBackend {
             _ => return None,
         };
         Some(tr)
+    }
+
+    /// Phase 2: Check if the source expression is a state field with a cache slot for this
+    /// projection target. If found, emit the Hot Dual memory path: check cache_valid,
+    /// load cached value or compute + store.
+    pub(crate) fn try_cached_projection(&mut self, out: &mut String, source_expr: &Expr,
+        src_val: &TypedRegister, target_name: &str, indent: &str) -> Option<TypedRegister>
+    {
+        // Extract the field name from the source expression (must be a state field identifier)
+        let field_name = match source_expr {
+            Expr::Identifier(n) => n.clone(),
+            _ => return None,
+        };
+        // Check if this field has a cache slot
+        let &(cache_idx, valid_idx) = self.cache_slots.get(&field_name)?;
+
+        let v = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
+        let valid_gep = format!("%cvp{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+            indent, valid_gep, valid_idx).ok();
+        let valid_load = format!("%cvv{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, valid_load, valid_gep).ok();
+        let valid_cond = format!("%cvc{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, valid_cond, valid_load).ok();
+
+        let hit_label = format!(".chit{}", self.txn_counter);
+        let miss_label = format!(".cmiss{}", self.txn_counter);
+        let merge_label = format!(".cmerge{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, valid_cond, hit_label, miss_label).ok();
+        writeln!(out, "{}:", hit_label).ok();
+        let cache_gep = format!("%cve{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+            indent, cache_gep, cache_idx).ok();
+        let cache_val = format!("%cvv{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, cache_val, cache_gep).ok();
+        writeln!(out, "{}br label %{}", indent, merge_label).ok();
+        writeln!(out, "{}:", miss_label).ok();
+        // Compute the projection value — reuses the source value as-is
+        writeln!(out, "{}{} = add i64 0, {}", indent, v, src_val.name).ok();
+        // Store the computed value in the cache and set valid flag
+        let store_gep = format!("%cse{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+            indent, store_gep, cache_idx).ok();
+        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, v, store_gep).ok();
+        let valid_store_gep = format!("%csve{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+            indent, valid_store_gep, valid_idx).ok();
+        writeln!(out, "{}store i8 1, i8* {}, align 1", indent, valid_store_gep).ok();
+        writeln!(out, "{}br label %{}", indent, merge_label).ok();
+        writeln!(out, "{}:", merge_label).ok();
+        let phi_reg = format!("%cp{}", self.txn_counter);
+        self.txn_counter += 1;
+        writeln!(out, "{}{} = phi i64 [ {}, %{} ], [ {}, %{} ]",
+            indent, phi_reg, cache_val, hit_label, v, miss_label).ok();
+        Some(TypedRegister { name: phi_reg, ty: Type::Int })
     }
 
     /// Phase 2: Check if the source type has a meld route for the given projection target.

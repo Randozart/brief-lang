@@ -5401,3 +5401,51 @@ let spec = crate::target_spec::TargetSpec {
             "single-lens → all fields Always");
         assert!(backend.cache_slots.is_empty(), "single-lens → no cache slots");
     }
+
+    #[test]
+    fn test_cached_projection_hot_dual_path() {
+        // Verify that dual-lens projection usage generates cache-aware Hot Dual IR.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".into(), ty: Type::Int, expr: None,
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                    constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "t".into(),
+                    parameters: vec![],
+                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                    body: vec![
+                        // Apply two different projections to create dual-lens usage
+                        Statement::Expression(Expr::Projection {
+                            source: Box::new(Expr::Identifier("x".into())),
+                            target: ProjectionTarget::Size,
+                        }),
+                        Statement::Expression(Expr::Projection {
+                            source: Box::new(Expr::Identifier("x".into())),
+                            target: ProjectionTarget::Ptr,
+                        }),
+                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                    ],
+                    is_async: false, is_reactive: false, reactor_speed: None,
+                    span: None, is_lambda: false, dependencies: vec![],
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: Vec::new(), output_type: None,
+                }),
+            ],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        // With dual-lens usage, cache slots should be appended and cache IR emitted.
+        assert!(backend.cache_slots.contains_key("x"),
+            "dual-lens → cache slots for x: {:?}", backend.cache_slots);
+        assert!(output.contains("icmp ne i8"),
+            "Hot Dual path should have cache_valid check (icmp ne i8): {}", output);
+        assert!(output.contains("phi i64"),
+            "Hot Dual path should have phi to merge cached vs computed: {}", output);
+    }
