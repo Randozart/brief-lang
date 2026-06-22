@@ -926,7 +926,7 @@ pub fn compute_projection_usage(program: &crate::ast::Program) -> HashMap<String
     usage
 }
 
-fn projection_target_name(target: &crate::ast::ProjectionTarget) -> String {
+pub fn projection_target_name(target: &crate::ast::ProjectionTarget) -> String {
     use crate::ast::ProjectionTarget;
     match target {
         ProjectionTarget::Size => "Size".into(),

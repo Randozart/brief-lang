@@ -2500,6 +2500,11 @@ impl LlvmBackend {
             // ── Projection ──────────────────────────────────────
             Expr::Projection { source, target } => {
                 let src_val = self.emit_expr(out, source, indent);
+                // Phase 2: Check if the source type has a meld route for this projection target.
+                let target_name = crate::analysis::transition_graph::projection_target_name(target);
+                if let Some(tr) = self.try_meld_projection(out, &src_val, &target_name, indent) {
+                    return tr;
+                }
                 match target {
                     ProjectionTarget::Size => {
                         if matches!(source.as_ref(),
@@ -4572,5 +4577,15 @@ impl LlvmBackend {
             _ => return None,
         };
         Some(tr)
+    }
+
+    /// Phase 2: Check if the source type has a meld route for the given projection target.
+    /// Currently a structural hook — returns None to fall through to default projection
+    /// dispatch. Route expression evaluation (substituting type references with SSA registers)
+    /// will be implemented in a follow-up.
+    pub(crate) fn try_meld_projection(&mut self, _out: &mut String, _src_val: &TypedRegister,
+        _target_name: &str, _indent: &str) -> Option<TypedRegister>
+    {
+        None
     }
 }

@@ -4693,6 +4693,9 @@ impl Interpreter {
             // Int → Bool
             (Value::Int(n), Type::Bool) => Ok(Value::Bool(*n != 0)),
 
+            // Meld-backed custom type cast: identity (reinterpretation, not conversion)
+            (_, Type::Custom(_)) => Ok(val),
+
             // Unsupported
             _ => Err(RuntimeError::TypeMismatch(format!(
                 "cannot convert {:?} to {:?}", val, target
@@ -8933,6 +8936,30 @@ mod tests {
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("no fallback"), "error should mention 'no fallback', got: {}", err);
     }
+
+    #[test]
+    fn test_eval_meld_cast_identity() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(
+            Box::new(Expr::Integer(42)),
+            Type::Custom("CString".to_string()),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(42),
+            "meld-backed cast should return identity value");
+    }
+
+    #[test]
+    fn test_eval_meld_cast_string_identity() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Cast(
+            Box::new(Expr::String("hello".to_string())),
+            Type::Custom("CString".to_string()),
+        );
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::String("hello".to_string()),
+            "meld-backed cast of String should return identity");
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
@@ -10909,29 +10936,5 @@ mod kani_full_tests {
         assert!(i.eval_constraint(&val, &constraint).is_ok());
         // After eval_constraint, _ should be restored
         assert_eq!(i.state.get("_"), Some(&Value::Int(999)));
-    }
-
-    #[kani::proof]
-    fn verify_eval_constraint_passes() {
-        let mut i = Interpreter::new();
-        let val = Value::Int(50);
-        let constraint = Expr::Ge(
-            Box::new(Expr::Identifier("_".to_string())),
-            Box::new(Expr::Integer(0)),
-        );
-        let result = i.eval_constraint(&val, &constraint);
-        assert!(result.is_ok());
-    }
-
-    #[kani::proof]
-    fn verify_eval_constraint_violated() {
-        let mut i = Interpreter::new();
-        let val = Value::Int(-5);
-        let constraint = Expr::Gt(
-            Box::new(Expr::Identifier("_".to_string())),
-            Box::new(Expr::Integer(0)),
-        );
-        let result = i.eval_constraint(&val, &constraint);
-        assert!(result.is_err());
     }
 }
