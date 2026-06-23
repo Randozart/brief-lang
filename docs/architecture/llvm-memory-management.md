@@ -13,11 +13,17 @@ memory traffic entirely for the common case. Heap allocation (`malloc`)
 is reserved exclusively for runtime-sized dynamic structures (collections,
 strings, enum variants).
 
-## 1. Stack-Allocated State
+Contracts (`[pre][post]`) are not a correctness tax — they provide the
+bound and liveness information that enables every optimization below.
+Without contracts, the compiler would need runtime guards; with contracts,
+it proves at compile time what can live on the stack, what can be
+scalarized, and what can be precomputed.
+
+## 1. Foundation: Stack-Allocated State
 
 Every `main()` entry allocates `%State` via `alloca`:
 
-```
+```llvm
 %state = alloca %State, align 8
 ```
 
@@ -28,43 +34,198 @@ Sources:
 - `src/backend/llvm/loop_engine.rs:1285` (pure counter)
 - `src/backend/llvm/emit_toplevel.rs:1374` (init_state body)
 
-Because `%State` is stack-allocated, LLVM's `mem2reg` can promote fields
-to SSA virtual registers. The `noalias nocapture` attribute on `%State*`
-parameters (`mod.rs:419`) ensures LLVM sees no aliasing, enabling GVN
-and LICM.
+### 1.1 `noalias nocapture` — Critical SROA Enabler
 
-### Three SROA Paths
+Every function that receives `%State*` annotates it as
+`ptr noalias nocapture`:
 
-The backend selects a codegen strategy based on body structure:
+- `emit_toplevel.rs:710` — generic state parameter emission
+- `emit_toplevel.rs:1124` — precondition functions (`@pre_*`)
+- `emit_toplevel.rs:1149` — async body functions
+- `emit_toplevel.rs:1182,1223` — fused and composed functions
+- `dispatch.rs:26,139` — `reactor_tick` (sequential and parallel)
+- `loop_engine.rs:1306` — `step()` function (trg dirty-flag path)
 
-| Path | Condition | Strategy |
-|------|-----------|----------|
-| **A005a** (SSA insertvalue) | Straight-line or provably linear body | `extractvalue`/`insertvalue` chain on a single `%State` SSA register. LLVM's SROA decomposes to scalars. `loop_engine.rs:362,412-461` |
-| **A005b** (Memory GEP) | Non-linear body with branching guards | Per-field `GEP` + `load`/`store`. Counter uses phi induction variable. `loop_engine.rs:571-659` |
-| **A005c** (Pure counter) | Compile-time constant bound, pure body | Single `store i64 <total_value>` into counter, then `ret`. O(1) store. `loop_engine.rs:1282-1292` |
+The `noalias` attribute tells LLVM's alias analysis passes that no other
+pointer aliases `%State`, enabling GVN to eliminate redundant loads.
+The `nocapture` attribute tells LLVM the pointer never escapes — all
+uses are within the function, enabling SROA to decompose `%State` into
+scalars. Without these attributes, the entire stack-based strategy
+collapses (`mod.rs:416-430`).
 
-### Pre-extraction
+### 1.2 Path Selection Tree
 
-Before the body loop, all float fields are extracted into native float
+The backend selects a codegen strategy at `mod.rs:1833-1860` by walking
+a decision tree: all-const inputs within budget → precompute; else check
+single foldable txn → pure counter or SSA or memory GEP; else multi-txn
+all-pure fold; else SSA register pipeline; else enum dispatch; else
+reactor tick loop.
+
+| Code | Condition | Memory Strategy |
+|------|-----------|-----------------|
+| **A000** | All-const inputs within budget | No runtime loop — `GEP + store` per final value. `mod.rs:1243-1260`, `emit_expr.rs:4448-4485` |
+| **A005a** (SSA insertvalue) | Straight-line or provably linear body | `extractvalue`/`insertvalue` chain on a single `%State` SSA register. LLVM SROA decomposes to scalars. `loop_engine.rs:362,412-461` |
+| **A005b** (Memory GEP) | Non-linear body with branching guards | Per-field `GEP + load/store`, counter phi. `loop_engine.rs:571-659` |
+| **A005c** (Pure counter) | Constant bound + pure body | Single `store i64 <total>` into counter, `ret`. `loop_engine.rs:1282-1292` |
+| **A006** (SSA pipeline) | Sequential bounded multi-txn | Per-field GEP pre-load, direct SSA loop with phi induction. `loop_engine.rs:678-860` |
+
+### 1.3 Counter Phi Structure
+
+The counter phi is the induction variable that drives every counted loop.
+Its structure varies by path:
+
+**SSA phi** (`emit_folded_loop`, `loop_engine.rs:304-349`, `use_phi=true`):
+```llvm
+_phdr:        ; header
+  %phi = phi i64 [ 0, %entry ], [ %next, %latch ]
+  %cmp = icmp slt i64 %phi, %bound
+  br i1 %cmp, label %body, label %done
+_body:
+  store i64 <body-counter-val>, ptr %state_slot
+  br label %latch
+_latch:
+  %next = add i64 %phi, 1
+  br label %phdr, !llvm.loop !N
+```
+
+**Memory/GEP phi** (`emit_folded_memory_main`, `loop_engine.rs:626-628`):
+Counter lives in a `phi i64` alone — body does `pre_load_all_fields` and
+writes counter back through GEP+store. The phi eliminates one GEP load +
+one GEP store per iteration for the counter field.
+
+**SSA direct loop** (`emit_ssa_main`, `loop_engine.rs:714-719`):
+The phi induction variable drives the body directly; no precondition
+check needed because the phi range guarantees the contract.
+
+### 1.4 Pre-extraction
+
+Before any body loop, float fields are extracted into native float
 registers (`pre_extract_float_fields`, `loop_engine.rs:212-226`) and
-all Int/Bool/Char/String fields into old-value maps (`pre_extract_int_fields`,
+Int/Bool/Char/String fields into old-value maps (`pre_extract_int_fields`,
 `loop_engine.rs:232-246`). This eliminates the per-reference `extractvalue`
-chain that inflated IR by ~5x.
+chain that inflated IR by ~5x for field-heavy benchmarks.
 
-### Per-Field GEP Loading (Memory Path)
+### 1.5 Per-Field GEP Loading (Memory Path)
 
 `pre_load_all_fields()` (`loop_engine.rs:252-270`) loads ALL state fields
 at tick entry via per-field `GEP`:
 
-```
+```llvm
 %gep_X = getelementptr inbounds %State, ptr %state, i32 0, i32 <field_idx>
 %X_old = load <ty>, <ty>* %gep_X, align <N>, !tbaa !<N>
 ```
 
 Identifier expressions read from these pre-loaded registers directly
-(`emit_expr.rs:64-98`) — zero memory traffic.
+(`emit_expr.rs:64-98`) — zero memory traffic for the hot path.
 
-## 2. Heap Allocation (Dynamic Structures Only)
+## 2. Precomputation (A000)
+
+When the region analyzer proves the entire program is precomputable within
+`--optimize-budget`, `emit_precomputed_main()` (`emit_expr.rs:4448-4485`)
+emits a `main()` with **no runtime loop at all**:
+
+```llvm
+define i32 @main() {
+  %state = alloca %State, align 8
+  call void @init_state(ptr %state)
+  %gp_counter = getelementptr inbounds %State, ptr %state, i32 0, i32 2
+  store i64 50000000, i64* %gp_counter    ; O(1) final value
+  ret i32 0
+}
+```
+
+This is the most extreme memory optimization: **zero runtime memory traffic
+because there is no runtime.** Detection at `mod.rs:1243-1260`:
+`analysis.region_analyzer.is_fully_precomputable(self.optimize_budget)`.
+
+When the budget is exceeded but no FFI exists in the hot path, the compiler
+warns "budget exceeded by composed chain product" and falls through to a
+runtime loop. When FFI exists, it warns "FFI calls prevent compile-time
+evaluation."
+
+---
+
+## 3. Composed Chain Folding
+
+Chains of reactive transactions that are **all-internal** (no FFI, no
+external triggers) have their final counter values stored directly as
+O(1) stores inside enum dispatch case arms rather than calling a folded
+loop (`mod.rs:1704-1718`):
+
+```llvm
+case_trg_1:     ; trigger value = 1
+  store i64 10, i64* %counter    ; all-internal: store and done
+  ret i32 0
+case_trg_2:     ; trigger value = 2
+  store i64 20, i64* %counter
+  ret i32 0
+```
+
+Non-all-internal chains get `emit_fused_composed()` (`emit_toplevel.rs:1221-1231`).
+
+---
+
+## 4. Fused Transactions
+
+`resolve_fusable_pairs()` (`emit_expr.rs:4538-4557`) detects adjacent
+reactive transactions with: no async, both reactive, disjoint write sets,
+no trigger-gated preconditions. `emit_fused()` (`emit_toplevel.rs:1176-1191`)
+concatenates their bodies into a single function with a single
+`%State* noalias nocapture` parameter, reducing `reactor_tick` dispatch
+overhead.
+
+---
+
+## 5. Dispatch Mode Selection & Memory
+
+`select_optimization_strategy()` (`optimizer.rs:30-46`) is the decision hub.
+
+### 5.1 Sequential Reactor
+
+`emit_reactor()` (`dispatch.rs:8-75`): evaluates all preconditions up front
+(`%pr0`, `%pr1`, ...), branches to each txn body in order. No additional
+memory beyond `%State`.
+
+### 5.2 Parallel Reactor with `%fired_mask`
+
+`emit_parallel_reactor()` (`dispatch.rs:120-217`): adds `alloca i64` for
+`%fired_mask` — a bitmask tracking which fields have been written by
+previously-fired parallel txns:
+
+```llvm
+%fired_mask = alloca i64, align 8
+store i64 0, i64* %fired_mask
+; Before each txn: check mask
+%fm = load i64, i64* %fired_mask
+%ca = and i64 %fm, <write_mask>           ; check conflict
+%nc = icmp eq i64 %ca, 0
+%can = and i1 %pr, %nc                    ; pre AND no conflict
+br i1 %can, label %body, label %skip
+; After each txn: update mask
+%fm2 = load i64, i64* %fired_mask
+%fm3 = or i64 %fm2, <write_mask>
+store i64 %fm3, i64* %fired_mask
+```
+
+The mask is 8 bytes on the stack. `build_write_masks()` (`dispatch.rs:103-117`)
+precomputes bitmasks from `field_index_map`.
+
+### 5.3 Enum Dispatch
+
+When trigger value sets fit within `optimize_budget`, the backend generates
+a switch-case main with per-key folded loops. Each case arm shares the same
+`%State` alloca. All-internal chains store final counter values directly
+(section 3).
+
+### 5.4 Async / Thread Pool
+
+Per-worker `%State*` passed to `async_body_*` functions, each with
+`noalias nocapture`. Thread pool metadata via `emit_thread_pool_metadata()`
+(`emit_expr.rs:4510-4519`).
+
+---
+
+## 6. Heap Allocation (Dynamic Structures Only)
 
 `malloc` is used only for runtime-sized data:
 
@@ -79,7 +240,7 @@ Identifier expressions read from these pre-loaded registers directly
 | Enum variant construction | `emit_expr.rs:563` | Tagged union via `@malloc` |
 | String concat | `emit_expr.rs:4764` | `@malloc(header + total_chars + 1)`, memcpy A + B |
 
-### 2-Slot Header Format
+### 6.1 Collection 2-Slot Header Format
 
 All heap-allocated collections use the same layout:
 
@@ -93,13 +254,13 @@ String constants mirror this format: emitted as `<{ i64, i64, [N x i8] }>`
 structs with `data_ptr` pointing to the chars field, making static strings
 indistinguishable from heap strings at the pointer level (`mod.rs:1641-1649`).
 
-### Embedded Mode Ban
+### 6.2 Embedded Mode Ban
 
 Embedded targets (`.ebv`/`.sebv`) ban all heap allocation. `check_embedded_restrictions()`
 (`mod.rs:1059-1099`) warns if any state, let-binding, or expression uses
 `Type::String`, `Type::Data`, or any collection type.
 
-## 3. String Concat Optimization
+## 7. String Concat Optimization
 
 ### Detection (`is_string_chain`, `emit_expr.rs:4986-5018`)
 
@@ -120,7 +281,7 @@ Emits **no runtime library calls**:
    constants (bit 0) and state-owned strings (both bits clear) preserved.
 8. Tag result with bit 1 set
 
-## 4. TBAA Metadata
+## 8. TBAA Metadata
 
 A 6-node TBAA type tree (`mod.rs:448-457`):
 
@@ -138,20 +299,41 @@ Annotated on every state field load/store and collection element access
 though all boxed types are stored as `i64` in `%State`, TBAA lets LLVM
 disambiguate accesses by logical type for GVN and load elimination.
 
-## 5. `!range` Metadata
+## 9. `!range` & `@llvm.assume`
 
-For simple `[x < N]` precondition patterns (`emit_toplevel.rs:1093-1119`),
-emits a re-load of field `x` with `!range !{ 0, N }` instead of
-`@llvm.assume`:
+Contracts inform LLVM's optimizer at two levels.
 
-```
+### `!range` metadata (preferred)
+
+For simple `[x < N]` precondition patterns (`emit_toplevel.rs:1093-1119`):
+
+```llvm
 %prl = load i64, i64* %gep, align 8, !tbaa !1, !range !{ 0, 100 }
 ```
 
-LLVM uses this to infer `nuw`/`nsw` on arithmetic. Complex patterns fall
-back to `@llvm.assume`.
+LLVM uses this to infer `nuw`/`nsw` on arithmetic, enabling induction
+variable strength reduction and loop optimizations.
 
-## 6. Dead-Field Elimination
+### `@llvm.assume` fallback
+
+For complex patterns (compound conditions, non-Lt forms,
+`emit_toplevel.rs:1110-1117`):
+
+```llvm
+%cond = icmp ne i64 %expr, 0
+br i1 %cond, label %safe, label %panic
+panic:
+  unreachable
+safe:
+  call void @llvm.assume(i1 %cond)
+```
+
+The `br ... unreachable` path prevents execution on contract violation.
+The `@llvm.assume` constrains the optimizer for downstream passes (GVN,
+LICM, SROA). Both together: correctness at runtime, optimization at
+compile time.
+
+## 10. Dead-Field Elimination
 
 `apply_field_modes()` (`mod.rs:2622-2696`) runs after the transition graph
 is built:
@@ -167,7 +349,7 @@ is built:
 
 Driven by `live_fields` from the transition graph (`mod.rs:1344-1346`).
 
-## 7. Projection Fast-Path
+## 11. Projection Fast-Path
 
 `try_projection_fast_path()` (`emit_expr.rs:5023-5208`) emits native LLVM IR
 for 45+ `UserDefinedWithArg` operator/type pairs (`Add`, `Sub`, `Mul`, `Div`,
@@ -180,7 +362,7 @@ for 45+ `UserDefinedWithArg` operator/type pairs (`Add`, `Sub`, `Mul`, `Div`,
 No boxing through i64. Called from the projection dispatch at
 `emit_expr.rs:2768`.
 
-## 8. No LLVM Struct Types
+## 12. No LLVM Struct Types
 
 User-defined structs are never emitted as LLVM `%MyStruct = type { ... }`.
 `struct_types` (`mod.rs:661`) stores field metadata for offset arithmetic only.
@@ -189,14 +371,84 @@ User-defined structs are never emitted as LLVM `%MyStruct = type { ... }`.
 stores at computed GEP offsets. This avoids LLVM struct-type rigidity and keeps
 SROA decomposition trivial.
 
-## 9. Instruction Reordering
+## 13. Instruction Reordering
 
-`reorder.rs` builds a dependency DAG (RAW/WAW/WAR dependencies from statement
-read/write sets) and applies Kahn's topological sort to group independent
-statements for maximum ILP. Terminators are always placed last. Bodies with
-< 3 statements skip reordering. Cycle detection falls back to original order.
+`reorder.rs` builds a dependency DAG from statement read/write sets and
+applies Kahn's topological sort to group independent statements for
+maximum instruction-level parallelism (ILP). Terminators are always placed
+last. Bodies with < 3 statements skip reordering. Cycle detection falls
+back to original order.
 
-## 10. SLP Hazard Analysis
+### Kahn's Topological Sort
+
+Kahn's algorithm orders a DAG so every edge goes forward — no statement
+appears before something it depends on. For Brief's reorder pass, each
+transaction body statement is a node, and edges are **data dependencies**:
+
+| Edge | Name | Meaning |
+|------|------|---------|
+| `A → B` | RAW (read-after-write) | B reads what A wrote |
+| `A → B` | WAW (write-after-write) | Both write the same field |
+| `A → B` | WAR (write-after-read) | B writes a field A just read |
+
+The algorithm:
+
+1. Compute in-degree (incoming edge count) for each statement
+2. Enqueue all statements with in-degree 0 (no blockers)
+3. Pop one, emit it, decrement in-degree of every statement depending on it
+4. If any of those now have in-degree 0, enqueue them
+5. Repeat until the queue is empty — the emission order is the result
+
+If the queue empties before all statements are emitted, a cycle exists
+and the pass falls back to the original order. Otherwise the result is a
+schedule where independent statements (no connected edges) appear in
+parallel-friendly groups — LLVM's scheduler can then fill execution ports
+simultaneously.
+
+### Comparison: Brief vs Forth
+
+This is nearly the opposite of how Forth sequences operations:
+
+| Forth | Brief |
+|-------|-------|
+| Data flows through implicit stack. Programmer sequences words manually; stack order *is* the data flow. | Data flows through explicit SSA registers. Compiler builds a dependency DAG, then reorders. |
+| Sequence is the *constraint* — stack position defines which value an operator consumes. | Sequence is the *output* — dependencies were already resolved in the DAG. The linear emit is just one valid schedule. |
+| ILP requires the programmer to manually stack-juggle. | ILP comes from automatic reordering of independent operations. |
+| No analysis — the programmer *is* the compiler. | Full dependency analysis — the compiler *is* the scheduler. |
+
+A better analogy than Forth: Brief's reorder pass is like a
+**superscalar processor's out-of-order scheduler**. It takes a sequential
+program, builds a data-flow graph, then emits a new sequence that respects
+all dependencies while maximizing distance between independent operations.
+Forth never has the graph — its sequence *is* the only representation.
+
+### Comparison: Microsoft Profile-Guided Basic Block Reorderer
+
+Microsoft's PGO Basic Block Reorderer (late-90s/early-2000s, used in
+the Windows NT kernel and Visual C++ linker) solved a related but distinct
+problem: given execution frequency data from profiling runs, reorder the
+basic blocks within a function so that hot paths fall through linearly
+and cold paths branch out-of-line. The goal was **I-cache locality** and
+**branch prediction** — keeping the common case compact and contiguous.
+
+Both reorderers share the premise that *"the programmer's linear sequence
+is not optimal; the compiler can pick a better one"*, but the optimization
+domains differ:
+
+| | Microsoft PGO Block Reorderer | Brief Kahn sort |
+|---|---|---|
+| **Input** | Profile data (execution frequency from real runs) | Static data dependencies (RAW/WAW/WAR) |
+| **Unit** | Basic blocks within a function | Statements within a transaction body |
+| **Goal** | I-cache locality + branch prediction (memory hierarchy) | ILP — group independent ops for superscalar execution |
+| **Technique** | Weighted CFG placement driven by edge frequencies | Topological sort of dependency DAG |
+| **Effect** | Hot path falls through; cold path is out-of-line | Wider reservation stations, more µop parallelism |
+
+One optimizes **which blocks live next to each other in memory**; the
+other optimizes **which instructions can execute in parallel**. The shared
+idea — that the compiler should reorganize the programmer's sequence
+based on richer information — applies at both granularities.
+
+## 14. SLP Hazard Analysis
 
 `hazard.rs` prevents SLP vectorization when register pressure would exceed
 hardware capacity:
@@ -208,7 +460,7 @@ hardware capacity:
   ops-per-field ratio < 1.5 (too many shuffles for too few ops)
 - `optimal_unroll_factor()` selects 1, 4, or 8 based on pressure
 
-## 11. Native Type Mapping
+## 15. Native Type Mapping
 
 `TypedRegister::llvm()` (`mod.rs:179-188`) maps each Brief type to its
 native LLVM type:
@@ -225,21 +477,164 @@ This avoids boxing everything to `i64`, enabling native register operations.
 Float register caching (`emit_toplevel.rs:166-189`) prevents redundant
 `trunc`+`bitcast` sequences for boxed→native float conversion.
 
-## 12. Constant Deduplication
+## 16. Constant Deduplication
 
 Constant globals are deduplicated by value (`mod.rs:1538-1627`). Identical
 constants map to the same global via `@alias`, reducing cache line pressure.
+
+---
+
+## 17. GPU Memory Model
+
+When a `#gpu`-annotated transaction is extracted, the memory model shifts
+fundamentally — there is **no `%State` alloca**. Instead, `emit_spirv_module()`
+(`gpu.rs:357-446`) emits a `spir_kernel` function with storage buffers:
+
+```llvm
+define spir_kernel void @kernel(i8* nocapture readonly %in_buf,
+                                i8* nocapture %out_buf, i64 %N)
+```
+
+- **`%in_buf`**: read-only buffer (state at tick start)
+- **`%out_buf`**: write buffer (state after tick)
+- **`%print_buf`**: optional I/O buffer (when `print_int#` exists)
+- **Global work-item ID**: `%gtid = call i64 @_Z13get_global_idj(i32 0)`
+- **Field access**: `getelementptr i8, i8* %base_in, i64 <offset>`
+
+Shared memory uses `addrspace(3)` globals (`gpu.rs:396-402`):
+
+```llvm
+@shared_buf_0 = internal addrspace(3) global [256 x i64] zeroinitializer
+```
+
+Memory eligibility (`check_eligibility`, `gpu.rs:54-122`) restricts GPU
+kernels to Int, Float, Bool, Char — no strings, structs, enums, or
+collections. SPIR-V compilation via `llc --mtriple=spirv64-unknown-unknown`
+(`gpu.rs:1038-1071`).
+
+---
+
+## 18. Reactive Dirty-Flag System (trg `step()`)
+
+`emit_trg_step()` (`loop_engine.rs:1299-1441`) emits a `@step()` function
+that implements the reactive dirty-flag architecture:
+
+```llvm
+define void @step(ptr noalias nocapture %state, i64 %dirty_in) {
+  %dirty_slot = alloca i64, align 8
+  store i64 %dirty_in, i64* %dirty_slot
+
+  ; Volatile-load all triggers (liveness anchor)
+  %gtrg = getelementptr %State, ptr %state, i32 0, i32 <trg_idx>
+  %ltrg = load volatile i64, i64* %gtrg
+  store volatile i64 %ltrg, i64* %gtrg
+
+  ; For each non-trg variable in topological order:
+  %ld = load i64, i64* %dirty_slot
+  %and = and i64 %ld, <dep_bitmask>
+  %cmp = icmp ne i64 %and, 0
+  br i1 %cmp, label %recompute, label %skip
+
+recompute:
+  %gdep = getelementptr %State, ptr %state, i32 0, i32 <dep_idx>
+  %ldep = load i64, i64* %gdep
+  store i64 <new_val>, i64* %gdep
+  br label %skip
+
+skip:
+  store i64 0, i64* %dirty_slot           ; clear mask
+  ret void
+}
+```
+
+Memory impact: one `alloca i64` per `step()` call, plus `load volatile`/
+`store volatile` on every trigger field every tick. This ensures liveness
+and correctness at the cost of barrier instructions preventing LLVM from
+optimizing trigger reads.
+
+The event loop (`emit_trg_event_epoll_wait`, `loop_engine.rs:1446-1555`)
+calls `epoll_wait`, reads per-trigger data, sets dirty bits, then `step()`.
+
+---
+
+## 19. Optimization Directives
+
+`directive.rs` resolves `#gpu`, `#inline`, `#unroll`, `#vectorize`
+directives into `DirectiveEffect` values. Memory impact:
+
+- **`#gpu`**: shifts from `%State`-on-stack to SPIR-V storage buffers
+  (section 17)
+- **`#inline`** / **`#unroll`** / **`#vectorize`**: emit `!llvm.loop`
+  metadata affecting LLVM's SROA, SLP, and mem2reg behavior
+
+---
+
+## 20. Future: Arena Allocation
+
+**Status:** Planned — see `docs/plans/2026-06-23-arena-allocation.md`.
+
+### Motivation
+
+Every `<-` push, pop, discard, and string concat currently follows a
+`@free(@malloc(...)) + @memcpy` pattern. For reactive transactions with
+many iterations, this means O(N) malloc/free cycles on the hot path.
+As Peter Juul Noer observed, **malloc-heavy code is a bottleneck** even
+for small allocations — malloc's generality (fragmentation, thread-safety,
+page table walks) adds overhead that Brief's semantics don't need.
+
+### Why Brief Is Uniquely Suited
+
+1. **Transaction tick boundaries** define clear lifetimes — temporaries
+   created during a tick die at tick end.
+2. **Contracts prove bounds** — `[i < N]` on a loop building a list
+   gives the compiler an exact capacity ceiling.
+3. **No shared ownership** — `<-` arrow produces new buffers; no GC,
+   no refcounting, no atomics.
+
+### Proposal: Per-Tick Bump Arena
+
+Replace `@malloc`/`@free` for collection and string operations with a
+bump arena scoped to a single transaction tick:
+
+```
+Transaction tick:
+  1. arena = malloc(ARENA_SIZE)       ← one allocation per tick
+  2.   <- push(list, val):            ← writes into arena
+       ptr = bump_alloc(arena, size)
+       memcpy(ptr, old_data, old_len)
+  3. Tick end:                        ← free = pointer reset
+       store arena_base -> arena_ptr
+```
+
+Three planned phases:
+
+| Phase | What | Benefit |
+|-------|------|---------|
+| 1 | Per-tick bump arena — replace `@malloc`/`@free` per op with pointer bump | ~N `malloc` calls per tick → 1 |
+| 2 | Contract-driven preallocation — `@malloc` once per bounded loop | Zero reallocation in bounded loops |
+| 3 | Cross-tick arena pool — reuse pages across ticks (deferred) | No OS round-trips between ticks |
+
+---
 
 ## Summary
 
 | Technique | File:Line |
 |-----------|-----------|
 | `%State` alloca (stack) | `loop_engine.rs:553,606,678,1285`; `emit_toplevel.rs:1374` |
+| `noalias nocapture` on `%State*` | `mod.rs:416-430`, `emit_toplevel.rs:710,1124,1182`, `dispatch.rs:26,139`, `loop_engine.rs:1306` |
 | Pre-extraction (float/int fields) | `loop_engine.rs:212-246` |
 | Pre-load all fields (GEP) | `loop_engine.rs:252-270` |
 | SSA insertvalue chain (A005a) | `loop_engine.rs:362,412-461` |
+| Counter phi (SSA / memory / direct) | `loop_engine.rs:304-349,626-628,714-719` |
 | Memory GEP path (A005b) | `loop_engine.rs:571-659` |
 | Pure counter fold (A005c) | `loop_engine.rs:1282-1292` |
+| SSA register pipeline (A006) | `loop_engine.rs:678-860` |
+| Precomputation (A000) | `emit_expr.rs:4448-4485`; `mod.rs:1243-1260` |
+| Composed chain folding (all-internal) | `mod.rs:1704-1718` |
+| Fused transactions | `emit_expr.rs:4538-4557`; `emit_toplevel.rs:1176-1191,1221-1231` |
+| Sequential reactor dispatch | `dispatch.rs:8-75` |
+| Parallel reactor (`%fired_mask`) | `dispatch.rs:103-217` |
+| Dispatch mode auto-selection | `optimizer.rs:30-88` |
 | `malloc` for collections | `emit_expr.rs:3314,3500,3525` |
 | `<-` arrow push/pop/discard/transfer | `emit_expr.rs:3546-3890` |
 | Enum malloc | `emit_expr.rs:563` |
@@ -247,6 +642,7 @@ constants map to the same global via `@alias`, reducing cache line pressure.
 | `is_string_chain()` detection | `emit_expr.rs:4986-5018` |
 | TBAA tree | `mod.rs:448-457` |
 | `!range` metadata | `emit_toplevel.rs:1093-1119` |
+| `@llvm.assume` (non-range fallback) | `emit_toplevel.rs:1110-1117` |
 | Dead-field elimination | `mod.rs:2622-2696` |
 | Cache slots (Hot Dual) | `emit_expr.rs:5213-5272` |
 | Projection fast-path (45+ pairs) | `emit_expr.rs:5023-5208` |
@@ -256,3 +652,7 @@ constants map to the same global via `@alias`, reducing cache line pressure.
 | Native type mapping | `mod.rs:179-188` |
 | Float register caching | `emit_toplevel.rs:166-189` |
 | Constant deduplication | `mod.rs:1538-1627` |
+| GPU memory model (SPIR-V buffers) | `gpu.rs:54-122,357-446,1038-1071` |
+| trg dirty-flag `step()` | `loop_engine.rs:1299-1441,1446-1555` |
+| Optimization directives | `directive.rs` |
+| Future: arena allocation | `docs/plans/2026-06-23-arena-allocation.md` |
