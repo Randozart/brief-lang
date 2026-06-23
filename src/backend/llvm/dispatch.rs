@@ -45,6 +45,10 @@ impl LlvmBackend {
 
         writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
+        // Arena init: shared arena for all txns in this tick.
+        // Previously each @txn_name had its own 64KB arena (Approach 2),
+        // but inlining shares one arena across all txns, saving memory.
+        self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
         let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.trigger_names
             .iter()
@@ -57,14 +61,16 @@ impl LlvmBackend {
         }
 
         if dispatch.is_empty() {
+            self.emit_arena_fini(out, "  ");
             writeln!(out, "  call void @cell_persistent_ticks(ptr %state)").ok();
             writeln!(out, "  ret void").ok();
         } else if fusable.is_empty()
             && dispatch.len() >= 2
             && crate::analysis::transition_graph::is_uniform_body_group(txns)
         {
-            writeln!(out, "  call void @{}(ptr %state)", dispatch[0]).ok();
+            self.emit_inline_txn_body(out, "  ", txns, &dispatch[0]);
             writeln!(out, "  call void @cell_persistent_ticks(ptr %state)").ok();
+            self.emit_arena_fini(out, "  ");
             writeln!(out, "  ret void").ok();
         } else {
             let mut pre_regs: Vec<String> = Vec::with_capacity(dispatch.len());
@@ -86,7 +92,10 @@ impl LlvmBackend {
                 let pr = &pre_regs[i];
                 writeln!(out, "  br i1 {}, label %{}, label %{}", pr, b, c).ok();
                 writeln!(out, "{}:", b).ok();
-                writeln!(out, "  call void @{}(ptr %state)", txn_name).ok();
+                // Inline txn body instead of `call @txn_name` — shares the
+                // arena across all txns in the tick and avoids function-call
+                // overhead. The body inherits the arena allocated above.
+                self.emit_inline_txn_body(out, "  ", txns, txn_name);
                 writeln!(out, "  br label %{}", c).ok();
                 writeln!(out, "{}:", c).ok();
             }
@@ -94,6 +103,7 @@ impl LlvmBackend {
             // The @cell_persistent_ticks function is emitted unconditionally
             // in generate() (see emit_toplevel.rs). Single tick point for
             // all dispatch paths that use @reactor_tick.
+            self.emit_arena_fini(out, "  ");
             writeln!(out, "  call void @cell_persistent_ticks(ptr %state)").ok();
             writeln!(out, "  ret void").ok();
         }
@@ -193,6 +203,8 @@ impl LlvmBackend {
 
         writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
+        // Arena init for parallel reactor — shared across all parallel txns.
+        self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
         let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.trigger_names
             .iter()
@@ -208,6 +220,7 @@ impl LlvmBackend {
         writeln!(out, "  store i64 0, i64* %fired_mask").ok();
 
         if dispatch.is_empty() {
+            self.emit_arena_fini(out, "  ");
             writeln!(out, "  ret void").ok();
         } else {
             let n = dispatch.len();
@@ -253,7 +266,8 @@ impl LlvmBackend {
                 let next_c = format!("ck{}", i + 1);
                 let wm = self.txn_write_masks.get(txn_name).copied().unwrap_or(0);
                 writeln!(out, "{}:", b).ok();
-                writeln!(out, "  call void @{}(ptr %state)", txn_name).ok();
+                // Inline txn body — shares arena across parallel txns.
+                self.emit_inline_txn_body(out, "  ", txns, txn_name);
                 if wm != 0 {
                     let fm = format!("%fm{}a", i);
                     let fmu = format!("%fm{}b", i);
@@ -265,10 +279,49 @@ impl LlvmBackend {
             }
 
             writeln!(out, "ck{}:", n).ok();
+            self.emit_arena_fini(out, "  ");
             writeln!(out, "  ret void").ok();
         }
         writeln!(out, "}}").ok();
         writeln!(out).ok();
+    }
+
+    // ── INLINE TXN BODY HELPER ──────────────────────────────────
+    //
+    // Emits a txn body inline within the reactor_tick function instead of
+    // calling it as a separate @txn_name function. Saves/restores backend
+    // state (terminated, let_bindings) to prevent cross-txn contamination.
+    fn emit_inline_txn_body(&mut self, out: &mut String, indent: &str,
+                             txns: &[(String, &crate::ast::Transaction)],
+                             txn_name: &str) {
+        let first_name = self.resolve_dispatch_first_txn(txn_name);
+        if let Some((_, txn)) = txns.iter().find(|(n, _)| n == &first_name) {
+            // Save state that the body might modify
+            let prev_terminated = self.terminated;
+            self.terminated = false;
+            self.returns_i64 = false;
+            let saved_bindings = self.let_bindings.clone();
+            let saved_types = self.let_binding_types.clone();
+            let saved_floats = self.reg_float_cache.clone();
+            let saved_typecache = self.reg_type_cache.clone();
+
+            // Emit precondition assume (for LLVM opt) — the br instruction
+            // already guards execution, so this is just for metadata.
+            if !matches!(txn.contract.pre_condition, crate::ast::Expr::Bool(true)) {
+                self.emit_precondition_check(out, &txn.contract.pre_condition, indent);
+            }
+            for s in &txn.body {
+                if self.terminated { break; }
+                self.emit_stmt(out, s, indent);
+            }
+
+            // Restore state
+            self.terminated = prev_terminated;
+            self.let_bindings = saved_bindings;
+            self.let_binding_types = saved_types;
+            self.reg_float_cache = saved_floats;
+            self.reg_type_cache = saved_typecache;
+        }
     }
 
     // ── EXIT CONDITION EXPRESSION ────────────────────────────

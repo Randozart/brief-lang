@@ -1,7 +1,12 @@
 # Arena Allocation for LLVM Backend
 
 **Date:** 2026-06-23
-**Status:** Plan
+**Status:** Implemented (see architecture doc §20)
+**Execution record:** implemented 2026-06-23 across all three phases.
+Phase 1: per-scope bump arena with inline emit_arena_alloc.
+Phase 2: contract-driven preallocation with capacity-aware push fast path.
+Phase 3: cross-tick pool via pointer reset (arena_reset instead of arena_fini)
+— see commits for the full change set.
 
 ## Motivation
 
@@ -19,6 +24,32 @@ Three observations make this a natural fit:
    gives the compiler an exact capacity ceiling.
 3. **No shared ownership**. The `<-` arrow produces new buffers without
    GC, refcounting, or atomics.
+
+## Inline Reactor Tick (2026-06-23, post-hoc fixes)
+
+Three remaining gaps were closed:
+
+**Enum dispatch arena:** `emit_folded_multi_main` (`loop_engine.rs:1189`)
+now calls `emit_arena_init` at function entry and `emit_arena_fini`
+before each `ret i32 0` exit point (4 ret sites). Covers all case arms,
+the uniform-body path, and the residual `call @reactor_tick` fallback.
+
+**Multi-txn SSA preallocation:** `emit_ssa_main` (`loop_engine.rs:887`)
+now scans all txn bodies for `<- push` targets and preallocates using
+the first txn's contract bound when `!has_canonical_loop`. Uses the new
+`emit_prealloc_for_targets` helper that accepts a pre-collected list of
+field names, shared with the single-txn path.
+
+**Inline reactor tick:** Both `emit_reactor` and `emit_parallel_reactor`
+(`dispatch.rs`) now call `emit_arena_init` at tick entry, `emit_arena_fini`
+at tick exit, and `emit_inline_txn_body` instead of `call void @txn_name`.
+The `emit_inline_txn_body` helper saves/restores `self.terminated`,
+`self.let_bindings`, `self.let_binding_types`, `self.reg_float_cache`, and
+`self.reg_type_cache` to prevent cross-txn contamination. This shares one
+arena across all txns per tick (vs. N×64KB in Approach 2) and eliminates
+the separate `@txn_name` function call overhead for the reactor path.
+The `@txn_name` functions are still emitted (needed for callable txns) —
+LLVM DCE removes the dead reactive ones.
 
 ## Phase 1: Per-Tick Bump Arena
 

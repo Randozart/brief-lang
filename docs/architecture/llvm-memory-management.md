@@ -569,50 +569,75 @@ directives into `DirectiveEffect` values. Memory impact:
 
 ---
 
-## 20. Future: Arena Allocation
+## 20. Arena Allocation
 
-**Status:** Planned — see `docs/plans/2026-06-23-arena-allocation.md`.
+**Status:** Implemented (2026-06-23) — three phases complete.
 
-### Motivation
+Phase 1 replaced per-operation `@free(@malloc(...))` in collection and
+string operations with a per-scope bump arena. Phase 3 extended this to
+keep arena pages alive across loop/ticks (pointer reset instead of free).
+Phase 2 added contract-driven preallocation: when a loop bound is known,
+the collection buffer is preallocated at full capacity, and `<- push`
+writes directly without allocation or memcpy.
 
-Every `<-` push, pop, discard, and string concat currently follows a
-`@free(@malloc(...)) + @memcpy` pattern. For reactive transactions with
-many iterations, this means O(N) malloc/free cycles on the hot path.
-As Peter Juul Noer observed, **malloc-heavy code is a bottleneck** even
-for small allocations — malloc's generality (fragmentation, thread-safety,
-page table walks) adds overhead that Brief's semantics don't need.
+### Phase 1: Per-Tick Bump Arena
 
-### Why Brief Is Uniquely Suited
+Every loop/tick body allocates a 64KB arena at entry (mod.rs:1121-1144,
+loop_engine.rs:657,726,807). All `<- push/pop/discard/transfer`, string
+concat, slice, map/set, and enum allocations use `emit_arena_alloc()`:
 
-1. **Transaction tick boundaries** define clear lifetimes — temporaries
-   created during a tick die at tick end.
-2. **Contracts prove bounds** — `[i < N]` on a loop building a list
-   gives the compiler an exact capacity ceiling.
-3. **No shared ownership** — `<-` arrow produces new buffers; no GC,
-   no refcounting, no atomics.
+- **Arena active** (inside any loop/tick scope): bump-allocate from arena.
+  Overflow triggers `@realloc` (grow 2x, min 64KB). No per-operation free.
+- **Arena inactive** (standalone callable txns, defns): fall back to `@malloc`.
 
-### Proposal: Per-Tick Bump Arena
+`emit_arena_alloc()` emits the inline bump sequence (load ptr, compute new
+pointer, overflow check, phi-merge hit/grow, store new ptr). The `@realloc`
+path is rarely exercised — 64KB accommodates typical per-tick patterns.
 
-Replace `@malloc`/`@free` for collection and string operations with a
-bump arena scoped to a single transaction tick:
+Files: `mod.rs:1102-1120` (emit_arena_alloc), `mod.rs:1121-1144` (init),
+`mod.rs:1165-1175` (fini), `emit_expr.rs` (12 call sites).
 
-```
-Transaction tick:
-  1. arena = malloc(ARENA_SIZE)       ← one allocation per tick
-  2.   <- push(list, val):            ← writes into arena
-       ptr = bump_alloc(arena, size)
-       memcpy(ptr, old_data, old_len)
-  3. Tick end:                        ← free = pointer reset
-       store arena_base -> arena_ptr
-```
+### Phase 2: Contract-Driven Capacity Preallocation
 
-Three planned phases:
+When a bounded loop (e.g., `[i < N] { &list = list <- i }`) is detected
+by the foldable analysis, the compiler preallocates a single full-size
+buffer at loop entry and records the capacity in `field_prealloc_info`.
 
-| Phase | What | Benefit |
-|-------|------|---------|
-| 1 | Per-tick bump arena — replace `@malloc`/`@free` per op with pointer bump | ~N `malloc` calls per tick → 1 |
-| 2 | Contract-driven preallocation — `@malloc` once per bounded loop | Zero reallocation in bounded loops |
-| 3 | Cross-tick arena pool — reuse pages across ticks (deferred) | No OS round-trips between ticks |
+The emission sites are:
+1. **Loop entry** (emit_folded_main, emit_folded_memory_main): calls
+   `emit_prealloc_for_body()` which scans the body for `<- push` targets,
+   allocates `(bound+2)*8` bytes per target from the arena, initializes
+   the 2-slot header (data_ptr + length=0), stores the buffer to the
+   state field, and records (capacity_reg, buf_i64) in the map.
+2. **`<- push`** (emit_expr.rs ArrowMut::Push): checks `field_prealloc_info`.
+   If found and `len < capacity`, writes the element directly at
+   `buf_i64[2 + old_len]`, increments `buf_i64[1]`, stores buffer ptr to
+   state. No allocation, no memcpy, no free — O(1) push.
+
+This transforms bounded-list-building loops from O(N²) element copies
+(1+2+...+N) to O(N) (N direct stores). The memcpy at each iteration was
+the hidden quadratic cost — now dead.
+
+Only append-style pushes (`ArrowDir::Push` without prepend) are optimized.
+Prepend still follows the normal arena path. If capacity is exceeded
+(contract violation during loop), the normal arena path handles overflow.
+
+Files: `mod.rs:1106-1150` (emit_prealloc_for_body), `mod.rs:1151-1202`
+(collect_push_targets), `emit_expr.rs:3575-3625` (push fast path).
+
+### Phase 3: Cross-Tick Arena Pool
+
+`emit_arena_reset()` (mod.rs:1155-1165) replaces `emit_arena_fini()` at
+loop/tick boundaries. Instead of `@free` + arena clear, it rewinds the
+bump pointer to `arena_base`. All allocated pages stay live, zero system
+round-trips. The arena is freed once at program exit via `emit_arena_fini()`.
+
+This flat `arena_base → arena_ptr` reset makes subsequent ticks with
+similar allocation patterns bypass `malloc`/`mmap` entirely. The three
+`alloca i8*` slots (ptr, end, base) persist for the program's lifetime.
+
+Files: `mod.rs:1155-1165` (emit_arena_reset), `loop_engine.rs:667,774`
+(loop exit), `loop_engine.rs:1044` (program exit).
 
 ---
 
@@ -655,4 +680,16 @@ Three planned phases:
 | GPU memory model (SPIR-V buffers) | `gpu.rs:54-122,357-446,1038-1071` |
 | trg dirty-flag `step()` | `loop_engine.rs:1299-1441,1446-1555` |
 | Optimization directives | `directive.rs` |
-| Future: arena allocation | `docs/plans/2026-06-23-arena-allocation.md` |
+| Arena allocation — per-scope bump | `mod.rs:1102-1144` |
+| Arena allocation — inline bump-alloc | `mod.rs:1102-1120` |
+| Arena init (64KB) | `mod.rs:1121-1144` |
+| Arena reset (cross-tick pool, Phase 3) | `mod.rs:1155-1165` |
+| Arena fini (program exit) | `mod.rs:1165-1175` |
+| Preallocation scan + buffer init (Phase 2) | `mod.rs:1106-1150` |
+| Push fast path (capacity-aware, Phase 2) | `emit_expr.rs:3575-3625` |
+| Arena wired into folded loops | `loop_engine.rs:657,667,726,774` |
+| Arena wired into reactive ticks | `loop_engine.rs:807,1044` |
+| Arena wired into enum dispatch | `loop_engine.rs:1192` (init), 1297,1331,1387,1441 (fini) |
+| Multi-txn SSA preallocation | `loop_engine.rs:887-897` |
+| Arena wired into reactor tick (inline bodies) | `dispatch.rs:50,61,72,82,217,271` |
+| Inline txn body helper | `dispatch.rs:294-326` |

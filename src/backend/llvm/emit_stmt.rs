@@ -165,7 +165,7 @@ impl LlvmBackend {
                         } else if self.fn_ret_ty == "i64" {
                             writeln!(out, "{}ret i64 {}", indent, r).ok();
                         } else if self.is_embedded {
-                            writeln!(out, "{}store i64 {}, ptr %state", indent, r).ok();
+                            writeln!(out, "{}store i64 {}, ptr {}", indent, r, self.state_reg_name).ok();
                             writeln!(out, "{}call void asm sideeffect \"wfi\", \"\"()", indent).ok();
                             writeln!(out, "{}ret void", indent).ok();
                         } else if self.main_body {
@@ -314,7 +314,7 @@ impl LlvmBackend {
                                 Some(reg)
                             } else if let Some(&field_idx) = self.field_index_map.get(&list_name) {
                                 let p = format!("%lgp{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, field_idx).ok();
+                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, self.state_reg_name, field_idx).ok();
                                 let ld = format!("%lld{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
                                 Some(ld)
@@ -367,7 +367,7 @@ impl LlvmBackend {
                             if let Some(&idx) = self.field_index_map.get(name) {
                                 let ty = self.field_types[idx].clone();
                                 let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
-                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, idx).ok();
+                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, self.state_reg_name, idx).ok();
                                 match ty.as_str() {
                                     "i8" => {
                                         let tr = format!("%tr{}", self.txn_counter); self.txn_counter += 1;
@@ -462,7 +462,7 @@ impl LlvmBackend {
                 if let Some(&idx) = self.field_index_map.get(&fname) {
                     let ty = self.field_types[idx].clone();
                     let p = format!("%ap{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, idx).ok();
+                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, self.state_reg_name, idx).ok();
                     let vol_str = if is_volatile { " volatile" } else { "" };
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
                     let tn = crate::backend::llvm::tbaa_node(&ty);
@@ -546,7 +546,7 @@ impl LlvmBackend {
                                 let p = format!("%gp{}", self.txn_counter); self.txn_counter += 1;
                                 let av = self.emit_expr(out, expr, indent);
                                 let ty = self.field_types[idx].clone();
-                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, idx).ok();
+                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, self.state_reg_name, idx).ok();
                                 let se = format!("%gs{}", self.txn_counter); self.txn_counter += 1;
                                 match ty.as_str() {
                                     "i8" => {

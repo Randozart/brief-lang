@@ -883,6 +883,10 @@ impl LlvmBackend {
         if let Some(action) = assume_action {
             writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
+            // Arena for body emission — same rationale as the standard path:
+            // the reactor dispatch calls @txn_name as a separate function,
+            // so arena allocas must live here, not in main().
+            self.emit_arena_init(out, "  ");
             writeln!(out, "  br i1 true, label %body, label %rollback").ok();
             writeln!(out, "  body:").ok();
             self.ssa_old_int_regs.clear();
@@ -905,7 +909,10 @@ impl LlvmBackend {
                 if self.terminated { break; }
                 self.emit_stmt(out, s, "  ");
             }
-            if !self.terminated { writeln!(out, "  ret void").ok(); }
+            if !self.terminated {
+                self.emit_arena_fini(out, "  ");
+                writeln!(out, "  ret void").ok();
+            }
             writeln!(out, "  rollback:").ok();
             match action {
                 "exit" => {
@@ -916,6 +923,7 @@ impl LlvmBackend {
                     writeln!(out, "    br label %body").ok();
                 }
                 _ => {
+                    self.emit_arena_fini(out, "    ");
                     writeln!(out, "    ret void").ok();
                 }
             }
@@ -943,7 +951,10 @@ impl LlvmBackend {
                 if self.terminated { break; }
                 self.emit_stmt(out, s, "  ");
             }
-            if !self.terminated { writeln!(out, "  ret void").ok(); }
+            if !self.terminated {
+                self.emit_arena_fini(out, "  ");
+                writeln!(out, "  ret void").ok();
+            }
             writeln!(out, "}}").ok();
         }
 
@@ -1618,11 +1629,11 @@ impl LlvmBackend {
                 writeln!(out, "  {} = getelementptr %State, ptr %cs, i32 0, i32 {}", gep, idx).ok();
                 let val = format!("%ctv_{}_{}", cell_name, port_name);
                 writeln!(out, "  {} = load {}, ptr {}, align 8", val, ll_ty, gep).ok();
-                writeln!(out, "  store atomic {} {}, ptr @chan_val_{}_{}, seq_cst", ll_ty, val, cell_name, port_name).ok();
+                writeln!(out, "  store atomic {} {}, ptr @chan_val_{}_{} seq_cst, align 8", ll_ty, val, cell_name, port_name).ok();
             }
         }
         // Set dirty flag
-        writeln!(out, "  store atomic i8 1, ptr @chan_dirty_{}, seq_cst", cell_name).ok();
+        writeln!(out, "  store atomic i8 1, ptr @chan_dirty_{} seq_cst, align 1", cell_name).ok();
 
         writeln!(out, "  br label %loop").ok();
         writeln!(out, "}}").ok();

@@ -1019,6 +1019,9 @@ impl LlvmBackend {
                         writeln!(out, "{}{}:", indent, _el).ok();
                         writeln!(out, "{}{} = phi i64 [ -1, %{} ], [ {}, %{} ]", indent, v, el, val, ol).ok();
                     }
+                    Intrinsic::Argv => {
+                        panic!("argv#() called at runtime — not supported in LLVM backend yet");
+                    }
                     // ===== Phase B: Raw File I/O (intrinsics.md D2) =====
                     Intrinsic::Open => {
                         let path = self.emit_expr(out, &args[0], indent);
@@ -3572,6 +3575,58 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
                 let old_len = format!("%aol{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, old_len, lp).ok();
+                // Phase 2 fast path: if preallocated capacity exists and
+                // length < capacity, write directly without alloc/memcpy.
+                // Only works for append — prepend requires element shifting
+                // which the fast path doesn't support. The slow_l label is
+                // emitted here (always) so the branch target exists even
+                // when the fast path returns early.
+                let slow_l = format!("push_slow_{}", self.txn_counter); self.txn_counter += 1;
+                if !prepend {
+                if let Expr::OwnedRef(field_name) = target.as_ref() {
+                    if let Some((cap_reg, buf_i64)) = self.field_prealloc_info.get(field_name.as_str()).cloned() {
+                        let cap_check = format!("%acap{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(out, "{}{} = icmp ult i64 {}, {}", indent, cap_check, old_len, cap_reg).ok();
+                        let fast_l = format!("push_fast_{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cap_check, fast_l, slow_l).ok();
+                        // Fast path: write element at header[2 + old_len], increment length.
+                        // Uses buf_i64 (preallocated i64* buffer from prealloc_info)
+                        // rather than hp (which alias the same memory but may be stale
+                        // after the first iteration resets state via the normal store path).
+                        writeln!(out, "{}{}:", indent, fast_l).ok();
+                        let el_off = format!("%apfo{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(out, "{}{} = add i64 {}, 2", indent, el_off, old_len).ok();
+                        let el_gep = format!("%apfg{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, el_gep, buf_i64, el_off).ok();
+                        let new_len_fast = format!("%apfn{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(out, "{}{} = add i64 {}, 1", indent, new_len_fast, old_len).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, elem_boxed, el_gep).ok();
+                        // Update length in header slot 1 of the preallocated buffer
+                        let len_gep = format!("%apfl{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, len_gep, buf_i64).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, new_len_fast, len_gep).ok();
+                        // Store back to state (buffer pointer unchanged — we modified
+                        // the preallocated buffer in-place, no new allocation).
+                        let store_idx = self.field_index_map[field_name];
+                        let ap = format!("%aapf{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, store_idx).ok();
+                        let tn = crate::backend::llvm::tbaa_node(&self.field_types[store_idx]);
+                        let base_fast = format!("%apfb{}", self.txn_counter);
+                        self.txn_counter += 1;
+                        writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, base_fast, buf_i64).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base_fast, ap, tn).ok();
+                        writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, buf_i64).ok();
+                        return TypedRegister { name: v, ty: Type::Int };
+                    }
+                }
+                }
+                writeln!(out, "{}{}:", indent, slow_l).ok();
                 // Allocate: when inside an arena scope (loop/tick), use bump
                 // alloc (no free — arena resets at scope exit). Outside a
                 // scope, fall back to per-operation malloc via emit_arena_alloc.

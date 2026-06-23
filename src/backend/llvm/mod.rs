@@ -712,6 +712,15 @@ pub struct LlvmBackend {
     pub(crate) arena_slots: Option<(String, String, String)>,
     pub(crate) arena_counter: usize,
 
+    // ── Collection Preallocation (Phase 2) ─────────────────
+    //
+    // Maps collection state field names to (capacity_register, base_register)
+    // when the loop has a known bound and the field receives <- push operations.
+    // The capacity register holds the preallocated array size; the base register
+    // holds the arena-allocated buffer pointer. Push checks this map: if capacity
+    // is present and len < capacity, it writes directly without alloc/memcpy.
+    pub(crate) field_prealloc_info: HashMap<String, (String, String)>,
+
     // ── GPU Offloading ─────────────────────────────────────
     gpu_offload: bool,
     gpu_backend: String,
@@ -774,6 +783,26 @@ pub struct InterruptEntry {
     pub name: String,
     pub vector: u32,
     pub trg_name: Option<String>,
+}
+
+/// Recursively collect ArrowMut::Push targets from a statement body.
+pub(crate) fn collect_push_targets(body: &[Statement], out: &mut Vec<String>) {
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs: Expr::ArrowMut { dir: crate::ast::ArrowDir::Push, target, .. }, .. } => {
+                if let Expr::OwnedRef(n) = target.as_ref() {
+                    out.push(n.clone());
+                }
+            }
+            Statement::Guarded { statements, .. } => {
+                collect_push_targets(statements, out);
+            }
+            Statement::SyncBlock { body: b } => {
+                collect_push_targets(b, out);
+            }
+            _ => {}
+        }
+    }
 }
 
 impl LlvmBackend {
@@ -862,6 +891,7 @@ impl LlvmBackend {
             emit_remarks: false,
             arena_slots: None,
             arena_counter: 0,
+            field_prealloc_info: HashMap::new(),
             gpu_offload: false,
             gpu_backend: "vulkan".to_string(),
             spirv_kernels: Vec::new(),
@@ -1069,6 +1099,79 @@ impl LlvmBackend {
     /// Emit a bump allocation from the active arena, or fall back to @malloc
     /// if no arena is active. Returns the register name holding the allocated
     /// i8* pointer.
+    /// Emit preallocation for a single collection field within a bounded loop.
+    /// Shared by both emit_prealloc_for_body and emit_prealloc_for_targets.
+    fn emit_prealloc_one_field(&mut self, out: &mut String, indent: &str, field_name: &str, bound_reg: &str) {
+        if !self.field_index_map.contains_key(field_name) {
+            return;
+        }
+        let idx = self.field_index_map[field_name];
+        if self.field_types[idx] != "i64" {
+            return;
+        }
+
+        let c = self.arena_counter;
+        self.arena_counter += 1;
+        let cap = format!("%pcap_{}", c);
+        writeln!(out, "{}{} = add i64 0, {}", indent, cap, bound_reg).ok();
+        let slot_cnt = format!("%psc_{}", c);
+        writeln!(out, "{}{} = add i64 {}, 2", indent, slot_cnt, cap).ok();
+        let alloc_sz = format!("%psz_{}", c);
+        writeln!(out, "{}{} = mul i64 {}, 8", indent, alloc_sz, slot_cnt).ok();
+        let buf_reg = self.emit_arena_alloc(out, indent, &alloc_sz);
+        let buf_i64 = format!("%pbp_{}", c);
+        writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, buf_i64, buf_reg).ok();
+        let base = format!("%pba_{}", c);
+        writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, buf_reg).ok();
+        let data_ptr = format!("%pdv_{}", c);
+        writeln!(out, "{}{} = add i64 {}, 16", indent, data_ptr, base).ok();
+        let s0 = format!("%ps0_{}", c);
+        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, buf_i64).ok();
+        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, data_ptr, s0).ok();
+        let s1 = format!("%ps1_{}", c);
+        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, buf_i64).ok();
+        writeln!(out, "{}store i64 0, i64* {}, align 8, !tbaa !1", indent, s1).ok();
+        let ap = format!("%pap_{}", c);
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
+        let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
+        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
+        self.field_prealloc_info.insert(field_name.to_string(), (cap, buf_i64));
+    }
+
+    /// Emit preallocation for collection fields that receive `<- push` within
+    /// a bounded loop. Scans body for push targets via collect_push_targets.
+    pub(crate) fn emit_prealloc_for_body(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        body: &[Statement],
+        bound_reg: &str,
+    ) {
+        let mut push_targets: Vec<String> = Vec::new();
+        collect_push_targets(body, &mut push_targets);
+        push_targets.sort();
+        push_targets.dedup();
+        for field_name in &push_targets {
+            self.emit_prealloc_one_field(out, indent, field_name, bound_reg);
+        }
+    }
+
+    /// Emit preallocation for a pre-collected list of push target field names.
+    pub(crate) fn emit_prealloc_for_targets(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        push_targets: &[String],
+        bound_reg: &str,
+    ) {
+        let mut targets: Vec<String> = push_targets.to_vec();
+        targets.sort();
+        targets.dedup();
+        for field_name in &targets {
+            self.emit_prealloc_one_field(out, indent, field_name, bound_reg);
+        }
+    }
+
     pub(crate) fn emit_arena_alloc(&mut self, out: &mut String, indent: &str, size_reg: &str) -> String {
         if let Some((ref ptr, ref end, ref base)) = self.arena_slots.clone() {
             let c = self.arena_counter;
@@ -1135,8 +1238,23 @@ impl LlvmBackend {
         self.arena_slots = Some((ptr, end, base));
     }
 
-    /// Emit arena teardown at scope exit. Frees the arena buffer and
-    /// clears the arena_slots flag.
+    /// Emit arena reset: rewinds the bump pointer to the base, preserving
+    /// the allocated memory for reuse in the next scope iteration.
+    /// This is Phase 3 — cross-tick arena pool — keeps pages alive across
+    /// loop ticks instead of free+malloc per cycle.
+    pub(crate) fn emit_arena_reset(&mut self, out: &mut String, indent: &str) {
+        if let Some((ref ptr, _end, ref base)) = self.arena_slots.clone() {
+            let r = format!("%arr{}", self.arena_counter);
+            self.arena_counter += 1;
+            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, r, base).ok();
+            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, r, ptr).ok();
+            // Slots stay alive (arena is not freed). Memory is reused on next tick.
+        }
+    }
+
+    /// Emit arena teardown at program exit. Frees the arena buffer and
+    /// clears the arena_slots flag. After this, dynamic allocations
+    /// fall back to @malloc.
     pub(crate) fn emit_arena_fini(&mut self, out: &mut String, indent: &str) {
         if let Some((_ptr, _end, ref base)) = self.arena_slots.clone() {
             let f = format!("%arf{}", self.arena_counter);

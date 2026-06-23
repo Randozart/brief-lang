@@ -4559,8 +4559,12 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("add i64 0, 0 ; push void")
             || (output.contains("call noalias i8* @malloc")
                 && output.contains("llvm.memcpy.p0i8.p0i8.i64")
+                && output.contains("!tbaa !1"))
+            || (output.contains("load i8*, i8**")
+                && output.contains("getelementptr i8")
+                && output.contains("llvm.memcpy.p0i8.p0i8.i64")
                 && output.contains("!tbaa !1")),
-            "Arrow push should emit malloc+memcpy with TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+            "Arrow push should emit malloc+memcpy or arena bump+memcpy with TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }
 
     #[test]
@@ -4599,9 +4603,9 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("call noalias i8* @malloc")
+        assert!((output.contains("call noalias i8* @malloc") || output.contains("load i8*, i8**"))
             && output.contains("!tbaa !1"),
-            "Arrow pop should emit malloc and TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+            "Arrow pop should emit malloc or arena bump with TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }
 
     #[test]
@@ -4638,9 +4642,9 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("call noalias i8* @malloc")
+        assert!((output.contains("call noalias i8* @malloc") || output.contains("load i8*, i8**"))
             && output.contains("llvm.memcpy.p0i8.p0i8.i64"),
-            "Arrow discard should emit malloc and memcpy. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+            "Arrow discard should emit malloc or arena bump with memcpy. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }
 
     #[test]
@@ -4684,8 +4688,8 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("call noalias i8* @malloc"),
-            "Arrow transfer should emit malloc for combined buffer. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+        assert!(output.contains("call noalias i8* @malloc") || output.contains("load i8*, i8**"),
+            "Arrow transfer should emit malloc or arena bump for combined buffer. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
         assert!(output.contains("; transfer"),
             "Arrow transfer should contain transfer marker. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }

@@ -651,6 +651,26 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
+        // Arena: per-loop scratch buffer for collection operations.
+        // Arena is reset (not freed) between loop iterations — Phase 3
+        // cross-tick pool keeps pages alive. Only freed at program exit.
+        self.emit_arena_init(out, "  ");
+        // Phase 2: preallocate collection buffers if loop has a known bound.
+        if let Some(body_stmts) = body {
+            if !use_phi {
+                let bound_reg = format!("%bound_pre{}", self.txn_counter); self.txn_counter += 1;
+                if let Some(ti) = total_idx {
+                    writeln!(out, "  %gt{0} = getelementptr inbounds %State, ptr %state, i32 0, i32 {1}", self.txn_counter, ti).ok();
+                    writeln!(out, "  {0} = load i64, i64* %gt{1}, align 8", bound_reg, self.txn_counter).ok();
+                    self.txn_counter += 1;
+                    self.emit_prealloc_for_body(out, "  ", body_stmts, &bound_reg);
+                } else if let Some(ref cn) = total_const_name {
+                    writeln!(out, "  {} = load i64, i64* @{}, align 8", bound_reg, cn).ok();
+                    self.txn_counter += 1;
+                    self.emit_prealloc_for_body(out, "  ", body_stmts, &bound_reg);
+                }
+            }
+        }
         // Legacy phi-mode: uses
         if use_phi {
             writeln!(out, "  br label %case_phi_entry").ok();
@@ -659,6 +679,10 @@ impl LlvmBackend {
             if !use_phi { self.optimal_unroll_factor(body_stmts) } else { 1 }
         } else { 1 };
         self.emit_folded_loop(out, txn_name, counter_idx, total_idx, total_const_name, "case", use_phi, body, uf, false, None);
+        // Clear prealloc info (loop scope ended).
+        self.field_prealloc_info.clear();
+        // Arena reset: keep memory alive for any subsequent loops.
+        self.emit_arena_reset(out, "  ");
         let saved = std::mem::take(&mut self.pending_post_hoist);
         self.emit_hoisted_post_loop_prints(out, &saved);
         writeln!(out, "  ret i32 0").ok();
@@ -714,17 +738,24 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
+        // Arena for memory-path loop: collection operations in A005b
+        // use bump alloc instead of per-op free+malloc. Arena is reset
+        // (not freed) between loop exits — Phase 3 cross-tick pool.
+        self.emit_arena_init(out, "  ");
         // Bound loading — use numbered positional args ({0}, {1}) to avoid
         // LLVM IR brace chars being parsed as named format placeholders.
         let bound_suffix = total_idx.unwrap_or(c0);
+        let bound_reg = format!("%lt{}_{}", c0, if total_idx.is_some() { bound_suffix } else { c0 });
         if let Some(ti) = total_idx {
             writeln!(out, "  %gt{0}_{1} = getelementptr inbounds %State, ptr %state, i32 0, i32 {1}", c0, ti).ok();
-            writeln!(out, "  %lt{0}_{1} = load i64, i64* %gt{0}_{1}, align 8", c0, ti).ok();
+            writeln!(out, "  {0} = load i64, i64* %gt{1}_{2}, align 8", bound_reg, c0, bound_suffix).ok();
         } else if let Some(cn) = total_const_name {
-            writeln!(out, "  %lt{0}_{0} = load i64, i64* @{1}, align 8", c0, cn).ok();
+            writeln!(out, "  {} = load i64, i64* @{}, align 8", bound_reg, cn).ok();
         } else {
-            writeln!(out, "  %lt{0}_{0} = add i64 0, 0", c0).ok();
+            writeln!(out, "  {0} = add i64 0, 0", bound_reg).ok();
         }
+        // Phase 2: preallocate collection buffers using known loop bound.
+        self.emit_prealloc_for_body(out, "  ", body, &bound_reg);
         writeln!(out, "  br label %_hdr").ok();
         writeln!(out, "_hdr:").ok();
         // Counter phi: initial value is 0 (first tick); subsequent values
@@ -759,6 +790,9 @@ impl LlvmBackend {
         writeln!(out, "  {0} = add i64 {1}, 1", next_reg, phi_reg).ok();
         super::emit_loop_metadata(out, "  ", "_hdr", &mut self.metadata_counter, &mut self.pending_metadata);
         writeln!(out, "_done:").ok();
+        // Arena reset: rewinds pointer for next scope. Memory stays live
+        // across loops (Phase 3 cross-tick pool). Only freed at program exit.
+        self.emit_arena_reset(out, "  ");
         let saved = std::mem::take(&mut self.pending_post_hoist);
         self.emit_hoisted_post_loop_prints(out, &saved);
         writeln!(out, "  ret i32 0").ok();
@@ -823,6 +857,18 @@ impl LlvmBackend {
                         writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
                         // Check if bound is compile-time or runtime
                         let bound_imm = if bname.parse::<i64>().is_ok() { bname.clone() } else { b_val.clone() };
+                        // Phase 2: preallocate collection buffers using the loop bound.
+                        // The bound is either a literal (already a string like "100")
+                        // or a loaded register (b_val). For the literal case we need
+                        // a register; for the register case we pass it directly.
+                        let bound_reg = if bname.parse::<i64>().is_ok() {
+                            let br = format!("%bound_reg_{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "  {} = add i64 0, {}", br, bname).ok();
+                            br
+                        } else {
+                            b_val.clone()
+                        };
+                        self.emit_prealloc_for_body(out, "  ", &txn.body, &bound_reg);
                         let pi_name = format!("%pi_{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "  br label %phdr").ok();
                         writeln!(out, "  phdr:").ok();
@@ -839,6 +885,37 @@ impl LlvmBackend {
             }
         }
         if !has_canonical_loop {
+            // Phase 2 preallocation for multi-txn SSA: scan all txn bodies
+            // for push targets and preallocate if a bound is available from
+            // any txn's contract (e.g., shared [count < N] across txns).
+            let mut all_push_targets: Vec<String> = Vec::new();
+            for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
+                crate::backend::llvm::collect_push_targets(&txn.body, &mut all_push_targets);
+            }
+            if !all_push_targets.is_empty() {
+                // Try to extract bound from the first txn's precondition
+                if let Some((_, first_txn)) = txns.iter().find(|(_, t)| t.is_reactive) {
+                    if let Expr::Lt(_, rhs) = &first_txn.contract.pre_condition {
+                        let bound_reg = format!("%bound_mt{}", self.txn_counter); self.txn_counter += 1;
+                        match rhs.as_ref() {
+                            Expr::Integer(n) => {
+                                writeln!(out, "  {} = add i64 0, {}", bound_reg, n).ok();
+                                self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
+                            }
+                            Expr::Identifier(bname) => {
+                                if let Some(&b_idx) = self.field_index_map.get(bname) {
+                                    let b_gep = format!("%gep_bmt{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, b_idx).ok();
+                                    writeln!(out, "  {} = load i64, i64* {}, align 8", bound_reg, b_gep).ok();
+                                    self.txn_counter += 1;
+                                    self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
             writeln!(out, "  br label %tick").ok();
             writeln!(out, "  tick:").ok();
         }
@@ -1137,6 +1214,9 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
+        // Arena for enum dispatch: covers all folded-loop case arms and
+        // the residual reactor_tick path. Freed before program exit.
+        self.emit_arena_init(out, "  ");
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (ptr)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
@@ -1242,13 +1322,14 @@ impl LlvmBackend {
             } else {
                 emit_case_folded_loops(self, out, "sc", fn_name, counter_idx, total_idx, total_const_name);
             }
-            if has_wake {
-                writeln!(out, "  br label %{}", done_label).ok();
-            } else {
-                writeln!(out, "  ret i32 0").ok();
-            }
-        } else if enum_sizes.len() == 1 {
-            // Single enumerable trigger — one switch axis
+                if has_wake {
+                    writeln!(out, "  br label %{}", done_label).ok();
+                } else {
+                    self.emit_arena_fini(out, "  ");
+                    writeln!(out, "  ret i32 0").ok();
+                }
+            } else if enum_sizes.len() == 1 {
+                // Single enumerable trigger — one switch axis
             let tn = &enum_sizes[0].0;
             let n = enum_sizes[0].1.unwrap_or(2);
             let native_name = txn_name.to_string();
@@ -1279,6 +1360,7 @@ impl LlvmBackend {
                 if has_wake {
                     writeln!(out, "  br label %{}", done_label).ok();
                 } else {
+                    self.emit_arena_fini(out, "  ");
                     writeln!(out, "  ret i32 0").ok();
                 }
                 // Residual label for safety (unreachable for fully-covered enums)
@@ -1335,6 +1417,7 @@ impl LlvmBackend {
                 if has_wake {
                     writeln!(out, "  br label %{}", done_label).ok();
                 } else {
+                    self.emit_arena_fini(out, "  ");
                     writeln!(out, "  ret i32 0").ok();
                 }
             }
@@ -1389,6 +1472,7 @@ impl LlvmBackend {
             writeln!(out, "  br label %tick").ok();
             if has_exit {
                 writeln!(out, "done:").ok();
+                self.emit_arena_fini(out, "  ");
                 writeln!(out, "  ret i32 0").ok();
             }
         }
