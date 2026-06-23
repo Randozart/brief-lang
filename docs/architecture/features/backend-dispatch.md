@@ -12,25 +12,21 @@ program structure: loop bounds, FFI presence, and control flow branching.
 
 The dispatch runs after typechecking in `mod.rs` `compile()`:
 
-```
-Program parsed + resolved + typechecked
-  │
-  ├─ All inputs compile-time constant?
-  │   └─ Within --optimize-budget?
-  │       └─ YES → A000: Fully precomputed (interpreter simulates all iterations)
-  │
-  ├─ Counter-bounded reactive txn (transition_graph::is_counter_bounded)?
-  │   ├─ Pure body (no FFI) + constant bound → A001: Pure counter fold (O(1) store)
-  │   ├─ Pure body + runtime-variable bound → A005: Phi pipeline (counter only, call txn)
-  │   └─ Non-pure body (has FFI) → check body structure:
-  │       ├─ No Guarded/Escape → A005a: Folded SSA insertvalue (straight-line)
-  │       └─ Has branching → prove_linear()?
-  │           ├─ YES → A005a: Folded SSA insertvalue (guards mutually exclusive)
-  │           └─ NO  → A005b: Folded memory (GEP+load+store, no phi)
-  │
-  └─ Not counter-bounded:
-      ├─ Has async/MMIO/triggers → Reactor tick loop
-      └─ No async/MMIO/triggers → A006: Direct SSA loop
+```mermaid
+graph TD
+    Start[Program] --> AllConst{All inputs const?}
+    AllConst -->|Yes + within budget| Precomp[Precomputation A000]
+    AllConst -->|No| CounterBounded{Counter-bounded?}
+
+    CounterBounded -->|Yes| Pure{Pure body?}
+    Pure -->|Yes, counter only| PureCounter[Pure counter fold A005c]
+    Pure -->|Yes, with body| SSAFold[SSA inline fold A005a]
+    Pure -->|Branching| MemFold[Memory GEP fold A005b]
+
+    CounterBounded -->|No, reactive| Triggered{Trigger dispatch?}
+    Triggered -->|Enum triggers| EnumD[Enum dispatch folded]
+    Triggered -->|Async triggering| AsyncD[Async with Thread Pool]
+    Triggered -->|Sequential| SeqReactor[Sequential Reactor]
 ```
 
 ## Path Details

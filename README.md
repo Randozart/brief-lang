@@ -262,49 +262,48 @@ The compiler proves:
 
 ## Compiler Architecture
 
-```
-Source (.bv/.sbv/.rbv/.ebv/.abv/.cbv/.dbv)
-    ↓
-Lexer (lexer.rs) → Token stream
-    ↓
-Parser (parser.rs) → AST
-    ↓
-Import Resolver (import_resolver.rs) → Resolved AST
-    ↓
-Desugarer (desugarer.rs) → Desugared AST
-    ↓
-Type Checker (typechecker.rs) → Typed AST
-    ↓
-Proof Engine (proof_engine.rs) → Verified AST
-    ↓
-Shared Analysis
-├── CallGraph — Cycle detection, acyclic optimization
-├── Range Analysis — Parameter bounds inference
-├── Dataflow — Read/write dependencies
-└── Protocol — Control register prerequisites
-    ↓
-┌───────────────── Three Canonical Backends ─────────────────┐
-│                                                             │
-│  LLVM Backend         Webstack Backend     CIRCT Backend    │
-│  (llvm/)              (webstack.rs)        (circt.rs)       │
-│                                                             │
-│  .bv → LLVM IR        .rbv → TypeScript    .cbv → MLIR     │
-│  .ebv → MCU bin       .wasm sidecars       → Verilog/VHDL  │
-│  .abv → SPIR-V        + frontend glue                       │
-│                                                             │
-├─────────────────────────────────────────────────────────────┤
-│  Other backends (C, Rust, COBOL, VHDL, etc.) archived in   │
-│  archive/backend/ — preserved for reference, not active.    │
-└─────────────────────────────────────────────────────────────┘
-    ↓
-LSP Server (lsp.rs)
-├── Hover — Type information
-├── Definition — Go-to-definition
-├── Completions — Context-aware keyword/field/hashtag suggestions
-├── Document Symbols — Outline view
-├── Workspace Symbols — Cross-file symbol search
-├── Strict Mode Detection — .sbv/.sebv/.srbv extension handling
-└── Diagnostics — Typechecker + proof engine errors
+```mermaid
+graph TD
+    S["Source<br>(.bv/.sbv/.rbv/.ebv/.abv/.cbv/.dbv)"] --> Lex[Lexer: lexer.rs]
+    Lex -->|Token stream| Par[Parser: parser.rs]
+    Par -->|AST| Imp[Import Resolver: import_resolver.rs]
+    Imp -->|Resolved AST| Des[Desugarer: desugarer.rs]
+    Des -->|Desugared AST| TC[Type Checker: typechecker.rs]
+    TC -->|Typed AST| PE[Proof Engine: proof_engine.rs]
+    PE -->|Verified AST| SA[Shared Analysis]
+
+    SA --> CA[CallGraph]
+    SA --> RA[Range Analysis]
+    SA --> DA[Dataflow]
+    SA --> PR[Protocol]
+
+    SA --> Backends[Three Canonical Backends]
+
+    subgraph Backends[Three Canonical Backends]
+        LLVM[LLVM Backend<br>llvm/]
+        Web[Webstack Backend<br>webstack.rs]
+        CIRCT[CIRCT Backend<br>circt.rs]
+
+        LLVM -->|.bv -> LLVM IR| Native[Native binary]
+        LLVM -->|.ebv -> MCU bin| MCU[Microcontroller binary]
+        LLVM -->|.abv -> SPIR-V| GPU[GPU kernel]
+
+        Web -->|.rbv -> TS + WASM| WebApp[Web frontend]
+        CIRCT -->|.cbv -> MLIR| HDL["Verilog / VHDL"]
+    end
+
+    Backends --> LSP[LSP Server: lsp.rs]
+
+    LSP --> Hover[Hover - Type info]
+    LSP --> Def[Definition - Go-to-def]
+    LSP --> Comp[Completions - Context-aware]
+    LSP --> Sym[Document Symbols - Outline]
+    LSP --> WsSym[Workspace Symbols - Cross-file]
+    LSP --> Strict[Strict Mode Detection]
+    LSP --> Diag[Diagnostics - Errors]
+
+    style LSP fill:#55b,color:#fff
+    style Backends fill:#484,color:#fff
 ```
 
 ## Standard Library

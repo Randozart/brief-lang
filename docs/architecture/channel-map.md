@@ -4,178 +4,85 @@
 
 ## Pipeline
 
-```
-Source text
-  │
-  ▼
-Lexer ──────────► Vec<Token>
-  │
-  ▼
-Parser ─────────► Program { items: Vec<TopLevel>, comments, attrs, exit_condition }
-  │               TopLevel::Inop(InopDeclaration) — user-defined intrinsics (inop/inop!)
-  │               TopLevel::Statement(Box<Statement>) — top-level executable stmts
-  │               Expression parsing now has a new `parse_check()` level:
-  │                 parse_equality → parse_check → parse_comparison
-  │                 Handles: `is` (type/variant check), `from` (derivation check),
-  │                          `like` (structural equality)
-  │               Import target syntax: `(wasm) import`, `(circt) import`, `(javascript) import`, `import`
-  ▼
-Type-Universe ────► TypeUniverse (frozen map of resolved type metadata)
-  │
-  ▼
-Import Resolver ──► Program (resolved paths, validated imports, synthesized imports)
-  │                 Accepts `sed_item_names: Vec<String>` from Parser
-  │                 Filters sed items from exported symbols via filter_items()
-  │                 Cache: HashMap<String, (Program, Vec<String>)>
-  │
-   ├──► Program::synthesize_init_txn() — wraps TopLevel::Statement in __init txn
-   │     (called in run_llvm_compile, run_check, and run_rbv after import resolution)
-   │      The __init txn is treated like any other rct txn by the optimizer.
-   │      The !__booted_N + &booted=1 pattern avoids counter-loop folding
-   │      (correct — it's a one-shot, not an iterative loop). Normal
-   │      precomputation still applies; FFI calls prevent it.
-  ▼
-Desugarer ────────► Program (sugar constructs lowered to core AST)
-  │                 @"..." → Expr::RegexLiteral
-  │                 name#() → Expr::IntrinsicCall
-  │                 Struct derivation: flatten parent fields into child structs
-  │                   before state generation. Handles chain inheritance,
-  │                   detects field name collisions, preserves parent link
-  │                   for type system queries.
-  │
-  ├──► Phase 1a: Template Expansion (features::macros::expand::expand_templates)
-  │     Collects TopLevel::TemplateDef from program into MacroContext
-  │     Walks AST for Expr::TemplateCall nodes → executes template bodies
-  │     @-interpolation substitution via features::macros::template
-  │     Hygiene: local let bindings prefixed with __gensym_N
-  │     TemplateDef nodes removed from program (metadata only)
-  │
-  ├──► Phase 1b: Macro Expansion (features::macros::expand::expand_macros)
-  │     Collects TopLevel::MacroDef from program into MacroContext
-  │     Walks AST for Expr::MacroCall nodes → executes macro bodies
-  │     Sandboxed interpreter executes macro body with bound args
-  │     compile#(): parse string → Value::Block (string mixin)
-  │     error#()/warn#(): compile-time diagnostics
-  │     gensym#(): unique identifier generation
-  │     Re-runs Phase 1a on macro output (macros can emit template calls)
-  │     validate_no_compile_time_intrinsics: ensures no compile-time-
-  │       only intrinsics survive (is_compile_time_only() annotation)
-  │
-  ▼
-Typechecker ──────► Program (annotated with types), TypecheckContext
-  │                 Routes Expr variants through ExprTypecheck trait
-  │                 Visibility enforcement: enforce_field_visibility()
-  │                   — Sedentary cross-file access → TypeError
-  │                   — Public allowed everywhere (Private stubbed)
-  │                 Struct derivation: is_derived_from() walks parent chain
-  │                   — B <: A → types_compatible(B, A) == true
-  ▼
-EqSaturation ─────► Program (simplified via 5-pass fixpoint rewrite)
-  │                 9 rules: add-zero, mul-one, sub-self, double-neg, etc.
-  ▼
-Proof Engine ──────► Vec<ProofError> (contracts verified symbolically)
-  │
-  ▼
-Annotator ────────► Program (file-level attributes processed)
-  │
-  ▼
-Analysis ─────────► AnalysisResult
-  │                 ├── CallGraph ──► backend dispatch selection
-  │                 ├── DependencyGraph ──► trg dirty-flag step() order (NEW 2026-06-15)
-  │                 ├── Dataflow ───► prior-state field analysis
-  │                 ├── TransitionGraph ──► dispatch collapse
-  │                 ├── SLP Hazard ──► compute_peak_live_floats → SLP enable/disable
-  │                 ├── RegionAnalyzer ──► precomputation budget
-  │                 └── PGO ──► branch weight annotations for LLVM
-  │
-  ▼
-Codegen ──────────► Output (LLVM IR / CIRCT / Webstack / C)
-  │                 ├── Direct SSA loop (A006) — no async, no MMIO
-  │                 ├── Enum dispatch — folded multi-txn
-  │                 └── Reactor tick — async triggers or MMIO
-  │
-  ▼
-LLVM Pipeline ────► Binary
-  ├── llvm-link (LTO merge with brief_rt.c)
-  ├── opt -O3 -ffast-math
-  └── llc -O3 --mcpu=native
+```mermaid
+graph TD
+    S[Source text] --> Lex[Lexer]
+    Lex -->|Vec Token| Par[Parser]
+    Par -->|Program| TU[Type-Universe]
+    TU -->|TypeUniverse| IR[Import Resolver]
+    IR -->|Resolved Program| Des[Desugarer]
+
+    IR --> Init[Program::synthesize_init_txn<br>wraps TopLevel::Statement in __init txn]
+
+    Des --> T1a[Phase 1a: Template Expansion]
+    Des --> T1b[Phase 1b: Macro Expansion]
+    T1a --> T1b
+
+    Des --> TC[Typechecker]
+    TC -->|Typed Program| Eq[EqSaturation]
+    Eq -->|Simplified Program| PE[Proof Engine]
+    PE -->|ProofResults| An[Annotator]
+    An -->|Annotated Program| Anl[Analysis]
+
+    Anl --> CG[CallGraph]
+    Anl --> DG[DependencyGraph]
+    Anl --> DF[Dataflow]
+    Anl --> TG[TransitionGraph]
+    Anl --> SLP[SLP Hazard]
+    Anl --> RA[RegionAnalyzer]
+    Anl --> PGO[PGO]
+
+    Anl --> Codegen[Codegen]
+    Codegen -->|LLVM IR| LLVM[LLVM Pipeline]
+    Codegen -->|MLIR| CIRCT[CIRCT]
+    Codegen -->|TS + WASM| Web[Webstack]
+
+    LLVM --> Link[llvm-link LTO with brief_rt.c]
+    Link --> Opt[opt O3 ffast-math]
+    Opt --> LLC[llc O3 mcpu=native]
+    LLC --> Bin[Binary]
+
+    style Init fill:#55b,color:#fff
+    style T1a fill:#55b,color:#fff
+    style T1b fill:#55b,color:#fff
 ```
 
 ## Top::Statement Synthesis Flow
 
-```
-Parser produces TopLevel::Statement(s)
-  │
-  ▼
-Program::synthesize_init_txn() called after import resolution:
-  1. Collect all TopLevel::Statement indices in order
-  2. Remove from program.items
-  3. Find unique __booted_N name (check N=0..63)
-  4. Create StateDecl { name: "__booted_N", ty: Int, expr: Integer(0) }
-  5. Create synthesized body: [stmts..., &__booted_N = 1, term;]
-  6. Create rct txn __init [!__booted_N][__booted_N] { body }
-  7. Prepend state decl, append __init txn to program.items
+```mermaid
+graph TD
+    P[Parser produces TopLevel::Statement] --> Syn[Program::synthesize_init_txn<br>after import resolution]
+    Syn --> C1[1. Collect all TopLevel::Statement indices]
+    C1 --> C2[2. Remove from program.items]
+    C2 --> C3[3. Find unique __booted_N name]
+    C3 --> C4[4. Create StateDecl __booted_N: Int = 0]
+    C4 --> C5[5. Synthesize body: stmts + booted = 1 + term]
+    C5 --> C6[6. Create rct txn __init]
+    C6 --> C7[7. Prepend state decl, append __init]
 ```
 
 ## IntrinsicCall Routing
 
-```
-Parser produces Expr::IntrinsicCall { intrinsic, args }
-  │             If Intrinsic::from_name(name) fails:
-  │               falls back to Intrinsic::UserDefined(name)
-  │               (checked against inop_decls later in pipeline)
-  │
-  ▼
-Typechecker: infers return type per intrinsic table (29 entries + UserDefined from inop_decls)
-  │             Unknown UserDefined names → diagnostic U001
-  │
-  ▼
-Interpreter: dispatches on Intrinsic enum — native Rust implementation
-  │             ├── println# → println!("{}", v)
-  │             ├── read_file# → std::fs::read_to_string
-  │             ├── sort# → passthrough (no-op in interpreter)
-  │             └── UserDefined(name) → inop_decls[name].fallback or RuntimeError
-  │
-  ▼
-LLVM Backend: dispatches on Intrinsic enum
-                ├── Sqrt → call float @llvm.sqrt.f32
-                ├── Println → printf with per-type format
-                ├── ReadFile → call ptr @brief_read_file(ptr) via inttoptr/ptrtoint marshaling
-                ├── Socket → add i64 0, -1 (stub)
-                └── UserDefined(name) → call <ret_ty> @name(%State* %state, <native_ty> args...)
-```
+```mermaid
+graph LR
+    subgraph Parser[Parser]
+        Intrin[IntrinsicCall expr]
+    end
+    Intrin --> TC[Typechecker]
+    TC -->|annotated| Interp[Interpreter]
+    TC -->|annotated| LLVM[LLVM Backend]
+
+    Interp -->|evaluate| Result[Intrinsic return value]
+    LLVM -->|emit| IR[LLVM IR intrinsic call]
 ```
 
 ## Universal Bracket Routing
 
-```
-Bracket expression parsed as:
-  val[start..end]      → Expr::Slice { value, start, end }
-  val[coord...]         → Expr::MultiSlice { value, ops }
-  val; mask             → BracketOp::Mask(predicate)
-  @"pattern"            → Expr::RegexLiteral(String)
-
-  │
-  ▼
-DFA Compiler (analysis/dfa.rs):
-  @"pattern" literal → compile_to_dfa() → RegexPattern (DFA table)
-                     → Value::Regex(RegexPattern)
-
-  │
-  ▼
-Interpreter:
-  SliceExpr::evaluate() → decompose_atomic_to_chars() for atomics
-  MultiSliceExpr::evaluate() → char decomposition + ops + reconstruction
-  eval_mask_condition() → Value::Bool | Value::Regex | Value::String
-
-  Type-directed desugar:
-    atomic_val["string"] → coord desugars to regex filter on chars
-
-  │
-  ▼
-LLVM Backend:
-  Expr::Slice / MultiSlice on atomics → passthrough (coord) or stub (stride/mask)
-  Expr::RegexLiteral → string constant pointer
+```mermaid
+graph TD
+    BR[BracketOp / RegexLiteral] --> DFA[DFA Compiler]
+    DFA -->|state machine| Interp2[Interpreter]
+    DFA -->|state machine| LLVM2[LLVM Backend]
 ```
 
 ## Import Target Routing (2026-06-19)
@@ -214,78 +121,25 @@ During body emission, TermBang handler checks loop_exit_label:
 
 ## Reactor / Async / Trigger Flow (2026-06-11)
 
+```mermaid
+graph TD
+    PB[Program Build] --> Ana[Analysis]
+    Ana -->|determines| Sel{Dispatch type?}
+    Sel -->|No async, no MMIO| SSA[Direct SSA loop A006]
+    Sel -->|Bounded triggers| Enum[Enum dispatch folded]
+    Sel -->|Async or MMIO| React[Reactor tick]
+
+    React --> Conv[Convergence loop:<br>pre body post]
+    Conv -->|triggers| Event[Event-driven loop:<br>epoll wait step]
 ```
-Program with rct async txn @NHz or trg declarations
-  │
-  ▼
-Reactor::build_from_program()
-  ├── ReactiveTransaction constructed per rct txn:
-  │     name, contract, body, is_async, reactor_speed, dependencies
-  │     is_async and reactor_speed copied directly from parsed Transaction
-  ├── TopLevel::Trigger stored in triggers map:
-  │     HashMap<String, TriggerDeclaration>
-  └── last_fired timestamps initialized: vec![Instant::now(); N_transactions]
-
-  │
-  ├── run_reactor (convergent, existing):
-  │     Loop on dirty_preconditions → convergence → break
-  │     Used for programs without async/triggers
-  │
-  └── run_reactor_continuous (event-driven, new):
-        Loop:
-          (1) reactor.run(interp)         — responsive convergence
-          (2) reactor.fire_due_async_txns  — polled @Hz transactions
-          (3) reactor.run(interp)         — catch cascades from (2)
-          (4) sleep 1ms                   — yield to OS
-
-fire_due_async_txns logic:
-  for each transaction with is_async && reactor_speed.is_some():
-    interval_ms = 1000 / hz
-    if last_fired[idx].elapsed() >= interval_ms:
 
 ## GPU Offloading Flow (2026-06-18)
 
-```
-Program with #gpu / #?gpu directives or --gpu-offload flag
-  │
-  ▼
-Backend::generate()
-  │
-  ├──► Normal LLVM codegen (emit_toplevel.rs)
-  │      After each transaction is emitted:
-  │        if txn has #gpu or --gpu-offload:
-  │          collect_gpu_kernel(txn_name, body, is_speculative)
-  │            ├── check_eligibility() — purity, no term/FFI, flat types
-  │            ├── [#?gpu only] gpu_cost::estimate(body, N)
-  │            │     ├── count_operations() — arithmetic ops in body
-  │            │     ├── count_bytes_transferred() — field reads/writes
-  │            │     ├── compute crossover point N_c
-  │            │     └── decision: Gpu / Cpu / Runtime
-  │            ├── emit optimization remark with analysis
-  │            ├── gpu::extract_kernel() — clone body, classify fields
-  │            ├── gpu::emit_spirv_module() — produce LLVM IR for spirv64 target
-  │            └── gpu::compile_to_spirv() — llc --mtriple=spirv64 → .spv
-  │
-  └──► At end of generate():
-         emit_spirv_embeds() — append @brief_kernel_N byte arrays to .ll output
-
-  │
-  ▼
-run_llvm_compile() (main.rs)
-  ├──► Normal .ll → native binary (existing pipeline)
-  └──► If --gpu-offload with kernels:
-         compile .spv file alongside .ll binary
-
-  │
-  ▼
-Runtime (brief_gpu_rt.c)
-  brief_gpu_init()
-    ├── dlopen("libvulkan.so.1") → Vulkan compute dispatch (preferred)
-    └── dlopen("libOpenCL.so.1") → clCreateProgramWithIL (fallback)
-  brief_gpu_launch(kernel_spirv, size, grid, block, buffer_handles)
-    ├── Vulkan: vkCreateShaderModule + vkCmdDispatch
-    └── OpenCL: clCreateProgramWithIL + clEnqueueNDRangeKernel
-  brief_gpu_is_available() → 0 if neither Vulkan nor OpenCL found (CPU fallback)
-```
-      mark dirty, fire transaction, update last_fired[idx]
+```mermaid
+graph TD
+    GPUMark[#gpu annotated txn] --> Check[check_eligibility]
+    Check -->|passes| SPIRV[emit_spirv_module]
+    SPIRV --> LLCSPV[llc mtriple=spirv64]
+    LLCSPV --> Vulkan[Vulkan / OpenCL runtime]
+    Check -->|fails| Warn[Warn: GPU-ineligible types]
 ```
