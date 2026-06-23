@@ -69,6 +69,7 @@ pub struct TypeChecker {
     trigger_names: std::collections::HashSet<String>,  // names of declared @ link triggers (read-only)
     inop_decls: HashMap<String, InopDeclaration>,
     type_universe: Option<crate::type_universe::TypeUniverse>,
+    cell_defs: HashMap<String, CellDef>,
 }
 
 impl TypeChecker {
@@ -95,6 +96,7 @@ impl TypeChecker {
             trigger_names: std::collections::HashSet::new(),
             inop_decls: HashMap::new(),
             type_universe: None,
+            cell_defs: HashMap::new(),
         }
     }
 
@@ -637,6 +639,10 @@ impl TypeChecker {
                 TopLevel::Assertion { .. } => {
                     // Assertions are compile-time only — skip in Pass 1.
                 }
+                TopLevel::Cell(cell) => {
+                    let c: &CellDef = cell;
+                    self.cell_defs.insert(c.name.clone(), c.clone());
+                }
                 _ => {}
             }
         }
@@ -891,6 +897,9 @@ impl TypeChecker {
                         }
                     }
                 }
+                TopLevel::Cell(cell) => {
+                    self.check_cell_definition(cell);
+                }
                 _ => {}
             }
         }
@@ -900,6 +909,80 @@ impl TypeChecker {
 
     pub fn get_diagnostics(&self) -> Vec<Diagnostic> {
         self.diagnostics.borrow().clone()
+    }
+
+    fn check_cell_definition(&mut self, cell: &CellDef) {
+        // 1. Verify output port names are unique and don't shadow params
+        if let Some(ref ot) = cell.output_type {
+            let mut seen_names: Vec<String> = Vec::new();
+            for (param_name, _) in &cell.parameters {
+                seen_names.push(param_name.clone());
+            }
+            self.check_output_type_names(ot, &mut seen_names);
+        }
+
+        // 2. Validate each transaction and definition within the cell
+        for txn in &cell.transactions {
+            self.check_transaction(txn);
+        }
+        for defn in &cell.definitions {
+            self.check_definition(defn);
+        }
+
+        // 3. Check that cell! (persistent) has at least one transaction
+        if cell.is_persistent && cell.transactions.is_empty() {
+            self.diagnostics.borrow_mut().push(
+                Diagnostic::new("C001", Severity::Error, "persistent cell must have at least one transaction")
+                    .with_explanation(&format!(
+                        "cell! '{}' is declared persistent but has no transactions",
+                        cell.name
+                    )),
+            );
+        }
+    }
+
+    fn check_output_type_names(&self, ot: &OutputType, seen: &mut Vec<String>) {
+        match ot {
+            OutputType::Single(_) => {}
+            OutputType::Union(types) => {
+                for t in types {
+                    self.check_output_type_names(t, seen);
+                }
+            }
+            OutputType::Tuple(types) => {
+                for t in types {
+                    self.check_output_type_names(t, seen);
+                }
+            }
+            OutputType::Array(_) => {}
+            OutputType::Named(name, inner) => {
+                if seen.contains(name) {
+                    self.diagnostics.borrow_mut().push(
+                        Diagnostic::new("C002", Severity::Error, "duplicate output port name")
+                            .with_explanation(&format!(
+                                "output port '{}' shadows an existing parameter or port name",
+                                name
+                            )),
+                    );
+                }
+                seen.push(name.clone());
+                self.check_output_type_names(inner, seen);
+            }
+        }
+    }
+
+    fn output_type_to_type(&self, ot: &OutputType) -> Type {
+        match ot {
+            OutputType::Single(ty) => ty.clone(),
+            OutputType::Union(types) => {
+                Type::Union(types.iter().map(|t| self.output_type_to_type(t)).collect())
+            }
+            OutputType::Tuple(types) => {
+                Type::Tuple(types.iter().map(|t| self.output_type_to_type(t)).collect())
+            }
+            OutputType::Array(ty) => Type::Applied("List".to_string(), vec![ty.as_ref().clone()]),
+            OutputType::Named(_, inner) => self.output_type_to_type(inner),
+        }
     }
 
     fn push_scope(&mut self) {
@@ -1241,6 +1324,12 @@ impl TypeChecker {
             }
             Expr::FieldAccess(obj, _) => {
                 self.check_expr_for_function_calls(obj);
+            }
+            Expr::CellCall(callee, args) => {
+                self.check_expr_for_function_calls(callee);
+                for arg in args {
+                    self.check_expr_for_function_calls(arg);
+                }
             }
             Expr::IsType(expr, _) | Expr::FromCheck(expr, _) => {
                 self.check_expr_for_function_calls(expr);
@@ -1699,6 +1788,21 @@ impl TypeChecker {
                     self.check_statement(body, is_async);
                 }
             }
+            Statement::TrgBinding { name, ty, instance, port, .. } => {
+                let instance_ty = self.infer_expression(instance);
+                if !self.types_compatible(&instance_ty, &Type::Int) {
+                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                        expected: "Int (cell instance handle)".to_string(),
+                        found: self.type_to_string(&instance_ty),
+                        context: format!("trg binding '{}'", name),
+                    });
+                }
+                if let Some(decl_ty) = ty {
+                    self.declare_variable(name, decl_ty.clone());
+                } else {
+                    self.declare_variable(name, Type::Int);
+                }
+            }
             _ => {}
         }
     }
@@ -1935,6 +2039,26 @@ impl TypeChecker {
                     Type::Custom(enum_name.clone())
                 } else {
                     Type::Custom(name.clone())
+                }
+            }
+            Expr::CellCall(callee, args) => {
+                for arg in args {
+                    self.infer_expression(arg);
+                }
+                if let Expr::Identifier(name) = callee.as_ref() {
+                    if let Some(cell_def) = self.cell_defs.get(name) {
+                        if let Some(ref ot) = cell_def.output_type {
+                            let ret_ty = self.output_type_to_type(ot);
+                            // For union output types, return the union
+                            ret_ty
+                        } else {
+                            Type::Void
+                        }
+                    } else {
+                        Type::Custom("unknown".to_string())
+                    }
+                } else {
+                    Type::Custom("unknown".to_string())
                 }
             }
             Expr::ListLiteral(elements) => {

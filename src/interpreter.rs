@@ -275,6 +275,8 @@ pub struct Interpreter {
     oracle_fuel: Option<u64>,
     pub type_universe: Option<crate::type_universe::TypeUniverse>,
     pub inop_decls: HashMap<String, InopDeclaration>,
+    pub cell_defs: HashMap<String, CellDef>,
+    pub next_cell_uid: usize,
 }
 
 impl Interpreter {
@@ -300,6 +302,8 @@ impl Interpreter {
             oracle_fuel: None,
             type_universe: None,
             inop_decls: HashMap::new(),
+            cell_defs: HashMap::new(),
+            next_cell_uid: 0,
         }
     }
 
@@ -988,6 +992,8 @@ impl Interpreter {
                     }
                     _ => {}
                 }
+            } else if let TopLevel::Cell(cell) = item {
+                self.cell_defs.insert(cell.name.clone(), cell.as_ref().clone());
             }
         }
 
@@ -1098,6 +1104,548 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+
+    fn call_cell(&mut self, cell_def: &CellDef, args: &[Value]) -> Result<Value, RuntimeError> {
+        let uid = self.next_cell_uid;
+        self.next_cell_uid += 1;
+
+        let saved_state = self.state.clone();
+        let saved_prior = self.prior_state.clone();
+        let saved_return = self.return_value.take();
+
+        // Initialize fields with defaults or zero values
+        for field in &cell_def.fields {
+            let key = format!("{}${}.{}", cell_def.name, uid, field.name);
+            let value = if let Some(ref expr) = field.default {
+                self.eval_expr(expr)?
+            } else {
+                match &field.ty {
+                    Type::Int => Value::Int(0),
+                    Type::Bool => Value::Bool(false),
+                    Type::Float => Value::Float(0.0),
+                    Type::Char => Value::Char('\0'),
+                    Type::String => Value::String(String::new()),
+                    _ => Value::Void,
+                }
+            };
+            self.state.insert(key, value);
+        }
+
+        // Bind input arguments with prefix
+        for ((param_name, _), arg) in cell_def.parameters.iter().zip(args.iter()) {
+            let key = format!("{}${}.{}", cell_def.name, uid, param_name);
+            self.state.insert(key, arg.clone());
+        }
+
+        // Convergence loop
+        let mut executed = true;
+        let max_iterations: usize = 100000;
+        let mut iterations = 0;
+
+        while executed && iterations < max_iterations {
+            executed = false;
+            iterations += 1;
+
+            for txn in &cell_def.transactions {
+                let pre = self.rewrite_identifiers(&txn.contract.pre_condition, uid, &cell_def.name);
+                let pre_val = self.eval_expr(&pre)?;
+
+                if pre_val == Value::Bool(true) {
+                    self.prior_state = self.state.clone();
+                    self.return_value = None;
+
+                    for stmt in &txn.body {
+                        let rewritten = self.rewrite_statement_identifiers(stmt, uid, &cell_def.name);
+                        match self.exec_stmt(&rewritten) {
+                            Ok(()) => {
+                                if self.return_value.is_some() {
+                                    break;
+                                }
+                            }
+                            Err(RuntimeError::Escaped) => {
+                                self.state = self.prior_state.clone();
+                                break;
+                            }
+                            Err(e) => {
+                                self.state = saved_state;
+                                self.prior_state = saved_prior;
+                                self.return_value = saved_return;
+                                return Err(e);
+                            }
+                        }
+                    }
+
+                    if self.return_value.is_some() {
+                        let result = self.get_designated_output(cell_def, uid);
+                        self.state = saved_state;
+                        self.prior_state = saved_prior;
+                        self.return_value = saved_return;
+                        return Ok(result);
+                    }
+
+                    // Check postcondition
+                    let post = self.rewrite_identifiers(&txn.contract.post_condition, uid, &cell_def.name);
+                    let post_val = self.eval_expr(&post)?;
+                    if post_val == Value::Bool(true) && self.state != self.prior_state {
+                        executed = true;
+                    }
+                }
+            }
+        }
+
+        let result = self.get_designated_output(cell_def, uid);
+        self.state = saved_state;
+        self.prior_state = saved_prior;
+        self.return_value = saved_return;
+        Ok(result)
+    }
+
+    fn rewrite_identifiers(&self, expr: &Expr, uid: usize, cell_name: &str) -> Expr {
+        let prefix = |name: &str| -> String { format!("{}${}.{}", cell_name, uid, name) };
+        match expr {
+            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::RegexLiteral(_)
+                | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Ellipsis
+                | Expr::SharedMem(_) => expr.clone(),
+            Expr::Literal(lit) => Expr::Literal(lit.clone()),
+            Expr::Identifier(name) => Expr::Identifier(prefix(name)),
+            Expr::OwnedRef(name) => Expr::OwnedRef(prefix(name)),
+            Expr::PriorState(name) => Expr::PriorState(prefix(name)),
+            Expr::EllipsisExpr(e) => Expr::EllipsisExpr(e.clone()),
+            Expr::TypeRef(name) => Expr::TypeRef(name.clone()),
+            Expr::ArrowMut { dir, target, index, value } => Expr::ArrowMut {
+                dir: dir.clone(),
+                target: Box::new(self.rewrite_identifiers(target, uid, cell_name)),
+                index: Box::new(self.rewrite_identifiers(index, uid, cell_name)),
+                value: value.as_ref().map(|v| Box::new(self.rewrite_identifiers(v, uid, cell_name))),
+            },
+            Expr::ArrowDiscard { target, index } => Expr::ArrowDiscard {
+                target: Box::new(self.rewrite_identifiers(target, uid, cell_name)),
+                index: Box::new(self.rewrite_identifiers(index, uid, cell_name)),
+            },
+            Expr::ArrowTransfer { dest, source, filter } => Expr::ArrowTransfer {
+                dest: Box::new(self.rewrite_identifiers(dest, uid, cell_name)),
+                source: Box::new(self.rewrite_identifiers(source, uid, cell_name)),
+                filter: filter.as_ref().map(|f| Box::new(self.rewrite_identifiers(f, uid, cell_name))),
+            },
+            Expr::ArrowMutExpr(e) => Expr::ArrowMutExpr(e.clone()),
+            Expr::ArrowDiscardExpr(e) => Expr::ArrowDiscardExpr(e.clone()),
+            Expr::ArrowTransferExpr(e) => Expr::ArrowTransferExpr(e.clone()),
+            Expr::Add(l, r) => Expr::Add(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Sub(l, r) => Expr::Sub(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Mul(l, r) => Expr::Mul(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Div(l, r) => Expr::Div(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Mod(l, r) => Expr::Mod(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Eq(l, r) => Expr::Eq(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Ne(l, r) => Expr::Ne(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Lt(l, r) => Expr::Lt(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Le(l, r) => Expr::Le(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Gt(l, r) => Expr::Gt(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Ge(l, r) => Expr::Ge(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::IsType(e, target) => Expr::IsType(
+                Box::new(self.rewrite_identifiers(e, uid, cell_name)),
+                target.clone(),
+            ),
+            Expr::FromCheck(e, ty) => Expr::FromCheck(
+                Box::new(self.rewrite_identifiers(e, uid, cell_name)),
+                ty.clone(),
+            ),
+            Expr::Like(l, r) => Expr::Like(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Or(l, r) => Expr::Or(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::And(l, r) => Expr::And(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Not(e) => Expr::Not(Box::new(self.rewrite_identifiers(e, uid, cell_name))),
+            Expr::Neg(e) => Expr::Neg(Box::new(self.rewrite_identifiers(e, uid, cell_name))),
+            Expr::BitNot(e) => Expr::BitNot(Box::new(self.rewrite_identifiers(e, uid, cell_name))),
+            Expr::BitAnd(l, r) => Expr::BitAnd(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::BitOr(l, r) => Expr::BitOr(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::BitXor(l, r) => Expr::BitXor(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Shl(l, r) => Expr::Shl(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Shr(l, r) => Expr::Shr(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::BinaryOp(e) => Expr::BinaryOp(Box::new(BinaryOpExpr {
+                kind: e.kind,
+                left: Box::new(self.rewrite_identifiers(&e.left, uid, cell_name)),
+                right: Box::new(self.rewrite_identifiers(&e.right, uid, cell_name)),
+            })),
+            Expr::UnaryOp(e) => Expr::UnaryOp(Box::new(UnaryOpExpr {
+                kind: e.kind,
+                operand: Box::new(self.rewrite_identifiers(&e.operand, uid, cell_name)),
+            })),
+            Expr::Concat(l, r) => Expr::Concat(
+                Box::new(self.rewrite_identifiers(l, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(r, uid, cell_name)),
+            ),
+            Expr::Cast(e, ty) => Expr::Cast(
+                Box::new(self.rewrite_identifiers(e, uid, cell_name)),
+                ty.clone(),
+            ),
+            Expr::Projection { source, target } => Expr::Projection {
+                source: Box::new(self.rewrite_identifiers(source, uid, cell_name)),
+                target: target.clone(),
+            },
+            Expr::ProjectionExpr(e) => Expr::ProjectionExpr(ProjectionExpr {
+                source: Box::new(self.rewrite_identifiers(&e.source, uid, cell_name)),
+                target: e.target.clone(),
+            }),
+            Expr::Call(name, args) => Expr::Call(
+                name.clone(),
+                args.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            ),
+            Expr::CallExpr(e) => Expr::CallExpr(CallExpr {
+                name: e.name.clone(),
+                args: e.args.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            }),
+            Expr::CellCall(callee, args) => Expr::CellCall(
+                Box::new(self.rewrite_identifiers(callee, uid, cell_name)),
+                args.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            ),
+            Expr::TemplateCall { name, args, block, span } => Expr::TemplateCall {
+                name: name.clone(),
+                args: args.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+                block: block.clone(),
+                span: *span,
+            },
+            Expr::MacroCall { name, args, block, span } => Expr::MacroCall {
+                name: name.clone(),
+                args: args.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+                block: block.clone(),
+                span: *span,
+            },
+            Expr::IntrinsicCall { intrinsic, args } => Expr::IntrinsicCall {
+                intrinsic: intrinsic.clone(),
+                args: args.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            },
+            Expr::ListLiteral(items) => Expr::ListLiteral(
+                items.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            ),
+            Expr::ListLiteralExpr(e) => Expr::ListLiteralExpr(ListLiteralExpr {
+                elements: e.elements.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            }),
+            Expr::MapLiteral(pairs) => Expr::MapLiteral(
+                pairs.iter().map(|(k, v)| {
+                    (self.rewrite_identifiers(k, uid, cell_name), self.rewrite_identifiers(v, uid, cell_name))
+                }).collect(),
+            ),
+            Expr::MapLiteralExpr(e) => Expr::MapLiteralExpr(MapLiteralExpr {
+                entries: e.entries.iter().map(|(k, v)| {
+                    (self.rewrite_identifiers(k, uid, cell_name), self.rewrite_identifiers(v, uid, cell_name))
+                }).collect(),
+            }),
+            Expr::SetLiteral(items) => Expr::SetLiteral(
+                items.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            ),
+            Expr::SetLiteralExpr(e) => Expr::SetLiteralExpr(SetLiteralExpr {
+                entries: e.entries.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            }),
+            Expr::ListIndex(list, idx) => Expr::ListIndex(
+                Box::new(self.rewrite_identifiers(list, uid, cell_name)),
+                Box::new(self.rewrite_identifiers(idx, uid, cell_name)),
+            ),
+            Expr::Slice { value, start, end, stride, mask } => Expr::Slice {
+                value: Box::new(self.rewrite_identifiers(value, uid, cell_name)),
+                start: start.as_ref().map(|s| Box::new(self.rewrite_identifiers(s, uid, cell_name))),
+                end: end.as_ref().map(|e| Box::new(self.rewrite_identifiers(e, uid, cell_name))),
+                stride: stride.as_ref().map(|s| Box::new(self.rewrite_identifiers(s, uid, cell_name))),
+                mask: mask.as_ref().map(|m| Box::new(self.rewrite_identifiers(m, uid, cell_name))),
+            },
+            Expr::SliceExpr(e) => Expr::SliceExpr(SliceExpr {
+                value: Box::new(self.rewrite_identifiers(&e.value, uid, cell_name)),
+                start: e.start.as_ref().map(|s| Box::new(self.rewrite_identifiers(s, uid, cell_name))),
+                end: e.end.as_ref().map(|s| Box::new(self.rewrite_identifiers(s, uid, cell_name))),
+                stride: e.stride.as_ref().map(|s| Box::new(self.rewrite_identifiers(s, uid, cell_name))),
+                mask: e.mask.as_ref().map(|m| Box::new(self.rewrite_identifiers(m, uid, cell_name))),
+            }),
+            Expr::MultiSlice { value, ops } => Expr::MultiSlice {
+                value: Box::new(self.rewrite_identifiers(value, uid, cell_name)),
+                ops: ops.clone(),
+            },
+            Expr::MultiSliceExpr(e) => Expr::MultiSliceExpr(MultiSliceExpr {
+                value: Box::new(self.rewrite_identifiers(&e.value, uid, cell_name)),
+                ops: e.ops.clone(),
+            }),
+            Expr::FieldAccess(obj, field) => Expr::FieldAccess(
+                Box::new(self.rewrite_identifiers(obj, uid, cell_name)),
+                field.clone(),
+            ),
+            Expr::FieldAccessExpr(e) => Expr::FieldAccessExpr(FieldAccessExpr {
+                obj: Box::new(self.rewrite_identifiers(&e.obj, uid, cell_name)),
+                field: e.field.clone(),
+            }),
+            Expr::StructInstance(name, fields) => Expr::StructInstance(
+                name.clone(),
+                fields.iter().map(|(n, e)| (n.clone(), self.rewrite_identifiers(e, uid, cell_name))).collect(),
+            ),
+            Expr::StructInstanceExpr(e) => Expr::StructInstanceExpr(StructInstanceExpr {
+                typename: e.typename.clone(),
+                fields: e.fields.iter().map(|(n, e)| (n.clone(), self.rewrite_identifiers(e, uid, cell_name))).collect(),
+            }),
+            Expr::ObjectLiteral(fields) => Expr::ObjectLiteral(
+                fields.iter().map(|(n, e)| (n.clone(), self.rewrite_identifiers(e, uid, cell_name))).collect(),
+            ),
+            Expr::ObjectLiteralExpr(e) => Expr::ObjectLiteralExpr(ObjectLiteralExpr {
+                fields: e.fields.iter().map(|(n, e)| (n.clone(), self.rewrite_identifiers(e, uid, cell_name))).collect(),
+            }),
+            Expr::PatternMatch { value, variant, fields } => Expr::PatternMatch {
+                value: Box::new(self.rewrite_identifiers(value, uid, cell_name)),
+                variant: variant.clone(),
+                fields: fields.clone(),
+            },
+            Expr::PatternMatchExpr(e) => Expr::PatternMatchExpr(PatternMatchExpr {
+                value: Box::new(self.rewrite_identifiers(&e.value, uid, cell_name)),
+                variant: e.variant.clone(),
+                fields: e.fields.clone(),
+            }),
+            Expr::Match { value, arms } => Expr::Match {
+                value: Box::new(self.rewrite_identifiers(value, uid, cell_name)),
+                arms: arms.clone(),
+            },
+            Expr::MatchExpr(e) => Expr::MatchExpr(MatchExpr {
+                value: Box::new(self.rewrite_identifiers(&e.value, uid, cell_name)),
+                arms: e.arms.clone(),
+            }),
+            Expr::Block(stmts, last) => Expr::Block(
+                stmts.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+                Box::new(self.rewrite_identifiers(last, uid, cell_name)),
+            ),
+            Expr::BlockExpr(e) => Expr::BlockExpr(BlockExpr {
+                stmts: e.stmts.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+                last: Box::new(self.rewrite_identifiers(&e.last, uid, cell_name)),
+            }),
+            Expr::Interpolate(name) => Expr::Interpolate(name.clone()),
+            Expr::InterpolateExpr(e) => Expr::InterpolateExpr(Box::new(self.rewrite_identifiers(e, uid, cell_name))),
+            Expr::QuoteBlock { statements, trailing_expr } => Expr::QuoteBlock {
+                statements: statements.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+                trailing_expr: trailing_expr.as_ref().map(|e| Box::new(self.rewrite_identifiers(e, uid, cell_name))),
+            },
+            Expr::TupleDestructure(names, expr) => Expr::TupleDestructure(
+                names.clone(),
+                Box::new(self.rewrite_identifiers(expr, uid, cell_name)),
+            ),
+            Expr::TupleDestructureExpr(e) => Expr::TupleDestructureExpr(TupleDestructureExpr {
+                names: e.names.clone(),
+                expr: Box::new(self.rewrite_identifiers(&e.expr, uid, cell_name)),
+            }),
+            Expr::Tuple(items) => Expr::Tuple(
+                items.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            ),
+            Expr::TupleExpr(e) => Expr::TupleExpr(TupleExpr {
+                exprs: e.exprs.iter().map(|a| self.rewrite_identifiers(a, uid, cell_name)).collect(),
+            }),
+            Expr::SigCall { modifier, expr } => Expr::SigCall {
+                modifier: modifier.clone(),
+                expr: Box::new(self.rewrite_identifiers(expr, uid, cell_name)),
+            },
+            Expr::SigCallExpr(e) => Expr::SigCallExpr(SigCallExpr {
+                modifier: e.modifier.clone(),
+                expr: Box::new(self.rewrite_identifiers(&e.expr, uid, cell_name)),
+            }),
+            Expr::SubtypeProjection { source, ops } => Expr::SubtypeProjection {
+                source: Box::new(self.rewrite_identifiers(source, uid, cell_name)),
+                ops: ops.clone(),
+            },
+            Expr::SubtypeProjectionExpr(e) => Expr::SubtypeProjectionExpr(SubtypeProjectionExpr {
+                source: Box::new(self.rewrite_identifiers(&e.source, uid, cell_name)),
+                ops: e.ops.clone(),
+            }),
+            Expr::DbvlTable { path, field_names, key_offsets, schema_name } => Expr::DbvlTable {
+                path: path.clone(),
+                field_names: field_names.clone(),
+                key_offsets: key_offsets.clone(),
+                schema_name: schema_name.clone(),
+            },
+            Expr::DbvlTableExpr(e) => Expr::DbvlTableExpr(e.clone()),
+            Expr::PipeChain(chain) => Expr::PipeChain(PipeChain {
+                initial: Box::new(self.rewrite_identifiers(&chain.initial, uid, cell_name)),
+                steps: chain.steps.iter().map(|s| {
+                    crate::ast::PipeStep {
+                        target: Box::new(self.rewrite_identifiers(&s.target, uid, cell_name)),
+                        skip: s.skip,
+                    }
+                }).collect(),
+            }),
+        }
+    }
+
+    fn rewrite_statement_identifiers(&self, stmt: &Statement, uid: usize, cell_name: &str) -> Statement {
+        match stmt {
+            Statement::Assignment { lhs, expr, timeout, modifiers } => Statement::Assignment {
+                lhs: self.rewrite_identifiers(lhs, uid, cell_name),
+                expr: self.rewrite_identifiers(expr, uid, cell_name),
+                timeout: timeout.clone(),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Unification { name, variant, fields, expr } => Statement::Unification {
+                name: name.clone(),
+                variant: variant.clone(),
+                fields: fields.clone(),
+                expr: self.rewrite_identifiers(expr, uid, cell_name),
+            },
+            Statement::Guarded { condition, statements } => Statement::Guarded {
+                condition: self.rewrite_identifiers(condition, uid, cell_name),
+                statements: statements.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+            },
+            Statement::Term { values, swan_song, modifiers } => Statement::Term {
+                values: values.iter().map(|v| v.as_ref().map(|e| self.rewrite_identifiers(e, uid, cell_name))).collect(),
+                swan_song: swan_song.as_ref().map(|s| Box::new(self.rewrite_statement_identifiers(s, uid, cell_name))),
+                modifiers: modifiers.clone(),
+            },
+            Statement::TermBang { values, swan_song, modifiers } => Statement::TermBang {
+                values: values.iter().map(|v| v.as_ref().map(|e| self.rewrite_identifiers(e, uid, cell_name))).collect(),
+                swan_song: swan_song.as_ref().map(|s| Box::new(self.rewrite_statement_identifiers(s, uid, cell_name))),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Escape(expr) => Statement::Escape(
+                expr.as_ref().map(|e| self.rewrite_identifiers(e, uid, cell_name)),
+            ),
+            Statement::Expression(expr) => Statement::Expression(
+                self.rewrite_identifiers(expr, uid, cell_name),
+            ),
+            Statement::Let { name, ty, expr, address, address_expr, bit_range, constraint, is_override, modifiers } => Statement::Let {
+                name: name.clone(),
+                ty: ty.clone(),
+                expr: expr.as_ref().map(|e| self.rewrite_identifiers(e, uid, cell_name)),
+                address: *address,
+                address_expr: address_expr.as_ref().map(|a| Box::new(self.rewrite_identifiers(a, uid, cell_name))),
+                bit_range: bit_range.clone(),
+                constraint: constraint.as_ref().map(|c| Box::new(self.rewrite_identifiers(c, uid, cell_name))),
+                is_override: *is_override,
+                modifiers: modifiers.clone(),
+            },
+            Statement::InlineAsm { asm_string, clobbers, span } => Statement::InlineAsm {
+                asm_string: asm_string.clone(),
+                clobbers: clobbers.clone(),
+                span: *span,
+            },
+            Statement::LocalTrigger { name, ty, expr, span } => Statement::LocalTrigger {
+                name: name.clone(),
+                ty: ty.clone(),
+                expr: expr.as_ref().map(|e| self.rewrite_identifiers(e, uid, cell_name)),
+                span: *span,
+            },
+            Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
+                name: name.clone(),
+                ty: ty.clone(),
+                instance: self.rewrite_identifiers(instance, uid, cell_name),
+                port: port.clone(),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Alka(alka) => Statement::Alka(alka.clone()),
+            Statement::OnExit { body, span } => Statement::OnExit {
+                body: body.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+                span: *span,
+            },
+            Statement::SyncBlock { body } => Statement::SyncBlock {
+                body: body.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+            },
+            Statement::Foreach { item, list, body, modifiers } => Statement::Foreach {
+                item: item.clone(),
+                list: Box::new(self.rewrite_identifiers(list, uid, cell_name)),
+                body: body.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Oracle { handler, body, span } => Statement::Oracle {
+                handler: handler.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+                body: body.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+                span: *span,
+            },
+            Statement::Await { expr, modifiers } => Statement::Await {
+                expr: self.rewrite_identifiers(expr, uid, cell_name),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Async { body, modifiers } => Statement::Async {
+                body: Box::new(self.rewrite_statement_identifiers(body, uid, cell_name)),
+                modifiers: modifiers.clone(),
+            },
+            Statement::AsyncAwait { body, lhs, modifiers } => Statement::AsyncAwait {
+                body: Box::new(self.rewrite_statement_identifiers(body, uid, cell_name)),
+                lhs: lhs.clone(),
+                modifiers: modifiers.clone(),
+            },
+        }
+    }
+
+    fn get_designated_output(&self, cell_def: &CellDef, uid: usize) -> Value {
+        if let Some(ref ot) = cell_def.output_type {
+            let names = self.extract_output_names(ot);
+            if let Some(first_name) = names.first() {
+                let key = format!("{}${}.{}", cell_def.name, uid, first_name);
+                return self.state.get(&key).cloned().unwrap_or(Value::Void);
+            }
+        }
+        Value::Void
+    }
+
+    fn extract_output_names(&self, ot: &OutputType) -> Vec<String> {
+        match ot {
+            OutputType::Named(name, inner) => {
+                let mut names = vec![name.clone()];
+                names.extend(self.extract_output_names(inner));
+                names
+            }
+            OutputType::Tuple(types) => {
+                types.iter().flat_map(|t| self.extract_output_names(t)).collect()
+            }
+            OutputType::Union(types) => {
+                types.iter().flat_map(|t| self.extract_output_names(t)).collect()
+            }
+            OutputType::Single(_) | OutputType::Array(_) => Vec::new(),
+        }
     }
 
     pub(crate) fn pattern_match(pat: &Pattern, value: &Value, state: &mut HashMap<String, Value>) -> bool {
@@ -1311,6 +1859,10 @@ impl Interpreter {
                         "foreach requires a List<T> value".to_string(),
                     )),
                 }
+            }
+            Statement::TrgBinding { name, instance, .. } => {
+                let _instance_val = self.eval_expr(instance)?;
+                self.state.insert(name.clone(), Value::Bool(false));
             }
             Statement::Oracle { body, handler, .. } => {
                 // Fuel-injected execution with state rollback on exhaustion.
@@ -1663,6 +2215,19 @@ impl Interpreter {
             Expr::Ellipsis => EllipsisExpr.evaluate(self, &ExprDispatch),
             Expr::Call(name, args) =>
                 crate::features::call::CallExpr::new(name.clone(), args.clone()).evaluate(self, &ExprDispatch),
+            Expr::CellCall(callee, args) => {
+                let callee_name = match callee.as_ref() {
+                    Expr::Identifier(name) => name.clone(),
+                    other => return Err(RuntimeError::TypeMismatch(
+                        format!("CellCall callee must be an identifier, got {:?}", other)
+                    )),
+                };
+                let cell_def = self.cell_defs.get(&callee_name).ok_or_else(|| {
+                    RuntimeError::TypeMismatch(format!("Cell '{}' not found", callee_name))
+                })?.clone();
+                let arg_values: Result<Vec<Value>, _> = args.iter().map(|a| self.eval_expr(a)).collect();
+                self.call_cell(&cell_def, &arg_values?)
+            }
             Expr::IntrinsicCall { intrinsic, args } => {
                 let values: Result<Vec<Value>, _> = args.iter().map(|a| self.eval_expr(a)).collect();
                 let mut values = values?;

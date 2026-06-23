@@ -468,6 +468,32 @@ impl Desugarer {
                 }).collect();
                 TopLevel::Struct(new_s)
             }
+            TopLevel::Cell(cell) => {
+                let mut c = cell.as_ref().clone();
+                c.transactions = c.transactions.into_iter()
+                    .map(|t| {
+                        let mut new_t = t.clone();
+                        new_t.body = self.desugar_body(&t.body);
+                        new_t.contract = self.desugar_contract(&t.contract);
+                        new_t
+                    })
+                    .collect();
+                c.definitions = c.definitions.into_iter()
+                    .map(|d| {
+                        let mut new_d = d.clone();
+                        new_d.body = self.desugar_body(&d.body);
+                        new_d.contract = self.desugar_contract(&d.contract);
+                        new_d
+                    })
+                    .collect();
+                c.internal_triggers = c.internal_triggers.into_iter()
+                    .map(|t| TriggerDeclaration {
+                        condition: t.condition.map(|e| self.desugar_expr(e)),
+                        ..t
+                    })
+                    .collect();
+                TopLevel::Cell(Box::new(c))
+            }
             other => other.clone(),
         }
     }
@@ -759,6 +785,11 @@ impl Desugarer {
                 new_args.extend(args.iter().cloned());
                 Expr::Call(name.clone(), new_args)
             }
+            Expr::CellCall(callee, args) => {
+                let mut new_args = vec![pipeline_val];
+                new_args.extend(args.iter().cloned());
+                Expr::CellCall(callee.clone(), new_args)
+            }
             Expr::Identifier(name) => {
                 // Auto-wrap bare identifier as function call
                 Expr::Call(name.clone(), vec![pipeline_val])
@@ -865,6 +896,11 @@ impl Desugarer {
                 name,
                 args.into_iter().map(|a| self.desugar_expr(a)).collect(),
             ),
+            Expr::CellCall(callee, args) => {
+                let callee = Box::new(self.desugar_expr(*callee));
+                let args = args.into_iter().map(|a| self.desugar_expr(a)).collect();
+                Expr::CellCall(callee, args)
+            }
             Expr::IntrinsicCall { intrinsic, args } => Expr::IntrinsicCall {
                 intrinsic,
                 args: args.into_iter().map(|a| self.desugar_expr(a)).collect(),
@@ -1180,6 +1216,13 @@ impl Desugarer {
                 modifiers,
             },
             Statement::InlineAsm { .. } | Statement::Alka(_) => stmt,
+            Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
+                name,
+                ty,
+                instance: self.desugar_expr(instance),
+                port,
+                modifiers,
+            },
         }
     }
 
