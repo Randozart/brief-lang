@@ -45,7 +45,7 @@ graph TD
     XREF -- "matches intrinsic" --> GEN_BV
     XREF -- "unknown symbol" --> GEN_BV
 
-    LINK -. "input to" .->|"bridge .bv"| EXPORT
+    LINK -. "input to (bridge .bv)" .-> EXPORT
 ```
 
 ## Flow Description
