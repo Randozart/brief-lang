@@ -4386,9 +4386,19 @@ let span = self.current_span();
             self.advance();
             let (outs, names) = self.parse_output_types_with_names(&parameters)?;
             let out_ty = if outs.len() > 1 {
-                Some(OutputType::Tuple(outs.iter().map(|t| OutputType::Single(t.clone())).collect()))
+                Some(OutputType::Tuple(outs.iter().enumerate().map(|(i, t)| {
+                    if let Some(Some(name)) = names.get(i) {
+                        OutputType::Named(name.clone(), Box::new(OutputType::Single(t.clone())))
+                    } else {
+                        OutputType::Single(t.clone())
+                    }
+                }).collect()))
             } else if outs.len() == 1 {
-                Some(OutputType::Single(outs[0].clone()))
+                if let Some(Some(name)) = names.first() {
+                    Some(OutputType::Named(name.clone(), Box::new(OutputType::Single(outs[0].clone()))))
+                } else {
+                    Some(OutputType::Single(outs[0].clone()))
+                }
             } else {
                 None
             };

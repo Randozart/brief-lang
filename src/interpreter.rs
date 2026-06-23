@@ -1176,12 +1176,11 @@ impl Interpreter {
                         }
                     }
 
-                    if self.return_value.is_some() {
-                        let result = self.get_designated_output(cell_def, uid);
+                    if let Some(ret_val) = self.return_value.take() {
                         self.state = saved_state;
                         self.prior_state = saved_prior;
                         self.return_value = saved_return;
-                        return Ok(result);
+                        return Ok(ret_val);
                     }
 
                     // Check postcondition
@@ -9543,6 +9542,134 @@ mod tests {
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::String("hello".to_string()),
             "meld-backed cast of String should return identity");
+    }
+
+    // ── Cell primitive tests ──────────────────────────────────────
+
+    #[test]
+    fn test_cell_simple() {
+        let mut interp = Interpreter::new();
+        let cell_def = CellDef {
+            is_persistent: false,
+            name: "add_one".to_string(), type_params: vec![],
+            parameters: vec![("x".to_string(), Type::Int)],
+            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::Int)))),
+            fields: vec![
+                StructField { name: "val".to_string(), ty: Type::Int, default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+            ],
+            transactions: vec![Transaction {
+                name: "compute".to_string(), is_async: false, is_reactive: true,
+                parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
+                ],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                outputs: vec![Type::Int], output_type: None,
+            }],
+            definitions: vec![], internal_triggers: vec![],
+            span: None, modifiers: vec![],
+        };
+        interp.cell_defs.insert("add_one".to_string(), cell_def.clone());
+        let call = Expr::CellCall(Box::new(Expr::Identifier("add_one".to_string())), vec![Expr::Integer(41)]);
+        let result = interp.eval_expr(&call).unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_cell_loop_convergence() {
+        let mut interp = Interpreter::new();
+        let cell_def = CellDef {
+            is_persistent: false,
+            name: "countdown".to_string(), type_params: vec![],
+            parameters: vec![("start".to_string(), Type::Int)],
+            output_type: Some(OutputType::Named("counter".to_string(), Box::new(OutputType::Single(Type::Int)))),
+            fields: vec![
+                StructField { name: "counter".to_string(), ty: Type::Int, default: None, visibility: Visibility::Private },
+            ],
+            transactions: vec![Transaction {
+                name: "dec".to_string(), is_async: false, is_reactive: true,
+                parameters: vec![],
+                contract: Contract::new(Expr::Gt(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Integer(0))), Expr::Bool(true)),
+                body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("counter".to_string()), expr: Expr::Sub(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
+                ],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                outputs: vec![], output_type: None,
+            }],
+            definitions: vec![], internal_triggers: vec![],
+            span: None, modifiers: vec![],
+        };
+        interp.cell_defs.insert("countdown".to_string(), cell_def.clone());
+        let call = Expr::CellCall(Box::new(Expr::Identifier("countdown".to_string())), vec![Expr::Integer(3)]);
+        let result = interp.eval_expr(&call).unwrap();
+        assert_eq!(result, Value::Int(0));
+    }
+
+    #[test]
+    fn test_cell_no_output() {
+        let mut interp = Interpreter::new();
+        let cell_def = CellDef {
+            is_persistent: false,
+            name: "noop".to_string(), type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            fields: vec![
+                StructField { name: "ran".to_string(), ty: Type::Bool, default: Some(Expr::Bool(false)), visibility: Visibility::Private },
+            ],
+            transactions: vec![Transaction {
+                name: "do_it".to_string(), is_async: false, is_reactive: true,
+                parameters: vec![],
+                contract: Contract::new(Expr::Not(Box::new(Expr::Identifier("ran".to_string()))), Expr::Bool(true)),
+                body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("ran".to_string()), expr: Expr::Bool(true), timeout: None, modifiers: vec![] },
+                    Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
+                ],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                outputs: vec![], output_type: None,
+            }],
+            definitions: vec![], internal_triggers: vec![],
+            span: None, modifiers: vec![],
+        };
+        interp.cell_defs.insert("noop".to_string(), cell_def.clone());
+        let call = Expr::CellCall(Box::new(Expr::Identifier("noop".to_string())), vec![]);
+        let result = interp.eval_expr(&call).unwrap();
+        assert_eq!(result, Value::Void);
+    }
+
+    #[test]
+    fn test_cell_term_bang_exits_early() {
+        let mut interp = Interpreter::new();
+        let cell_def = CellDef {
+            is_persistent: false,
+            name: "early_exit".to_string(), type_params: vec![],
+            parameters: vec![],
+            output_type: Some(OutputType::Named("counter".to_string(), Box::new(OutputType::Single(Type::Int)))),
+            fields: vec![
+                StructField { name: "counter".to_string(), ty: Type::Int, default: None, visibility: Visibility::Private },
+            ],
+            transactions: vec![Transaction {
+                name: "stop_early".to_string(), is_async: false, is_reactive: true,
+                parameters: vec![],
+                contract: Contract::new(Expr::Eq(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Integer(0))), Expr::Bool(true)),
+                body: vec![
+                    Statement::TermBang { values: vec![Some(Expr::Integer(99))], swan_song: None, modifiers: vec![] },
+                ],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                outputs: vec![], output_type: None,
+            }],
+            definitions: vec![], internal_triggers: vec![],
+            span: None, modifiers: vec![],
+        };
+        interp.cell_defs.insert("early_exit".to_string(), cell_def.clone());
+        let call = Expr::CellCall(Box::new(Expr::Identifier("early_exit".to_string())), vec![]);
+        let result = interp.eval_expr(&call).unwrap();
+        assert_eq!(result, Value::Int(99));
     }
 }
 
