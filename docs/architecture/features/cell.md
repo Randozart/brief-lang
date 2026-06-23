@@ -326,9 +326,9 @@ When `term expr;` or `term! expr;` executes inside a cell, the expression value 
 
 | File | Tests | What it covers |
 |------|-------|----------------|
-| `src/parser.rs` | 3 | Parse `cell`, `cell!`, no outputs |
-| `src/interpreter.rs` | 4 | Simple arithmetic, multiple fields, loop convergence, `term!` early exit |
-| `src/backend/llvm/tests.rs` | 2 | Cell fields in `%State` type, CellCall codegen (convergence loop, no trap stubs) |
+| `src/parser.rs` | 5 | Parse `cell`, `cell!`, no outputs, `trg @` binding, `trg @` with port |
+| `src/interpreter.rs` | 5 | Simple arithmetic, loop convergence, `term!` early exit, no output, persistent state |
+| `src/backend/llvm/tests.rs` | 4 | Cell fields in `%State`, CellCall convergence, persistent tick function, multi-output first port |
 
 Run with `cargo test --lib`.
 
@@ -375,9 +375,63 @@ Persistent (`cell!`) instances maintain state between calls. Each call to a pers
 - Transient: fresh fields + fresh uid per call, state discarded after return
 - Persistent: saved state restored, uid=0 always, state saved after each call
 
-**Caveat**: Persistent cells still run their convergence loop synchronously within `call_cell()`. True async (independent thread/timer) is deferred.
+**Caveat**: Persistent cells run their convergence loop synchronously within `call_cell()`. True async (independent thread/timer) uses the channel-based threading system below.
 
-### Multi-Output Named Ports (implemented 2026-06-23)
+### True Async Threading (implemented 2026-06-23)
+
+Every persistent `cell!` with `tick_hz > 0` (from `@Hz` annotation) gets its own OS thread. Output changes are communicated to the parent reactor loop via lock-free channels.
+
+#### Interpreter Threading
+
+**`CellChannel`** struct:
+- `outputs: Arc<Mutex<HashMap<String, Value>>>` — latest output values per port name
+- `changed: Arc<AtomicBool>` — dirty flag set by cell thread, cleared by parent after read
+- `terminate: Arc<AtomicBool>` — signal for thread exit (set on program termination)
+
+**`impl Clone for Interpreter`** (line 321): Creates a new Interpreter with fresh empty state but shared references to read-only resources (definitions, foreign functions, FFI registry). This allows the cell thread to call `eval_expr` and `exec_stmt` on its own clone without touching the parent's state.
+
+**`register_persistent_cell`** (line 1200): When `tick_hz > 0`:
+1. Creates a `CellChannel`
+2. Spawns `std::thread::spawn(move || { ... })` that owns a cloned `Interpreter`
+3. The thread loop: `thread::sleep(tick_ns)` → `cell_tick()` (convergence pass on private state) → `chan.outputs.lock()` → store outputs → `chan.changed.store(true)` → repeat
+4. Checks `chan.terminate` flag each iteration
+
+**`tick_persistent_cells`** (module-level function): For threaded cells, checks `chan.changed`. If true, locks `chan.outputs`, syncs values to parent state via `trg_bindings` registry, clears dirty flag. No inline convergence for threaded cells — the thread handles it.
+
+**Extracted functions** (no nesting, testable standalone):
+- `cell_convergence_pass(interp, cell_def, cell_name, state, prior_state) -> bool` — runs one iteration of all cell transactions against the given state HashMap
+- `cell_tick(interp, cell_def, cell_name, state, prior_state) -> (bool, HashMap<String, Value>)` — calls convergence_pass, extracts output values by port name
+- `eval_expr_in_state(expr, state) -> Result<Value>` — swaps `self.state` with the given state, evaluates, restores
+- `exec_stmt_in_state(stmt, state, return_val) -> Result<()>` — same swap approach for statement execution
+
+#### LLVM Backend Threading
+
+**`emit_cell_thread`** (`src/backend/llvm/emit_toplevel.rs`): Emits a `define i8* @cell_thread_<name>(ptr %arg)` function for each persistent cell. The function:
+1. Bitcasts the argument to a `%State*` pointer (contains cell's prefixed fields)
+2. Allocates timespec and computes tick interval from `@Hz`
+3. Loop: `call i32 @nanosleep(ptr %ts, ptr null)` → evaluates all transactions with rewritten identifiers → atomic stores output values to `@chan_val_<cell>_<port>` → sets `@chan_dirty_<cell>` → repeat
+
+**Channel globals** (`emit_cell_channel_globals`): Emits `@chan_val_<cell>_<port>` (i64) and `@chan_dirty_<cell>` (i8) LLVM globals for each persistent cell's output ports.
+
+**Main loop integration** (`emit_main` in `loop_engine.rs`):
+- After `setvbuf` init: `call i32 @pthread_create(ptr %thread, ptr null, ptr @cell_thread_<name>, ptr %cell_state)` for each persistent cell thread
+- Before `ret i32 0`: `call i32 @pthread_join(i64 %thread, ptr null)` for each thread
+- `pthread_create`/`pthread_join` declared alongside existing `nanosleep` at `mod.rs:1530`
+
+### CIRCT Hardware Synthesis (implemented 2026-06-23)
+
+The CIRCT backend (`src/backend/circt.rs`) now handles `TopLevel::Cell` and `Expr::CellCall`:
+
+**First pass** (`generate()` line 110-121): Registers cell fields and parameters as state variables with `cell$name$field` prefixed names and MLIR types. Fields become `seq.firreg` sequential registers; parameters become input ports.
+
+**Expression codegen** (`emit_expr` line 378-401): `Expr::CellCall(callee, args)` emits `hw.instance` sub-module instantiation:
+```
+%result = hw.instance "cell_inst" @cellName (%arg0: $arg0: i64) -> (%result: $result: i64)
+```
+
+Cell transactions are synthesized as combinational logic feeding into the cell's `seq.firreg` registers. The cell's output port is wired to the `hw.instance` result port.
+
+**Phase 4 — Cell-to-Cell Communication (not started)**
 
 Cells with multiple named output ports (`-> elapsed: Int, done: Bool`) return a `Value::Tuple` of all output values:
 
@@ -403,13 +457,12 @@ Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8
 
 | Item | Priority | Status |
 |------|----------|--------|
-| `cell!` true async (independent thread/reactor) | High | Not started |
 | LLVM backend multi-output tuple packing | Medium | Deferred — single-port fallback, comment added |
-| CIRCT hardware synthesis (`cell` → `hw.module`) | Medium | Not started |
-| `cell` keyword in expression context (`let x = cell timer(1000)`) | Low | Parser emits `Expr::CellCall` from `parse_primary` |
-| `@Hz` rate limiting (`trg @ cell() @1kHz`) | Low | Parser + interpreter support; tick_interval conversion deferred |
+| Phase 4 cell-to-cell communication | Medium | Not started |
+| CIRCT cell transaction body synthesis (full) | Medium | `hw.instance` + field regs done; txn body pending |
+| True hardware clock domain crossing | Low | Not started |
 
-### @Hz Tick Rate Limiting
+### @Hz Tick Rate Limiting (implemented 2026-06-23)
 
 The `trg @` binding syntax supports an optional `@Hz` suffix:
 
