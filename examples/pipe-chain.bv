@@ -10,7 +10,7 @@
 defn add_one(x: Int) -> Int { term x + 1; };
 defn double(x: Int) -> Int { term x * 2; };
 
-txn main() [true][true] -> Bool {
+txn main() -> Bool {
     let result: Int = 5 |> add_one() |> double() |> add_one();
     term! -> print_int#(result);   // prints 13
 };

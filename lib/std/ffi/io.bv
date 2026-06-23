@@ -107,10 +107,18 @@ defn consume() -> Bool {
     term true;
 };
 
-// ===== FILE IO (FFI Signatures) =====
+// ===== FILE IO (Intrinsics) =====
+// Replaced: frgn __read_file/__write_file (TOML-based) with
+// read_file#/write_file# intrinsics.
 
-frgn __read_file(path: String) -> Result<String, String> from "std::fs::read_to_string";
-frgn __write_file(path: String, content: String) -> Result<Void, String> from "std::fs::write";
+defn __read_file(path: String) -> Result<String, String> {
+    term read_file#(path);
+};
+
+defn __write_file(path: String, content: String) -> Result<Void, String> {
+    term write_file#(path, content);
+};
+
 frgn __file_exists(path: String) -> Result<Bool, String> from "std::fs::metadata";
 frgn __delete_file(path: String) -> Result<Void, String> from "std::fs::remove_file";
 frgn __list_directory(path: String) -> Result<String, String> from "std::fs::read_dir";

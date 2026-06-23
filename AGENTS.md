@@ -73,6 +73,22 @@ a sandbox file, not in the main codebase. Every commit should be production-
 quality code that could ship as-is. Stubs, `todo!()`, and `unreachable!()` in
 committed code are bugs.
 
+**EXECUTIVE REQUESTS ARE NOT OPTIONAL.** When the user explicitly says to fix
+a pattern, replace `frgn` with intrinsics, or update `[true][true]` contracts,
+do NOT:
+- Skip it because you think it's "too much work"
+- Flag it as "technical debt" for later
+- Dismiss it as "intentional" without testing
+- Judge the value of the instruction
+
+Instead:
+1. Do the work. All of it, not just the easy parts.
+2. If you are unsure about a specific case, ask — do not decide.
+3. Test that the change actually works (e.g., compile the file).
+4. If the change requires prerequisite work (e.g., backend codegen that
+   doesn't exist yet), implement the prerequisite first. Flagging it as
+   debt IS skipping.
+
 ### Commands
 - **Build**: `cargo build`
 - **Test**: `cargo test --lib`

@@ -1,8 +1,11 @@
 // TTY — Terminal I/O for Brief
 //
 // Provides ergonomic terminal operations: raw mode, size detection,
-// and single-key reading. All operations route through the C runtime
-// (brief_rt.c) which is auto-linked when this module is imported.
+// and single-key reading. All operations route through the intrinsic
+// system which emits native LLVM IR for I/O operations.
+//
+// Previously used `frgn` declarations to call brief_rt.c directly;
+// now uses the TTY intrinsic `#`-calls which provide native codegen.
 //
 // Import:
 //   import tty from "std/tty.bv";
@@ -14,9 +17,17 @@
 
 import "link/brief_rt.c";
 
-frgn __tty_raw_mode(enable: Int) -> Int from "link/brief_rt.c";
-frgn __tty_size() -> Int from "link/brief_rt.c";
-frgn __tty_read_key() -> Int from "link/brief_rt.c";
+defn __tty_raw_mode(enable: Int) -> Int {
+    term tty_raw_mode#(enable);
+};
+
+defn __tty_size() -> Int {
+    term tty_size#();
+};
+
+defn __tty_read_key() -> Int {
+    term tty_read_key#();
+};
 
 defn raw_mode(enable: Bool) -> Bool {
     term __tty_raw_mode(if enable { 1 } else { 0 }) == 1;

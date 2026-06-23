@@ -1,27 +1,46 @@
 // GPU compute intrinsic wrappers.
 //
-// These expose SPIR-V built-in functions as Brief FFI calls.
+// These expose SPIR-V built-in functions as Brief intrinsic calls.
 // The SPIR-V backend recognizes them and emits the correct
 // SPIR-V LLVM IR built-in calls. On CPU (fallback), these
-// resolve to stub implementations in brief_gpu_rt.c.
+// resolve via the intrinsic codegen in the LLVM backend.
+//
+// Users import and call these as regular functions:
+//   import { get_global_id } from "std/gpu.bv";
+//   let id: Int = get_global_id(0);
+//
+// Implementation note: previously declared as `frgn`, replaced with
+// `defn` wrappers around the intrinsic `#`-calls. The intrinsics
+// provide native codegen in the LLVM backend and work across all
+// targets (GPU via SPIR-V, CPU via LLVM stub).
 
 /// Global work-item ID for the given dimension (0, 1, or 2).
 /// Returns a unique thread identifier within the entire grid.
-frgn get_global_id(dim: Int) -> Int ;
+defn get_global_id(dim: Int) -> Int {
+    term get_global_id#(dim);
+};
 
 /// Local work-item ID within the workgroup for the given dimension.
 /// Returns the thread's position within its workgroup (0..block_size-1).
-frgn get_local_id(dim: Int) -> Int ;
+defn get_local_id(dim: Int) -> Int {
+    term get_local_id#(dim);
+};
 
 /// Workgroup ID for the given dimension.
 /// Returns which workgroup this thread belongs to.
-frgn get_group_id(dim: Int) -> Int ;
+defn get_group_id(dim: Int) -> Int {
+    term get_group_id#(dim);
+};
 
 /// Number of workgroups in the given dimension.
 /// Returns the total grid size for this dimension.
-frgn get_num_groups(dim: Int) -> Int ;
+defn get_num_groups(dim: Int) -> Int {
+    term get_num_groups#(dim);
+};
 
 /// Workgroup-level barrier.
 /// Synchronizes all threads in the workgroup. All threads must
 /// reach the barrier before any thread continues past it.
-frgn barrier() -> Bool ;
+defn barrier() -> Bool {
+    term barrier#();
+};

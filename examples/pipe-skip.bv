@@ -19,7 +19,7 @@ defn square(x: Int) -> Int { term x * x; };
 defn add_one(x: Int) -> Int { term x + 1; };
 defn double(x: Int) -> Int { term x * 2; };
 
-txn main() [true][true] -> Bool {
+txn main() -> Bool {
     let result: Int = 3 |> square() |> add_one() .2|> double();
     term! -> print_int#(result);   // prints 6
 };

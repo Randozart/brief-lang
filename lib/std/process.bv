@@ -3,10 +3,19 @@
 
 import "std/result";
 
-// ===== PROCESS SPAWNING (FFI) =====
+// ===== PROCESS SPAWNING (Intrinsics) =====
+// Replaced: frgn __spawn/__spawn_with_output (TOML-based) with
+// spawn#/spawn_with_output# intrinsics. Remaining frgns (env_var,
+// set_env_var, etc.) have no intrinsic equivalent yet.
 
-frgn __spawn(command: String, args: List<String>) -> Result<Int, String>;
-frgn __spawn_with_output(command: String, args: List<String>) -> Result<String, String>;
+defn __spawn(command: String, args: List<String>) -> Result<Int, String> {
+    term spawn#(command, args);
+};
+
+defn __spawn_with_output(command: String, args: List<String>) -> Result<String, String> {
+    term spawn_with_output#(command, args);
+};
+
 frgn __env_var(name: String) -> Result<String, String>;
 frgn __set_env_var(name: String, value: String) -> Result<Void, String>;
 frgn __current_dir() -> Result<String, String>;
