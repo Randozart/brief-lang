@@ -277,9 +277,34 @@ pub struct Interpreter {
     pub inop_decls: HashMap<String, InopDeclaration>,
     pub cell_defs: HashMap<String, CellDef>,
     pub next_cell_uid: usize,
-    /// Saved state for persistent (cell!) instances — keyed by cell name.
-    /// Value is (state, prior_state) that persists across convergence calls.
-    pub persistent_cell_states: HashMap<String, (HashMap<String, Value>, HashMap<String, Value>)>,
+    /// Registered persistent cell instances — keyed by cell name.
+    /// Each instance has its own private state and ticks independently.
+    pub persistent_cells: HashMap<String, PersistentCellInstance>,
+    /// Trigger binding registry — maps trigger names to (cell_name, port_name)
+    /// for output synchronization from persistent cells to parent state.
+    pub trg_bindings: Vec<TrgBindingReg>,
+}
+
+/// A registered persistent (cell!) instance with its own private state.
+#[derive(Debug, Clone)]
+pub struct PersistentCellInstance {
+    pub cell_def: CellDef,
+    pub state: HashMap<String, Value>,
+    pub prior_state: HashMap<String, Value>,
+    /// Cached output values by port name — used to detect changes.
+    pub output_cache: HashMap<String, Value>,
+    pub tick_counter: u64,
+    /// Minimum main loop iterations between ticks (0 = every iteration).
+    pub tick_interval: u64,
+}
+
+/// A trigger binding: maps a parent-level trigger name to a cell's output port.
+#[derive(Debug, Clone)]
+pub struct TrgBindingReg {
+    pub trigger_name: String,
+    pub cell_name: String,
+    pub port_name: String,
+    pub ty: Option<Type>,
 }
 
 impl Interpreter {
@@ -307,7 +332,8 @@ impl Interpreter {
             inop_decls: HashMap::new(),
             cell_defs: HashMap::new(),
             next_cell_uid: 0,
-            persistent_cell_states: HashMap::new(),
+            persistent_cells: HashMap::new(),
+            trg_bindings: Vec::new(),
         }
     }
 
@@ -1098,6 +1124,11 @@ impl Interpreter {
                     }
                 }
             }
+
+            // Tick persistent cells — each cell! gets one convergence pass per iteration
+            if self.tick_persistent_cells()? {
+                executed = true;
+            }
         }
 
         if iterations >= max_iterations {
@@ -1110,7 +1141,65 @@ impl Interpreter {
         Ok(())
     }
 
+    /// Register a cell! as an independently-ticking persistent instance.
+    pub fn register_persistent_cell(&mut self, cell_def: &CellDef, args: &[Value], tick_hz: Option<u64>) -> Result<String, RuntimeError> {
+        let name = cell_def.name.clone();
+        let mut state = HashMap::new();
+
+        // Initialize fields from defaults or zero values
+        for field in &cell_def.fields {
+            let key = format!("{}${}.{}", cell_def.name, 0, field.name);
+            let value = if let Some(ref expr) = field.default {
+                self.eval_expr(expr)?
+            } else {
+                match &field.ty {
+                    Type::Int => Value::Int(0),
+                    Type::Bool => Value::Bool(false),
+                    Type::Float => Value::Float(0.0),
+                    Type::Char => Value::Char('\0'),
+                    Type::String => Value::String(String::new()),
+                    _ => Value::Void,
+                }
+            };
+            state.insert(key, value);
+        }
+
+        // Bind input arguments with uid=0 prefix
+        for ((param_name, _), arg) in cell_def.parameters.iter().zip(args.iter()) {
+            let key = format!("{}${}.{}", cell_def.name, 0, param_name);
+            state.insert(key, arg.clone());
+        }
+
+        let instance = PersistentCellInstance {
+            cell_def: cell_def.clone(),
+            state,
+            prior_state: HashMap::new(),
+            output_cache: HashMap::new(),
+            tick_counter: 0,
+            tick_interval: match tick_hz { Some(0) | None => 0, _ => 0 }, // Hz-based interval deferred
+        };
+
+        self.persistent_cells.insert(name.clone(), instance);
+        Ok(name)
+    }
+
     fn call_cell(&mut self, cell_def: &CellDef, args: &[Value]) -> Result<Value, RuntimeError> {
+        if cell_def.is_persistent {
+            if !self.persistent_cells.contains_key(&cell_def.name) {
+                self.register_persistent_cell(cell_def, args, None)?;
+            }
+            if let Some(instance) = self.persistent_cells.get(&cell_def.name) {
+                let names = if let Some(ref ot) = cell_def.output_type {
+                    self.extract_output_names(ot)
+                } else { vec![] };
+                if let Some(first_name) = names.first() {
+                    let key = format!("{}${}.{}", cell_def.name, 0, first_name);
+                    return Ok(instance.state.get(&key).cloned().unwrap_or(Value::Void));
+                }
+            }
+            return Ok(Value::Void);
+        }
+
         let uid = self.next_cell_uid;
         self.next_cell_uid += 1;
 
@@ -1118,115 +1207,49 @@ impl Interpreter {
         let saved_prior = self.prior_state.clone();
         let saved_return = self.return_value.take();
 
-        if cell_def.is_persistent {
-            // Persistent cell: restore saved state if it exists
-            let key = cell_def.name.clone();
-            if let Some((saved_cell_state, saved_cell_prior)) = self.persistent_cell_states.remove(&key) {
-                // Merge saved cell state into interpreter state
-                for (k, v) in saved_cell_state {
-                    self.state.insert(k, v);
-                }
-                self.prior_state = saved_cell_prior;
+        for field in &cell_def.fields {
+            let k = format!("{}${}.{}", cell_def.name, uid, field.name);
+            let value = if let Some(ref expr) = field.default {
+                self.eval_expr(expr)?
             } else {
-                // First call: initialize fields with defaults
-                for field in &cell_def.fields {
-                    let k = format!("{}${}.{}", cell_def.name, 0usize, field.name);
-                    let value = if let Some(ref expr) = field.default {
-                        self.eval_expr(expr)?
-                    } else {
-                        match &field.ty {
-                            Type::Int => Value::Int(0),
-                            Type::Bool => Value::Bool(false),
-                            Type::Float => Value::Float(0.0),
-                            Type::Char => Value::Char('\0'),
-                            Type::String => Value::String(String::new()),
-                            _ => Value::Void,
-                        }
-                    };
-                    self.state.insert(k, value);
+                match &field.ty {
+                    Type::Int => Value::Int(0), Type::Bool => Value::Bool(false),
+                    Type::Float => Value::Float(0.0), Type::Char => Value::Char('\0'),
+                    Type::String => Value::String(String::new()), _ => Value::Void,
                 }
-                // Use uid=0 for persistent cell state keys so they never grow
-            }
-            // Always re-bind input arguments (uid=0 for persistent)
-            for ((param_name, _), arg) in cell_def.parameters.iter().zip(args.iter()) {
-                let k = format!("{}${}.{}", cell_def.name, 0usize, param_name);
-                self.state.insert(k, arg.clone());
-            }
-        } else {
-            // Transient cell: initialize fields with defaults (fresh each call)
-            for field in &cell_def.fields {
-                let k = format!("{}${}.{}", cell_def.name, uid, field.name);
-                let value = if let Some(ref expr) = field.default {
-                    self.eval_expr(expr)?
-                } else {
-                    match &field.ty {
-                        Type::Int => Value::Int(0),
-                        Type::Bool => Value::Bool(false),
-                        Type::Float => Value::Float(0.0),
-                        Type::Char => Value::Char('\0'),
-                        Type::String => Value::String(String::new()),
-                        _ => Value::Void,
-                    }
-                };
-                self.state.insert(k, value);
-            }
-            for ((param_name, _), arg) in cell_def.parameters.iter().zip(args.iter()) {
-                let k = format!("{}${}.{}", cell_def.name, uid, param_name);
-                self.state.insert(k, arg.clone());
-            }
+            };
+            self.state.insert(k, value);
+        }
+        for ((param_name, _), arg) in cell_def.parameters.iter().zip(args.iter()) {
+            let k = format!("{}${}.{}", cell_def.name, uid, param_name);
+            self.state.insert(k, arg.clone());
         }
 
-        // Convergence loop
         let mut executed = true;
         let max_iterations: usize = 100000;
         let mut iterations = 0;
-
         while executed && iterations < max_iterations {
             executed = false;
             iterations += 1;
-
             for txn in &cell_def.transactions {
-                let cell_uid = if cell_def.is_persistent { 0usize } else { uid };
-                let pre = self.rewrite_identifiers(&txn.contract.pre_condition, cell_uid, &cell_def.name);
+                let pre = self.rewrite_identifiers(&txn.contract.pre_condition, uid, &cell_def.name);
                 let pre_val = self.eval_expr(&pre)?;
-
                 if pre_val == Value::Bool(true) {
                     self.prior_state = self.state.clone();
                     self.return_value = None;
-
                     for stmt in &txn.body {
-                        let rewritten = self.rewrite_statement_identifiers(stmt, cell_uid, &cell_def.name);
+                        let rewritten = self.rewrite_statement_identifiers(stmt, uid, &cell_def.name);
                         match self.exec_stmt(&rewritten) {
-                            Ok(()) => {
-                                if self.return_value.is_some() {
-                                    break;
-                                }
-                            }
-                            Err(RuntimeError::Escaped) => {
-                                self.state = self.prior_state.clone();
-                                break;
-                            }
-                            Err(e) => {
-                                self.state = saved_state;
-                                self.prior_state = saved_prior;
-                                self.return_value = saved_return;
-                                return Err(e);
-                            }
+                            Ok(()) => { if self.return_value.is_some() { break; } }
+                            Err(RuntimeError::Escaped) => { self.state = self.prior_state.clone(); break; }
+                            Err(e) => { self.state = saved_state; self.prior_state = saved_prior; self.return_value = saved_return; return Err(e); }
                         }
                     }
-
                     if let Some(ret_val) = self.return_value.take() {
-                        if cell_def.is_persistent {
-                            // Save persistent cell state before restoring parent
-                            self.save_persistent_state(cell_def);
-                        }
-                        self.state = saved_state;
-                        self.prior_state = saved_prior;
-                        self.return_value = saved_return;
+                        self.state = saved_state; self.prior_state = saved_prior; self.return_value = saved_return;
                         return Ok(ret_val);
                     }
-
-                    let post = self.rewrite_identifiers(&txn.contract.post_condition, cell_uid, &cell_def.name);
+                    let post = self.rewrite_identifiers(&txn.contract.post_condition, uid, &cell_def.name);
                     let post_val = self.eval_expr(&post)?;
                     if post_val == Value::Bool(true) && self.state != self.prior_state {
                         executed = true;
@@ -1234,28 +1257,145 @@ impl Interpreter {
                 }
             }
         }
-
-        let result = self.get_designated_output(cell_def, if cell_def.is_persistent { 0 } else { uid });
-        if cell_def.is_persistent {
-            self.save_persistent_state(cell_def);
-        }
-        self.state = saved_state;
-        self.prior_state = saved_prior;
-        self.return_value = saved_return;
+        let result = self.get_designated_output(cell_def, uid);
+        self.state = saved_state; self.prior_state = saved_prior; self.return_value = saved_return;
         Ok(result)
     }
 
-    fn save_persistent_state(&mut self, cell_def: &CellDef) {
-        let key = cell_def.name.clone();
-        let mut cell_state = HashMap::new();
-        let prefix = format!("{}${}.", cell_def.name, 0);
-        for (k, v) in &self.state {
-            if k.starts_with(&prefix) {
-                cell_state.insert(k.clone(), v.clone());
+    /// Run one convergence pass on all registered persistent cells.
+    /// Returns true if any cell fired (output may have changed).
+    fn tick_persistent_cells(&mut self) -> Result<bool, RuntimeError> {
+        let mut any_fired = false;
+        let cell_names: Vec<String> = self.persistent_cells.keys().cloned().collect();
+
+        for name in &cell_names {
+            if !self.persistent_cells.contains_key(name) { continue; }
+
+            // Take ownership of the instance to avoid borrow conflicts
+            let mut instance = self.persistent_cells.remove(name).unwrap();
+            instance.tick_counter += 1;
+
+            if instance.tick_interval > 0 && instance.tick_counter % instance.tick_interval != 0 {
+                self.persistent_cells.insert(name.clone(), instance);
+                continue;
+            }
+
+            // Save the current parent state and install the cell's state
+            let saved_state = std::mem::replace(&mut self.state, instance.state);
+            let saved_prior = std::mem::replace(&mut self.prior_state, instance.prior_state);
+            let cell_name = name.clone();
+
+            // Run one convergence pass over the cell's transactions
+            let mut cell_fired = false;
+            let mut cell_terminated = false;
+            for txn in &instance.cell_def.transactions {
+                let pre = self.rewrite_identifiers(&txn.contract.pre_condition, 0, &cell_name);
+                let pre_val = match self.eval_expr(&pre) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        instance.state = self.state.clone();
+                        instance.prior_state = self.prior_state.clone();
+                        self.state = saved_state;
+                        self.prior_state = saved_prior;
+                        self.persistent_cells.insert(cell_name, instance);
+                        return Err(e);
+                    }
+                };
+
+                if pre_val == Value::Bool(true) {
+                    self.prior_state = self.state.clone();
+                    self.return_value = None;
+
+                    for stmt in &txn.body {
+                        let rewritten = self.rewrite_statement_identifiers(stmt, 0, &cell_name);
+                        match self.exec_stmt(&rewritten) {
+                            Ok(()) => {
+                                if self.return_value.is_some() {
+                                    cell_terminated = true;
+                                    break;
+                                }
+                            }
+                            Err(e) => {
+                                instance.state = self.state.clone();
+                                instance.prior_state = self.prior_state.clone();
+                                self.state = saved_state;
+                                self.prior_state = saved_prior;
+                                self.persistent_cells.insert(cell_name, instance);
+                                return Err(e);
+                            }
+                        }
+                    }
+
+                    if cell_terminated { break; }
+
+                    let post = self.rewrite_identifiers(&txn.contract.post_condition, 0, &cell_name);
+                    let post_val = match self.eval_expr(&post) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            instance.state = self.state.clone();
+                            instance.prior_state = self.prior_state.clone();
+                            self.state = saved_state;
+                            self.prior_state = saved_prior;
+                            self.persistent_cells.insert(cell_name, instance);
+                            return Err(e);
+                        }
+                    };
+                    if post_val == Value::Bool(true) && self.state != self.prior_state {
+                        cell_fired = true;
+                    }
+                }
+            }
+
+            // Save cell's state back to the instance
+            instance.state = self.state.clone();
+            instance.prior_state = self.prior_state.clone();
+
+            // Restore parent state
+            self.state = saved_state;
+            self.prior_state = saved_prior;
+
+            if cell_terminated {
+                // term/term! was called — remove all bindings for this cell
+                let to_remove: Vec<String> = self.trg_bindings.iter()
+                    .filter(|t| t.cell_name == *name)
+                    .map(|t| t.trigger_name.clone())
+                    .collect();
+                for trg_name in to_remove {
+                    self.state.remove(&trg_name);
+                }
+                self.trg_bindings.retain(|t| t.cell_name != *name);
+                any_fired = true;
+            } else {
+                // Save back the instance (not terminated)
+                // Sync outputs before saving state
+                if cell_fired {
+                    let output_type = instance.cell_def.output_type.clone();
+                    let (output_cache, cell_state) = (instance.output_cache.clone(), instance.state.clone());
+                    let names = if let Some(ref ot) = output_type {
+                        self.extract_output_names(ot)
+                    } else { vec![] };
+
+                    for port_name in names {
+                        let key = format!("{}${}.{}", cell_name, 0, port_name);
+                        let new_val = cell_state.get(&key).cloned().unwrap_or(Value::Void);
+                        let old_val = output_cache.get(&port_name);
+
+                        if Some(&new_val) != old_val {
+                            for trg in &self.trg_bindings {
+                                if trg.cell_name == cell_name && trg.port_name == port_name {
+                                    self.state.insert(trg.trigger_name.clone(), new_val.clone());
+                                }
+                            }
+                            instance.output_cache.insert(port_name, new_val);
+                        }
+                    }
+                }
+                self.persistent_cells.insert(cell_name, instance);
+                any_fired = any_fired || cell_fired;
             }
         }
-        let cell_prior = self.prior_state.clone();
-        self.persistent_cell_states.insert(key, (cell_state, cell_prior));
+
+        Ok(any_fired)
     }
 
     fn rewrite_identifiers(&self, expr: &Expr, uid: usize, cell_name: &str) -> Expr {
@@ -1923,12 +2063,32 @@ impl Interpreter {
                     )),
                 }
             }
-            Statement::TrgBinding { name, instance, port, .. } => {
+            Statement::TrgBinding { name, ty, instance, port, .. } => {
                 let value = match instance {
                     Expr::Call(callee, args) if self.cell_defs.contains_key(callee) => {
                         let cell = self.cell_defs.get(callee).unwrap().clone();
                         let arg_values: Result<Vec<Value>, _> = args.iter().map(|a| self.eval_expr(a)).collect();
-                        self.call_cell(&cell, &arg_values?)?
+                        let args = arg_values?;
+                        if cell.is_persistent {
+                            // Register for independent ticking
+                            self.register_persistent_cell(&cell, &args, None)?;
+                            // Register trigger binding for output sync
+                            self.trg_bindings.push(TrgBindingReg {
+                                trigger_name: name.clone(),
+                                cell_name: cell.name.clone(),
+                                port_name: if port.is_empty() && cell.output_type.is_some() {
+                                    if let Some(ref ot) = cell.output_type {
+                                        let names = self.extract_output_names(ot);
+                                        names.first().cloned().unwrap_or_default()
+                                    } else { String::new() }
+                                } else { port.clone() },
+                                ty: ty.clone(),
+                            });
+                            // Return initial output value
+                            self.call_cell(&cell, &args)?
+                        } else {
+                            self.call_cell(&cell, &args)?
+                        }
                     }
                     _ => self.eval_expr(instance)?,
                 };
@@ -9772,22 +9932,35 @@ mod tests {
         };
         interp.cell_defs.insert("counter".to_string(), cell_def.clone());
 
+        // Register the persistent cell
+        let counter_def = interp.cell_defs["counter"].clone();
+        interp.register_persistent_cell(&counter_def, &[], None).unwrap();
+
+        // Initial output (before any tick): val = 0 (default)
         let call = Expr::CellCall(Box::new(Expr::Identifier("counter".to_string())), vec![]);
+        let r0 = interp.eval_expr(&call).unwrap();
+        assert_eq!(r0, Value::Int(0), "before first tick: val = 0 (default)");
+
+        // Tick the cell: fired=false → !fired=true → fires → val=0+1=1, fired=true
+        interp.tick_persistent_cells().unwrap();
+
+        // Now call_cell returns current output: val = 1
         let r1 = interp.eval_expr(&call).unwrap();
-        assert_eq!(r1, Value::Int(1), "first call: val = 0 + 1 = 1");
+        assert_eq!(r1, Value::Int(1), "after first tick: val = 0 + 1 = 1");
 
-        // Second call: fired is reset by field initialization? NO — persistent cell retains state!
-        // fired is still true from first call, so the precondition !fired is false.
-        // The transaction does NOT fire. val stays at 1.
+        // Second tick: fired=true → !fired=false → doesn't fire → val stays 1
+        interp.tick_persistent_cells().unwrap();
         let r2 = interp.eval_expr(&call).unwrap();
-        assert_eq!(r2, Value::Int(1), "second call: precondition !fired is false, val stays 1");
+        assert_eq!(r2, Value::Int(1), "second tick: precondition !fired is false, val stays 1");
 
-        // But we should see that the state IS persistent — reset fired in saved state
-        let saved = interp.persistent_cell_states.get_mut("counter").unwrap();
-        saved.0.insert("counter$0.fired".to_string(), Value::Bool(false));
+        // Reset fired in saved state — demonstrate persistence
+        let saved = interp.persistent_cells.get_mut("counter").unwrap();
+        saved.state.insert("counter$0.fired".to_string(), Value::Bool(false));
 
+        // Tick again: fired=false → !fired=true → fires → val=1+1=2
+        interp.tick_persistent_cells().unwrap();
         let r3 = interp.eval_expr(&call).unwrap();
-        assert_eq!(r3, Value::Int(2), "after resetting fired: val = 1 + 1 = 2");
+        assert_eq!(r3, Value::Int(2), "after resetting fired and ticking: val = 1 + 1 = 2");
     }
 }
 
