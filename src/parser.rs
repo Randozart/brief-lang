@@ -5669,8 +5669,34 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     } else {
                         (instance, String::new())
                     };
+                    // Parse optional @Hz suffix (e.g. @1kHz, @10MHz) for tick rate
+                    let mut modifiers: Vec<Hashtag> = vec![];
+                    if let Some(Ok(Token::At)) = self.current_token() {
+                        self.advance();
+                        let hz_raw = self.expect_integer()?;
+                        let unit = if let Some(Ok(Token::Identifier(u))) = self.current_token() {
+                            let u = u.clone();
+                            self.advance();
+                            u
+                        } else { "Hz".to_string() };
+                        let multiplier: u64 = match unit.as_str() {
+                            "Hz" | "hz" => 1,
+                            "kHz" | "khz" | "KHz" => 1000,
+                            "MHz" | "mhz" | "MHz" => 1_000_000,
+                            _ => 1,
+                        };
+                        let hz_val = (hz_raw as u64) * multiplier;
+                        modifiers.push(Hashtag {
+                            name: "hz".to_string(),
+                            value: Some(hz_val.to_string()),
+                            mandatory: false,
+                            speculative: false,
+                            fallback: vec![],
+                            scoped: None,
+                        });
+                    }
                     self.expect(Token::Semicolon)?;
-                    Ok(Statement::TrgBinding { name, ty, instance, port, modifiers: vec![] })
+                    Ok(Statement::TrgBinding { name, ty, instance, port, modifiers })
                 } else {
                     // No @ — fall through to the old error (deprecated local trigger)
                     self.spanned_err(
@@ -7058,7 +7084,26 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             }
             Some(Ok(Token::Term)) => {
                 self.advance();
-                Ok(Expr::Literal(Box::new(LiteralExpr::Term)))
+                Ok(Expr::Term)
+            }
+            Some(Ok(Token::Cell)) => {
+                self.advance();
+                // cell name(args) — explicit synchronous cell creation
+                let cell_name = self.expect_identifier()?;
+                let args = if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let mut a = Vec::new();
+                    loop {
+                        if let Some(Ok(Token::RParen)) = self.current_token() { break; }
+                        a.push(self.parse_expression()?);
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else { break; }
+                    }
+                    self.expect(Token::RParen)?;
+                    a
+                } else { vec![] };
+                Ok(Expr::CellCall(Box::new(Expr::Identifier(cell_name)), args))
             }
             Some(Ok(Token::Match)) => {
                 self.advance();

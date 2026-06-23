@@ -5742,3 +5742,59 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("persistent_counter$val"), "cell field should be in State");
     }
 
+
+    #[test]
+    fn test_llvm_cell_multi_output_returns_first_port() {
+        let mut backend = LlvmBackend::new();
+        let cell_def = CellDef {
+            is_persistent: false,
+            name: "pair".to_string(), type_params: vec![],
+            parameters: vec![],
+            output_type: Some(OutputType::Tuple(vec![
+                OutputType::Named("a".to_string(), Box::new(OutputType::Single(Type::Int))),
+                OutputType::Named("b".to_string(), Box::new(OutputType::Single(Type::Int))),
+            ])),
+            fields: vec![
+                StructField { name: "a".to_string(), ty: Type::Int, default: Some(Expr::Integer(1)), visibility: Visibility::Private },
+                StructField { name: "b".to_string(), ty: Type::Int, default: Some(Expr::Integer(2)), visibility: Visibility::Private },
+            ],
+            transactions: vec![Transaction {
+                name: "compute".to_string(), is_async: false, is_reactive: true,
+                parameters: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] }],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                outputs: vec![], output_type: None,
+            }],
+            definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
+        };
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "result".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false, os_mode: false, span: None,
+                    attrs: vec![], constraint: None,
+                }),
+                TopLevel::Cell(Box::new(cell_def)),
+                TopLevel::Transaction(Transaction {
+                    name: "main".to_string(), is_async: false, is_reactive: true,
+                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                    body: vec![
+                        Statement::Let { name: "r".to_string(), ty: Some(Type::Int), expr: Some(Expr::CellCall(Box::new(Expr::Identifier("pair".to_string())), vec![])), address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+                        Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: vec![], output_type: None,
+                }),
+            ],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("pair$a"), "first output field in State");
+        assert!(output.contains("pair$b"), "second output field in State");
+        assert!(output.contains("cell$pair$a"), "should access first output port");
+    }

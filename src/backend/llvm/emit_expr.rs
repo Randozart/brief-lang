@@ -4035,6 +4035,13 @@ impl LlvmBackend {
                         }
                         return TypedRegister { name: v.clone(), ty: ret_ty };
                     }
+                    // NOTE: Multi-output cells return via extract_output_names_llvm which
+                    // returns all named port names, but we only read the first one here.
+                    // The interpreter supports full multi-output via Value::Tuple, but
+                    // LLVM codegen returns a single i64 register. For cells with multiple
+                    // output ports, the second+ ports are unreachable from LLVM codegen
+                    // until TypedRegister supports tuple types. Interpreter is the
+                    // reference — LLVM multi-output is deferred.
                 }
 
                 // Fallback: return 0

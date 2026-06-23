@@ -399,11 +399,40 @@ Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8
 - Static wiring at compile time (like hardware signals)
 - Compiler can statically schedule or parallelize independent cells
 
-### Known Gaps (Updated)
+### Known Gaps (Updated 2026-06-23)
 
 | Item | Priority | Status |
 |------|----------|--------|
 | `cell!` true async (independent thread/reactor) | High | Not started |
-| LLVM backend multi-output tuple packing | Medium | Not started |
+| LLVM backend multi-output tuple packing | Medium | Deferred — single-port fallback, comment added |
 | CIRCT hardware synthesis (`cell` → `hw.module`) | Medium | Not started |
-| `cell` keyword in expression context (`let x = cell timer(1000)`) | Low | Not started |
+| `cell` keyword in expression context (`let x = cell timer(1000)`) | Low | Parser emits `Expr::CellCall` from `parse_primary` |
+| `@Hz` rate limiting (`trg @ cell() @1kHz`) | Low | Parser + interpreter support; tick_interval conversion deferred |
+
+### @Hz Tick Rate Limiting
+
+The `trg @` binding syntax supports an optional `@Hz` suffix:
+
+```brief
+trg X: Int @ counter() @1kHz;
+trg Y: Int @ filter(raw).out @10MHz;
+```
+
+**Parser** (`src/parser.rs` line 5673): After parsing the instance expression and optional `.port`, checks for `Token::At`. If found, parses an integer + unit suffix (`Hz`, `kHz`, `MHz`). Stores the Hz value as a `Hashtag { name: "hz", value: Some("1000") }` in the `modifiers` list.
+
+**Interpreter** (`src/interpreter.rs` line 2067): Extracts the `hz` modifier value from `Statement::TrgBinding.modifiers`, passes it to `register_persistent_cell` as `tick_hz: Option<u64>`. Currently all Hz values map to `tick_interval: 0` (every tick) — real rate limiting requires a main-loop timing mechanism.
+
+### `cell` Keyword in Expression Context
+
+The `cell` keyword can be used in expression position to create a synchronous cell call:
+
+```brief
+let result = cell timer(1000);
+let x = cell add_one(41);
+```
+
+**Parser** (`src/parser.rs` line 7088): In `parse_primary`, matches `Token::Cell`, advances, expects an identifier (cell name), optionally parses `(args)` arguments, and emits `Expr::CellCall(Identifier(name), args)`.
+
+### Multi-Output LLVM Tuple Packing
+
+The LLVM backend reads the first named output port when `Expr::CellCall` returns. Multi-output cells (declared `-> a: Int, b: Bool`) have all fields registered in `%State` as `cell$name$a` / `cell$name$b`, but only the first port is loaded and returned as a single `i64` register. The interpreter returns `Value::Tuple` for the same program. Multi-output LLVM support requires `TypedRegister` to support tuple/struct types.

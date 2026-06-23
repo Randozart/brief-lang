@@ -2063,15 +2063,20 @@ impl Interpreter {
                     )),
                 }
             }
-            Statement::TrgBinding { name, ty, instance, port, .. } => {
+            Statement::TrgBinding { name, ty, instance, port, modifiers, .. } => {
+                // Extract @Hz tick rate from modifiers (e.g., modifiers=[Hashtag{name:"hz", args:["1000"]}])
+                let tick_hz: Option<u64> = modifiers.iter()
+                    .find(|m| m.name == "hz")
+                    .and_then(|m| m.value.as_ref())
+                    .and_then(|s| s.parse().ok());
                 let value = match instance {
                     Expr::Call(callee, args) if self.cell_defs.contains_key(callee) => {
                         let cell = self.cell_defs.get(callee).unwrap().clone();
                         let arg_values: Result<Vec<Value>, _> = args.iter().map(|a| self.eval_expr(a)).collect();
                         let args = arg_values?;
                         if cell.is_persistent {
-                            // Register for independent ticking
-                            self.register_persistent_cell(&cell, &args, None)?;
+                            // Register for independent ticking with optional @Hz rate
+                            self.register_persistent_cell(&cell, &args, tick_hz)?;
                             // Register trigger binding for output sync
                             self.trg_bindings.push(TrgBindingReg {
                                 trigger_name: name.clone(),
