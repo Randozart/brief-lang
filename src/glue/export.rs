@@ -100,6 +100,13 @@ fn extract_exports(program: &Program) -> Vec<ExportDecl> {
                 .collect();
             let return_type = defn.output_type.as_ref()
                 .map(|ot| format_output_type(ot))
+                .or_else(|| {
+                    if !defn.outputs.is_empty() {
+                        Some(defn.outputs.iter().map(|t| format_type(t)).collect::<Vec<_>>().join("|"))
+                    } else {
+                        None
+                    }
+                })
                 .unwrap_or_else(|| "Void".to_string());
             exports.push(ExportDecl {
                 name: defn.name.clone(),
@@ -456,5 +463,30 @@ mod tests {
     fn test_parse_type_map_empty() {
         let map = parse_type_map("{}");
         assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_parse_type_map_no_braces() {
+        let map = parse_type_map("Int:int Float:float");
+        assert_eq!(map.get("Int"), Some(&"int".to_string()));
+        assert_eq!(map.len(), 2);
+    }
+
+    #[test]
+    fn test_serialize_exports_dbvl_multiple_separate() {
+        let exports = vec![
+            ExportDecl {
+                name: "add".to_string(),
+                params: vec![("a".to_string(), "Int".to_string()), ("b".to_string(), "Int".to_string())],
+                return_type: "Int".to_string(),
+            },
+            ExportDecl {
+                name: "greet".to_string(),
+                params: vec![("name".to_string(), "String".to_string())],
+                return_type: "String".to_string(),
+            },
+        ];
+        let result = serialize_exports_dbvl(&exports);
+        assert_eq!(result, "add,Int|Int,Int\ngreet,String,String");
     }
 }

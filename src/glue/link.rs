@@ -224,7 +224,7 @@ mod tests {
             ],
         };
         let output = generate_bridge_bv(&result);
-        assert!(output.contains("→ intrinsic: sqrt#()"));
+        assert!(output.contains("maps to intrinsic: sqrt#()"));
         assert!(output.contains("sqrt#(args)"));
     }
 
@@ -243,5 +243,29 @@ mod tests {
         };
         let output = generate_bridge_bv(&result);
         assert!(output.contains("frgn custom_fn(...) -> Int ;"));
+    }
+
+    #[test]
+    fn test_generate_bridge_bv_mixed() {
+        let result = LinkResult {
+            library_path: "hybrid.a".to_string(),
+            functions: vec![
+                ForeignFunction {
+                    name: "sqrt".to_string(),
+                    symbol: "sqrt".to_string(),
+                    is_intrinsic: true,
+                    intrinsic_name: Some("sqrt".to_string()),
+                },
+                ForeignFunction {
+                    name: "my_custom_fn".to_string(),
+                    symbol: "my_custom_fn".to_string(),
+                    is_intrinsic: false,
+                    intrinsic_name: None,
+                },
+            ],
+        };
+        let output = generate_bridge_bv(&result);
+        assert!(output.contains("maps to intrinsic"), "should document intrinsic mapping");
+        assert!(output.contains("frgn my_custom_fn"), "should emit frgn for unknown");
     }
 }

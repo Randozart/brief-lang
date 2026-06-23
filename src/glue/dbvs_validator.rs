@@ -47,6 +47,11 @@ pub struct Schema {
 /// Field types: String, Int, Enum<A, B, C>, Optional<T>,
 ///   List<T; delimiter=X>, Map<K, V; pair_separator=:, value_delimiter=space, brace=required>
 pub fn parse_schema(input: &str) -> Result<Schema, String> {
+    // Strip // line comments before parsing
+    let input: String = input.lines()
+        .filter(|line| !line.trim().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n");
     let input = input.trim();
 
     // Strip outer `entry Name { ... };`
