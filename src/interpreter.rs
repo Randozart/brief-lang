@@ -4768,6 +4768,44 @@ impl Interpreter {
                             .as_nanos());
                         Ok(Value::String(sym))
                     }
+                    //
+                    // emit_file#(filename: String, content: String) — write file at compile time.
+                    // Used by GLUE adapter macros to emit native language source files into the
+                    // compiler's output directory during `$!macro` expansion.
+                    // Takes (filename, content) as two String arguments. Returns Void on success,
+                    // propagates I/O errors as RuntimeError.
+                    //
+                    // Architecture rationale: GLUE adapters are Brief `$!` macros, not Rust template
+                    // engines. Adding a language = writing one `.bv` file. The emit_file# intrinsic
+                    // is the bridge between the macro system and the filesystem — without it, adapters
+                    // would need a Rust-side template engine, which will be thrown away during
+                    // self-hosting. By keeping file emission as a compile-time intrinsic, the entire
+                    // adapter pipeline stays in Brief code.
+                    //
+                    Intrinsic::EmitFile => {
+                        let filename = match values.remove(0) {
+                            Value::String(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("emit_file# requires String filename, got {:?}", v))),
+                        };
+                        let content = match values.remove(0) {
+                            Value::String(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("emit_file# requires String content, got {:?}", v))),
+                        };
+                        // Determine output directory: use --out if provided, else cwd
+                        let out_dir = std::env::var("BRIEF_OUTPUT_DIR")
+                            .unwrap_or_else(|_| ".".to_string());
+                        let path = std::path::Path::new(&out_dir).join(&filename);
+                        if let Some(parent) = path.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        match std::fs::write(&path, &content) {
+                            Ok(_) => Ok(Value::Void),
+                            Err(e) => Err(RuntimeError::TypeMismatch(
+                                format!("emit_file#: failed to write {}: {}", filename, e))),
+                        }
+                    }
                     // GPU compute intrinsics — interpreter stubs (no GPU simulation)
                     // These accept their standard dimension arguments for validation
                     // but return constant values since the interpreter cannot simulate a GPU.

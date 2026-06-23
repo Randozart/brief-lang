@@ -1,0 +1,247 @@
+// GLUE Link Pipeline
+//
+// `brief link <path> <function>` — analyzes a foreign library, generates a .bv
+// file with `frgn` declarations. Cross-references against the `Intrinsic` enum —
+// if a `frgn` name matches an intrinsic, emit `intrinsic_call#()` instead.
+//
+// This replaces the old TOML binding system. The generated .bv can be imported
+// directly by Brief programs and serves as input to `brief export`.
+//
+// Architecture: The link pipeline performs static analysis of foreign libraries
+// via nm/objdump and cross-references against `Intrinsic::from_name()`. If a
+// symbol matches an intrinsic name, we emit `intrinsic_call#()` instead of
+// `frgn "symbol_name"`. This ensures the GLUE pipeline never generates
+// redundant frgn declarations for operations the compiler already knows about.
+
+use crate::ast::Intrinsic;
+use std::collections::HashMap;
+use std::path::Path;
+
+/// A single function discovered in a foreign library.
+#[derive(Debug, Clone)]
+pub struct ForeignFunction {
+    pub name: String,
+    pub symbol: String,
+    pub is_intrinsic: bool,
+    pub intrinsic_name: Option<String>,
+}
+
+/// Result of analyzing a foreign library.
+#[derive(Debug, Clone)]
+pub struct LinkResult {
+    pub library_path: String,
+    pub functions: Vec<ForeignFunction>,
+}
+
+/// Analyze a foreign library and extract function symbols.
+/// Uses `nm` to read the symbol table, then cross-references each symbol
+/// against the compiler's known intrinsics.
+pub fn analyze_library(lib_path: &Path) -> Result<LinkResult, String> {
+    let lib_name = lib_path.file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    // Try to read symbols via nm
+    let symbols = extract_symbols(lib_path)?;
+
+    let functions: Vec<ForeignFunction> = symbols.iter()
+        .map(|sym| {
+            let clean_sym = strip_underscore_prefix(sym);
+            // Cross-reference against Intrinsic enum
+            // Check both the raw symbol and common name variants
+            let intrinsic = Intrinsic::from_name(clean_sym)
+                .or_else(|| {
+                    // Try stripping common prefixes/suffixes
+                    let variants = [
+                        clean_sym,
+                        clean_sym.strip_prefix("__").unwrap_or(clean_sym),
+                        clean_sym.strip_prefix("brief_").unwrap_or(clean_sym),
+                    ];
+                    variants.iter().find_map(|v| Intrinsic::from_name(v))
+                });
+
+            ForeignFunction {
+                name: clean_sym.to_string(),
+                symbol: sym.clone(),
+                is_intrinsic: intrinsic.is_some(),
+                intrinsic_name: intrinsic.map(|i| i.name().to_string()),
+            }
+        })
+        .collect();
+
+    Ok(LinkResult {
+        library_path: lib_name,
+        functions,
+    })
+}
+
+/// Extract defined (T) symbols from a library via nm.
+/// Falls back to listing common runtime symbols if nm is unavailable.
+fn extract_symbols(path: &Path) -> Result<Vec<String>, String> {
+    // Try nm first
+    let output = std::process::Command::new("nm")
+        .args(["--defined-only", "-g"])
+        .arg(path)
+        .output()
+        .map_err(|e| format!("Failed to execute nm: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("nm failed: {}", stderr.lines().next().unwrap_or("unknown error")));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let symbols: Vec<String> = stdout.lines()
+        .filter_map(|line| {
+            // nm output format: <address> <type> <name>
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() >= 3 {
+                let sym_type = parts[1];
+                let name = parts[2..].join(" ");
+                // Only include T (text/code) symbols — skip data (D, d) and undefined (U)
+                if sym_type == "T" || sym_type == "t" {
+                    Some(name)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if symbols.is_empty() {
+        Err(format!("No T (text) symbols found in {}", path.display()))
+    } else {
+        Ok(symbols)
+    }
+}
+
+/// Strip leading underscores from symbol names (common in C symbols).
+fn strip_underscore_prefix(sym: &str) -> &str {
+    sym.strip_prefix('_').unwrap_or(sym)
+}
+
+/// Generate a .bv source file from a link analysis result.
+/// Produces `frgn` declarations for each function, with intrinsics
+/// replaced by intrinsic_call#() wrappers.
+pub fn generate_bridge_bv(result: &LinkResult) -> String {
+    let mut output = String::new();
+    output.push_str(&format!("// Auto-generated bridge for {}\n", result.library_path));
+    output.push_str("// Generated by `brief link`\n");
+    output.push_str("// Cross-referenced against compiler intrinsic enum\n\n");
+
+    for func in &result.functions {
+        if func.is_intrinsic {
+            let intrinsic = func.intrinsic_name.as_deref().unwrap_or(&func.name);
+            // For known intrinsics, emit an intrinsic_call wrapper
+            // rather than a frgn declaration. This avoids redundant
+            // frgn declarations for operations the compiler knows.
+            output.push_str(&format!(
+                "// {} — maps to intrinsic: {}#()\n",
+                func.symbol, intrinsic
+            ));
+            output.push_str(&format!(
+                "defn {}(args...) -> Int {{\n",
+                func.name
+            ));
+            output.push_str(&format!(
+                "  term {}#(args);\n",
+                intrinsic
+            ));
+            output.push_str("};\n\n");
+        } else {
+            // For unknown symbols, emit a frgn declaration skeleton
+            // with a TODO for parameter types.
+            output.push_str(&format!(
+                "frgn {}(...) -> Int ;\n\n",
+                func.name
+            ));
+        }
+    }
+
+    output
+}
+
+/// Print a human-readable summary of the link analysis.
+pub fn print_link_summary(result: &LinkResult) {
+    println!("  Library: {}", result.library_path);
+    println!("  Functions found: {}", result.functions.len());
+
+    let intrinsic_count = result.functions.iter().filter(|f| f.is_intrinsic).count();
+    let frgn_count = result.functions.len() - intrinsic_count;
+
+    println!("    → {} map to compiler intrinsics", intrinsic_count);
+    println!("    → {} require frgn declarations", frgn_count);
+
+    if !result.functions.is_empty() {
+        println!("\n  Functions:");
+        for func in &result.functions {
+            if func.is_intrinsic {
+                println!("    ✓ {} → {}#() (intrinsic)", func.symbol,
+                    func.intrinsic_name.as_deref().unwrap_or(&func.name));
+            } else {
+                println!("    ? {} → frgn (unknown)", func.symbol);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_underscore_prefix() {
+        assert_eq!(strip_underscore_prefix("printf"), "printf");
+        assert_eq!(strip_underscore_prefix("_printf"), "printf");
+        assert_eq!(strip_underscore_prefix("__builtin_printf"), "_builtin_printf");
+    }
+
+    #[test]
+    fn test_generate_bridge_bv_empty() {
+        let result = LinkResult {
+            library_path: "test".to_string(),
+            functions: vec![],
+        };
+        let output = generate_bridge_bv(&result);
+        assert!(output.contains("Auto-generated bridge for test"));
+        assert!(!output.contains("frgn"));
+    }
+
+    #[test]
+    fn test_generate_bridge_bv_with_intrinsic() {
+        let result = LinkResult {
+            library_path: "test".to_string(),
+            functions: vec![
+                ForeignFunction {
+                    name: "sqrt".to_string(),
+                    symbol: "sqrt".to_string(),
+                    is_intrinsic: true,
+                    intrinsic_name: Some("sqrt".to_string()),
+                },
+            ],
+        };
+        let output = generate_bridge_bv(&result);
+        assert!(output.contains("→ intrinsic: sqrt#()"));
+        assert!(output.contains("sqrt#(args)"));
+    }
+
+    #[test]
+    fn test_generate_bridge_bv_with_unknown() {
+        let result = LinkResult {
+            library_path: "test".to_string(),
+            functions: vec![
+                ForeignFunction {
+                    name: "custom_fn".to_string(),
+                    symbol: "custom_fn".to_string(),
+                    is_intrinsic: false,
+                    intrinsic_name: None,
+                },
+            ],
+        };
+        let output = generate_bridge_bv(&result);
+        assert!(output.contains("frgn custom_fn(...) -> Int ;"));
+    }
+}

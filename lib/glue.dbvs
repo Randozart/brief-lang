@@ -1,0 +1,15 @@
+// GLUE Adapter Registry Schema
+// Validates each entry in glue.dbvl:
+//   position 0: language (String) — name of the target language
+//   position 1: macro_path (String) — path to the $!macro adapter file
+//   position 2: file_extension (String) — native source file extension (without dot)
+//   position 3: output_dir (String, Optional) — subdirectory for generated files
+//   position 4: type_map (Map<String, String>, Optional) — Brief-to-language type mapping
+//
+entry AdapterEntry {
+    language: String;
+    macro_path: String;
+    file_extension: String;
+    output_dir: Optional<String>;
+    type_map: Optional<Map<String, String; pair_separator=:; item_separator=,>>;
+};

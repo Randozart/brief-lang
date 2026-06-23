@@ -559,13 +559,10 @@ impl LlvmBackend {
                         let n_slots = a_strs.len() + 1;
                         let sz = format!("%csz{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = mul i64 {}, 8", indent, sz, n_slots as i64).ok();
-                        let pm = format!("%cpm{}", self.txn_counter); self.txn_counter += 1;
-                        // Why malloc for enum variants: tagged union requires heap allocation
-                        // because different variants have different sizes (varying numbers of
-                        // fields). Stack allocation would need max-size reservation for every
-                        // variant, wasting memory. The malloc'd block has discriminant at
-                        // slot 0 and fields at slot 1+.
-                        writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, pm, sz).ok();
+                        // Why malloc/arena for enum variants: tagged union requires heap
+                        // allocation because different variants have different sizes.
+                        // Arena handles this with bump alloc when in a loop context.
+                        let pm = self.emit_arena_alloc(out, indent, &sz);
                         let p = format!("%cop{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, p, pm).ok();
                         let disc_gep = format!("%cdg{}", self.txn_counter); self.txn_counter += 1;
@@ -2214,6 +2211,9 @@ impl LlvmBackend {
                     Intrinsic::MacroGenSym => {
                         panic!("gensym#() called at runtime — this is a compiler bug");
                     }
+                    Intrinsic::EmitFile => {
+                        panic!("emit_file#() called at runtime — this is a compiler bug");
+                    }
                     // GPU compute intrinsics (2026-06-18)
                     // CPU fallback: emit C runtime calls that return sensible defaults.
                     Intrinsic::GetGlobalId => {
@@ -3003,8 +3003,7 @@ impl LlvmBackend {
                             // Allocate new list
                             let rab = format!("%mrab{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = mul i64 {}, 8", indent, rab, rcnt).ok();
-                            let rrm = format!("%mrrm{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, rrm, rab).ok();
+                            let rrm = self.emit_arena_alloc(out, indent, &rab);
                             let rai = format!("%mrai{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, rai, rrm).ok();
                             // Copy loop
@@ -3072,8 +3071,7 @@ impl LlvmBackend {
                             // Allocate stride-filtered buffer
                             let sab = format!("%msab{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = mul i64 {}, 8", indent, sab, len).ok();
-                            let srm = format!("%msrm{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, srm, sab).ok();
+                            let srm = self.emit_arena_alloc(out, indent, &sab);
                             let sai = format!("%msai{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, sai, srm).ok();
                             // Loop: j = 0; k = 0; while j < len { copy[j]; j += stride; k++ }
@@ -3137,8 +3135,7 @@ impl LlvmBackend {
                             // Allocate mask-filtered buffer (max size = len)
                             let mab = format!("%mmab{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = mul i64 {}, 8", indent, mab, len).ok();
-                            let mrm = format!("%mmrm{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, mrm, mab).ok();
+                            let mrm = self.emit_arena_alloc(out, indent, &mab);
                             let mai = format!("%mmai{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, mai, mrm).ok();
                             // Loop: j = 0; k = 0; while j < len
@@ -3315,11 +3312,10 @@ impl LlvmBackend {
                 // Why malloc for slice results: slice produces a new list whose size
                 // is only known at runtime (depends on start, end, stride). Stack
                 // allocation is impossible because the size varies per execution.
-                // Allocate new list header via malloc (avoids invalid dynamic alloca in non-entry block)
+                // Allocate new list header (avoids invalid dynamic alloca in non-entry block)
                 let ab = format!("%sab{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, ab, count_reg).ok();
-                let rm = format!("%srm{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, rm, ab).ok();
+                let rm = self.emit_arena_alloc(out, indent, &ab);
                 let ai = format!("%sai{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, ai, rm).ok();
 
@@ -3401,8 +3397,7 @@ impl LlvmBackend {
                     // Allocate max-size filtered buffer
                     let m_ab = format!("%smab{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = mul i64 {}, 8", indent, m_ab, old_count).ok();
-                    let m_rm = format!("%smrm{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, m_rm, m_ab).ok();
+                    let m_rm = self.emit_arena_alloc(out, indent, &m_ab);
                     let m_ai = format!("%smai{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, m_ai, m_rm).ok();
                     let zero_reg = format!("%smz{}", self.txn_counter); self.txn_counter += 1;
@@ -3504,11 +3499,12 @@ impl LlvmBackend {
             Expr::MapLiteral(items) => {
                 let n = items.len() as i64;
                 let alloc_slots = n + 2;
-                let ai = format!("%mai{}", self.txn_counter); self.txn_counter += 1;
-                // Why malloc for map/set literals: the literal may have a large number
-                // of entries (hundreds). Stack allocation via alloca would risk stack
-                // overflow. Heap allocation via malloc is the safe choice.
-                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, ai, (alloc_slots * 8 + 8)).ok();
+                // Why malloc/arena for map/set literals: the literal may have a large
+                // number of entries (hundreds). Stack via alloca would risk overflow.
+                // Arena handles this with bump alloc when in a loop context.
+                let map_alloc_size = format!("%mas{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 0, {}", indent, map_alloc_size, (alloc_slots * 8 + 8)).ok();
+                let ai = self.emit_arena_alloc(out, indent, &map_alloc_size);
                 let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, ai).ok();
                 let base = format!("%mba{}", self.txn_counter); self.txn_counter += 1;
@@ -3532,11 +3528,9 @@ impl LlvmBackend {
             }
             Expr::SetLiteral(items) => {
                 let n = items.len() as i64;
-                let ai = format!("%sai{}", self.txn_counter); self.txn_counter += 1;
-                // Why malloc for map/set literals: the literal may have a large number
-                // of entries (hundreds). Stack allocation via alloca would risk stack
-                // overflow. Heap allocation via malloc is the safe choice.
-                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, ai, (n + 2) * 8 + 8).ok();
+                let set_alloc_size = format!("%sas{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 0, {}", indent, set_alloc_size, (n + 2) * 8 + 8).ok();
+                let ai = self.emit_arena_alloc(out, indent, &set_alloc_size);
                 let hp = format!("%shp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, ai).ok();
                 let base = format!("%sba{}", self.txn_counter); self.txn_counter += 1;
@@ -3578,17 +3572,22 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
                 let old_len = format!("%aol{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, old_len, lp).ok();
-                // Free old buffer before allocating new one
-                let old_ptr = format!("%aop{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
-                writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
-                // Allocate new buffer: (old_len + 3) * 8 bytes
+                // Allocate: when inside an arena scope (loop/tick), use bump
+                // alloc (no free — arena resets at scope exit). Outside a
+                // scope, fall back to per-operation malloc via emit_arena_alloc.
                 let new_cnt = format!("%anc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 3", indent, new_cnt, old_len).ok();
                 let alloc_bytes = format!("%aab{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, alloc_bytes, new_cnt).ok();
-                let new_buf = format!("%anb{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, new_buf, alloc_bytes).ok();
+                let new_buf = self.emit_arena_alloc(out, indent, &alloc_bytes);
+                // Free old buffer: when arena is active, the arena owns all
+                // memory — no per-operation free needed. When arena is inactive
+                // (standalone call), free the old buffer normally.
+                if self.arena_slots.is_none() {
+                    let old_ptr = format!("%aop{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
+                    writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
+                }
                 // Set header: data_ptr at slot 0, new length at slot 1
                 let new_hp = format!("%anh{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, new_hp, new_buf).ok();
@@ -3674,17 +3673,18 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dp, pop_idx).ok();
                 writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
                 let popped = v.clone();
-                // Free old buffer before allocating new one
-                let old_ptr = format!("%pop{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
-                writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
+                // Free old buffer: arena-active skips per-op free; standalone frees
+                if self.arena_slots.is_none() {
+                    let old_ptr = format!("%pop{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
+                    writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
+                }
                 // Allocate new buffer: (len + 1) * 8 (2 header + len - 1 elements)
                 let new_cnt = format!("%pnc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 1", indent, new_cnt, len).ok();
                 let alloc_bytes = format!("%pab{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, alloc_bytes, new_cnt).ok();
-                let new_buf = format!("%pnb{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, new_buf, alloc_bytes).ok();
+                let new_buf = self.emit_arena_alloc(out, indent, &alloc_bytes);
                 // Set header
                 let new_hp = format!("%pnh{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, new_hp, new_buf).ok();
@@ -3750,17 +3750,18 @@ impl LlvmBackend {
                     let ib = self.adapt_to_i64(out, indent, &iv);
                     writeln!(out, "{}{} = add i64 {}, 0", indent, discard_idx, ib).ok();
                 }
-                // Free old buffer before allocating new one
-                let old_ptr = format!("%dop{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
-                writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
+                // Free old buffer: arena-active skips per-op free; standalone frees
+                if self.arena_slots.is_none() {
+                    let old_ptr = format!("%dop{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, old_ptr, list_boxed).ok();
+                    writeln!(out, "{}call void @free(i8* {})", indent, old_ptr).ok();
+                }
                 // Allocate new buffer: (len + 1) slots (2 header + len - 1 elements)
                 let new_cnt = format!("%dnc{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 1", indent, new_cnt, len).ok();
                 let alloc_bytes = format!("%dab{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, alloc_bytes, new_cnt).ok();
-                let new_buf = format!("%dnb{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, new_buf, alloc_bytes).ok();
+                let new_buf = self.emit_arena_alloc(out, indent, &alloc_bytes);
                 // Set header
                 let new_hp = format!("%dnh{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, new_hp, new_buf).ok();
@@ -3837,20 +3838,21 @@ impl LlvmBackend {
                 // Total = dest_len + src_len
                 let total = format!("%ttl{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, {}", indent, total, dlen, slen).ok();
-                // Free old buffers before allocating new one
-                let dold = format!("%tdop{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, dold, dest_boxed).ok();
-                writeln!(out, "{}call void @free(i8* {})", indent, dold).ok();
-                let sold = format!("%tsop{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, sold, src_boxed).ok();
-                writeln!(out, "{}call void @free(i8* {})", indent, sold).ok();
+                // Free old buffers: arena skips per-op free; standalone frees
+                if self.arena_slots.is_none() {
+                    let dold = format!("%tdop{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, dold, dest_boxed).ok();
+                    writeln!(out, "{}call void @free(i8* {})", indent, dold).ok();
+                    let sold = format!("%tsop{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, sold, src_boxed).ok();
+                    writeln!(out, "{}call void @free(i8* {})", indent, sold).ok();
+                }
                 // Allocate new dest buffer: (total + 2) * 8
                 let alloc_slots = format!("%tas{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 2", indent, alloc_slots, total).ok();
                 let alloc_bytes = format!("%tab{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, alloc_bytes, alloc_slots).ok();
-                let new_buf = format!("%tnb{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, new_buf, alloc_bytes).ok();
+                let new_buf = self.emit_arena_alloc(out, indent, &alloc_bytes);
                 // Set dest header
                 let new_hp = format!("%tnh{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, new_hp, new_buf).ok();
@@ -3896,8 +3898,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                         let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                         // Allocate new empty list for source
-                        let ebuf = format!("%seb{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "{}{} = call noalias i8* @malloc(i64 16)", indent, ebuf).ok();
+                        let ebuf = self.emit_arena_alloc(out, indent, "16");
                         let ehp = format!("%seh{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, ehp, ebuf).ok();
                         let ebase = format!("%seb2{}", self.txn_counter); self.txn_counter += 1;
@@ -4463,7 +4464,7 @@ impl LlvmBackend {
         }
     }
 
-    fn extract_output_names_llvm(ot: &Option<OutputType>) -> Vec<String> {
+    pub(super) fn extract_output_names_llvm(ot: &Option<OutputType>) -> Vec<String> {
         match ot {
             Some(OutputType::Named(name, inner)) => {
                 let mut names = vec![name.clone()];
@@ -4818,8 +4819,7 @@ impl LlvmBackend {
         writeln!(out, "{}{} = add i64 16, {}", indent, header_size, total).ok();
         let alloc_size = format!("%cas{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = add i64 {}, 1", indent, alloc_size, header_size).ok();
-        let result = format!("%cr{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = call i8* @malloc(i64 {})", indent, result, alloc_size).ok();
+        let result = self.emit_arena_alloc(out, indent, &alloc_size);
         let hp = format!("%chp{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, result).ok();
         let base = format!("%cba{}", self.txn_counter); self.txn_counter += 1;
@@ -4849,39 +4849,42 @@ impl LlvmBackend {
         writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, nt, dest_start, total).ok();
         writeln!(out, "{}store i8 0, i8* {}, align 1", indent, nt).ok();
         // Free heap-allocated operands that are temporaries (bit 1 set).
+        // When arena is active, the arena owns all allocations — skip.
         // Static constants (bit 0=1) and state fields (bit 0=0,bit 1=0) are
-        // preserved; only concat results (bit 1=1) are freed.
-        let tag_a = format!("%cta{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, 2", indent, tag_a, a_boxed).ok();
-        let is_temp_a = format!("%cia{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp_a, tag_a).ok();
-        let free_a_label = format!("free_a_{}", self.txn_counter);
-        let after_free_a_label = format!("af_a_{}", self.txn_counter);
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp_a, free_a_label, after_free_a_label).ok();
-        writeln!(out, "{}{}:", indent, free_a_label).ok();
-        let a_clean_all = format!("%cca{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, -4", indent, a_clean_all, a_boxed).ok();
-        let a_free_ptr = format!("%cfp{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, a_free_ptr, a_clean_all).ok();
-        writeln!(out, "{}call void @free(i8* {})", indent, a_free_ptr).ok();
-        writeln!(out, "{}br label %{}", indent, after_free_a_label).ok();
-        writeln!(out, "{}{}:", indent, after_free_a_label).ok();
-        // Same for operand B
-        let tag_b = format!("%ctb{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, 2", indent, tag_b, b_boxed).ok();
-        let is_temp_b = format!("%cib{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp_b, tag_b).ok();
-        let free_b_label = format!("free_b_{}", self.txn_counter);
-        let after_free_b_label = format!("af_b_{}", self.txn_counter);
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp_b, free_b_label, after_free_b_label).ok();
-        writeln!(out, "{}{}:", indent, free_b_label).ok();
-        let b_clean_all = format!("%ccb{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, -4", indent, b_clean_all, b_boxed).ok();
-        let b_free_ptr = format!("%cfq{}", self.txn_counter); self.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, b_free_ptr, b_clean_all).ok();
-        writeln!(out, "{}call void @free(i8* {})", indent, b_free_ptr).ok();
-        writeln!(out, "{}br label %{}", indent, after_free_b_label).ok();
-        writeln!(out, "{}{}:", indent, after_free_b_label).ok();
+        // always preserved regardless of arena mode.
+        if self.arena_slots.is_none() {
+            let tag_a = format!("%cta{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = and i64 {}, 2", indent, tag_a, a_boxed).ok();
+            let is_temp_a = format!("%cia{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp_a, tag_a).ok();
+            let free_a_label = format!("free_a_{}", self.txn_counter);
+            let after_free_a_label = format!("af_a_{}", self.txn_counter);
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp_a, free_a_label, after_free_a_label).ok();
+            writeln!(out, "{}{}:", indent, free_a_label).ok();
+            let a_clean_all = format!("%cca{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = and i64 {}, -4", indent, a_clean_all, a_boxed).ok();
+            let a_free_ptr = format!("%cfp{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, a_free_ptr, a_clean_all).ok();
+            writeln!(out, "{}call void @free(i8* {})", indent, a_free_ptr).ok();
+            writeln!(out, "{}br label %{}", indent, after_free_a_label).ok();
+            writeln!(out, "{}{}:", indent, after_free_a_label).ok();
+            // Same for operand B
+            let tag_b = format!("%ctb{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = and i64 {}, 2", indent, tag_b, b_boxed).ok();
+            let is_temp_b = format!("%cib{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp_b, tag_b).ok();
+            let free_b_label = format!("free_b_{}", self.txn_counter);
+            let after_free_b_label = format!("af_b_{}", self.txn_counter);
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp_b, free_b_label, after_free_b_label).ok();
+            writeln!(out, "{}{}:", indent, free_b_label).ok();
+            let b_clean_all = format!("%ccb{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = and i64 {}, -4", indent, b_clean_all, b_boxed).ok();
+            let b_free_ptr = format!("%cfq{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, b_free_ptr, b_clean_all).ok();
+            writeln!(out, "{}call void @free(i8* {})", indent, b_free_ptr).ok();
+            writeln!(out, "{}br label %{}", indent, after_free_b_label).ok();
+            writeln!(out, "{}{}:", indent, after_free_b_label).ok();
+        }
 
         let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, v, result).ok();

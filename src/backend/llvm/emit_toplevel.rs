@@ -1569,4 +1569,77 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }
+
+    /// Emit a thread function for a persistent cell that loops with nanosleep.
+    /// The function takes a ptr to a %CellState struct, runs convergence,
+    /// and stores outputs to atomic channel globals.
+    pub(super) fn emit_cell_thread(&mut self, out: &mut String, cell: &crate::ast::CellDef) {
+        let cell_name = &cell.name;
+        writeln!(out, "define i8* @cell_thread_{}(ptr %arg) local_unnamed_addr #0 {{", cell_name).ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  %cs = bitcast ptr %arg to ptr").ok();
+
+        let tick_ns = 1_000_000; // 1kHz default
+        writeln!(out, "  %ts_sec = alloca i64, align 8").ok();
+        writeln!(out, "  %ts_nsec = alloca i64, align 8").ok();
+        writeln!(out, "  store i64 0, ptr %ts_sec").ok();
+        writeln!(out, "  store i64 {}, ptr %ts_nsec", tick_ns).ok();
+
+        writeln!(out, "  br label %loop").ok();
+        writeln!(out, "loop:").ok();
+
+        // nanosleep for tick interval
+        writeln!(out, "  call i32 @nanosleep(ptr %ts_sec, ptr null)").ok();
+
+        // Run convergence on cell state
+        for txn in &cell.transactions {
+            let pre = Self::rewrite_cell_identifiers(&txn.contract.pre_condition, cell_name);
+            let cond = self.emit_expr(out, &pre, "  ");
+            let fire_l = format!(".ct_{}_{}", cell_name, txn.name);
+            let skip_l = format!(".ct_{}_{}_s", cell_name, txn.name);
+            writeln!(out, "  %ctp_{}_{} = icmp ne i64 {}, 0", cell_name, txn.name, cond.name).ok();
+            writeln!(out, "  br i1 %ctp_{}_{}, label %{}, label %{}", cell_name, txn.name, fire_l, skip_l).ok();
+            writeln!(out, "{}:", fire_l).ok();
+            for stmt in &txn.body {
+                let rewritten = Self::rewrite_cell_stmt_identifiers(stmt, cell_name);
+                self.emit_stmt(out, &rewritten, "  ");
+            }
+            writeln!(out, "  br label %{}", skip_l).ok();
+            writeln!(out, "{}:", skip_l).ok();
+        }
+
+        // Atomic store outputs to channel globals
+        let output_names = Self::extract_output_names_llvm(&cell.output_type);
+        for port_name in &output_names {
+            let prefixed = format!("cell${}${}", cell_name, port_name);
+            if let Some(&idx) = self.field_index_map.get(&prefixed) {
+                let ll_ty = &self.field_types[idx];
+                let gep = format!("%ctg_{}_{}", cell_name, port_name);
+                writeln!(out, "  {} = getelementptr %State, ptr %cs, i32 0, i32 {}", gep, idx).ok();
+                let val = format!("%ctv_{}_{}", cell_name, port_name);
+                writeln!(out, "  {} = load {}, ptr {}, align 8", val, ll_ty, gep).ok();
+                writeln!(out, "  store atomic {} {}, ptr @chan_val_{}_{}, seq_cst", ll_ty, val, cell_name, port_name).ok();
+            }
+        }
+        // Set dirty flag
+        writeln!(out, "  store atomic i8 1, ptr @chan_dirty_{}, seq_cst", cell_name).ok();
+
+        writeln!(out, "  br label %loop").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// Emit channel globals for a persistent cell's output ports.
+    pub(super) fn emit_cell_channel_globals(&mut self, out: &mut String, cell: &crate::ast::CellDef) {
+        let cell_name = &cell.name;
+        let output_names = Self::extract_output_names_llvm(&cell.output_type);
+        for port_name in &output_names {
+            let prefixed = format!("cell${}${}", cell_name, port_name);
+            if let Some(&idx) = self.field_index_map.get(&prefixed) {
+                let ll_ty = &self.field_types[idx];
+                writeln!(out, "@chan_val_{}_{} = global {} 0, align 8", cell_name, port_name, ll_ty).ok();
+            }
+        }
+        writeln!(out, "@chan_dirty_{} = global i8 0, align 1", cell_name).ok();
+    }
 }

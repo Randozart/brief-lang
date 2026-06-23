@@ -107,6 +107,17 @@ impl CirctBackend {
                         }
                     }
                 }
+                TopLevel::Cell(cell) => {
+                    // Register cell fields as state variables
+                    for field in &cell.fields {
+                        self.var_types.insert(format!("{}${}", cell.name, field.name), field.ty.clone());
+                        self.var_exprs.insert(format!("{}${}", cell.name, field.name), field.default.clone());
+                    }
+                    // Register cell parameters as input ports
+                    for (param_name, param_ty) in &cell.parameters {
+                        self.var_types.insert(format!("{}${}", cell.name, param_name), param_ty.clone());
+                    }
+                }
                 _ => {}
             }
         }
@@ -360,6 +371,28 @@ impl CirctBackend {
                 ).ok();
                 // Declare the external module if not already declared
                 let _ = arity;
+                Some(result_wire)
+            }
+            Expr::CellCall(callee, args) => {
+                let callee_name = match callee.as_ref() {
+                    Expr::Identifier(name) => name.clone(),
+                    _ => return None,
+                };
+                let inst_name = format!("{}_inst", callee_name);
+                let result_wire = ng.fresh_wire(&format!("{}_result", callee_name));
+                let mut arg_parts = Vec::new();
+                for (i, arg) in args.iter().enumerate() {
+                    let arg_mlir_ty = result_ty;
+                    if let Some(arg_val) = self.emit_expr(ng, out, arg, reg_names, arg_mlir_ty) {
+                        arg_parts.push(format!("{}: $arg{}: {}", arg_val, i, arg_mlir_ty));
+                    }
+                }
+                // Read output ports from the cell instance
+                writeln!(out, "  {} = hw.instance \"{}\" @{} ({}) -> ({}: ${}: {})",
+                    result_wire, inst_name, callee_name,
+                    arg_parts.join(", "),
+                    result_wire, "result", result_ty,
+                ).ok();
                 Some(result_wire)
             }
             Expr::IntrinsicCall { intrinsic, args } => {

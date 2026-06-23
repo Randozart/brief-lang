@@ -195,6 +195,12 @@ impl LlvmBackend {
         // Line-buffer stdout so \n auto-flushes (matching default TTY behavior)
         writeln!(out, "  %so_init = load ptr, ptr @stdout").ok();
         writeln!(out, "  call i32 @setvbuf(ptr %so_init, ptr null, i32 1, i64 0)").ok();
+        // Spawn persistent cell threads
+        for name in &self.cell_thread_names {
+            writeln!(out, "  %cell_state_{} = alloca %State, align 8", name).ok();
+            writeln!(out, "  %ct_{} = alloca i64, align 8", name).ok();
+            writeln!(out, "  call i32 @pthread_create(ptr %ct_{}, ptr null, ptr @cell_thread_{}, ptr %cell_state_{})", name, name, name).ok();
+        }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
         if self.has_async_txns && !self.is_lightweight_async {
@@ -219,6 +225,11 @@ impl LlvmBackend {
                 writeln!(out, "  br i1 {}, label %done, label %tick, !llvm.loop !{}", tr, md_idx).ok();
             }
             writeln!(out, "  done:").ok();
+            // Join persistent cell threads before exit
+            for name in &self.cell_thread_names {
+                writeln!(out, "  %ctv_{} = load i64, ptr %ct_{}, align 8", name, name).ok();
+                writeln!(out, "  call i32 @pthread_join(i64 %ctv_{}, ptr null)", name).ok();
+            }
             writeln!(out, "  ret i32 0").ok();
         } else {
             if has_wake_triggers {
@@ -775,6 +786,12 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
+        // Arena for reactive tick scope: allocates a 64KB scratch buffer
+        // that all collection operations within the reactive loop will
+        // bump-allocate from. At each tick boundary the arena is reset
+        // (pointer rewound to base) — no per-operation free needed.
+        // After the program exits, the arena is freed entirely.
+        self.emit_arena_init(out, "  ");
         // Detect canonical loop pattern: simple single counter [count < bound]
         let has_canonical_loop = txns.len() == 1 && {
             let pre = &txns[0].1.contract.pre_condition;
@@ -1009,6 +1026,9 @@ impl LlvmBackend {
         if self.exit_condition.is_none() && self.phi_induction_reg.is_none() {
             writeln!(out, "  done:").ok();
         }
+        // Arena teardown: free the entire arena at program exit.
+        // All tick-scoped allocations are released in one free call.
+        self.emit_arena_fini(out, "  ");
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();

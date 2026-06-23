@@ -1,0 +1,9 @@
+schema lib/glue.dbvs;
+# GLUE Adapter Registry
+# One entry per language, fields:
+#   language, macro_path, file_extension, output_dir, type_map
+# The V in .dbvl stands for "Brief" (Data Brief Lines)
+#
+"rust",  "glue/adapters/rust.bv",   "rs",  "generated", {Int:i64, Float:f64, Bool:bool, Char:char, String:String, Data:Vec<u8>}
+"python","glue/adapters/python.bv", "py",  "generated", {Int:int, Float:float, Bool:bool, Char:str, String:str, Data:bytes}
+"node",  "glue/adapters/node.bv",   "js",  "generated", {Int:number, Float:number, Bool:boolean, Char:string, String:string, Data:Uint8Array}

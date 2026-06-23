@@ -711,6 +711,10 @@ pub enum Intrinsic {
     MacroWarn,
     /// gensym#() -> String — generate unique identifier during macro expansion
     MacroGenSym,
+    /// emit_file#(filename: String, content: String) — write a file during macro expansion.
+    /// Used by GLUE adapters to generate native language wrapper source files.
+    /// The file is written to the compiler's output directory.
+    EmitFile,
     /// User-defined intrinsic via `inop#` / `inop!#` declaration.
     /// The String stores the name for display/lookup; validation happens
     /// in the typechecker against the program's `inop_decls` map.
@@ -935,6 +939,7 @@ impl Intrinsic {
             "error" => Some(Intrinsic::MacroError),
             "warn" => Some(Intrinsic::MacroWarn),
             "gensym" => Some(Intrinsic::MacroGenSym),
+            "emit_file" => Some(Intrinsic::EmitFile),
             _ => None,
         }
     }
@@ -1128,6 +1133,7 @@ impl Intrinsic {
             Intrinsic::MacroError => "error",
             Intrinsic::MacroWarn => "warn",
             Intrinsic::MacroGenSym => "gensym",
+            Intrinsic::EmitFile => "emit_file",
             Intrinsic::UserDefined(_) => "__user__",
         }
     }
@@ -1150,6 +1156,7 @@ impl Intrinsic {
             | Intrinsic::MacroError
             | Intrinsic::MacroWarn
             | Intrinsic::MacroGenSym
+            | Intrinsic::EmitFile
         )
     }
 }

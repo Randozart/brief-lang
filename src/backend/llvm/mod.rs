@@ -680,6 +680,7 @@ pub struct LlvmBackend {
     struct_types: HashMap<String, Vec<(String, Type)>>,
     enum_types: HashMap<String, crate::ast::EnumDefinition>,
     cell_defs: HashMap<String, CellDef>,
+    cell_thread_names: Vec<String>,
     /// Accumulated `!N = !{...}` metadata definitions emitted at module level.
     /// LLVM 18+ rejects metadata definitions inside function bodies, so they
     /// are collected here and flushed by emit_module_end_metadata().
@@ -695,6 +696,21 @@ pub struct LlvmBackend {
     // ── Optimization Remarks ───────────────────────────────
     pub(crate) remarks: Vec<crate::backend::llvm::directive::OptimizationRemark>,
     emit_remarks: bool,
+
+    // ── Arena Allocator ─────────────────────────────────────
+    //
+    // arena_slots stores (ptr_name, end_name, base_name) for the per-scope
+    // bump allocator. When Some, all dynamic allocations within the scope
+    // use bump allocation from the arena instead of malloc/free. The arena
+    // is allocated once at scope entry and reset (pointer reset, not free)
+    // at scope exit.
+    //
+    // Split by use case:
+    //   Folded loops (A005a/b/c): arena init at loop entry, reset after loop exit
+    //   Reactive ticks (A006):   arena init at main entry, reset at tick end
+    //   Standalone fn calls:     arena = None, keep malloc/free (no loop to scope)
+    pub(crate) arena_slots: Option<(String, String, String)>,
+    pub(crate) arena_counter: usize,
 
     // ── GPU Offloading ─────────────────────────────────────
     gpu_offload: bool,
@@ -836,6 +852,7 @@ impl LlvmBackend {
             struct_types: HashMap::new(),
             enum_types: HashMap::new(),
             cell_defs: HashMap::new(),
+            cell_thread_names: Vec::new(),
             pending_metadata: String::new(),
             variant_disc: HashMap::new(),
             explain: false,
@@ -843,6 +860,8 @@ impl LlvmBackend {
             library_mode: false,
             remarks: Vec::new(),
             emit_remarks: false,
+            arena_slots: None,
+            arena_counter: 0,
             gpu_offload: false,
             gpu_backend: "vulkan".to_string(),
             spirv_kernels: Vec::new(),
@@ -1047,6 +1066,87 @@ impl LlvmBackend {
 
     /// Append embedded SPIR-V blobs to the output IR string.
     /// Called at the end of `generate()` after all transactions are emitted.
+    /// Emit a bump allocation from the active arena, or fall back to @malloc
+    /// if no arena is active. Returns the register name holding the allocated
+    /// i8* pointer.
+    pub(crate) fn emit_arena_alloc(&mut self, out: &mut String, indent: &str, size_reg: &str) -> String {
+        if let Some((ref ptr, ref end, ref base)) = self.arena_slots.clone() {
+            let c = self.arena_counter;
+            self.arena_counter += 1;
+            let cur = format!("%aacur{}", c);
+            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, cur, ptr).ok();
+            let new_ptr = format!("%aanew{}", c);
+            writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, new_ptr, cur, size_reg).ok();
+            let end_val = format!("%aaend{}", c);
+            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, end_val, end).ok();
+            let ok = format!("%aaok{}", c);
+            writeln!(out, "{}{} = icmp ule i8* {}, {}", indent, ok, new_ptr, end_val).ok();
+            let grow_l = format!("aagrow_{}", c);
+            let ok_l = format!("aaok_{}", c);
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, ok, ok_l, grow_l).ok();
+            writeln!(out, "{}{}:", indent, grow_l).ok();
+            let old_base = format!("%aaob{}", c);
+            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, old_base, base).ok();
+            let grow_sz = format!("%aags{}", c);
+            writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
+            let min_sz = format!("%aams{}", c);
+            writeln!(out, "{}{} = add i64 {}, 65536", indent, min_sz, grow_sz).ok();
+            let new_base = format!("%aanb{}", c);
+            writeln!(out, "{}{} = call i8* @realloc(i8* {}, i64 {})", indent, new_base, old_base, min_sz).ok();
+            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_base, ptr).ok();
+            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_base, base).ok();
+            let new_end = format!("%aane{}", c);
+            writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, new_end, new_base, min_sz).ok();
+            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_end, end).ok();
+            writeln!(out, "{}br label %{}", indent, ok_l).ok();
+            writeln!(out, "{}{}:", indent, ok_l).ok();
+            let phi = format!("%aaphi{}", c);
+            writeln!(out, "{}{} = phi i8* [ {}, %{} ], [ {}, %{} ]",
+                indent, phi, cur, ok_l, new_base, grow_l).ok();
+            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_ptr, ptr).ok();
+            phi
+        } else {
+            let c = self.arena_counter;
+            self.arena_counter += 1;
+            let r = format!("%aam{}", c);
+            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, r, size_reg).ok();
+            r
+        }
+    }
+
+    /// Emit arena initialization at scope entry. Allocates the initial
+    /// 64KB arena buffer, sets up ptr/end/base alloca slots.
+    pub(crate) fn emit_arena_init(&mut self, out: &mut String, indent: &str) {
+        let c = self.arena_counter;
+        self.arena_counter += 1;
+        let ptr = format!("%arptr{}", c);
+        let end = format!("%arend{}", c);
+        let base = format!("%arbase{}", c);
+        writeln!(out, "{}{} = alloca i8*, align 8", indent, ptr).ok();
+        writeln!(out, "{}{} = alloca i8*, align 8", indent, end).ok();
+        writeln!(out, "{}{} = alloca i8*, align 8", indent, base).ok();
+        let init = format!("%arinit{}", c);
+        writeln!(out, "{}{} = call i8* @malloc(i64 65536)", indent, init).ok();
+        writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, init, ptr).ok();
+        writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, init, base).ok();
+        let init_end = format!("%arieu{}", c);
+        writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 65536", indent, init_end, init).ok();
+        writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, init_end, end).ok();
+        self.arena_slots = Some((ptr, end, base));
+    }
+
+    /// Emit arena teardown at scope exit. Frees the arena buffer and
+    /// clears the arena_slots flag.
+    pub(crate) fn emit_arena_fini(&mut self, out: &mut String, indent: &str) {
+        if let Some((_ptr, _end, ref base)) = self.arena_slots.clone() {
+            let f = format!("%arf{}", self.arena_counter);
+            self.arena_counter += 1;
+            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, f, base).ok();
+            writeln!(out, "{}call void @free(i8* {})", indent, f).ok();
+            self.arena_slots = None;
+        }
+    }
+
     pub(crate) fn emit_spirv_embeds(&self) -> String {
         let mut out = String::new();
         if self.spirv_blobs.is_empty() && self.spirv_kernels.is_empty() {
@@ -1525,6 +1625,8 @@ self.emit_declares(&mut out);
         writeln!(out, "declare i32 @getgid() #1").ok();
         writeln!(out, "declare i32 @getegid() #1").ok();
         writeln!(out, "declare i32 @setvbuf(ptr, ptr, i32, i64) #1").ok();
+        writeln!(out, "declare i32 @pthread_create(ptr, ptr, ptr, ptr) #1").ok();
+        writeln!(out, "declare i32 @pthread_join(i64, ptr) #1").ok();
         writeln!(out, "declare i32 @sleep(i32) #1").ok();
         writeln!(out, "declare i32 @nanosleep(ptr, ptr) #1").ok();
         writeln!(out, "declare ptr @fopen(ptr, ptr) #1").ok();
@@ -1783,6 +1885,20 @@ self.emit_declares(&mut out);
         self.emit_init_state(&mut out);
         self.emit_persistent_cell_ticks(&mut out);
         writeln!(out).ok();
+
+        // Emit cell channel globals and persistent cell thread functions
+        let persistent_cells: Vec<crate::ast::CellDef> = self.cell_defs.values()
+            .filter(|c| c.is_persistent)
+            .cloned()
+            .collect();
+        for cell in &persistent_cells {
+            self.emit_cell_channel_globals(&mut out, cell);
+        }
+        for cell in &persistent_cells {
+            self.emit_cell_thread(&mut out, cell);
+        }
+        writeln!(out).ok();
+
         // Reactor — sequential or parallel
         // Enumeration and wake trigger detection were computed above
         // in the auto-categorization step (lines ~312-380).
@@ -2654,6 +2770,9 @@ self.emit_declares(&mut out);
                     self.field_index_map.insert(prefixed.clone(), self.field_types.len());
                     self.field_types.push(self.llvm_type(param_ty).to_string());
                     self.field_initializers.insert(prefixed, None);
+                }
+                if c.is_persistent {
+                    self.cell_thread_names.push(c.name.clone());
                 }
             }
         }

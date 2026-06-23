@@ -2071,6 +2071,8 @@ impl TypeChecker {
                     // Macro/template intrinsics (compile-time only)
                     Intrinsic::Compile | Intrinsic::MacroError
                     | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Data,
+                    // GLUE file emission intrinsic
+                    Intrinsic::EmitFile => Type::Bool,
                     Intrinsic::UserDefined(name) => {
                         self.inop_decls.get(name)
                             .map(|d| {
