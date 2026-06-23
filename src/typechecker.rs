@@ -1759,7 +1759,8 @@ impl TypeChecker {
                 match intrinsic {
                     Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil | Intrinsic::Floor => Type::Float,
                     Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz | Intrinsic::Abs | Intrinsic::Bitreverse => Type::Int,
-                    Intrinsic::Bytes | Intrinsic::Size | Intrinsic::Strlen => Type::Int,
+                    Intrinsic::ByteCount | Intrinsic::Size | Intrinsic::Strlen => Type::Int,
+                    Intrinsic::StrBytes => Type::Custom("List".to_string()),
                     Intrinsic::Pop => Type::Int,
                     Intrinsic::Contains => Type::Bool,
                     Intrinsic::Keys | Intrinsic::Values => Type::Custom("List".to_string()),
@@ -1786,7 +1787,7 @@ impl TypeChecker {
                     Intrinsic::Open | Intrinsic::Close | Intrinsic::Read
                     | Intrinsic::Write | Intrinsic::LSeek | Intrinsic::PRead
                     | Intrinsic::PWrite | Intrinsic::Stat | Intrinsic::FStat
-                    | Intrinsic::Truncate | Intrinsic::FTruncate | Intrinsic::FSync
+                    | Intrinsic::FTruncate | Intrinsic::FSync
                     | Intrinsic::FDup | Intrinsic::FDup2 | Intrinsic::FCntl => Type::Int,
                     // Phase C: Filesystem
                     Intrinsic::ReadLink | Intrinsic::GetCwd => Type::String,
@@ -3588,7 +3589,7 @@ mod kani_full_tests {
         let mut prog = make_program(vec![]);
         let mut tc = super::TypeChecker::new();
         let ty = tc.infer_expression(&Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Bytes,
+            intrinsic: Intrinsic::ByteCount,
             args: vec![Expr::String("hello".into())],
         });
         assert_eq!(ty, Type::Int, "bytes# should infer as Int");
@@ -3768,7 +3769,7 @@ mod kani_full_tests {
     #[test]
     fn test_check_intrinsic_truncate_returns_int() {
         let expr = Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Truncate,
+            intrinsic: Intrinsic::FTruncate,
             args: vec![Expr::String("/tmp/t".into()), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();

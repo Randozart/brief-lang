@@ -1451,6 +1451,7 @@ self.emit_declares(&mut out);
         // Declare cast helper functions
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
         writeln!(out, "declare i64 @__int_to_str__(i64) #1").ok();
+        writeln!(out, "declare i64 @__str_bytes__(i64) #1").ok();
         writeln!(out, "declare i64 @__str_to_int(i8*) #1").ok();
 
         // Format string constants for benchmark intrinsics (print_int#, print_float#)

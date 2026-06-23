@@ -645,8 +645,18 @@ impl LlvmBackend {
                         let raw = self.emit_expr(out, &args[0], indent);
                         writeln!(out, "{}{} = call i64 @llvm.bitreverse.i64(i64 {})", indent, v, raw).ok();
                     }
-                    Intrinsic::Bytes => {
+                    Intrinsic::ByteCount => {
                         writeln!(out, "{}{} = add i64 0, 8 ; bytes", indent, v).ok();
+                    }
+                    Intrinsic::StrBytes => {
+                        if let Some(first) = args.first() {
+                            let n = self.emit_expr(out, first, indent);
+                            let boxed = self.adapt_to_i64(out, indent, &n);
+                            writeln!(out, "{}{} = call i64 @__str_bytes__(i64 {})", indent, v, boxed).ok();
+                        } else {
+                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
+                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                        }
                     }
                     Intrinsic::Size => {
                         if let Some(first) = args.first() {
@@ -1097,7 +1107,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = call i32 @fstat(i32 {}, ptr {})", indent, rv, fdt, st).ok();
                         writeln!(out, "{}{} = zext i32 {} to i64", indent, v, rv).ok();
                     }
-                    Intrinsic::Truncate => {
+                    Intrinsic::FTruncate => {
                         let path = self.emit_expr(out, &args[0], indent);
                         let len = self.emit_expr(out, &args[1], indent);
                         let sp = format!("%ttsp{}", self.txn_counter); self.txn_counter += 1;

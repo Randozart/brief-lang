@@ -1752,7 +1752,7 @@ impl Interpreter {
                             (b, e) => Err(RuntimeError::TypeMismatch(format!("pow# requires (Float, Float), got ({:?}, {:?})", b, e))),
                         }
                     }
-                    Intrinsic::Bytes => {
+                    Intrinsic::ByteCount => {
                         let v = values.remove(0);
                         match v {
                             Value::Float(_) => Ok(Value::Int(8)),
@@ -1768,6 +1768,16 @@ impl Interpreter {
                             Value::Queue(q) => Ok(Value::Int((q.len() * 8) as i64)),
                             Value::StringBuilder(sb) => Ok(Value::Int(sb.len() as i64)),
                             v => Err(RuntimeError::TypeMismatch(format!("bytes not implemented for {:?}", v))),
+                        }
+                    }
+                    Intrinsic::StrBytes => {
+                        let v = values.remove(0);
+                        match v {
+                            Value::String(s) => {
+                                let bytes: Vec<Value> = s.bytes().map(|b| Value::Int(b as i64)).collect();
+                                Ok(Value::List(bytes))
+                            }
+                            v => Err(RuntimeError::TypeMismatch(format!("str_bytes requires String, got {:?}", v))),
                         }
                     }
                     Intrinsic::Strlen => {
@@ -2216,7 +2226,7 @@ impl Interpreter {
                             Ok(Value::Int(-1))
                         }
                     }
-                    Intrinsic::Truncate => {
+                    Intrinsic::FTruncate => {
                         let path = match values.remove(0) {
                             Value::String(s) => s,
                             v => return Err(RuntimeError::TypeMismatch(format!("truncate path requires String, got {:?}", v))),
@@ -6153,7 +6163,7 @@ mod tests {
         };
         i.state.insert("p".to_string(), val);
         let expr = Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Bytes,
+            intrinsic: Intrinsic::ByteCount,
             args: vec![Expr::Identifier("p".to_string())],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -6165,7 +6175,7 @@ mod tests {
         let mut i = Interpreter::new();
         i.state.insert("m".to_string(), Value::HashMap(std::collections::HashMap::new()));
         let expr = Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Bytes,
+            intrinsic: Intrinsic::ByteCount,
             args: vec![Expr::Identifier("m".to_string())],
         };
         let result = i.eval_expr(&expr);
@@ -9125,7 +9135,7 @@ mod kani_full_tests {
     fn test_intrinsic_bytes_int() {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Bytes,
+            intrinsic: Intrinsic::ByteCount,
             args: vec![Expr::Integer(42)],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9136,7 +9146,7 @@ mod kani_full_tests {
     fn test_intrinsic_bytes_float() {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Bytes,
+            intrinsic: Intrinsic::ByteCount,
             args: vec![Expr::Float(3.0)],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9147,7 +9157,7 @@ mod kani_full_tests {
     fn test_intrinsic_bytes_bool() {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Bytes,
+            intrinsic: Intrinsic::ByteCount,
             args: vec![Expr::Bool(true)],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9158,7 +9168,7 @@ mod kani_full_tests {
     fn test_intrinsic_bytes_char() {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Bytes,
+            intrinsic: Intrinsic::ByteCount,
             args: vec![Expr::Char('A')],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9621,7 +9631,7 @@ mod kani_full_tests {
     fn test_intrinsic_truncate_type_error() {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
-            intrinsic: Intrinsic::Truncate,
+            intrinsic: Intrinsic::FTruncate,
             args: vec![Expr::Integer(0), Expr::Integer(0)],
         };
         assert!(i.eval_expr(&expr).is_err());

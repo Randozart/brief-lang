@@ -444,7 +444,7 @@ pub enum Intrinsic {
     Cttz,
     Abs,
     Bitreverse,
-    Bytes,
+    ByteCount,
     Size,
     Pop,
     Contains,
@@ -497,8 +497,14 @@ pub enum Intrinsic {
     PWrite,
     Stat,
     FStat,
-    Truncate,
+    /// ftruncate#(path: String, len: Int) -> Int
+    /// Truncates a file on disk to the specified length.
+    /// Returns 0 on success, -1 on error (errno set).
+    /// Named ftruncate# to distinguish from string truncation (which is done via s[0..n] slicing).
     FTruncate,
+    /// str_bytes#(s: String) -> List<Int>
+    /// Converts a string's characters into a list of integer byte values.
+    StrBytes,
     FSync,
     FDup,
     FDup2,
@@ -719,10 +725,11 @@ impl Intrinsic {
             | Intrinsic::Floor
             | Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz
             | Intrinsic::Abs | Intrinsic::Bitreverse
-            | Intrinsic::Bytes | Intrinsic::Size
+            | Intrinsic::ByteCount | Intrinsic::Size
             | Intrinsic::TrimLeft | Intrinsic::TrimRight
             | Intrinsic::ToLower | Intrinsic::ContainsAt
             | Intrinsic::FindFrom | Intrinsic::SplitN
+            | Intrinsic::StrBytes
             | Intrinsic::IntToStr | Intrinsic::Strlen
             | Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
             | Intrinsic::FloatToStr | Intrinsic::ToStr
@@ -748,7 +755,8 @@ impl Intrinsic {
             "cttz" => Some(Intrinsic::Cttz),
             "abs" => Some(Intrinsic::Abs),
             "bitreverse" => Some(Intrinsic::Bitreverse),
-            "bytes" => Some(Intrinsic::Bytes),
+            "byte_count" => Some(Intrinsic::ByteCount),
+            "str_bytes" => Some(Intrinsic::StrBytes),
             "size" => Some(Intrinsic::Size),
             "pop" => Some(Intrinsic::Pop),
             "contains" => Some(Intrinsic::Contains),
@@ -803,7 +811,7 @@ impl Intrinsic {
             "pwrite" => Some(Intrinsic::PWrite),
             "stat" => Some(Intrinsic::Stat),
             "fstat" => Some(Intrinsic::FStat),
-            "truncate" => Some(Intrinsic::Truncate),
+            "truncate" => Some(Intrinsic::FTruncate),
             "ftruncate" => Some(Intrinsic::FTruncate),
             "fsync" => Some(Intrinsic::FSync),
             "dup" => Some(Intrinsic::FDup),
@@ -942,7 +950,8 @@ impl Intrinsic {
             Intrinsic::Cttz => "cttz",
             Intrinsic::Abs => "abs",
             Intrinsic::Bitreverse => "bitreverse",
-            Intrinsic::Bytes => "bytes",
+            Intrinsic::ByteCount => "byte_count",
+            Intrinsic::StrBytes => "str_bytes",
             Intrinsic::Size => "size",
             Intrinsic::Pop => "pop",
             Intrinsic::Contains => "contains",
@@ -996,7 +1005,6 @@ impl Intrinsic {
             Intrinsic::PWrite => "pwrite",
             Intrinsic::Stat => "stat",
             Intrinsic::FStat => "fstat",
-            Intrinsic::Truncate => "truncate",
             Intrinsic::FTruncate => "ftruncate",
             Intrinsic::FSync => "fsync",
             Intrinsic::FDup => "dup",
@@ -2880,8 +2888,8 @@ mod tests {
 
     #[test]
     fn test_intrinsic_from_name_truncate() {
-        assert_eq!(Intrinsic::from_name("truncate"), Some(Intrinsic::Truncate));
-        assert_eq!(Intrinsic::Truncate.name(), "truncate");
+        assert_eq!(Intrinsic::from_name("truncate"), Some(Intrinsic::FTruncate));
+        assert_eq!(Intrinsic::FTruncate.name(), "ftruncate");
     }
 
     #[test]

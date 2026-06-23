@@ -12,10 +12,27 @@ enum ShmError {
     ShmOther(String)
 }
 
-// ===== POSIX SHM OPERATIONS (FFI) =====
+// ===== POSIX SHM OPERATIONS (Intrinsics) =====
+// Replaced: frgn __shm_open/__shm_unlink (external FFI) with
+// shm_open#/shm_unlink# intrinsics. The defn wrappers convert the
+// raw Int return to Result<Int, ShmError> for backward compatibility.
 
-frgn __shm_open(name: String, flags: Int, mode: Int) -> Result<Int, ShmError>;
-frgn __shm_unlink(name: String) -> Result<Void, ShmError>;
+defn __shm_open(name: String, flags: Int, mode: Int) -> Result<Int, ShmError> {
+    let fd = shm_open#(name, flags, mode);
+    [fd >= 0] {
+        term Ok(fd);
+    };
+    term Err(ShmOther("shm_open failed"));
+};
+
+defn __shm_unlink(name: String) -> Result<Void, ShmError> {
+    let ret = shm_unlink#(name);
+    [ret == 0] {
+        term Ok(void);
+    };
+    term Err(ShmOther("shm_unlink failed"));
+};
+
 frgn __ftruncate_shm(fd: Int, length: Int) -> Result<Void, ShmError>;
 frgn __shm_list() -> Result<List<String>, ShmError>;
 frgn __shm_exists(name: String) -> Result<Bool, ShmError>;
@@ -92,10 +109,18 @@ enum MmapError {
     MmapOther(String)
 }
 
-// ===== MMAP OPERATIONS (FFI) =====
+// ===== MMAP OPERATIONS (Intrinsics) =====
+// Replaced: frgn __munmap with munmap# intrinsic.
+
+defn __munmap(addr: Int, length: Int) -> Result<Void, MmapError> {
+    let ret = munmap#(addr, length);
+    [ret == 0] {
+        term Ok(void);
+    };
+    term Err(MmapOther("munmap failed"));
+};
 
 frgn __mmap_anonymous(length: Int, prot: Int, flags: Int) -> Result<Int, MmapError>;
-frgn __munmap(addr: Int, length: Int) -> Result<Void, MmapError>;
 frgn __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError>;
 frgn __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError>;
 frgn __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError>;

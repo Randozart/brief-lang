@@ -27,16 +27,15 @@ frgn __unescape(s: String) -> Result<String, StringError>;
 frgn __quote(s: String) -> Result<String, StringError>;
 frgn __unquote(s: String) -> Result<String, StringError>;
 // Encoding
-frgn __bytes(s: String) -> Result<List<Int>, StringError>;
+defn __bytes(s: String) -> Result<List<Int>, StringError> {
+    term Ok(str_bytes#(s));
+};
 frgn __from_bytes(list: List<Int>) -> Result<String, StringError>;
 // Complex replacement
 frgn __replace_all(s: String, old: String, new: String) -> Result<String, StringError>;
 // Split variations
 frgn __rsplit(s: String, delim: String) -> Result<List<String>, StringError>;
 frgn __words(s: String) -> Result<List<String>, StringError>;
-// Truncation
-frgn __truncate(s: String, max_len: Int) -> Result<String, StringError>;
-frgn __truncate_with(s: String, max_len: Int, suffix: String) -> Result<String, StringError>;
 // Comparison
 frgn __eq_ignore_case(a: String, b: String) -> Result<Bool, StringError>;
 frgn __cmp(s1: String, s2: String) -> Result<Int, StringError>;
