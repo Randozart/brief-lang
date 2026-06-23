@@ -1,3 +1,29 @@
+// ── Loop emission architecture overview ──────────────────────────────────
+//
+// There are three main loop emission strategies, chosen by the frontend
+// based on the program's structure (see optimizer.rs classification):
+//
+// 1. FOLDED LOOP (emit_folded_loop + emit_folded_main):
+//    For single-txn programs where the body is pure (no branches, no
+//    reactive triggers). The counter is either a phi node (use_phi=true,
+//    A005a — pure counter-only) or has the body emitted inline with
+//    struct-SSA (use_phi=false, A005b — body with provably linear guards).
+//
+// 2. MEMORY LOOP (emit_folded_memory_main, A005b):
+//    For bodies with branching control flow (Guarded statements) where
+//    linearity cannot be proven. Uses per-field GEP loads/stores instead
+//    of the %State insertvalue chain to avoid phi %State dominance issues.
+//
+// 3. SSA REGISTER PIPELINE (emit_ssa_main):
+//    For multi-txn reactive programs (rct txn). Precondition checked per-
+//    iteration; body runs inline with per-field GEP loads/stores. Supports
+//    canonical loop detection for phi induction variable optimization.
+//
+// Why three separate strategies instead of one:
+//   - Each eliminates a different category of LLVM IR bloat.
+//   - The folded phi loop (A005a) is O(1) — single store, no iteration.
+//   - The memory path (A005b) avoids phi %State dominance failures.
+//   - The SSA pipeline handles reactive trigger sampling inline.
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{float_to_llvm_hex, find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
 use crate::analysis::dependency_graph::DependencyGraph;
@@ -209,6 +235,18 @@ impl LlvmBackend {
     /// fields will use these old-value registers, making all float
     /// operations within the iteration independent — LLVM's scheduler can
     /// then fill all CPU float execution ports simultaneously.
+    ///
+    /// Why this exists: without pre-extraction, each body statement that
+    /// reads a float field emits its own extractvalue from the %State phi,
+    /// serializing all float operations. By extracting ALL float fields
+    /// once at the top, every float arithmetic instruction in the body
+    /// reads from the same SSA source — the old-value register. LLVM's
+    /// scheduler then sees independent operations and can fill all CPU
+    /// float execution ports (2-4 per cycle on modern x86).
+    ///
+    /// Rejected alternative: GEP + load from memory loses SSA register
+    /// provenance, preventing LLVM's register allocator from keeping hot
+    /// floats in XMM registers.
     pub(crate) fn pre_extract_float_fields(&mut self, out: &mut String) {
         let ssa_reg = match self.ssa_state_reg.clone() {
             Some(r) => r,
@@ -229,6 +267,11 @@ impl LlvmBackend {
     /// Mirrors `pre_extract_float_fields` for Int fields. This eliminates the
     /// per-reference extractvalue-from-insertvalue-chain pattern that inflates
     /// the SSA body by ~5× for Int-heavy benchmarks.
+    ///
+    /// Why separate loops (float vs !float) instead of one loop: keeps hot
+    /// float fields together in cache when iterating field_index_map.
+    /// Future: float fields may use f64 instead of i64 box, needing
+    /// different extractvalue types.
     pub(crate) fn pre_extract_int_fields(&mut self, out: &mut String) {
         let ssa_reg = match self.ssa_state_reg.clone() {
             Some(r) => r,
@@ -249,6 +292,18 @@ impl LlvmBackend {
     /// Used by emit_ssa_main when ssa_state_reg is None (per-field GEP mode).
     /// Mirrors pre_extract_float/int_fields but loads from memory instead of
     /// extractvalue from the SSA %State register.
+    ///
+    /// Why this exists (memory mode alternative): when the program has
+    /// branching control flow (Guarded with non-linear guards), using a
+    /// single %State SSA register causes phi dominance failures. Instead
+    /// of building a complex phi web, we load each field independently
+    /// from memory via GEP. Each field is its own SSA value, and writes
+    /// go directly through GEP+store — no phi needed.
+    ///
+    /// Why TBAA is needed on every load: all fields are in one %State
+    /// struct but have different logical types. Without TBAA, LLVM sees
+    /// all GEP loads as MayAlias (same struct), preventing GVN and ILP.
+    /// With TBAA, a Float field load never aliases an Int field store.
     fn pre_load_all_fields(&mut self, out: &mut String, state_ptr: &str) {
         self.ssa_old_float_regs.clear();
         self.ssa_old_int_regs.clear();
@@ -272,13 +327,26 @@ impl LlvmBackend {
     /// Emit the folded while-loop body (without `@init_state()` or the enclosing
     /// `define` / `ret`).  Used by both `emit_folded_main` and the enum dispatch path.
     ///
-    /// When `use_phi = true`, the counter lives in an SSA phi node (register)
-    /// instead of being loaded/stored through %state every iteration.
-    /// Only valid when the txn body is pure (just counter++).
+    /// Two usage modes:
     ///
-    /// When `use_phi = false` and `body = Some(stmts)`, the txn body is emitted
-    /// inline with struct-SSA (load `%State` once, insertvalue chains, store once).
-    /// When `use_phi = false` and `body = None`, calls the txn function as before.
+    /// 1. use_phi=true (A005a — pure counter-only):
+    ///    Counter lives in an SSA phi node (register), not in %state memory.
+    ///    Zero memory traffic per iteration. The phi counts down (remaining
+    ///    iterations -> 0) so the cmp is `icmp sgt %i, 0` — sub sets ZF,
+    ///    eliminating the cmp instruction. Final counter stored to %state
+    ///    once after the loop exit. Only valid for pure counter-only bodies.
+    ///
+    /// 2. use_phi=false with body=Some(stmts) (A005b — inline body SSA):
+    ///    Body emitted inline with struct-SSA: load %State from alloca via
+    ///    phi at header, extractvalue for reads, insertvalue chains for
+    ///    writes, store %State back at iteration end.
+    ///
+    /// 3. use_phi=false with body=None (legacy call path):
+    ///    Calls txn function via call void @txn_name(ptr %state).
+    ///
+    /// Why label_prefix parameter: enum dispatch calls emit_folded_loop
+    /// multiple times with different prefixes (one per switch case arm).
+    /// Without per-call prefix, label names like "_hdr" collide.
     pub(crate) fn emit_folded_loop(
         &mut self,
         out: &mut String,
@@ -302,6 +370,20 @@ impl LlvmBackend {
         let c_once = self.txn_counter;
         self.txn_counter += 1;
         if use_phi {
+            // Why phi instead of GEP load+store: the counter lives in an SSA
+            // phi node (register), not in %state memory. Zero memory traffic
+            // per iteration. LLVM sees a canonical induction variable and can
+            // apply IV widening, strength reduction, LCSSA.
+            //
+            // Why counted-down: remaining = bound - initial; count down to 0.
+            // The `sub` instruction sets ZF, so `icmp sgt %i, 0` reads flags
+            // — eliminating the cmp instruction entirely. Clang emits the same
+            // pattern for C for-loops.
+            //
+            // Why both phi body and post-loop alloca store are needed: the phi
+            // tracks remaining iteration count. After loop exit, the final
+            // counter value (the bound) is stored to %state via a single store.
+            // Without this, %state.counter would contain its initial value.
             let entry_label = format!("{}_phi_entry", label_prefix);
             let hdr_label = format!("{}_hdr", label_prefix);
             let body_label = format!("{}_body", label_prefix);
@@ -536,6 +618,11 @@ impl LlvmBackend {
         }
     }
 
+    /// Emit a main() that calls emit_folded_loop. Entry point for single-txn
+    /// programs that can be folded. Three modes determined by use_phi and body:
+    ///   use_phi=true  → A005a pure counter (phi-only, O(1) store)
+    ///   use_phi=false + body → A005b inline SSA body (insertvalue chain)
+    ///   use_phi=false + no body → legacy txn function call
     pub(crate) fn emit_folded_main(
         &mut self,
         out: &mut String,
@@ -569,14 +656,24 @@ impl LlvmBackend {
     }
 
     /// Emit a counted-loop main() that uses per-field GEP loads/stores (no SSA
-    /// insertvalue chain). Used when the body has branching control flow (Guarded
-    /// statements) and linearity cannot be proven — avoids phi %State dominance issues.
+    /// insertvalue chain). A005b — memory path for non-linear bodies.
+    ///
+    /// Why this exists: when the body has branching guards and linearity cannot
+    /// be proven, using a single %State SSA register causes phi dominance
+    /// failures at convergence points. The solution: load/store each field
+    /// independently through GEP — no phi needed for the state as a whole.
+    ///
+    /// Why counter phi still exists: the counter uses a phi node so LLVM sees a
+    /// canonical loop counter for trip count, vectorization, and rotation analysis.
+    /// Without the phi, the counter would be GEP+load+store (3 uops per iteration).
+    ///
+    /// Why pre_load_all_fields + phi override: all reads must see pre-tick values.
+    /// The counter phi is injected into ssa_old_int_regs so body reads use the phi
+    /// value rather than a stale GEP load from %state.
     ///
     /// 2026-06-13: A005b — memory path for non-linear bodies.
     /// 2026-06-20: Phase 1 — counter phi replaces GEP+load+store for induction
-    /// variable. The phi provides a canonical counted loop structure that helps
-    /// LLVM's loop optimizations (rotation, induction variable, vectorization)
-    /// compared to the raw GEP+load+store counter.
+    /// variable.
     pub(crate) fn emit_folded_memory_main(
         &mut self,
         out: &mut String,
@@ -1280,6 +1377,20 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
+    /// Emit a main() that is a single O(1) store — no loop, no iteration.
+    /// A005c: Pure body with constant bound → compiler precomputed the final
+    /// counter value. The backend stores it once and returns.
+    ///
+    /// Why this exists: when a program is a pure counter (no observable side
+    /// effects, no FFI) and the bound is a compile-time constant, the region
+    /// analyzer precomputes all iterations and produces the final counter value.
+    /// The loop is eliminated entirely — O(1) runtime regardless of iteration
+    /// count.
+    ///
+    /// This is correct, not a bug: the compiler proved that no iteration
+    /// produces any observable effect, so all iterations are dead code.
+    /// If the user expected a runtime loop, the fix is to make the bound
+    /// runtime-determined (via __get_env_int) or add an FFI call.
     pub(crate) fn emit_folded_pure_counter(&mut self, out: &mut String, counter_idx: usize, total_value: i64) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();

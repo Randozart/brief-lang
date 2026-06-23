@@ -51,6 +51,14 @@ pub struct GpuKernel {
 /// Deferred (not yet implemented):
 /// - Loop-carried dependency analysis for parallelizability verification
 /// - Stride analysis for memory coalescing verification
+    /// Why only Int/Float/Bool/Char can cross the GPU boundary: SPIR-V kernels
+    /// execute in a separate address space from the host. Pointers to host memory
+    /// (strings, struct fields, collection headers) are invalid in the GPU
+    /// because each work-item has its own local memory and global memory buffers.
+    /// Strings would require host-device memory coherence; structs/enums require
+    /// pointer chasing across the PCIe bus. Only flat value types (Int as i64,
+    /// Float as float, Bool as i8, Char as i32) can be packed into a linear
+    /// buffer and indexed by global work-item ID.
 pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
     let mut reasons = Vec::new();
     let mut write_fields = Vec::new();
@@ -354,6 +362,24 @@ fn collect_expr_fields(expr: &Expr, fields: &mut Vec<String>) {
 /// Each field referenced in an expression is loaded from its correct
 /// buffer offset into a unique SSA register — unlike the old approach
 /// that reused a single `%old` register for the LHS field.
+    /// Why raw LLVM IR targeting spirv64 instead of a SPIR-V builder library:
+    /// the existing LLVM backend already emits valid LLVM IR for all expression
+    /// types. By targeting spirv64-unknown-unknown, we reuse the same emission
+    /// infrastructure (same emit_expr, same getelementptr, same function calls)
+    /// and let llc handle the LLVM→SPIR-V translation. A SPIR-V builder library
+    /// would require duplicating the entire expression emission pipeline.
+    ///
+    /// Why buffer-based memory model instead of %State: GPU kernels execute
+    /// across thousands of work-items simultaneously, each with its own global_id.
+    /// A shared %State struct would serialize all work-items. Instead, each
+    /// field is accessed by computing (gtid * stride + field_offset) within
+    /// a flat i8* buffer. The host packs all state fields into in_buf before
+    /// launch and unpacks out_buf after completion. The stride is sizeof(State)
+    /// per work-item, so work-item N reads/writes bytes [N*stride, N*stride+stride).
+    ///
+    /// Why shared memory is addrspace(3): SPIR-V's workgroup shared memory
+    /// is accessible by all work-items in the same workgroup but not by the
+    /// host. LLVM represents this as address space 3 with the `internal` linkage.
 pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     let mut ir = String::new();
     let mut label_counter = 0u64;
@@ -574,6 +600,14 @@ fn has_print_intrinsics_expr(expr: &Expr) -> bool {
 /// Loads the correct LLVM type based on `field_types`: `float` for float
 /// fields, `i64` for integer/bool fields. Selects `%base_in` or `%base_out`
 /// based on whether the field is in `write_fields`.
+        // Why each field load computes buffer offset from scratch: the GPU
+        // kernel receives a single i8* buffer for all fields. Unlike the CPU
+        // path (which has %State with named GEP indices), we must compute
+        // byte offsets manually: field_offset = gtid * state_stride + field_byte_offset.
+        // The state_stride is sizeof(all state fields) per work-item.
+        // We recompute the base pointer for each field rather than caching it,
+        // because the LLVM register allocator would spill the cached pointer
+        // across many field accesses anyway (register pressure is high in GPU kernels).
 fn ensure_field_loaded(
     field: &str,
     ir: &mut String,
@@ -895,6 +929,19 @@ fn emit_spirv_expr(
     }
 }
 
+    // Why GPU intrinsics map to different LLVM functions than the CPU path:
+    // SPIR-V has its own built-in functions for thread ID queries (_Z13get_global_idj)
+    // and synchronization (_Z8barrierj). These are declared as external functions
+    // in the spirv64-unknown-unknown target triple and translated to SPIR-V
+    // opcodes by llc. The CPU path uses @llvm.read_register or pthread_self(),
+    // which are invalid in the SPIR-V context.
+    //
+    // Why barrier# uses CLK_GLOBAL_MEM_FENCE (flag 1): SPIR-V's barrier
+    // requires a memory fence flags argument. CLK_GLOBAL_MEM_FENCE ensures
+    // that all global memory writes before the barrier are visible to all
+    // work-items in the workgroup after the barrier. Without the fence
+    // flag, barrier only synchronizes execution, not memory.
+///
 /// Emit a GPU intrinsic call as SPIR-V-compatible LLVM IR,
 /// returning the SSA register name holding the result.
 ///
@@ -1035,6 +1082,12 @@ pub fn embed_spirv_blob(spirv_binary: &[u8], kernel_name: &str) -> String {
 ///
 /// This runs `llc --mtriple=spirv64-unknown-unknown` on the kernel IR
 /// and captures the output as a `.spv` byte buffer.
+    /// Why shell out to llc instead of using inkwell/codegen directly: LLVM's
+    /// SPIR-V backend is a separate target (spirv64-unknown-unknown) that is
+    /// not enabled in the default LLVM build used by inkwell. Running llc with
+    /// the correct target triple is the most reliable way to produce valid
+    /// SPIR-V binaries across LLVM versions. The shell-out cost is negligible
+    /// (< 100ms) because GPU kernel compilation is rare compared to CPU codegen.
 pub fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {
     use std::io::Write;
     use std::process::Command;

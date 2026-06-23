@@ -428,6 +428,12 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// - Precondition extraction → internal `i1` functions, dispatch chain
 /// - User-provided `frgn __wait_for_event` + `rct txn [true]` for sleep
 /// - `@ link` triggers → `external global` + `load volatile`
+///
+/// Design philosophy: the backend is a single monolithic pass (not a pipeline
+/// of small passes) because Brief's contract system provides structural
+/// guarantees that LLVM cannot infer from generic IR. By emitting contract-
+/// aware IR directly (TBAA, !range, noalias), we avoid the need for an
+/// expensive LLVM analysis pass to rediscover what the contracts already state.
 
 /// LLVM storage type for an `@ link` trigger global.
 /// The C runtime provides `char` (Bool→i8), `int64_t` (Int→i64),
@@ -455,6 +461,19 @@ pub(super) fn tbaa_node(ty_str: &str) -> i32 {
         _ => 1,  // fallback: Int
     }
 }
+
+    /// Why a 6-node TBAA tree: Brief has exactly 5 scalar types that map to
+    /// distinct LLVM storage types (i64, i8, i32, i8*, float). The root "Brief"
+    /// node groups them under a single type tree so that LLVM's TBAA can
+    /// distinguish Int stores from Float stores even though both may be i64
+    /// at the IR level. Without TBAA, all i64 accesses within %State are
+    /// MayAlias, preventing GVN load elimination.
+
+/// Why metadata defs must be deferred: LLVM 18+ rejects metadata definitions
+/// (!N = !{...}) inside function bodies. Metadata must be defined at module
+/// scope. We collect all pending metadata in a Vec and flush it at the end
+/// of the module (after the last function definition). This also lets us
+/// deduplicate identical metadata nodes across multiple loop headers.
 
 /// Emit `!llvm.loop` metadata for a backedge branch and the branch itself.
 ///
@@ -1240,6 +1259,14 @@ impl LlvmBackend {
         analysis.region_analyzer.compose_chains();
         analysis.region_analyzer.build_budget_plan(self.optimize_budget);
 
+        // ── Precomputation check (A000) ──────────────────────────────
+        //
+        // Before emitting any runtime loop, check if the entire program can be
+        // precomputed at compile time. If all inputs are const and the body
+        // converges within --optimize-budget, we emit O(1) final-value stores.
+        // If budget is exceeded but no FFI exists, warn and fall through to
+        // runtime loop. If FFI exists, warn that compile-time eval is blocked.
+
         let precomputed_final_values = if analysis.region_analyzer.is_fully_precomputable(self.optimize_budget) {
             analysis.region_analyzer.collect_final_values(program)
         } else if !analysis.region_analyzer.composed_chains.is_empty() {
@@ -1701,6 +1728,13 @@ self.emit_declares(&mut out);
         }
         // Composed chain functions
         // Extract all-internal counter info before taking composed_chains.
+        //
+        // ── Composed chain extraction ─────────────────────────────────
+        //
+        // Chains of reactive transactions that are all-internal (no FFI, no
+        // external triggers) have their final counter values stored directly
+        // as O(1) stores inside enum dispatch case arms. Non-all-internal
+        // chains emit a fused composed function.
         let all_internal_counter: HashMap<String, (usize, i64)> = analysis.region_analyzer.composed_chains
             .iter()
             .filter(|cc| cc.all_internal)
@@ -1798,6 +1832,28 @@ self.emit_declares(&mut out);
                 }
             }
         }
+
+        // ── Loop emission strategy selection ──────────────────────
+        //
+        // This is the core decision tree that maps a reactive transaction's
+        // structure to the optimal LLVM IR emission strategy:
+        //
+        //   Single txn + bounded counter:
+        //     → check = pure counter fold (A005c), folded SSA (A005a), or
+        //        folded memory (A005b)
+        //   All-const inputs:
+        //     → precompute (A000) — no runtime loop
+        //   Multi-txn all-pure:
+        //     → multi-txn pure fold (O(1) per counter)
+        //   Sequential bounded multi-txn:
+        //     → SSA register pipeline (A006)
+        //   Enumerable triggers:
+        //     → switch-dispatch per-key folded loops
+        //   Reactive with triggers:
+        //     → reactor tick loop (sequential or parallel)
+        //
+        // The decision is driven by the transition graph (analysis), not by
+        // runtime profiling data. Contracts provide the bound/liveness info.
 
         let foldable = graph.nodes.len() == 1
             && !graph.has_triggers
@@ -2457,8 +2513,9 @@ self.emit_declares(&mut out);
         flags
     }
 
-    /// Return the attribute group for a function, using `#4` (SLP-disabled)
-    /// instead of `#0` if the function is hazardous, or `#5` instead of `#3`.
+    /// Select the LLVM attribute group for a function, adjusting for SLP hazard.
+    /// Non-hazardous functions use #0 or #3; hazardous functions use #4 or #5
+    /// (which disable SLP vectorization). See hazard.rs for the analysis.
     /// Check if an expression produces a `Ptr<T>` value.
     /// Used by `ListIndex` to decide between direct pointer GEP vs 2-slot header load.
     /// Resolve a Brief type to its underlying LLVM type for BILD purposes.
@@ -2624,8 +2681,14 @@ self.emit_declares(&mut out);
     }
 
     // ── Adaptive Layout — apply field modes ──────────────────
-    /// Apply field modes to the %State layout: remove Never fields, append cache slots.
-    /// Called after `build_field_index()` and after the transition graph is available.
+    /// Apply field liveness analysis to eliminate dead fields and add
+    /// cache slots for lazily-computed projections.
+    ///
+    /// Why this runs after the transition graph is built: the transition
+    /// graph's live_fields analysis can only be accurate after the full
+    /// region analysis (which determines which txns fire under which
+    /// conditions). Running dead-field elimination earlier would conservatively
+    /// keep all fields, missing elimination opportunities.
     pub(crate) fn apply_field_modes(&mut self, program: &Program,
         live_fields: &std::collections::HashSet<String>,
         projection_usage: &std::collections::HashMap<String, std::collections::HashSet<String>>)

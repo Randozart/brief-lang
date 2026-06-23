@@ -43,6 +43,8 @@ use regex::Regex;
 use serde_json::Value as JsonValue;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
+use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use std::thread;
 
 /// Metadata for a lazy-loaded DBVL table with key-offset index
 #[derive(Debug, Clone, PartialEq)]
@@ -57,8 +59,6 @@ pub(crate) struct DbvlTableInner {
     /// Index of the key field (default 0)
     pub schema_key_index: Option<usize>,
 }
-
-use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -283,9 +283,128 @@ pub struct Interpreter {
     /// Trigger binding registry — maps trigger names to (cell_name, port_name)
     /// for output synchronization from persistent cells to parent state.
     pub trg_bindings: Vec<TrgBindingReg>,
+    /// Handle for cell thread — joined on drop or program exit.
+    pub cell_thread_handle: Option<thread::JoinHandle<()>>,
 }
 
-/// A registered persistent (cell!) instance with its own private state.
+impl Clone for Interpreter {
+    fn clone(&self) -> Self {
+        Interpreter {
+            state: HashMap::new(),
+            prior_state: HashMap::new(),
+            foreign_functions: self.foreign_functions.clone(),
+            definitions: self.definitions.clone(),
+            callable_txns: self.callable_txns.clone(),
+            ffi_bindings: self.ffi_bindings.clone(),
+            ffi_name_to_location: self.ffi_name_to_location.clone(),
+            orchestrator: Orchestrator::new(),
+            metropolitan_hub: crate::ffi::metropolitan::MetropolitanHub::new(),
+            return_value: None,
+            frgn_registry: crate::ffi::dynamic::FrgnRegistry::new(),
+            profile_mode: false,
+            branch_counts: HashMap::new(),
+            guard_counter: 0,
+            enum_variants: self.enum_variants.clone(),
+            dbvl_cache: HashMap::new(),
+            oracle_fuel: None,
+            type_universe: self.type_universe.clone(),
+            inop_decls: self.inop_decls.clone(),
+            cell_defs: self.cell_defs.clone(),
+            next_cell_uid: self.next_cell_uid,
+            persistent_cells: HashMap::new(),
+            trg_bindings: Vec::new(),
+            cell_thread_handle: None,
+        }
+    }
+}
+
+/// Thread-safe channel for a cell thread to communicate output changes
+/// to the parent reactor loop. Lock-free on the hot path (dirty flag is atomic).
+#[derive(Debug, Clone)]
+pub struct CellChannel {
+    pub outputs: Arc<Mutex<HashMap<String, Value>>>,
+    pub changed: Arc<AtomicBool>,
+    pub terminate: Arc<AtomicBool>,
+}
+
+impl CellChannel {
+    pub fn new() -> Self {
+        CellChannel {
+            outputs: Arc::new(Mutex::new(HashMap::new())),
+            changed: Arc::new(AtomicBool::new(false)),
+            terminate: Arc::new(AtomicBool::new(false)),
+        }
+    }
+}
+
+/// Run one convergence pass on a cell's private state.
+/// Returns true if the cell fired (state changed and postcondition satisfied).
+pub fn cell_convergence_pass(
+    interp: &mut Interpreter,
+    cell_def: &CellDef,
+    cell_name: &str,
+    state: &mut HashMap<String, Value>,
+    prior_state: &mut HashMap<String, Value>,
+) -> bool {
+    let mut fired = false;
+    for txn in &cell_def.transactions {
+        let pre = interp.rewrite_identifiers(&txn.contract.pre_condition, 0, cell_name);
+        let pre_val = match interp.eval_expr_in_state(&pre, state) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        if pre_val == Value::Bool(true) {
+            *prior_state = state.clone();
+            let mut return_val: Option<Value> = None;
+            let mut terminated = false;
+            for stmt in &txn.body {
+                let rewritten = interp.rewrite_statement_identifiers(stmt, 0, cell_name);
+                match interp.exec_stmt_in_state(&rewritten, state, &mut return_val) {
+                    Ok(()) => {
+                        if return_val.is_some() {
+                            terminated = true;
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            if terminated {
+                break;
+            }
+            let post = interp.rewrite_identifiers(&txn.contract.post_condition, 0, cell_name);
+            if let Ok(post_val) = interp.eval_expr_in_state(&post, state) {
+                if post_val == Value::Bool(true) && state != prior_state {
+                    fired = true;
+                }
+            }
+        }
+    }
+    fired
+}
+
+/// Run a cell tick: convergence pass + output sync.
+/// Returns (fired, output_map).
+pub fn cell_tick(
+    interp: &mut Interpreter,
+    cell_def: &CellDef,
+    cell_name: &str,
+    state: &mut HashMap<String, Value>,
+    prior_state: &mut HashMap<String, Value>,
+) -> (bool, HashMap<String, Value>) {
+    let fired = cell_convergence_pass(interp, cell_def, cell_name, state, prior_state);
+    let mut outputs = HashMap::new();
+    if let Some(ref ot) = cell_def.output_type {
+        for port_name in interp.extract_output_names(ot) {
+            let key = format!("{}${}.{}", cell_name, 0, port_name);
+            if let Some(val) = state.get(&key) {
+                outputs.insert(port_name, val.clone());
+            }
+        }
+    }
+    (fired, outputs)
+}
+
 #[derive(Debug, Clone)]
 pub struct PersistentCellInstance {
     pub cell_def: CellDef,
@@ -296,6 +415,9 @@ pub struct PersistentCellInstance {
     pub tick_counter: u64,
     /// Minimum main loop iterations between ticks (0 = every iteration).
     pub tick_interval: u64,
+    /// Channel for communicating outputs to parent thread.
+    /// Used by both cooperative and threaded cells.
+    pub channel: CellChannel,
 }
 
 /// A trigger binding: maps a parent-level trigger name to a cell's output port.
@@ -334,6 +456,7 @@ impl Interpreter {
             next_cell_uid: 0,
             persistent_cells: HashMap::new(),
             trg_bindings: Vec::new(),
+            cell_thread_handle: None,
         }
     }
 
@@ -1176,10 +1299,46 @@ impl Interpreter {
             prior_state: HashMap::new(),
             output_cache: HashMap::new(),
             tick_counter: 0,
-            tick_interval: match tick_hz { Some(0) | None => 0, _ => 0 }, // Hz-based interval deferred
+            tick_interval: match tick_hz {
+                Some(hz) if hz > 0 => (1_000_000_000 / hz).max(1) as u64,
+                _ => 0,
+            },
+            channel: CellChannel::new(),
         };
 
+        let chan = instance.channel.clone();
         self.persistent_cells.insert(name.clone(), instance);
+
+        // Spawn a background thread for this cell if tick_hz > 0
+        if let Some(hz) = tick_hz {
+            if hz > 0 {
+                let tick_ns = (1_000_000_000 / hz).max(1) as u64;
+                let clone = self.clone();
+                let cell_name = name.clone();
+                let cell_def = cell_def.clone();
+                let handle = thread::spawn(move || {
+                    let mut state: HashMap<String, Value> = HashMap::new();
+                    let mut prior_state: HashMap<String, Value> = HashMap::new();
+                    let mut interp = clone;
+                    while !chan.terminate.load(Ordering::Relaxed) {
+                        thread::sleep(std::time::Duration::from_nanos(tick_ns));
+                        let (fired, outputs) = cell_tick(
+                            &mut interp,
+                            &cell_def,
+                            &cell_name,
+                            &mut state,
+                            &mut prior_state,
+                        );
+                        if fired {
+                            *chan.outputs.lock().unwrap() = outputs;
+                            chan.changed.store(true, Ordering::SeqCst);
+                        }
+                    }
+                });
+                self.cell_thread_handle = Some(handle);
+            }
+        }
+
         Ok(name)
     }
 
@@ -1275,6 +1434,26 @@ impl Interpreter {
             let mut instance = self.persistent_cells.remove(name).unwrap();
             instance.tick_counter += 1;
 
+            // Threaded cells (tick_interval > 0): check channel for outputs
+            if instance.tick_interval > 0 {
+                if instance.channel.changed.load(Ordering::SeqCst) {
+                    let outputs = instance.channel.outputs.lock().unwrap().clone();
+                    instance.channel.changed.store(false, Ordering::SeqCst);
+                    // Sync thread outputs to parent trigger state
+                    for (port_name, val) in &outputs {
+                        for trg in &self.trg_bindings {
+                            if trg.cell_name == *name && trg.port_name == *port_name {
+                                self.state.insert(trg.trigger_name.clone(), val.clone());
+                            }
+                        }
+                    }
+                    any_fired = true;
+                }
+                self.persistent_cells.insert(name.clone(), instance);
+                continue;
+            }
+
+            // Non-threaded cell: run inline convergence
             if instance.tick_interval > 0 && instance.tick_counter % instance.tick_interval != 0 {
                 self.persistent_cells.insert(name.clone(), instance);
                 continue;
@@ -2177,6 +2356,24 @@ impl Interpreter {
             }
         }
         Ok(())
+    }
+
+    /// Evaluate an expression against a specific state HashMap instead of self.state.
+    pub fn eval_expr_in_state(&mut self, expr: &Expr, state: &HashMap<String, Value>) -> Result<Value, RuntimeError> {
+        let saved = std::mem::replace(&mut self.state, state.clone());
+        let result = self.eval_expr(expr);
+        self.state = saved;
+        result
+    }
+
+    /// Execute a statement against a specific state HashMap.
+    pub fn exec_stmt_in_state(&mut self, stmt: &Statement, state: &mut HashMap<String, Value>, return_val: &mut Option<Value>) -> Result<(), RuntimeError> {
+        let saved_state = std::mem::replace(&mut self.state, state.clone());
+        let saved_return = std::mem::replace(&mut self.return_value, return_val.take());
+        let result = self.exec_stmt(stmt);
+        *state = std::mem::replace(&mut self.state, saved_state);
+        *return_val = std::mem::replace(&mut self.return_value, saved_return);
+        result
     }
 
     /// Check TypeUniverse guards for a given type annotation on a value.

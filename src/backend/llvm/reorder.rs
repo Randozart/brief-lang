@@ -1,6 +1,20 @@
 // Transaction body instruction reordering for ILP.
 // Builds a dependency DAG from statement read/write sets and
 // topologically sorts to group independent operations together.
+//
+// Why this exists: Brief transaction bodies are written as sequential
+// statements, but many sequences contain independent operations (e.g.,
+// &x = a + b; &y = c + d). LLVM's scheduler can issue independent
+// operations simultaneously, but only if they appear in separate
+// dependency chains. Kahn's topological sort finds the chains and
+// interleaves them for maximum ILP.
+//
+// Why not let LLVM handle this entirely? LLVM's instruction scheduler
+// works within a basic block after codegen. By reordering at the Brief
+// statement level before LLVM IR emission, we:
+//   1. Give LLVM a wider scheduling window from the start
+//   2. Avoid LLVM having to push independent ops through alias analysis
+//   3. Keep the emitted IR readable for debugging
 
 use crate::ast::{Expr, Statement};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -13,6 +27,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// to an earlier position, subsequent statements would be silently dropped.
 /// Returns (reordered_statements, has_cycle) where has_cycle indicates
 /// a dependency cycle was detected and sorted order may be suboptimal.
+///
+/// Why the < 3 threshold: bodies with 0-2 statements have no reordering
+/// opportunity (no ILP to exploit). The dependency graph construction
+/// and topological sort would add overhead for zero benefit.
 pub(crate) fn reorder_body_statements(body: &[Statement]) -> (Vec<Statement>, bool) {
     if body.len() < 3 {
         return (body.to_vec(), false);
@@ -197,6 +215,20 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
 
 /// Build a dependency graph: stmt i must come before stmt j if j reads
 /// what i writes, or j writes what i writes (WAW), or j writes what i reads (WAR).
+///
+/// Why only forward edges (i < j): edges are only added from earlier
+/// statements to later ones. This guarantees the graph is acyclic by
+/// construction — Kahn's algorithm in topological_sort can never detect
+/// a cycle from reorder_body_statements input. Cycles can still arise
+/// from manually constructed graphs in tests or if this function is
+/// called on unsorted input.
+///
+/// Why three edge types:
+///   RAW (i writes, j reads)  — classic true dependency, must preserve
+///   WAW (both write)         — output dependency, must preserve for
+///                              deterministic final value
+///   WAR (i reads, j writes)  — anti-dependency, must preserve to avoid
+///                              reading a pre-emptively updated value
 fn build_dependency_graph(sets: &[ReadWriteSet]) -> HashMap<usize, HashSet<usize>> {
     let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
     for i in 0..sets.len() {
@@ -221,6 +253,18 @@ fn build_dependency_graph(sets: &[ReadWriteSet]) -> HashMap<usize, HashSet<usize
 
 /// Kahn's topological sort — emits independent statements grouped together
 /// for maximum ILP. Returns (sorted_statements, has_cycle).
+///
+/// Why Kahn's over DFS-based topological sort: Kahn's emits statements
+/// as soon as all their dependencies are satisfied, which naturally groups
+/// independent statements together (they all become ready at the same time
+/// and are popped consecutively). DFS post-order produces a reverse
+/// topo-sort that doesn't have this grouping property.
+///
+/// Cycle fallback: if Kahn's leaves some statements unscheduled (should
+/// not happen from build_dependency_graph but can from manual input),
+/// the unscheduled statements are appended in original order. This is a
+/// correctness fallback — the schedule is valid (all known dependencies
+/// are satisfied) but may miss some transitive edges.
 fn topological_sort(body: &[Statement], deps: &HashMap<usize, HashSet<usize>>) -> (Vec<Statement>, bool) {
     let n = body.len();
     let mut in_degree = vec![0usize; n];

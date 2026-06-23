@@ -1,5 +1,24 @@
 use crate::ast::Hashtag;
 
+// ── Directive Resolution ────────────────────────────────────────────
+//
+// Why a separate file for directive resolution: directives (#inline,
+// #unroll, #vectorize, #gpu, #export) are parsed in the frontend as
+// Hashtag values and stored on AST nodes. The resolution logic maps
+// each hashtag to an LLVM IR effect (function attribute, loop metadata,
+// GPU offload request, export symbol).
+//
+// By keeping resolution in a dedicated file, adding a new directive
+// (e.g., #novector, #interleave) is a single-function addition here —
+// no changes to emit_expr.rs, loop_engine.rs, or the parser.
+//
+// The three-tier system (#, #?, #!):
+//   #directive       — mandatory: warn if inapplicable
+//   #?directive      — speculative: emit remark with analysis/hints
+//   #!directive      — force: error if inapplicable
+// This mirrors LLVM's own hint/flag distinction (llvm.loop.*.enable
+// vs llvm.loop.*.followup) and gives the programmer graduated control.
+
 /// Context where a directive is applied — determines which LLVM annotations
 /// the directive maps to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

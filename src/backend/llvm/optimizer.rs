@@ -6,6 +6,29 @@
 //   - Transaction categorization (enum / async / sequential)
 //   - Lightweight async detection
 //
+// Why the three-way categorization (enum / async / sequential):
+//
+//   Enum dispatch — when triggers have small compile-time-known value
+//     sets (within --optimize-budget), we emit a switch-case main that
+//     dispatches to per-key folded loops. This lets each trigger key
+//     converge in O(1) ticks instead of one increment per tick.
+//     Example: a trigger with 10 values and a bounded-counter txn folds
+//     to 10 O(1) stores instead of 10×N ticks.
+//
+//   Async dispatch — when multiple conflict-free reactive transactions
+//     can run in parallel via the thread pool. Conflict freedom is
+//     proven by checking pairwise write-set disjointness.
+//
+//   Sequential dispatch — fallback. All reactive txns run in order.
+//     Safe for any program, but leaves ILP on the table when txns
+//     could have run in parallel.
+//
+// Lightweight async: an optimization on top of async dispatch. When a
+// pure-body bounded-counter txn has a runtime-variable bound (not a
+// compile-time constant), we can skip the thread pool overhead and
+// just emit a counted loop. The "lightweight" tag lets us use simpler
+// codegen — no barrier, no work-stealing, just a phi + icmp + backedge.
+//
 // Zero behavioral changes — pure code reorganization.
 
 use std::collections::{HashMap, HashSet};
@@ -47,6 +70,14 @@ impl LlvmBackend {
 
     /// Auto-select Parallel dispatch when all reactive transactions
     /// are proven conflict-free.
+    ///
+    /// Why both write-set AND cross-read-write checks:
+    ///   Write-set disjointness (a_writes ∩ b_writes == ∅) prevents
+    ///   WAW hazards. But even with disjoint writes, txn A might read
+    ///   a field that B writes (WAR) or write a field that B reads (RAW).
+    ///   The cross-read-write check only runs when preconditions share
+    ///   identifiers — if A and B read different fields, there is no
+    ///   cross-path regardless of writes.
     fn select_dispatch_mode(
         program: &Program,
         txns: &[(String, &Transaction)],
@@ -89,6 +120,14 @@ impl LlvmBackend {
 
     /// Categorize reactive transactions into enum/async/sequential dispatch paths.
     /// Sets self.has_async_txns, self.async_txn_names, self.is_lightweight_async.
+    ///
+    /// The return tuple is (has_wake_triggers, enumerable, enum_keys, enum_txn_names):
+    ///   - enumerable: Some(sizes) if all triggers have bounded value sets.
+    ///     Each element is (trigger_name, Option<value_set_size>). None means
+    ///     the trigger is not enumerable (too many values or unbounded).
+    ///   - enum_keys: for fallback triggers, the actual observed key values
+    ///     extracted from the precondition's Eq(trigger, value) patterns.
+    ///   - enum_txn_names: subset of txns gated by enumerable triggers.
     fn classify_txns(
         &mut self,
         analysis: &AnalysisResults,
@@ -226,6 +265,16 @@ impl LlvmBackend {
 }
 
 /// Check if a precondition is gated on any of the named triggers.
+///
+/// A txn is "trigger-gated" if its precondition references a trigger
+/// variable. Enum dispatch requires trigger gates so it can map each
+/// trigger value to a distinct case arm. Async dispatch also requires
+/// trigger gating for wake-trigger eligibility.
+///
+/// Only Identifier, Eq(trigger, val), and And are recognized as gates.
+/// Complex boolean formulas (Or with mixed trigger/non-trigger terms)
+/// are not considered gated — the compiler cannot statically determine
+/// which trigger values fire the txn.
 fn is_trigger_gated(pre: &Expr, trigger_names: &HashSet<&str>) -> bool {
     match pre {
         Expr::Identifier(name) => trigger_names.contains(name.as_str()),
@@ -240,7 +289,16 @@ fn is_trigger_gated(pre: &Expr, trigger_names: &HashSet<&str>) -> bool {
     }
 }
 
-/// Extract trigger keys from a precondition.
+/// Extract trigger values from a precondition that match Eq(trigger, value).
+///
+/// Example: precondition `trigger == 1 || (trigger == 2 && x > 0)` extracts
+/// keys [1, 2] — the enum dispatch can then generate case arms for values
+/// 1 and 2 (with the rest falling through to the sequential reactor).
+///
+/// Why this exists separately from value_set_size_of: the region analyzer
+/// tells us the size of a trigger's value set, but not the actual values.
+/// For enum dispatch we need the concrete values to emit switch labels.
+/// extract_trigger_keys digs them out of the precondition's Eq arms.
 fn extract_trigger_keys(
     pre: &Expr,
     trigger_names: &HashSet<&str>,

@@ -560,6 +560,11 @@ impl LlvmBackend {
                         let sz = format!("%csz{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = mul i64 {}, 8", indent, sz, n_slots as i64).ok();
                         let pm = format!("%cpm{}", self.txn_counter); self.txn_counter += 1;
+                        // Why malloc for enum variants: tagged union requires heap allocation
+                        // because different variants have different sizes (varying numbers of
+                        // fields). Stack allocation would need max-size reservation for every
+                        // variant, wasting memory. The malloc'd block has discriminant at
+                        // slot 0 and fields at slot 1+.
                         writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, pm, sz).ok();
                         let p = format!("%cop{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, p, pm).ok();
@@ -3307,6 +3312,9 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = add i64 0, {}", indent, count_reg, raw_count).ok();
                 }
 
+                // Why malloc for slice results: slice produces a new list whose size
+                // is only known at runtime (depends on start, end, stride). Stack
+                // allocation is impossible because the size varies per execution.
                 // Allocate new list header via malloc (avoids invalid dynamic alloca in non-entry block)
                 let ab = format!("%sab{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, ab, count_reg).ok();
@@ -3497,6 +3505,9 @@ impl LlvmBackend {
                 let n = items.len() as i64;
                 let alloc_slots = n + 2;
                 let ai = format!("%mai{}", self.txn_counter); self.txn_counter += 1;
+                // Why malloc for map/set literals: the literal may have a large number
+                // of entries (hundreds). Stack allocation via alloca would risk stack
+                // overflow. Heap allocation via malloc is the safe choice.
                 writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, ai, (alloc_slots * 8 + 8)).ok();
                 let hp = format!("%mhp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, ai).ok();
@@ -3522,6 +3533,9 @@ impl LlvmBackend {
             Expr::SetLiteral(items) => {
                 let n = items.len() as i64;
                 let ai = format!("%sai{}", self.txn_counter); self.txn_counter += 1;
+                // Why malloc for map/set literals: the literal may have a large number
+                // of entries (hundreds). Stack allocation via alloca would risk stack
+                // overflow. Heap allocation via malloc is the safe choice.
                 writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, ai, (n + 2) * 8 + 8).ok();
                 let hp = format!("%shp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, ai).ok();
@@ -3543,6 +3557,11 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ai).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
+            // Why free+malloc+memcpy instead of realloc: Brief collections have
+            // immutable-value semantics — `<-` produces a new list, the old one is
+            // dead (no shared refs). realloc doesn't help (we still memcpy to make
+            // room) and the old→new ptr mapping adds complexity. The free+malloc
+            // pattern makes allocation visible to LLVM's malloc optimization passes.
             Expr::ArrowMut { dir: ArrowDir::Push, target, index: _, value: Some(val) } => {
                 let list_val = self.emit_expr(out, target, indent);
                 let elem_val = self.emit_expr(out, val, indent);
@@ -3621,6 +3640,10 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, new_buf).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
+            // Why free+malloc+memcpy for pop: same semantics as push — the old
+            // buffer is dead after the operation. Pop removes one element but
+            // we still allocate a fresh buffer of len-1. An arena allocator
+            // (planned) would replace the free+malloc with a bump pointer reset.
             Expr::ArrowMut { dir: ArrowDir::Pop, target, index, value: None } => {
                 let list_val = self.emit_expr(out, target, indent);
                 let list_boxed = self.adapt_to_i64(out, indent, &list_val);
@@ -3787,6 +3810,11 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, {} ; discard", indent, v, base).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
+            // ArrowTransfer moves ALL elements from source to destination.
+            // Both old buffers are freed; a new combined buffer is allocated.
+            // The source list becomes empty (2-slot header with data_ptr=null, len=0).
+            // This is the most allocation-heavy arrow op — the arena plan (Phase 1)
+            // benefits transfer the most.
             Expr::ArrowTransfer { dest, source, filter: _ } => {
                 // Unfiltered: move all elements from source to dest
                 let dest_val = self.emit_expr(out, dest, indent);
@@ -4452,6 +4480,10 @@ impl LlvmBackend {
         }
     }
 
+    /// Emit a main() that stores final precomputed values and returns.
+    /// A000: no runtime loop, no iteration. The region analyzer simulated
+    /// all transactions within --optimize-budget and produced final values.
+    /// This is the most extreme optimization: zero runtime memory traffic.
     pub(crate) fn emit_precomputed_main(
         &mut self,
         out: &mut String,
@@ -4748,6 +4780,17 @@ impl LlvmBackend {
     ///   bit 1 = temporary concat result (safe to free when consumed)
     /// State-loaded strings have both bits clear (heap, state-owned).
     /// Only concat results get bit 1 set.
+    //
+    // Why inline string concat instead of calling sprintf/strcat: the compiler
+    // knows each operand's length at emit time (from header slot 1), so it can
+    // compute the total allocation size and emit memcpy calls that LLVM can
+    // lower to rep movsb or inline. sprintf would need to scan for null
+    // terminators at runtime, losing the length information.
+    //
+    // Tag bits: bit 0 = static string constant (from .rodata, don't free),
+    // bit 1 = temporary concat result (safe to free when consumed).
+    // State-loaded strings have both bits clear. The tag convention avoids
+    // separate tracking data structures.
     fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &TypedRegister, b: &TypedRegister) -> TypedRegister {
         let a_boxed = self.adapt_to_i64(out, indent, a);
         let b_boxed = self.adapt_to_i64(out, indent, b);
@@ -4995,9 +5038,13 @@ impl LlvmBackend {
         TypedRegister { name: c, ty: Type::Bool }
     }
 
-    /// Recursively check if an expression chain produces a string value.
-    /// This catches `literal + identifier` and `result_of_concat + literal`
-    /// where all values are boxed as Type::Int (i64).
+    /// Recursively detect if an expression chain produces a String/Data value.
+    /// Used by emit_inline_concat to determine whether to use the inline
+    /// concat path or emit generic Add IR.
+    ///
+    /// Why this exists: a + b on Ints should emit `add i64`, but a + b on
+    /// Strings should emit malloc+memcpy. The type tracker checks type
+    /// bindings, defn return types, and cast targets.
     fn is_string_chain(&self, e: &Expr) -> bool {
         match e {
             Expr::String(_) => true,
@@ -5032,9 +5079,15 @@ impl LlvmBackend {
         }
     }
 
-    /// Phase 3.5: Fast-path codegen for well-known UserDefinedWithArg projection names.
-    /// Recognizes operator names (Add, Sub, Eq, etc.) on known types (Int, Float, Bool)
-    /// and emits native LLVM IR instead of the generic fallback.
+    /// Emit native LLVM IR for well-known UserDefinedWithArg projections.
+    /// 45+ operator/type pairs (Add/Sub/Mul/Div/Eq/Ne on Int/Float/Bool).
+    /// Avoids boxing through i64 — native add/fadd/icmp instructions.
+    ///
+    /// Why this exists: Brief's projection system is generic (any operator
+    /// on any type dispatches through UserDefinedWithArg). But for primitive
+    /// types, the generic dispatch would: load i64, convert to native, exec
+    /// op, convert back. The fast path emits native IR directly, skipping
+    /// both conversions.
     fn try_projection_fast_path(
         &mut self,
         out: &mut String,
@@ -5222,9 +5275,10 @@ impl LlvmBackend {
         Some(tr)
     }
 
-    /// Phase 2: Check if the source expression is a state field with a cache slot for this
-    /// projection target. If found, emit the Hot Dual memory path: check cache_valid,
-    /// load cached value or compute + store.
+    /// Emit a cached projection: load valid flag, branch on hit/miss.
+    /// Hit: load cached value. Miss: compute, store in cache, set flag.
+    /// Phi merges hit/miss paths. Cache slots are appended to %State by
+    /// dead-field elimination (apply_field_modes).
     pub(crate) fn try_cached_projection(&mut self, out: &mut String, source_expr: &Expr,
         src_val: &TypedRegister, target_name: &str, indent: &str) -> Option<TypedRegister>
     {

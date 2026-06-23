@@ -106,13 +106,25 @@ fn pattern_refs_name(pattern: &Pattern, name: &str) -> bool {
     }
 }
 
+/// Compute the peak number of simultaneously-live float values across a
+/// statement body, using classical interval analysis (def→last-use).
+///
+/// Why interval analysis instead of register-allocation simulation: we
+/// only need to know whether peak register demand exceeds the hardware
+/// budget, not an exact allocation. Interval analysis is O(N × V) where
+/// N = statements, V = float names, which is fast (< 1µs for real bodies).
+/// A full register allocator simulation would be O(N × V × R) and is
+/// unnecessary — the only question is "do we risk spills if SLP multiplies
+/// demand by vector_width?"
+///
+/// Def point: for let-bound floats, the let statement. For state fields
+/// or constants, the first statement that references the name (the implicit
+/// load from %State or global).
+/// Last use: the last statement that references the name within the body.
 fn compute_peak_live_floats(body: &[Statement], float_names: &[String]) -> u32 {
     if float_names.is_empty() {
         return 0;
     }
-    // For each float name, find (def_point, last_use) interval.
-    // - If the name is let-bound in this body, def = that statement index.
-    // - Otherwise (field read or const), def = first statement that references it.
     let mut intervals: Vec<(usize, usize)> = Vec::with_capacity(float_names.len());
     for name in float_names.iter() {
         // Is this name let-bound in this body?
@@ -157,10 +169,32 @@ impl LlvmBackend {
 
     // ── SLP Vectorization Hazard Analysis ─────────────────────
     //
+    // Why this exists: LLVM's SLP vectorizer can produce code that is
+    // slower than scalar if register pressure exceeds hardware capacity.
+    // SLP packs multiple scalar operations into vector instructions,
+    // increasing live register demand linearly with vector width.
+    // On AVX2 (16 regs, 8-wide), SLP can turn 2 live floats into 16
+    // by packing 8 operations that each reference different fields.
+    //
+    // The analysis computes peak register demand from three sources:
+    //   a) Live float temporaries from interval analysis (def→last-use)
+    //   b) Shuffle pressure from cross-field float operations (expensive)
+    //   c) Packed constants (global float values loaded into registers)
+    //
+    // If peak >= available registers (e.g., 16 for AVX2), we disable
+    // SLP entirely for that function by selecting attribute groups
+    // #4/#5 instead of #0/#3. The #4/#5 groups have
+    // -prefer-vector-width=1 and -vectorize-loops=false.
+    //
+    // Even if peak < available registers, we also check the ratio of
+    // float operations to distinct float fields. If ops_per_field < 1.5,
+    // there are too few operations per field to amortize the shuffle
+    // cost of SLP packing — scalar is faster.
+    //
     // Three critical guarantees make this analysis watertight:
     //   1. Local variable tracking: we walk body statements FIRST, collecting
     //      let-bound float names into `local_floats` before they're referenced.
-    //   2. Operand-aware counting: any float binary op with ≥1 non-trivial
+    //   2. Operand-aware counting: any float binary op with >=1 non-trivial
     //      operand (variable, constant, or literal) counts as a cross-op.
     //   3. Constant-load accounting: global float constants (matrix coefficients,
     //      filter taps) are counted and packed into the peak register demand.
@@ -230,6 +264,22 @@ impl LlvmBackend {
         temp_count
     }
 
+    /// Map a target spec to (register_count, vector_width).
+    ///
+    /// Returned pair is used to decide whether SLP vectorization fits
+    /// within the available register file. The register count is the
+    /// number of architectural float/vector registers; the vector width
+    /// is the number of scalar elements per vector.
+    ///
+    /// Why these specific values:
+    ///   AVX512: 32 zmm registers, 16-wide (64-bit floats in 512-bit)
+    ///   AVX2:   16 ymm registers, 8-wide  (64-bit floats in 256-bit)
+    ///   NEON:   32 q registers, 4-wide   (64-bit floats in 128-bit)
+    ///   SSE:    16 xmm registers, 4-wide (64-bit floats in 128-bit)
+    ///   Fallback: 16 scalar regs, width 1 (no vectorization)
+    ///
+    /// Note: NEON has 32 registers vs AVX2's 16, so NEON can tolerate
+    /// more SLP-induced register pressure despite narrower vectors.
     pub(super) fn target_hardware(&self, spec: &crate::target_spec::TargetSpec) -> (u32, u32) {
         if spec.has_capability("avx512f") {
             (32, 16)
@@ -397,8 +447,16 @@ impl LlvmBackend {
     /// if demand exceeds available registers, LLVM spills to stack, negating the
     /// benefit. Also considers body instruction count for very simple loops.
     ///
-    /// Returns 1, 4, or 8. 1 = no unrolling (high register pressure, avoid spills),
-    /// 4 = moderate unrolling (default), 8 = aggressive unrolling (simple body).
+    /// Returns 1, 4, or 8:
+    ///   1 = no unrolling (high reg pressure: peak > regs/4, avoid spills)
+    ///   4 = moderate (default, balances unroll benefit with pressure)
+    ///   8 = aggressive (simple body with <=3 insts and <=1 live float,
+    ///       or very low pressure with peak <= regs/8)
+    ///
+    /// Why 4 as default: LLVM's own heuristic defaults to unroll factor ~4
+    /// for most loops. 4x unrolling gives a good balance of reduced branch
+    /// overhead vs register pressure. 8x is only safe when register pressure
+    /// is demonstrably low.
     ///
     /// 2026-06-20: Phase 0b — replaces hardcoded `let uf = 4`.
     pub(super) fn optimal_unroll_factor(&self, body: &[Statement]) -> usize {

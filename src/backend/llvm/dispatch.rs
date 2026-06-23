@@ -5,6 +5,26 @@ use std::fmt::Write;
 
 impl LlvmBackend {
     // ── REACTOR LOOP ──────────────────────────────────────────
+    //
+    // Why two dispatch modes (sequential + parallel):
+    //
+    // Sequential is the fallback for any program where we cannot prove
+    // conflict-freedom. It evaluates ALL preconditions first, then fires
+    // each txn body. Ordering preconditions before bodies means that if
+    // one txn fires and modifies state, subsequent txns still see the
+    // pre-tick state for their pre-checks — a txn's decision to fire is
+    // based on the state at tick start, not mid-tick modifications.
+    //
+    // Parallel adds a %fired_mask (bitmask) to track which fields have
+    // been written by any previously-fired txn. Before firing, a txn
+    // checks (fired_mask & write_mask) == 0 — if any of its written fields
+    // were already written by a prior parallel txn, it skips. This avoids
+    // the write-after-write hazard without locking.
+    //
+    // Both modes emit @cell_persistent_ticks(ptr %state) at the end of
+    // every tick. This is a single call site for all dispatch paths that
+    // ensures cell instances with persistent bodies tick once per reactor
+    // cycle. See emit_toplevel.rs.
     pub(crate) fn emit_reactor(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)], fusable: &[(String, String)]) {
         self.fused_to_first.clear();
         for (a, b) in fusable {
@@ -82,6 +102,16 @@ impl LlvmBackend {
     }
 
     // ── RANGE EXTRACTION ──────────────────────────────────────
+    //
+    // Extracts [lo, hi) range bounds from precondition expressions for
+    // !range metadata annotation. Only handles simple patterns:
+    //   And(Lt(x, N), Ge(x, 0))  →  x: (0, N)
+    //   Gt(x, M)                 →  x: (M+1, MAX)
+    //
+    // Why this lives in dispatch.rs instead of emit_toplevel.rs with the
+    // !range emission: the range extraction happens during the same pass
+    // that builds the dispatch mask, and both share the field_index_map.
+    // The ranges are consumed by emit_precondition_check in emit_toplevel.rs.
     pub(crate) fn extract_ranges(pre: &Expr) -> HashMap<String, (i64, i64)> {
         let mut r = HashMap::new();
         Self::extract_ranges_inner(pre, &mut r);
@@ -107,6 +137,14 @@ impl LlvmBackend {
     }
 
     // ── WRITE MASKS (Parallel Dispatch) ──────────────────────
+    //
+    // Precomputes a 64-bit bitmask per transaction where bit N is set if
+    // the txn writes to field at index N in field_index_map.
+    //
+    // Why 64 bits: field_index_map is partitioned so state fields get the
+    // lowest indices (0..N). Cache slots and internal variables get higher
+    // indices. A u64 mask is cheap to and/or/test and saturates any practical
+    // state size. If >64 fields are needed, this should switch to u128.
     pub(crate) fn build_write_masks(&mut self, program: &Program) {
         self.txn_write_masks.clear();
         for item in &program.items {
@@ -124,6 +162,16 @@ impl LlvmBackend {
     }
 
     // ── PARALLEL DISPATCH REACTOR ────────────────────────────
+    //
+    // Emits a reactor_tick that fires conflict-free transactions in parallel.
+    // Unlike the sequential reactor (which chains every txn unconditionally),
+    // this version tracks which fields have been written via a %fired_mask.
+    //
+    // Why a mask instead of locks or transactions: the compiler has complete
+    // knowledge of every transaction's write set at compile time. A simple
+    // bitmask check (load-and-test) is cheaper than any lock acquire or
+    // transactional memory instruction. The mask is only 8 bytes on the stack
+    // and the check is 3 ALU ops per txn.
     pub(crate) fn emit_parallel_reactor(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)],
                              fusable: &[(String, String)]) {
         self.fused_to_first.clear();
@@ -224,6 +272,16 @@ impl LlvmBackend {
     }
 
     // ── EXIT CONDITION EXPRESSION ────────────────────────────
+    //
+    // Validates that every identifier in a #!exit condition references an
+    // existing state field, constant, or trigger. This prevents silent
+    // reference-to-nowhere bugs where the exit condition always evaluates
+    // to false because the field name was mistyped.
+    //
+    // Why this lives in dispatch.rs: the exit condition is evaluated in the
+    // same pass as the main dispatch decision — both need the same
+    // field_index_map and trigger_names visibility. Separating it would
+    // require duplicating the lookup tables.
     pub(crate) fn check_exit_condition_idents(&self, expr: &Expr) -> Vec<String> {
         let mut errors = Vec::new();
         self.check_exit_condition_idents_inner(expr, &mut errors);

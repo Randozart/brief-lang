@@ -12,6 +12,20 @@ impl LlvmBackend {
     }
 
     /// Box a native-typed value to i64 for return/store, returning the adapted SSA name.
+    ///
+    /// Why boxing to i64: %State stores all non-float fields as i64 for
+    /// uniformity. Bool (native i1) is zext'd, Char (native i32) is kept
+    /// as i64, String/Data (native i8*) is ptrtoint'd, and Float (native
+    /// float) is bitcast through i32 then zext. The single i64 slot per
+    /// field means LLVM's TBAA metadata is the only way to disambiguate
+    /// types — there is no runtime type tag.
+    ///
+    /// The redundancy in the float path (bitcast float→i32→zext i64) is
+    /// deliberate: it preserves the float bits through a uniform i64
+    /// representation so that TBAA (not the bit pattern) tells LLVM
+    /// which operations are valid. Without the bitcast+zext, LLVM would
+    /// see a float value stored in an i64 slot and produce invalid
+    /// bitcast or pointer-to-int transforms during optimization.
     pub(super) fn adapt_to_i64(&mut self, out: &mut String, indent: &str, r: &TypedRegister) -> String {
         if r.ty == Type::Bool {
             let z = format!("%rz{}", self.txn_counter); self.txn_counter += 1;
@@ -113,29 +127,33 @@ impl LlvmBackend {
                 if let Some(swan) = swan_song {
                     self.emit_stmt(out, swan, indent);
                 }
+                // term! has three emission paths depending on context:
+                //
+                // 1. Callable txn: store result to callable_txn_result slot,
+                //    branch to post_label (caller picks up the value).
+                //    No ret — the caller's post-label handles the return.
+                //
+                // 2. Reactive txn loop (loop_exit_label is set): store value
+                //    to %state, branch to exit label. This lets LLVM see the
+                //    loop as countable (the exit branch dominates all exits)
+                //    and enables more aggressive unrolling/vectorization
+                //    compared to ret + caller loop.
+                //
+                // 3. Standalone (main_body or plain function): emit ret with
+                //    the correct return type. Embedded targets emit wfi
+                //    (wait-for-interrupt) instead of ret.
                 if self.in_callable_txn {
-                    // Store value to result slot, branch to post label
-                    if let Some(Some(v)) = values.first() {
-                        let r = self.emit_expr(out, v, indent);
-                        // Phase 3: Decay chimera before storing to txn result slot
-                        let r = self.emit_decay(out, &r, None, indent);
-                        if let Some(rs) = self.callable_txn_result.clone() {
-                            self.store_i64_result(out, indent, &r, &rs);
-                        }
-                    }
-                    if let Some(ref pl) = self.callable_txn_post_label {
-                        writeln!(out, "{}br label %{}", indent, pl).ok();
-                    }
-                } else if let Some(exit_label) = self.loop_exit_label.clone() {
-                    // Inside a reactive transaction loop — branch to exit label
-                    // instead of ret, so LLVM can unroll the loop.
                     if let Some(Some(v)) = values.first() {
                         let r = self.emit_expr(out, v, indent);
                         // Phase 3: Decay chimera before storing to state
                         let r = self.emit_decay(out, &r, None, indent);
                         self.store_i64_result(out, indent, &r, "%state");
                     }
-                    writeln!(out, "{}br label %{}", indent, exit_label).ok();
+                    if let Some(ref loop_exit) = self.loop_exit_label {
+                        writeln!(out, "{}br label %{}", indent, loop_exit).ok();
+                    } else if let Some(ref pl) = self.callable_txn_post_label {
+                        writeln!(out, "{}br label %{}", indent, pl).ok();
+                    }
                     self.terminated = true;
                 } else {
                     if let Some(Some(v)) = values.first() {
@@ -503,6 +521,22 @@ impl LlvmBackend {
                 };
 
                 // Guard→select if single assignment (not in SSA mode — branch-based path handles insertvalue)
+                //
+                // Why this optimization: a Guarded statement that wraps a single
+                // Assignment can be emitted as a `select` instruction instead of
+                // a branch + phi. `select` is a single ALU op with no control
+                // flow change — the CPU's branch predictor sees no branch, the
+                // out-of-order scheduler sees no serialization point, and LLVM's
+                // passes (GVN, LICM, SROA) can optimize through select more
+                // aggressively than through a conditional branch.
+                //
+                // This only applies in memory mode (ssa_state_reg.is_none()).
+                // In SSA mode, insertvalue chains require a phi to merge the
+                // two state values — select on the field value alone is not
+                // enough because the rest of %State must also be live.
+                //
+                // Cache slots are invalidated after the select store, same as
+                // the branch-based path.
                 if statements.len() == 1 && self.ssa_state_reg.is_none() {
                     if let Statement::Assignment { lhs, expr, modifiers, .. } = &statements[0] {
                         if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
@@ -741,6 +775,22 @@ impl LlvmBackend {
     /// Emit a runtime constraint/guard check for a variable bound in this tick.
     /// Temporarily binds `_` to the variable's register, evaluates the expression,
     /// and branches to `@llvm.trap()` on false.
+    ///
+    /// WHY constraint guards are emitted as separate checks with @llvm.trap() failure:
+    ///   Brief's contract system allows per-variable guards in type definitions
+    ///   (e.g. `let x: Int[0 < x]`). These guards are not preconditions — they
+    ///   apply to individual values within a tick. If the guard fails, the program
+    ///   has violated a type invariant, which is unrecoverable (UB). @llvm.trap()
+    ///   tells LLVM this path is dead code, enabling DCE of the guarded body and
+    ///   any downstream computations that depend on x. Unlike @llvm.assume (which
+    ///   is a trust-the-checker hint), @llvm.trap() + unreachable is a hard
+    ///   correctness boundary — LLVM can eliminate all code that is only reachable
+    ///   through the failed guard.
+    ///
+    ///   The `_` binding allows guards like `[int_to_str(x) != ""]` where the guard
+    ///   expression references x using Brief's `_` convention ("the value being
+    ///   constrained"). Without it, guards would need to name x explicitly, which
+    ///   would be inconsistent with how `_` works in mask/filter expressions.
     fn emit_guard_check(&mut self, out: &mut String, indent: &str, var_name: &str, guard: &Expr) {
         let Some(reg) = self.let_bindings.get(var_name).cloned() else { return };
         let prior_ = self.let_bindings.get("_").cloned();

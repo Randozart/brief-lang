@@ -403,6 +403,15 @@ impl LlvmBackend {
         writeln!(out, " }}").ok();
     }
 
+    //
+    // WHY emit_init_state as a separate function AND emit_inline_init_stores:
+    //   Two callers need init logic. The main reactor loop uses the inline path
+    //   (emit_inline_init_stores) so SROA can scalarize %State. But library-mode
+    //   and external-C callers (via __brief_init_state) need a callable function
+    //   that returns an initialized %State* — those callers don't have an alloca
+    //   to inline into, so they need @init_state as a named function. Both share
+    //   the same store logic; the tradeoff is SROA opportunity (inline) vs callable
+    //   interface (function).
     pub(super) fn emit_init_state(&mut self, out: &mut String) {
         writeln!(out, "define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
@@ -544,6 +553,21 @@ impl LlvmBackend {
     /// Same logic as emit_init_state but stores are emitted directly, not wrapped in a
     /// separate @init_state function. This prevents the %state alloca from escaping to
     /// init_state, enabling LLVM's SROA to decompose the %State struct.
+    ///
+    /// WHY inline instead of a separate @init_state call:
+    ///   If %state alloca is passed to an external @init_state function, LLVM must
+    ///   conservatively assume the call writes to ALL of %State, making SROA analysis
+    ///   impossible — the struct stays as one opaque alloca. By inlining the stores,
+    ///   every field store is a direct GEP+store that SROA can scalarize and GVN can
+    ///   eliminate. This is critical for embedded targets where %State must decompose
+    ///   into scalar registers to eliminate the stack alloca entirely.
+    ///
+    /// WHY every field gets explicit initial values (including zero-initialized ones):
+    ///   LLVM's SROA will not promote an alloca to SSA registers if any field is
+    ///   undef or has a non-GEP use. Dead fields still need explicit initializers so
+    ///   SROA can see every field's lifetime. Zero-initialized fields are store i64 0
+    ///   / i8* null explicitly — without these, the field is undef and LLVM may
+    ///   introduce poison which inhibits downstream optimizations like load elimination.
     pub(super) fn emit_inline_init_stores(&mut self, out: &mut String, state_ptr: &str) {
         let indent = if state_ptr == "%state" { "  " } else { "" };
         let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
@@ -1075,6 +1099,29 @@ impl LlvmBackend {
         self.param_slots.clear();
     }
 
+    //
+    // WHY both br...unreachable AND @llvm.assume / !range are needed:
+    //   Two distinct correctness requirements: (1) If the precondition is false,
+    //   the program must stop — unreachable tells LLVM the false path is dead
+    //   and enables fold elimination. (2) If the precondition is true, LLVM must
+    //   know the bound so it can optimize subsequent loads/stores. The
+    //   br...unreachable establishes the contract violation as UB (LLVM can DCE
+    //   the entire tick). The assumption/range gives the optimizer a known bound.
+    //
+    // WHY !range metadata instead of @llvm.assume:
+    //   @llvm.assume is a control-flow barrier — it prevents LLVM from moving
+    //   instructions across it, which blocks GVN and LICM. !range metadata on a
+    //   load has no such barrier: GVN eliminates the redundant load, LLVM's
+    //   ValueTracking propagates the range, and passes like LICM are not blocked.
+    //   But !range only works for the pattern "x = load before check; check x < N;
+    //   use x" — you need a load to attach the metadata to, hence the re-load.
+    //
+    // WHY only Expr::Lt(x, Integer(N)) gets the fast path:
+    //   !range metadata natively expresses "value in [lo, hi)" — a single
+    //   lt-against-constant maps directly. Any other pattern (le, gt, ge,
+    //   compound and/or) cannot be represented as a single !range entry.
+    //   Complex patterns fall back to @llvm.assume, which is correct (the
+    //   optimizer still gets the info) but slightly slower (barrier cost).
     pub(super) fn emit_precondition_check(&mut self, out: &mut String, pre: &Expr, indent: &str) {
         let cond = self.emit_expr(out, pre, indent);
         let i1 = format!("%pi{}", self.txn_counter); self.txn_counter += 1;
@@ -1119,6 +1166,22 @@ impl LlvmBackend {
         }
     }
 
+    //
+    // WHY preconditions are extracted into separate @pre_* functions:
+    //   The fast-path registry (try_projection_fast_path) and the main dispatch
+    //   loop both need to check the same precondition before deciding whether to
+    //   fire a txn. Extracting it into @pre_*(%State*) avoids duplicating the
+    //   check IR across 7+ dispatch paths (folded, SSA, reactor, parallel, etc.).
+    //   LLVM will inline @pre_* into its single caller (alwaysinline), so there
+    //   is zero runtime cost — the extraction is purely an IR-size optimization
+    //   during codegen, not a runtime abstraction.
+    //
+    // WHY ptr noalias nocapture on %State*:
+    //   noalias tells LLVM that no other pointer aliases %state during @pre_*'s
+    //   execution — enables load/store reordering and redundant load elimination
+    //   across the call boundary. nocapture means @pre_* does not store %state
+    //   in a global or return it, which lets LLVM's -mem2reg promote stack
+    //   allocas that would otherwise escape to the @pre_* call.
     pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
         writeln!(out, "define internal i1 @pre_{}(ptr noalias nocapture align 8 %state) #0 {{", name).ok();
@@ -1143,6 +1206,23 @@ impl LlvmBackend {
         }
     }
 
+    //
+    // WHY async bodies have their own function with noalias nocapture %State*:
+    //   Async dispatch spawns concurrent evaluation of multiple txns. Each async
+    //   task operates on the same %State* but with thread-level interleaving
+    //   guarantees (barriers between reads and writes). Giving each async body
+    //   its own LLVM function with noalias nocapture per-task allows ThreadSanitizer
+    //   and LLVM's alias analysis to reason about independent regions within %State.
+    //   Without the separate function, the inlined barrier call sites would appear
+    //   as unstructured control flow that LLVM cannot analyze for race conditions.
+    //
+    // WHY the pre-check + body structure mirrors the sequential path:
+    //   Async txns have the same contract semantics as sequential ones — the
+    //   precondition must be checked (contracts are not a "correctness tax"),
+    //   and the body must execute atomically with respect to the pre-check.
+    //   Mirroring the sequential emit ensures identical semantics under both
+    //   dispatch strategies. The only difference is the function boundary, which
+    //   enables the async runtime to call each body independently.
     pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         let async_name = format!("async_body_{}", name);
         let async_attr = self.slp_attr(&async_name, "#0");
@@ -1173,6 +1253,29 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
     }
 
+    //
+    // WHY bodies are concatenated (not analyzed for dependencies):
+    //   Fused txns come from the fusion pass, which has already proven that txn A
+    //   and txn B have non-conflicting read/write sets (their union is conflict-
+    //   free). Concatenation is correct because the fusion analysis already did the
+    //   dependency work — re-analyzing at emit time would duplicate that analysis
+    //   and risk desynchronizing with the fusion pass. The fusion pass guarantees
+    //   no false dependencies between A's state mutations and B's, so straight-line
+    //   concatenation is safe.
+    //
+    // WHY terminators (term/term!/escape) are filtered out:
+    //   In a fused pair, A's terminator would prevent B from executing. The fusion
+    //   analysis verified that A cannot terminate before B runs (both preconditions
+    //   must be satisfied simultaneously), so A's terminator is dead code in the
+    //   fused context. Filtering it avoids emitting unreachable IR that would
+    //   confuse LLVM's control-flow analysis (specifically the structurizercfg pass).
+    //
+    // WHY a single %State* is shared:
+    //   A and B operate on the same %State struct. Creating separate %State allocas
+    //   would require merging them after both bodies execute, which would need
+    //   explicit memcpy — defeating the purpose of fusion by doubling memory
+    //   traffic. A single pointer is correct because the fusion pass guaranteed
+    //   that A and B do not conflict on any state field.
     pub(super) fn emit_fused(&mut self, out: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, name: &str) {
         let body_a: Vec<Statement> = a.body.iter()
             .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. } | Statement::Escape(_)))
@@ -1218,6 +1321,15 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
     }
 
+    //
+    // WHY emit_fused_composed mirrors emit_fused (same concatenation strategy):
+    //   Composed fusion is the N-ary generalization of binary fusion. The analysis
+    //   pass has already proven that all N bodies are conflict-free and that
+    //   intermediate terminators are dead. The concatenation strategy is identical
+    //   to the binary case — the only difference is that the composed variant
+    //   takes a pre-built body slice (the fusion pass constructed the concatenated
+    //   body) instead of stitching two txns at emit time. Both produce the same
+    //   straight-line IR and both share the %State* rationale above.
     pub(super) fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
@@ -1234,6 +1346,23 @@ impl LlvmBackend {
     /// Emit a user-defined `inop#` / `inop!#` intrinsic as a private LLVM function.
     /// The body is pasted verbatim from the inop# declaration, with `term`
     /// replaced by `ret` (or `br %post_label` in callable txn context).
+    ///
+    /// WHY BILD bodies are pasted verbatim into LLVM IR:
+    ///   BILD (Built-In LLVM Declaration) is a Brief feature that lets the user
+    ///   write raw LLVM IR directly in .bv files. The entire point of BILD is
+    ///   zero-abstraction access to LLVM — any transformation (e.g. IR rewriting,
+    ///   type re-mangling) would break the assumption that the user controls
+    ///   every instruction. Pasting verbatim means the user gets exactly the IR
+    ///   they wrote, with no opaque compiler layer between them and LLVM.
+    ///
+    /// WHY type resolution happens at emit time (not parse time):
+    ///   BILD declarations use Brief type aliases (like `my_type` which resolves
+    ///   to `Int` in the current scope). At parse time, the type environment is
+    ///   not fully built — generics, imports, and type aliases from other files
+    ///   are not yet resolved. By emit time, TypeUniverse has all definitions.
+    ///   resolve_bild_type converts declared types to concrete LLVM types so the
+    ///   parameter types in the function signature match what the user's IR
+    ///   instructions expect.
     pub(super) fn emit_inop(&mut self, out: &mut String, inop: &crate::ast::InopDeclaration) {
         let is_float_fn = inop.outputs.iter().any(|t| {
             let resolved = self.resolve_bild_type(t);
