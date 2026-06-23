@@ -705,50 +705,57 @@ analysis, not at runtime.
 ```mermaid
 graph TD
     P[Program enters codegen] --> A{All inputs const + within budget?}
-    A -->|Yes| A000[A000: Precompute, O1 stores in main]
+    A -->|Yes| A000["A000: Precompute<br>O(1) final store, zero runtime alloc"]
     A -->|No| B{Single foldable txn?}
-    B -->|No| C{Multi-txn all-pure?}
+
     B -->|Yes| D{Body structure}
-    D -->|Pure counter only| A005c[A005c: store + ret]
-    D -->|Straight-line, linear| A005a[A005a: SSA + arena]
-    D -->|Branching, non-linear| A005b[A005b: GEP + arena]
+    D -->|Pure counter, no body side effects| A005c["A005c: store + ret<br>No collection ops, no arena needed"]
+    D -->|Straight-line, provably linear| A005a["A005a: SSA insertvalue<br>arena for any collection ops"]
+    D -->|Branching guards, non-linear| A005b["A005b: memory GEP path<br>arena for any collection ops"]
 
-    C -->|Yes| E[Folded multi-txn + arena]
+    B -->|No| C{Multi-txn all-pure?}
+    C -->|Yes| E[Folded multi-txn: per-txn folded loops + arena]
+
     C -->|No| F{Sequential bounded multi-txn?}
-    F -->|Yes| G[A006: SSA pipeline + arena]
+    F -->|Yes| G["A006: SSA register pipeline<br>arena + prealloc if bound known"]
+
     F -->|No| H{Enumerable triggers?}
-    H -->|Yes| I[Enum dispatch + arena]
-    H -->|No| J[Reactortick, inline bodies + arena]
+    H -->|Yes| I["Enum dispatch: switch-case main<br>arena + prealloc if bound known"]
 
-    D --> K
-    E --> K
-    G --> K
-    I --> K
-    J --> K
+    H -->|No| J["Reactor tick loop: sequential or parallel<br>inline txn bodies + shared arena"]
 
-    K{Within arena, body has push?}
-    K -->|Yes| L{Bound known + not prepend?}
-    L -->|Yes| M[Phase 2: prealloc, write direct, O1]
-    L -->|No| N[Normal arena: bump alloc + memcpy]
+    D -->|converges to arena check| K
+    E -->|converges to arena check| K
+    G -->|converges to arena check| K
+    I -->|converges to arena check| K
+    J -->|converges to arena check| K
 
-    K -->|No| O{Collection op other than push?}
-    O -->|Pop, discard, transfer| N
+    K{Within arena scope, body has collection op?}
+    K -->|Yes, push| L{Bound known from contract + not prepend?}
+    L -->|Yes| M["Phase 2 fast path<br>Prealloc (bound+2)*8<br>Write direct, no alloc, no memcpy<br>O(1) per push"]
+    L -->|No| N["Normal arena path<br>bump_alloc + memcpy<br>O(N) per push"]
+
+    K -->|Yes, other op| O{Collection operation?}
+    O -->|Pop or discard| N
+    O -->|Transfer| N
     O -->|String concat| N
     O -->|Slice, map, set| N
     O -->|Enum variant| N
 
+    K -->|No collection ops| S
+
     N --> P{Arena active?}
-    P -->|Inside loop/tick| Q[bump alloc from arena_ptr]
-    P -->|Standalone fn| R[malloc + free per op]
+    P -->|Inside loop, tick, or txn body| Q["bump_alloc:<br>load arena_ptr,<br>GEP new_ptr,<br>overflow -> realloc 2x,<br>store new_ptr back"]
+    P -->|Standalone callable txn or defn| R["@malloc + @free<br>per operation"]
 
-    M --> S
-    N --> S
-    R --> S
+    M -->|path chooses final alloc| S
+    N -->|path chooses final alloc| S
+    R -->|path chooses final alloc| S
 
-    S[Scope boundary]
-    S -->|Loop / tick exit| U[arena_reset: ptr = base, keep live]
-    S -->|Program exit| V[arena_fini: free arena]
-    S -->|Standalone return| W[free via normal path]
+    S[Scope boundary: loop exit, tick end, or program exit]
+    S -->|Loop / tick exit| U["arena_reset<br>ptr = base, memory stays live<br>cross-tick pool (Phase 3)"]
+    S -->|Program exit| V["arena_fini<br>call @free(arena_base)"]
+    S -->|Standalone fn return| W[Memory freed naturally via @free]
 
     style A000 fill:#1a5,color:#fff
     style A005c fill:#1a5,color:#fff
