@@ -1,0 +1,29 @@
+// cell-counter.bv — Demonstrates cell and cell! primitives
+// Compile: brief-compiler build examples/cell-counter.bv
+
+// A transient cell that adds numbers
+cell adder(a: Int, b: Int) -> sum: Int {
+    done: Bool = false;
+    sum: Int = 0;
+    rct txn compute [!done]] {
+        &sum = a + b;
+        &done = true;
+        term;
+    };
+};
+
+// A persistent counter that increments independently
+cell! counter(start: Int) -> val: Int {
+    val: Int = 0;
+    rct txn count [val < 100]] {
+        &val = val + 1;
+        term;
+    };
+};
+
+defn main() -> Int {
+    // Sync cell call
+    let result = cell adder(40, 2);
+    print_int#(result);
+    term result;
+};
