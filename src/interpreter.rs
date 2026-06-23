@@ -1859,9 +1859,16 @@ impl Interpreter {
                     )),
                 }
             }
-            Statement::TrgBinding { name, instance, .. } => {
-                let _instance_val = self.eval_expr(instance)?;
-                self.state.insert(name.clone(), Value::Bool(false));
+            Statement::TrgBinding { name, instance, port, .. } => {
+                let value = match instance {
+                    Expr::Call(callee, args) if self.cell_defs.contains_key(callee) => {
+                        let cell = self.cell_defs.get(callee).unwrap().clone();
+                        let arg_values: Result<Vec<Value>, _> = args.iter().map(|a| self.eval_expr(a)).collect();
+                        self.call_cell(&cell, &arg_values?)?
+                    }
+                    _ => self.eval_expr(instance)?,
+                };
+                self.state.insert(name.clone(), value);
             }
             Statement::Oracle { body, handler, .. } => {
                 // Fuel-injected execution with state rollback on exhaustion.

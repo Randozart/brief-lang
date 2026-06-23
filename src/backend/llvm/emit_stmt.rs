@@ -723,8 +723,17 @@ impl LlvmBackend {
                 }
                 self.pending_async_await_count += 1;
             }
-            Statement::TrgBinding { name, .. } => {
-                writeln!(out, "{}; trg @ {} — Phase 1 stub", indent, name).ok();
+            Statement::TrgBinding { name, instance, .. } => {
+                let val = self.emit_expr(out, instance, indent);
+                let reg = format!("%t{}", self.txn_counter);
+                self.txn_counter += 1;
+                writeln!(out, "{}{} = add i64 0, {}", indent, reg, val.name).ok();
+                self.let_bindings.insert(name.clone(), reg);
+                if let Some(ty) = self.let_binding_types.get(&val.name).cloned() {
+                    self.let_binding_types.insert(name.clone(), ty);
+                } else {
+                    self.let_binding_types.insert(name.clone(), Type::Int);
+                }
             }
         }
     }

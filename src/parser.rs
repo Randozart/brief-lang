@@ -5648,11 +5648,37 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 Ok(Statement::LocalTrigger { name, ty, expr, span: prev_span })
             }
             Some(Ok(Token::Trg)) => {
-                self.spanned_err(
-                    "Local triggers introduce asynchronous rollback risks. \
-                     You must use 'trg!' or 'trigger!' to explicitly acknowledge this boundary. \
-                     (Top-level trigger declarations use 'trg' without '!')".to_string(),
-                )
+                // Phase 3: trg name: Type @ cell!(args).port  — trigger binding
+                // Phase 3: trg name: Type @ cell! .port      — shorthand (single output port)
+                self.advance();
+                let name = self.expect_identifier()?;
+                let ty = if let Some(Ok(Token::Colon)) = self.current_token() {
+                    self.advance();
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                if let Some(Ok(Token::At)) = self.current_token() {
+                    self.advance();
+                    // Parse instance expression — cell_name(args).port or cell_name(args)
+                    // The expression parser will eagerly consume .port as FieldAccess, so
+                    // parse the full expression then extract port from FieldAccess if present.
+                    let instance = self.parse_expression()?;
+                    let (instance, port) = if let Expr::FieldAccess(obj, name) = &instance {
+                        (obj.as_ref().clone(), name.clone())
+                    } else {
+                        (instance, String::new())
+                    };
+                    self.expect(Token::Semicolon)?;
+                    Ok(Statement::TrgBinding { name, ty, instance, port, modifiers: vec![] })
+                } else {
+                    // No @ — fall through to the old error (deprecated local trigger)
+                    self.spanned_err(
+                        "Local triggers introduce asynchronous rollback risks. \
+                         You must use 'trg!' or 'trigger!' to explicitly acknowledge this boundary. \
+                         (Trigger bindings use 'trg name: Type @ expr.port')".to_string(),
+                    )
+                }
             }
             // DISABLED: alka/on_exit — not ready for use; keep parser disabled until revisited.
             // Some(Ok(Token::Hash)) => {
@@ -8229,6 +8255,66 @@ mod parser_tests {
             assert_eq!(s.fields[0].visibility, Visibility::Sedentary);
         } else {
             panic!("Expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_trg_binding_simple() {
+        let src = "defn main() -> Int {
+            trg X: Int @ add_one(41);
+            term 0;
+        };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Definition(d) => {
+                assert_eq!(d.body.len(), 2);
+                match &d.body[0] {
+                    Statement::TrgBinding { name, ty, instance, port, .. } => {
+                        assert_eq!(name, "X");
+                        assert!(ty.is_some());
+                        assert_eq!(port, "");
+                        if let Expr::Call(callee, args) = instance {
+                            assert_eq!(callee, "add_one");
+                            assert_eq!(args.len(), 1);
+                        } else {
+                            panic!("Expected Call, got {:?}", instance);
+                        }
+                    }
+                    other => panic!("Expected TrgBinding, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_trg_binding_with_port() {
+        let src = "defn main() -> Int {
+            trg elapsed: Int @ timer(1000).elapsed;
+            term 0;
+        };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Definition(d) => {
+                assert_eq!(d.body.len(), 2);
+                match &d.body[0] {
+                    Statement::TrgBinding { name, ty, instance, port, .. } => {
+                        assert_eq!(name, "elapsed");
+                        assert!(ty.is_some());
+                        assert_eq!(port, "elapsed");
+                        if let Expr::Call(callee, args) = instance {
+                            assert_eq!(callee, "timer");
+                            assert_eq!(args.len(), 1);
+                        } else {
+                            panic!("Expected Call, got {:?}", instance);
+                        }
+                    }
+                    other => panic!("Expected TrgBinding, got {:?}", other),
+                }
+            }
+            other => panic!("Expected Definition, got {:?}", other),
         }
     }
 
