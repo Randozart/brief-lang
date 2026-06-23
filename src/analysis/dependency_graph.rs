@@ -259,7 +259,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
         Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _) => {
             collect_expr_ids_inner(a, ids);
         }
-        Expr::Call(_, args) => {
+        Expr::Call(_, args) | Expr::CellCall(_, args) => {
             for arg in args {
                 collect_expr_ids_inner(arg, ids);
             }

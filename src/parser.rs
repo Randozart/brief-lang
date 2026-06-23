@@ -1134,6 +1134,18 @@ impl<'a> Parser<'a> {
                 let enum_def = self.parse_enum()?;
                 Ok(wrap_test(TopLevel::Enum(enum_def), &test_groups))
             }
+            Some(Ok(Token::Cell)) => {
+                self.advance(); // consume `cell`
+                // Check for cell! (persistent) vs cell (auto-terminating)
+                let is_persistent = if let Some(Ok(Token::Not)) = self.current_token() {
+                    self.advance(); // consume `!`
+                    true
+                } else {
+                    false
+                };
+                let cell_def = self.parse_cell_definition(is_persistent)?;
+                Ok(wrap_test(TopLevel::Cell(Box::new(cell_def)), &test_groups))
+            }
             Some(Ok(Token::Template)) => {
                 let (name, params, return_type, body) = self.parse_template_def()?;
                 Ok(wrap_test(TopLevel::TemplateDef { name, params, return_type, body }, &test_groups))
@@ -1183,6 +1195,7 @@ impl<'a> Parser<'a> {
                     TopLevel::Constant(c) => Some(c.name.clone()),
                     TopLevel::RStruct(r) => Some(r.name.clone()),
                     TopLevel::Inop(i) => Some(i.name.clone()),
+                    TopLevel::Cell(c) => Some(c.name.clone()),
                     _ => None,
                 };
                 if let Some(name) = name {
@@ -4304,6 +4317,160 @@ let span = self.current_span();
             is_lambda,
             modifiers: Vec::new(),
             variant_bodies,
+        })
+    }
+
+    fn parse_cell_definition(&mut self, is_persistent: bool) -> Result<CellDef, SyntaxError> {
+        let name = self.expect_identifier()?;
+
+        let type_params = if let Some(Ok(Token::Lt)) = self.current_token() {
+            self.advance();
+            let mut params = Vec::new();
+            loop {
+                let param_name = self.expect_identifier()?;
+                let mut bounds = Vec::new();
+                if let Some(Ok(Token::Colon)) = self.current_token() {
+                    self.advance();
+                    loop {
+                        let bound_name = self.expect_identifier()?;
+                        bounds.push(TypeBound::HasTrait(bound_name));
+                        if let Some(Ok(Token::Plus)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                params.push(TypeParam {
+                    name: param_name,
+                    bounds,
+                });
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::Gt)?;
+            params
+        } else {
+            Vec::new()
+        };
+
+        let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
+            self.advance();
+            let mut params = Vec::new();
+            loop {
+                let param_result = self.expect_identifier();
+                match param_result {
+                    Ok(param_name) => {
+                        self.expect(Token::Colon)?;
+                        let param_type = self.parse_type()?;
+                        params.push((param_name, param_type));
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            self.expect(Token::RParen)?;
+            params
+        } else {
+            Vec::new()
+        };
+
+        let (outputs, output_names, output_type) = if let Some(Ok(Token::Arrow)) = self.current_token() {
+            self.advance();
+            let (outs, names) = self.parse_output_types_with_names(&parameters)?;
+            let out_ty = if outs.len() > 1 {
+                Some(OutputType::Tuple(outs.iter().map(|t| OutputType::Single(t.clone())).collect()))
+            } else if outs.len() == 1 {
+                Some(OutputType::Single(outs[0].clone()))
+            } else {
+                None
+            };
+            (outs, names, out_ty)
+        } else {
+            (Vec::new(), Vec::new(), None)
+        };
+
+        // Parse body: { fields; txns; defns; trgs; }
+        self.expect(Token::LBrace)?;
+
+        let mut fields = Vec::new();
+        let mut transactions = Vec::new();
+        let mut definitions = Vec::new();
+        let mut internal_triggers = Vec::new();
+
+        while let Some(token) = self.current_token() {
+            if let Ok(Token::RBrace) = token {
+                break;
+            }
+
+            match token {
+                Ok(Token::Rct) | Ok(Token::Txn) => {
+                    let mut txn = self.parse_transaction()?;
+                    txn.modifiers = self.parse_hashtag_modifiers()?;
+                    transactions.push(txn);
+                }
+                Ok(Token::Defn) => {
+                    let mut defn = self.parse_definition()?;
+                    defn.modifiers = self.parse_hashtag_modifiers()?;
+                    definitions.push(defn);
+                }
+                Ok(Token::Trg) => {
+                    self.advance();
+                    let trg = self.parse_trigger_body(false)?;
+                    internal_triggers.push(trg);
+                }
+                Ok(Token::TrgBang) => {
+                    self.advance();
+                    let trg = self.parse_trigger_body(false)?;
+                    internal_triggers.push(trg);
+                }
+                _ => {
+                    // Try to parse as a state field: name: Type = init;
+                    let field_name = self.expect_identifier()?;
+                    self.expect(Token::Colon)?;
+                    let field_type = self.parse_type()?;
+                    let default = if let Some(Ok(Token::Eq)) = self.current_token() {
+                        self.advance();
+                        Some(self.parse_expression()?)
+                    } else {
+                        None
+                    };
+                    self.expect(Token::Semicolon)?;
+                    fields.push(StructField {
+                        name: field_name,
+                        ty: field_type,
+                        default,
+                        visibility: Visibility::Private,
+                    });
+                }
+            }
+        }
+
+        self.expect(Token::RBrace)?;
+
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
+
+        Ok(CellDef {
+            is_persistent,
+            name,
+            type_params,
+            parameters,
+            output_type,
+            fields,
+            transactions,
+            definitions,
+            internal_triggers,
+            span: None,
+            modifiers: Vec::new(),
         })
     }
 
@@ -8052,6 +8219,86 @@ mod parser_tests {
             assert_eq!(s.fields[0].visibility, Visibility::Sedentary);
         } else {
             panic!("Expected Struct");
+        }
+    }
+
+    #[test]
+    fn test_parse_cell_auto_terminating() {
+        let src = "cell timer(duration: Int) -> elapsed: Int, done: Bool {
+            elapsed: Int = 0;
+            done: Bool = false;
+
+            rct txn tick [elapsed < duration]] {
+                &elapsed = elapsed + 1;
+                term;
+            };
+
+            rct txn finish [elapsed >= duration && !done]] {
+                &done = true;
+                term!;
+            };
+        };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Cell(cell) => {
+                assert!(!cell.is_persistent);
+                assert_eq!(cell.name, "timer");
+                assert_eq!(cell.parameters.len(), 1);
+                assert_eq!(cell.parameters[0].0, "duration");
+                assert_eq!(cell.fields.len(), 2);
+                assert_eq!(cell.fields[0].name, "elapsed");
+                assert_eq!(cell.fields[1].name, "done");
+                assert_eq!(cell.transactions.len(), 2);
+                assert_eq!(cell.transactions[0].name, "tick");
+                assert_eq!(cell.transactions[1].name, "finish");
+            }
+            other => panic!("Expected TopLevel::Cell, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_cell_persistent() {
+        let src = "cell! console(path: String) -> buffer: String {
+            accumulated: String = \"\";
+
+            rct txn read [path != \"\"]] {
+                &accumulated = accumulated + path;
+                term;
+            };
+        };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Cell(cell) => {
+                assert!(cell.is_persistent);
+                assert_eq!(cell.name, "console");
+                assert_eq!(cell.parameters.len(), 1);
+                assert_eq!(cell.parameters[0].0, "path");
+                assert_eq!(cell.fields.len(), 1);
+                assert_eq!(cell.fields[0].name, "accumulated");
+                assert_eq!(cell.transactions.len(), 1);
+                assert_eq!(cell.transactions[0].name, "read");
+            }
+            other => panic!("Expected TopLevel::Cell, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_cell_no_outputs() {
+        let src = "cell sink(data: Int) {
+            buffer: Int = 0;
+            rct txn absorb [data != 0]] { &buffer = buffer + data; term; };
+        };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Cell(cell) => {
+                assert!(!cell.is_persistent);
+                assert_eq!(cell.name, "sink");
+                assert!(cell.output_type.is_none());
+            }
+            other => panic!("Expected TopLevel::Cell, got {:?}", other),
         }
     }
 

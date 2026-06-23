@@ -145,6 +145,9 @@ pub enum Token {
     #[token("TYPE")]
     Type,
 
+    #[token("cell")]
+    #[token("CELL")]
+    Cell,
     #[token("struct")]
     #[token("STRUCT")]
     Struct,
@@ -553,6 +556,7 @@ impl std::fmt::Display for Token {
             Token::Rsrc => write!(f, "rsrc"),
             Token::Registry => write!(f, "reg"),
             Token::Type => write!(f, "type"),
+            Token::Cell => write!(f, "cell"),
             Token::Struct => write!(f, "struct"),
             Token::Rstruct => write!(f, "rstruct"),
             Token::Render => write!(f, "render"),

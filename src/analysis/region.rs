@@ -1340,6 +1340,7 @@ fn count_statements_recursive(body: &[Statement]) -> usize {
             Statement::Await { .. } => 1,
             Statement::Async { body, .. } => 1 + count_statements_recursive(std::slice::from_ref(body.as_ref())),
             Statement::AsyncAwait { body, .. } => 1 + count_statements_recursive(std::slice::from_ref(body.as_ref())),
+            Statement::TrgBinding { .. } => 1,
         }
     }).sum()
 }
@@ -1369,6 +1370,7 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
         Statement::Await { expr, .. } => expr_has_call(expr),
         Statement::Async { body, .. } => has_ffi_or_terminator_stmt(body),
         Statement::AsyncAwait { body, .. } => has_ffi_or_terminator_stmt(body),
+        Statement::TrgBinding { .. } => false,
     }
 }
 
@@ -1403,6 +1405,7 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, _trigger_vars: &HashSet<String>) ->
         Statement::Await { expr, .. } => expr_has_call(expr),
         Statement::Async { body, .. } => has_ffi_or_trigger_stmt(body.as_ref(), _trigger_vars),
         Statement::AsyncAwait { body, .. } => has_ffi_or_trigger_stmt(body.as_ref(), _trigger_vars),
+        Statement::TrgBinding { .. } => false,
     }
 }
 

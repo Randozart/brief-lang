@@ -392,6 +392,9 @@ impl Reactor {
                 interp.exec_stmt(body)?;
                 Ok(StmtResult::Continue)
             }
+            Statement::TrgBinding { .. } => {
+                Ok(StmtResult::Continue)
+            }
         }
     }
 }

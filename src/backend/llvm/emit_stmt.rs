@@ -723,6 +723,10 @@ impl LlvmBackend {
                 }
                 self.pending_async_await_count += 1;
             }
+            Statement::TrgBinding { .. } => {
+                writeln!(out, "{}call void @llvm.trap()", indent).ok();
+                writeln!(out, "{}unreachable", indent).ok();
+            }
         }
     }
 

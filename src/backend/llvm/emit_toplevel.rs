@@ -1361,3 +1361,24 @@ fn sig_number(name: &str) -> i32 {
         _ => 0,
     }
 }
+
+impl LlvmBackend {
+    /// Emit a library shim — no main function, only `__brief_init_state`
+    /// and dso_local wrappers for #export functions.
+    /// Called when `self.library_mode` is true.
+    pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
+        // The #export wrappers are already emitted by emit_definition (called
+        // earlier in generate()). We only need to add __brief_init_state.
+        // __brief_init_state — allocates %State, calls init_state, returns ptr
+        writeln!(out, "define dso_local i64 @__brief_init_state() local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        writeln!(out, "  %ptr = ptrtoint %State* %state to i64").ok();
+        writeln!(out, "  ret i64 %ptr").ok();
+        writeln!(out, "}}").ok();
+        // Also emit a __glue_release placeholder (no-op for arena-free bridge)
+        writeln!(out, "define dso_local void @__glue_release(i64 %frame_tag) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+    }
+}

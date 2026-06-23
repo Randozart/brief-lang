@@ -1293,6 +1293,8 @@ pub enum Expr {
     Call(String, Vec<Expr>),
     // Pattern B — packed call
     CallExpr(CallExpr),
+    /// `cell name(args)` — synchronous call to a cell.
+    CellCall(Box<Expr>, Vec<Expr>),
 
     /// $name(args) or $name(args) { block } — template call
     TemplateCall {
@@ -1654,7 +1656,7 @@ impl Expr {
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Projection { source: e, .. } => {
                 e.extract_deps_recursive(deps);
             }
-            Expr::Call(_, args) | Expr::ListLiteral(args) => {
+            Expr::Call(_, args) | Expr::ListLiteral(args) | Expr::CellCall(_, args) => {
                 for arg in args {
                     arg.extract_deps_recursive(deps);
                 }
@@ -1808,6 +1810,16 @@ pub enum Statement {
         ty: Type,
         expr: Option<Expr>,
         span: Option<Span>,
+    },
+
+    /// `trg name @ instance.port;` — bind a trigger to a component's output port.
+    /// The trigger fires when the component writes to that output variable.
+    TrgBinding {
+        name: String,
+        ty: Option<Type>,         // optional explicit type annotation
+        instance: Expr,           // expression yielding a component handle
+        port: String,             // named output port on the component
+        modifiers: Vec<Hashtag>,
     },
 
     // Alka escape hatch: alka { ... }; or alka! { ... };
@@ -2154,6 +2166,8 @@ pub enum TopLevel {
     /// User-defined intrinsic operation via `inop#` / `inop!#` declaration.
     Inop(InopDeclaration),
     ResourceDecl(ResourceDeclaration), // NEW: rsrc/resource
+    /// `cell` / `cell!` — cybernetic cell with isolated state space.
+    Cell(Box<CellDef>),
     Struct(StructDefinition),
     RStruct(RStructDefinition),
     Enum(EnumDefinition),
@@ -2257,6 +2271,31 @@ pub struct StructField {
     pub ty: Type,
     pub default: Option<Expr>,
     pub visibility: Visibility,
+}
+
+/// `cell` / `cell!` — Cybernetic Cell Definition.
+/// An isolated Brief-in-Brief state space with private state, reactive
+/// transactions, internal triggers, and a well-defined output interface.
+#[derive(Debug, Clone)]
+pub struct CellDef {
+    /// false = cell (auto-terminating), true = cell! (persistent)
+    pub is_persistent: bool,
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    /// Input arguments (ephemeral per invocation)
+    pub parameters: Vec<(String, Type)>,
+    /// Output ports: -> name: Type [, | name: Type]
+    pub output_type: Option<OutputType>,
+    /// Private state fields (declared in body)
+    pub fields: Vec<StructField>,
+    /// Reactive/non-reactive transactions inside the cell body
+    pub transactions: Vec<Transaction>,
+    /// Helper definitions inside the cell body
+    pub definitions: Vec<Definition>,
+    /// Internal triggers (scoped to the cell, invisible outside)
+    pub internal_triggers: Vec<TriggerDeclaration>,
+    pub span: Option<Span>,
+    pub modifiers: Vec<Hashtag>,
 }
 
 #[derive(Debug, Clone)]

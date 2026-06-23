@@ -831,6 +831,9 @@ impl WebstackGenerator {
                     out.push_str("})();\n");
                 }
             }
+            Statement::TrgBinding { name, .. } => {
+                out.push_str(&format!("// TrgBinding: {} (omitted in TS)\n", name));
+            }
         }
     }
 
@@ -1257,6 +1260,9 @@ impl WebstackGenerator {
                     out.push_str("// async await block\n");
                     self.statement_to_rust(out, body);
                 }
+            }
+            Statement::TrgBinding { name, .. } => {
+                out.push_str(&format!("// TrgBinding: {} (omitted in Rust)\n", name));
             }
         }
     }

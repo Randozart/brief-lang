@@ -244,7 +244,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         }
 
         // Function calls - can't track
-        Expr::Call(_, _) => SymbolicValue::Unknown,
+        Expr::Call(_, _) | Expr::CellCall(_, _) => SymbolicValue::Unknown,
         Expr::IntrinsicCall { .. } => SymbolicValue::Unknown,
 
         // Other complex expressions

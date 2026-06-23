@@ -236,6 +236,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         Statement::Await { expr, .. } => { collect_strings_expr(expr, seen, out); }
         Statement::Async { body, .. } => { collect_strings_stmt(body, seen, out); }
         Statement::AsyncAwait { body, .. } => { collect_strings_stmt(body, seen, out); }
+        Statement::TrgBinding { .. } => {}
     }
 }
 
@@ -332,7 +333,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::StructInstance(_, fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
         Expr::ObjectLiteral(fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
         // Call, Match, Pattern
-        Expr::Call(_, args) => { for a in args { collect_strings_expr(a, seen, out); } }
+        Expr::Call(_, args) | Expr::CellCall(_, args) => { for a in args { collect_strings_expr(a, seen, out); } }
         Expr::Match { value, arms } => { collect_strings_expr(value, seen, out); for arm in arms { collect_strings_expr(&arm.body, seen, out); } }
         Expr::PatternMatch { value, .. } => { collect_strings_expr(value, seen, out); }
         // Block
@@ -568,6 +569,7 @@ pub struct LlvmBackend {
     spec: Option<crate::target_spec::TargetSpec>,
     explain: bool,
     dump_layout: bool,
+    library_mode: bool,
 
     // ── State Fields ───────────────────────────────────────
     field_index_map: HashMap<String, usize>,
@@ -811,6 +813,7 @@ impl LlvmBackend {
             variant_disc: HashMap::new(),
             explain: false,
             dump_layout: false,
+            library_mode: false,
             remarks: Vec::new(),
             emit_remarks: false,
             gpu_offload: false,
@@ -902,6 +905,11 @@ impl LlvmBackend {
 
     pub fn with_dump_layout(mut self, v: bool) -> Self {
         self.dump_layout = v;
+        self
+    }
+
+    pub fn with_library_mode(mut self, v: bool) -> Self {
+        self.library_mode = v;
         self
     }
 
@@ -2055,6 +2063,8 @@ self.emit_declares(&mut out);
                     self.emit_wake_metadata(&mut out);
                 }
                 self.emit_thread_pool_metadata(&mut out);
+            } else if self.library_mode {
+                self.emit_library_shim(&mut out, &txns);
             } else if !txns.is_empty()
                 && self.async_txn_names.is_empty()
                 && self.mmio_fields.is_empty()

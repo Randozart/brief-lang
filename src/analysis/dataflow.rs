@@ -308,6 +308,7 @@ impl<'a> DataflowAnalyzer<'a> {
             Statement::AsyncAwait { body, .. } => {
                 self.extract_ids_from_statement(body, ids);
             }
+            Statement::TrgBinding { .. } => {}
         }
     }
 

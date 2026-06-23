@@ -881,7 +881,8 @@ impl SymbolicExecutor {
                     }
                 }
                 Statement::InlineAsm { .. } => {}
-                Statement::Guarded {
+                Statement::TrgBinding { .. } => {}
+            Statement::Guarded {
                     condition,
                     statements,
                 } => {
@@ -2576,7 +2577,7 @@ impl ProofEngine {
             Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) => {
                 self.collect_identifiers(inner, vars);
             }
-            Expr::Call(_, args) => {
+            Expr::Call(_, args) | Expr::CellCall(_, args) => {
                 for arg in args {
                     self.collect_identifiers(arg, vars);
                 }
@@ -3210,6 +3211,7 @@ impl ProofEngine {
                     vars.insert(name.clone());
                 }
             }
+            Statement::TrgBinding { .. } => {}
             Statement::Async { body, .. } => {
                 self.collect_write_vars(body, vars);
             }
