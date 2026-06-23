@@ -3020,6 +3020,14 @@ impl Interpreter {
                             Err(_) => Ok(Value::Int(-1)),
                         }
                     }
+                    Intrinsic::Argv => {
+                        // argv#() returns command-line arguments as List<String>
+                        // Skips argv[0] (program name) — matches argv convention
+                        let args: Vec<Value> = std::env::args().skip(1)
+                            .map(|a| Value::String(a))
+                            .collect();
+                        Ok(Value::List(args))
+                    }
                     // ===== Phase B: Raw File I/O (intrinsics.md D2) =====
                     Intrinsic::Open => {
                         let path = match values.remove(0) {

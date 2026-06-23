@@ -335,6 +335,8 @@ fn print_usage(program: &str) {
     eprintln!("  dbv <file>       Parse .dbv and export to JSON (--out, --pretty)");
     eprintln!("  deps [check|install|list]  Check or install dependencies from .dbvs/.dbv files");
     eprintln!("  selfhost <file>  Run self-hosted compiler (Brief-in-Brief)");
+    eprintln!("  export <bridge.bv> <language>  Compile bridge, generate native wrappers via $!macro");
+    eprintln!("  link <lib>       Analyze library, generate bridge .bv cross-referenced against intrinsics");
     eprintln!("  map <lib>        Analyze library and show generated bindings (dry-run)");
     eprintln!("  wrap <lib>       Generate FFI bindings for a library");
     eprintln!("  install         Install 'brief' to ~/.local/bin");
@@ -3418,6 +3420,63 @@ fn install_dependency(dep: &dbrief::ast::DbriefDependency, verbose: bool) -> Res
     Ok(())
 }
 
+/// Intent: run `brief export` — compile a bridge .bv to .a and generate
+/// native language wrappers via the language's $! adapter macro.
+fn run_export_main(
+    file_path: &Path,
+    language: &str,
+    out_dir: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = fs::read_to_string(file_path)?;
+    let clean_source = strip_annotations(&source);
+
+    let mut parser = parser::Parser::new(&clean_source);
+    let mut program = parser.parse()
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    let mut import_resolver = import_resolver::ImportResolver::new()
+        .with_use_stdlib(false);
+    let file_path_buf = file_path.to_path_buf();
+    let mut program = import_resolver.resolve_imports(&program, &file_path_buf)
+        .map_err(|e| format!("Import error: {}", e))?;
+
+    let bridge_name = file_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("bridge")
+        .to_string();
+
+    let output = out_dir.unwrap_or_else(|| Path::new("."));
+    let dbvl_path = Path::new("lib/glue.dbvl");
+
+    use brief_compiler::glue::export::run_export as run_glue_export;
+    run_glue_export(&program, &bridge_name, language, output, dbvl_path)
+        .map_err(|e| format!("Export failed: {}", e).into())
+}
+
+/// Intent: run `brief link` — analyze a foreign library, generate a .bv
+/// with frgn declarations cross-referenced against compiler intrinsics.
+fn run_link_main(
+    lib_path: &Path,
+    out_dir: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use brief_compiler::glue::link::{analyze_library, generate_bridge_bv, print_link_summary};
+
+    let result = analyze_library(lib_path)?;
+    print_link_summary(&result);
+
+    let output = generate_bridge_bv(&result);
+    let stem = lib_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("library");
+    let out_path = out_dir
+        .map(|d| d.join(format!("{}-bridge.bv", stem)))
+        .unwrap_or_else(|| PathBuf::from(format!("{}-bridge.bv", stem)));
+
+    fs::write(&out_path, &output)?;
+    println!("\n  Bridge generated: {}", out_path.display());
+    Ok(())
+}
+
 /// Intent: main.
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -4155,6 +4214,70 @@ fn main() {
                 errors::ErrorMode::Verbose
             };
             lsp::run_lsp_server(mode);
+        }
+
+        "export" => {
+            let mut file_path = None;
+            let mut language = None;
+            let mut out_dir = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if arg.ends_with(".bv") || arg.ends_with(".sbv") {
+                    file_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else if !arg.starts_with('-') {
+                    language = Some(arg.clone());
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let (Some(path), Some(lang)) = (file_path, language) {
+                if let Err(e) = run_export_main(&path, &lang, out_dir.as_deref()) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: Usage: {} export <bridge.bv> <language> [--out <dir>]", args[0]);
+                eprintln!("  Analyzes a Brief bridge and generates native language wrappers");
+                std::process::exit(1);
+            }
+        }
+
+        "link" => {
+            let mut lib_path = None;
+            let mut out_dir = None;
+
+            let mut i = 2;
+            while i < args.len() {
+                let arg = &args[i];
+                if arg == "--out" && i + 1 < args.len() {
+                    out_dir = Some(PathBuf::from(&args[i + 1]));
+                    i += 2;
+                } else if !arg.starts_with('-') {
+                    lib_path = Some(PathBuf::from(arg));
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+
+            if let Some(path) = lib_path {
+                if let Err(e) = run_link_main(&path, out_dir.as_deref()) {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: Usage: {} link <library_path> [--out <dir>]", args[0]);
+                eprintln!("  Analyzes a foreign library and generates a bridge .bv file");
+                std::process::exit(1);
+            }
         }
 
         "map" | "wrap" => {

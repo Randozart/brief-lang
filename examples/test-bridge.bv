@@ -1,0 +1,6 @@
+// Test bridge for GLUE export pipeline
+
+#export("add")
+defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};

@@ -486,6 +486,8 @@ pub enum Intrinsic {
     // ===== Phase A: Process (intrinsics.md D5) =====
     SpawnWithOutput,
     Spawn,
+    /// argv#() -> List<String> — command-line arguments (argc/argv)
+    Argv,
 
     // ===== Phase B: Raw File I/O (intrinsics.md D2) =====
     Open,
@@ -742,6 +744,7 @@ impl Intrinsic {
             | Intrinsic::GetGroupId | Intrinsic::GetNumGroups
             // OS queries that are constant for process lifetime
             | Intrinsic::PageSize | Intrinsic::CpuCount
+            | Intrinsic::Argv
             => false,
             // Everything else is observable — cannot fold
             _ => true,
@@ -805,6 +808,7 @@ impl Intrinsic {
             // Phase A: Process
             "spawn_with_output" => Some(Intrinsic::SpawnWithOutput),
             "spawn" => Some(Intrinsic::Spawn),
+            "argv" => Some(Intrinsic::Argv),
             // Phase B: Raw File I/O
             "open" => Some(Intrinsic::Open),
             "close" => Some(Intrinsic::Close),
@@ -1000,6 +1004,7 @@ impl Intrinsic {
             // Phase A: Process
             Intrinsic::SpawnWithOutput => "spawn_with_output",
             Intrinsic::Spawn => "spawn",
+            Intrinsic::Argv => "argv",
             // Phase B: Raw File I/O
             Intrinsic::Open => "open",
             Intrinsic::Close => "close",

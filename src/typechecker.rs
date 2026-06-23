@@ -1991,6 +1991,7 @@ impl TypeChecker {
                     Intrinsic::IsTty => Type::Bool,
                     Intrinsic::SpawnWithOutput => Type::String,
                     Intrinsic::Spawn => Type::Int,
+                    Intrinsic::Argv => Type::Custom("List".to_string()),
                     // Phase B: Raw File I/O — all return Int (fd, bytes, or -1)
                     Intrinsic::Open | Intrinsic::Close | Intrinsic::Read
                     | Intrinsic::Write | Intrinsic::LSeek | Intrinsic::PRead

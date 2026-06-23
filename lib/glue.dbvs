@@ -6,10 +6,13 @@
 //   position 3: output_dir (String, Optional) — subdirectory for generated files
 //   position 4: type_map (Map<String, String>, Optional) — Brief-to-language type mapping
 //
+// The map format matches parse_map() in dbvl_reader.rs:
+//   pairs separated by whitespace, key:value separated by colon, wrapped in { }
+//
 entry AdapterEntry {
     language: String;
     macro_path: String;
     file_extension: String;
     output_dir: Optional<String>;
-    type_map: Optional<Map<String, String; pair_separator=:; item_separator=,>>;
+    type_map: Optional<Map<String, String; pair_separator=:, value_delimiter=space, brace=required>>;
 };

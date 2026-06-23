@@ -23,5 +23,5 @@
 
 pub mod dbvl_reader;
 pub mod dbvs_validator;
-// pub mod export;  // TODO: restore when export.rs is created
-// pub mod link;    // TODO: restore when link.rs is created
+pub mod export;
+pub mod link;

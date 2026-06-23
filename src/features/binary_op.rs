@@ -43,6 +43,37 @@ impl ExprEval for BinaryOpExpr {
         use BinaryOpKind::*;
         Ok(match (self.kind, &l, &r) {
             (Add,  Value::Int(a), Value::Int(b)) => Value::Int(a + b),
+            (Add,  Value::String(a), Value::String(b)) => Value::String({
+                let mut s = String::with_capacity(a.len() + b.len());
+                s.push_str(a);
+                s.push_str(b);
+                s
+            }),
+            (Add,  Value::String(a), Value::Int(b)) => Value::String({
+                let mut s = String::with_capacity(a.len() + 20);
+                s.push_str(a);
+                s.push_str(&b.to_string());
+                s
+            }),
+            (Add,  Value::Int(a), Value::String(b)) => Value::String({
+                let mut s = String::with_capacity(20 + b.len());
+                s.push_str(&a.to_string());
+                s.push_str(b);
+                s
+            }),
+            (Add,  Value::String(a), Value::Float(b)) => Value::String({
+                let mut s = String::with_capacity(a.len() + 30);
+                s.push_str(a);
+                s.push_str(&b.to_string());
+                s
+            }),
+            (Add,  Value::Float(a), Value::String(b)) => Value::String({
+                let mut s = String::with_capacity(30 + b.len());
+                s.push_str(&a.to_string());
+                s.push_str(b);
+                s
+            }),
+            (Add,  Value::Float(a), Value::Float(b)) => Value::Float(a + b),
             (Sub,  Value::Int(a), Value::Int(b)) => Value::Int(a - b),
             (Mul,  Value::Int(a), Value::Int(b)) => Value::Int(a * b),
             (Div,  Value::Int(a), Value::Int(b)) => Value::Int(a / b),

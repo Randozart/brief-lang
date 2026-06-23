@@ -1,0 +1,31 @@
+// GLUE Python Adapter Macro
+//
+// Generates a Python package wrapping a Brief bridge via ctypes.
+// Invoked during `brief export bridge.bv python`. Uses emit_file#()
+// to write __init__.py with ctypes.CDLL loading and safe wrappers.
+//
+// Architecture: Uses ctypes (not C extension) — no C compiler needed.
+// The bridge .so is loaded at runtime via CDLL, and each #export
+// is presented as a typed Python function.
+
+macro generate_python_wrapper (bridge_name: String, exports_dbvl: String, frgns_dbvl: String, melds_dbvl: String) -> String {
+    let init_py = "import ctypes\nimport os\n\n_lib = None\n\n" +
+        "def _get_lib():\n" +
+        "    global _lib\n" +
+        "    if _lib is None:\n" +
+        "        lib_path = os.path.join(os.path.dirname(__file__), \"" + bridge_name + ".so\")\n" +
+        "        _lib = ctypes.CDLL(lib_path)\n" +
+        "        _lib.__brief_init_state.restype = ctypes.c_int64\n" +
+        "        _lib.__brief_init_state()\n" +
+        "    return _lib\n\n" +
+        "def __getattr__(name):\n" +
+        "    lib = _get_lib()\n" +
+        "    fn = getattr(lib, name, None)\n" +
+        "    if fn is None:\n" +
+        "        raise AttributeError(f\"Bridge has no export '{name}'\")\n" +
+        "    return fn\n\n" +
+        "# Bridge: " + bridge_name + "\n";
+
+    emit_file#("__init__.py", init_py);
+    term "ok";
+};
