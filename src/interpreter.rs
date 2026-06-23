@@ -1680,9 +1680,15 @@ impl Interpreter {
     fn get_designated_output(&self, cell_def: &CellDef, uid: usize) -> Value {
         if let Some(ref ot) = cell_def.output_type {
             let names = self.extract_output_names(ot);
-            if let Some(first_name) = names.first() {
-                let key = format!("{}${}.{}", cell_def.name, uid, first_name);
+            if names.len() == 1 {
+                let key = format!("{}${}.{}", cell_def.name, uid, &names[0]);
                 return self.state.get(&key).cloned().unwrap_or(Value::Void);
+            } else if names.len() > 1 {
+                let values: Vec<Value> = names.iter().map(|n| {
+                    let key = format!("{}${}.{}", cell_def.name, uid, n);
+                    self.state.get(&key).cloned().unwrap_or(Value::Void)
+                }).collect();
+                return Value::Tuple(values);
             }
         }
         Value::Void

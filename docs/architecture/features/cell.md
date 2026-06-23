@@ -345,19 +345,65 @@ Run with `cargo test --lib`.
 | Multi-output named ports (multiple `-> name: Type` outputs) | Low | Parser + interpreter handle via `OutputType::Named` |
 | In-cell `defn` with output ports | Low | Parser parses, interpreter needs defn-in-scope handling |
 
-### Phase 3 — `trg @ cell!` One-Liner
+### Phase 3 — `trg @ cell!` Binding (implemented 2026-06-23)
 
-Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8.3 for full spec.
+The `trg name: Type @ cell(args).port` syntax is now implemented through the full pipeline:
 
-- `trg X: Type @ cell!(args).port` syntax — implicit async instance creation
-- Instance lifecycle tied to trigger lifetime (persistent `cell!`)
-- Instance cleanup when trigger is unregistered
-- Phase 2 LLVM codegen provides the foundation: `Expr::CellCall` can be called from trigger bindings
+**Parser** (`src/parser.rs` line 5651): When `trg` appears at statement level without `!`, checks for `@` token. If present, parses as trigger binding: `trg name: Type @ expr.port`. The `.port` suffix is handled by parsing the full expression then checking if it's an `Expr::FieldAccess(expr, name)` — if so, extracts the field name as the port.
 
-### Phase 4 — Cell-to-Cell Communication
+**Interpreter** (`src/interpreter.rs` line 1862): Evaluates the instance expression. If it's `Expr::Call(name, args)` where `name` matches a registered `CellDef`, calls `call_cell()` to create/execute the cell instance and stores the result in state under the trigger name.
+
+**LLVM backend** (`src/backend/llvm/emit_stmt.rs` line 726): Emits the instance expression, stores the result in `let_bindings`/`let_binding_types` for downstream use.
+
+**Implementation notes:**
+- `trg X: Int @ add_one(41)` — parses `add_one(41)` as `Call("add_one", [41])`, interpreter detects cell binding
+- `trg elapsed: Int @ timer(1000).elapsed` — parses `timer(1000).elapsed` as `FieldAccess(Call("timer", [1000]), "elapsed")`, extracts `"elapsed"` as port name
+- Parser tests: `test_parse_trg_binding_simple`, `test_parse_trg_binding_with_port`
+
+### `cell!` Persistent State (implemented 2026-06-23)
+
+Persistent (`cell!`) instances maintain state between calls. Each call to a persistent cell restores its previous state, runs convergence, and saves the new state.
+
+**Interpreter** (`src/interpreter.rs`):
+- `persistent_cell_states: HashMap<String, (HashMap<String, Value>, HashMap<String, Value>)>` — per-cell saved state + prior_state
+- On first call: initializes fields from defaults, runs convergence, saves state
+- On subsequent calls: restores saved state, re-binds input args (uid=0 for persistent cell keys), runs convergence, saves state again
+- `save_persistent_state()` extracts `cell$0.`-prefixed keys from interpreter state
+- After convergence: saves cell state BEFORE restoring parent state
+
+**Key difference from transient `cell`:**
+- Transient: fresh fields + fresh uid per call, state discarded after return
+- Persistent: saved state restored, uid=0 always, state saved after each call
+
+**Caveat**: Persistent cells still run their convergence loop synchronously within `call_cell()`. True async (independent thread/timer) is deferred.
+
+### Multi-Output Named Ports (implemented 2026-06-23)
+
+Cells with multiple named output ports (`-> elapsed: Int, done: Bool`) return a `Value::Tuple` of all output values:
+
+```rust
+// OutputType: Tuple([Named("elapsed", Single(Int)), Named("done", Single(Bool))])
+// extract_output_names → ["elapsed", "done"]
+// get_designated_output → Value::Tuple([Int(n), Bool(b)])
+```
+
+- Single output (named or unnamed): returns the single value directly
+- Multiple outputs: returns `Value::Tuple` of all named port values in declaration order
+- LLVM backend: returns first named port only (tuple packing deferred)
+
+### Phase 4 — Cell-to-Cell Communication (not started)
 
 Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8.4.
 
 - Exposed output ports of one cell feed into input arguments of another
 - Static wiring at compile time (like hardware signals)
 - Compiler can statically schedule or parallelize independent cells
+
+### Known Gaps (Updated)
+
+| Item | Priority | Status |
+|------|----------|--------|
+| `cell!` true async (independent thread/reactor) | High | Not started |
+| LLVM backend multi-output tuple packing | Medium | Not started |
+| CIRCT hardware synthesis (`cell` → `hw.module`) | Medium | Not started |
+| `cell` keyword in expression context (`let x = cell timer(1000)`) | Low | Not started |
