@@ -703,44 +703,52 @@ for any given program. The decisions are made at compile time based on contract
 analysis, not at runtime.
 
 ```mermaid
-flowchart TD
+graph TD
     P[Program enters codegen] --> A{All inputs const + within budget?}
-    A -->|Yes| A000[A000: Precompute → O(1) stores in main<br>Zero runtime allocation]
+    A -->|Yes| A000[A000: Precompute, O1 stores in main]
     A -->|No| B{Single foldable txn?}
     B -->|No| C{Multi-txn all-pure?}
     B -->|Yes| D{Body structure}
-    D -->|Pure counter only| A005c[A005c: store + ret<br>Single i64 store, no collection ops]
-    D -->|Straight-line, provably linear| A005a[A005a: SSA insertvalue chain<br>arena for any collection ops]
-    D -->|Branching guards, non-linear| A005b[A005b: memory GEP path<br>arena for any collection ops]
+    D -->|Pure counter only| A005c[A005c: store + ret]
+    D -->|Straight-line, linear| A005a[A005a: SSA + arena]
+    D -->|Branching, non-linear| A005b[A005b: GEP + arena]
 
-    C -->|Yes| E[Folded multi-txn emit<br>Per-case folded loops + arena + prealloc?]
+    C -->|Yes| E[Folded multi-txn + arena]
     C -->|No| F{Sequential bounded multi-txn?}
-    F -->|Yes| G[A006: SSA register pipeline<br>arena + prealloc if bound known]
+    F -->|Yes| G[A006: SSA pipeline + arena]
     F -->|No| H{Enumerable triggers?}
-    H -->|Yes| I[Enum dispatch<br>Switch-case main + arena + prealloc?]
-    H -->|No| J[Reactor tick loop<br>Sequential or parallel dispatch<br>Inline txn bodies + shared arena]
+    H -->|Yes| I[Enum dispatch + arena]
+    H -->|No| J[Reactortick, inline bodies + arena]
 
-    D & E & G & I & J --> K{Within arena scope, body has <- push?}
-    K -->|Yes| L{Bound known<br>+ not prepend?}
-    L -->|Yes| M[Phase 2 fast path<br>Prealloc (bound+2)*8<br>Write direct, no alloc/memcpy<br>O(1) per push]
-    L -->|No| N[Normal arena path<br>bump_alloc + memcpy<br>O(N) per push]
+    D --> K
+    E --> K
+    G --> K
+    I --> K
+    J --> K
 
-    K -->|No| O{Collection op<br>other than push?}
-    O -->|Pop/discard/transfer| N
+    K{Within arena, body has push?}
+    K -->|Yes| L{Bound known + not prepend?}
+    L -->|Yes| M[Phase 2: prealloc, write direct, O1]
+    L -->|No| N[Normal arena: bump alloc + memcpy]
+
+    K -->|No| O{Collection op other than push?}
+    O -->|Pop, discard, transfer| N
     O -->|String concat| N
-    O -->|Slice/map/set| N
+    O -->|Slice, map, set| N
     O -->|Enum variant| N
 
     N --> P{Arena active?}
-    P -->|Inside loop/tick| Q[Get cur_ptr from arena<br>bump_alloc(...)<br>Overflow→realloc 2x<br>Store new_ptr back]
-    P -->|Standalone fn| R[call @malloc<br>call @free<br>Per-operation]
+    P -->|Inside loop/tick| Q[bump alloc from arena_ptr]
+    P -->|Standalone fn| R[malloc + free per op]
 
-    M & N & R --> S[Scope boundary]
-    S --> T{Scope type?}
-    T -->|Loop exit| U[arena_reset<br>ptr = base<br>Memory stays live]
-    T -->|Tick end (inline bodies)| U
-    T -->|Program exit| V[arena_fini<br>call @free(arena_base)]
-    T -->|Standalone fn return| W[Memory freed normally via @free]
+    M --> S
+    N --> S
+    R --> S
+
+    S[Scope boundary]
+    S -->|Loop / tick exit| U[arena_reset: ptr = base, keep live]
+    S -->|Program exit| V[arena_fini: free arena]
+    S -->|Standalone return| W[free via normal path]
 
     style A000 fill:#1a5,color:#fff
     style A005c fill:#1a5,color:#fff
