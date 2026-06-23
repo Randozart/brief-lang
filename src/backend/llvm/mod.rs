@@ -2577,17 +2577,17 @@ self.emit_declares(&mut out);
                     .insert(t.name.clone(), self.field_types.len());
                 self.field_types.push(self.llvm_type(&t.ty).to_string());
                 self.field_initializers.insert(t.name.clone(), None);
-            } else if let TopLevel::Cell(cell) = item {
-                for field in &cell.fields {
-                    let prefixed = format!("cell${}${}", cell.name, field.name);
+            } else if let TopLevel::Cell(c) = item {
+                for field in &c.fields {
+                    let prefixed = format!("cell${}${}", c.name, field.name);
                     self.field_index_map.insert(prefixed.clone(), self.field_types.len());
                     self.field_types.push(self.llvm_type(&field.ty).to_string());
-                    self.field_initializers.insert(prefixed, None);
+                    self.field_initializers.insert(prefixed, field.default.clone());
                 }
-                for (name, ty) in &cell.parameters {
-                    let prefixed = format!("cell${}${}", cell.name, name);
+                for (param_name, param_ty) in &c.parameters {
+                    let prefixed = format!("cell${}${}", c.name, param_name);
                     self.field_index_map.insert(prefixed.clone(), self.field_types.len());
-                    self.field_types.push(self.llvm_type(ty).to_string());
+                    self.field_types.push(self.llvm_type(param_ty).to_string());
                     self.field_initializers.insert(prefixed, None);
                 }
             }
@@ -2630,6 +2630,13 @@ self.emit_declares(&mut out);
         // not by txn body identifiers.
         for name in &self.trigger_names {
             self.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
+        }
+        // Cell fields and parameters must never be eliminated — they're accessed
+        // by Expr::CellCall codegen with cellular$name prefixed names.
+        for name in self.field_index_map.keys() {
+            if name.starts_with("cell$") {
+                self.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
+            }
         }
         self.cache_slots.clear();
 

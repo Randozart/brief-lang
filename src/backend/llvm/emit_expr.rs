@@ -3951,17 +3951,32 @@ impl LlvmBackend {
                     }
                 }
 
-                // 2. Single-pass through transactions with identifier rewriting
-                for (ti, txn) in cell.transactions.iter().enumerate() {
-                    let fire_l = format!(".cf_{}_{}", self.txn_counter, ti);
-                    let skip_l = format!(".cs_{}_{}", self.txn_counter, ti);
+                // 2. Convergence loop: repeat txns until stasis
+                let loop_h = format!(".celloop_{}", self.txn_counter);
+                let done_l = format!(".celldone_{}", self.txn_counter);
+                let any_fired = format!("%cany_{}", self.txn_counter);
+                self.txn_counter += 1;
 
-                    // Evaluate precondition (rewriting identifiers to prefixed names)
+                // Alloca for any_fired flag (initialized to false)
+                writeln!(out, "{}{} = alloca i8, align 1", indent, any_fired).ok();
+                writeln!(out, "{}store i8 0, ptr {}, align 1", indent, any_fired).ok();
+
+                writeln!(out, "{}br label %{}", indent, loop_h).ok();
+                writeln!(out, "{}:", loop_h).ok();
+
+                for (ti, txn) in cell.transactions.iter().enumerate() {
+                    let fire_l = format!(".cl_{}_{}", self.txn_counter, ti);
+                    let skip_l = format!(".cl_{}_s_{}", self.txn_counter, ti);
+
+                    // Evaluate precondition with rewritten identifiers
                     let pre_expr = Self::rewrite_cell_identifiers(&txn.contract.pre_condition, &callee_name);
                     let pre_val = self.emit_expr(out, &pre_expr, indent);
 
                     writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, pre_val.name, fire_l, skip_l).ok();
                     writeln!(out, "{}:", fire_l).ok();
+
+                    // Set any_fired = true
+                    writeln!(out, "{}store i8 1, ptr {}, align 1", indent, any_fired).ok();
 
                     // Execute body
                     for stmt in &txn.body {
@@ -3972,6 +3987,16 @@ impl LlvmBackend {
                     writeln!(out, "{}br label %{}", indent, skip_l).ok();
                     writeln!(out, "{}:", skip_l).ok();
                 }
+
+                // After all txns: check any_fired → loop or done
+                let af_load = format!("%cal_{}", self.txn_counter);
+                writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, af_load, any_fired).ok();
+                let af_bool = format!("%cab_{}", self.txn_counter);
+                writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, af_bool, af_load).ok();
+                writeln!(out, "{}store i8 0, ptr {}, align 1", indent, any_fired).ok();
+                writeln!(out, "{}br i1 {}, label %{}, label %{}",
+                    indent, af_bool, loop_h, done_l).ok();
+                writeln!(out, "{}:", done_l).ok();
 
                 // 3. Read designated output from prefixed output field
                 let output_names = Self::extract_output_names_llvm(&cell.output_type);
