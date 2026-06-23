@@ -693,3 +693,74 @@ Files: `mod.rs:1155-1165` (emit_arena_reset), `loop_engine.rs:667,774`
 | Multi-txn SSA preallocation | `loop_engine.rs:887-897` |
 | Arena wired into reactor tick (inline bodies) | `dispatch.rs:50,61,72,82,217,271` |
 | Inline txn body helper | `dispatch.rs:294-326` |
+
+---
+
+## Memory Allocation Decision Tree
+
+The following flowchart shows how the compiler selects an allocation strategy
+for any given program. The decisions are made at compile time based on contract
+analysis, not at runtime.
+
+```mermaid
+flowchart TD
+    P[Program enters codegen] --> A{All inputs const + within budget?}
+    A -->|Yes| A000[A000: Precompute → O(1) stores in main<br>Zero runtime allocation]
+    A -->|No| B{Single foldable txn?}
+    B -->|No| C{Multi-txn all-pure?}
+    B -->|Yes| D{Body structure}
+    D -->|Pure counter only| A005c[A005c: store + ret<br>Single i64 store, no collection ops]
+    D -->|Straight-line, provably linear| A005a[A005a: SSA insertvalue chain<br>arena for any collection ops]
+    D -->|Branching guards, non-linear| A005b[A005b: memory GEP path<br>arena for any collection ops]
+
+    C -->|Yes| E[Folded multi-txn emit<br>Per-case folded loops + arena + prealloc?]
+    C -->|No| F{Sequential bounded multi-txn?}
+    F -->|Yes| G[A006: SSA register pipeline<br>arena + prealloc if bound known]
+    F -->|No| H{Enumerable triggers?}
+    H -->|Yes| I[Enum dispatch<br>Switch-case main + arena + prealloc?]
+    H -->|No| J[Reactor tick loop<br>Sequential or parallel dispatch<br>Inline txn bodies + shared arena]
+
+    D & E & G & I & J --> K{Within arena scope, body has <- push?}
+    K -->|Yes| L{Bound known<br>+ not prepend?}
+    L -->|Yes| M[Phase 2 fast path<br>Prealloc (bound+2)*8<br>Write direct, no alloc/memcpy<br>O(1) per push]
+    L -->|No| N[Normal arena path<br>bump_alloc + memcpy<br>O(N) per push]
+
+    K -->|No| O{Collection op<br>other than push?}
+    O -->|Pop/discard/transfer| N
+    O -->|String concat| N
+    O -->|Slice/map/set| N
+    O -->|Enum variant| N
+
+    N --> P{Arena active?}
+    P -->|Inside loop/tick| Q[Get cur_ptr from arena<br>bump_alloc(...)<br>Overflow→realloc 2x<br>Store new_ptr back]
+    P -->|Standalone fn| R[call @malloc<br>call @free<br>Per-operation]
+
+    M & N & R --> S[Scope boundary]
+    S --> T{Scope type?}
+    T -->|Loop exit| U[arena_reset<br>ptr = base<br>Memory stays live]
+    T -->|Tick end (inline bodies)| U
+    T -->|Program exit| V[arena_fini<br>call @free(arena_base)]
+    T -->|Standalone fn return| W[Memory freed normally via @free]
+
+    style A000 fill:#1a5,color:#fff
+    style A005c fill:#1a5,color:#fff
+    style M fill:#1a5,color:#fff
+    style U fill:#55b,color:#fff
+    style V fill:#55b,color:#fff
+```
+
+### Key
+
+| Color | Meaning |
+|-------|---------|
+| **Green** | Optimal path — zero or minimal allocation overhead |
+| **Blue** | Arena-scoped — memory is reused, not freed |
+| **White** | Normal path — may use `@malloc`/`@free` |
+
+### When arena is inactive
+
+Standalone callable txns and defns (no loop to scope the arena) use
+the traditional `@malloc` + `@free` per operation. This is correct but
+not optimized — these paths are single-shot and don't benefit from
+arena reuse. If a callable txn is hot, it should be refactored as a
+reactive txn with a contract-proven bound to enable arena + preallocation.
