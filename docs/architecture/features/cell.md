@@ -293,17 +293,34 @@ The designated output is read from the state via the cell's `output_type`. The `
 
 When `term expr;` or `term! expr;` executes inside a cell, the expression value is captured in `self.return_value` and returned directly — bypassing the state read.
 
-### LLVM Backend (Phase 1 Stubs)
+### LLVM Backend (Phase 2 — Real Codegen)
 
-`src/backend/llvm/`: All three backend points are stubs for Phase 1:
+**Phase 1** stubs (`@llvm.trap()` + `unreachable`) were replaced in Phase 2 with real codegen.
 
-| File | Addition | Behavior |
-|------|----------|----------|
-| `mod.rs` | `cell_defs: HashMap<String, CellDef>` | Registration + string collection |
-| `emit_expr.rs` | `Expr::CellCall(_, _)` arm | `call void @llvm.trap(); unreachable` |
-| `emit_stmt.rs` | `Statement::TrgBinding { name, .. }` arm | Comment-only `; trg @ <name>` |
+**Field registration** (`src/backend/llvm/mod.rs`):
+- `build_field_index()` at line 2580: cell fields and parameters are registered in `%State` with `cell$name$field` prefixed names. Each gets a slot in `field_index_map`, `field_types`, and `field_initializers`.
+- `apply_field_modes()` at line 2637: cell fields are protected from elimination by marking them `FieldMode::Always` (same protection as trigger names), preventing the adaptive layout pass from removing them.
 
-Cell-using programs work in the interpreter (test mode) but crash at runtime when LLVM-compiled. Real LLVM codegen (prefixed state functions, convergence loop in IR) is Phase 2.
+**CellCall codegen** (`src/backend/llvm/emit_expr.rs` line 3901):
+1. **Arg binding**: Input arguments are stored to `cell$name$param` slots via GEP + type-appropriate truncation/casting (i64→i8 for bool, i64→i32 for char, inttoptr for i8* strings).
+2. **Convergence loop**: An `alloca i8` serves as the `any_fired` flag. The loop body iterates all transactions:
+   - Precondition identifiers are rewritten via `rewrite_cell_identifiers()` (cell-local names → cell$name$name prefixed)
+   - If precondition is true: set `any_fired = 1`, execute body (rewritten stmts via `rewrite_cell_stmt_identifiers()`)
+   - If false: skip to next transaction
+3. **Stasis detection**: After all txns, load `any_fired`, compare to 0, reset to 0, branch back to loop header if any fired, or exit to done label.
+4. **Output read**: Designated output port name is extracted from `OutputType` via `extract_output_names_llvm()`. The corresponding `cell$name$output` field is loaded via GEP, with type-aware boxing (zext i8→i64, ptrtoint i8*→i64, etc.).
+
+**`emit_stmt.rs`**: `Statement::TrgBinding { name, .. }` emits a comment `; trg @ <name> — Phase 1 stub`.
+
+| File | Role | Lines |
+|------|------|-------|
+| `mod.rs` | `cell_defs` HashMap, `build_field_index` cell slots, `apply_field_modes` protection | +13 |
+| `emit_expr.rs` | Full CellCall codegen + `rewrite_cell_identifiers` (90+ Expr variants) + `rewrite_cell_stmt_identifiers` (all Statement variants) + `extract_output_names_llvm` | +524 |
+
+**Helper functions** (all in `emit_expr.rs`):
+- `rewrite_cell_identifiers(expr, cell_name) → Expr`: Recursively rewrites all `Expr::Identifier(name)` to `Expr::Identifier(format!("cell${}${}", cell_name, name))`, plus `OwnedRef` and `PriorState`. Handles 90+ Expr variants, reconstructing Pattern B types (BinaryOpExpr, UnaryOpExpr, ProjectionExpr, etc.) with rewritten children. Non-identifier leaf nodes (Integer, Float, Bool, Char, Term) are cloned as-is.
+- `rewrite_cell_stmt_identifiers(stmt, cell_name) → Statement`: Rewrites all expression children in Statements (Assignment, Let, Term, TermBang, Guarded, Foreach, Oracle, SyncBlock, Async, etc.).
+- `extract_output_names_llvm(ot) → Vec<String>`: Flattens `OutputType::Named`, `Tuple`, `Union`, `Single`, `Array` into a list of port names.
 
 ### Tests
 
@@ -311,6 +328,7 @@ Cell-using programs work in the interpreter (test mode) but crash at runtime whe
 |------|-------|----------------|
 | `src/parser.rs` | 3 | Parse `cell`, `cell!`, no outputs |
 | `src/interpreter.rs` | 4 | Simple arithmetic, multiple fields, loop convergence, `term!` early exit |
+| `src/backend/llvm/tests.rs` | 2 | Cell fields in `%State` type, CellCall codegen (convergence loop, no trap stubs) |
 
 Run with `cargo test --lib`.
 
@@ -318,12 +336,28 @@ Run with `cargo test --lib`.
 
 | Item | Priority | Status |
 |------|----------|--------|
-| `cell!` persistent (async) | High | Not started |
-| `trg @` trigger binding (full) | High | Stub only |
-| LLVM convergence loop codegen | High | Stub only |
-| CIRCT hardware synthesis | Medium | Not started |
-| Cell isolation check in typechecker (no parent state refs) | Medium | Not implemented |
-| Sub-state GEP optimization (Phase 2) | Low | Not started |
-| `cell` keyword in expression context (`let x = cell timer(1000)`) | Low | Parser emits `Expr::CellCall` on explicit `cell` keyword prefix |
-| Multi-output named ports | Low | Parser + interpreter handle via `OutputType::Named` |
-| In-cell `defn` with output ports | Low | Parser parses, interpreter needs to handle defn calls within cell scope |
+| `cell!` persistent (async) — independent reactor loop | High | Not started |
+| `trg @` trigger binding (full) — wire cell output ports to parent triggers | High | Stub only |
+| Convergence loop postcondition checks (compare state before/after, rollback on failure) | Medium | Not implemented |
+| Cell isolation check in typechecker (verify cell txns reference no external state) | Medium | Not implemented |
+| CIRCT hardware synthesis (`cell` → `hw.module` with input/output ports) | Medium | Not started |
+| Sub-state GEP optimization (cell state as nested `%CellState` struct) | Low | Not started |
+| Multi-output named ports (multiple `-> name: Type` outputs) | Low | Parser + interpreter handle via `OutputType::Named` |
+| In-cell `defn` with output ports | Low | Parser parses, interpreter needs defn-in-scope handling |
+
+### Phase 3 — `trg @ cell!` One-Liner
+
+Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8.3 for full spec.
+
+- `trg X: Type @ cell!(args).port` syntax — implicit async instance creation
+- Instance lifecycle tied to trigger lifetime (persistent `cell!`)
+- Instance cleanup when trigger is unregistered
+- Phase 2 LLVM codegen provides the foundation: `Expr::CellCall` can be called from trigger bindings
+
+### Phase 4 — Cell-to-Cell Communication
+
+Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8.4.
+
+- Exposed output ports of one cell feed into input arguments of another
+- Static wiring at compile time (like hardware signals)
+- Compiler can statically schedule or parallelize independent cells

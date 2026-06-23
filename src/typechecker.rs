@@ -939,6 +939,110 @@ impl TypeChecker {
                     )),
             );
         }
+
+        // 4. Cell isolation: verify transactions don't reference external state
+        let local_names: std::collections::HashSet<&str> = std::collections::HashSet::from_iter(
+            cell.fields.iter().map(|f| f.name.as_str())
+                .chain(cell.parameters.iter().map(|(n, _)| n.as_str()))
+                .chain(["true", "false", "null"].iter().cloned())
+        );
+        for txn in &cell.transactions {
+            self.check_cell_expression_isolation(txn, &local_names, &cell.name);
+        }
+    }
+
+    fn check_cell_expression_isolation(&self, txn: &Transaction, local_names: &std::collections::HashSet<&str>, cell_name: &str) {
+        for stmt in &txn.body {
+            self.check_cell_stmt_isolation(stmt, local_names, cell_name);
+        }
+    }
+
+    fn check_cell_stmt_isolation(&self, stmt: &Statement, local_names: &std::collections::HashSet<&str>, cell_name: &str) {
+        match stmt {
+            Statement::Assignment { expr, lhs, .. } => {
+                self.check_cell_expr_isolation(expr, local_names, cell_name);
+                self.check_cell_expr_isolation(lhs, local_names, cell_name);
+            }
+            Statement::Let { expr: Some(e), .. } => {
+                self.check_cell_expr_isolation(e, local_names, cell_name);
+            }
+            Statement::Expression(e) => self.check_cell_expr_isolation(e, local_names, cell_name),
+            Statement::Term { values, swan_song, .. } | Statement::TermBang { values, swan_song, .. } => {
+                for v in values.iter().flatten() { self.check_cell_expr_isolation(v, local_names, cell_name); }
+                if let Some(s) = swan_song { self.check_cell_stmt_isolation(s, local_names, cell_name); }
+            }
+            Statement::Guarded { condition, statements, .. } => {
+                self.check_cell_expr_isolation(condition, local_names, cell_name);
+                for s in statements { self.check_cell_stmt_isolation(s, local_names, cell_name); }
+            }
+            Statement::Unification { expr, .. } => self.check_cell_expr_isolation(expr, local_names, cell_name),
+            Statement::Escape(Some(e)) => self.check_cell_expr_isolation(e, local_names, cell_name),
+            Statement::LocalTrigger { expr: Some(e), .. } => self.check_cell_expr_isolation(e, local_names, cell_name),
+            Statement::Foreach { list, body, .. } => {
+                self.check_cell_expr_isolation(list, local_names, cell_name);
+                for s in body { self.check_cell_stmt_isolation(s, local_names, cell_name); }
+            }
+            Statement::Oracle { body, handler, .. } => {
+                for s in body { self.check_cell_stmt_isolation(s, local_names, cell_name); }
+                for s in handler { self.check_cell_stmt_isolation(s, local_names, cell_name); }
+            }
+            Statement::Await { expr, .. } => self.check_cell_expr_isolation(expr, local_names, cell_name),
+            Statement::Async { body, .. } => self.check_cell_stmt_isolation(body, local_names, cell_name),
+            Statement::AsyncAwait { body, .. } => self.check_cell_stmt_isolation(body, local_names, cell_name),
+            Statement::SyncBlock { body } => { for s in body { self.check_cell_stmt_isolation(s, local_names, cell_name); } }
+            Statement::TrgBinding { instance, .. } => self.check_cell_expr_isolation(instance, local_names, cell_name),
+            _ => {}
+        }
+    }
+
+    fn check_cell_expr_isolation(&self, expr: &Expr, local_names: &std::collections::HashSet<&str>, cell_name: &str) {
+        match expr {
+            Expr::Identifier(name) => {
+                if !local_names.contains(name.as_str())
+                    && !name.starts_with("__")
+                    && !name.contains('#')
+                {
+                    self.diagnostics.borrow_mut().push(
+                        Diagnostic::new("C003", Severity::Error,
+                            &format!("cell '{}' references external identifier '{}' — cells cannot access parent state", cell_name, name))
+                            .with_explanation(&format!(
+                                "identifier '{}' is not a field or parameter of cell '{}'. All cell state must be declared in the cell body.",
+                                name, cell_name
+                            )),
+                    );
+                }
+            }
+            Expr::Call(_callee_name, args) => {
+                // callee is a String (function name), not an Expr
+                for a in args { self.check_cell_expr_isolation(a, local_names, cell_name); }
+            }
+            Expr::CellCall(callee, args) => {
+                self.check_cell_expr_isolation(callee, local_names, cell_name);
+                for a in args { self.check_cell_expr_isolation(a, local_names, cell_name); }
+            }
+            Expr::IntrinsicCall { args, .. } => {
+                for a in args { self.check_cell_expr_isolation(a, local_names, cell_name); }
+            }
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
+                | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
+                | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r)
+                | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) | Expr::Like(l, r) => {
+                self.check_cell_expr_isolation(l, local_names, cell_name);
+                self.check_cell_expr_isolation(r, local_names, cell_name);
+            }
+            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::IsType(e, _) | Expr::FromCheck(e, _) | Expr::Cast(e, _) => {
+                self.check_cell_expr_isolation(e, local_names, cell_name);
+            }
+            Expr::ListLiteral(items) | Expr::Tuple(items) => {
+                for i in items { self.check_cell_expr_isolation(i, local_names, cell_name); }
+            }
+            Expr::ListIndex(list, idx) => {
+                self.check_cell_expr_isolation(list, local_names, cell_name);
+                self.check_cell_expr_isolation(idx, local_names, cell_name);
+            }
+            Expr::Projection { source, .. } => self.check_cell_expr_isolation(source, local_names, cell_name),
+            _ => {}
+        }
     }
 
     fn check_output_type_names(&self, ot: &OutputType, seen: &mut Vec<String>) {

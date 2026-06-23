@@ -3966,6 +3966,8 @@ impl LlvmBackend {
 
                 for (ti, txn) in cell.transactions.iter().enumerate() {
                     let fire_l = format!(".cl_{}_{}", self.txn_counter, ti);
+                    let post_ok_l = format!(".cl_{}_{}_pok", self.txn_counter, ti);
+                    let reset_l = format!(".cl_{}_{}_pres", self.txn_counter, ti);
                     let skip_l = format!(".cl_{}_s_{}", self.txn_counter, ti);
 
                     // Evaluate precondition with rewritten identifiers
@@ -3975,15 +3977,21 @@ impl LlvmBackend {
                     writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, pre_val.name, fire_l, skip_l).ok();
                     writeln!(out, "{}:", fire_l).ok();
 
-                    // Set any_fired = true
-                    writeln!(out, "{}store i8 1, ptr {}, align 1", indent, any_fired).ok();
-
                     // Execute body
                     for stmt in &txn.body {
                         let rewritten = Self::rewrite_cell_stmt_identifiers(stmt, &callee_name);
                         self.emit_stmt(out, &rewritten, indent);
                     }
 
+                    // Check postcondition — set any_fired only if postcondition is true
+                    let post_expr = Self::rewrite_cell_identifiers(&txn.contract.post_condition, &callee_name);
+                    let post_val = self.emit_expr(out, &post_expr, indent);
+                    writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, post_val.name, post_ok_l, reset_l).ok();
+                    writeln!(out, "{}:", post_ok_l).ok();
+                    writeln!(out, "{}store i8 1, ptr {}, align 1", indent, any_fired).ok();
+                    writeln!(out, "{}br label %{}", indent, skip_l).ok();
+                    writeln!(out, "{}:", reset_l).ok();
+                    writeln!(out, "{}store i8 0, ptr {}, align 1", indent, any_fired).ok();
                     writeln!(out, "{}br label %{}", indent, skip_l).ok();
                     writeln!(out, "{}:", skip_l).ok();
                 }
