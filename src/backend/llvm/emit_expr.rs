@@ -1,6 +1,19 @@
-use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, Pattern, ProjectionTarget, SliceCoordinate, Statement, Type};
+use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, OutputType, Pattern, PipeChain, PipeStep, ProjectionTarget, SliceCoordinate, Statement, Type};
 use crate::backend::llvm::{float_to_llvm_hex, LlvmBackend, TypedRegister};
+use crate::features::arrow::{ArrowMutExpr, ArrowDiscardExpr, ArrowTransferExpr};
+use crate::features::binary_op::BinaryOpExpr;
+use crate::features::block::BlockExpr;
+use crate::features::call::CallExpr;
+use crate::features::collection::{ListLiteralExpr, MapLiteralExpr, MultiSliceExpr, SetLiteralExpr, SliceExpr};
+use crate::features::ellipsis::EllipsisExpr;
+use crate::features::field::{FieldAccessExpr, ObjectLiteralExpr, StructInstanceExpr};
+use crate::features::pattern::{MatchExpr, PatternMatchExpr};
+use crate::features::projection::ProjectionExpr;
+use crate::features::sigcall::SigCallExpr;
+use crate::features::subtype::SubtypeProjectionExpr;
 use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
+use crate::features::tuple::{TupleDestructureExpr, TupleExpr};
+use crate::features::unary_op::UnaryOpExpr;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -3885,10 +3898,114 @@ impl LlvmBackend {
                 };
                 return TypedRegister { name: cv, ty: ret_ty };
             }
-            // ── CellCall — Phase 1 stub ───────────────────────
-            Expr::CellCall(_, _) => {
-                writeln!(out, "{}call void @llvm.trap()", indent).ok();
-                writeln!(out, "{}unreachable", indent).ok();
+            // ── CellCall ──────────────────────────────────────────
+            Expr::CellCall(callee, args) => {
+                let callee_name = match callee.as_ref() {
+                    Expr::Identifier(name) => name.clone(),
+                    _ => { writeln!(out, "{}call void @llvm.trap()", indent).ok(); writeln!(out, "{}unreachable", indent).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+                };
+                let cell = match self.cell_defs.get(&callee_name) {
+                    Some(c) => c.clone(),
+                    None => { writeln!(out, "{}call void @llvm.trap()", indent).ok(); writeln!(out, "{}unreachable", indent).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+                };
+
+                // 1. Store input args to prefixed parameter fields
+                for (i, (param_name, _param_ty)) in cell.parameters.iter().enumerate() {
+                    if i < args.len() {
+                        let arg_reg = self.emit_expr(out, &args[i], indent);
+                        let prefixed = format!("cell${}${}", callee_name, param_name);
+                        if let Some(&idx) = self.field_index_map.get(&prefixed) {
+                            let ll_ty = self.field_types[idx].clone();
+                            let gep = format!("%csp_{}_{}", &callee_name, &param_name);
+                            writeln!(out, "{}{} = getelementptr %State, ptr {}, i32 0, i32 {}",
+                                indent, gep, self.state_reg_name, idx).ok();
+                            let adapted = self.adapt_to_i64(out, indent, &arg_reg);
+                            let store_val = match ll_ty.as_str() {
+                                "i8" => {
+                                    let t = format!("%cstr_{}_{}", &callee_name, &param_name);
+                                    writeln!(out, "{}{} = trunc i64 {} to i8", indent, t, adapted).ok();
+                                    t
+                                }
+                                "i32" => {
+                                    let t = format!("%cst_{}_{}", &callee_name, &param_name);
+                                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, adapted).ok();
+                                    t
+                                }
+                                "float" => {
+                                    let t = format!("%cstf_{}_{}", &callee_name, &param_name);
+                                    writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, adapted).ok();
+                                    let fl = format!("%cstfl_{}_{}", &callee_name, &param_name);
+                                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, t).ok();
+                                    fl
+                                }
+                                "i8*" => {
+                                    let t = format!("%cstp_{}_{}", &callee_name, &param_name);
+                                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, t, adapted).ok();
+                                    t
+                                }
+                                _ => adapted,
+                            };
+                            writeln!(out, "{}store {} {}, ptr {}, align 8",
+                                indent, ll_ty, store_val, gep).ok();
+                        }
+                    }
+                }
+
+                // 2. Single-pass through transactions with identifier rewriting
+                for (ti, txn) in cell.transactions.iter().enumerate() {
+                    let fire_l = format!(".cf_{}_{}", self.txn_counter, ti);
+                    let skip_l = format!(".cs_{}_{}", self.txn_counter, ti);
+
+                    // Evaluate precondition (rewriting identifiers to prefixed names)
+                    let pre_expr = Self::rewrite_cell_identifiers(&txn.contract.pre_condition, &callee_name);
+                    let pre_val = self.emit_expr(out, &pre_expr, indent);
+
+                    writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, pre_val.name, fire_l, skip_l).ok();
+                    writeln!(out, "{}:", fire_l).ok();
+
+                    // Execute body
+                    for stmt in &txn.body {
+                        let rewritten = Self::rewrite_cell_stmt_identifiers(stmt, &callee_name);
+                        self.emit_stmt(out, &rewritten, indent);
+                    }
+
+                    writeln!(out, "{}br label %{}", indent, skip_l).ok();
+                    writeln!(out, "{}:", skip_l).ok();
+                }
+
+                // 3. Read designated output from prefixed output field
+                let output_names = Self::extract_output_names_llvm(&cell.output_type);
+                if let Some(first_name) = output_names.first() {
+                    let prefixed = format!("cell${}${}", callee_name, first_name);
+                    if let Some(&idx) = self.field_index_map.get(&prefixed) {
+                        let ll_ty = &self.field_types[idx];
+                        let gep = format!("%cgo_{}_{}", &callee_name, first_name);
+                        writeln!(out, "{}{} = getelementptr %State, ptr {}, i32 0, i32 {}",
+                            indent, gep, self.state_reg_name, idx).ok();
+                        writeln!(out, "{}{} = load {}, ptr {}, align 8", indent, v, ll_ty, gep).ok();
+                        let ret_ty = match ll_ty.as_str() {
+                            "i8" => Type::Bool,
+                            "i32" => Type::Char,
+                            "float" => Type::Float,
+                            "i8*" => Type::String,
+                            _ => Type::Int,
+                        };
+                        if ret_ty == Type::Int && ll_ty != "i64" {
+                            let boxed = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = zext {} {} to i64", indent, boxed, ll_ty, v).ok();
+                            return TypedRegister { name: boxed, ty: Type::Int };
+                        }
+                        if ret_ty == Type::String {
+                            let boxed = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, boxed, v).ok();
+                            return TypedRegister { name: boxed, ty: Type::Int };
+                        }
+                        return TypedRegister { name: v.clone(), ty: ret_ty };
+                    }
+                }
+
+                // Fallback: return 0
+                writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
             _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }
@@ -3896,6 +4013,403 @@ impl LlvmBackend {
         // Default: treat as Int. Float operations are handled explicitly
         // by emit_binop/emit_fcmp which return Type::Float/Bool respectively.
         TypedRegister { name: v, ty: Type::Int }
+    }
+
+    // ── Cell identifier rewriting helpers ──────────────────────
+
+    fn rewrite_cell_identifiers(expr: &Expr, cell_name: &str) -> Expr {
+        let p = |name: &str| -> String { format!("cell${}${}", cell_name, name) };
+        match expr {
+            // Leaf nodes — no identifiers
+            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::RegexLiteral(_)
+                | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Ellipsis
+                | Expr::SharedMem(_) => expr.clone(),
+            Expr::Literal(lit) => Expr::Literal(lit.clone()),
+            // Identifier variants — rewrite to prefixed form
+            Expr::Identifier(name) => Expr::Identifier(p(name)),
+            Expr::OwnedRef(name) => Expr::OwnedRef(p(name)),
+            Expr::PriorState(name) => Expr::PriorState(p(name)),
+            Expr::EllipsisExpr(e) => Expr::EllipsisExpr(e.clone()),
+            Expr::TypeRef(name) => Expr::TypeRef(name.clone()),
+            // Arrow variants
+            Expr::ArrowMut { dir, target, index, value } => Expr::ArrowMut {
+                dir: dir.clone(),
+                target: Box::new(Self::rewrite_cell_identifiers(target, cell_name)),
+                index: Box::new(Self::rewrite_cell_identifiers(index, cell_name)),
+                value: value.as_ref().map(|v| Box::new(Self::rewrite_cell_identifiers(v, cell_name))),
+            },
+            Expr::ArrowDiscard { target, index } => Expr::ArrowDiscard {
+                target: Box::new(Self::rewrite_cell_identifiers(target, cell_name)),
+                index: Box::new(Self::rewrite_cell_identifiers(index, cell_name)),
+            },
+            Expr::ArrowTransfer { dest, source, filter } => Expr::ArrowTransfer {
+                dest: Box::new(Self::rewrite_cell_identifiers(dest, cell_name)),
+                source: Box::new(Self::rewrite_cell_identifiers(source, cell_name)),
+                filter: filter.as_ref().map(|f| Box::new(Self::rewrite_cell_identifiers(f, cell_name))),
+            },
+            Expr::ArrowMutExpr(e) => Expr::ArrowMutExpr(ArrowMutExpr {
+                dir: e.dir.clone(),
+                target: Box::new(Self::rewrite_cell_identifiers(&e.target, cell_name)),
+                index: Box::new(Self::rewrite_cell_identifiers(&e.index, cell_name)),
+                value: e.value.as_ref().map(|v| Box::new(Self::rewrite_cell_identifiers(v, cell_name))),
+            }),
+            Expr::ArrowDiscardExpr(e) => Expr::ArrowDiscardExpr(ArrowDiscardExpr {
+                target: Box::new(Self::rewrite_cell_identifiers(&e.target, cell_name)),
+                index: Box::new(Self::rewrite_cell_identifiers(&e.index, cell_name)),
+            }),
+            Expr::ArrowTransferExpr(e) => Expr::ArrowTransferExpr(ArrowTransferExpr {
+                dest: Box::new(Self::rewrite_cell_identifiers(&e.dest, cell_name)),
+                source: Box::new(Self::rewrite_cell_identifiers(&e.source, cell_name)),
+                filter: e.filter.as_ref().map(|f| Box::new(Self::rewrite_cell_identifiers(f, cell_name))),
+            }),
+            // Binary ops — two children
+            Expr::Add(l, r) => Expr::Add(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Sub(l, r) => Expr::Sub(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Mul(l, r) => Expr::Mul(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Div(l, r) => Expr::Div(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Mod(l, r) => Expr::Mod(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Eq(l, r) => Expr::Eq(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Ne(l, r) => Expr::Ne(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Lt(l, r) => Expr::Lt(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Le(l, r) => Expr::Le(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Gt(l, r) => Expr::Gt(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Ge(l, r) => Expr::Ge(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::And(l, r) => Expr::And(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Or(l, r) => Expr::Or(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::BitAnd(l, r) => Expr::BitAnd(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::BitOr(l, r) => Expr::BitOr(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::BitXor(l, r) => Expr::BitXor(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Shl(l, r) => Expr::Shl(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Shr(l, r) => Expr::Shr(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            Expr::Concat(l, r) => Expr::Concat(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            // Unary ops
+            Expr::Not(e) => Expr::Not(Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
+            Expr::Neg(e) => Expr::Neg(Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
+            Expr::BitNot(e) => Expr::BitNot(Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
+            // IsType / FromCheck / Like
+            Expr::IsType(e, target) => Expr::IsType(Box::new(Self::rewrite_cell_identifiers(e, cell_name)), target.clone()),
+            Expr::FromCheck(e, ty) => Expr::FromCheck(Box::new(Self::rewrite_cell_identifiers(e, cell_name)), ty.clone()),
+            Expr::Like(l, r) => Expr::Like(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
+            // Pattern B: BinaryOp / UnaryOp
+            Expr::BinaryOp(e) => Expr::BinaryOp(Box::new(BinaryOpExpr {
+                kind: e.kind,
+                left: Box::new(Self::rewrite_cell_identifiers(&e.left, cell_name)),
+                right: Box::new(Self::rewrite_cell_identifiers(&e.right, cell_name)),
+            })),
+            Expr::UnaryOp(e) => Expr::UnaryOp(Box::new(UnaryOpExpr {
+                kind: e.kind,
+                operand: Box::new(Self::rewrite_cell_identifiers(&e.operand, cell_name)),
+            })),
+            // Cast and Projection
+            Expr::Cast(e, ty) => Expr::Cast(Box::new(Self::rewrite_cell_identifiers(e, cell_name)), ty.clone()),
+            Expr::Projection { source, target } => Expr::Projection {
+                source: Box::new(Self::rewrite_cell_identifiers(source, cell_name)),
+                target: target.clone(),
+            },
+            Expr::ProjectionExpr(e) => Expr::ProjectionExpr(ProjectionExpr {
+                source: Box::new(Self::rewrite_cell_identifiers(&e.source, cell_name)),
+                target: e.target.clone(),
+            }),
+            // Calls
+            Expr::Call(name, args) => Expr::Call(
+                name.clone(),
+                args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            ),
+            Expr::CallExpr(e) => Expr::CallExpr(CallExpr {
+                name: e.name.clone(),
+                args: e.args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            }),
+            Expr::CellCall(callee, args) => Expr::CellCall(
+                Box::new(Self::rewrite_cell_identifiers(callee, cell_name)),
+                args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            ),
+            // Template/Macro calls
+            Expr::TemplateCall { name, args, block, span } => Expr::TemplateCall {
+                name: name.clone(),
+                args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+                block: block.clone(),
+                span: *span,
+            },
+            Expr::MacroCall { name, args, block, span } => Expr::MacroCall {
+                name: name.clone(),
+                args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+                block: block.clone(),
+                span: *span,
+            },
+            Expr::IntrinsicCall { intrinsic, args } => Expr::IntrinsicCall {
+                intrinsic: intrinsic.clone(),
+                args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            },
+            // Collections
+            Expr::ListLiteral(items) => Expr::ListLiteral(
+                items.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            ),
+            Expr::ListLiteralExpr(e) => Expr::ListLiteralExpr(ListLiteralExpr {
+                elements: e.elements.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            }),
+            Expr::MapLiteral(pairs) => Expr::MapLiteral(
+                pairs.iter().map(|(k, v)| (Self::rewrite_cell_identifiers(k, cell_name), Self::rewrite_cell_identifiers(v, cell_name))).collect(),
+            ),
+            Expr::MapLiteralExpr(e) => Expr::MapLiteralExpr(MapLiteralExpr {
+                entries: e.entries.iter().map(|(k, v)| (Self::rewrite_cell_identifiers(k, cell_name), Self::rewrite_cell_identifiers(v, cell_name))).collect(),
+            }),
+            Expr::SetLiteral(items) => Expr::SetLiteral(
+                items.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            ),
+            Expr::SetLiteralExpr(e) => Expr::SetLiteralExpr(SetLiteralExpr {
+                entries: e.entries.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            }),
+            Expr::ListIndex(list, idx) => Expr::ListIndex(
+                Box::new(Self::rewrite_cell_identifiers(list, cell_name)),
+                Box::new(Self::rewrite_cell_identifiers(idx, cell_name)),
+            ),
+            // Slice / MultiSlice
+            Expr::Slice { value, start, end, stride, mask } => Expr::Slice {
+                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
+                start: start.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
+                end: end.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
+                stride: stride.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
+                mask: mask.as_ref().map(|m| Box::new(Self::rewrite_cell_identifiers(m, cell_name))),
+            },
+            Expr::SliceExpr(e) => Expr::SliceExpr(SliceExpr {
+                value: Box::new(Self::rewrite_cell_identifiers(&e.value, cell_name)),
+                start: e.start.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
+                end: e.end.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
+                stride: e.stride.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
+                mask: e.mask.as_ref().map(|m| Box::new(Self::rewrite_cell_identifiers(m, cell_name))),
+            }),
+            Expr::MultiSlice { value, ops } => Expr::MultiSlice {
+                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
+                ops: ops.clone(),
+            },
+            Expr::MultiSliceExpr(e) => Expr::MultiSliceExpr(MultiSliceExpr {
+                value: Box::new(Self::rewrite_cell_identifiers(&e.value, cell_name)),
+                ops: e.ops.clone(),
+            }),
+            // Field access
+            Expr::FieldAccess(obj, field) => Expr::FieldAccess(
+                Box::new(Self::rewrite_cell_identifiers(obj, cell_name)),
+                field.clone(),
+            ),
+            Expr::FieldAccessExpr(e) => Expr::FieldAccessExpr(FieldAccessExpr {
+                obj: Box::new(Self::rewrite_cell_identifiers(&e.obj, cell_name)),
+                field: e.field.clone(),
+            }),
+            // Struct / Object
+            Expr::StructInstance(name, fields) => Expr::StructInstance(
+                name.clone(),
+                fields.iter().map(|(n, e)| (n.clone(), Self::rewrite_cell_identifiers(e, cell_name))).collect(),
+            ),
+            Expr::StructInstanceExpr(e) => Expr::StructInstanceExpr(StructInstanceExpr {
+                typename: e.typename.clone(),
+                fields: e.fields.iter().map(|(n, e)| (n.clone(), Self::rewrite_cell_identifiers(e, cell_name))).collect(),
+            }),
+            Expr::ObjectLiteral(fields) => Expr::ObjectLiteral(
+                fields.iter().map(|(n, e)| (n.clone(), Self::rewrite_cell_identifiers(e, cell_name))).collect(),
+            ),
+            Expr::ObjectLiteralExpr(e) => Expr::ObjectLiteralExpr(ObjectLiteralExpr {
+                fields: e.fields.iter().map(|(n, e)| (n.clone(), Self::rewrite_cell_identifiers(e, cell_name))).collect(),
+            }),
+            // Pattern / Match
+            Expr::PatternMatch { value, variant, fields } => Expr::PatternMatch {
+                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
+                variant: variant.clone(),
+                fields: fields.clone(),
+            },
+            Expr::PatternMatchExpr(e) => Expr::PatternMatchExpr(PatternMatchExpr {
+                value: Box::new(Self::rewrite_cell_identifiers(&e.value, cell_name)),
+                variant: e.variant.clone(),
+                fields: e.fields.clone(),
+            }),
+            Expr::Match { value, arms } => Expr::Match {
+                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
+                arms: arms.clone(),
+            },
+            Expr::MatchExpr(e) => Expr::MatchExpr(MatchExpr {
+                value: Box::new(Self::rewrite_cell_identifiers(&e.value, cell_name)),
+                arms: e.arms.clone(),
+            }),
+            // Block
+            Expr::Block(stmts, last) => Expr::Block(
+                stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                Box::new(Self::rewrite_cell_identifiers(last, cell_name)),
+            ),
+            Expr::BlockExpr(e) => Expr::BlockExpr(BlockExpr {
+                stmts: e.stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                last: Box::new(Self::rewrite_cell_identifiers(&e.last, cell_name)),
+            }),
+            // Quote / Interpolation
+            Expr::Interpolate(name) => Expr::Interpolate(name.clone()),
+            Expr::InterpolateExpr(e) => Expr::InterpolateExpr(Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
+            Expr::QuoteBlock { statements, trailing_expr } => Expr::QuoteBlock {
+                statements: statements.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                trailing_expr: trailing_expr.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
+            },
+            // Tuple
+            Expr::TupleDestructure(names, expr) => Expr::TupleDestructure(
+                names.clone(),
+                Box::new(Self::rewrite_cell_identifiers(expr, cell_name)),
+            ),
+            Expr::TupleDestructureExpr(e) => Expr::TupleDestructureExpr(TupleDestructureExpr {
+                names: e.names.clone(),
+                expr: Box::new(Self::rewrite_cell_identifiers(&e.expr, cell_name)),
+            }),
+            Expr::Tuple(items) => Expr::Tuple(
+                items.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            ),
+            Expr::TupleExpr(e) => Expr::TupleExpr(TupleExpr {
+                exprs: e.exprs.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
+            }),
+            // SigCall
+            Expr::SigCall { modifier, expr } => Expr::SigCall {
+                modifier: modifier.clone(),
+                expr: Box::new(Self::rewrite_cell_identifiers(expr, cell_name)),
+            },
+            Expr::SigCallExpr(e) => Expr::SigCallExpr(SigCallExpr {
+                modifier: e.modifier.clone(),
+                expr: Box::new(Self::rewrite_cell_identifiers(&e.expr, cell_name)),
+            }),
+            // Subtype projection
+            Expr::SubtypeProjection { source, ops } => Expr::SubtypeProjection {
+                source: Box::new(Self::rewrite_cell_identifiers(source, cell_name)),
+                ops: ops.clone(),
+            },
+            Expr::SubtypeProjectionExpr(e) => Expr::SubtypeProjectionExpr(SubtypeProjectionExpr {
+                source: Box::new(Self::rewrite_cell_identifiers(&e.source, cell_name)),
+                ops: e.ops.clone(),
+            }),
+            // DBVL
+            Expr::DbvlTable { path, field_names, key_offsets, schema_name } => Expr::DbvlTable {
+                path: path.clone(),
+                field_names: field_names.clone(),
+                key_offsets: key_offsets.clone(),
+                schema_name: schema_name.clone(),
+            },
+            Expr::DbvlTableExpr(e) => Expr::DbvlTableExpr(e.clone()),
+            // Pipe chain
+            Expr::PipeChain(chain) => Expr::PipeChain(PipeChain {
+                initial: Box::new(Self::rewrite_cell_identifiers(&chain.initial, cell_name)),
+                steps: chain.steps.iter().map(|s| PipeStep {
+                    target: Box::new(Self::rewrite_cell_identifiers(&s.target, cell_name)),
+                    skip: s.skip,
+                }).collect(),
+            }),
+        }
+    }
+
+    fn rewrite_cell_stmt_identifiers(stmt: &Statement, cell_name: &str) -> Statement {
+        match stmt {
+            Statement::Assignment { lhs, expr, timeout, modifiers } => Statement::Assignment {
+                lhs: Self::rewrite_cell_identifiers(lhs, cell_name),
+                expr: Self::rewrite_cell_identifiers(expr, cell_name),
+                timeout: timeout.clone(),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Unification { name, variant, fields, expr } => Statement::Unification {
+                name: name.clone(),
+                variant: variant.clone(),
+                fields: fields.clone(),
+                expr: Self::rewrite_cell_identifiers(expr, cell_name),
+            },
+            Statement::Guarded { condition, statements } => Statement::Guarded {
+                condition: Self::rewrite_cell_identifiers(condition, cell_name),
+                statements: statements.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+            },
+            Statement::Term { values, swan_song, modifiers } => Statement::Term {
+                values: values.iter().map(|v| v.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name))).collect(),
+                swan_song: swan_song.as_ref().map(|s| Box::new(Self::rewrite_cell_stmt_identifiers(s, cell_name))),
+                modifiers: modifiers.clone(),
+            },
+            Statement::TermBang { values, swan_song, modifiers } => Statement::TermBang {
+                values: values.iter().map(|v| v.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name))).collect(),
+                swan_song: swan_song.as_ref().map(|s| Box::new(Self::rewrite_cell_stmt_identifiers(s, cell_name))),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Escape(expr) => Statement::Escape(
+                expr.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
+            ),
+            Statement::Expression(expr) => Statement::Expression(
+                Self::rewrite_cell_identifiers(expr, cell_name),
+            ),
+            Statement::Let { name, ty, expr, address, address_expr, bit_range, constraint, is_override, modifiers } => Statement::Let {
+                name: name.clone(),
+                ty: ty.clone(),
+                expr: expr.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
+                address: *address,
+                address_expr: address_expr.as_ref().map(|a| Box::new(Self::rewrite_cell_identifiers(a, cell_name))),
+                bit_range: bit_range.clone(),
+                constraint: constraint.as_ref().map(|c| Box::new(Self::rewrite_cell_identifiers(c, cell_name))),
+                is_override: *is_override,
+                modifiers: modifiers.clone(),
+            },
+            Statement::InlineAsm { asm_string, clobbers, span } => Statement::InlineAsm {
+                asm_string: asm_string.clone(),
+                clobbers: clobbers.clone(),
+                span: *span,
+            },
+            Statement::LocalTrigger { name, ty, expr, span } => Statement::LocalTrigger {
+                name: name.clone(),
+                ty: ty.clone(),
+                expr: expr.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
+                span: *span,
+            },
+            Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
+                name: name.clone(),
+                ty: ty.clone(),
+                instance: Self::rewrite_cell_identifiers(instance, cell_name),
+                port: port.clone(),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Alka(alka) => Statement::Alka(alka.clone()),
+            Statement::OnExit { body, span } => Statement::OnExit {
+                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                span: *span,
+            },
+            Statement::SyncBlock { body } => Statement::SyncBlock {
+                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+            },
+            Statement::Foreach { item, list, body, modifiers } => Statement::Foreach {
+                item: item.clone(),
+                list: Box::new(Self::rewrite_cell_identifiers(list, cell_name)),
+                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Oracle { handler, body, span } => Statement::Oracle {
+                handler: handler.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                span: *span,
+            },
+            Statement::Await { expr, modifiers } => Statement::Await {
+                expr: Self::rewrite_cell_identifiers(expr, cell_name),
+                modifiers: modifiers.clone(),
+            },
+            Statement::Async { body, modifiers } => Statement::Async {
+                body: Box::new(Self::rewrite_cell_stmt_identifiers(body, cell_name)),
+                modifiers: modifiers.clone(),
+            },
+            Statement::AsyncAwait { body, lhs, modifiers } => Statement::AsyncAwait {
+                body: Box::new(Self::rewrite_cell_stmt_identifiers(body, cell_name)),
+                lhs: lhs.clone(),
+                modifiers: modifiers.clone(),
+            },
+        }
+    }
+
+    fn extract_output_names_llvm(ot: &Option<OutputType>) -> Vec<String> {
+        match ot {
+            Some(OutputType::Named(name, inner)) => {
+                let mut names = vec![name.clone()];
+                names.extend(Self::extract_output_names_llvm(&Some(inner.as_ref().clone())));
+                names
+            }
+            Some(OutputType::Tuple(types)) => {
+                types.iter().flat_map(|t| Self::extract_output_names_llvm(&Some(t.clone()))).collect()
+            }
+            Some(OutputType::Union(types)) => {
+                types.iter().flat_map(|t| Self::extract_output_names_llvm(&Some(t.clone()))).collect()
+            }
+            Some(OutputType::Single(_)) | Some(OutputType::Array(_)) | None => Vec::new(),
+        }
     }
 
     pub(crate) fn emit_precomputed_main(

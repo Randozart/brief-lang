@@ -2577,6 +2577,19 @@ self.emit_declares(&mut out);
                     .insert(t.name.clone(), self.field_types.len());
                 self.field_types.push(self.llvm_type(&t.ty).to_string());
                 self.field_initializers.insert(t.name.clone(), None);
+            } else if let TopLevel::Cell(cell) = item {
+                for field in &cell.fields {
+                    let prefixed = format!("cell${}${}", cell.name, field.name);
+                    self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                    self.field_types.push(self.llvm_type(&field.ty).to_string());
+                    self.field_initializers.insert(prefixed, None);
+                }
+                for (name, ty) in &cell.parameters {
+                    let prefixed = format!("cell${}${}", cell.name, name);
+                    self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                    self.field_types.push(self.llvm_type(ty).to_string());
+                    self.field_initializers.insert(prefixed, None);
+                }
             }
         }
     }
