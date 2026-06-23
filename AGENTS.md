@@ -12,6 +12,67 @@ optimization enabler. Full machine access is available through contracts
 proven at compile time, not `unsafe` blocks. See
 `docs/architecture/philosophy.md` for the full thesis.
 
+### GLUE — General Language Unification Engine
+
+GLUE is a universal FFI broker built on Brief's `meld` system. Any two
+languages that consume LLVM-compatible object code can be linked through GLUE.
+Neither language knows Brief exists. Both see their own native interface.
+Brief is the invisible translator — `meld` proves type compatibility at
+compile time, `frgn` declares calls into the target language, `#export`
+exposes functions to the caller.
+
+**The bridge is native object code.** No C compiler, no `extern "C"`, no `cc`
+crate. Brief emits LLVM IR → native `.o`/`.a`/`.wasm`. The foreign language's
+linker consumes it directly.
+
+**GLUE adapters use Brief's `$!` macro system**, not a separate template engine.
+A `$!macro` takes the bridge's `#export`/`frgn`/`meld` declarations at compile
+time and emits native wrapper source code for the target language. Adding a
+language = writing one `.bv` macro file.
+
+**Key directives:**
+- `brief link <path> <function>` — analyzes a foreign library, generates a `.bv`
+  with `frgn` declarations. Cross-references against the `Intrinsic` enum in
+  `src/ast.rs` — if a `frgn` name matches an intrinsic, emit `intrinsic_call#()`
+  instead. This replaces the old TOML binding system.
+- `brief export <bridge.bv> <language>` — compiles to `.a` (library mode, no
+  `main`), reads `glue.dbvl` to find the adapter entry for `<language>`, invokes
+  the `$!` macro for that language, generates native wrappers.
+- `glue <target> <function> <language>` — one-shot wrapper: `brief link` + `brief export`.
+
+**GLUE protocol files:**
+- `glue.dbvl` — Data Brief Lines adapter registry (one language per line)
+- `glue.dbvs` — Data Brief Schema that validates `glue.dbvl` entries
+- Adapter macros live in `glue/adapters/<language>.bv`
+
+**Data Brief naming:**
+- `.dbv` — Data Brief, universal data extension. The `V` stands for "Brief."
+- `.dbvl` — Data Brief Lines. Raw data, one line per entry.
+- `.dbvs` — Data Brief Schema. Validates `.dbvl` and `.dbv` files.
+
+### Correctness Over Speed (All Development)
+
+The Brief compiler is built to be correct, not to ship an MVP as fast as
+possible. Being able to test between changes is important, but test with code
+that won't need rewriting immediately.
+
+**This applies to every feature, not just GLUE.** Before any implementation:
+1. Understand WHY the approach is correct (not just THAT it works)
+2. Document the reasoning in the commit
+3. Use Brief's existing systems (`$!` macros, `meld`, contracts) rather than
+   building parallel Rust infrastructure that will be thrown away during
+   self-hosting. Every throwaway Rust template engine is technical debt that
+   must be rewritten in Brief later.
+4. When you encounter a deprecated pattern (frgn where intrinsic exists,
+   double `[true][true]` contracts, TOML bindings for intrinsics), fix it
+   rather than propagating it. The codebase is a living artifact — clean as
+   you go.
+
+**NO prototyping — build clean.** If a feature needs experimentation, do it in
+a sandbox file, not in the main codebase. Every commit should be production-
+quality code that could ship as-is. Stubs, `todo!()`, and `unreachable!()` in
+committed code are bugs.
+
 ### Commands
 - **Build**: `cargo build`
 - **Test**: `cargo test --lib`
