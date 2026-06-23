@@ -3885,6 +3885,12 @@ impl LlvmBackend {
                 };
                 return TypedRegister { name: cv, ty: ret_ty };
             }
+            // ── CellCall — Phase 1 stub ───────────────────────
+            Expr::CellCall(_, _) => {
+                writeln!(out, "{}call void @llvm.trap()", indent).ok();
+                writeln!(out, "{}unreachable", indent).ok();
+                return TypedRegister { name: v, ty: Type::Int };
+            }
             _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }
         }
         // Default: treat as Int. Float operations are handled explicitly

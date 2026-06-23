@@ -149,7 +149,7 @@ pub(crate) fn hoist_terminating_guard(
 }
 
 use crate::ast::{
-    ArrowDir, BracketOp, DispatchMode, Expr, ForeignSignature, Intrinsic, MatchArm, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
+    ArrowDir, BracketOp, CellDef, DispatchMode, Expr, ForeignSignature, Intrinsic, MatchArm, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
 };
 use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
 
@@ -206,6 +206,12 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
         TopLevel::Definition(d) => { for s in &d.body { collect_strings_stmt(s, seen, out); } }
         TopLevel::Constant(c) => { collect_strings_expr(&c.expr, seen, out); }
         TopLevel::StateDecl(s) => { if let Some(ref e) = s.expr { collect_strings_expr(e, seen, out); } }
+        TopLevel::Cell(c) => {
+            for f in &c.fields { if let Some(ref e) = f.default { collect_strings_expr(e, seen, out); } }
+            for txn in &c.transactions { for s in &txn.body { collect_strings_stmt(s, seen, out); } }
+            for d in &c.definitions { for s in &d.body { collect_strings_stmt(s, seen, out); } }
+            for trg in &c.internal_triggers { if let Some(ref e) = trg.condition { collect_strings_expr(e, seen, out); } }
+        }
         _ => {}
     }
 }
@@ -654,6 +660,7 @@ pub struct LlvmBackend {
     pub(crate) constants: HashMap<String, (Type, Expr)>,
     struct_types: HashMap<String, Vec<(String, Type)>>,
     enum_types: HashMap<String, crate::ast::EnumDefinition>,
+    cell_defs: HashMap<String, CellDef>,
     /// Accumulated `!N = !{...}` metadata definitions emitted at module level.
     /// LLVM 18+ rejects metadata definitions inside function bodies, so they
     /// are collected here and flushed by emit_module_end_metadata().
@@ -809,6 +816,7 @@ impl LlvmBackend {
             ssa_old_int_regs: HashMap::new(),
             struct_types: HashMap::new(),
             enum_types: HashMap::new(),
+            cell_defs: HashMap::new(),
             pending_metadata: String::new(),
             variant_disc: HashMap::new(),
             explain: false,
@@ -1322,6 +1330,9 @@ impl LlvmBackend {
                 }
                 TopLevel::Enum(e) => {
                     self.enum_types.insert(e.name.clone(), e.clone());
+                }
+                TopLevel::Cell(c) => {
+                    self.cell_defs.insert(c.name.clone(), c.as_ref().clone());
                 }
                 _ => {}
             }

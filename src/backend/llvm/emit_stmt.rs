@@ -723,9 +723,8 @@ impl LlvmBackend {
                 }
                 self.pending_async_await_count += 1;
             }
-            Statement::TrgBinding { .. } => {
-                writeln!(out, "{}call void @llvm.trap()", indent).ok();
-                writeln!(out, "{}unreachable", indent).ok();
+            Statement::TrgBinding { name, .. } => {
+                writeln!(out, "{}; trg @ {} — Phase 1 stub", indent, name).ok();
             }
         }
     }
