@@ -1381,4 +1381,51 @@ impl LlvmBackend {
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
     }
+
+    /// Emit a standalone `@cell_persistent_ticks(ptr %state)` function that runs
+    /// one convergence pass on each registered persistent cell. Called from the
+    /// main reactor loop after `@reactor_tick`.
+    pub(super) fn emit_persistent_cell_ticks(&mut self, out: &mut String) {
+        let names: Vec<String> = self.cell_defs.iter()
+            .filter(|(_, c)| c.is_persistent)
+            .map(|(name, _)| name.clone())
+            .collect();
+        if names.is_empty() { return; }
+
+        writeln!(out, "define void @cell_persistent_ticks(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
+        writeln!(out, "  entry:").ok();
+
+        let prev_state = self.state_reg_name.clone();
+        self.state_reg_name = "%state".to_string();
+
+        for name in &names {
+            let cell = self.cell_defs.get(name).unwrap().clone();
+            for txn in &cell.transactions {
+                let pre = Self::rewrite_cell_identifiers(
+                    &txn.contract.pre_condition, name);
+                let cond = self.emit_expr(out, &pre, "  ");
+
+                let fire_l = format!(".cpt_{}_{}", name, txn.name);
+                let skip_l = format!(".cpt_{}_{}_s", name, txn.name);
+
+                writeln!(out, "  %cpct_{}_{} = icmp ne i64 {}, 0", name, txn.name, cond.name).ok();
+                writeln!(out, "  br i1 %cpct_{}_{}, label %{}, label %{}",
+                    name, txn.name, fire_l, skip_l).ok();
+                writeln!(out, "{}:", fire_l).ok();
+
+                for stmt in &txn.body {
+                    let rewritten = Self::rewrite_cell_stmt_identifiers(stmt, name);
+                    self.emit_stmt(out, &rewritten, "  ");
+                }
+
+                writeln!(out, "  br label %{}", skip_l).ok();
+                writeln!(out, "{}:", skip_l).ok();
+            }
+        }
+
+        self.state_reg_name = prev_state;
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
 }

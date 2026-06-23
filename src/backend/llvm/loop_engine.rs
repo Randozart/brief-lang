@@ -1172,7 +1172,8 @@ impl LlvmBackend {
                 } else {
                     writeln!(out, "  br label %{}_residual_loop", tn).ok();
                     writeln!(out, "{}_residual_loop:", tn).ok();
-                    writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
+            writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
+            writeln!(out, "  call void @cell_persistent_ticks(ptr noalias nocapture %state)").ok();
                     writeln!(out, "  br label %{}_residual_loop", tn).ok();
                 }
             } else {

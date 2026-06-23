@@ -2111,6 +2111,7 @@ self.emit_declares(&mut out);
                 if has_wake_triggers {
                     writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
                 }
+                self.emit_persistent_cell_ticks(&mut out);
                 self.emit_main(&mut out, has_wake_triggers);
                 // Wake trigger metadata
                 if has_wake_triggers {
@@ -2124,6 +2125,7 @@ self.emit_declares(&mut out);
                 writeln!(out, "}}").ok();
                 writeln!(out).ok();
                 // Main
+                self.emit_persistent_cell_ticks(&mut out);
                 self.emit_main(&mut out, false);
             }
             }

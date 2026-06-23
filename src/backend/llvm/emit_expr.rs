@@ -4050,7 +4050,7 @@ impl LlvmBackend {
 
     // ── Cell identifier rewriting helpers ──────────────────────
 
-    fn rewrite_cell_identifiers(expr: &Expr, cell_name: &str) -> Expr {
+    pub(super) fn rewrite_cell_identifiers(expr: &Expr, cell_name: &str) -> Expr {
         let p = |name: &str| -> String { format!("cell${}${}", cell_name, name) };
         match expr {
             // Leaf nodes — no identifiers
@@ -4330,7 +4330,7 @@ impl LlvmBackend {
         }
     }
 
-    fn rewrite_cell_stmt_identifiers(stmt: &Statement, cell_name: &str) -> Statement {
+    pub(super) fn rewrite_cell_stmt_identifiers(stmt: &Statement, cell_name: &str) -> Statement {
         match stmt {
             Statement::Assignment { lhs, expr, timeout, modifiers } => Statement::Assignment {
                 lhs: Self::rewrite_cell_identifiers(lhs, cell_name),
