@@ -37,12 +37,14 @@ impl LlvmBackend {
         }
 
         if dispatch.is_empty() {
+            writeln!(out, "  call void @cell_persistent_ticks(ptr %state)").ok();
             writeln!(out, "  ret void").ok();
         } else if fusable.is_empty()
             && dispatch.len() >= 2
             && crate::analysis::transition_graph::is_uniform_body_group(txns)
         {
             writeln!(out, "  call void @{}(ptr %state)", dispatch[0]).ok();
+            writeln!(out, "  call void @cell_persistent_ticks(ptr %state)").ok();
             writeln!(out, "  ret void").ok();
         } else {
             let mut pre_regs: Vec<String> = Vec::with_capacity(dispatch.len());
@@ -68,6 +70,11 @@ impl LlvmBackend {
                 writeln!(out, "  br label %{}", c).ok();
                 writeln!(out, "{}:", c).ok();
             }
+            // Tick persistent cell! instances every reactor cycle.
+            // The @cell_persistent_ticks function is emitted unconditionally
+            // in generate() (see emit_toplevel.rs). Single tick point for
+            // all dispatch paths that use @reactor_tick.
+            writeln!(out, "  call void @cell_persistent_ticks(ptr %state)").ok();
             writeln!(out, "  ret void").ok();
         }
         writeln!(out, "}}").ok();

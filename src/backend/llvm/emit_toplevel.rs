@@ -1392,7 +1392,19 @@ impl LlvmBackend {
             .collect();
         if names.is_empty() { return; }
 
-        writeln!(out, "define void @cell_persistent_ticks(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
+        // Emit a standalone @cell_persistent_ticks(ptr %state) that runs one
+        // convergence pass on each registered persistent cell. This is called
+        // from @reactor_tick (see dispatch.rs) so it fires every main loop
+        // iteration regardless of which dispatch path the program takes.
+        //
+        // Why a separate function instead of inlining in each dispatch path?
+        // The LLVM backend has 7+ dispatch strategies (folded, SSA, reactor,
+        // parallel, etc.). A single tick function avoids duplicating the cell
+        // evaluation logic across all of them. The function takes %State* so
+        // it reads/writes the same %State struct as the rest of the program,
+        // using the cell$name$field prefixed slots registered in
+        // build_field_index.
+        writeln!(out, "define void @cell_persistent_ticks(ptr noalias nocapture align 8 %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
 
         let prev_state = self.state_reg_name.clone();

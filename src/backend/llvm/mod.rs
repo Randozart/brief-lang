@@ -1747,6 +1747,7 @@ self.emit_declares(&mut out);
         // Init
         self.txn_counter = 0;
         self.emit_init_state(&mut out);
+        self.emit_persistent_cell_ticks(&mut out);
         writeln!(out).ok();
         // Reactor — sequential or parallel
         // Enumeration and wake trigger detection were computed above
@@ -2111,7 +2112,6 @@ self.emit_declares(&mut out);
                 if has_wake_triggers {
                     writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
                 }
-                self.emit_persistent_cell_ticks(&mut out);
                 self.emit_main(&mut out, has_wake_triggers);
                 // Wake trigger metadata
                 if has_wake_triggers {
@@ -2125,7 +2125,6 @@ self.emit_declares(&mut out);
                 writeln!(out, "}}").ok();
                 writeln!(out).ok();
                 // Main
-                self.emit_persistent_cell_ticks(&mut out);
                 self.emit_main(&mut out, false);
             }
             }
@@ -2580,6 +2579,13 @@ self.emit_declares(&mut out);
                 self.field_types.push(self.llvm_type(&t.ty).to_string());
                 self.field_initializers.insert(t.name.clone(), None);
             } else if let TopLevel::Cell(c) = item {
+                // Cell fields and parameters get prefixed %State slots so the
+                // @cell_persistent_ticks function can access them via standard
+                // GEP + field_index_map lookups. The "cell$name$" prefix is the
+                // same scheme used by rewrite_cell_identifiers in emit_expr.rs,
+                // creating a flat namespace in %State that mirrors the
+                // interpreter's prefix scheme. Both sync and async (persistent)
+                // CellCall codegen depends on these slots.
                 for field in &c.fields {
                     let prefixed = format!("cell${}${}", c.name, field.name);
                     self.field_index_map.insert(prefixed.clone(), self.field_types.len());

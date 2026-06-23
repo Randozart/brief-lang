@@ -5690,3 +5690,55 @@ let spec = crate::target_spec::TargetSpec {
         assert!(!output.contains("call void @llvm.trap()"), "should not have trap stubs");
     }
 
+    #[test]
+    fn test_llvm_cell_persistent_tick_function() {
+        let mut backend = LlvmBackend::new();
+        let cell_def = CellDef {
+            is_persistent: true,
+            name: "persistent_counter".to_string(), type_params: vec![],
+            parameters: vec![],
+            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::Int)))),
+            fields: vec![
+                StructField { name: "val".to_string(), ty: Type::Int, default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+            ],
+            transactions: vec![Transaction {
+                name: "tick".to_string(), is_async: false, is_reactive: true,
+                parameters: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
+                ],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                outputs: vec![Type::Int], output_type: None,
+            }],
+            definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
+        };
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "dummy".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false, os_mode: false, span: None,
+                    attrs: vec![], constraint: None,
+                }),
+                TopLevel::Cell(Box::new(cell_def)),
+                TopLevel::Transaction(Transaction {
+                    name: "main".to_string(), is_async: false, is_reactive: true,
+                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                    body: vec![Statement::Term { values: vec![], swan_song: None, modifiers: vec![] }],
+                    reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                    outputs: vec![], output_type: None,
+                }),
+            ],
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
+            strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("@cell_persistent_ticks"), "should emit persistent tick function");
+        assert!(output.contains("@cell_persistent_ticks("), "should define the tick function");
+        assert!(output.contains("persistent_counter$val"), "cell field should be in State");
+    }
+
