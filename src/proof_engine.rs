@@ -3432,6 +3432,225 @@ impl ProofEngine {
     }
 }
 
+// ── Cost estimation for timing watchdog ──
+
+/// Estimated execution cost of a transaction or definition body.
+/// Each "operation" maps to roughly one CPU cycle in the LLVM backend.
+#[derive(Debug, Clone)]
+pub struct CostEstimate {
+    pub total_ops: u64,
+    pub field_reads: u64,
+    pub field_writes: u64,
+    pub guards: u64,
+    pub intrinsic_calls: u64,
+    pub convergence_bound: Option<u64>,
+    pub includes_io: bool,
+}
+
+impl CostEstimate {
+    pub fn cycles_upper_bound(&self) -> Option<u64> {
+        let per_iter = self.total_ops;
+        match self.convergence_bound {
+            Some(n) => Some(n * per_iter),
+            None => None,
+        }
+    }
+}
+
+/// Known per-intrinsic cycle costs (rough estimates).
+fn intrinsic_cost(name: &str) -> Option<u64> {
+    match name {
+        "getenv_int" | "getenv" | "setenv" | "getcwd" | "chdir" => Some(100),
+        "print_int" | "print_float" | "putchar" | "print" => Some(200),
+        "tty_raw_mode" | "tty_size" | "tty_read_key" => Some(200),
+        "str_bytes" | "strlen" => Some(10),
+        "shm_open" | "shm_unlink" | "ftruncate" | "munmap" | "mmap" => Some(1000),
+        "atomic_load" | "atomic_store" | "atomic_cas" | "atomic_xchg" | "atomic_add" => Some(50),
+        "fence" => Some(10),
+        "spawn" | "spawn_with_output" => Some(10000),
+        "read_file" | "write_file" => Some(50000),
+        "sleep_ms" | "sleep_us" => Some(1000),
+        "now" | "now_millis" | "now_micros" => Some(50),
+        _ => None,
+    }
+}
+
+/// Estimate the minimum and maximum cycle count for a single pass
+/// through a statement block. Ignores loop amplification.
+fn estimate_stmt_cost(stmt: &Statement) -> u64 {
+    match stmt {
+        Statement::Let { expr, .. } => expr.as_ref().map(|e| expr_cost(e)).unwrap_or(1) + 1,
+        Statement::Assignment { expr, .. } => expr_cost(expr) + 2,
+        Statement::Expression(expr) => expr_cost(expr) + 1,
+        Statement::Term { .. } | Statement::TermBang { .. } => 2,
+        Statement::Guarded { condition, statements } => {
+            expr_cost(condition) + statements.iter().map(estimate_stmt_cost).sum::<u64>() + 2
+        }
+        Statement::Oracle { body, handler, .. } => {
+            let body_cost: u64 = body.iter().map(estimate_stmt_cost).sum();
+            let handler_cost: u64 = handler.iter().map(estimate_stmt_cost).sum();
+            std::cmp::max(body_cost, handler_cost) + 5
+        }
+        _ => 5,
+    }
+}
+
+fn expr_cost(expr: &Expr) -> u64 {
+    match expr {
+        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
+        | Expr::String(_) | Expr::Term => 1,
+        Expr::Identifier(_) | Expr::OwnedRef(_) | Expr::PriorState(_) => 1,
+        Expr::Add(_, _) | Expr::Sub(_, _) | Expr::Mul(_, _)
+        | Expr::Div(_, _) | Expr::Mod(_, _) => 3,
+        Expr::Eq(_, _) | Expr::Ne(_, _) | Expr::Lt(_, _)
+        | Expr::Le(_, _) | Expr::Gt(_, _) | Expr::Ge(_, _) => 2,
+        Expr::And(_, _) | Expr::Or(_, _) | Expr::Not(_) => 1,
+        Expr::Neg(_) | Expr::BitNot(_) => 1,
+        Expr::BitAnd(_, _) | Expr::BitOr(_, _) | Expr::BitXor(_, _)
+        | Expr::Shl(_, _) | Expr::Shr(_, _) => 2,
+        Expr::Call(name, args) => {
+            match intrinsic_cost(name) {
+                Some(c) => c,
+                None => args.iter().map(expr_cost).sum::<u64>() + 10,
+            }
+        }
+        Expr::IntrinsicCall { args, .. } => {
+            args.iter().map(expr_cost).sum::<u64>() + 3
+        }
+        Expr::ListLiteral(items) => {
+            items.iter().map(expr_cost).sum::<u64>() + items.len() as u64
+        }
+        Expr::StructInstance(_, fields) => {
+            fields.iter().map(|(_, e)| expr_cost(e)).sum::<u64>() + fields.len() as u64
+        }
+        Expr::FieldAccess(inner, _) => expr_cost(inner) + 2,
+        Expr::Projection { source, .. } => expr_cost(source) + 2,
+        Expr::Slice { value, .. } | Expr::ListIndex(value, _) => expr_cost(value) + 4,
+        Expr::Tuple(items) => items.iter().map(expr_cost).sum::<u64>() + 1,
+        Expr::Block(stmts, last) => {
+            let s: u64 = stmts.iter().map(estimate_stmt_cost).sum();
+            s + expr_cost(last)
+        }
+        Expr::Cast(inner, _) => expr_cost(inner) + 2,
+        Expr::Match { value, arms } => {
+            let e = expr_cost(value);
+            let a: u64 = arms.iter().map(|arm| {
+                expr_cost(&arm.body) + 1
+            }).sum();
+            e + a + 3
+        }
+        Expr::ArrowMut { target, index, value, .. } => {
+            let mut c = expr_cost(target) + expr_cost(index) + 3;
+            if let Some(v) = value { c += expr_cost(v); }
+            c
+        }
+        Expr::ArrowDiscard { target, index } => expr_cost(target) + expr_cost(index) + 3,
+        Expr::ArrowTransfer { dest, source, .. } => expr_cost(dest) + expr_cost(source) + 5,
+        Expr::MapLiteral(pairs) => {
+            pairs.iter().map(|(k, v)| expr_cost(k) + expr_cost(v)).sum::<u64>() + pairs.len() as u64
+        }
+        Expr::SetLiteral(items) => {
+            items.iter().map(expr_cost).sum::<u64>() + items.len() as u64
+        }
+        Expr::MultiSlice { value, .. } => expr_cost(value) + 6,
+        _ => 5,
+    }
+}
+
+/// Count calls in an expression for intrinsic tracking.
+fn count_calls(expr: &Expr, intrinsics: &mut u64, includes_io: &mut bool) {
+    match expr {
+        Expr::Call(name, _) => {
+            *intrinsics += 1;
+            if matches!(name.as_str(), "read_file" | "write_file" | "spawn" | "spawn_with_output" | "sleep_ms" | "sleep_us") {
+                *includes_io = true;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Estimate the total cost of a transaction body, including loop amplification.
+pub fn estimate_body_cost(
+    body: &[Statement],
+    contract: &Contract,
+) -> CostEstimate {
+    let mut total: u64 = 0;
+    let mut reads: u64 = 0;
+    let mut writes: u64 = 0;
+    let mut guards: u64 = 0;
+    let mut intrinsics: u64 = 0;
+    let mut includes_io = false;
+
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs, expr, .. } => {
+                total += expr_cost(expr) + 2;
+                if matches!(lhs, Expr::Identifier(_)) { writes += 1; }
+                count_calls(expr, &mut intrinsics, &mut includes_io);
+            }
+            Statement::Let { expr, .. } => {
+                let cost = expr.as_ref().map(|e| expr_cost(e)).unwrap_or(1) + 1;
+                total += cost;
+                if let Some(e) = expr { count_calls(e, &mut intrinsics, &mut includes_io); }
+            }
+            Statement::Guarded { condition, statements } => {
+                guards += 1;
+                total += expr_cost(condition) + 2;
+                for s in statements { total += estimate_stmt_cost(s); }
+            }
+            Statement::Expression(expr) => {
+                total += expr_cost(expr);
+                count_calls(expr, &mut intrinsics, &mut includes_io);
+            }
+            Statement::Term { .. } | Statement::TermBang { .. } => total += 2,
+            Statement::Oracle { body, handler, .. } => {
+                for s in body { total += estimate_stmt_cost(s); }
+                for s in handler { total += estimate_stmt_cost(s); }
+            }
+            _ => total += 5,
+        }
+    }
+
+    // Extract convergence bound from the postcondition
+    let bound = extract_bound_from_postcondition(&contract.post_condition);
+
+    CostEstimate {
+        total_ops: total,
+        field_reads: reads,
+        field_writes: writes,
+        guards,
+        intrinsic_calls: intrinsics,
+        convergence_bound: bound,
+        includes_io,
+    }
+}
+
+/// Extract a numeric convergence bound from a postcondition expression.
+/// For example: [count == N] -> bound = N, or [i == 100] -> bound = 100.
+fn extract_bound_from_postcondition(post: &Expr) -> Option<u64> {
+    // x == N
+    if let Expr::Eq(left, right) = post {
+        if let (Expr::Identifier(_), Expr::Integer(n)) = (left.as_ref(), right.as_ref()) {
+            if *n >= 0 { return Some(*n as u64); }
+        }
+        if let (Expr::Integer(n), Expr::Identifier(_)) = (left.as_ref(), right.as_ref()) {
+            if *n >= 0 { return Some(*n as u64); }
+        }
+    }
+    // x >= N && x <= N (a range constraint)
+    if let Expr::And(left, right) = post {
+        if let (Expr::Ge(a, n1), Expr::Le(b, n2)) = (left.as_ref(), right.as_ref()) {
+            if let (Expr::Integer(v1), Expr::Integer(v2)) = (n1.as_ref(), n2.as_ref()) {
+                if *v1 >= 0 && *v2 >= 0 && v1 == v2 {
+                    return Some(*v1 as u64);
+                }
+            }
+        }
+    }
+    None
+}
+
 // ── Standalone expression analysis helpers (for linearity proof) ──
 
 /// Extract (variable_name, operator, value) from a comparison expression.
@@ -3761,6 +3980,49 @@ fn is_decreasing_expr(expr: &Expr, param_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_estimate_cost_simple_body() {
+        let body = vec![
+            Statement::Let { name: "x".to_string(), expr: Some(Expr::Integer(10)), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+            Statement::Let { name: "y".to_string(), expr: Some(Expr::Add(Box::new(Expr::Integer(5)), Box::new(Expr::Integer(3)))), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+            Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+        ];
+        let contract = Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            watchdog: None, span: None,
+        };
+        let cost = estimate_body_cost(&body, &contract);
+        assert_eq!(cost.guards, 0);
+        assert_eq!(cost.intrinsic_calls, 0);
+        assert!(!cost.includes_io);
+        assert!(cost.total_ops > 0);
+        assert!(cost.cycles_upper_bound().is_none());
+    }
+
+    #[test]
+    fn test_estimate_cost_with_convergence() {
+        let body = vec![
+            Statement::Let { name: "x".to_string(), expr: Some(Expr::Integer(0)), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+            Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: Expr::Add(Box::new(Expr::Integer(1)), Box::new(Expr::Identifier("x".to_string()))),
+                timeout: None, modifiers: vec![],
+            },
+            Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+        ];
+        let contract = Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Eq(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Integer(100))),
+            watchdog: None, span: None,
+        };
+        let cost = estimate_body_cost(&body, &contract);
+        assert_eq!(cost.convergence_bound, Some(100));
+        let upper = cost.cycles_upper_bound();
+        assert!(upper.is_some());
+        assert!(upper.unwrap() >= 100);
+    }
 
     #[test]
     fn test_mutual_exclusion_detects_conflict() {
