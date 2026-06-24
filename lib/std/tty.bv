@@ -17,24 +17,24 @@
 
 import "link/brief_rt.c";
 
-defn __tty_raw_mode(enable: Int) -> Int {
+defn tty_raw_mode_inner(enable: Int) -> Int {
     term tty_raw_mode#(enable);
 };
 
-defn __tty_size() -> Int {
+defn tty_size_inner() -> Int {
     term tty_size#();
 };
 
-defn __tty_read_key() -> Int {
+defn tty_read_key_inner() -> Int {
     term tty_read_key#();
 };
 
 defn raw_mode(enable: Bool) -> Bool {
-    term __tty_raw_mode(if enable { 1 } else { 0 }) == 1;
+    term tty_raw_mode_inner(if enable { 1 } else { 0 }) == 1;
 };
 
 defn size() -> Int {
-    term __tty_size();
+    term tty_size_inner();
 };
 
 // Returns the column count of the terminal.
@@ -48,5 +48,5 @@ defn rows(size: Int) -> Int {
 };
 
 defn read_key() -> Int {
-    term __tty_read_key();
+    term tty_read_key_inner();
 };

@@ -9,12 +9,12 @@
 
 #!exit count == bound;
 
-import { __get_env_int } from "std/env.bv";
+import { get_env_int } from "std/env.bv";
 import "link/brief_rt.c";
 
 frgn #out __print_float(val: Float) -> Bool;
 
-let bound: Int = __get_env_int("BOUND");
+let bound: Int = get_env_int("BOUND");
 let count: Int = 0;
 
 const pi: Float = 3.141592653589793;

@@ -681,6 +681,8 @@ pub struct LlvmBackend {
     enum_types: HashMap<String, crate::ast::EnumDefinition>,
     cell_defs: HashMap<String, CellDef>,
     cell_thread_names: Vec<String>,
+    /// Cell-to-cell wires: (from_cell, from_port, to_cell, to_param)
+    cell_wires: Vec<(String, String, String, String)>,
     /// Accumulated `!N = !{...}` metadata definitions emitted at module level.
     /// LLVM 18+ rejects metadata definitions inside function bodies, so they
     /// are collected here and flushed by emit_module_end_metadata().
@@ -882,6 +884,7 @@ impl LlvmBackend {
             enum_types: HashMap::new(),
             cell_defs: HashMap::new(),
             cell_thread_names: Vec::new(),
+            cell_wires: Vec::new(),
             pending_metadata: String::new(),
             variant_disc: HashMap::new(),
             explain: false,
@@ -1513,6 +1516,9 @@ impl LlvmBackend {
 
         self.exit_condition = program.exit_condition.clone();
         self.build_field_index(program);
+
+        // Scan for cell-to-cell wires from TrgBinding statements
+        self.scan_cell_wires(program);
 
         // Inject synthetic __trg_epfd field if program has built-in triggers
         let has_builtin_trg = program.items.iter().any(|item| {
@@ -3002,5 +3008,59 @@ self.emit_declares(&mut out);
         }
     }
 
+    /// Scan the program for cell-to-cell wires from TrgBinding statements.
+    fn scan_cell_wires(&mut self, program: &Program) {
+        for item in &program.items {
+            self.scan_item_for_wires(item);
+        }
+    }
+
+    fn scan_top_level_body(&mut self, body: &[Statement]) {
+        for stmt in body {
+            self.scan_trg_stmt(stmt);
+        }
+    }
+
+    fn scan_trg_stmt(&mut self, stmt: &Statement) {
+        if let Statement::TrgBinding { instance, .. } = stmt {
+            if let Expr::Call(callee, args) = instance {
+                if !self.cell_defs.contains_key(callee) { return; }
+                let cell = &self.cell_defs[callee];
+                for (i, arg) in args.iter().enumerate() {
+                    if let Expr::FieldAccess(inner, port_name) = arg {
+                        if let Expr::Identifier(src_cell) = inner.as_ref() {
+                            if self.cell_defs.contains_key(src_cell) {
+                                if let Some(param_name) = cell.parameters.get(i) {
+                                    self.cell_wires.push((
+                                        src_cell.clone(),
+                                        port_name.clone(),
+                                        callee.clone(),
+                                        param_name.0.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn scan_item_for_wires(&mut self, item: &TopLevel) {
+        match item {
+            TopLevel::Statement(stmt) => self.scan_trg_stmt(stmt.as_ref()),
+            TopLevel::Transaction(t) => self.scan_top_level_body(&t.body),
+            TopLevel::Definition(d) => self.scan_top_level_body(&d.body),
+            TopLevel::Cell(c) => {
+                for txn in &c.transactions {
+                    self.scan_top_level_body(&txn.body);
+                }
+            }
+            TopLevel::SyncGroup { item: inner, .. } => {
+                self.scan_item_for_wires(inner);
+            }
+            _ => {}
+        }
+    }
 }
 

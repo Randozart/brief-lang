@@ -44,7 +44,7 @@ defn is_strict_extension(path: String) -> Bool {
 // ===== COMPILE =====
 
 defn compile_file(path: String, backend: String, verbose: Bool) -> Result<String, String> [path.len() > 0][term.is_ok() || term.is_err()] {
-    let source_result = __read_file(path);
+    let source_result = read_file_res(path);
     uni source_result(Ok(source)) = {
         let state = CompilerState {
             source: source,

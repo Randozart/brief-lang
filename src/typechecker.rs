@@ -1901,6 +1901,38 @@ impl TypeChecker {
                         context: format!("trg binding '{}'", name),
                     });
                 }
+                // Phase 4: validate cell-to-cell wire connections
+                if let Expr::Call(callee, args) = instance {
+                    if let Some(target_cell) = self.cell_defs.get(callee) {
+                        for (i, arg) in args.iter().enumerate() {
+                            if let Expr::FieldAccess(inner, port_name) = arg {
+                                if let Expr::Identifier(src_cell_name) = inner.as_ref() {
+                                    if let Some(src_cell) = self.cell_defs.get(src_cell_name) {
+                                        // Validate source port exists
+                                        let src_port_type = self.get_output_port_type(&src_cell.output_type, port_name);
+                                        if src_port_type.is_none() {
+                                            self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                                expected: format!("output port '{}' on cell '{}'", port_name, src_cell_name),
+                                                found: "no such port".to_string(),
+                                                context: format!("trg binding '{}' arg {}", name, i),
+                                            });
+                                        } else if let Some(ref port_ty) = src_port_type {
+                                            if let Some((_pname, param_ty)) = target_cell.parameters.get(i) {
+                                                if !self.types_compatible(port_ty, param_ty) {
+                                                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                                        expected: self.type_to_string(param_ty),
+                                                        found: self.type_to_string(port_ty),
+                                                        context: format!("cell wire '{}'.{} -> '{}'.param{}", src_cell_name, port_name, callee, i),
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if let Some(decl_ty) = ty {
                     self.declare_variable(name, decl_ty.clone());
                 } else {
@@ -3032,6 +3064,44 @@ Expr::ObjectLiteral(fields) => {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Resolve the type of a named output port from a cell's OutputType.
+    /// Returns None if the port name is not found.
+    fn get_output_port_type(&self, ot: &Option<OutputType>, port_name: &str) -> Option<Type> {
+        match ot {
+            Some(OutputType::Named(name, inner)) => {
+                if name == port_name {
+                    // Found the port — unwrap remaining wrappers to get the base type
+                    self.get_output_port_type(&Some(inner.as_ref().clone()), port_name)
+                } else {
+                    // Not this port — inner may contain more named ports (tuples)
+                    None
+                }
+            }
+            Some(OutputType::Tuple(types)) => {
+                for t in types {
+                    if let Some(ty) = self.get_output_port_type(&Some(t.clone()), port_name) {
+                        return Some(ty);
+                    }
+                }
+                None
+            }
+            Some(OutputType::Union(types)) => {
+                for t in types {
+                    if let Some(ty) = self.get_output_port_type(&Some(t.clone()), port_name) {
+                        return Some(ty);
+                    }
+                }
+                None
+            }
+            Some(OutputType::Single(ty)) => {
+                // Reached only when recursing into a found Named port's inner type
+                Some(ty.clone())
+            }
+            Some(OutputType::Array(ty)) => Some(*ty.clone()),
+            None => None,
         }
     }
 

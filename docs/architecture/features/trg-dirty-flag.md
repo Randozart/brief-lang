@@ -12,16 +12,18 @@ trg keypress: Char @stdin;      // stdin event (epoll-driven)
 trg tick: Int @timer(60);       // 60 Hz periodic timer
 ```
 
-### `wake` Modifier
+### `wake` Default
 
-The `wake` modifier tells the reactor to treat this trigger as a wake-up source. A trigger with `wake` prevents the reactor from sleeping when it would otherwise idle:
+All triggers are now **wake by default** — the reactor blocks on epoll (for built-in sources) or `__rt_wait()` (for MMIO-only programs) rather than busy-looping.
+
+Use `#nowake` for passive triggers that should be read-only (e.g., an MMIO input that doesn't need to drive the tick loop):
 
 ```brief
-trg wake io_pending: Bool @ link __io_pending;
-trg wake button: Bool @ 0x5000;
+trg io_pending: Bool @ link __io_pending;    // wake (default) — blocks until __io_pending changes
+trg button: Bool @ 0x5000 #nowake;            // passive — polled but doesn't wake the reactor
 ```
 
-Without `wake`, a trigger is passive — the system polls it but may sleep through its events. With `wake`, the runtime ensures the trigger is monitored and will wake the reactor on state change. The `wake` keyword is placed before the trigger name.
+A `#nowake` trigger is still sampled every tick (its value is loaded from the state), but the reactor will not block waiting for it to fire. This is useful for read-only sensors that are polled on demand.
 
 ## Architecture — Three Backend Patterns
 

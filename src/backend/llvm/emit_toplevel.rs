@@ -1582,6 +1582,34 @@ impl LlvmBackend {
                 writeln!(out, "  br label %{}", skip_l).ok();
                 writeln!(out, "{}:", skip_l).ok();
             }
+            // Phase 4: propagate cell-to-cell wires after convergence
+            // Only propagate when the source cell is NOT threaded (threaded cells
+            // store outputs to channel globals; propagation from those requires
+            // a separate channel-read path in the main loop).
+            let is_threaded = self.cell_thread_names.contains(name);
+            if !is_threaded {
+                for (from_cell, from_port, to_cell, to_param) in &self.cell_wires.clone() {
+                    if from_cell != name { continue; }
+                    let src_prefixed = format!("cell${}${}", from_cell, from_port);
+                    let dst_prefixed = format!("cell${}${}", to_cell, to_param);
+                    if let Some(&src_idx) = self.field_index_map.get(&src_prefixed) {
+                        if let Some(&dst_idx) = self.field_index_map.get(&dst_prefixed) {
+                            let src_ll_ty = &self.field_types[src_idx];
+                            let dst_ll_ty = &self.field_types[dst_idx];
+                            let src_gep = format!("%cpw_src_{}_{}", self.txn_counter, from_cell);
+                            let dst_gep = format!("%cpw_dst_{}_{}", self.txn_counter, from_cell);
+                            let src_val = format!("%cpw_val_{}_{}", self.txn_counter, from_cell);
+                            self.txn_counter += 1;
+                            writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
+                                src_gep, src_idx).ok();
+                            writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
+                                dst_gep, dst_idx).ok();
+                            writeln!(out, "  {} = load {}, ptr {}, align 8", src_val, src_ll_ty, src_gep).ok();
+                            writeln!(out, "  store {} {}, ptr {}, align 8", dst_ll_ty, src_val, dst_gep).ok();
+                        }
+                    }
+                }
+            }
         }
 
         self.state_reg_name = prev_state;

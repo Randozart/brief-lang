@@ -173,7 +173,7 @@ enabling precise bit-widths (i8, i16, i32, i64) for efficient FPGA synthesis.
 | `Linked("name")` | Linked name | `button0` |
 | `Timer(freq)` | `timer_<freq>hz` | `timer_1000hz` |
 | `Signal("name")` | Signal name | `irq_line` |
-| `#wake` modifier | Additional `wake_<name>` output port | `wake_sensor` |
+| `is_wake` (default `true`) | Additional `wake_<name>` output port | `wake_sensor` |
 
 ## Webstack Backend
 

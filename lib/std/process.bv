@@ -8,16 +8,16 @@ import "std/result";
 // spawn#/spawn_with_output# intrinsics. Remaining frgns (env_var,
 // set_env_var, etc.) have no intrinsic equivalent yet.
 
-defn __spawn(command: String, args: List<String>) -> Result<Int, String> {
+defn spawn_res(command: String, args: List<String>) -> Result<Int, String> {
     term spawn#(command, args);
 };
 
-defn __spawn_with_output(command: String, args: List<String>) -> Result<String, String> {
+defn spawn_with_output_res(command: String, args: List<String>) -> Result<String, String> {
     term spawn_with_output#(command, args);
 };
 
 // Replaced: frgn __env_var with getenv# intrinsic
-defn __env_var(name: String) -> Result<String, String> {
+defn env_var_res(name: String) -> Result<String, String> {
     let val = getenv#(name);
     [val != ""] {
         term Ok(val);
@@ -26,7 +26,7 @@ defn __env_var(name: String) -> Result<String, String> {
 };
 
 // Replaced: frgn __set_env_var with setenv# intrinsic
-defn __set_env_var(name: String, value: String) -> Result<Void, String> {
+defn set_env_var_res(name: String, value: String) -> Result<Void, String> {
     let ret = setenv#(name, value);
     [ret == 0] {
         term Ok(void);
@@ -35,7 +35,7 @@ defn __set_env_var(name: String, value: String) -> Result<Void, String> {
 };
 
 // Replaced: frgn __current_dir with getcwd# intrinsic
-defn __current_dir() -> Result<String, String> {
+defn current_dir_res() -> Result<String, String> {
     let dir = getcwd#();
     [dir != ""] {
         term Ok(dir);
@@ -44,7 +44,7 @@ defn __current_dir() -> Result<String, String> {
 };
 
 // Replaced: frgn __set_current_dir with chdir# intrinsic
-defn __set_current_dir(path: String) -> Result<Void, String> {
+defn set_current_dir_res(path: String) -> Result<Void, String> {
     let ret = chdir#(path);
     [ret == 0] {
         term Ok(void);
@@ -55,7 +55,7 @@ defn __set_current_dir(path: String) -> Result<Void, String> {
 // ===== NATIVE WRAPPERS =====
 
 defn spawn(command: String, args: List<String>) -> Int [command != ""][term >= -1] {
-    let result = __spawn(command, args);
+    let result = spawn_res(command, args);
     [is_ok(result)] {
         term unwrap(result);
     };
@@ -63,7 +63,7 @@ defn spawn(command: String, args: List<String>) -> Int [command != ""][term >= -
 };
 
 defn spawn_with_output(command: String, args: List<String>) -> String [command != ""][term :> Size >= 0] {
-    let result = __spawn_with_output(command, args);
+    let result = spawn_with_output_res(command, args);
     [is_ok(result)] {
         term unwrap(result);
     };
@@ -71,7 +71,7 @@ defn spawn_with_output(command: String, args: List<String>) -> String [command !
 };
 
 defn env_var(name: String) -> String [name != ""][term :> Size >= 0] {
-    let result = __env_var(name);
+    let result = env_var_res(name);
     [result.is_ok()] {
         term result.value;
     };
@@ -79,7 +79,7 @@ defn env_var(name: String) -> String [name != ""][term :> Size >= 0] {
 };
 
 defn set_env_var(name: String, value: String) -> Bool [name != ""][term == true || term == false] {
-    let result = __set_env_var(name, value);
+    let result = set_env_var_res(name, value);
     [result.is_ok()] {
         term true;
     };
@@ -87,7 +87,7 @@ defn set_env_var(name: String, value: String) -> Bool [name != ""][term == true 
 };
 
 defn current_dir() -> String [true][term :> Size >= 0] {
-    let result = __current_dir();
+    let result = current_dir_res();
     [result.is_ok()] {
         term result.value;
     };
@@ -95,7 +95,7 @@ defn current_dir() -> String [true][term :> Size >= 0] {
 };
 
 defn set_current_dir(path: String) -> Bool [path != ""][term == true || term == false] {
-    let result = __set_current_dir(path);
+    let result = set_current_dir_res(path);
     [result.is_ok()] {
         term true;
     };

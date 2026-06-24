@@ -111,11 +111,11 @@ defn consume() -> Bool {
 // Replaced: frgn __read_file/__write_file (TOML-based) with
 // read_file#/write_file# intrinsics.
 
-defn __read_file(path: String) -> Result<String, String> {
+defn read_file_res(path: String) -> Result<String, String> {
     term read_file#(path);
 };
 
-defn __write_file(path: String, content: String) -> Result<Void, String> {
+defn write_file_res(path: String, content: String) -> Result<Void, String> {
     term write_file#(path, content);
 };
 
@@ -127,7 +127,7 @@ frgn __create_dir(path: String) -> Result<Void, String> from "std::fs::create_di
 // ===== NATIVE WRAPPERS =====
 
 defn read_file(path: String) -> String [path != ""][term :> Size >= 0] {
-    let result = __read_file(path);
+    let result = read_file_res(path);
     [result.is_ok()] {
         term result.value;
     };
@@ -135,7 +135,7 @@ defn read_file(path: String) -> String [path != ""][term :> Size >= 0] {
 };
 
 defn write_file(path: String, content: String) -> Bool [path != ""][term == true || term == false] {
-    let result = __write_file(path, content);
+    let result = write_file_res(path, content);
     [result.is_ok()] {
         term true;
     };

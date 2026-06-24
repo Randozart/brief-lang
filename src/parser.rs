@@ -3916,30 +3916,19 @@ let span = self.current_span();
             self.expect(Token::RBracket)?;
         }
 
-        // @ link triggers are wake-capable by default - they monitor volatile globals
-        // that change during sleep. MMIO triggers (Explicit) are natively wake-capable.
-        // Built-in sources (Stdin, Timer, Signal) are wake-capable by design.
-        let is_builtin = matches!(address, crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_));
-        let mut is_wake = matches!(address, crate::ast::LinkRef::Linked(_)) || is_builtin;
-        // #wake is retained for backward compat but is now the default for @ link
-        // Built-in sources already consumed their # as part of the source syntax.
-        if !is_builtin {
-            if let Some(Ok(Token::Hash)) = self.current_token() {
-                self.advance();
-                if let Some(Ok(Token::Identifier(n))) = self.current_token() {
-                    if n == "wake" {
-                        self.advance();
-                        is_wake = true;
-                    } else {
-                        return self.spanned_err("Expected 'wake' after '#' modifier".to_string());
-                    }
+        // Wake is now the default for all trigger types — the reactor re-evaluates on
+        // every tick when any trigger is `is_wake`. Use `#nowake` for passive MMIO reads.
+        let mut is_wake = true;
+        if let Some(Ok(Token::Hash)) = self.current_token() {
+            self.advance();
+            if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                if n == "nowake" {
+                    self.advance();
+                    is_wake = false;
+                } else {
+                    return self.spanned_err("Expected 'nowake' after '#' modifier".to_string());
                 }
             }
-        }
-
-        // Error if MMIO trigger has #wake (redundant)
-        if is_wake && matches!(address, crate::ast::LinkRef::Explicit(_)) {
-            return self.spanned_err("MMIO triggers are natively wake-capable; #wake is redundant".to_string());
         }
 
         let span = self.current_span();
@@ -9144,21 +9133,33 @@ mod parser_tests {
     }
 
     #[test]
-    fn test_wake_modifier() {
-        let s = "trg x: Bool @ link __x #wake;";
+    fn test_nowake_modifier() {
+        let s = "trg x: Bool @ link __x #nowake;";
         let mut parser = Parser::new(s);
         let result = parser.parse_trigger();
-        assert!(result.is_ok(), "#wake modifier should parse: {:?}", result.err());
+        assert!(result.is_ok(), "#nowake modifier should parse: {:?}", result.err());
         let trg = result.unwrap();
-        assert!(trg.is_wake, "is_wake should be true");
+        assert!(!trg.is_wake, "is_wake should be false with #nowake");
     }
 
     #[test]
-    fn test_wake_on_mmio_error() {
-        let s = "trg x: Bool @ 0x4000 #wake;";
+    fn test_wake_default_mmio() {
+        let s = "trg x: Bool @ 0x4000;";
         let mut parser = Parser::new(s);
         let result = parser.parse_trigger();
-        assert!(result.is_err(), "#wake on MMIO should error");
+        assert!(result.is_ok(), "MMIO trigger without modifier should parse: {:?}", result.err());
+        let trg = result.unwrap();
+        assert!(trg.is_wake, "MMIO trigger should default to is_wake=true");
+    }
+
+    #[test]
+    fn test_nowake_on_mmio() {
+        let s = "trg x: Bool @ 0x4000 #nowake;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse_trigger();
+        assert!(result.is_ok(), "MMIO trigger with #nowake should parse: {:?}", result.err());
+        let trg = result.unwrap();
+        assert!(!trg.is_wake, "is_wake should be false with #nowake on MMIO");
     }
 
     #[test]

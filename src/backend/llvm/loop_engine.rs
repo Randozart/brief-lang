@@ -1677,7 +1677,22 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
     let tc = backend.txn_counter; backend.txn_counter += 20;
     let epfd_idx = match backend.field_index_map.get("__trg_epfd") {
         Some(&i) => i,
-        None => return,
+        None => {
+            // No builtin triggers (Stdin/Timer/Signal) — MMIO-only wake triggers
+            // can't use epoll on bare addresses. Block-sleep instead of busy-loop.
+            writeln!(out, "  call void @__rt_wait()").ok();
+            // Step all MMIO wake triggers to refresh reactor state
+            for (name, trg) in &backend.triggers {
+                if matches!(&trg.address, crate::ast::LinkRef::Explicit(_)) {
+                    if let Some(&bit) = backend.dep_graph.bit_index.get(name) {
+                        let drx = format!("%drx_{}_{}", tc, name);
+                        writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
+                        writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
+                    }
+                }
+            }
+            return;
+        }
     };
     let evt = format!("%evt_{}", tc);
     writeln!(out, "  {} = alloca i8, i64 16, align 8", evt).ok();
@@ -1771,7 +1786,13 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            _ => {
+            crate::ast::LinkRef::Explicit(_) => {
+                let drx = format!("%drx_{}_{}", tc, name);
+                writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
+                writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
+                writeln!(out, "  br label %{}", t_skip).ok();
+            }
+            crate::ast::LinkRef::Linked(_) => {
                 let drx = format!("%drx_{}_{}", tc, name);
                 writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();

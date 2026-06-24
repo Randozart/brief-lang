@@ -9,12 +9,12 @@
 
 #!exit ops == bound;
 
-import { __get_env_int } from "std/env.bv";
+import { get_env_int } from "std/env.bv";
 import "link/brief_rt.c";
 
 frgn __print_int(n: Int) -> Bool ;
 
-let bound: Int = __get_env_int("BOUND");
+let bound: Int = get_env_int("BOUND");
 let ops: Int = 0;
 
 rct txn work [bound > 0 && ops < bound][ops == bound] {

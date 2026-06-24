@@ -1757,7 +1757,7 @@ mod tests {
             bit_range: None,
             stages: vec![],
             condition: None,
-            is_wake: false,
+            is_wake: true,
             is_const: false,
             span: None,
         })

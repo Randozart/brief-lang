@@ -13,7 +13,7 @@ They are Brief's single, universal escape hatch, exhaustively documented here.
 |-----------|-------|---------|
 | `#!dispatch(parallel)` | File-level | Enable parallel reactor dispatch |
 | `#io` | File-level | Declare an OS-linked trigger |
-| `#wake` | Trigger modifier | Mark a trigger as wake-capable |
+| `#nowake` | Trigger modifier | Mark a trigger as passive (no wake) |
 
 ---
 
@@ -96,24 +96,23 @@ where triggers are natively wake-capable via hardware interrupt lines.
 
 ---
 
-## `#wake` — Trigger Wake Modifier
+## `#nowake` — Passive Trigger Modifier
 
-Marks a `@ link` trigger as wake-capable, meaning it can wake the reactor from
-a blocking sleep.
+All triggers are **wake by default** — the reactor blocks on epoll (for built-in
+sources) or `__rt_wait()` (for MMIO-only programs) instead of busy-looping.
 
-**Syntax:**
+Use `#nowake` to mark a trigger as passive — polled on every tick but does not
+prevent the reactor from sleeping:
+
 ```brief
-trg sigint: Bool @ link __sigint_flag #wake;
+trg sensor: Bool @ 0x5000 #nowake;             // passive MMIO — polled on demand
+trg io_pending: Bool @ link __flag #nowake;    // passive link — doesn't wake
 ```
 
-**Rules:**
-- `#wake` is valid only on `@ link` triggers (not MMIO)
-- `trg x: Bool @ 0x4000 #wake;` — **error** (MMIO is natively wake-capable)
-- `#io` implies `#wake` automatically (all OS triggers are wake-capable)
-
-**Semantics:** The `#wake` flag is metadata for the runtime. When at least one
-wake-capable trigger exists, the reactor may use blocking waits
-(`epoll_wait`, `signalfd`, `kqueue`, `WFI`) instead of busy-looping.
+**Semantics:** Without `#nowake`, the trigger is wake-capable: the reactor may
+use blocking waits (`epoll_wait`, `__rt_wait`) instead of busy-looping. With
+`#nowake`, the trigger value is still sampled every tick but the reactor will
+not block waiting for it.
 
 ---
 

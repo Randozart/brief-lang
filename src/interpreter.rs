@@ -283,6 +283,7 @@ pub struct Interpreter {
     /// Trigger binding registry — maps trigger names to (cell_name, port_name)
     /// for output synchronization from persistent cells to parent state.
     pub trg_bindings: Vec<TrgBindingReg>,
+    pub cell_wires: Vec<CellWire>,
     /// Handle for cell thread — joined on drop or program exit.
     pub cell_thread_handle: Option<thread::JoinHandle<()>>,
 }
@@ -313,6 +314,7 @@ impl Clone for Interpreter {
             next_cell_uid: self.next_cell_uid,
             persistent_cells: HashMap::new(),
             trg_bindings: Vec::new(),
+            cell_wires: Vec::new(),
             cell_thread_handle: None,
         }
     }
@@ -429,6 +431,18 @@ pub struct TrgBindingReg {
     pub ty: Option<Type>,
 }
 
+/// A static wire connecting one cell's output port to another cell's input parameter.
+/// After each tick of the source cell, the output value is automatically copied to
+/// the target cell's parameter state slot. This enables cell-to-cell dataflow without
+/// parent-state mediation.
+#[derive(Debug, Clone)]
+pub struct CellWire {
+    pub from_cell: String,
+    pub from_port: String,
+    pub to_cell: String,
+    pub to_param: String,
+}
+
 impl Interpreter {
     pub fn new() -> Self {
         let foreign_functions = Self::load_ffi_functions();
@@ -456,6 +470,7 @@ impl Interpreter {
             next_cell_uid: 0,
             persistent_cells: HashMap::new(),
             trg_bindings: Vec::new(),
+            cell_wires: Vec::new(),
             cell_thread_handle: None,
         }
     }
@@ -1569,6 +1584,19 @@ impl Interpreter {
                         }
                     }
                 }
+                // Phase 4: propagate cell-to-cell wires — copy output values
+                // from this cell's state to target cell's parameter state slots.
+                for wire in &self.cell_wires.clone() {
+                    if wire.from_cell == cell_name {
+                        let src_key = format!("{}${}.{}", cell_name, 0, wire.from_port);
+                        if let Some(val) = instance.state.get(&src_key).cloned() {
+                            if let Some(target) = self.persistent_cells.get_mut(&wire.to_cell) {
+                                let dst_key = format!("{}${}.{}", wire.to_cell, 0, wire.to_param);
+                                target.state.insert(dst_key, val);
+                            }
+                        }
+                    }
+                }
                 self.persistent_cells.insert(cell_name, instance);
                 any_fired = any_fired || cell_fired;
             }
@@ -2251,12 +2279,39 @@ impl Interpreter {
                 let value = match instance {
                     Expr::Call(callee, args) if self.cell_defs.contains_key(callee) => {
                         let cell = self.cell_defs.get(callee).unwrap().clone();
-                        let arg_values: Result<Vec<Value>, _> = args.iter().map(|a| self.eval_expr(a)).collect();
+                        // Phase 4: detect cell-to-cell wires in arguments
+                        for (i, arg) in args.iter().enumerate() {
+                            if let Expr::FieldAccess(inner, port_name) = arg {
+                                if let Expr::Identifier(src_cell) = inner.as_ref() {
+                                    if self.persistent_cells.contains_key(src_cell) {
+                                        if let Some(param_name) = cell.parameters.get(i) {
+                                            self.cell_wires.push(CellWire {
+                                                from_cell: src_cell.clone(),
+                                                from_port: port_name.clone(),
+                                                to_cell: callee.clone(),
+                                                to_param: param_name.0.clone(),
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let arg_values: Result<Vec<Value>, _> = args.iter().map(|a| {
+                            // Resolve cell-to-cell references: if arg is FieldAccess(Identifier(src_cell), port),
+                            // read from the source cell's cached state instead of evaluating normally.
+                            if let Expr::FieldAccess(inner, port_name) = a {
+                                if let Expr::Identifier(src_cell) = inner.as_ref() {
+                                    if let Some(instance) = self.persistent_cells.get(src_cell) {
+                                        let key = format!("{}${}.{}", src_cell, 0, port_name);
+                                        return Ok(instance.state.get(&key).cloned().unwrap_or(Value::Void));
+                                    }
+                                }
+                            }
+                            self.eval_expr(a)
+                        }).collect();
                         let args = arg_values?;
                         if cell.is_persistent {
-                            // Register for independent ticking with optional @Hz rate
                             self.register_persistent_cell(&cell, &args, tick_hz)?;
-                            // Register trigger binding for output sync
                             self.trg_bindings.push(TrgBindingReg {
                                 trigger_name: name.clone(),
                                 cell_name: cell.name.clone(),
@@ -2268,7 +2323,6 @@ impl Interpreter {
                                 } else { port.clone() },
                                 ty: ty.clone(),
                             });
-                            // Return initial output value
                             self.call_cell(&cell, &args)?
                         } else {
                             self.call_cell(&cell, &args)?
@@ -10209,6 +10263,95 @@ mod tests {
         interp.tick_persistent_cells().unwrap();
         let r3 = interp.eval_expr(&call).unwrap();
         assert_eq!(r3, Value::Int(2), "after resetting fired and ticking: val = 1 + 1 = 2");
+    }
+
+    #[test]
+    fn test_cell_to_cell_wire() {
+        let mut interp = Interpreter::new();
+
+        // Producer cell: persistent, has output port `val`, counts up each tick
+        let producer = CellDef {
+            is_persistent: true,
+            name: "producer".to_string(), type_params: vec![],
+            parameters: vec![],
+            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::Int)))),
+            fields: vec![
+                StructField { name: "val".to_string(), ty: Type::Int, default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "fired".to_string(), ty: Type::Bool, default: Some(Expr::Bool(false)), visibility: Visibility::Private },
+            ],
+            transactions: vec![Transaction {
+                name: "inc".to_string(), is_async: false, is_reactive: true,
+                parameters: vec![],
+                contract: Contract::new(Expr::Not(Box::new(Expr::Identifier("fired".to_string()))), Expr::Bool(true)),
+                body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: Expr::Identifier("fired".to_string()), expr: Expr::Bool(true), timeout: None, modifiers: vec![] },
+                ],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                outputs: vec![], output_type: None,
+            }],
+            definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
+        };
+
+        // Consumer cell: persistent, takes `input` param, echoes it as `out`
+        let consumer = CellDef {
+            is_persistent: true,
+            name: "consumer".to_string(), type_params: vec![],
+            parameters: vec![("input".to_string(), Type::Int)],
+            output_type: Some(OutputType::Named("out".to_string(), Box::new(OutputType::Single(Type::Int)))),
+            fields: vec![
+                StructField { name: "out".to_string(), ty: Type::Int, default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "input".to_string(), ty: Type::Int, default: None, visibility: Visibility::Private },
+                StructField { name: "fired".to_string(), ty: Type::Bool, default: Some(Expr::Bool(false)), visibility: Visibility::Private },
+            ],
+            transactions: vec![Transaction {
+                name: "forward".to_string(), is_async: false, is_reactive: true,
+                parameters: vec![],
+                contract: Contract::new(Expr::Not(Box::new(Expr::Identifier("fired".to_string()))), Expr::Bool(true)),
+                body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("out".to_string()), expr: Expr::Identifier("input".to_string()), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: Expr::Identifier("fired".to_string()), expr: Expr::Bool(true), timeout: None, modifiers: vec![] },
+                ],
+                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
+                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                outputs: vec![], output_type: None,
+            }],
+            definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
+        };
+
+        interp.cell_defs.insert("producer".to_string(), producer.clone());
+        interp.cell_defs.insert("consumer".to_string(), consumer.clone());
+
+        // Register both cells as persistent
+        interp.register_persistent_cell(&producer, &[], None).unwrap();
+        interp.register_persistent_cell(&consumer, &[Value::Int(0)], None).unwrap();
+
+        // Add a wire: producer.val → consumer.input
+        interp.cell_wires.push(CellWire {
+            from_cell: "producer".to_string(),
+            from_port: "val".to_string(),
+            to_cell: "consumer".to_string(),
+            to_param: "input".to_string(),
+        });
+
+        // Initial state: producer.val=0, consumer.input=0, consumer.out=0
+        let prod_val = interp.call_cell(&producer, &[]).unwrap();
+        assert_eq!(prod_val, Value::Int(0), "producer initial val");
+        let cons_val = interp.call_cell(&consumer, &[]).unwrap();
+        assert_eq!(cons_val, Value::Int(0), "consumer initial out");
+
+        // Tick persistent cells: producer fires (fired=false, val→1), wire should propagate
+        interp.tick_persistent_cells().unwrap();
+
+        // After tick: producer.val=1, consumer should have received it via wire
+        let prod_val = interp.call_cell(&producer, &[]).unwrap();
+        assert_eq!(prod_val, Value::Int(1), "producer.val after one tick");
+
+        // Wire should have propagated producer.val (1) to consumer.input
+        // Consumer should have ticked too, setting consumer.out = consumer.input = 1
+        let cons_val = interp.call_cell(&consumer, &[]).unwrap();
+        assert_eq!(cons_val, Value::Int(1), "consumer.out after wire propagation");
     }
 }
 

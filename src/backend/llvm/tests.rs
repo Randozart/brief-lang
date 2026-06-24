@@ -1245,7 +1245,7 @@ fn empty_program() -> Program {
                     bit_range: None,
                     stages: vec![],
                     condition: None,
-                    is_wake: false,
+                    is_wake: true,
                     is_const: true,
                     span: None,
                 }),
@@ -1435,7 +1435,7 @@ fn empty_program() -> Program {
             items.push(TopLevel::Trigger(TriggerDeclaration {
                 name: trg_name.to_string(), ty: trg_ty,
                 address: LinkRef::Explicit(0), bit_range: None,
-                stages: vec![], condition: None, is_wake: false, is_const: false, span: None,
+                stages: vec![], condition: None, is_wake: true, is_const: false, span: None,
             }));
         }
         for (txn_name, body) in txns {
