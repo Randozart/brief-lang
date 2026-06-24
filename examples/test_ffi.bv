@@ -1,14 +1,14 @@
 // Pure Brief FFI Test
-// Intrinsic calls (println#, sqrt#, sin#, pow#) replaced their
-// frgn counterparts. The TOML-binding tests (string_length,
-// string_concat) remain to test the FFI registry.
+// Intrinsic calls (println#, sqrt#, sin#, pow#) replace old frgn
+// counterparts. GLUE-style frgn declarations for string ops use
+// the FFI registry directly without TOML bindings.
 //
-// Intrinsics provide native LLVM codegen — no TOML binding files
+// Intrinsics provide native LLVM codegen — no binding files
 // needed for operations the compiler already knows about.
 
-// Intrinsic-based functions (no TOML bindings needed)
-frgn string_length(s: String) -> Result<Int, StringError> from "std/bindings/string.toml";
-frgn string_concat(a: String, b: String) -> Result<String, StringError> from "std/bindings/string.toml";
+// GLUE-style FFI declarations (no TOML bindings)
+frgn string_length(s: String) -> Result<Int, StringError> ;
+frgn string_concat(a: String, b: String) -> Result<String, StringError> ;
 
 // Test 1: println via intrinsic
 txn test1 [true][term == void] {
@@ -16,27 +16,27 @@ txn test1 [true][term == void] {
 };
 
 // Test 2: sqrt via intrinsic  
-txn test2 [true][term == 4.0] {
+txn test2 [sqrt#(16.0) == 4.0][term == 4.0] {
     term sqrt#(16.0);
 };
 
 // Test 3: sin via intrinsic
-txn test3 [true][term == 0.0] {
+txn test3 [sin#(0.0) == 0.0][term == 0.0] {
     term sin#(0.0);
 };
 
 // Test 4: pow via intrinsic
-txn test4 [true][term == 8.0] {
+txn test4 [pow#(2.0, 3.0) == 8.0][term == 8.0] {
     term pow#(2.0, 3.0);
 };
 
-// Test 5: string length — TOML-binding FFI
-txn test5 [result == 5]] {
+// Test 5: string length — GLUE-style FFI
+txn test5 [string_length("hello") == 5][result == 5]] {
     term string_length("hello");
 };
 
-// Test 6: string concat — TOML-binding FFI
-txn test6 [result == "helloworld"]] {
+// Test 6: string concat — GLUE-style FFI
+txn test6 [string_concat("hello", "world") == "helloworld"][result == "helloworld"]] {
     term string_concat("hello", "world");
 };
 

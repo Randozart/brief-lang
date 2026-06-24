@@ -21,15 +21,15 @@
 //   await init_physics_wasm();  // returns WebAssembly.Instance
 //   instance.exports.simulate(data, count);  // call exported functions
 
-import "link/default.toml";
-
 (wasm) import physics from "physics.bv" as wasmPhysics;
 
 state result: Float = 0.0;
+state data: List<Float> = [];
+state count: Int = 0;
 
 b-text: "Computed: {result}";
 
-rct txn tick [true][true] {
-    &result = wasmPhysics.simulate(data, count);
+rct txn tick [count > 0][tick_count == @tick_count + 1] {
+    &result = wasmPhysics.simulate(data :> Ptr, count);
     term;
 };

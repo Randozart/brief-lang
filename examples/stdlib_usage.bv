@@ -1,29 +1,37 @@
-// Example: Native Brief Stdlib vs FFI Bindings
+// Example: Using the Brief Standard Library
+// Imports and exercises core stdlib modules: char, bits, option, result
+
+import char from "std/char";
+import { absolute, min, max, clamp, is_positive, is_even } from "std/bits";
+import { some, none, map, unwrap } from "std/option";
+import { ok, err, is_ok, is_err } from "std/result";
 
 let x: Int = -42;
 let y: Int = 10;
-let z: Int = 20;
 let initialized: Bool = false;
 let counter: Int = 0;
 
-// Native Brief: Integer Operations & Predicates
-// Brief includes these proven functions natively:
-//   absolute(n) | min(a, b) | max(a, b) | clamp(v, lo, hi)
-//   is_positive(n) | is_negative(n) | is_zero(n) | is_even(n)
-//
-// Key advantage: Proven correct at compile time, zero FFI overhead
-
-defn demo_predicates() [true][term == true || term == false] -> Bool {
-  term true;
+defn demo_predicates(n: Int) [true][term == true || term == false] -> Bool {
+  term is_positive(n) && is_even(n);
 };
 
-// State Management (Brief's Core Strength)
-// Brief is designed for proving state transitions correct
+defn demo_bits(n: Int) [n != 0][term == absolute(n)] -> Int {
+  term absolute(n);
+};
 
 rct txn initialize_system
   [initialized == false]
   [initialized == true && counter == @counter]
 {
   &initialized = true;
+  term;
+};
+
+rct txn process_value [initialized == true][counter == @counter + 1] {
+  let clamped: Int = clamp(x, -50, 50);
+  let a: Int = absolute(x);
+  let m: Int = min(y, 20);
+  let positive: Bool = is_positive(clamped);
+  &counter = counter + 1;
   term;
 };

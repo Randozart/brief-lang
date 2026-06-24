@@ -1,0 +1,26 @@
+// swan-song.bv — term -> swan_song vs term! -> exit
+// Demonstrates: term -> (commit action), term! -> (program exit)
+// Proper liveness pattern for observable terminal output
+
+frgn output_written: Bool = false;
+
+// term -> swan_song: commit action that runs BEFORE the transaction
+// terminates but does NOT exit the program
+txn commit_action [output_written == false][output_written == true] {
+    term -> print_int#(42);   // runs before term, program continues
+};
+
+// term! -> swan_song: program exit, the swan song is the last
+// observable action before the process terminates
+txn program_exit [output_written == true][true] {
+    term! -> println#("Goodbye!");
+};
+
+// Without swan song, this program is dead code — the compiler
+// would fold it all away since nothing is observable
+txn dead_without_io [true][counter == @counter + 1] {
+    &counter = counter + 1;
+    // NO term -> or term! -> means no observable output
+    // The compiler is correct to eliminate this
+    term;
+};

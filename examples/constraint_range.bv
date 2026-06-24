@@ -8,7 +8,7 @@ rct txn process_score {
   term print_int#(valid);
 };
 
-rct txn increment [score < 100][true] {
+rct txn increment [score < 100][score == @score + 1] {
   &score = score + 1;
   term;
 };

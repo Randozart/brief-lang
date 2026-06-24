@@ -1,0 +1,16 @@
+// config.dbv — Data Brief configuration file
+// A .dbv file is pure data — no code, no contracts
+// Used for configuration, hardware register maps, etc.
+
+{
+    "app": "brief-compiler",
+    "version": "0.11.0",
+    "debug": false,
+    "optimization": {
+        "budget": 256,
+        "simplify": true,
+        "vectorize": true
+    },
+    "backends": ["llvm", "webstack", "circt"],
+    "threads": 4
+}

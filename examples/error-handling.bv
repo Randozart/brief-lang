@@ -1,0 +1,56 @@
+// error-handling.bv — Result<T,E> and Option<T> from stdlib
+// Demonstrates: import Option/Result, uni pattern matching,
+// Ok/Err/Some/None discriminants, ? operator
+
+import { some, none, map, unwrap, unwrap_or } from "std/option";
+import { ok, err, is_ok, is_err } from "std/result";
+
+// Function returning Result
+defn divide(a: Int, b: Int) -> Result<Int, String> [true][term.is_ok() || term.is_err()] {
+    [b == 0] {
+        term Err("division by zero");
+    };
+    term Ok(a / b);
+};
+
+// Pattern matching on Result via uni
+defn safe_divide(a: Int, b: Int) -> Int {
+    let res = divide(a, b);
+    uni res(Ok(val)) = {
+        term val;
+    };
+    uni res(Err(msg)) = {
+        term! -> println#("Error: " + msg);
+    };
+};
+
+// Option type usage
+defn find_first_even(items: List<Int>) -> Option<Int> {
+    let i: Int = 0;
+    let len: Int = items :> Size;
+    txn search_loop [i < len][i == len || found] -> Option<Int> {
+        [items[i] % 2 == 0] {
+            term some(items[i]);
+        };
+        &i = i + 1;
+        term;
+    };
+    term none();
+};
+
+defn get_or_zero(items: List<Int>) -> Int {
+    let opt = find_first_even(items);
+    uni opt(Some(val)) = {
+        term val;
+    };
+    term 0;
+};
+
+// Chaining with Result
+defn parse_and_divide(input: String) -> Result<Int, String> {
+    let parsed: Result<Int, String> = int_to_str#(input) :> Parse;
+    [is_ok(parsed)] {
+        term divide(unwrap(parsed), 2);
+    };
+    term parsed;
+};

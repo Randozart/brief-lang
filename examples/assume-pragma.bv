@@ -1,0 +1,38 @@
+// assume-pragma.bv — Compiler assumption pragmas
+// Demonstrates: #assume_event(name), #assume_shape(guard, action)
+
+// #assume_event tells the compiler that an external event
+// with the given name may occur at any time. This prevents
+// dead-code elimination on event-handling code.
+#assume_event("button_press");
+#assume_event("timer_expiry");
+
+// Guards based on assumed events
+let button_pressed: Bool = false;
+let timer_fired: Bool = false;
+
+// The compiler won't eliminate this transaction because
+// button_press is an #assume_event
+rct txn handle_button [button_pressed == false][button_pressed == true] {
+    &button_pressed = true;
+    term;
+};
+
+// #assume_shape tells the compiler to assume a shape
+// (guard + action pair) holds without proving it.
+// This is a compile-time assertion, not a runtime check.
+#assume_shape([input > 0], {
+    let processed: Int = input * 2;
+});
+
+// Assumed shapes can be used to guide optimization
+// without runtime overhead
+#assume_shape([alignment % 16 == 0], {
+    // compiler may use aligned load/store
+    let val: Int = ptr :> Load;
+});
+
+// The compiler uses these pragmas to:
+// 1. Keep event handlers live (#assume_event)
+// 2. Assume preconditions hold (#assume_shape)
+// 3. Optimize based on assumed properties

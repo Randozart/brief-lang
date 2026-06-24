@@ -10,12 +10,12 @@
 let count: Int = 0;
 let step: Int = 1;
 
-txn increment [true][@count + step == count] {
+txn increment [count < 100][@count + step == count] {
     &count = count + step;
     term;
 };
 
-txn decrement [true][@count - step == count] {
+txn decrement [count > 0][@count - step == count] {
     &count = count - step;
     term;
 };

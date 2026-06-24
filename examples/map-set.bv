@@ -1,0 +1,44 @@
+// map-set.bv — MapLiteral and SetLiteral
+// Demonstrates: {"a": 1} MapLiteral, {1, 2, 3} SetLiteral,
+// operations via projection and <-
+
+// MapLiteral creates a HashMap
+let config: HashMap<String, Int> = {
+    "port": 8080,
+    "timeout": 30,
+    "retries": 3
+};
+
+// Access via :> Index projection
+let port: Int = config :> Index("port");
+
+// Check existence
+let has_timeout: Bool = config :> Contains("timeout");
+
+// Get all keys
+let keys: List<String> = config :> Keys;
+
+// Remove via <-
+txn remove_timeout [config :> Size > 0][config :> Size == @config :> Size - 1] {
+    &config <- "timeout" !;
+    term;
+};
+
+// SetLiteral creates a HashSet
+let tags: HashSet<String> = {"brief", "language", "compiler"};
+
+// Check membership
+let has_brief: Bool = tags :> Contains("brief");
+
+// Add via <-
+txn add_tag [true][tags :> Size == @tags :> Size + 1] {
+    &tags <- "contract";
+    term;
+};
+
+// Convert to list
+let tag_list: List<String> = tags :> Elements;
+
+// Empty literals
+let empty_map: HashMap<Int, Bool> = {};
+let empty_set: HashSet<Int> = {};

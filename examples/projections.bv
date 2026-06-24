@@ -1,0 +1,52 @@
+// projections.bv — Projection operator (:>) across all targets
+// Demonstrates: Size, Bytes, Ptr, Alignment, Range, Popcount,
+// LeadingZeros, TrailingZeros, Absolute, BitReverse, Type,
+// Match, Keys, Values, Contains, Pop, Index
+
+let val: Int = -42;
+let flag: Bool = true;
+let ch: Char = 'A';
+let text: String = "Hello";
+
+// Size — length/size of collections and strings
+let len: Int = text :> Size;
+
+// Bytes — byte representation size
+let b: Int = val :> Bytes;
+
+// Ptr — raw pointer to the value's storage
+let p: Int = val :> Ptr;
+
+// Alignment — memory alignment requirement
+let a: Int = val :> Alignment;
+
+// Range — [lo..hi] range constraint access
+let r: Int = val :> Range;
+
+// Bit manipulation projections on Int
+let pop: Int = val :> Popcount;       // count of set bits
+let lz: Int = val :> LeadingZeros;    // leading zero bits
+let tz: Int = val :> TrailingZeros;   // trailing zero bits
+let abs: Int = val :> Absolute;        // absolute value
+let rev: Int = val :> BitReverse;      // bit-reversed
+
+// Type — runtime type tag (useful in generics)
+let ty: Int = val :> Type;
+
+// Match — pattern-match dispatch on type
+let matched: Bool = val :> Match;
+
+// Collection projections
+let map: HashMap<String, Int> = {"a": 1, "b": 2};
+
+let keys: List<String> = map :> Keys;     // all keys
+let vals: List<Int> = map :> Values;       // all values
+let has_a: Bool = map :> Contains("a");    // key existence check
+let val_a: Int = map :> Index("a");        // value by key
+
+// Pop from collection via projection
+let popped: Int = map :> Pop("a");         // remove and return
+
+// Array access via Index projection
+let arr: List<Int> = [10, 20, 30];
+let first: Int = arr :> Index(0);          // arr[0]

@@ -1,0 +1,6 @@
+// adapters.dbvl — Data Brief Lines (one entry per line)
+// GLUE adapter registry for the FFI bridge system
+
+rust glue/adapters/rust.bv .rs src/
+python glue/adapters/python.bv .py lib/
+node  glue/adapters/node.bv  .js  lib/

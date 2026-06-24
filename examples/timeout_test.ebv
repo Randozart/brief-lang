@@ -1,13 +1,17 @@
+// timeout-test.ebv — Embedded Brief with fetch timeout
+// Demonstrates: sig declarations, union types, within-cycles timeout
+
 sig fetch: () -> Int;
 
-let res: Int | Error = 0;
+let res: Int = 0;
+let fetched: Bool = false;
 
-rct txn fetch_data [n >= 0][true] {
-    res = fetch() within 10 cycles;
-    [res Ok(data)] {
+rct txn fetch_data [fetched == false][fetched == true] {
+    &res = fetch() within 10 cycles;
+    [res > 0] {
         term true;
     };
-    [res Err(e)] {
+    [res <= 0] {
         term true;
     };
 };

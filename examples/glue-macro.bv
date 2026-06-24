@@ -1,0 +1,37 @@
+// glue-macro.bv — Full GLUE bridge pattern
+// Demonstrates: #export, frgn, meld, GLUE macro adapter
+// Three-language bridge: Brief exports, Rust/Python/Node imports
+
+// The type bridge: prove Int and Float are layout-compatible
+meld Int <:> Float {
+    Ptr -> Ptr,
+    Size -> Size,
+    Bytes -> Bytes
+};
+
+// Foreign function: import from the target language
+frgn print_number(n: Int) -> Bool ;
+
+// Exported function: available to foreign callers
+#export add_and_print(a: Int, b: Int) -> Int {
+    let sum: Int = a + b;
+    let _ = print_number(sum);
+    term sum;
+};
+
+// Another export with meld-proven type compatibility
+#export compute_dot(x: List<Float>, y: List<Float>) -> Float {
+    let dot: Float = 0.0;
+    let i: Int = 0;
+    let n: Int = x :> Size;
+    txn dot_loop [i < n][i == n] -> Float {
+        &dot = dot + (x[i] * y[i]);
+        &i = i + 1;
+        term;
+    };
+    term dot;
+};
+
+// The GLUE adapter macro (in glue/adapters/rust.bv) generates:
+//   pub fn add_and_print(a: i64, b: i64) -> i64 { ... }
+//   pub fn compute_dot(x: &[f64], y: &[f64]) -> f64 { ... }

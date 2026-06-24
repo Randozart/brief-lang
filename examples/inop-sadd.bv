@@ -19,9 +19,10 @@ rct txn run [tick < 1][tick == 1] {
     [tick == 0] {
         let x: Int = sadd#(10, 20);
         term! -> print_int#(x);
+    } else {
+        &tick = tick + 1;
+        term;
     };
-    &tick = tick + 1;
-    term;
 };
 
 // Compile:   ./target/release/brief-compiler build examples/inop-sadd.bv

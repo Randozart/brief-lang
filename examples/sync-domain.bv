@@ -1,0 +1,43 @@
+// sync-domain.bv — Sync domains for structured concurrency
+// Demonstrates: sync(domain) prefix on txn, TopLevel::SyncGroup,
+// Statement::SyncBlock
+
+// Define a sync domain for ordered state transitions
+sync(io) txn read_input [buffer_empty == true][buffer_empty == false] {
+    &buffer = read#(fd, 256);
+    &buffer_empty = false;
+    term;
+};
+
+sync(io) txn process_buffer [buffer_empty == false][buffer_empty == true] {
+    &result = transform(buffer);
+    &buffer = [];
+    &buffer_empty = true;
+    term;
+};
+
+// Sync group — transactions that share a domain run atomically
+sync(computation) {
+    sync(computation) txn step_a [state == 0][state == 1] {
+        &state = 1;
+        term;
+    };
+
+    sync(computation) txn step_b [state == 1][state == 2] {
+        &state = 2;
+        term;
+    };
+};
+
+// Sync block inside a transaction — local synchronization
+txn coordinated_work [state >= 0][done == true] {
+    let temp: Int = 0;
+
+    sync(critical) {
+        &temp = data :> Size;
+        &shared = shared + temp;
+    };
+
+    &done = true;
+    term;
+};

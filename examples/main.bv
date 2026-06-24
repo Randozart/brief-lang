@@ -23,8 +23,8 @@ defn count_tokens(source: String) -> Int [source != ""][term >= 0] {
 
 // ===== MAIN TRANSACTION =====
 
-txn compile_main [true][term == "compilation complete"] {
-    let source: String = "let x: Int = 0;\n\n txn test [true][true] {\n   term;\n };";
+txn compile_main [source != ""][count >= 0] {
+    let source: String = "let x: Int = 0;\n\n txn test [x > 0][x == @x] {\n   term;\n };";
     let count = count_tokens(source);
-    term;
+    term count;
 };

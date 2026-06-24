@@ -1,0 +1,70 @@
+// stdlib-demo.bv — Import and use stdlib collections
+// Demonstrates: HashMap, HashSet, Stack, Queue, StringBuilder,
+// string/char operations from stdlib
+
+import { new_map, insert, get, contains_key, remove, keys, values } from "std/hashmap";
+import { new_set, add, contains, to_list, union, intersection } from "std/hashset";
+import { new_stack, push, pop, peek, top } from "std/stack";
+import { new_queue, enqueue, dequeue, front } from "std/queue";
+import { new_builder, append_str, to_string, clear, len } from "std/string_builder";
+import { to_upper, is_alpha, is_digit } from "std/char";
+import { contains, starts_with, split, join } from "std/string";
+
+// HashMap usage
+let scores: HashMap<String, Int> = new_map();
+txn add_score [true][scores :> Size == @scores :> Size + 1] {
+    &scores <- ("alice", 95);
+    term;
+};
+
+let alice_score: Int = scores :> Index("alice");
+let has_bob: Bool = scores :> Contains("bob");
+let all_keys: List<String> = scores :> Keys;
+
+// HashSet usage
+let seen: HashSet<Int> = new_set();
+txn mark_seen [true][seen :> Size == @seen :> Size + 1] {
+    &seen <- 42;
+    term;
+};
+
+let has_42: Bool = seen :> Contains(42);
+
+// Stack usage
+let stack: Stack<String> = new_stack();
+txn push_item [true][stack :> Size == @stack :> Size + 1] {
+    &stack <- "brief";
+    term;
+};
+
+// Queue usage
+let queue: Queue<Int> = new_queue();
+txn enqueue_item [true][queue :> Size == @queue :> Size + 1] {
+    &queue <- 100;
+    term;
+};
+
+// StringBuilder usage
+let builder: StringBuilder = new_builder();
+txn build_string [true][builder :> Size > 0] {
+    let _ = append_str(builder, "Hello ");
+    let _ = append_str(builder, "World!");
+    let result: String = to_string(builder);
+    term;
+};
+
+// Char classification
+defn classify_char(c: Char) -> String {
+    [is_alpha(c)] {
+        term "letter";
+    };
+    [is_digit(c)] {
+        term "digit";
+    };
+    term "other";
+};
+
+// String operations
+defn check_prefix(s: String, prefix: String) -> Bool {
+    term starts_with(s, prefix);
+};

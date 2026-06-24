@@ -1,7 +1,8 @@
 // Minimal intrinsic test
-// println# and sqrt# are native intrinsics — no TOML bindings needed.
-// Replaced: frgn println/sqrt (TOML-based) with intrinsic #-calls.
+// println# is a native intrinsic — no TOML bindings needed.
 
-rct txn test_ff [true]] {
-    term println#("Hello from intrinsics!");
+frgn output_written: Bool = false;
+
+rct txn test_ffi [output_written == false][output_written == true] {
+    term! -> println#("Hello from intrinsics!");
 };

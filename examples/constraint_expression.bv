@@ -10,7 +10,7 @@ rct txn check_constraint {
   term print_int#(even);
 };
 
-rct txn update [value > 0][true] {
+rct txn update [value > 0][value == @value - 1] {
   &value = value - 1;
   term;
 };

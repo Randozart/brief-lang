@@ -16,10 +16,41 @@ defn __spawn_with_output(command: String, args: List<String>) -> Result<String, 
     term spawn_with_output#(command, args);
 };
 
-frgn __env_var(name: String) -> Result<String, String>;
-frgn __set_env_var(name: String, value: String) -> Result<Void, String>;
-frgn __current_dir() -> Result<String, String>;
-frgn __set_current_dir(path: String) -> Result<Void, String>;
+// Replaced: frgn __env_var with getenv# intrinsic
+defn __env_var(name: String) -> Result<String, String> {
+    let val = getenv#(name);
+    [val != ""] {
+        term Ok(val);
+    };
+    term Err("env var not found");
+};
+
+// Replaced: frgn __set_env_var with setenv# intrinsic
+defn __set_env_var(name: String, value: String) -> Result<Void, String> {
+    let ret = setenv#(name, value);
+    [ret == 0] {
+        term Ok(void);
+    };
+    term Err("setenv failed");
+};
+
+// Replaced: frgn __current_dir with getcwd# intrinsic
+defn __current_dir() -> Result<String, String> {
+    let dir = getcwd#();
+    [dir != ""] {
+        term Ok(dir);
+    };
+    term Err("getcwd failed");
+};
+
+// Replaced: frgn __set_current_dir with chdir# intrinsic
+defn __set_current_dir(path: String) -> Result<Void, String> {
+    let ret = chdir#(path);
+    [ret == 0] {
+        term Ok(void);
+    };
+    term Err("chdir failed");
+};
 
 // ===== NATIVE WRAPPERS =====
 

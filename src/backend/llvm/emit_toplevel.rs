@@ -1560,9 +1560,18 @@ impl LlvmBackend {
                 let fire_l = format!(".cpt_{}_{}", name, txn.name);
                 let skip_l = format!(".cpt_{}_{}_s", name, txn.name);
 
-                writeln!(out, "  %cpct_{}_{} = icmp ne i64 {}, 0", name, txn.name, cond.name).ok();
-                writeln!(out, "  br i1 %cpct_{}_{}, label %{}, label %{}",
-                    name, txn.name, fire_l, skip_l).ok();
+                let cond_i1 = {
+                    let r = format!("%cpct_{}_{}", name, txn.name);
+                    self.txn_counter += 1;
+                    if cond.ty == Type::Bool {
+                        writeln!(out, "  {} = and i1 {}, true", r, cond.name).ok();
+                    } else {
+                        writeln!(out, "  {} = icmp ne i64 {}, 0", r, cond.name).ok();
+                    }
+                    r
+                };
+                writeln!(out, "  br i1 {}, label %{}, label %{}",
+                    cond_i1, fire_l, skip_l).ok();
                 writeln!(out, "{}:", fire_l).ok();
 
                 for stmt in &txn.body {
@@ -1586,9 +1595,13 @@ impl LlvmBackend {
     /// and stores outputs to atomic channel globals.
     pub(super) fn emit_cell_thread(&mut self, out: &mut String, cell: &crate::ast::CellDef) {
         let cell_name = &cell.name;
-        writeln!(out, "define i8* @cell_thread_{}(ptr %arg) local_unnamed_addr #0 {{", cell_name).ok();
+        // Thread function receives a private %State* allocated by the caller
+        // in emit_main. Named %state so all GEP loads/stores throughout the
+        // LLVM backend resolve correctly.
+        writeln!(out, "define i8* @cell_thread_{}(ptr %state) local_unnamed_addr #0 {{", cell_name).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  %cs = bitcast ptr %arg to ptr").ok();
+        let saved_state = self.state_reg_name.clone();
+        self.state_reg_name = "%state".to_string();
 
         let tick_ns = 1_000_000; // 1kHz default
         writeln!(out, "  %ts_sec = alloca i64, align 8").ok();
@@ -1608,8 +1621,17 @@ impl LlvmBackend {
             let cond = self.emit_expr(out, &pre, "  ");
             let fire_l = format!(".ct_{}_{}", cell_name, txn.name);
             let skip_l = format!(".ct_{}_{}_s", cell_name, txn.name);
-            writeln!(out, "  %ctp_{}_{} = icmp ne i64 {}, 0", cell_name, txn.name, cond.name).ok();
-            writeln!(out, "  br i1 %ctp_{}_{}, label %{}, label %{}", cell_name, txn.name, fire_l, skip_l).ok();
+            let cond_i1 = {
+                let r = format!("%cti_{}_{}", cell_name, txn.name);
+                self.txn_counter += 1;
+                if cond.ty == Type::Bool {
+                    writeln!(out, "  {} = and i1 {}, true", r, cond.name).ok();
+                } else {
+                    writeln!(out, "  {} = icmp ne i64 {}, 0", r, cond.name).ok();
+                }
+                r
+            };
+            writeln!(out, "  br i1 {}, label %{}, label %{}", cond_i1, fire_l, skip_l).ok();
             writeln!(out, "{}:", fire_l).ok();
             for stmt in &txn.body {
                 let rewritten = Self::rewrite_cell_stmt_identifiers(stmt, cell_name);
@@ -1626,7 +1648,7 @@ impl LlvmBackend {
             if let Some(&idx) = self.field_index_map.get(&prefixed) {
                 let ll_ty = &self.field_types[idx];
                 let gep = format!("%ctg_{}_{}", cell_name, port_name);
-                writeln!(out, "  {} = getelementptr %State, ptr %cs, i32 0, i32 {}", gep, idx).ok();
+                writeln!(out, "  {} = getelementptr %State, ptr {}, i32 0, i32 {}", gep, self.state_reg_name, idx).ok();
                 let val = format!("%ctv_{}_{}", cell_name, port_name);
                 writeln!(out, "  {} = load {}, ptr {}, align 8", val, ll_ty, gep).ok();
                 writeln!(out, "  store atomic {} {}, ptr @chan_val_{}_{} seq_cst, align 8", ll_ty, val, cell_name, port_name).ok();
@@ -1635,6 +1657,7 @@ impl LlvmBackend {
         // Set dirty flag
         writeln!(out, "  store atomic i8 1, ptr @chan_dirty_{} seq_cst, align 1", cell_name).ok();
 
+        self.state_reg_name = saved_state;
         writeln!(out, "  br label %loop").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();

@@ -29,7 +29,7 @@ rct txn deposit [locked == false]
 };
 
 // Reset daily counter (for testing)
-rct txn reset_counter [true]
+rct txn reset_counter [total_withdrawals > 0]
   [total_withdrawals == 0]
 {
   &total_withdrawals = 0;

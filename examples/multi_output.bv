@@ -9,11 +9,7 @@ defn process_step -> Int, String, Bool {
 txn run_process [done == false]
   [done == true]
 {
-  let a: Int;
-  let b: String;
-  let c: Bool;
-  
-  let results = process_step();
+  let (a, b, c) = process_step();
   
   &count = a;
   &message = b;

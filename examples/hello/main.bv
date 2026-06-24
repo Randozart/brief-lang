@@ -1,10 +1,10 @@
 let greeting: String = "Hello";
 
-txn greet [true]] {
-  term greeting;
+txn greet [greeting != ""][term == greeting] {
+  term! -> print_int#(greeting :> Size);
 };
 
-txn set_greeting [true]] {
+txn set_greeting [greeting != "Hello, World!"][greeting == "Hello, World!"] {
   &greeting = "Hello, World!";
   term;
 };

@@ -33,7 +33,15 @@ defn __shm_unlink(name: String) -> Result<Void, ShmError> {
     term Err(ShmOther("shm_unlink failed"));
 };
 
-frgn __ftruncate_shm(fd: Int, length: Int) -> Result<Void, ShmError>;
+// Replaced: frgn __ftruncate_shm with ftruncate# intrinsic
+defn __ftruncate_shm(fd: Int, length: Int) -> Result<Void, ShmError> {
+    let ret = ftruncate#(fd, length);
+    [ret == 0] {
+        term Ok(void);
+    };
+    term Err(ShmOther("ftruncate failed"));
+};
+
 frgn __shm_list() -> Result<List<String>, ShmError>;
 frgn __shm_exists(name: String) -> Result<Bool, ShmError>;
 frgn __shm_size(name: String) -> Result<Int, ShmError>;
@@ -120,8 +128,17 @@ defn __munmap(addr: Int, length: Int) -> Result<Void, MmapError> {
     term Err(MmapOther("munmap failed"));
 };
 
-frgn __mmap_anonymous(length: Int, prot: Int, flags: Int) -> Result<Int, MmapError>;
+// Replaced: frgn __mmap_anonymous with mmap# intrinsic
+defn __mmap_anonymous(length: Int, prot: Int, flags: Int) -> Result<Int, MmapError> {
+    let addr = mmap#(0, length, prot, flags, -1, 0);
+    [addr != -1] {
+        term Ok(addr);
+    };
+    term Err(MmapOther("mmap failed"));
+};
+
 frgn __msync(addr: Int, length: Int, flags: Int) -> Result<Void, MmapError>;
+
 frgn __mmap_write(addr: Int, offset: Int, data: List<Int>, length: Int) -> Result<Void, MmapError>;
 frgn __mmap_read(addr: Int, offset: Int, length: Int) -> Result<List<Int>, MmapError>;
 frgn __mmap_read_u32(addr: Int, offset: Int) -> Result<Int, MmapError>;
@@ -236,12 +253,42 @@ enum AtomicError {
     AtomicOther(String)
 }
 
-frgn __atomic_load_u32(addr: Int, offset: Int) -> Result<Int, AtomicError>;
-frgn __atomic_store_u32(addr: Int, offset: Int, value: Int) -> Result<Void, AtomicError>;
-frgn __atomic_cas_u32(addr: Int, offset: Int, expected: Int, new_value: Int) -> Result<Int, AtomicError>;
-frgn __atomic_fence() -> Result<Void, AtomicError>;
-frgn __atomic_xchg_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError>;
-frgn __atomic_add_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError>;
+// Replaced: frgn __atomic_* with atomic_*# intrinsics
+defn __atomic_load_u32(addr: Int, offset: Int) -> Result<Int, AtomicError> {
+    let val = atomic_load#(addr + offset, 0);
+    term Ok(val);
+};
+
+defn __atomic_store_u32(addr: Int, offset: Int, value: Int) -> Result<Void, AtomicError> {
+    let ret = atomic_store#(addr + offset, value, 0);
+    [ret == 0] {
+        term Ok(void);
+    };
+    term Err(AtomicOther("atomic_store failed"));
+};
+
+defn __atomic_cas_u32(addr: Int, offset: Int, expected: Int, new_value: Int) -> Result<Int, AtomicError> {
+    let ret = atomic_cas#(addr + offset, expected, new_value, 0);
+    term Ok(ret);
+};
+
+defn __atomic_fence() -> Result<Void, AtomicError> {
+    let ret = fence#(0);
+    [ret == 0] {
+        term Ok(void);
+    };
+    term Err(AtomicOther("fence failed"));
+};
+
+defn __atomic_xchg_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError> {
+    let ret = atomic_xchg#(addr + offset, value, 0);
+    term Ok(ret);
+};
+
+defn __atomic_add_u32(addr: Int, offset: Int, value: Int) -> Result<Int, AtomicError> {
+    let ret = atomic_add#(addr + offset, value, 0);
+    term Ok(ret);
+};
 
 // ===== ATOMIC WRAPPERS =====
 

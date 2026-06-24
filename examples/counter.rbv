@@ -2,7 +2,7 @@
 rstruct Counter {
   count: Int = 0;
 
-  txn Counter.increment [true][@count + 1 == count] {
+  txn Counter.increment [count < 100][@count + 1 == count] {
     &count = count + 1;
     term;
   };
@@ -12,7 +12,7 @@ rstruct Counter {
     term;
   };
 
-  txn Counter.reset [true][0 == count] {
+  txn Counter.reset [count != 0][0 == count] {
     &count = 0;
     term;
   };

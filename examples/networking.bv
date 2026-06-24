@@ -1,0 +1,49 @@
+// networking.bv — Basic TCP client using networking intrinsics
+// Demonstrates: socket#, connect#, send#, recv#, close#
+
+let sock: Int = 0;
+let connected: Bool = false;
+let buffer: List<Int> = [];
+let received: List<Int> = [];
+
+// Create a TCP socket
+txn create_socket [sock == 0][sock > 0] {
+    // AF_INET = 2, SOCK_STREAM = 1
+    &sock = socket#(2, 1, 0);
+    term;
+};
+
+// Connect to a remote host
+txn connect_socket [sock > 0 && connected == false][connected == true] {
+    // sockaddr_in structure encoded as Int list:
+    // [family(2), port(htons), addr(4 bytes), padding(8 bytes)]
+    let addr: List<Int> = [2, 0x5000, 0x0100007F, 0, 0];
+    let ret: Int = connect#(sock, addr :> Ptr, 16);
+    &connected = ret == 0;
+    term;
+};
+
+// Send data
+txn send_data [connected == true][sent == true] {
+    let data: String = "GET / HTTP/1.0\r\n\r\n";
+    let ret: Int = send#(sock, data :> Ptr, data :> Size, 0);
+    &sent = ret >= 0;
+    term;
+};
+
+// Receive response
+txn recv_data [connected == true][received :> Size > 0] {
+    let buf: List<Int> = [0; 4096];
+    let ret: Int = recv#(sock, buf :> Ptr, 4096, 0);
+    [ret > 0] {
+        &received = buf;
+    };
+    term;
+};
+
+// Clean up
+txn close_socket [sock > 0][sock == 0] {
+    let _ = close#(sock);
+    &sock = 0;
+    term;
+};

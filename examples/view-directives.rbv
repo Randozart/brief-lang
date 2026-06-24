@@ -1,0 +1,63 @@
+// view-directives.rbv — Advanced RBV view directives
+// Demonstrates: b-style, b-class, b-if, b-show, b-each
+
+let items: List<String> = ["A", "B", "C"];
+let selected: String = "";
+let dark_mode: Bool = false;
+let show_sidebar: Bool = true;
+
+txn toggle_dark [dark_mode == false][dark_mode == true] {
+    &dark_mode = true;
+    term;
+};
+
+txn toggle_sidebar [show_sidebar == true][show_sidebar == false] {
+    &show_sidebar = false;
+    term;
+};
+
+txn select_item [true][selected == item] {
+    &selected = item;
+    term;
+};
+
+<view>
+<div>
+    <!-- b-if: conditionally render element -->
+    <div b-if="dark_mode" b-style="background: #333; color: white;">
+        Dark mode active
+    </div>
+
+    <!-- b-show: show/hide (always rendered, CSS display toggle) -->
+    <div b-show="show_sidebar">
+        Sidebar content
+    </div>
+
+    <!-- b-style: dynamic inline styles -->
+    <div b-style="'background: ' + (dark_mode ? '#222' : '#fff') + ';'">
+        Dynamic background
+    </div>
+
+    <!-- b-class: dynamic CSS classes -->
+    <div b-class="{ 'active': selected == 'A', 'highlight': dark_mode }">
+        Conditional classes
+    </div>
+
+    <!-- b-each: iterate over list -->
+    <ul>
+        <li b-each:item="items"
+            b-class="{ 'selected': item == selected }"
+            b-trigger:click="select_item(item)">
+            <span b-text="item">Item</span>
+        </li>
+    </ul>
+</div>
+</view>
+
+<style>
+.active { font-weight: bold; }
+.highlight { border: 2px solid gold; }
+.selected { background: #667eea; color: white; }
+li { padding: 8px; cursor: pointer; }
+li:hover { background: #f0f0f0; }
+</style>
