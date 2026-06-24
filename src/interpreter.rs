@@ -1438,9 +1438,26 @@ impl Interpreter {
 
     /// Run one convergence pass on all registered persistent cells.
     /// Returns true if any cell fired (output may have changed).
+    /// Runs up to 2 convergence passes to handle cell-to-cell wire propagation:
+    /// pass 0 ticks all cells, pass 1 re-ticks cells that received wire updates.
     fn tick_persistent_cells(&mut self) -> Result<bool, RuntimeError> {
         let mut any_fired = false;
-        let cell_names: Vec<String> = self.persistent_cells.keys().cloned().collect();
+
+        for pass in 0..2 {
+            // Before second pass: reset fired flag for wire target cells so they
+            // re-evaluate with the updated parameter values from pass 0 propagation.
+            if pass == 1 {
+                for wire in &self.cell_wires.clone() {
+                    if let Some(instance) = self.persistent_cells.get_mut(&wire.to_cell) {
+                        instance.state.insert(
+                            format!("{}${}.fired", wire.to_cell, 0),
+                            Value::Bool(false),
+                        );
+                    }
+                }
+            }
+
+            let cell_names: Vec<String> = self.persistent_cells.keys().cloned().collect();
 
         for name in &cell_names {
             if !self.persistent_cells.contains_key(name) { continue; }
@@ -1599,6 +1616,7 @@ impl Interpreter {
                 }
                 self.persistent_cells.insert(cell_name, instance);
                 any_fired = any_fired || cell_fired;
+            }
             }
         }
 
