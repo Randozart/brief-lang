@@ -164,7 +164,7 @@ See `docs/architecture/features/pipe.md` for full documentation.
 **INTRINSICS BEFORE FRGN**: Before reaching for a `frgn` declaration, check if
 an `Intrinsic` variant already exists that does the same thing. This is
 especially critical in `.abv` (Accelerated Brief) files, where `frgn` is banned:
-  - Need to print? → `print_int#`, `print_float#`, `put_char#` (already exist)
+  - Need to print? → `print_int#`, `print_float#`, `putchar#` (already exist)
   - Need input? → `get_env_int#`, `read_stdin#` (already exist)
   - Need GPU thread ID? → `get_global_id#`, `get_local_id#` (already exist)
   If no suitable intrinsic exists, add one to `src/ast.rs` — never add `frgn`.

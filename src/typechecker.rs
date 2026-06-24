@@ -3083,7 +3083,10 @@ Expr::ObjectLiteral(fields) => {
                     }
                 }
             }
-            Expr::IntrinsicCall { .. } => {}
+            Expr::IntrinsicCall { intrinsic: _, args } => {
+                self.check_expr_for_function_calls(expr);
+                for arg in args { self.check_expr_for_ffi_errors(arg); }
+            }
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
                 self.check_expr_for_ffi_errors(l);
                 self.check_expr_for_ffi_errors(r);

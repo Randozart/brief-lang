@@ -820,6 +820,9 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
+        // Line-buffer stdout so \n auto-flushes (matching default TTY behavior)
+        writeln!(out, "  %so_init = load ptr, ptr @stdout").ok();
+        writeln!(out, "  call i32 @setvbuf(ptr %so_init, ptr null, i32 1, i64 0)").ok();
         // Arena for reactive tick scope: allocates a 64KB scratch buffer
         // that all collection operations within the reactive loop will
         // bump-allocate from. At each tick boundary the arena is reset
@@ -916,8 +919,11 @@ impl LlvmBackend {
                     }
                 }
             }
+            writeln!(out, "  %any_fired = alloca i8, align 1").ok();
+            writeln!(out, "  store i8 0, ptr %any_fired").ok();
             writeln!(out, "  br label %tick").ok();
             writeln!(out, "  tick:").ok();
+            writeln!(out, "  store i8 0, ptr %any_fired").ok();
         }
         self.ssa_state_reg = None;
         for (name, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
@@ -1029,6 +1035,7 @@ impl LlvmBackend {
                 let done_l = format!("done_{}", name);
                 writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, done_l).ok();
                 writeln!(out, "  {}:", body_l).ok();
+                writeln!(out, "  store i8 1, ptr %any_fired").ok();
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
@@ -1058,6 +1065,7 @@ impl LlvmBackend {
                     self.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
                 }
                 self.loop_exit_label = Some("done".into());
+                writeln!(out, "  store i8 1, ptr %any_fired").ok();
                 for s in body_stmts { self.emit_stmt(out, s, "  "); }
                 self.loop_exit_label = None;
                 self.ssa_old_float_regs.clear();
@@ -1094,9 +1102,15 @@ impl LlvmBackend {
             writeln!(out, "  done:").ok();
         } else if has_wake_triggers {
             emit_trg_event_epoll_wait(self, out);
-            super::emit_loop_metadata(out, "  ", "tick", &mut self.metadata_counter, &mut self.pending_metadata);
+            let md_idx = super::emit_loop_metadata_nodes(&mut self.metadata_counter, &mut self.pending_metadata);
+            writeln!(out, "  %af = load i8, ptr %any_fired").ok();
+            writeln!(out, "  %afc = icmp ne i8 %af, 0").ok();
+            writeln!(out, "  br i1 %afc, label %tick, label %done, !llvm.loop !{}", md_idx).ok();
         } else {
-            super::emit_loop_metadata(out, "  ", "tick", &mut self.metadata_counter, &mut self.pending_metadata);
+            let md_idx = super::emit_loop_metadata_nodes(&mut self.metadata_counter, &mut self.pending_metadata);
+            writeln!(out, "  %af = load i8, ptr %any_fired").ok();
+            writeln!(out, "  %afc = icmp ne i8 %af, 0").ok();
+            writeln!(out, "  br i1 %afc, label %tick, label %done, !llvm.loop !{}", md_idx).ok();
         }
         self.phi_induction_reg = None;
         self.pending_post_hoist.clear();

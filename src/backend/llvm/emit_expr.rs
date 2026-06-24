@@ -589,11 +589,16 @@ impl LlvmBackend {
                     } else {
                         // 2026-06-13: Pass %state to defns/callable txns — functions need
                         // the state pointer to access module-level fields (SSA is function-scoped).
+                        let fn_name = if name == "main" && self.defn_params.contains_key("main") {
+                            "brief_main"
+                        } else {
+                            name
+                        };
                         a_strs.insert(0, "ptr %state".to_string());
                         let is_float_ret = def_rets.as_ref().map_or(false, |rets| rets.iter().any(|t| matches!(t, Type::Float)));
                         let is_string_ret = def_rets.as_ref().map_or(false, |rets| rets.iter().any(|t| matches!(t, Type::String) || matches!(t, Type::Data)));
                         let call_ret = if is_float_ret { "float" } else { "i64" };
-                        writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, name, a_strs.join(", ")).ok();
+                        writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, fn_name, a_strs.join(", ")).ok();
                         if is_float_ret {
                             return TypedRegister { name: v, ty: Type::Float };
                         }
@@ -4047,6 +4052,12 @@ impl LlvmBackend {
 
                 writeln!(out, "{}br label %{}", indent, loop_h).ok();
                 writeln!(out, "{}:", loop_h).ok();
+                // Clear SSA old-value cache so precondition evaluation emits
+                // fresh loads instead of stale cached values. Without this, the
+                // CellCall convergence loop sees stale field values and loops
+                // forever when the body stores new values to the same fields.
+                self.ssa_old_int_regs.clear();
+                self.ssa_old_float_regs.clear();
 
                 for (ti, txn) in cell.transactions.iter().enumerate() {
                     let fire_l = format!(".cl_{}_{}", self.txn_counter, ti);

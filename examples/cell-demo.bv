@@ -1,0 +1,24 @@
+// cell-demo.bv — cell primitive demo
+// Compile: brief-compiler build examples/cell-demo.bv && ./cell-demo
+
+let boot_done: Bool = false;
+
+// A transient cell that adds two numbers
+cell adder(a: Int, b: Int) -> sum: Int {
+    done: Bool = false;
+    sum: Int = 0;
+    rct txn compute [!done]] {
+        &sum = a + b;
+        &done = true;
+        term;
+    };
+};
+
+// Script: call the cell, print result, exit
+rct txn boot [!boot_done]] {
+    let result = cell adder(40, 2);
+    print_int#(result);
+    putchar#(10);
+    &boot_done = true;
+    term!;
+};
