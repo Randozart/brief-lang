@@ -332,19 +332,6 @@ When `term expr;` or `term! expr;` executes inside a cell, the expression value 
 
 Run with `cargo test --lib`.
 
-### Known Gaps and Future Work
-
-| Item | Priority | Status |
-|------|----------|--------|
-| `cell!` persistent (async) — independent reactor loop | High | Not started |
-| `trg @` trigger binding (full) — wire cell output ports to parent triggers | High | Stub only |
-| Convergence loop postcondition checks (compare state before/after, rollback on failure) | Medium | Not implemented |
-| Cell isolation check in typechecker (verify cell txns reference no external state) | Medium | Not implemented |
-| CIRCT hardware synthesis (`cell` → `hw.module` with input/output ports) | Medium | Not started |
-| Sub-state GEP optimization (cell state as nested `%CellState` struct) | Low | Not started |
-| Multi-output named ports (multiple `-> name: Type` outputs) | Low | Parser + interpreter handle via `OutputType::Named` |
-| In-cell `defn` with output ports | Low | Parser parses, interpreter needs defn-in-scope handling |
-
 ### Phase 3 — `trg @ cell!` Binding (implemented 2026-06-23)
 
 The `trg name: Type @ cell(args).port` syntax is now implemented through the full pipeline:
@@ -457,6 +444,7 @@ Planned but not started. See `docs/plans/2026-06-23-cell-primitive.md` section 8
 
 | Item | Priority | Status |
 |------|----------|--------|
+| Sub-state GEP optimization (nested `%CellState` instead of flat prefixed fields in `%State`) | Low | Deferred — flat `cell$name$field` works for all current use cases |
 | LLVM backend multi-output tuple packing | Medium | Deferred — single-port fallback, comment added |
 | Phase 4 cell-to-cell communication | Medium | Not started |
 | CIRCT cell transaction body synthesis (full) | Medium | `hw.instance` + field regs done; txn body pending |
