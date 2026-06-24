@@ -554,7 +554,7 @@ See `docs/design/optimization-decision-tree.md` for the full decision tree — p
 - **Compile-time PGO** — interpreter profiling guides LLVM branch weights.
 - **LTO pipeline** — merges `brief_rt.c` bitcode with program IR.
 - **MMIO / DBVS / hardware handoff** — address plumbing, schema validation, Vivado XSA extraction.
-- **alka/on_exit disabled** — parser paths commented out, code left for future revisit.
+- **alka/on_exit permanently abandoned** — parser paths commented out, code left only as a historical artifact. No revisit planned.
 - **`__rt_poll()`** — non-blocking event drain at main() entry.
 - **Sync domains (Phase 11)** — `sync(domain)` prefix on `txn`/`defn`, `TopLevel::SyncGroup`, `Statement::SyncBlock`.
 - **BracketOp (MultiSlice refactor)** — flat `Vec<BracketOp>` replaces `coordinates`+`mask`. Ops: `Coord`, `Mask`, `Stride` in any order.

@@ -3351,7 +3351,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // DISABLED: alka/on_exit — not ready for use; keep parser disabled until revisited.
+    // PERMANENTLY ABANDONED: alka/on_exit — code left as historical artifact. No revisit planned.
     // fn parse_alka_block(&mut self) -> Result<Statement, SyntaxError> {
     //     self.advance();
     //     let dangerous = if let Some(Ok(Token::Not)) = self.current_token() {
@@ -3394,7 +3394,7 @@ impl<'a> Parser<'a> {
     //     Ok(Statement::Alka(AlkaBlock { dangerous, content, span }))
     // }
 
-    // DISABLED: alka/on_exit — not ready for use; keep parser disabled until revisited.
+    // PERMANENTLY ABANDONED: alka/on_exit — code left as historical artifact. No revisit planned.
     // fn parse_block_pragma(&mut self) -> Result<Statement, SyntaxError> {
     //     // #identifier { body };
     //     self.advance();

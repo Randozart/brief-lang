@@ -1834,10 +1834,12 @@ pub enum Statement {
         modifiers: Vec<Hashtag>,
     },
 
-    // Alka escape hatch: alka { ... }; or alka! { ... };
+    // PERMANENTLY ABANDONED — alka { ... }; or alka! { ... };
+    // Code left as historical artifact. No revisit planned.
     Alka(AlkaBlock),
 
-    // Block pragma: #on_exit { ... };
+    // PERMANENTLY ABANDONED — #on_exit { ... };
+    // Code left as historical artifact. No revisit planned.
     OnExit {
         body: Vec<Statement>,
         span: Option<Span>,

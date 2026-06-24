@@ -26,8 +26,8 @@ src/features/stmt/
   unification.rs      — Statement::Unification { name, variant, fields, expr }
   inline_asm.rs       — Statement::InlineAsm { asm_string, clobbers, span }
   local_trigger.rs    — Statement::LocalTrigger { name, ty, expr, span }
-  alka.rs             — Statement::Alka(AlkaBlock)
-  on_exit.rs          — Statement::OnExit { body, span }
+  alka.rs             — Statement::Alka(AlkaBlock) — **PERMANENTLY ABANDONED**
+  on_exit.rs          — Statement::OnExit { body, span } — **PERMANENTLY ABANDONED**
   sync_block.rs       — Statement::SyncBlock { body }
 ```
 
