@@ -497,6 +497,7 @@ mod tests {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let mut ctx = MacroContext::new();
         assert!(expand_templates(&mut program, &mut ctx).is_ok());
@@ -549,6 +550,7 @@ mod tests {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         assert!(validate_no_compile_time_intrinsics(&program).is_ok());
     }
@@ -631,6 +633,7 @@ mod tests {
             dispatch_mode: crate::ast::DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let mut ctx = MacroContext::new();
         let result = expand_templates(&mut program, &mut ctx);
@@ -663,6 +666,7 @@ mod tests {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let mut ctx = MacroContext::new();
         collect_macro_defs(&mut program, &mut ctx);

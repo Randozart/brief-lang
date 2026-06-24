@@ -416,6 +416,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         }
     }
 
@@ -464,6 +465,9 @@ mod tests {
 
     fn watchdog_spec(trigger: &str, is_required: bool) -> WatchdogSpec {
         WatchdogSpec {
+            cycles_bound: None,
+            seconds_bound: None,
+            is_proven: false,
             condition: Expr::PriorState(trigger.to_string()),
             is_required,
         }
@@ -593,6 +597,9 @@ mod tests {
         assert_eq!(extract_trigger_name(&spec), Some("my_button".to_string()));
 
         let spec_non_trigger = WatchdogSpec {
+            cycles_bound: None,
+            seconds_bound: None,
+            is_proven: false,
             condition: Expr::Bool(false),
             is_required: true,
         };
@@ -605,6 +612,9 @@ mod tests {
         assert!(is_trigger_watchdog(&spec));
 
         let spec_var = WatchdogSpec {
+            cycles_bound: None,
+            seconds_bound: None,
+            is_proven: false,
             condition: Expr::Identifier("timeout".to_string()),
             is_required: true,
         };
@@ -717,7 +727,12 @@ mod tests {
     fn test_no_trigger_watchdog_not_analyzed() {
         let program = make_program(vec![
             make_txn("main", Expr::Identifier("timeout".to_string()), Expr::Bool(true),
-                Some(WatchdogSpec { condition: Expr::Identifier("timeout".to_string()), is_required: true }),
+                Some(WatchdogSpec {
+                    cycles_bound: None,
+                    seconds_bound: None,
+                    is_proven: false,
+                    condition: Expr::Identifier("timeout".to_string()), is_required: true,
+                }),
                 vec![]),
         ]);
         let errors = analyze(&program);

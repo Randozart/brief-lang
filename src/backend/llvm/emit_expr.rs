@@ -4644,7 +4644,7 @@ impl LlvmBackend {
     pub(crate) fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast::Transaction)]) -> Vec<(String, String)> {
         let prg = crate::ast::Program {
             items: txns.iter().map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect(),
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential, exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential, exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None),
         };
         let mut pairs = crate::backend::detect_fusable_pairs(&prg);
         pairs.retain(|(a, b)| {

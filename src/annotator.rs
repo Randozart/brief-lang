@@ -650,7 +650,7 @@ use crate::ast::*;
     #[test]
     fn test_analyze_empty_program() {
         let mut ann = Annotator::new();
-        let prog = Program { items: vec![], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        let prog = Program { items: vec![], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);
         assert!(ann.call_paths.is_empty());
     }
@@ -659,7 +659,7 @@ use crate::ast::*;
     fn test_analyze_definition_no_calls() {
         let mut ann = Annotator::new();
         let stmts = vec![Statement::Term { values: vec![Some(Expr::Integer(42))], swan_song: None, modifiers: vec![] }];
-        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);
         assert_eq!(ann.call_paths.get("foo").map(|v| v.len()).unwrap_or(0), 0);
     }
@@ -668,7 +668,7 @@ use crate::ast::*;
     fn test_analyze_definition_with_call() {
         let mut ann = Annotator::new();
         let stmts = vec![Statement::Expression(make_call_expr("bar"))];
-        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["bar".to_string()]);
@@ -680,7 +680,7 @@ use crate::ast::*;
         let inner = make_call_expr("inner");
         let outer = Expr::Call("outer".to_string(), vec![inner]);
         let stmts = vec![Statement::Expression(outer)];
-        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["outer".to_string(), "inner".to_string()]);
@@ -693,7 +693,7 @@ use crate::ast::*;
             condition: Expr::Bool(true),
             statements: vec![Statement::Expression(make_call_expr("inside_guard"))],
         };
-        let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["inside_guard".to_string()]);
@@ -711,7 +711,7 @@ use crate::ast::*;
                 modifiers: vec![],
             }],
         };
-        let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None };
+        let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["calc".to_string()]);

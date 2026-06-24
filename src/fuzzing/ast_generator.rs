@@ -43,6 +43,7 @@ pub fn arb_program(max_depth: usize) -> impl Strategy<Value = Program> {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         })
     })
 }

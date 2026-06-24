@@ -1913,6 +1913,9 @@ pub struct Contract {
 pub struct WatchdogSpec {
     pub condition: Expr,
     pub is_required: bool,  // false = ? (optional), true = ! (required)
+    pub cycles_bound: Option<u64>,
+    pub seconds_bound: Option<u64>,
+    pub is_proven: bool,
 }
 
 impl Contract {
@@ -2436,8 +2439,27 @@ pub struct Program {
     pub dispatch_mode: DispatchMode,
     pub exit_condition: Option<Box<Expr>>, // NEW: #!exit <expr>;
     pub out_pragmas: Vec<String>,         // NEW: #!out(x, y);
+    pub watchdog_defaults: (Option<u64>, Option<u64>), // NEW
     /// Default sig modifier for the file scope: Some(Out) or Some(Inline)
     pub default_sig_modifier: Option<SigModifier>,
+}
+
+impl Default for Program {
+    fn default() -> Self {
+        Program {
+            items: vec![],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None,
+            out_pragmas: vec![],
+            watchdog_defaults: (None, None),
+            default_sig_modifier: None,
+        }
+    }
 }
 
 impl Program {
@@ -2773,7 +2795,7 @@ mod tests {
             items: vec![],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         program.synthesize_builtin_types();
         let enum_names: Vec<&str> = program.items.iter().filter_map(|item| {
@@ -2797,7 +2819,7 @@ mod tests {
             })],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         program.synthesize_builtin_types();
         let count = program.items.iter().filter(|item| {
@@ -2812,7 +2834,7 @@ mod tests {
             items: vec![],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         program.synthesize_builtin_types();
         let option = program.items.iter().find_map(|item| {
@@ -2829,7 +2851,7 @@ mod tests {
             items: vec![],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         program.synthesize_builtin_types();
         let result = program.items.iter().find_map(|item| {

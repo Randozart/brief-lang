@@ -380,6 +380,7 @@ pub fn run_export(
         exit_condition: None,
         out_pragmas: Vec::new(),
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
     };
 
     // Phase 1b: Expand the macro call — this will invoke the adapter's

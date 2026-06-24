@@ -253,6 +253,7 @@ mod tests {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
@@ -272,6 +273,7 @@ mod tests {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
@@ -296,6 +298,7 @@ mod tests {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
@@ -321,6 +324,7 @@ mod tests {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
@@ -349,6 +353,7 @@ mod tests {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);

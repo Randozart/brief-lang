@@ -13,6 +13,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         }
     }
 
@@ -51,6 +52,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("%State"));
@@ -118,6 +120,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("@increment("));
@@ -172,6 +175,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("noalias"), "Transaction should have noalias");
@@ -254,6 +258,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("alwaysinline"), "#inline should emit alwaysinline");
@@ -276,6 +281,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("inlinehint"), "#?inline should emit inlinehint");
@@ -301,6 +307,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // Cycle-free reactive txn always gets alwaysinline by default.
@@ -360,6 +367,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let _output = backend.generate(&program);
         assert!(backend.spirv_kernels.len() >= 1,
@@ -383,6 +391,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("GPU Kernel Blobs") || backend.spirv_kernels.len() >= 1,
@@ -406,6 +415,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let _output = backend.generate(&program);
         assert!(backend.spirv_kernels.len() >= 1,
@@ -460,6 +470,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @__get_global_id"),
@@ -509,6 +520,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("call void @__barrier__"),
@@ -538,6 +550,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let _output = backend.generate(&program);
         assert!(backend.spirv_kernels.len() >= 1,
@@ -566,6 +579,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let _output = backend.generate(&program);
         assert!(backend.spirv_kernels.len() == 2,
@@ -654,6 +668,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
 
@@ -753,6 +768,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // None is the first variant → discriminant 0
@@ -814,6 +830,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // Lower bound should be i64::MIN = -9223372036854775808
@@ -908,6 +925,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // Must NOT emit nuw nsw — we removed manual emission
@@ -965,6 +983,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         }
     }
 
@@ -1100,6 +1119,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = LlvmBackend::new().generate(&program);
         // MMIO triggers with is_wake → metadata only includes LinkRef::Linked symbols, not Explicit
@@ -1157,6 +1177,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // 2026-06-17: Float literal emits bitcast i32 directly (native float).
@@ -1222,6 +1243,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // The string literal "hello" should be stored as a bitcast of @str.0 to i8*,
@@ -1284,6 +1306,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("cannot write to const trigger 'locked'"),
@@ -1317,6 +1340,7 @@ fn empty_program() -> Program {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // No assert here — constants are not directly visible in IR.
@@ -1378,6 +1402,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("fadd fast float"),
@@ -1464,6 +1489,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         }
     }
 
@@ -1778,6 +1804,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         }
     }
 
@@ -1888,6 +1915,7 @@ fn empty_program() -> Program {
             exit_condition: exit_expr.map(Box::new),
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         }
     }
 
@@ -2228,6 +2256,7 @@ fn empty_program() -> Program {
             exit_condition: None,
         out_pragmas: vec![],
         default_sig_modifier: None,
+            watchdog_defaults: (None, None),
         }
     }
 
@@ -5263,6 +5292,7 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // Should contain undef instead of add i64 0, 0 for the void intrinsic
@@ -5304,6 +5334,7 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("add i64 undef, 0 ; halt is void"),
@@ -5399,6 +5430,7 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // With single-lens usage, no cache slots should be appended.
@@ -5446,6 +5478,7 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // With dual-lens usage, cache slots should be appended and cache IR emitted.
@@ -5532,6 +5565,7 @@ let spec = crate::target_spec::TargetSpec {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let tu = crate::type_universe::TypeUniverse::build(&program);
         let mut backend = LlvmBackend::new();
@@ -5566,6 +5600,7 @@ let spec = crate::target_spec::TargetSpec {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let tu = crate::type_universe::TypeUniverse::build(&program);
         let mut backend = LlvmBackend::new();
@@ -5628,6 +5663,7 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // Cell fields should appear as prefixed state fields
@@ -5682,6 +5718,7 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         // Should emit convergence loop header
@@ -5739,6 +5776,7 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("@cell_persistent_ticks"), "should emit persistent tick function");
@@ -5796,6 +5834,7 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
         assert!(output.contains("pair$a"), "first output field in State");

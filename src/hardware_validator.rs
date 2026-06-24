@@ -706,6 +706,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         }
     }
 

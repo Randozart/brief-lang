@@ -9847,6 +9847,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         i.type_universe = Some(crate::type_universe::TypeUniverse::build(&program));
         let stmt = Statement::Let {
@@ -9894,6 +9895,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         i.type_universe = Some(crate::type_universe::TypeUniverse::build(&program));
         let stmt = Statement::Let {

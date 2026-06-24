@@ -892,6 +892,7 @@ impl<'a> Parser<'a> {
             exit_condition,
             out_pragmas,
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         })
     }
 
@@ -4830,7 +4831,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             );
         }
 
-        // External watchdog: ?[cond] or ?![cond] (after all bracket pairs)
+        // External watchdog: ?[cond], ?![cond], or ?#[cond] (after all bracket pairs)
         if let Some(Ok(Token::Question)) = self.current_token() {
             self.advance();
             let is_required = if let Some(Ok(Token::Not)) = self.current_token() {
@@ -4839,15 +4840,25 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             } else {
                 false // ?
             };
+            let is_proven = if let Some(Ok(Token::Hash)) = self.current_token() {
+                self.advance();
+                true
+            } else {
+                false
+            };
             self.expect(Token::LBracket)?;
             let cond = self.parse_expression()?;
             self.expect(Token::RBracket)?;
             if cond.as_bool() == Some(true) {
                 return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
             }
+            let (cycles_bound, seconds_bound) = Self::extract_timing_bound(&cond);
             watchdog = Some(WatchdogSpec {
+                cycles_bound,
+                seconds_bound,
                 condition: cond,
                 is_required,
+                is_proven,
             });
         }
 
@@ -4891,9 +4902,13 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     return self.spanned_err("Watchdog cannot be [true] - must verify something".to_string());
                 }
 
+                let (cycles_bound, seconds_bound) = Self::extract_timing_bound(&cond);
                 watchdog = Some(WatchdogSpec {
+                    cycles_bound,
+                    seconds_bound,
                     condition: cond,
                     is_required: !is_optional, // default is required
+                    is_proven: false,
                 });
             } else {
                 return self.spanned_err("Too many contract brackets (max 3: [pre][post][watchdog])".to_string());
@@ -4936,6 +4951,25 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             watchdog,
             span,
         })
+    }
+
+    fn extract_timing_bound(expr: &Expr) -> (Option<u64>, Option<u64>) {
+        match expr {
+            Expr::Lt(left, right) => {
+                if let (Expr::Identifier(name), Expr::Integer(n)) = (left.as_ref(), right.as_ref()) {
+                    if *n >= 0 {
+                        if name == "cycles" {
+                            return (Some(*n as u64), None);
+                        }
+                        if name == "seconds" {
+                            return (None, Some(*n as u64));
+                        }
+                    }
+                }
+                (None, None)
+            }
+            _ => (None, None),
+        }
     }
 
     fn parse_body(&mut self) -> Result<Vec<Statement>, SyntaxError> {

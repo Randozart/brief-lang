@@ -421,6 +421,7 @@ impl Desugarer {
             exit_condition: program.exit_condition.clone().map(|e| Box::new(self.desugar_expr(*e))),
             out_pragmas: program.out_pragmas.clone(),
             default_sig_modifier: program.default_sig_modifier.clone(),
+                watchdog_defaults: (None, None),
         }
     }
 

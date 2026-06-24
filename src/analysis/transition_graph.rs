@@ -1760,6 +1760,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let graph = ReactorTransitionGraph::build(&program);
         assert_eq!(graph.nodes.len(), 1);
@@ -1787,7 +1788,7 @@ mod tests {
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         let usage = compute_projection_usage(&program);
         assert!(usage.is_empty(), "no projections → empty usage");
@@ -1816,7 +1817,7 @@ mod tests {
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         let usage = compute_projection_usage(&program);
         assert_eq!(usage.len(), 1, "field x should have projection usage");

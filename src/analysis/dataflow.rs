@@ -469,6 +469,7 @@ mod kani_full_tests {
             items: vec![], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: crate::ast::StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         }
     }
 

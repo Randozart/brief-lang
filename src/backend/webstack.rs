@@ -1442,6 +1442,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let bindings: Vec<Binding> = vec![];
         let output = backend.generate(&program, &bindings, "test");
@@ -1455,7 +1456,7 @@ mod tests {
             items: vec![],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         let bindings = vec![Binding {
             element_id: "e1".into(),
@@ -1472,7 +1473,7 @@ mod tests {
             items: vec![],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         let bindings = vec![Binding {
             element_id: "e2".into(),
@@ -1489,7 +1490,7 @@ mod tests {
             items: vec![],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         let bindings: Vec<Binding> = vec![];
         let output = backend.generate(&program, &bindings, "ts_mod");
@@ -1536,6 +1537,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program, &[], "test");
         assert!(output.ts_code.contains("count: number = 0;"));
@@ -1569,6 +1571,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program, &[], "test");
         assert!(output.ts_code.contains("x: number = 42;"));
@@ -1581,7 +1584,7 @@ mod tests {
             items: vec![],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None,
         };
         let output = backend.generate(&program, &[], "test");
         assert!(output.ts_code.contains("export function createApp"));
@@ -1675,6 +1678,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program, &[], "test");
         assert!(output.ts_code.contains("tick"), "Transaction method 'tick' should exist");
@@ -1879,6 +1883,7 @@ mod tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program, &[], "arm_test");
         let rust = output.rust_code;

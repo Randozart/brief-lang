@@ -4544,6 +4544,7 @@ mod kani_full_tests {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         };
         engine.check_trivial_contracts(&program);
         assert!(engine.errors.is_empty());

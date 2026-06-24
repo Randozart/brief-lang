@@ -214,6 +214,7 @@ impl ImportResolver {
             exit_condition: program.exit_condition.clone(),
             out_pragmas: program.out_pragmas.clone(),
             default_sig_modifier: program.default_sig_modifier.clone(),
+                watchdog_defaults: (None, None),
         })
     }
 
@@ -235,6 +236,7 @@ impl ImportResolver {
                 exit_condition: None,
                 out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
             });
         }
 
@@ -290,6 +292,7 @@ impl ImportResolver {
                         exit_condition: None,
                         out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
                     }, vec![]),
                 );
                 return Ok(Program {
@@ -303,6 +306,7 @@ impl ImportResolver {
                     exit_condition: None,
                     out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
                 });
             }
         }
@@ -363,6 +367,7 @@ impl ImportResolver {
                         exit_condition: None,
                         out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
                     }, vec![]),
                 );
                 return Ok(Program {
@@ -379,6 +384,7 @@ impl ImportResolver {
                     exit_condition: None,
                     out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
                 });
             }
         }
@@ -462,6 +468,7 @@ impl ImportResolver {
                 exit_condition: None,
                 out_pragmas: vec![],
                 default_sig_modifier: None,
+                    watchdog_defaults: (None, None),
             };
 
             self.loaded_modules.insert(
@@ -480,6 +487,7 @@ impl ImportResolver {
                 exit_condition: None,
                 out_pragmas: vec![],
                 default_sig_modifier: None,
+                    watchdog_defaults: (None, None),
             });
         }
 
@@ -749,6 +757,7 @@ impl ImportResolver {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         })
     }
 
@@ -813,6 +822,7 @@ impl ImportResolver {
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
+                watchdog_defaults: (None, None),
         })
     }
 }
@@ -886,7 +896,7 @@ mod tests {
             items: vec![TopLevel::Import(Import { is_magic: false, target: crate::ast::ImportTarget::Native, path: path.iter().map(|s| s.to_string()).collect(), items })],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None),
         }
     }
 
