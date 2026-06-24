@@ -44,3 +44,7 @@ sed struct Buffer { ... };               // type name unexported
 - `Visibility::Public` — accessible from anywhere
 - `Visibility::Sedentary` — accessible only within defining file
 - `Visibility::Private` — accessible only from within the struct
+
+## Example
+
+See `examples/visibility-demo.bv` for a complete walkthrough of all three visibility levels.

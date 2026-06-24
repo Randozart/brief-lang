@@ -1,0 +1,53 @@
+// visibility-demo.bv — Visibility modifiers (pub, pvt, sed)
+// Demonstrates: struct field visibility, top-level sed items
+
+// ===== STRUCT FIELD VISIBILITY =====
+struct Buffer<T> {
+    pvt  data: List<T>;          // struct-private — only accessible within this struct
+    sed  cache: HashMap<Int, T>; // file-private — only in this .bv file
+    size: Int;                   // public (default) — accessible from anywhere
+};
+
+// ===== FILE-PRIVATE (sed) ITEMS =====
+sed let INTERNAL_BOUND: Int = 100;
+sed defn helper(n: Int) -> Int {
+    term n * 2;
+};
+
+// sed items cannot be imported by other files.
+// Importing this file with `import { helper } from "visibility-demo.bv"` would fail
+// because `helper` is sed.
+
+// ===== PUBLIC ITEMS =====
+let bound: Int = INTERNAL_BOUND;
+
+defn create_buffer<T>() -> Buffer<T> {
+    term Buffer {
+        data: [],
+        cache: {},
+        size: 0
+    };
+};
+
+// pvt fields are accessible inside the struct's methods
+txn Buffer.resize(buf: Buffer<Int>) [true][buf.size == new_size] {
+    &buf.size = new_size;
+    term;
+};
+
+// pvt fields are NOT accessible from outside the struct
+// &buf.data = new_data;  // ERROR: field `data` is pvt
+
+// sed items are accessible within this file
+let doubled: Int = helper(21);
+
+// ===== TOP-LEVEL sed WORKS ON: =====
+sed let config: String = "secret";
+sed struct InternalState { x: Int; y: Int; };
+sed txn internal_tick [true][x == @x + 1] { &x = x + 1; term; };
+
+// ===== PUBLIC RE-EXPORT =====
+// A public defn can call sed helpers internally
+defn public_api(n: Int) -> Int {
+    term helper(n);
+};

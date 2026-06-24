@@ -1,0 +1,75 @@
+// subtype-projections.bv — Collection query pipeline with <:
+// Demonstrates: FILTER, MAP, SORT, LIMIT, SKIP, UNIQUE, JOIN, GROUP,
+// COUNT, SUM, AVG, MIN, MAX, MATCH
+
+let items: List<(String, Int)> = [
+    ("alice", 95),
+    ("bob", 72),
+    ("carol", 88),
+    ("dave", 65),
+    ("eve", 95)
+];
+
+// FILTER: keep items matching predicate (bound to _)
+let high_scores <: items { FILTER(_[1] >= 80); };
+// Result: [("alice", 95), ("carol", 88), ("eve", 95)]
+
+// MAP: transform each item
+let doubled <: items { MAP(_[1] * 2); };
+// Result: [190, 144, 176, 130, 190]
+
+// SORT: sort by key expression
+let by_score <: items { SORT(_[1]); };
+// Result: [("dave", 65), ("bob", 72), ("carol", 88), ("alice", 95), ("eve", 95)]
+
+// LIMIT: take first N items
+let top3 <: items { SORT(_[1]); LIMIT(3); };
+// Result: [("dave", 65), ("bob", 72), ("carol", 88)]
+
+// SKIP: drop first N items
+let after_skip <: items { SKIP(2); };
+// Result: [("carol", 88), ("dave", 65), ("eve", 95)]
+
+// UNIQUE: remove adjacent duplicates (by _[1])
+let scores_only <: items { MAP(_[1]); SORT(_); UNIQUE; };
+// Result: [65, 72, 88, 95]
+
+// JOIN: inner join on key (matched on _[0])
+let extras: List<(String, Int)> = [("alice", 100), ("bob", 200)];
+let joined <: items { JOIN(extras, _[0]); };
+// Result: [(("alice", 95), ("alice", 100)), (("bob", 72), ("bob", 200))]
+
+// GROUP: group by key
+let by_grade <: items { GROUP(_[1] >= 80 ? "pass" : "fail"); };
+// Result: [("pass", [("alice", 95), ("carol", 88), ("eve", 95)]),
+//          ("fail", [("bob", 72), ("dave", 65)])]
+
+// Aggregate ops (terminal — return scalar)
+let count <: items { COUNT; };
+// Result: 5
+
+let sum <: items { SUM(_[1]); };
+// Result: 415
+
+let avg <: items { AVG(_[1]); };
+// Result: 83.0
+
+let min <: items { MIN(_[1]); };
+// Result: 65
+
+let max <: items { MAX(_[1]); };
+// Result: 95
+
+// String regex MATCH
+let email: String = "alice@example.com";
+let match <: email["^(.+)@(.+)$"];
+// Result: ("alice", "example.com")
+
+// Chained pipeline
+let result <: items {
+    FILTER(_[1] >= 70);
+    SORT(_[1]);
+    MAP(_[0]);
+    UNIQUE;
+};
+// Result: ["bob", "carol", "alice", "eve"]

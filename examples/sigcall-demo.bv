@@ -1,0 +1,57 @@
+// sigcall-demo.bv — Signature declarations and higher-order functions
+// Demonstrates: sig declarations, modifiers (#out, #inline, #export),
+// sig-as-type for higher-order functions, union/tuple return types
+
+// ===== SIMPLE SIGNATURE =====
+sig print: String -> Bool;
+
+// ===== SIG WITH MODIFIERS =====
+sig #out log_to_file: String -> Int;
+sig #inline pure_hash: String -> Int;
+
+// ===== UNION RETURN TYPE =====
+sig fetch_user: Int -> Bool | Int;
+
+// ===== TUPLE RETURN TYPE =====
+sig split_name: String -> String, String;
+
+// ===== ARRAY RETURN TYPE =====
+sig find_all: String -> Bool[];
+
+// ===== SIG AS FUNCTION TYPE =====
+sig validate: Int -> Bool;
+
+defn is_positive(n: Int) [n != 0][term == (n > 0)] -> Bool {
+    term n > 0;
+};
+
+defn is_even(n: Int) [n != 0][term == (n % 2 == 0)] -> Bool {
+    term n % 2 == 0;
+};
+
+// Higher-order: takes a function matching the validate sig
+defn check(n: Int, validator: sig_validate) [true][term == true || term == false] -> Bool {
+    term validator(n);
+};
+
+txn run_tests [true][all_passed] {
+    let r1 = check(5, is_positive);   // true
+    let r2 = check(4, is_even);       // true
+    let r3 = check(3, is_even);       // false
+    &all_passed = r1 && r2 && ~r3;
+    term;
+};
+
+// ===== SIG BOUND TO DEFN =====
+// When a sig is bound to a defn with `=`, the compiler verifies
+// the defn conforms to the sig's contract.
+sig compute: Int -> Int = fast_compute;
+
+defn fast_compute(x: Int) [x >= 0][term >= 0] -> Int {
+    term x * 2;
+};
+
+txn verify_bound_sig [true][result == 10] {
+    let result = compute(5);
+    term;
+};

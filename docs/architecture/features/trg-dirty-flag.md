@@ -12,6 +12,17 @@ trg keypress: Char @stdin;      // stdin event (epoll-driven)
 trg tick: Int @timer(60);       // 60 Hz periodic timer
 ```
 
+### `wake` Modifier
+
+The `wake` modifier tells the reactor to treat this trigger as a wake-up source. A trigger with `wake` prevents the reactor from sleeping when it would otherwise idle:
+
+```brief
+trg wake io_pending: Bool @ link __io_pending;
+trg wake button: Bool @ 0x5000;
+```
+
+Without `wake`, a trigger is passive — the system polls it but may sleep through its events. With `wake`, the runtime ensures the trigger is monitored and will wake the reactor on state change. The `wake` keyword is placed before the trigger name.
+
 ## Architecture — Three Backend Patterns
 
 The dirty-flag system adapts to each backend's execution model:
