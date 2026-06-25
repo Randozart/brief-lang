@@ -1532,6 +1532,13 @@ impl LlvmBackend {
             self.field_types.push("i32".to_string());
             self.field_initializers.insert("__trg_epfd".to_string(), None);
         }
+        // Inject synthetic cycle_count field for watchdog timing
+        if !self.field_index_map.contains_key("cycle_count") {
+            let idx = self.field_index_map.len();
+            self.field_index_map.insert("cycle_count".to_string(), idx);
+            self.field_types.push("i64".to_string());
+            self.field_initializers.insert("cycle_count".to_string(), Some(Expr::Integer(0)));
+        }
         self.validate_schema_types();
         self.triggers.clear();
         self.trigger_names.clear();
@@ -2951,6 +2958,11 @@ self.emit_declares(&mut out);
             if name.starts_with("cell$") {
                 self.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
             }
+        }
+        // Synthetic cycle_count field must never be eliminated — it's maintained
+        // by the tick loop, not by txn body code.
+        if let Some(idx) = self.field_index_map.get("cycle_count") {
+            self.field_modes.insert("cycle_count".to_string(), crate::analysis::FieldMode::Always);
         }
         self.cache_slots.clear();
 

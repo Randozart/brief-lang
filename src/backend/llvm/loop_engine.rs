@@ -203,6 +203,8 @@ impl LlvmBackend {
         }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
+        // Increment cycle_count on every tick
+        emit_cycle_count_increment(self, out);
         if self.has_async_txns && !self.is_lightweight_async {
             self.emit_async_phase(out);
         } else {
@@ -881,6 +883,7 @@ impl LlvmBackend {
                         writeln!(out, "  {} = icmp slt i64 {}, {}", pc_name, pi_name, bound_imm).ok();
                         writeln!(out, "  br i1 {}, label %ptick, label %pdoneloop", pc_name).ok();
                         writeln!(out, "  ptick:").ok();
+                        emit_cycle_count_increment(self, out);
                         // The old tick label is skipped — we use ptick instead
                         self.phi_induction_reg = Some((cname.clone(), pi_name.clone(), pn_name.clone()));
                     }
@@ -923,6 +926,7 @@ impl LlvmBackend {
             writeln!(out, "  store i8 0, ptr %any_fired").ok();
             writeln!(out, "  br label %tick").ok();
             writeln!(out, "  tick:").ok();
+            emit_cycle_count_increment(self, out);
             writeln!(out, "  store i8 0, ptr %any_fired").ok();
         }
         self.ssa_state_reg = None;
@@ -1238,6 +1242,7 @@ impl LlvmBackend {
         }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "tick:").ok();
+        emit_cycle_count_increment(self, out);
 
         // Sample triggers (clone trigger data to avoid borrow conflict)
         let trigger_data: Vec<(String, crate::ast::LinkRef, crate::ast::Type)> = enum_sizes.iter()
@@ -1803,4 +1808,14 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
     }
     writeln!(out, "  br label %{}", ev_done).ok();
     writeln!(out, "{}:", ev_done).ok();
+}
+
+/// Emit i64 cycle_count = load + add 1 + store at the start of each tick.
+fn emit_cycle_count_increment(backend: &mut LlvmBackend, out: &mut String) {
+    if let Some(&idx) = backend.field_index_map.get("cycle_count") {
+        writeln!(out, "  %cc_gep = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", idx).ok();
+        writeln!(out, "  %cc_old = load i64, ptr %cc_gep, align 8").ok();
+        writeln!(out, "  %cc_new = add i64 %cc_old, 1").ok();
+        writeln!(out, "  store i64 %cc_new, ptr %cc_gep, align 8").ok();
+    }
 }
