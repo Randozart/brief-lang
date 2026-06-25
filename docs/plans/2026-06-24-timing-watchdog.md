@@ -106,21 +106,23 @@ let x: Int = foo() within 10 cyc (3) ~? "fallback";   // ERROR: Int vs String
 
 `Expr::Within { body, bound, unit, retries, fallback }` has the unified type.
 
-## Fallback Constraint: Provably Terminable
+## Fallback Constraint: Only the Final Fallback Must Be Provably Terminable
 
-The fallback expression MUST be proven terminable at compile time by the
-proof engine:
+In a chained expression `a ~? b ~? c`, only `c` (the final fallback)
+must be proven terminable at compile time. Intermediate fallbacks like `b`
+can themselves be `within ~?` chains — they may time out too.
 
+**Final fallback rules** (last expression in any `~?` chain):
 - A literal value (`0`, `""`, `true`, `null`) — trivially 0 cycles
-- A function whose body the proof engine can prove terminates in 0 cycles
-- A function that only calls proven-terminable intrinsics (memory ops, etc.)
-- NO recursion
-- NO FFI calls (frgn)
-- NO `within ~?` chains that could themselves time out
+- A function the proof engine can prove terminates in 0 cycles
+- Only proven-terminable intrinsics (memory ops, etc.)
+- NO recursion, NO FFI calls, NO `within ~?` chains
 
-Rationale: the fallback is the LAST resort — it must never itself fail.
-The proof engine validates this using `estimate_body_cost` with
-`cycles_upper_bound() == Some(0)`.
+**Intermediate fallbacks** have no restrictions — they are normal expressions.
+
+Rationale: the final fallback is the LAST resort — it must never fail.
+The proof engine traverses the `~?` chain to find the final fallback and
+applies the check there.
 
 ## Lexer Changes
 

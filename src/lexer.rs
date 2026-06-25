@@ -185,6 +185,9 @@ pub enum Token {
     #[token("within")]
     #[token("WITHIN")]
     Within,
+    #[token("retry")]
+    #[token("RETRY")]
+    Retry,
     #[token("bank")]
     #[token("BANK")]
     Bank,
@@ -270,6 +273,21 @@ pub enum Token {
     #[token("minute")]
     #[token("MINUTE")]
     Minute,
+    #[token("minutes")]
+    #[token("MINUTES")]
+    Minutes,
+    #[token("min")]
+    #[token("MIN")]
+    Min,
+    #[token("nanoseconds")]
+    #[token("NANOSECONDS")]
+    Nanoseconds,
+    #[token("ns")]
+    #[token("NS")]
+    Ns,
+    #[token("s")]
+    #[token("S")]
+    S,
 
     // Operators
     #[token("=")]
@@ -310,6 +328,8 @@ pub enum Token {
     Question,
     #[token("-")]
     Minus,
+    #[token("~?")]
+    TildeQuestion,
     #[token("~/")]
     TildeSlash,
     #[token("~")]
@@ -668,6 +688,13 @@ impl std::fmt::Display for Token {
             Token::TypeU32 => write!(f, "u32"),
             Token::TypeI64 => write!(f, "i64"),
             Token::TypeU64 => write!(f, "u64"),
+            Token::Retry => write!(f, "retry"),
+            Token::Minutes => write!(f, "minutes"),
+            Token::Min => write!(f, "min"),
+            Token::Nanoseconds => write!(f, "nanoseconds"),
+            Token::Ns => write!(f, "ns"),
+            Token::S => write!(f, "s"),
+            Token::TildeQuestion => write!(f, "~?"),
             Token::Identifier(s) => write!(f, "{}", s),
         }
     }
