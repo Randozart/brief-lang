@@ -686,6 +686,9 @@ pub struct LlvmBackend {
     enum_types: HashMap<String, crate::ast::EnumDefinition>,
     cell_defs: HashMap<String, CellDef>,
     cell_thread_names: Vec<String>,
+    /// Per-cell state types: cell_name → (field_index_map, field_types_vec)
+    /// Used by emit_cell_thread to GEP into %CellState.<name> instead of %State.
+    cell_state_types: HashMap<String, (HashMap<String, usize>, Vec<String>)>,
     /// Cell-to-cell wires: (from_cell, from_port, to_cell, to_param)
     cell_wires: Vec<(String, String, String, String)>,
     /// Accumulated `!N = !{...}` metadata definitions emitted at module level.
@@ -891,6 +894,7 @@ impl LlvmBackend {
             cell_defs: HashMap::new(),
             cell_thread_names: Vec::new(),
             cell_wires: Vec::new(),
+            cell_state_types: HashMap::new(),
             pending_metadata: String::new(),
             variant_disc: HashMap::new(),
             explain: false,
@@ -2890,27 +2894,50 @@ self.emit_declares(&mut out);
                 self.field_types.push(self.llvm_type(&t.ty).to_string());
                 self.field_initializers.insert(t.name.clone(), None);
             } else if let TopLevel::Cell(c) = item {
-                // Cell fields and parameters get prefixed %State slots so the
-                // @cell_persistent_ticks function can access them via standard
-                // GEP + field_index_map lookups. The "cell$name$" prefix is the
-                // same scheme used by rewrite_cell_identifiers in emit_expr.rs,
-                // creating a flat namespace in %State that mirrors the
-                // interpreter's prefix scheme. Both sync and async (persistent)
-                // CellCall codegen depends on these slots.
-                for field in &c.fields {
-                    let prefixed = format!("cell${}${}", c.name, field.name);
-                    self.field_index_map.insert(prefixed.clone(), self.field_types.len());
-                    self.field_types.push(self.llvm_type(&field.ty).to_string());
-                    self.field_initializers.insert(prefixed, field.default.clone());
-                }
-                for (param_name, param_ty) in &c.parameters {
-                    let prefixed = format!("cell${}${}", c.name, param_name);
-                    self.field_index_map.insert(prefixed.clone(), self.field_types.len());
-                    self.field_types.push(self.llvm_type(param_ty).to_string());
-                    self.field_initializers.insert(prefixed, None);
-                }
+                // Cell fields are handled differently depending on whether the
+                // cell is persistent (threaded) or sync (non-threaded).
+                //
+                // For threaded cells: fields go into a separate %CellState.<name>
+                // type so the thread function can operate on its own struct without
+                // sharing %State. The %CellState.* definitions are built here and
+                // emitted in declare_state_type.
+                //
+                // For non-threaded persistent cells (used by @cell_persistent_ticks):
+                // fields stay in %State as prefixed slots, accessed via the same
+                // GEP path as program state fields.
+                //
+                // Sync CellCall codegen always allocates %CellState.* locally and
+                // accesses fields through the cell_state_types map.
                 if c.is_persistent {
+                    // Build cell-state type info for this persistent cell
+                    let mut cs_imap: HashMap<String, usize> = HashMap::new();
+                    let mut cs_tys: Vec<String> = Vec::new();
+                    for field in &c.fields {
+                        let prefixed = format!("cell${}${}", c.name, field.name);
+                        cs_imap.insert(prefixed.clone(), cs_tys.len());
+                        cs_tys.push(self.llvm_type(&field.ty).to_string());
+                    }
+                    for (param_name, param_ty) in &c.parameters {
+                        let prefixed = format!("cell${}${}", c.name, param_name);
+                        cs_imap.insert(prefixed.clone(), cs_tys.len());
+                        cs_tys.push(self.llvm_type(param_ty).to_string());
+                    }
+                    self.cell_state_types.insert(c.name.clone(), (cs_imap, cs_tys));
                     self.cell_thread_names.push(c.name.clone());
+                } else {
+                    // Non-persistent (sync) cell: add to %State as prefixed slots
+                    for field in &c.fields {
+                        let prefixed = format!("cell${}${}", c.name, field.name);
+                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.field_types.push(self.llvm_type(&field.ty).to_string());
+                        self.field_initializers.insert(prefixed, field.default.clone());
+                    }
+                    for (param_name, param_ty) in &c.parameters {
+                        let prefixed = format!("cell${}${}", c.name, param_name);
+                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.field_types.push(self.llvm_type(param_ty).to_string());
+                        self.field_initializers.insert(prefixed, None);
+                    }
                 }
             }
         }

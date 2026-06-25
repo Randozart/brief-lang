@@ -391,6 +391,16 @@ impl LlvmBackend {
     }
 
     pub(super) fn declare_state_type(&mut self, out: &mut String) {
+        // Emit %CellState.<name> types for persistent cells (used by thread functions)
+        for (cell_name, (cs_imap, cs_tys)) in &self.cell_state_types {
+            write!(out, "%CellState.{} = type {{ ", cell_name).ok();
+            for (i, f) in cs_tys.iter().enumerate() {
+                if i > 0 { write!(out, ", ").ok(); }
+                write!(out, "{}", f).ok();
+            }
+            writeln!(out, " }}").ok();
+        }
+
         if self.field_types.is_empty() {
             writeln!(out, "%State = type {{ i64 }}").ok();
             return;
@@ -1623,12 +1633,20 @@ impl LlvmBackend {
     /// and stores outputs to atomic channel globals.
     pub(super) fn emit_cell_thread(&mut self, out: &mut String, cell: &crate::ast::CellDef) {
         let cell_name = &cell.name;
-        // Thread function receives a private %State* allocated by the caller
-        // in emit_main. Named %state so all GEP loads/stores throughout the
-        // LLVM backend resolve correctly.
+        // Thread function receives a private %CellState.<name>* allocated by the caller
+        // in emit_main. We temporarily replace field_index_map and field_types with
+        // the cell-local versions so all GEP loads/stores resolve against the
+        // %CellState.<name> type instead of %State.
+        let saved_imap = self.field_index_map.clone();
+        let saved_types = self.field_types.clone();
+        let saved_state_reg = self.state_reg_name.clone();
+
+        if let Some((cs_imap, cs_tys)) = self.cell_state_types.get(cell_name) {
+            self.field_index_map = cs_imap.clone();
+            self.field_types = cs_tys.clone();
+        }
         writeln!(out, "define i8* @cell_thread_{}(ptr %state) local_unnamed_addr #0 {{", cell_name).ok();
         writeln!(out, "  entry:").ok();
-        let saved_state = self.state_reg_name.clone();
         self.state_reg_name = "%state".to_string();
 
         let tick_ns = 1_000_000; // 1kHz default
@@ -1670,13 +1688,15 @@ impl LlvmBackend {
         }
 
         // Atomic store outputs to channel globals
+        // Use %CellState.<name> type for GEPs since cell fields are in the cell state
+        let cell_state_type = format!("%CellState.{}", cell_name);
         let output_names = Self::extract_output_names_llvm(&cell.output_type);
         for port_name in &output_names {
             let prefixed = format!("cell${}${}", cell_name, port_name);
             if let Some(&idx) = self.field_index_map.get(&prefixed) {
                 let ll_ty = &self.field_types[idx];
                 let gep = format!("%ctg_{}_{}", cell_name, port_name);
-                writeln!(out, "  {} = getelementptr %State, ptr {}, i32 0, i32 {}", gep, self.state_reg_name, idx).ok();
+                writeln!(out, "  {} = getelementptr {}, ptr {}, i32 0, i32 {}", gep, cell_state_type, self.state_reg_name, idx).ok();
                 let val = format!("%ctv_{}_{}", cell_name, port_name);
                 writeln!(out, "  {} = load {}, ptr {}, align 8", val, ll_ty, gep).ok();
                 writeln!(out, "  store atomic {} {}, ptr @chan_val_{}_{} seq_cst, align 8", ll_ty, val, cell_name, port_name).ok();
@@ -1685,7 +1705,9 @@ impl LlvmBackend {
         // Set dirty flag
         writeln!(out, "  store atomic i8 1, ptr @chan_dirty_{} seq_cst, align 1", cell_name).ok();
 
-        self.state_reg_name = saved_state;
+        self.state_reg_name = saved_state_reg;
+        self.field_index_map = saved_imap;
+        self.field_types = saved_types;
         writeln!(out, "  br label %loop").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -1695,11 +1717,23 @@ impl LlvmBackend {
     pub(super) fn emit_cell_channel_globals(&mut self, out: &mut String, cell: &crate::ast::CellDef) {
         let cell_name = &cell.name;
         let output_names = Self::extract_output_names_llvm(&cell.output_type);
-        for port_name in &output_names {
-            let prefixed = format!("cell${}${}", cell_name, port_name);
-            if let Some(&idx) = self.field_index_map.get(&prefixed) {
-                let ll_ty = &self.field_types[idx];
-                writeln!(out, "@chan_val_{}_{} = global {} 0, align 8", cell_name, port_name, ll_ty).ok();
+        // For persistent cells, look up field types in cell_state_types
+        if let Some((cs_imap, cs_tys)) = self.cell_state_types.get(cell_name) {
+            for port_name in &output_names {
+                let prefixed = format!("cell${}${}", cell_name, port_name);
+                if let Some(&idx) = cs_imap.get(&prefixed) {
+                    let ll_ty = &cs_tys[idx];
+                    writeln!(out, "@chan_val_{}_{} = global {} 0, align 8", cell_name, port_name, ll_ty).ok();
+                }
+            }
+        } else {
+            // Fall back to field_index_map for non-persistent cells (shouldn't happen)
+            for port_name in &output_names {
+                let prefixed = format!("cell${}${}", cell_name, port_name);
+                if let Some(&idx) = self.field_index_map.get(&prefixed) {
+                    let ll_ty = &self.field_types[idx];
+                    writeln!(out, "@chan_val_{}_{} = global {} 0, align 8", cell_name, port_name, ll_ty).ok();
+                }
             }
         }
         writeln!(out, "@chan_dirty_{} = global i8 0, align 1", cell_name).ok();

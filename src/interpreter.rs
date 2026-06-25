@@ -88,6 +88,12 @@ pub enum Value {
     /// Compiled regex pattern from `@"..."` literal.
     Regex(crate::analysis::dfa::RegexPattern),
 
+    /// Typed memory address — carries a pointer value but cannot be dereferenced
+    /// without an explicit `volatile_load#` or `volatile_store#` intrinsic.
+    /// The pointee type `T` is tracked at the type level (`Type::Applied("Ptr", vec![T])`),
+    /// not at runtime.
+    Ptr(u64),
+
     /// Compile-time AST node values (for template/macro return values)
     Expr(Box<crate::ast::Expr>),
     Stmt(Box<crate::ast::Statement>),
@@ -124,6 +130,7 @@ impl fmt::Display for Value {
                 write!(f, "<DbvlTable {} '{}' ({} entries, lazy)>", schema, t.path, t.key_offsets.len())
             }
             Value::Regex(r) => write!(f, "<Regex {:?}>", r.pattern),
+            Value::Ptr(addr) => write!(f, "Ptr({})", addr),
             Value::Expr(_) => write!(f, "<Expr>"),
             Value::Stmt(_) => write!(f, "<Stmt>"),
             Value::Block(_) => write!(f, "<Block>"),
@@ -176,6 +183,7 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
         Value::StringBuilder(s) => JsonValue::String(s.clone()),
         Value::Stack(stack) => JsonValue::Array(stack.iter().map(value_to_json_value).collect()),
         Value::Queue(queue) => JsonValue::Array(queue.iter().map(value_to_json_value).collect()),
+        Value::Ptr(p) => JsonValue::Number((*p).into()),
         Value::Instance { fields, .. } => {
             let map: serde_json::Map<String, JsonValue> = fields
                 .iter()

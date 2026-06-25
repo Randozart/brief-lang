@@ -197,7 +197,8 @@ impl LlvmBackend {
         writeln!(out, "  call i32 @setvbuf(ptr %so_init, ptr null, i32 1, i64 0)").ok();
         // Spawn persistent cell threads
         for name in &self.cell_thread_names {
-            writeln!(out, "  %cell_state_{} = alloca %State, align 8", name).ok();
+            let cell_state_type = format!("%CellState.{}", name);
+            writeln!(out, "  %cell_state_{} = alloca {}, align 8", name, cell_state_type).ok();
             writeln!(out, "  %ct_{} = alloca i64, align 8", name).ok();
             writeln!(out, "  call i32 @pthread_create(ptr %ct_{}, ptr null, ptr @cell_thread_{}, ptr %cell_state_{})", name, name, name).ok();
         }
