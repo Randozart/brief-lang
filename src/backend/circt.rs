@@ -2,7 +2,7 @@
 // Invoked via: brief build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
 use crate::analysis::dependency_graph::DependencyGraph;
-use crate::ast::{BitRange, Contract, Expr, Intrinsic, LinkRef, Program, Statement, TopLevel, Type};
+use crate::ast::{BitRange, Contract, Expr, Intrinsic, LinkRef, OutputType, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -27,6 +27,9 @@ pub struct CirctBackend {
     pub mmio_vars: Vec<String>,
     /// Known function/module names and their argument counts (for submodule instantiation).
     pub fn_arity: HashMap<String, usize>,
+    /// Cell definitions encountered during program traversal.
+    /// Key is cell name, value is the CellDef AST node.
+    cell_defs: HashMap<String, crate::ast::CellDef>,
 }
 
 /// Per-generation counters for unique MLIR value names.
@@ -63,6 +66,7 @@ impl CirctBackend {
             var_exprs: HashMap::new(),
             mmio_vars: Vec::new(),
             fn_arity: HashMap::new(),
+            cell_defs: HashMap::new(),
         }
     }
 
@@ -108,6 +112,8 @@ impl CirctBackend {
                     }
                 }
                 TopLevel::Cell(cell) => {
+                    // Track the cell definition for module emission
+                    self.cell_defs.insert(cell.name.clone(), cell.as_ref().clone());
                     // Register cell fields as state variables
                     for field in &cell.fields {
                         self.var_types.insert(format!("{}${}", cell.name, field.name), field.ty.clone());
@@ -125,6 +131,11 @@ impl CirctBackend {
         let mut out = String::new();
         self.emit_header(&mut out);
         self.emit_module(&mut out, &dep_graph, program);
+        // Emit separate hw.module for each cell with synthesized transaction bodies
+        let cell_defs: Vec<crate::ast::CellDef> = self.cell_defs.values().cloned().collect();
+        for cell_def in &cell_defs {
+            self.emit_cell_module(&mut out, &dep_graph, cell_def);
+        }
         out
     }
 
@@ -594,6 +605,90 @@ impl CirctBackend {
         writeln!(out, "  seq.always(posedge %clock) {{").ok();
         writeln!(out, "    {} <= {}", state_reg, state_after_body).ok();
         writeln!(out, "  }}").ok();
+    }
+
+    /// Emit a standalone hw.module for a cell definition with synthesized
+    /// transaction body. The module has input ports for parameters, state
+    /// registers for fields, and output ports matching the cell's output type.
+    fn emit_cell_module(&mut self, out: &mut String, dep_graph: &DependencyGraph, cell: &crate::ast::CellDef) {
+        let cell_name = &cell.name;
+        let mut ng = NameGen::default();
+
+        // Cell module ports: clock, reset, input params, output result
+        write!(out, "hw.module @{}(", cell_name).ok();
+        write!(out, "in %clock: i1, in %reset: i1").ok();
+        for (param_name, param_ty) in &cell.parameters {
+            let mlir_ty = self.mlir_type(param_ty);
+            write!(out, ", in %{}: {}", param_name, mlir_ty).ok();
+        }
+        let output_names = Self::extract_output_names_llvm(&cell.output_type);
+        if let Some(first_out) = output_names.first() {
+            let out_mlir_ty = cell.parameters.first()
+                .map(|(_, t)| self.mlir_type(t))
+                .unwrap_or_else(|| "i64".to_string());
+            write!(out, ") -> ({}: ${}: {})", first_out, "result", out_mlir_ty).ok();
+        } else {
+            write!(out, ") -> ()").ok();
+        }
+        writeln!(out, " {{").ok();
+
+        // Emit registers for state fields
+        let mut reg_names: HashMap<String, String> = HashMap::new();
+        for field in &cell.fields {
+            let mlir_ty = self.mlir_type(&field.ty);
+            let init_val = match &field.default {
+                Some(Expr::Integer(n)) => format!("{}", n),
+                Some(Expr::Bool(b)) => format!("{}", if *b { 1 } else { 0 }),
+                _ => "0".to_string(),
+            };
+            let reg = ng.fresh_reg(cell_name);
+            writeln!(out, "  {} = seq.firreg initial_value {{ init_value = {} : {} }} : {}", reg, init_val, mlir_ty, mlir_ty).ok();
+            reg_names.insert(field.name.clone(), reg);
+        }
+
+        // Emit transaction bodies as combinational+sequential logic
+        for txn in &cell.transactions {
+            // Emit precondition as a when-guard
+            if !matches!(&txn.contract.pre_condition, Expr::Bool(true)) {
+                let pre_mlir_ty = "i1";
+                if let Some(pre_val) = self.emit_expr(&mut ng, out, &txn.contract.pre_condition, &reg_names, pre_mlir_ty) {
+                    writeln!(out, "  %when_{} = comb.icmp eq {} %true : {}", ng.fresh_wire("wc"), pre_val, pre_mlir_ty).ok();
+                }
+            }
+            for stmt in &txn.body {
+                self.emit_stmt_body(&mut ng, out, stmt, &reg_names);
+            }
+        }
+
+        // Drive output ports from the last assigned field value
+        if let Some(first_out) = output_names.first() {
+            if let Some(reg) = reg_names.get(first_out) {
+                writeln!(out, "  seq.always(posedge %clock) {{").ok();
+                writeln!(out, "    {} <= {}", reg.clone(), reg.clone()).ok();
+                writeln!(out, "  }}").ok();
+            }
+        }
+
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// Extract output port names from an optional OutputType.
+    /// This is CIRCT's poor sibling of the LLVM backend function — CIRCT
+    /// doesn't support multi-output cells, so we return at most one name.
+    fn extract_output_names_llvm(output_type: &Option<crate::ast::OutputType>) -> Vec<String> {
+        match output_type {
+            Some(crate::ast::OutputType::Named(name, _)) => vec![name.clone()],
+            Some(crate::ast::OutputType::Single(_)) => vec!["result".to_string()],
+            Some(crate::ast::OutputType::Array(_)) => vec!["result".to_string()],
+            Some(crate::ast::OutputType::Tuple(types)) => {
+                (0..types.len()).map(|i| format!("out{}", i)).collect()
+            }
+            Some(crate::ast::OutputType::Union(types)) => {
+                (0..types.len()).map(|i| format!("case{}", i)).collect()
+            }
+            None => vec![],
+        }
     }
 
     /// Emit statements that are purely combinational (no FSM involvement).
