@@ -4143,6 +4143,49 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
+            Expr::Within { body, bound, unit: _, retries, fallback } => {
+                // ... body label, retry loop ...
+                let l_entry = format!("%within_entry_{}", self.txn_counter);
+                let l_body = format!("%within_body_{}", self.txn_counter);
+                let l_retry = format!("%within_retry_{}", self.txn_counter);
+                let l_done = format!("%within_done_{}", self.txn_counter);
+                let l_fallback = format!("%within_fallback_{}", self.txn_counter);
+                let v_result = format!("%within_result_{}", self.txn_counter);
+                self.txn_counter += 1;
+
+                // Entry: check retry count, branch to body or fallback
+                writeln!(out, "{}br label {}", indent, l_entry).ok();
+                writeln!(out, "{}:", l_entry).ok();
+                // alloca for retry counter and result
+                writeln!(out, "{}  %rc = alloca i64, align 8", indent).ok();
+                writeln!(out, "{}  store i64 0, i64* %rc, align 8", indent).ok();
+                writeln!(out, "{}  br label {}", indent, l_body).ok();
+
+                // Body: emit the guarded expression
+                writeln!(out, "{}:", l_body).ok();
+                let body_result = self.emit_expr(out, body, &format!("{}  ", indent));
+                writeln!(out, "{}  store i64 {}, i64* %rc, align 8", indent, v_result).ok();
+                writeln!(out, "{}  br label {}", indent, l_done).ok();
+
+                // Retry check: increment counter, compare, branch
+                writeln!(out, "{}:", l_retry).ok();
+                writeln!(out, "{}  %rc_old = load i64, i64* %rc, align 8", indent).ok();
+                writeln!(out, "{}  %rc_new = add i64 %rc_old, 1", indent).ok();
+                writeln!(out, "{}  store i64 %rc_new, i64* %rc, align 8", indent).ok();
+                writeln!(out, "{}  %rc_done = icmp ugt i64 %rc_new, {}", indent, retries).ok();
+                writeln!(out, "{}  br i1 %rc_done, label {}, label {}", indent, l_fallback, l_body).ok();
+
+                // Fallback: emit the fallback expression
+                writeln!(out, "{}:", l_fallback).ok();
+                let fallback_result = self.emit_expr(out, fallback, &format!("{}  ", indent));
+                writeln!(out, "{}  store i64 {}, i64* %rc, align 8", indent, v_result).ok();
+                writeln!(out, "{}  br label {}", indent, l_done).ok();
+
+                // Done: phi to select result
+                writeln!(out, "{}:", l_done).ok();
+                writeln!(out, "{}  {} = load i64, i64* %rc, align 8", indent, v_result).ok();
+                return TypedRegister { name: v_result, ty: body_result.ty };
+            }
             _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }
         }
         // Default: treat as Int. Float operations are handled explicitly

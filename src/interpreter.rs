@@ -281,6 +281,8 @@ pub struct Interpreter {
     /// Watchdog cycle budget — the maximum number of statements before timeout.
     cycle_budget: u64,
     pub type_universe: Option<crate::type_universe::TypeUniverse>,
+    /// Default watchdogs for frgn functions — wraps calls automatically.
+    pub frgn_watchdogs: std::collections::HashMap<String, (u64, TimeUnit, u64, Option<Expr>)>,
     pub inop_decls: HashMap<String, InopDeclaration>,
     pub cell_defs: HashMap<String, CellDef>,
     pub next_cell_uid: usize,
@@ -318,6 +320,7 @@ impl Clone for Interpreter {
             cycle_counter: 0,
             cycle_budget: u64::MAX,
             type_universe: self.type_universe.clone(),
+            frgn_watchdogs: self.frgn_watchdogs.clone(),
             inop_decls: self.inop_decls.clone(),
             cell_defs: self.cell_defs.clone(),
             next_cell_uid: self.next_cell_uid,
@@ -476,6 +479,7 @@ impl Interpreter {
             cycle_counter: 0,
             cycle_budget: u64::MAX,
             type_universe: None,
+            frgn_watchdogs: std::collections::HashMap::new(),
             inop_decls: HashMap::new(),
             cell_defs: HashMap::new(),
             next_cell_uid: 0,
@@ -522,6 +526,10 @@ impl Interpreter {
                         .unwrap_or_else(|_| signature.location.clone())
                 };
                 self.ffi_name_to_location.insert(name.clone(), location);
+                // Store default watchdog if present
+                if let Some((bound, unit, retries, fallback)) = &signature.default_watchdog {
+                    self.frgn_watchdogs.insert(name.clone(), (*bound, unit.clone(), *retries, Some(fallback.as_ref().clone())));
+                }
             }
 
             // Register frgn declarations that use `from "lib.so"` (dynamic linking)
@@ -2743,8 +2751,22 @@ impl Interpreter {
             }.evaluate(self, &ExprDispatch),
             Expr::SigCall { modifier, expr } => SigCallExpr { modifier: modifier.clone(), expr: expr.clone() }.evaluate(self, &ExprDispatch),
             Expr::Ellipsis => EllipsisExpr.evaluate(self, &ExprDispatch),
-            Expr::Call(name, args) =>
-                crate::features::call::CallExpr::new(name.clone(), args.clone()).evaluate(self, &ExprDispatch),
+            Expr::Call(name, args) => {
+                // Check if this function has a default watchdog from frgn import
+                if let Some((bound, unit, retries, fallback_opt)) = self.frgn_watchdogs.get(name) {
+                    let fallback = fallback_opt.as_ref().cloned().unwrap_or(Expr::Integer(0));
+                    let within = Expr::Within {
+                        body: Box::new(Expr::Call(name.clone(), args.clone())),
+                        bound: *bound,
+                        unit: unit.clone(),
+                        retries: *retries,
+                        fallback: Box::new(fallback),
+                    };
+                    self.eval_expr(&within)
+                } else {
+                    crate::features::call::CallExpr::new(name.clone(), args.clone()).evaluate(self, &ExprDispatch)
+                }
+            }
             Expr::CellCall(callee, args) => {
                 let callee_name = match callee.as_ref() {
                     Expr::Identifier(name) => name.clone(),
