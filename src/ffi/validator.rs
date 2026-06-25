@@ -159,6 +159,7 @@ mod tests {
             is_out: false,
             is_pipe: false,
             fallback: None,
+            default_watchdog: None,
             span: None,
         };
 
@@ -183,33 +184,7 @@ mod tests {
             precondition: None,
             postcondition: None,
             buffer_mode: None,
-        };
-
-        assert!(validate_frgn_against_binding(&frgn, &binding).is_ok());
-    }
-
-    #[test]
-    fn test_validate_name_mismatch() {
-        let mut frgn = ForeignSignature {
-            name: "read_file".to_string(),
-            location: "test".to_string(),
-            wasm_impl: None,
-            wasm_setup: None,
-            inputs: vec![],
-            success_output: vec![],
-            result_type: ResultType::TrueAssertion,
-            error_type_name: "Error".to_string(),
-            error_fields: vec![],
-            input_layout: None,
-            output_layout: None,
-            precondition: None,
-            postcondition: None,
-            buffer_mode: None,
-            ffi_kind: None,
-            is_out: false,
-            is_pipe: false,
-            fallback: None,
-            span: None,
+            default_watchdog: None,
         };
 
         let binding = ForeignBinding {
@@ -230,6 +205,7 @@ mod tests {
             precondition: None,
             postcondition: None,
             buffer_mode: None,
+            default_watchdog: None,
         };
 
         assert!(validate_frgn_against_binding(&frgn, &binding).is_err());

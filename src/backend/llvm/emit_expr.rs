@@ -4429,6 +4429,11 @@ impl LlvmBackend {
                     skip: s.skip,
                 }).collect(),
             }),
+            Expr::Within { body, fallback, .. } => Expr::Within {
+                body: Box::new(Self::rewrite_cell_identifiers(body, cell_name)),
+                bound: 0, retries: 0, unit: crate::ast::TimeUnit::Cycles,
+                fallback: Box::new(Self::rewrite_cell_identifiers(fallback, cell_name)),
+            },
         }
     }
 

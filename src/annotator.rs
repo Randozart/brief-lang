@@ -324,6 +324,7 @@ impl Annotator {
                         TimeUnit::Ms => "ms",
                         TimeUnit::Seconds => "s",
                         TimeUnit::Minutes => "min",
+                        TimeUnit::Nanoseconds => "ns",
                     };
                     format!(" within {} {}", self.format_expr(expr), unit_str)
                 } else {

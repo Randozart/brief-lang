@@ -1790,6 +1790,7 @@ impl<'a> Parser<'a> {
             is_out,
             is_pipe,
             fallback,
+            default_watchdog: None,
             span: None,
         };
 
@@ -4859,6 +4860,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 condition: cond,
                 is_required,
                 is_proven,
+                retries: 0,
+                fallback: None,
             });
         }
 
@@ -4909,6 +4912,8 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     condition: cond,
                     is_required: !is_optional, // default is required
                     is_proven: false,
+                    retries: 0,
+                    fallback: None,
                 });
             } else {
                 return self.spanned_err("Too many contract brackets (max 3: [pre][post][watchdog])".to_string());

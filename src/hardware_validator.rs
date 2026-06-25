@@ -760,7 +760,7 @@ mod tests {
                     input_layout: None, output_layout: None,
                     precondition: None, postcondition: None,
                     buffer_mode: None, ffi_kind: None, is_out: false,
-                    is_pipe: false, fallback: None, span: None,
+                    is_pipe: false, fallback: None, default_watchdog: None, span: None,
                 },
                 span: None,
             },

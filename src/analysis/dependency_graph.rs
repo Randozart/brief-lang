@@ -466,6 +466,10 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
         Expr::SigCallExpr(sce) => {
             collect_expr_ids_inner(&sce.expr, ids);
         }
+        Expr::Within { body, fallback, .. } => {
+            collect_expr_ids_inner(body, ids);
+            collect_expr_ids_inner(fallback, ids);
+        }
         Expr::SubtypeProjection { source, ops } => {
             collect_expr_ids_inner(source, ids);
             for op in ops {

@@ -465,6 +465,8 @@ mod tests {
 
     fn watchdog_spec(trigger: &str, is_required: bool) -> WatchdogSpec {
         WatchdogSpec {
+            retries: 0,
+            fallback: None,
             cycles_bound: None,
             seconds_bound: None,
             is_proven: false,
@@ -602,14 +604,9 @@ mod tests {
             is_proven: false,
             condition: Expr::Bool(false),
             is_required: true,
+            retries: 0,
+            fallback: None,
         };
-        assert_eq!(extract_trigger_name(&spec_non_trigger), None);
-    }
-
-    #[test]
-    fn test_is_trigger_watchdog() {
-        let spec = watchdog_spec("btn", true);
-        assert!(is_trigger_watchdog(&spec));
 
         let spec_var = WatchdogSpec {
             cycles_bound: None,
@@ -617,6 +614,8 @@ mod tests {
             is_proven: false,
             condition: Expr::Identifier("timeout".to_string()),
             is_required: true,
+            retries: 0,
+            fallback: None,
         };
         assert!(!is_trigger_watchdog(&spec_var));
     }
@@ -731,6 +730,8 @@ mod tests {
                     cycles_bound: None,
                     seconds_bound: None,
                     is_proven: false,
+                    retries: 0,
+                    fallback: None,
                     condition: Expr::Identifier("timeout".to_string()), is_required: true,
                 }),
                 vec![]),

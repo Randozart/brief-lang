@@ -410,6 +410,10 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         }
         // Pipe chains — desugared before this pass
         Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
+        Expr::Within { body, fallback, .. } => {
+            collect_strings_expr(body, seen, out);
+            collect_strings_expr(fallback, seen, out);
+        }
     }
 }
 

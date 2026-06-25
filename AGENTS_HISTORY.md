@@ -1043,3 +1043,366 @@ declarations). Planned but not yet started.
 - After const trg: 1078 (+5 from new tests)
 - After test additions: 1082 (+4 from const trg tests)
 - Final: **1082 passed, 0 failed**
+
+---
+
+## Archived from AGENTS.md (2026-06-25)
+
+The following sections were removed from AGENTS.md during the 2026-06-25 condensation
+to keep active guidance under ~350 lines. Preserved here for historical reference.
+
+### GLUE — General Language Unification Engine
+
+GLUE is a universal FFI broker built on Brief's `meld` system. Any two
+languages that consume LLVM-compatible object code can be linked through GLUE.
+Neither language knows Brief exists. Both see their own native interface.
+Brief is the invisible translator — `meld` proves type compatibility at
+compile time, `frgn` declares calls into the target language, `#export`
+exposes functions to the caller.
+
+**The bridge is native object code.** No C compiler, no `extern "C"`, no `cc`
+crate. Brief emits LLVM IR → native `.o`/`.a`/`.wasm`. The foreign language's
+linker consumes it directly.
+
+**GLUE adapters use Brief's `$!` macro system**, not a separate template engine.
+A `$!macro` takes the bridge's `#export`/`frgn`/`meld` declarations at compile
+time and emits native wrapper source code for the target language. Adding a
+language = writing one `.bv` macro file.
+
+**Key directives:**
+- `brief link <path> <function>` — analyzes a foreign library, generates a `.bv`
+  with `frgn` declarations. Cross-references against the `Intrinsic` enum in
+  `src/ast.rs` — if a `frgn` name matches an intrinsic, emit `intrinsic_call#()`
+  instead. This replaces the old TOML binding system.
+- `brief export <bridge.bv> <language>` — compiles to `.a` (library mode, no
+  `main`), reads `glue.dbvl` to find the adapter entry for `<language>`, invokes
+  the `$!` macro for that language, generates native wrappers.
+- `glue <target> <function> <language>` — one-shot wrapper: `brief link` + `brief export`.
+
+**GLUE protocol files:**
+- `glue.dbvl` — Data Brief Lines adapter registry (one language per line)
+- `glue.dbvs` — Data Brief Schema that validates `glue.dbvl` entries
+- Adapter macros live in `glue/adapters/<language>.bv`
+
+### File Types
+- **.bv** - Brief (standard Brief file, cosmopolitan tier — any FFI, any language, OS assumed)
+- **.sbv** - Strict Brief (full contracts required, no sugar defaults)
+- **.abv** - Accelerated Brief (native GPU compilation — always compiles to SPIR-V, no FFI, restricted types, GPU intrinsics only. Also known as "Brief Accel")
+- **.rbv** - Rendered Brief (Brief + View, compiles to web frontend. Like `.tsx` is to `.ts`. Also known as "Brief Render")
+- **.srbv** - Strict Rendered Brief (full contracts required in web target)
+- **.ebv** - Embedded Brief (bare metal — no OS, no GC. C/Rust FFI allowed but Python/Java warned. Also known as "Brief Embed")
+- **.sebv** - Strict Embedded Brief (full contracts required, bare metal)
+- **.cbv** - Circuit Brief (pure logic graph — no FFI, no external deps, only synthesizable types. Contracts must be total. Outputs Verilog/VHDL/SV. Also known as "Brief Circuit"; formerly Hardware Embedded Brief / `.hebv`)
+- **.dbv/.dbvs/.dbvl** - Data Brief (configuration with schema, think `.xml`/`.xmls`/`.jsonl`. Also known as "D-Brief" or "Brief Data")
+
+### Contract Sugar Syntax
+
+Brief provides sugar for single-sided contracts. Use these where possible in the stdlib
+to teach readers the pattern:
+
+| Syntax | Precondition | Postcondition | Meaning |
+|---|---|---|---|
+| `[pre][post]` | `pre` | `post` | Full contract (both sides) |
+| `[[post]` | `true` (omitted) | `post` | Postcondition only, no guard. **The opening `[[` means the precondition was omitted.** |
+| `[pre]]` | `pre` | `true` (omitted) | Guard only, no guarantee. **The closing `]]` means the postcondition was omitted.** |
+
+Memory aid: the left bracket `[` is always the precondition. `[[` = two left brackets = the
+first one opens an empty precondition (defaults to `true`), the second opens the postcondition.
+`]]` = two right brackets = the first closes the precondition, the second closes an empty
+postcondition (defaults to `true`).
+
+**Banned in**: `.sbv`, `.srbv`, `.sebv`, `.cbv` (strict tiers require explicit both-sided contracts).
+**Allowed in**: `.abv`, `.bv`, `.ebv`, `.rbv` (sugar is the recommended style).
+
+### Pipe Chaining Sugar
+
+Brief provides pipe chaining (`|>`) as a syntactic sugar that desugars to
+flat let-bindings before typechecking. All three active backends see only
+the desugared form — zero runtime overhead.
+
+```brief
+x |> f()            // f(x) — pipeline value prepended as first arg
+x |> f() |> g()     // g(f(x)) — multi-step chain
+x |> f() .|> g()    // .|> reads from 1 position back in pipeline stack
+x |> f() .2|> g()   // .N|> reads from N positions back
+x |> f              // auto-wrapped: f(x)
+f() |> g()          // chain starts with function call (no initial input)
+```
+
+See `docs/architecture/features/pipe.md` for full documentation.
+
+### Language Architecture
+
+Brief is a **general-purpose programming language**. The computational primitive is the **reactive transaction** (`rct txn`):
+- **Precondition** (guard): `[x > 0 && y < N]`
+- **Postcondition** (contract): `[x == N]`
+- **Body**: `{ &x = x + 1; &y = y * 2; }`
+
+Loops are transactions with bounded convergence. Recursion is a transaction chain with proved termination. Every optimization (purity folding, dead-field elimination, SROA, SLP) applies because contracts give the compiler enough information.
+
+#### Misconceptions to Avoid
+
+| Wrong | Correct |
+|-------|---------|
+| "Brief is a reactive state machine DSL" | Brief is general-purpose. Transactions ARE loops, iteration, and recursion. |
+| "Brief has no arrays/strings/collections" | Interpreter supports `List<T>`, `String`, `HashMap`, `HashSet`, `Stack`, `Queue`, `StringBuilder`. Stdlib has 26 modules. |
+| "Brief can't do tree/heap benchmarks" | Interpreter supports recursive enums, structs, field access, match. |
+| "Brief needs malloc/FFI for buffers" | Compiler proves bounds from contracts, allocates accordingly. |
+| "The LLVM backend is the language" | Interpreter is the reference. Backend is an optimization pass. |
+
+#### Two-Layer Architecture
+
+1. **Interpreter** — reference implementation. Validates EVERYTHING before any codegen.
+2. **LLVM Backend** — compiles to LLVM IR with optimizations. Never weakens existing optimization paths.
+
+### Interpreter Completeness
+
+#### Expressions — Except where noted, all fully implemented
+| Status | Variants |
+|--------|----------|
+| ✅ | Integer, Float, String, Char, Bool, Term, Identifier, OwnedRef, PriorState |
+| ✅ | Add, Sub, Mul, Div, Mod, Eq, Ne, Lt, Le, Gt, Ge, Or, And, Not |
+| ✅ | Neg, BitNot, BitAnd, BitOr, BitXor, Shl, Shr |
+| ✅ | Call, ListLiteral, ListIndex, Projection (18 targets), FieldAccess |
+| ✅ | StructInstance, ObjectLiteral, PatternMatch, Concat |
+| ✅ | Slice, MultiSlice, Block, Tuple, TupleDestructure, Cast, Match |
+| ✅ | ArrowMut, ArrowDiscard, ArrowTransfer (dispatch on Value type, not string names) |
+| ✅ | MapLiteral, SetLiteral (evaluate to Value::HashMap, Value::HashSet) |
+| ⚠️ | **ForAll, Exists** — FULLY REMOVED from AST, parser, lexer, and all match arms. |
+
+#### Statements — All fully implemented
+Assignment, Let, InlineAsm, Expression, Term (with optional swan song), TermBang (with optional swan song), Escape, Guarded, Unification, LocalTrigger, SyncBlock.
+
+#### Known Gaps
+- **Recursive defn calls**: No recursion guard or stack depth limit. Deep recursion overflows the Rust interpreter.
+- **ForAll/Exists**: Removed from surface syntax.
+- **Interpreter built-in method dispatch**: `dispatch_method_by_type` still matches on function name strings. Deferred — should use FFI registry (Path A: register all operations under `"std::HashMap::insert"` etc., resolve through `ffi_name_to_location`).
+- **LLVM backend**: Slice/MultiSlice/Tuple/MapLiteral/SetLiteral/ArrowTransfer/projection stubs remain (see Backend Gaps below).
+
+### Feature Modules (`src/features/`)
+
+New features follow the Pattern-B convention: a single directory with `mod.rs` + per-aspect files implementing the trait dispatch system.
+
+| Feature module | Files | Status |
+|----------------|-------|--------|
+| `literal/` | `mod.rs` | ✅ |
+| `binary_op/` | `mod.rs` | ✅ |
+| `call/` | `mod.rs` | ✅ |
+| `projection/` | `mod.rs` | ✅ |
+| `collection/` | `mod.rs` | ✅ |
+| `tuple/` | `mod.rs` | ✅ |
+| `field/` | `mod.rs` | ✅ |
+| `pattern/` | `mod.rs` | ✅ |
+| `block/` | `mod.rs` | ✅ |
+| `arrow/` | `mod.rs` | ✅ |
+| `subtype/` | `mod.rs` | ✅ |
+| `sigcall/` | `mod.rs` | ✅ |
+| `dbvl/` | `mod.rs` | ✅ |
+| `ellipsis/` | `mod.rs` | ✅ |
+| `stmt/` | `mod.rs` | ✅ |
+| `toplevel/` | `mod.rs` | ✅ |
+| `macros/` | `context.rs`, `expand.rs`, `template.rs`, `hygiene.rs`, `macro_.rs` | ✅ |
+
+### LLVM Backend — All Gaps Closed (2026-06-21)
+
+Additive only — never weaken existing optimization paths.
+
+All expression types from the original gaps list (`Slice`, `MultiSlice`,
+`Tuple`, `StructInstance`, `ObjectLiteral`, `FieldAccess`, `MapLiteral`,
+`SetLiteral`, `ArrowTransfer`, `<-` push/pop/discard, and all projection
+operators including `Keys`, `Values`, `Contains`, `Pop`, `Index`) have been
+**fully implemented** in `emit_expr.rs`. `ForAll`/`Exists` were **removed**
+from the AST entirely. As of 2026-06-21, there are **no known stub or
+degraded expression paths** in the LLVM backend.
+
+#### Expressions — All Fixed (2026-06-21)
+
+The following expression codegen gaps were fixed:
+
+**Slice stride/mask** — Stride is now used in the copy loop (`src[start + i*stride]`)
+with ceiling-division count. Mask applies a second-pass filter loop that binds `_`
+to each element and evaluates the mask expression. Both implemented inline with
+LLVM IR loops.
+
+**MultiSlice stride/mask/range** — `Coord(Range)` allocates a new list and copies
+the sub-range `[lo..hi)`. `Stride` emits a step-by copy loop. `Mask` emits a
+filter loop with `_` binding. All three produce native LLVM IR loops without
+runtime library calls.
+
+**`FloatToStr`/`ToStr` working paths** — Replaced buggy `@__snprintf__`-based
+implementation with `@__float_to_str` / `@__to_str` C runtime functions.
+Return type changed from `i8*` to `i64` to match C functions.
+
+**`bytes` projection for struct types** — Now computes `fields.len() * 8` when
+the source type is `Type::Custom(name)` and the struct is in `struct_types`.
+
+**`FieldAccess` field not found** — Now emits `call void @llvm.trap()` instead
+of silent `add i64 0, 0 ; field`.
+
+**`UserDefined`/`UserDefinedWithArg` projections** — Now emit `@llvm.trap()`
+when `try_projection_fast_path` fails (instead of silent `add i64 0, 0`).
+
+**Missing declares** — 8 `declare` statements for runtime functions
+(`__trim_left__`, `__trim_right__`, `__to_lower__`, `__contains_at__`,
+`__find_from__`, `__splitn__`, `__float_to_str`, `__to_str`) were added to
+`emit_toplevel.rs`.
+
+#### Error-Guard Stubs — All Fixed (2026-06-21)
+
+The following error-guard stubs previously emitted `add i64 0, 0` silently;
+all now emit `call void @llvm.trap()` before the zero return:
+
+**Intrinsic error-guards (wrong arg count)**: `sort`, `reverse`, `range`,
+`trim_left`, `trim_right`, `to_lower`, `contains_at`, `splitn`, `int_to_str`,
+`strlen`, `float_to_str`, `to_str`, `size`, `pop`, `contains`, `keys`/`values`,
+`read_file`.
+
+**Projection error-guards (unrecognized field/type)**: `Expr::Identifier` not
+found, `ProjectionTarget::Bytes` for unknown type, `ProjectionTarget::UserDefined`
+and `UserDefinedWithArg` fallthrough, `Expr::FieldAccess` field not found.
+
+#### Top-Level — Struct/Enum Layout
+| TopLevel | Notes |
+|----------|-------|
+| **Struct** | No LLVM struct type generated. StructInstance/FieldAccess use field-offset arithmetic (GEP), not LLVM struct types. No TBAA on struct fields. |
+| **Enum** | Tagged union layout via ad-hoc stack alloca + discriminant prefix. No LLVM struct type. |
+| Signature, Import, LinkDependency | Correctly skipped — frontend-only. |
+
+### Self-Hosting Pipeline
+
+The Brief-in-Brief compiler lives in `lib/compiler/`. Run via `brief-compiler selfhost <file.bv>`.
+
+**NOT currently being worked on.** Broken at parser level (multidimensional slice bug). Deferred.
+
+**Do NOT add as built-ins**: `is_digit`, `is_alpha`, `is_alphanumeric`, `is_upper`, `is_lower`, `is_space`, `char_to_string`, `None`, `Some`, `Ok`, `Err`. These are in `lib/std/` — import them.
+
+### Optimization Design
+
+See `docs/design/optimization-decision-tree.md` for the full decision tree — precomputation → enum dispatch → async → folded struct-SSA → fallback — and the rationale for each path (phi reduction, SROA pipeline, why struct phis were eliminated, cross-cutting optimizations).
+
+### Critical Context
+
+#### Already Done (Don't Redo)
+- **Projection operator (`:>`)** — fully implemented, 8 targets (Size, Bytes, Ptr, Alignment, Range, Popcount, LeadingZeros, TrailingZeros, Absolute, BitReverse, Type, Ptr!, Match, Keys, Values, Contains, Pop, Index). `Expr::ListLen` deleted. All stdlib migrated.
+- **`<-` arrow syntax** — fully implemented for List, HashMap, HashSet, Stack, Queue via `ArrowMut`/`ArrowDiscard`/`ArrowTransfer`. Dispatch on Value type, not string names.
+- **`->` vs `<-` convention** — `->` reserved for return types and swan songs; `<-` exclusively for collection mutation (`&` sigil marks mutated operand).
+- **`term -> swan_song;`** (commit action) and **`term!`** (program exit) — both implemented in interpreter + LLVM backend.
+- **`#assume_event(name)`** and **`#assume_shape(guard, action)`** — pragma infrastructure in parser, analysis, LLVM.
+- **`#` prefix for all directives** — reuses Hashtag/Attribute parsing.
+- **Dead-field elimination** — liveness analysis drops stores to unobserved fields.
+- **Dispatch-chain collapse** — preconditions evaluate against pre-tick state.
+- **Thread pool async dispatch** — portable barrier + auto-inference of conflict-free txns.
+- **SLP hazard analyzer** — disables SLP when peak register demand exceeds hardware.
+- **Equality saturation** — lightweight recursive simplification (5-pass fixpoint, 9 rewrite rules).
+- **Compile-time PGO** — interpreter profiling guides LLVM branch weights.
+- **LTO pipeline** — merges `brief_rt.c` bitcode with program IR.
+- **MMIO / DBVS / hardware handoff** — address plumbing, schema validation, Vivado XSA extraction.
+- **alka/on_exit permanently abandoned** — parser paths commented out, code left only as a historical artifact. No revisit planned.
+- **`__rt_poll()`** — non-blocking event drain at main() entry.
+- **Sync domains (Phase 11)** — `sync(domain)` prefix on `txn`/`defn`, `TopLevel::SyncGroup`, `Statement::SyncBlock`.
+- **BracketOp (MultiSlice refactor)** — flat `Vec<BracketOp>` replaces `coordinates`+`mask`. Ops: `Coord`, `Mask`, `Stride` in any order.
+- **MapLiteral / SetLiteral** — `{"a": 1}` evaluates to `Value::HashMap`, `{1, 2, 3}` to `Value::HashSet`. ObjectLiteral `{field: val}` preserved.
+- **Value::Tuple** — true distinct variant. `Expr::Tuple` evaluates to `Value::Tuple`. Tuple destructure handles both `List` and `Tuple`.
+- **ProjectionTarget::Index(usize)** — tuple indexing via `pair :> 0`.
+- **`$`/`$!` macro system (Phase 1a/1b)** — `$` for hygienic templates, `$!` for high-power macros. `quote { }` with `@`-interpolation. `compile#()`/`error#()`/`warn#()`/`gensym#()` compile-time intrinsics with `is_compile_time_only()` annotation. Phase 1a (template) → Phase 1b (macro) → re-expand 1a → TypeChecker. Gensym hygiene for local `let` bindings (`__gensym_N`). Three canonical flags: `--macro-budget`, `--unlimited-macros`, `--safe-compile`.
+- **MultiSlice mask/stride evaluation** — `BracketOp::Mask` and `BracketOp::Stride` ops now evaluated in interpreter. `_` bound as implicit element variable. `Expr::Slice.mask` also implemented. ArrowTransfer filter implemented with same `_`-binding pattern.
+
+#### Not a Priority
+- Self-hosting pipeline (broken, deferred)
+- ForAll/Exists (removed from core syntax)
+
+#### Historical Record
+All optimization sprints, benchmark timing tables, bug diagnoses, and implementation phases are preserved in `AGENTS_HISTORY.md` and `AGENTS_HISTORY_2.md`.
+
+#### Current State (as of 2026-06-21)
+- 1162 tests pass, 0 fail
+- **Constraint unification (B1/B2/B3)** complete: `RangeConstraint` + `Type::ContractBound` removed; `Statement::Let.constraint` + `StateDecl.constraint` unified to `Option<Box<Expr>>`; `_`-binding in `eval_constraint()`/`emit_guard_check()`; TypeDef body guards in `ResolvedType.guards`; LLVM constraint codegen with `@llvm.trap()` + `unreachable`
+- **Phase 3.5 (Backend Fast-Path Registry)** complete
+- **trg reactive dirty-flag architecture** complete (Phases 1–6)
+- **SSA phi dominance** fixed (6 root causes)
+- **foreach** complete
+- **`?#` proof oracle** complete
+- **Instruction reordering** complete
+- **Variadic `fprintf` syntax** fixed
+- **TBAA metadata** implemented
+- **`!range` metadata** implemented
+- **Webstack backend gaps closed** (2026-06-21)
+- **CIRCT backend gaps closed** (2026-06-21)
+- **Pattern B AssignmentStmt** (2026-06-21)
+- **`$!` macro expansion wired** (2026-06-21)
+- **Crypto/HTTP FFI implemented** (2026-06-21)
+- **`bytes` projection extended** (2026-06-21)
+- **GPU intrinsics dimension validation** (2026-06-21)
+- **Void intrinsic stubs → `undef`** (2026-06-21)
+- **Exit expression stubs → `llvm.trap()`** (2026-06-21)
+- **`<-` arrow push/pop/discard/transfer** implemented for `List<T>`
+- **String/char escape sequences** fully implemented
+- Three canonical backends: LLVM (native), Webstack (WASM+JS), CIRCT (MLIR→Verilog)
+- All other backends are dead code — zero fixes
+- Kani: 14 fast-group harnesses proven, 96 full-group pass
+
+#### Roadmap — Next Work Items (all completed as of 2026-06-21)
+SSA phi dominance → foreach LLVM/SIMD → `?#` proof oracle → ILP reordering
+
+### Known Bugs Fixed
+
+#### 2026-06-17: String state initializers store null instead of string constant
+**Root cause**: `emit_inline_init_stores` in `emit_toplevel.rs:468` had a special case
+that matched `Some(Expr::String(_))` and stored `i8* null` instead of the actual
+string constant pointer. All string state variables (e.g. `current_input: String = ""`,
+`target_os: String = "linux"`) were initialized as null pointers.
+
+**Fix**: Replace `null` with a `bitcast` of `@str.N` to `i8*`.
+
+**Lesson**: Every `Expr` handler that evaluates to a pointer must store the actual
+pointer, not a sentinel/placeholder.
+
+#### 2026-06-17: Wrong TFD_NONBLOCK / SFD_NONBLOCK constants in trigger init
+**Root cause**: `emit_toplevel.rs:104-105` had `tfd_nonblock = 0x400` and
+`sfd_nonblock = 0x400`. These should be `0x800` (same as `O_NONBLOCK` on Linux x86_64).
+
+**Fix**: Change both to `0x800`.
+
+**Lesson**: Hardcoded platform constants should be cross-referenced against kernel headers.
+
+#### 2026-06-17: `read_file#` returns null instead of error — FFI must use `Result<T, E>`
+**Root cause**: `read_file#` returned `i8*` — either a valid C string or NULL if
+the file didn't exist. The Brief type system has no notion of "nullable pointer".
+
+**Fix**: Changed `read_file#` to return `Result<String, String>`.
+
+**Architectural rule**: Every Brief `#`-intrinsic that can fail MUST return
+`Result<T, E>` where `E` describes the failure.
+
+#### 2026-06-17: `is_string_chain` missing `Expr::Call` arm — officina SIGSEGV
+**Root cause**: `is_string_chain` in `emit_expr.rs:2763` detects string `+`
+for inline concat but does not handle `Expr::Call`.
+
+**Fix**: Added `Expr::Call(name, _)` arm checking `defn_return_types` for
+`String`/`Data` return type.
+
+#### 2026-06-17: `\0` char escape not handled in lexer
+**Root cause**: `src/lexer.rs:371-382` handles `\n`, `\t`, `\\`, `\'`,
+and `\u{...}` escape sequences in char literals, but NOT `\0` (null).
+
+**Fix**: Added `if inner == "\\0" { return Some('\0'); }` before the other escape checks.
+
+#### 2026-06-17: `done_{name}` SSA dispatch branches to exit instead of next txn
+**Root cause**: `src/backend/llvm/loop_engine.rs:778`: the `done_l` label
+(emitted when a txn's precondition is false) unconditionally branches to
+`%done` (program exit) instead of `%{skip_l}` (next txn's skip label).
+
+**Fix**: Changed `br label %done` to `br label %{skip_l}`.
+
+#### 2026-06-17: TBAA metadata tree for `i64`-boxed types
+**Implementation**: Added 6-node TBAA metadata tree (Brief root + Int, Bool,
+Char, String, Float sub-types).
+
+#### 2026-06-17: `!range` metadata replaces `@llvm.assume` for simple patterns
+**Implementation**: `emit_precondition_check` detects simple `[x < N]` precondition
+patterns and emits a re-load of the field with `!range !{ 0, N }` metadata.
+
+#### 2026-06-17: Variadic `fprintf` missing `(ptr, ptr, ...)` prototype
+**Root cause**: Three `fprintf` call sites omit the explicit variadic function type.
+
+**Fix**: Added `(ptr, ptr, ...)` to all three call sites.

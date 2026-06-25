@@ -2678,6 +2678,10 @@ impl ProofEngine {
             }
             // Pipe chains — desugared before this pass
             Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
+            Expr::Within { body, fallback, .. } => {
+                self.collect_identifiers(body, vars);
+                self.collect_identifiers(fallback, vars);
+            }
         }
     }
 

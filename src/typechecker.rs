@@ -3398,6 +3398,7 @@ mod tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: false, fallback: None,
+            default_watchdog: None,
             span: None,
         };
         tc.foreign_bindings.insert("my_fn".into(), sig.clone());
@@ -3528,6 +3529,7 @@ mod tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true, fallback: Some(Expr::String("".to_string())),
+            default_watchdog: None,
             span: None,
         };
         tc.foreign_bindings.insert("pipe_fn".into(), sig.clone());
@@ -3552,6 +3554,7 @@ mod tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true, fallback: Some(Expr::Integer(0)),
+            default_watchdog: None,
             span: None,
         };
         tc.check_frgn_binding("no_toml_fn", "", &mut sig);

@@ -1952,6 +1952,11 @@ impl Interpreter {
                     }
                 }).collect(),
             }),
+            Expr::Within { body, fallback, .. } => Expr::Within {
+                body: Box::new(self.rewrite_identifiers(body, uid, cell_name)),
+                bound: 0, retries: 0, unit: crate::ast::TimeUnit::Cycles,
+                fallback: Box::new(self.rewrite_identifiers(fallback, uid, cell_name)),
+            },
         }
     }
 
@@ -5710,6 +5715,37 @@ impl Interpreter {
             }
             // Pipe chains — desugared before this pass
             Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
+            Expr::Within { body, bound, unit: _, retries, fallback } => {
+                let saved_counter = self.cycle_counter;
+                let saved_budget = self.cycle_budget;
+                let max_cycles = saved_counter + bound;
+                let mut attempt = 0u64;
+                let saved_state = self.state.clone();
+                loop {
+                    self.cycle_counter = saved_counter;
+                    self.cycle_budget = max_cycles;
+                    match self.eval_expr(body) {
+                        Ok(val) => {
+                            self.cycle_budget = saved_budget;
+                            break Ok(val);
+                        }
+                        Err(RuntimeError::Timeout(_)) => {
+                            attempt += 1;
+                            if attempt > *retries {
+                                self.state = saved_state;
+                                self.cycle_budget = saved_budget;
+                                self.cycle_counter = saved_counter;
+                                break self.eval_expr(fallback);
+                            }
+                            self.state = saved_state.clone();
+                        }
+                        Err(e) => {
+                            self.cycle_budget = saved_budget;
+                            break Err(e);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -9760,6 +9796,7 @@ mod tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true, fallback: Some(Expr::Integer(-1)),
+            default_watchdog: None,
             span: None,
         };
         i.ffi_bindings.insert("integration_pipe".into(), sig.clone());
@@ -9791,6 +9828,7 @@ mod tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true, fallback: Some(Expr::Float(0.0)),
+            default_watchdog: None,
             span: None,
         };
         i.ffi_bindings.insert("integration_pipe_nan".into(), sig.clone());
@@ -9841,6 +9879,7 @@ mod tests {
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true,
             fallback: Some(Expr::Integer(-1)),
+            default_watchdog: None,
             span: None,
         };
         i.ffi_bindings.insert("getpid".into(), sig);
@@ -9895,6 +9934,7 @@ mod tests {
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true,
             fallback: Some(Expr::Integer(-1)),
+            default_watchdog: None,
             span: None,
         };
         i.ffi_bindings.insert("getpid".into(), sig);
@@ -12201,6 +12241,7 @@ mod kani_full_tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true, fallback: Some(Expr::Integer(0)),
+            default_watchdog: None,
             span: None,
         };
         i.ffi_bindings.insert("test_pipe_ok".into(), sig);
@@ -12230,6 +12271,7 @@ mod kani_full_tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true, fallback: Some(Expr::Float(0.0)),
+            default_watchdog: None,
             span: None,
         };
         i.ffi_bindings.insert("test_pipe_err".into(), sig);
@@ -12258,6 +12300,7 @@ mod kani_full_tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true, fallback: Some(Expr::Float(0.0)),
+            default_watchdog: None,
             span: None,
         };
         i.ffi_bindings.insert("test_pipe_f".into(), sig);
@@ -12289,6 +12332,7 @@ mod kani_full_tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true, fallback: Some(Expr::String("default".to_string())),
+            default_watchdog: None,
             span: None,
         };
         i.ffi_bindings.insert("test_pipe_null_str".into(), sig);

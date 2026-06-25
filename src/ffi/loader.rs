@@ -237,6 +237,7 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
             precondition,
             postcondition,
             buffer_mode,
+            default_watchdog: None,
         };
 
         bindings.push(binding);

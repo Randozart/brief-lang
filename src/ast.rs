@@ -104,6 +104,7 @@ pub enum TimeUnit {
     Ms,
     Seconds,
     Minutes,
+    Nanoseconds,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -223,7 +224,62 @@ pub struct ForeignSignature {
     pub is_out: bool,                // #out modifier — function has observable output
     pub is_pipe: bool,               // true if pipe syntax `-> T | fallback` was used
     pub fallback: Option<Expr>,      // fallback expression for pipe syntax
+    pub default_watchdog: Option<(u64, TimeUnit, u64, Box<Expr>)>,
     pub span: Option<Span>,
+}
+
+impl Default for ForeignSignature {
+    fn default() -> Self {
+        ForeignSignature {
+            name: String::new(),
+            location: String::new(),
+            wasm_impl: None,
+            wasm_setup: None,
+            inputs: Vec::new(),
+            success_output: Vec::new(),
+            result_type: ResultType::VoidType,
+            error_type_name: "Error".to_string(),
+            error_fields: Vec::new(),
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            ffi_kind: None,
+            is_out: false,
+            is_pipe: false,
+            fallback: None,
+            default_watchdog: None,
+            span: None,
+        }
+    }
+}
+
+impl ForeignSignature {
+    pub fn new(name: String, location: String) -> Self {
+        ForeignSignature {
+            name,
+            location,
+            wasm_impl: None,
+            wasm_setup: None,
+            inputs: Vec::new(),
+            success_output: Vec::new(),
+            result_type: ResultType::VoidType,
+            error_type_name: "Error".to_string(),
+            error_fields: Vec::new(),
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            ffi_kind: None,
+            is_out: false,
+            is_pipe: false,
+            fallback: None,
+            default_watchdog: None,
+            span: None,
+        }
+    }
 }
 
 /// Resource declaration (rsrc/resource)
@@ -255,6 +311,7 @@ pub struct ForeignBinding {
     pub precondition: Option<String>, // Pre-call validation (NEW v2)
     pub postcondition: Option<String>, // Post-call validation (NEW v2)
     pub buffer_mode: Option<String>, // stack | heap | static
+    pub default_watchdog: Option<(u64, TimeUnit, u64, Box<Expr>)>,
 }
 
 impl ForeignBinding {
@@ -277,6 +334,7 @@ impl ForeignBinding {
             precondition: None,
             postcondition: None,
             buffer_mode: None,
+            default_watchdog: None,
         }
     }
 
@@ -299,6 +357,7 @@ impl ForeignBinding {
             precondition: sig.precondition.clone(),
             postcondition: sig.postcondition.clone(),
             buffer_mode: sig.buffer_mode.clone(),
+            default_watchdog: None,
         }
     }
 
@@ -1429,6 +1488,14 @@ pub enum Expr {
     /// Pipe chain: `initial |> step1 |> step2 .|> step3`
     /// Desugared to block with let-bound temporaries before typechecking.
     PipeChain(PipeChain),
+    /// Temporal fallback: `foo() within N cycles (retries) ~? fallback()`
+    Within {
+        body: Box<Expr>,
+        bound: u64,
+        unit: TimeUnit,
+        retries: u64,
+        fallback: Box<Expr>,
+    },
 }
 
 /// A full pipe chain: initial value followed by chained transformation steps.
@@ -1916,6 +1983,8 @@ pub struct WatchdogSpec {
     pub cycles_bound: Option<u64>,
     pub seconds_bound: Option<u64>,
     pub is_proven: bool,
+    pub retries: u64,
+    pub fallback: Option<Box<Expr>>,
 }
 
 impl Contract {
