@@ -2591,6 +2591,7 @@ impl Interpreter {
             (Value::Instance { .. }, _) => true,
             (Value::Enum(..), _) => true,
             (Value::DbvlTable(_) | Value::Regex(_), _) => true,
+            (Value::Ptr(_), Type::Applied(n, _)) if n == "Ptr" => true,
             // Primitive type mismatch
             _ => false,
         }
@@ -2884,6 +2885,7 @@ impl Interpreter {
                             Value::Int(_) => Ok(Value::Int(8)),
                             Value::Bool(_) => Ok(Value::Int(1)),
                             Value::Char(_) => Ok(Value::Int(4)),
+                            Value::Ptr(_) => Ok(Value::Int(8)),
                             Value::String(s) => Ok(Value::Int(s.len() as i64)),
                             Value::List(l) => Ok(Value::Int((l.len() * 8) as i64)),
                             Value::Data(d) => Ok(Value::Int(d.len() as i64)),
@@ -2920,7 +2922,7 @@ impl Interpreter {
                     Intrinsic::Size => {
                         let v = values.remove(0);
                         match v {
-                            Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
+                            Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) | Value::Ptr(_) => Ok(Value::Int(1)),
                             Value::List(l) => Ok(Value::Int(l.len() as i64)),
                             Value::String(s) => Ok(Value::Int(s.len() as i64)),
                             Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
@@ -3006,6 +3008,32 @@ impl Interpreter {
                             _ => 0,
                         };
                         std::process::exit(code);
+                    }
+                    Intrinsic::VolatileLoad => {
+                        let ptr = values.remove(0);
+                        match ptr {
+                            Value::Ptr(addr) => {
+                                // Interpreter cannot read real hardware registers.
+                                // Return a zero value of the appropriate type.
+                                // The type is determined at compile time from the Ptr<T> type arg.
+                                Ok(Value::Int(0))
+                            }
+                            v => Err(RuntimeError::TypeMismatch(
+                                format!("volatile_load requires Ptr, got {:?}", v))),
+                        }
+                    }
+                    Intrinsic::VolatileStore => {
+                        let ptr = values.remove(0);
+                        let _val = values.remove(0);
+                        match ptr {
+                            Value::Ptr(_addr) => {
+                                // Interpreter cannot write to real hardware registers.
+                                // No-op: just return success.
+                                Ok(Value::Bool(true))
+                            }
+                            v => Err(RuntimeError::TypeMismatch(
+                                format!("volatile_store requires Ptr as first arg, got {:?}", v))),
+                        }
                     }
                     Intrinsic::Halt => {
                         // No-op in interpreter — can't halt the host CPU
@@ -5798,6 +5826,7 @@ impl Interpreter {
                     (Value::Enum(ename, ..), Type::Custom(n)) => ename == n,
                     (Value::Enum(ename, ..), Type::Enum(n)) => ename == n,
                     (Value::Enum(ename, ..), Type::Applied(n, _)) => ename == n,
+                    (Value::Ptr(_), Type::Applied(n, _)) if n == "Ptr" => true,
                     _ => false,
                 };
                 Ok(Value::Bool(matches))
@@ -5828,6 +5857,7 @@ impl Interpreter {
             (Value::Int(a), Value::Int(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => (a - b).abs() < f64::EPSILON,
             (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Ptr(a), Value::Ptr(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Char(a), Value::Char(b)) => a == b,
             (Value::List(a), Value::List(b)) => {
@@ -5906,6 +5936,12 @@ impl Interpreter {
 
             // Int → Bool
             (Value::Int(n), Type::Bool) => Ok(Value::Bool(*n != 0)),
+
+            // Ptr ↔ Int
+            (Value::Ptr(p), Type::Int) => Ok(Value::Int(*p as i64)),
+            (Value::Int(n), Type::Applied(name, _)) if name == "Ptr" => {
+                Ok(Value::Ptr(*n as u64))
+            }
 
             // Meld-backed custom type cast: identity (reinterpretation, not conversion)
             (_, Type::Custom(_)) => Ok(val),
@@ -10556,6 +10592,90 @@ mod tests {
         // Consumer should have ticked too, setting consumer.out = consumer.input = 1
         let cons_val = interp.call_cell(&consumer, &[]).unwrap();
         assert_eq!(cons_val, Value::Int(1), "consumer.out after wire propagation");
+    }
+
+    // --- Ptr<T> tests ---
+
+    #[test]
+    fn test_eval_cast_int_to_ptr() {
+        let mut i = Interpreter::new();
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Int]);
+        let expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Ptr(0x40011000), "Int -> Ptr should wrap address");
+    }
+
+    #[test]
+    fn test_eval_cast_ptr_to_int() {
+        let mut i = Interpreter::new();
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Int]);
+        let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011004)), ptr_ty);
+        let cast_back = Expr::Cast(ptr_expr.into(), Type::Int);
+        let result = i.eval_expr(&cast_back).unwrap();
+        assert_eq!(result, Value::Int(0x40011004), "Ptr -> Int should extract address");
+    }
+
+    #[test]
+    fn test_ptr_display() {
+        let p = Value::Ptr(0x40011000);
+        assert_eq!(format!("{}", p), "Ptr(1073811456)");
+    }
+
+    #[test]
+    fn test_is_valid_ffi_return_ptr() {
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Int]);
+        assert!(Interpreter::is_valid_ffi_return(&Value::Ptr(0x1000), &ptr_ty));
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Int(0), &ptr_ty));
+    }
+
+    // --- Volatile load/store tests ---
+
+    #[test]
+    fn test_volatile_load_returns_zero() {
+        let mut i = Interpreter::new();
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Int]);
+        let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
+        let vl = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::VolatileLoad,
+            args: vec![ptr_expr],
+        };
+        let result = i.eval_expr(&vl).unwrap();
+        assert_eq!(result, Value::Int(0), "volatile_load returns 0 in interpreter");
+    }
+
+    #[test]
+    fn test_volatile_load_requires_ptr() {
+        let mut i = Interpreter::new();
+        let vl = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::VolatileLoad,
+            args: vec![Expr::Integer(42)],
+        };
+        let result = i.eval_expr(&vl);
+        assert!(result.is_err(), "volatile_load with non-Ptr should error");
+    }
+
+    #[test]
+    fn test_volatile_store_returns_true() {
+        let mut i = Interpreter::new();
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Int]);
+        let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
+        let vs = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::VolatileStore,
+            args: vec![ptr_expr, Expr::Integer(42)],
+        };
+        let result = i.eval_expr(&vs).unwrap();
+        assert_eq!(result, Value::Bool(true), "volatile_store returns true");
+    }
+
+    #[test]
+    fn test_volatile_store_requires_ptr() {
+        let mut i = Interpreter::new();
+        let vs = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::VolatileStore,
+            args: vec![Expr::Integer(0), Expr::Integer(1)],
+        };
+        let result = i.eval_expr(&vs);
+        assert!(result.is_err(), "volatile_store with non-Ptr should error");
     }
 }
 

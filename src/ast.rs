@@ -699,6 +699,13 @@ pub enum Intrinsic {
     /// backtrace#() -> List<Int> — stack trace addresses
     Backtrace,
 
+    // ===== Memory-mapped I/O (2026-06-25) =====
+    /// volatile_load#(ptr: Ptr<T>) -> T — volatile read from MMIO register.
+    /// Return type T is the pointee type of Ptr<T>, determined at compile time.
+    VolatileLoad,
+    /// volatile_store#(ptr: Ptr<T>, val: T) -> Bool — volatile write to MMIO register.
+    VolatileStore,
+
     // ===== D14b: CPU Halt (2026-06-19) =====
     /// halt#() -> Void — halt CPU (WFI on ARM, HLT on x86). Used by embedded mode term!
     Halt,
@@ -967,6 +974,8 @@ impl Intrinsic {
             "abort" => Some(Intrinsic::Abort),
             "backtrace" => Some(Intrinsic::Backtrace),
             "halt" => Some(Intrinsic::Halt),
+            "volatile_load" => Some(Intrinsic::VolatileLoad),
+            "volatile_store" => Some(Intrinsic::VolatileStore),
             // D15: Scheduling
             "sched_yield" => Some(Intrinsic::SchedYield),
             "getpriority" => Some(Intrinsic::GetPriority),
@@ -1162,6 +1171,8 @@ impl Intrinsic {
             Intrinsic::Abort => "abort",
             Intrinsic::Backtrace => "backtrace",
             Intrinsic::Halt => "halt",
+            Intrinsic::VolatileLoad => "volatile_load",
+            Intrinsic::VolatileStore => "volatile_store",
             // D15: Scheduling
             Intrinsic::SchedYield => "sched_yield",
             Intrinsic::GetPriority => "getpriority",

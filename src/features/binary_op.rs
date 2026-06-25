@@ -91,6 +91,25 @@ impl ExprEval for BinaryOpExpr {
             (BitXor, Value::Int(a), Value::Int(b)) => Value::Int(a ^ b),
             (Shl,  Value::Int(a), Value::Int(b)) => Value::Int(a << b),
             (Shr,  Value::Int(a), Value::Int(b)) => Value::Int(a >> b),
+            // Ptr<T> arithmetic — all ops preserve T, produce Ptr<T>
+            (Add,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a.wrapping_add(*b as u64)),
+            (Add,  Value::Int(a), Value::Ptr(b)) => Value::Ptr(b.wrapping_add(*a as u64)),
+            (Sub,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a.wrapping_sub(*b as u64)),
+            (BitAnd, Value::Ptr(a), Value::Int(b)) => Value::Ptr(a & *b as u64),
+            (BitAnd, Value::Int(a), Value::Ptr(b)) => Value::Ptr(b & *a as u64),
+            (BitOr,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a | *b as u64),
+            (BitOr,  Value::Int(a), Value::Ptr(b)) => Value::Ptr(b | *a as u64),
+            (BitXor, Value::Ptr(a), Value::Int(b)) => Value::Ptr(a ^ *b as u64),
+            (BitXor, Value::Int(a), Value::Ptr(b)) => Value::Ptr(b ^ *a as u64),
+            (Shl,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a << *b),
+            (Shr,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a >> *b),
+            // Ptr<T> comparison
+            (Eq,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a == b),
+            (Ne,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a != b),
+            (Lt,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a < b),
+            (Le,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a <= b),
+            (Gt,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a > b),
+            (Ge,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a >= b),
             (_, Value::Regex(_), _) | (_, _, Value::Regex(_)) => {
                 return Err(RuntimeError::TypeMismatch(format!("binary op {:?} on Regex", self.kind)))
             }

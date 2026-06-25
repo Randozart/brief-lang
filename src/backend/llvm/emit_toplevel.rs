@@ -1,3 +1,4 @@
+use crate::analysis::bild_asm;
 use crate::ast::{Expr, Statement, TopLevel, Type};
 use crate::backend::llvm::{float_to_llvm_hex, LlvmBackend, TypedRegister};
 use std::fmt::Write;
@@ -1390,8 +1391,11 @@ impl LlvmBackend {
             matches!(resolved, Type::Float)
         });
 
+        // Desugar `asm target { }` blocks before emission
+        let desugared_body = bild_asm::desugar_asm_target(&inop.llvm_body);
+
         // Detect multi-output: term %q, %r — has comma-separated registers
-        let is_multi_output = inop.llvm_body.iter().any(|line| {
+        let is_multi_output = desugared_body.iter().any(|line| {
             let trimmed = line.trim();
             (trimmed.starts_with("term ") || trimmed.starts_with("term!"))
                 && trimmed.contains(',')
@@ -1430,7 +1434,7 @@ impl LlvmBackend {
         self.txn_counter = 0;
         self.terminated = false;
 
-        for line in &inop.llvm_body {
+        for line in &desugared_body {
             let trimmed = line.trim();
             if trimmed.starts_with("term!") {
                 let after = trimmed.strip_prefix("term!").unwrap_or("").trim();

@@ -1,3 +1,4 @@
+use crate::analysis::bild_asm;
 use crate::ast::{Expr, InopDeclaration};
 use std::collections::HashMap;
 
@@ -138,6 +139,9 @@ pub fn verify_inop(inop: &InopDeclaration) -> SymExecResult {
 /// Symbolically execute the BILD body.
 /// Returns the symbolic expression for the terminator's return value.
 fn symexec_bild(inop: &InopDeclaration) -> Result<Option<SymExpr>, SymExecError> {
+    // Desugar asm target blocks before symbolic execution
+    let body = bild_asm::desugar_asm_target(&inop.llvm_body);
+
     let mut regs: HashMap<String, SymExpr> = HashMap::new();
 
     // Parameters are symbolic variables
@@ -147,7 +151,7 @@ fn symexec_bild(inop: &InopDeclaration) -> Result<Option<SymExpr>, SymExecError>
 
     let mut return_expr: Option<SymExpr> = None;
 
-    for (i, line) in inop.llvm_body.iter().enumerate() {
+    for (i, line) in body.iter().enumerate() {
         let trimmed = line.trim().trim_end_matches(';');
 
         if trimmed.starts_with("term!") {
@@ -176,8 +180,16 @@ fn symexec_bild(inop: &InopDeclaration) -> Result<Option<SymExpr>, SymExecError>
             let rhs = trimmed[eq_pos + 3..].trim();
 
             if lhs.starts_with('%') {
-                let sym = parse_bild_instruction(rhs, &regs, i)?;
-                regs.insert(lhs, sym);
+                // Treat call, asm, load, store, alloca, getelementptr as opaque
+                if rhs.starts_with("call ") || rhs.starts_with("asm ")
+                    || rhs.starts_with("load ") || rhs.starts_with("store ")
+                    || rhs.starts_with("alloca ") || rhs.starts_with("getelementptr ")
+                {
+                    regs.insert(lhs, SymExpr::Opaque(rhs.to_string()));
+                } else {
+                    let sym = parse_bild_instruction(rhs, &regs, i)?;
+                    regs.insert(lhs, sym);
+                }
             }
         }
     }

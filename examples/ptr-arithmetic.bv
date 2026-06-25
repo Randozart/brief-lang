@@ -1,0 +1,97 @@
+// ptr-arithmetic: Ptr<T> type — typed memory addresses with contract safety
+//
+// Demonstrates:
+//   1. Ptr<T> as a first-class type (typed memory address)
+//   2. Explicit as casts between Ptr<T> and Int
+//   3. Ptr arithmetic: +, -, ^, &, |, <<, >> (preserves T)
+//   4. Ptr comparison: ==, !=, <, <=, >, >=
+//   5. Contract integration: [ptr >= BASE][ptr < END]
+//   6. volatile_load# / volatile_store# for MMIO access
+
+const UART0_BASE: Int = 0x40011000;
+const UART0_END:  Int = 0x40011010;
+const UART_RX:    Ptr<Int> = 0x40011000 as Ptr<Int>;
+const UART_TX:    Ptr<Int> = 0x40011004 as Ptr<Int>;
+
+// Ptr arithmetic: offset by index, preserves Ptr<Int>
+let uart_rx: Ptr<Int> = UART_RX;
+let uart_tx: Ptr<Int> = UART_RX + 4;
+let base: Ptr<Int> = uart_tx - 4;
+let xor_mask: Ptr<Int> = UART_RX ^ 0xFFF;
+let masked: Ptr<Int> = UART_RX & 0xFFFF0000;
+let shifted: Ptr<Int> = UART_RX << 2;
+
+// Cast: Ptr → Int (extract raw address)
+let raw_addr: Int = uart_rx as Int;
+
+// Cast: Int → Ptr (reinterpret address as typed pointer)
+let re_ptr: Ptr<Int> = raw_addr as Ptr<Int>;
+
+// Comparison
+let same: Bool = uart_rx == uart_tx;
+let lower: Bool = uart_rx < uart_tx;
+
+// Contract-proven pointer safety
+defn read_uart(reg: Ptr<Int>) -> Int
+    [reg as Int >= UART0_BASE]
+    [reg as Int <  UART0_END]
+{
+    term volatile_load#(reg);
+};
+
+defn write_uart(reg: Ptr<Int>, val: Int) -> Bool
+    [reg as Int >= UART0_BASE]
+    [reg as Int <  UART0_END]
+{
+    term volatile_store#(reg, val);
+};
+
+// volatile_load# / volatile_store# usage
+defn demo_mmio(addr: Ptr<Int>) -> Int
+    [addr as Int >= UART0_BASE]
+    [addr as Int <  UART0_END]
+{
+    let old: Int = volatile_load#(addr);
+    let ok: Bool = volatile_store#(addr, 42);
+    // In real usage: read-modify-write on a hardware register
+    term old;
+};
+
+// Verify volatile_store# return value
+let write_ok: Bool = false;
+let read_val: Int = 0;
+
+rct txn run [tick < 1][tick == 1] {
+    [tick == 0] {
+        let result: Int = 0;
+
+        // uart_tx should be UART0_BASE + 4
+        if uart_tx as Int == UART0_BASE + 4 {
+            &result = result + 1;
+        };
+
+        // Read with safety contract
+        let _val: Int = read_uart(uart_rx);
+
+        // Cast round-trip
+        let rt: Int = (0x40000000 as Ptr<Int>) as Int;
+        if rt == 0x40000000 {
+            &result = result + 1;
+        };
+
+        // volatile_store returns Bool (true = success)
+        let ok: Bool = volatile_store#(uart_rx, 42);
+        &write_ok = ok;
+
+        // volatile_load returns the register value (0 in interpreter)
+        &read_val = volatile_load#(uart_tx);
+
+        term! -> print_int#(result);
+    } else {
+        &tick = tick + 1;
+        term;
+    };
+};
+
+// Compile:   ./target/release/brief-compiler build examples/ptr-arithmetic.bv
+// Expected:  prints "2"

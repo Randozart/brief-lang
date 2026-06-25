@@ -2439,6 +2439,85 @@ impl LlvmBackend {
                         writeln!(out, "{}call void asm sideeffect \"wfi\", \"\"()", indent).ok();
                         writeln!(out, "{}{} = add i64 undef, 0 ; halt is void", indent, v).ok();
                     }
+                    Intrinsic::VolatileLoad => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let ptr = format!("%vlptr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
+                        // Extract T from Ptr<T> argument type
+                        let t = if let Type::Applied(name, inners) = &addr.ty {
+                            if name == "Ptr" {
+                                inners.first().cloned().unwrap_or(Type::Int)
+                            } else {
+                                Type::Int
+                            }
+                        } else {
+                            Type::Int
+                        };
+                        let llvm_t = self.llvm_type(&t).to_string();
+                        let raw = format!("%vlraw{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = load volatile {}, ptr {}", indent, raw, llvm_t, ptr).ok();
+                        // Box result to i64 if needed
+                        match t {
+                            Type::Bool => {
+                                writeln!(out, "{}{} = zext {} {} to i64", indent, v, llvm_t, raw).ok();
+                            }
+                            Type::Char => {
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, v, raw).ok();
+                            }
+                            Type::Float => {
+                                let bi = format!("%vlbi{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, raw).ok();
+                                writeln!(out, "{}{} = zext i32 {} to i64", indent, v, bi).ok();
+                            }
+                            _ => {
+                                writeln!(out, "{}{} = add i64 0, {}", indent, v, raw).ok();
+                            }
+                        }
+                        return TypedRegister { name: v, ty: t };
+                    }
+                    Intrinsic::VolatileStore => {
+                        let addr = self.emit_expr(out, &args[0], indent);
+                        let val = self.emit_expr(out, &args[1], indent);
+                        let ptr = format!("%vsptr{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
+                        // Extract T from Ptr<T> argument type
+                        let t = if let Type::Applied(name, inners) = &addr.ty {
+                            if name == "Ptr" {
+                                inners.first().cloned().unwrap_or(Type::Int)
+                            } else {
+                                Type::Int
+                            }
+                        } else {
+                            Type::Int
+                        };
+                        let llvm_t = self.llvm_type(&t).to_string();
+                        // Unbox val from i64 to native type T
+                        let native_val = match t {
+                            Type::Bool => {
+                                let tr = format!("%vstr{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = trunc i64 {} to {}", indent, tr, val.name, llvm_t).ok();
+                                tr
+                            }
+                            Type::Char => {
+                                let tr = format!("%vstr{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val.name).ok();
+                                tr
+                            }
+                            Type::Float => {
+                                let tr = format!("%vstr{}", self.txn_counter); self.txn_counter += 1;
+                                let bi = format!("%vsbi{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val.name).ok();
+                                writeln!(out, "{}{} = bitcast i32 {} to float", indent, bi, tr).ok();
+                                bi
+                            }
+                            _ => {
+                                val.name.clone()
+                            }
+                        };
+                        writeln!(out, "{}store volatile {} {}, ptr {}", indent, llvm_t, native_val, ptr).ok();
+                        writeln!(out, "{}{} = add i64 0, 1 ; volatile_store success", indent, v).ok();
+                        return TypedRegister { name: v, ty: Type::Bool };
+                    }
                     Intrinsic::UserDefined(name) => {
                         // Extract return and param type info before any mutable borrows.
                         // Clone the inop declaration to avoid borrow conflicts with emit_expr.
@@ -5053,6 +5132,12 @@ impl LlvmBackend {
             }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
+        // Preserve Ptr type through arithmetic operations
+        let is_a_ptr = matches!(&a.ty, Type::Applied(n, _) if n == "Ptr");
+        let is_b_ptr = matches!(&b.ty, Type::Applied(n, _) if n == "Ptr");
+        let ptr_ty = if is_a_ptr { Some(a.ty.clone()) }
+                     else if is_b_ptr { Some(b.ty.clone()) }
+                     else { None };
         if a.ty == Type::Float || b.ty == Type::Float {
             // 2026-06-17: Skip float path if either operand is String/Data
             // (prevents pointer→float corruption, e.g. String + Float).
@@ -5061,7 +5146,7 @@ impl LlvmBackend {
                 let a_i64 = self.adapt_to_i64(out, indent, &a);
                 let b_i64 = self.adapt_to_i64(out, indent, &b);
                 writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
-                TypedRegister { name: v, ty: Type::Int }
+                TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Int) }
             } else {
                 let fa = self.ensure_float_reg(out, indent, &a);
                 let fb = self.ensure_float_reg(out, indent, &b);
@@ -5075,8 +5160,13 @@ impl LlvmBackend {
             let a_i64 = self.adapt_to_i64(out, indent, &a);
             let b_i64 = self.adapt_to_i64(out, indent, &b);
             writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
-            TypedRegister { name: v, ty: Type::Int }
+            TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Int) }
         }
+    }
+
+    /// Check if a type is `Ptr<T>` (returns true for any pointee type T).
+    fn is_ptr_ty(ty: &Type) -> bool {
+        if let Type::Applied(name, _) = ty { name == "Ptr" } else { false }
     }
 
     /// Check if an expression is a reference to a linked String trigger.

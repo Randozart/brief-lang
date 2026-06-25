@@ -2007,6 +2007,24 @@ impl TypeChecker {
                     Intrinsic::Println | Intrinsic::WriteFile | Intrinsic::Sleep | Intrinsic::Bind | Intrinsic::Listen => Type::Bool,
                     Intrinsic::Readln | Intrinsic::ReadFile => Type::String,
                     Intrinsic::Exit | Intrinsic::Halt => Type::Bool,
+                    Intrinsic::VolatileLoad => {
+                        // Return type is T from Ptr<T> argument
+                        if let Some(arg_ty) = args.first() {
+                            let t = self.infer_expression(arg_ty);
+                            if let Type::Applied(name, inner) = &t {
+                                if name == "Ptr" {
+                                    inner.first().cloned().unwrap_or(Type::Void)
+                                } else {
+                                    Type::Void
+                                }
+                            } else {
+                                Type::Void
+                            }
+                        } else {
+                            Type::Void
+                        }
+                    }
+                    Intrinsic::VolatileStore => Type::Bool,
                     Intrinsic::Time | Intrinsic::Socket | Intrinsic::Accept => Type::Int,
                     Intrinsic::Sort | Intrinsic::Reverse => Type::Bool,
                     Intrinsic::Range => Type::Custom("List".to_string()),
@@ -2582,8 +2600,15 @@ Expr::ObjectLiteral(fields) => {
                     _ => {
                         let l_ty = self.infer_expression(&bop.left);
                         let r_ty = self.infer_expression(&bop.right);
-                        if l_ty == Type::Float || r_ty == Type::Float { Type::Float }
-                        else { Type::Int }
+                        if l_ty == Type::Float || r_ty == Type::Float {
+                            Type::Float
+                        } else {
+                            let is_l_ptr = matches!(&l_ty, Type::Applied(n, _) if n == "Ptr");
+                            let is_r_ptr = matches!(&r_ty, Type::Applied(n, _) if n == "Ptr");
+                            if is_l_ptr { l_ty }
+                            else if is_r_ptr { r_ty }
+                            else { Type::Int }
+                        }
                     }
                 }
             }
@@ -2947,6 +2972,9 @@ Expr::ObjectLiteral(fields) => {
             (Type::UInt, Type::String) | (Type::String, Type::UInt) |
             (Type::Bool, Type::String) | (Type::String, Type::Bool)
         ) { return true; }
+        // Ptr ↔ Int cast: any Int can become Ptr<T>, any Ptr<T> can become Int
+        if let Type::Applied(name, _) = src { if name == "Ptr" && *dst == Type::Int { return true; } }
+        if let Type::Applied(name, _) = dst { if name == "Ptr" && *src == Type::Int { return true; } }
         // Check meld-backed cast between custom types
         if let (Type::Custom(src_name), Type::Custom(dst_name)) = (src, dst) {
             if let Some(ref universe) = self.type_universe {
