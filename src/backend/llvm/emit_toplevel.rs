@@ -1447,7 +1447,11 @@ impl LlvmBackend {
             self.let_binding_types.insert(n.clone(), resolved.clone());
             self.let_original_types.insert(n.clone(), t.clone());
         }
-        writeln!(out, ") local_unnamed_addr #0 {{").ok();
+        if let Some(ref section) = inop.section {
+            writeln!(out, ") section \"{}\" local_unnamed_addr #0 {{", section).ok();
+        } else {
+            writeln!(out, ") local_unnamed_addr #0 {{").ok();
+        }
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.terminated = false;

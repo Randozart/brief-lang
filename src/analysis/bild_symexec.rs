@@ -296,7 +296,7 @@ fn parse_bild_instruction(
                     let b = resolve_reg(sel_ops.get(3).copied().unwrap_or("0"), regs);
                     Ok(SymExpr::Select(Box::new(c), Box::new(a), Box::new(b)))
                 }
-                _ => Err(SymExecError::UnsupportedOpcode(opcode.to_string(), line)),
+                _ => Ok(SymExpr::Opaque(instr.to_string())),
             }
         }
         "trunc" | "zext" | "sext" | "fptrunc" | "fpext" | "fptosi" | "sitofp" | "uitofp" => {
@@ -308,7 +308,7 @@ fn parse_bild_instruction(
             let val = parts[2].trim_end_matches(',');
             Ok(resolve_reg(val, regs))
         }
-        _ => Err(SymExecError::UnsupportedOpcode(opcode.to_string(), line)),
+        _ => Ok(SymExpr::Opaque(instr.to_string())),
     }
 }
 
@@ -419,6 +419,7 @@ mod tests {
             fallback,
             has_side_effects: false,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         }

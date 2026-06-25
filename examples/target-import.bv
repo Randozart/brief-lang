@@ -1,0 +1,63 @@
+// target-import: Board-level device constants via `import "target"`
+//
+// Demonstrates:
+//   1. import "target" resolves to the board description
+//   2. Typed Int constants for peripheral base addresses
+//   3. Typed Int constants for individual registers
+//   4. Contract-proven MMIO access using volatile_load#/volatile_store#
+//
+// Usage:
+//   brief-compiler --board stm32f407 target-import.bv
+//
+// Without --board, defaults to "stm32f407".
+
+import "target";
+
+// Peripheral base addresses (from lib/boards/stm32f407.toml)
+// UART1 at 0x40011000
+// GPIOA at 0x40020000
+// TIM2  at 0x40000000
+
+// UART register addresses (base + offset)
+// uart_dr   = 0x40011000 + 0x00  — Data register
+// uart_sr   = 0x40011000 + 0x01  — Status register
+// uart_cr1  = 0x40011000 + 0x0C  — Control register 1
+
+defn uart_init() -> Bool
+    [uart_cr1 > 0]
+    [uart_cr1 < 0x50000000]
+{
+    // Enable UART by setting CR1.UE bit (bit 13)
+    let cr1_val: Byte = volatile_load#(uart_cr1 as Ptr<Byte>);
+    term volatile_store#(uart_cr1 as Ptr<Byte>, cr1_val | 0x20);
+};
+
+defn uart_send(c: Byte) -> Bool {
+    // Wait for TX buffer empty (SR.TXE bit 7)
+    let mut sr: Byte = volatile_load#(uart_sr as Ptr<Byte>);
+    while (sr & 0x80) == 0 {
+        &sr = volatile_load#(uart_sr as Ptr<Byte>);
+    };
+    // Send the character
+    term volatile_store#(uart_dr as Ptr<Byte>, c);
+};
+
+defn uart_recv() -> Bool {
+    // Wait for RX buffer not empty (SR.RXNE bit 5)
+    let mut sr: Byte = volatile_load#(uart_sr as Ptr<Byte>);
+    while (sr & 0x20) == 0 {
+        &sr = volatile_load#(uart_sr as Ptr<Byte>);
+    };
+    // Read and acknowledge data
+    let _c: Byte = volatile_load#(uart_dr as Ptr<Byte>);
+    term true;
+};
+
+// GPIO: toggle pin via ODR register
+defn gpio_toggle() -> Bool
+    [gpioa_odr > 0]
+    [gpioa_odr < 0x50000000]
+{
+    let val: Byte = volatile_load#(gpioa_odr as Ptr<Byte>);
+    term volatile_store#(gpioa_odr as Ptr<Byte>, val ^ 0x01);
+};

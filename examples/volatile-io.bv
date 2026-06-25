@@ -1,0 +1,102 @@
+// volatile-io: MMIO-style I/O using volatile_load# / volatile_store#
+//
+// Demonstrates:
+//   1. Memory-mapped I/O with type-safe Ptr<T>
+//   2. Contract-proven address bounds for MMIO safety
+//   3. Polling loop on status register (busy-wait)
+//   4. Read-modify-write on control registers
+//   5. Block transfer from MMIO device to buffer
+
+const UART_BASE: Int = 0x40011000;
+const UART_END:  Int = 0x40011018;
+
+// UART register offsets (in bytes)
+const UART_DR:   Ptr<Byte> = UART_BASE as Ptr<Byte>;
+const UART_SR:   Ptr<Byte> = (UART_BASE + 0x01) as Ptr<Byte>;
+const UART_CR1:  Ptr<Byte> = (UART_BASE + 0x0C) as Ptr<Byte>;
+const UART_CR2:  Ptr<Byte> = (UART_BASE + 0x10) as Ptr<Byte>;
+
+// Status register bits
+const SR_TXE: Byte = 0x20;  // Transmit data register empty
+const SR_RXNE: Byte = 0x10; // Read data register not empty
+
+// Send a character via UART (polling)
+defn uart_send(c: Byte) -> Bool
+    [UART_SR as Int >= UART_BASE]
+    [UART_SR as Int <  UART_END]
+    [UART_DR as Int >= UART_BASE]
+    [UART_DR as Int <  UART_END]
+{
+    // Wait until TX buffer is empty
+    let mut status: Byte = volatile_load#(UART_SR);
+    while (status & SR_TXE) == 0 {
+        &status = volatile_load#(UART_SR);
+    };
+    // Send the character
+    term volatile_store#(UART_DR, c);
+};
+
+// Receive a character via UART (polling)
+defn uart_recv() -> Byte
+    [UART_SR as Int >= UART_BASE]
+    [UART_SR as Int <  UART_END]
+    [UART_DR as Int >= UART_BASE]
+    [UART_DR as Int <  UART_END]
+{
+    // Wait until RX buffer is full
+    let mut status: Byte = volatile_load#(UART_SR);
+    while (status & SR_RXNE) == 0 {
+        &status = volatile_load#(UART_SR);
+    };
+    // Read the received character
+    term volatile_load#(UART_DR);
+};
+
+// Configure UART control register (set baud rate divisor)
+defn uart_set_baud(divisor: Int) -> Bool
+    [UART_CR1 as Int >= UART_BASE]
+    [UART_CR1 as Int <  UART_END]
+    [divisor > 0]
+    [divisor < 65536]
+{
+    term volatile_store#(UART_CR1, divisor as Byte);
+};
+
+// Read-modify-write: set a bit in a control register
+defn set_bit(reg: Ptr<Byte>, bit: Byte) -> Bool
+    [reg as Int >= UART_BASE]
+    [reg as Int <  UART_END]
+{
+    let val: Byte = volatile_load#(reg);
+    term volatile_store#(reg, val | bit);
+};
+
+// Read-modify-write: clear a bit in a control register
+defn clear_bit(reg: Ptr<Byte>, bit: Byte) -> Bool
+    [reg as Int >= UART_BASE]
+    [reg as Int <  UART_END]
+{
+    let val: Byte = volatile_load#(reg);
+    term volatile_store#(reg, val & !bit);
+};
+
+// Block read: read N bytes from an MMIO FIFO into a local buffer
+// (demonstrates repeated volatile_load# with accumulating contract)
+defn fifo_read(fifo: Ptr<Byte>, count: Int) -> String
+    [fifo as Int >= UART_BASE]
+    [fifo as Int <  UART_END]
+    [count > 0]
+    [count <= 64]
+{
+    let mut buf: String = "";
+    let mut i: Int = 0;
+    rct txn loop [i < count][i == count] {
+        [i < count] {
+            let c: Byte = volatile_load#(fifo);
+            &buf = buf + (c as Char);
+            &i = i + 1;
+        };
+        term;
+    };
+    term buf;
+};

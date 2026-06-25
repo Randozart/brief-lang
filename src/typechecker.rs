@@ -2613,6 +2613,30 @@ impl TypeChecker {
                             }
                         }
                     }
+                    // ── Function metadata projections ────────────────────
+                    ProjectionTarget::FnPtr |
+                    ProjectionTarget::FnName |
+                    ProjectionTarget::FnParams |
+                    ProjectionTarget::FnReturns |
+                    ProjectionTarget::FnArity |
+                    ProjectionTarget::FnLoc |
+                    ProjectionTarget::FnDoc |
+                    ProjectionTarget::FnHash |
+                    ProjectionTarget::FnContracts |
+                    ProjectionTarget::FnModule |
+                    ProjectionTarget::FnIsPure |
+                    ProjectionTarget::FnSpan => {
+                        if let Expr::Identifier(n) = source.as_ref() {
+                            self.infer_fn_projection(n, target)
+                        } else {
+                            self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                expected: "function/transaction/inop name".to_string(),
+                                found: self.type_to_string(&src_ty),
+                                context: format!("{:?} projection requires a direct function/transaction/inop name on the left", target),
+                            });
+                            Self::error_fn_projection_type(target)
+                        }
+                    }
                     ProjectionTarget::UserDefined(name) => {
                         self.resolve_user_projection_type(&src_ty, name)
                     }
@@ -3327,6 +3351,56 @@ Expr::ObjectLiteral(fields) => {
         // Default fallback
         Type::Int
     }
+
+    /// Return the default type for error recovery in Fn* projections.
+    fn error_fn_projection_type(target: &ProjectionTarget) -> Type {
+        match target {
+            ProjectionTarget::FnArity | ProjectionTarget::FnHash | ProjectionTarget::FnPtr => Type::Int,
+            ProjectionTarget::FnIsPure => Type::Bool,
+            ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Int, Type::Int]),
+            _ => Type::String,
+        }
+    }
+
+    /// Infer the return type of a function metadata projection.
+    /// Checks if `name` resolves to a defn, inop, or txn declaration
+    /// and returns the appropriate type for the given projection target.
+    fn infer_fn_projection(&self, name: &str, target: &ProjectionTarget) -> Type {
+        // Check definitions (defn)
+        let found = self.definitions.contains_key(name)
+            || self.inop_decls.contains_key(name)
+            || self.transactions.contains_key(name);
+
+        if !found {
+            self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                expected: "a defined function, inop, or transaction".to_string(),
+                found: format!("identifier '{}'", name),
+                context: format!("{:?} projection requires a callable name", target),
+            });
+            return match target {
+                ProjectionTarget::FnArity | ProjectionTarget::FnHash | ProjectionTarget::FnPtr => Type::Int,
+                ProjectionTarget::FnIsPure => Type::Bool,
+                ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Int, Type::Int]),
+                _ => Type::String,
+            };
+        }
+
+        match target {
+            ProjectionTarget::FnPtr => Type::Int,
+            ProjectionTarget::FnName => Type::String,
+            ProjectionTarget::FnParams => Type::String,
+            ProjectionTarget::FnReturns => Type::String,
+            ProjectionTarget::FnArity => Type::Int,
+            ProjectionTarget::FnLoc => Type::String,
+            ProjectionTarget::FnDoc => Type::String,
+            ProjectionTarget::FnHash => Type::Int,
+            ProjectionTarget::FnContracts => Type::String,
+            ProjectionTarget::FnModule => Type::String,
+            ProjectionTarget::FnIsPure => Type::Bool,
+            ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Int, Type::Int]),
+            _ => unreachable!("non-Fn* target passed to infer_fn_projection"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3765,6 +3839,7 @@ mod tests {
             )),
             has_side_effects: false,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         };

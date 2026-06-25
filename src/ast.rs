@@ -486,6 +486,31 @@ pub enum ProjectionTarget {
     /// Bit-range extraction: `word @/0..3` → extracts bits 0-3 via shift+mask
     /// Also used in TypeDef base types: `type MyInt <: Bits @/0..7`
     BitRange(BitRange),
+    // ── Function metadata projections ────────────────────────────────────
+    /// Function entry point address: `add :> FnPtr` → Int (ptrtoint)
+    FnPtr,
+    /// Declaration name: `add :> FnName` → String
+    FnName,
+    /// Comma-separated parameter types: `add :> FnParams` → String
+    FnParams,
+    /// Comma-separated return types: `add :> FnReturns` → String
+    FnReturns,
+    /// Number of parameters: `add :> FnArity` → Int
+    FnArity,
+    /// Source location `file:line:col`: `add :> FnLoc` → String
+    FnLoc,
+    /// Doc comment text (or empty): `add :> FnDoc` → String
+    FnDoc,
+    /// Stable content hash: `add :> FnHash` → Int
+    FnHash,
+    /// Serialized pre/post condition: `add :> FnContracts` → String
+    FnContracts,
+    /// Module path: `add :> FnModule` → String
+    FnModule,
+    /// True for defn/inop/txn (callable): `add :> FnIsPure` → Bool
+    FnIsPure,
+    /// Start and end line numbers: `add :> FnSpan` → (Int, Int)
+    FnSpan,
     /// User-defined projection from a type declaration: `value :> MyField`
     UserDefined(String),
     /// User-defined parameterized projection: `value :> At(0)`
@@ -1251,6 +1276,8 @@ pub struct InopDeclaration {
     pub fallback: Option<Expr>,
     pub has_side_effects: bool,
     pub has_state_access: bool,
+    /// LLVM section attribute (e.g. ".init_array") — emitted as `section "..."` on `define`.
+    pub section: Option<String>,
     pub span: Option<Span>,
 }
 
@@ -2285,6 +2312,8 @@ pub enum TopLevel {
         pre: Expr,
         chain: Vec<String>,
     },
+    /// `#!cfg(condition) { items }` — conditional compilation guard.
+    Cfg(CfgGuard),
     RenderBlock(RenderBlock),
     Stylesheet(String),
     SvgComponent {
@@ -2312,6 +2341,61 @@ pub enum TopLevel {
         return_type: Option<MacroArgType>,
         body: Vec<Statement>,
     },
+}
+
+/// A condition expression evaluated at parse-time for `#!cfg(...)` guards.
+/// Determines whether a block of top-level items is compiled or skipped.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CfgCondition {
+    /// Equality: `key == "value"`
+    Eq(String, String),
+    /// Inequality: `key != "value"`
+    Ne(String, String),
+    /// Logical AND
+    And(Box<CfgCondition>, Box<CfgCondition>),
+    /// Logical OR
+    Or(Box<CfgCondition>, Box<CfgCondition>),
+    /// Logical NOT
+    Not(Box<CfgCondition>),
+    /// Literal true/false
+    Bool(bool),
+}
+
+impl CfgCondition {
+    /// Evaluate the condition against the given target configuration.
+    pub fn evaluate(&self, target_os: &str, target_arch: &str, board: &str) -> bool {
+        match self {
+            CfgCondition::Eq(key, val) => {
+                let actual = match key.as_str() {
+                    "target_os" => target_os,
+                    "target_arch" => target_arch,
+                    "board" => board,
+                    _ => return false,
+                };
+                actual == val
+            }
+            CfgCondition::Ne(key, val) => {
+                let actual = match key.as_str() {
+                    "target_os" => target_os,
+                    "target_arch" => target_arch,
+                    "board" => board,
+                    _ => return false,
+                };
+                actual != val
+            }
+            CfgCondition::And(a, b) => a.evaluate(target_os, target_arch, board) && b.evaluate(target_os, target_arch, board),
+            CfgCondition::Or(a, b) => a.evaluate(target_os, target_arch, board) || b.evaluate(target_os, target_arch, board),
+            CfgCondition::Not(c) => !c.evaluate(target_os, target_arch, board),
+            CfgCondition::Bool(b) => *b,
+        }
+    }
+}
+
+/// A `#!cfg(...)` guard that conditionally includes top-level items.
+#[derive(Debug, Clone)]
+pub struct CfgGuard {
+    pub condition: CfgCondition,
+    pub items: Vec<TopLevel>,
 }
 
 /// A block of statements with an optional trailing expression.

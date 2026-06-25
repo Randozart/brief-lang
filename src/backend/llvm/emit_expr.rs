@@ -2693,6 +2693,10 @@ impl LlvmBackend {
             }
             // ── Projection ──────────────────────────────────────
             Expr::Projection { source, target } => {
+                // Function metadata projections — source is a function name, not a runtime value.
+                if let Some(result) = self.try_emit_fn_projection(out, source, target, indent) {
+                    return result;
+                }
                 let src_val = self.emit_expr(out, &*source, indent);
                 // Phase 2: Check if this is a cached projection (Hot Dual path).
                 let target_name = crate::analysis::transition_graph::projection_target_name(target);
@@ -5372,6 +5376,57 @@ impl LlvmBackend {
     /// types, the generic dispatch would: load i64, convert to native, exec
     /// op, convert back. The fast path emits native IR directly, skipping
     /// both conversions.
+    /// Emit LLVM IR for function metadata projections (FnPtr, FnName, etc.).
+    /// Returns Some(register) if the target is an Fn* variant and the source is a function name.
+    fn try_emit_fn_projection(&mut self, out: &mut String, source: &Expr, target: &ProjectionTarget, indent: &str) -> Option<TypedRegister> {
+        use crate::ast::ProjectionTarget;
+        let name = match source {
+            Expr::Identifier(n) => n.clone(),
+            _ => return None,
+        };
+        let is_fn = matches!(target,
+            ProjectionTarget::FnPtr | ProjectionTarget::FnName |
+            ProjectionTarget::FnParams | ProjectionTarget::FnReturns |
+            ProjectionTarget::FnArity | ProjectionTarget::FnLoc |
+            ProjectionTarget::FnDoc | ProjectionTarget::FnHash |
+            ProjectionTarget::FnContracts | ProjectionTarget::FnModule |
+            ProjectionTarget::FnIsPure | ProjectionTarget::FnSpan);
+        if !is_fn { return None; }
+
+        let v = format!("%fnm{}", self.txn_counter); self.txn_counter += 1;
+
+        // Dispatch without exhaustive match to avoid non-exhaustive pattern errors
+        if matches!(target, ProjectionTarget::FnPtr) {
+            writeln!(out, "{}{} = ptrtoint @{} to i64", indent, v, name).ok();
+            return Some(TypedRegister { name: v, ty: Type::Int });
+        }
+        if matches!(target, ProjectionTarget::FnArity) {
+            let arity = self.defn_params.get(&name)
+                .map(|p| p.len() as i64)
+                .or_else(|| self.inop_decls.get(&name).map(|i| i.params.len() as i64))
+                .unwrap_or(0);
+            writeln!(out, "{}{} = add i64 0, {}", indent, v, arity).ok();
+            return Some(TypedRegister { name: v, ty: Type::Int });
+        }
+        if matches!(target, ProjectionTarget::FnHash) {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            name.hash(&mut hasher);
+            let h = hasher.finish() as i64;
+            writeln!(out, "{}{} = add i64 0, {}", indent, v, h).ok();
+            return Some(TypedRegister { name: v, ty: Type::Int });
+        }
+        if matches!(target, ProjectionTarget::FnIsPure) {
+            let is_inop_bang = self.inop_decls.get(&name).map(|i| i.has_side_effects).unwrap_or(false);
+            let val = if is_inop_bang { 0 } else { 1 };
+            writeln!(out, "{}{} = add i64 0, {}", indent, v, val).ok();
+            return Some(TypedRegister { name: v, ty: Type::Int });
+        }
+        // Default for string-valued and other Fn* targets
+        writeln!(out, "{}{} = add i64 0, 0 ; {:?}", indent, v, target).ok();
+        Some(TypedRegister { name: v, ty: Type::Int })
+    }
+
     fn try_projection_fast_path(
         &mut self,
         out: &mut String,

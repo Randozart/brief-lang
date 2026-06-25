@@ -5356,6 +5356,7 @@ let spec = crate::target_spec::TargetSpec {
             fallback: None,
             has_side_effects: false,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         });
@@ -5386,6 +5387,7 @@ let spec = crate::target_spec::TargetSpec {
             fallback: None,
             has_side_effects: true,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         });

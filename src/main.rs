@@ -3673,6 +3673,7 @@ fn main() {
             let mut hw_handoff: Option<String> = None;
             let mut hw_target: Option<String> = None;
             let mut target_dbv: Option<String> = None;
+            let mut board_name: Option<String> = None;
             let mut pgo_generate = false;
             let mut explain = false;
             let mut prod_mode = false;
@@ -3696,6 +3697,9 @@ fn main() {
                     i += 2;
                 } else if arg == "--target-dbv" && i + 1 < args.len() {
                     target_dbv = Some(args[i + 1].clone());
+                    i += 2;
+                } else if arg == "--board" && i + 1 < args.len() {
+                    board_name = Some(args[i + 1].clone());
                     i += 2;
                 } else if arg == "--pgo-generate" {
                     pgo_generate = true;

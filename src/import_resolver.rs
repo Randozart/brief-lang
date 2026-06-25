@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Import, ImportItem, Program, StrictMode, TopLevel, Expr};
+use crate::ast::{Constant, Expr, Import, ImportItem, Program, StrictMode, TopLevel, Type};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use crate::dbrief::v2 as dbrief_v2;
@@ -44,6 +44,8 @@ pub struct ImportResolver {
     stdlib_path: Option<PathBuf>,
     use_stdlib: bool,
     core_imported: bool,
+    /// Board name for `import "target"` resolution (e.g., "stm32f407").
+    board_name: Option<String>,
 }
 
 impl ImportResolver {
@@ -56,7 +58,14 @@ impl ImportResolver {
             stdlib_path: None,
             use_stdlib: true,
             core_imported: false,
+            board_name: None,
         }
+    }
+
+    /// Set the board name for `import "target"` resolution.
+    pub fn with_board(mut self, board: &str) -> Self {
+        self.board_name = Some(board.to_string());
+        self
     }
 
     /// Set strict mode for all resolved imports (propagated to all Program objects)
@@ -218,6 +227,69 @@ impl ImportResolver {
         })
     }
 
+    /// Resolve `import "target"` — loads the board D-brief description and emits typed constants.
+    fn resolve_target_import(&mut self) -> Result<Program, String> {
+        let board = self.board_name.as_deref().unwrap_or("stm32f407");
+        let file_name = format!("{}.dbvl", board);
+
+        let file_path = self.search_paths.iter()
+            .map(|p| p.join("boards").join(&file_name))
+            .chain(std::iter::once(PathBuf::from(&file_name)))
+            .find(|p| p.exists());
+
+        let path = match file_path {
+            Some(p) => p,
+            None => return Err(format!(
+                "Board file 'lib/boards/{}.dbvl' not found. Use --board <name> or create a board file.",
+                board
+            )),
+        };
+
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("Failed to read '{}': {}", path.display(), e))?;
+
+        // Parse the .dbvl board file using D-brief v2 parser
+        let mut doc = crate::dbrief::v2::parse_document(&content)
+            .map_err(|e| format!("Failed to parse '{}': {}", path.display(), e))?;
+
+        // Resolve schema imports (schema <path>; directives)
+        let mut resolved_imports = Vec::new();
+        for import_path in &doc.imports {
+            let schema_path = self.search_paths.iter()
+                .map(|p| p.join(&import_path))
+                .chain(std::iter::once(PathBuf::from(&import_path)))
+                .find(|p| p.exists());
+
+            if let Some(sp) = schema_path {
+                if let Ok(schema_content) = std::fs::read_to_string(&sp) {
+                    if let Ok(schema_doc) = crate::dbrief::v2::parse_document(&schema_content) {
+                        doc.schemas.extend(schema_doc.schemas);
+                        resolved_imports.push(import_path.clone());
+                    }
+                }
+            }
+        }
+        // Keep only unresolved imports in doc.imports (resolved ones are merged into schemas)
+        doc.imports.retain(|i| !resolved_imports.contains(i));
+
+        // Bridge to TopLevel constants via the standard D-brief bridge
+        let items = crate::dbrief::bridge::document_to_program(&doc, &board);
+
+        Ok(Program {
+            items,
+            comments: vec![],
+            reactor_speed: None,
+            attrs: Vec::new(),
+            ffi: None,
+            strict_mode: self.strict_mode,
+            dispatch_mode: Default::default(),
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        })
+    }
+
     fn resolve_import(
         &mut self,
         import: &Import,
@@ -238,6 +310,11 @@ impl ImportResolver {
             default_sig_modifier: None,
                 watchdog_defaults: (None, None),
             });
+        }
+
+        // Handle `import "target"` — board-level device description
+        if import.path.len() == 1 && import.path[0] == "target" {
+            return self.resolve_target_import();
         }
 
         // Handle glob expansion (* or ** in last path segment)

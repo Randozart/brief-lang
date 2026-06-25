@@ -1,0 +1,8 @@
+schema GpioPeripheral {
+    base_addr: UInt[64];
+    size: UInt[32];
+    moder_offset: UInt[32];
+    odr_offset: UInt[32];
+    idr_offset: UInt[32];
+    bsrr_offset: UInt[32];
+}

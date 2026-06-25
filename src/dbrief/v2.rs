@@ -4,6 +4,7 @@
 // Conversion to native Value happens at import time (Phase B).
 
 use std::collections::HashMap;
+use std::path::Path;
 use serde::Serialize;
 
 // ============================================================================
@@ -119,6 +120,9 @@ struct Parser {
     track_offsets: bool,
     /// Accumulated key → byte offsets during parsing
     offsets: std::collections::HashMap<String, Vec<usize>>,
+    /// Active schema name set by `schema <path>;` directive.
+    /// Applied to subsequent data entries that don't have explicit schema.
+    current_schema: Option<String>,
 }
 
 impl Parser {
@@ -128,6 +132,7 @@ impl Parser {
             pos: 0,
             track_offsets: false,
             offsets: std::collections::HashMap::new(),
+            current_schema: None,
         }
     }
 
@@ -153,10 +158,9 @@ impl Parser {
                     let path = self.parse_import()?;
                     doc.imports.push(path);
                 }
-                // schema Name { ... }
+                // schema Name { ... }  or  schema <path>;
                 's' | 'S' if self.starts_with_ignore_case("schema") => {
-                    let schema = self.parse_schema()?;
-                    doc.schemas.push(schema);
+                    self.parse_schema_or_import(&mut doc)?;
                 }
                 // rule name(params) { body }
                 'r' | 'R' if self.starts_with_ignore_case("rule") => {
@@ -228,6 +232,49 @@ impl Parser {
     // ========================================================================
     // Schema
     // ========================================================================
+
+    /// Parse either a schema definition (`schema Name { ... }`) or
+    /// a schema file import (`schema <path>;` — for .dbvl board files).
+    fn parse_schema_or_import(&mut self, doc: &mut DbriefDocument) -> Result<(), String> {
+        // Save position before consuming "schema"
+        let saved = self.pos;
+
+        self.consume_keyword_ignore_case("schema")?;
+        self.skip_ws();
+        let name = self.parse_identifier()?;
+
+        // File-path schemas contain '.' or '/'
+        if name.contains('.') || name.contains('/') {
+            self.skip_ws();
+            self.expect_char(';')?;
+            doc.imports.push(name.clone());
+            // Set active schema from filename stem (e.g., "uart" from "lib/devices/uart.dbvs")
+            if let Some(stem) = Path::new(&name).file_stem().and_then(|s| s.to_str()) {
+                self.current_schema = Some(stem.to_string());
+            }
+            return Ok(());
+        }
+
+        // Plain name — must be schema definition: `schema Name { ... }`
+        self.skip_ws();
+        self.expect_char('{')?;
+
+        let mut fields = Vec::new();
+        loop {
+            self.skip_ws_and_comments();
+            if self.peek_char() == Some('}') {
+                self.advance();
+                break;
+            }
+            if self.is_eof() {
+                return Err("Unexpected end of input in schema body".into());
+            }
+            fields.push(self.parse_field_def()?);
+        }
+
+        doc.schemas.push(SchemaDef { name, fields });
+        Ok(())
+    }
 
     fn parse_schema(&mut self) -> Result<SchemaDef, String> {
         self.consume_keyword_ignore_case("schema")?;
@@ -491,7 +538,7 @@ impl Parser {
             match fields {
                 Ok(f) => {
                     self.expect_char('}')?;
-                    return Ok(DataEntry { key: None, schema_name: None, fields: f });
+                    return Ok(DataEntry { key: None, schema_name: self.current_schema.clone(), fields: f });
                 }
                 Err(_) => {
                     // Not a data field list — could be schema-less named
@@ -536,7 +583,7 @@ impl Parser {
                 let fields = self.parse_positional_values()?;
                 return Ok(DataEntry {
                     key: Some(key),
-                    schema_name: None,
+                    schema_name: self.current_schema.clone(),
                     fields,
                 });
             }
@@ -549,7 +596,7 @@ impl Parser {
         let fields = self.parse_positional_values()?;
         Ok(DataEntry {
             key: None,
-            schema_name: None,
+            schema_name: self.current_schema.clone(),
             fields,
         })
     }

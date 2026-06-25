@@ -262,6 +262,16 @@ impl Clone for EnumVariantInfo {
     }
 }
 
+/// Metadata for a callable declaration (defn/inop/txn).
+/// Used by function metadata projections (FnPtr, FnName, etc.).
+#[derive(Debug, Clone)]
+struct FnMeta {
+    params: Vec<Type>,
+    outputs: Vec<Type>,
+    span: Option<crate::errors::Span>,
+    has_side_effects: bool,
+}
+
 pub struct Interpreter {
     pub state: HashMap<String, Value>,
     pub prior_state: HashMap<String, Value>,
@@ -5793,8 +5803,15 @@ impl Interpreter {
                 SetLiteralExpr { entries: entries.clone() }.evaluate(self, &ExprDispatch),
             Expr::ListIndex(list_expr, index_expr) =>
                 ListIndexExpr { list: list_expr.clone(), index: index_expr.clone() }.evaluate(self, &ExprDispatch),
-            Expr::Projection { source, target } =>
-                ProjectionExpr::new(*source.clone(), target.clone()).evaluate(self, &ExprDispatch),
+            Expr::Projection { source, target } => {
+                // Function metadata projections don't evaluate the source expression
+                // (the source is a defn/inop/txn name, not a state variable)
+                if let Some(result) = self.try_eval_fn_projection(source, target) {
+                    result
+                } else {
+                    ProjectionExpr::new(*source.clone(), target.clone()).evaluate(self, &ExprDispatch)
+                }
+            }
             Expr::FieldAccess(obj_expr, field_name) =>
                 FieldAccessExpr { obj: obj_expr.clone(), field: field_name.clone() }.evaluate(self, &ExprDispatch),
             Expr::StructInstance(typename, fields) =>
@@ -5904,6 +5921,108 @@ impl Interpreter {
                 }
             }
         }
+    }
+
+    /// Try to evaluate a function metadata projection (FnPtr, FnName, etc.).
+    /// Returns None if the source is not an identifier or the target is not Fn*.
+    fn try_eval_fn_projection(&mut self, source: &Expr, target: &ProjectionTarget) -> Option<Result<Value, RuntimeError>> {
+        let name = match source {
+            Expr::Identifier(n) => n.clone(),
+            _ => return None,
+        };
+        match target {
+            ProjectionTarget::FnPtr
+            | ProjectionTarget::FnName
+            | ProjectionTarget::FnParams
+            | ProjectionTarget::FnReturns
+            | ProjectionTarget::FnArity
+            | ProjectionTarget::FnLoc
+            | ProjectionTarget::FnDoc
+            | ProjectionTarget::FnHash
+            | ProjectionTarget::FnContracts
+            | ProjectionTarget::FnModule
+            | ProjectionTarget::FnIsPure
+            | ProjectionTarget::FnSpan => {}
+            _ => return None,
+        }
+
+        // Look up the declaration
+        let meta = if let Some(defn) = self.definitions.get(&name) {
+            Some(FnMeta {
+                params: defn.parameters.iter().map(|(_, t)| t.clone()).collect(),
+                outputs: defn.outputs.clone(),
+                span: None, // Definition does not store span
+                has_side_effects: false,
+            })
+        } else if let Some(inop) = self.inop_decls.get(&name) {
+            Some(FnMeta {
+                params: inop.params.iter().map(|(_, t)| t.clone()).collect(),
+                outputs: inop.outputs.clone(),
+                span: inop.span,
+                has_side_effects: inop.has_side_effects,
+            })
+        } else if let Some(txn) = self.callable_txns.get(&name) {
+            Some(FnMeta {
+                params: txn.parameters.iter().map(|(_, t)| t.clone()).collect(),
+                outputs: txn.outputs.clone(),
+                span: txn.span,
+                has_side_effects: !txn.is_reactive,
+            })
+        } else {
+            None
+        };
+
+        let meta = match meta {
+            Some(m) => m,
+            None => return Some(Err(RuntimeError::UndefinedVariable(
+                format!("cannot apply Fn projection to '{}': not a defined function, inop, or transaction", name)
+            ))),
+        };
+
+        Some(match target {
+            ProjectionTarget::FnPtr => Ok(Value::Int(0)),  // sentinel; real addr only in codegen
+            ProjectionTarget::FnName => Ok(Value::String(name)),
+            ProjectionTarget::FnParams => {
+                let s = meta.params.iter()
+                    .map(|t| format!("{:?}", t))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Ok(Value::String(s))
+            }
+            ProjectionTarget::FnReturns => {
+                let s = meta.outputs.iter()
+                    .map(|t| format!("{:?}", t))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Ok(Value::String(s))
+            }
+            ProjectionTarget::FnArity => Ok(Value::Int(meta.params.len() as i64)),
+            ProjectionTarget::FnLoc => {
+                let loc = match meta.span {
+                    Some(s) => format!("{}:{}", s.line, s.column),
+                    None => String::new(),
+                };
+                Ok(Value::String(loc))
+            }
+            ProjectionTarget::FnDoc => Ok(Value::String(String::new())), // doc comments not stored yet
+            ProjectionTarget::FnHash => {
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                name.hash(&mut hasher);
+                Ok(Value::Int(hasher.finish() as i64))
+            }
+            ProjectionTarget::FnContracts => Ok(Value::String(String::new())), // contracts not serialized yet
+            ProjectionTarget::FnModule => Ok(Value::String(String::new())), // module tracking not implemented yet
+            ProjectionTarget::FnIsPure => Ok(Value::Bool(!meta.has_side_effects)),
+            ProjectionTarget::FnSpan => {
+                let (start, end) = match meta.span {
+                    Some(s) => (s.start as i64, s.end as i64),
+                    None => (0, 0),
+                };
+                Ok(Value::Tuple(vec![Value::Int(start), Value::Int(end)]))
+            }
+            _ => unreachable!(),
+        })
     }
 
     fn eval_is_type(&self, val: Value, target: &crate::ast::IsTarget) -> Result<Value, RuntimeError> {
@@ -10347,6 +10466,7 @@ mod tests {
             )),
             has_side_effects: false,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         };
@@ -10384,6 +10504,7 @@ mod tests {
             fallback: None,
             has_side_effects: false,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         };
@@ -10403,7 +10524,6 @@ mod tests {
         let mut i = Interpreter::new();
         use crate::ast::{TopLevel, Program, TypeDef, TypeDefBody, TypeBinding, InopDeclaration, Contract, Statement, Expr, Type, ArrowDir};
         use crate::interpreter::Value;
-        // Set up type "MyList" with InsertAt = "my_insert"
         let td = TypeDef {
             name: "MyList".into(),
             type_params: vec![],
@@ -10445,6 +10565,7 @@ mod tests {
             fallback: Some(Expr::Integer(999)),
             has_side_effects: false,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         });
@@ -10526,6 +10647,7 @@ mod tests {
             ])),
             has_side_effects: false,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         });
@@ -13492,5 +13614,112 @@ mod kani_full_tests {
         let mut desugarer = crate::desugarer::Desugarer::new();
         // This should panic because skip=2 but only 1 step precedes the .2|>
         let _ = desugarer.desugar_expr(Expr::PipeChain(pipe));
+    }
+
+    #[test]
+    fn test_fn_projection_name() {
+        let mut i = Interpreter::new();
+        i.definitions.insert("add".to_string(), Definition {
+            name: "add".into(),
+            type_params: vec![],
+            parameters: vec![("x".into(), Type::Int), ("y".into(), Type::Int)],
+            outputs: vec![Type::Int],
+            output_type: Some(OutputType::Single(Box::new(Type::Int))),
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("add".into())),
+            target: ProjectionTarget::FnName,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::String("add".into()));
+    }
+
+    #[test]
+    fn test_fn_projection_arity() {
+        let mut i = Interpreter::new();
+        i.definitions.insert("add".to_string(), Definition {
+            name: "add".into(),
+            type_params: vec![],
+            parameters: vec![("x".into(), Type::Int), ("y".into(), Type::Int)],
+            outputs: vec![Type::Int],
+            output_type: Some(OutputType::Single(Box::new(Type::Int))),
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("add".into())),
+            target: ProjectionTarget::FnArity,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(2));
+    }
+
+    #[test]
+    fn test_fn_projection_is_pure() {
+        let mut i = Interpreter::new();
+        i.definitions.insert("pure_fn".to_string(), Definition {
+            name: "pure_fn".into(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![Type::Int],
+            output_type: Some(OutputType::Single(Box::new(Type::Int))),
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        });
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("pure_fn".into())),
+            target: ProjectionTarget::FnIsPure,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(true));
+    }
+
+    #[test]
+    fn test_fn_projection_inop_not_pure() {
+        let mut i = Interpreter::new();
+        i.inop_decls.insert("write_buf".to_string(), InopDeclaration {
+            name: "write_buf".into(),
+            params: vec![("buf".into(), Type::Int)],
+            outputs: vec![Type::Int],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec![],
+            llvm_body_spans: vec![],
+            fallback: None,
+            has_side_effects: true,
+            has_state_access: false,
+            section: None,
+            span: None,
+        });
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("write_buf".into())),
+            target: ProjectionTarget::FnIsPure,
+        };
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Bool(false));
+    }
+
+    #[test]
+    fn test_fn_projection_unknown_name_errors() {
+        let mut i = Interpreter::new();
+        let expr = Expr::Projection {
+            source: Box::new(Expr::Identifier("undefined_fn".into())),
+            target: ProjectionTarget::FnPtr,
+        };
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err(), "Undefined function should error on Fn projection");
     }
 }

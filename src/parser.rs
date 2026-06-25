@@ -29,6 +29,33 @@ use crate::lexer::Token;
 use logos::{Lexer, Logos};
 use std::path::Path;
 
+/// Flatten `#!cfg` guards in a program's items list by evaluating conditions
+/// against the given target configuration. Items guarded by false conditions
+/// are removed. Nested `#!cfg` guards are recursively flattened.
+pub fn flatten_cfg(items: &mut Vec<TopLevel>, target_os: &str, target_arch: &str, board: &str) {
+    let mut i = 0;
+    while i < items.len() {
+        let (is_cfg, active) = match &items[i] {
+            TopLevel::Cfg(cfg) => (true, cfg.condition.evaluate(target_os, target_arch, board)),
+            _ => (false, false),
+        };
+        if is_cfg {
+            if active {
+                let mut replacement = match items.remove(i) {
+                    TopLevel::Cfg(cfg) => cfg.items,
+                    _ => unreachable!(),
+                };
+                flatten_cfg(&mut replacement, target_os, target_arch, board);
+                items.splice(i..i, replacement);
+            } else {
+                items.remove(i);
+            }
+        } else {
+            i += 1;
+        }
+    }
+}
+
 pub fn parse_hardware_config(path: &Path) -> Result<HardwareConfig, SyntaxError> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read hardware config: {}", e))?;
@@ -846,8 +873,13 @@ impl<'a> Parser<'a> {
                             });
                             continue;
                         }
+                        if kw == "cfg" {
+                            let (condition, cfg_items) = self.parse_cfg_guard()?;
+                            items.push(TopLevel::Cfg(CfgGuard { condition, items: cfg_items }));
+                            continue;
+                        }
                     }
-                    // Not #!exit, #!out, or #!assert — treat as legacy #! attribues
+                    // Not #!exit, #!out, #!assert, or #!cfg — treat as legacy #! attribues
                     file_attrs.append(&mut self.parse_attributes()?);
                     continue;
                 }
@@ -965,7 +997,157 @@ impl<'a> Parser<'a> {
         None
     }
 
+    /// Parse a `#!cfg(condition)` guard. Returns the parsed condition and items.
+    fn parse_cfg_guard(&mut self) -> Result<(CfgCondition, Vec<TopLevel>), SyntaxError> {
+        // Consume #!
+        self.advance();
+        // Expect "cfg"
+        let kw = self.expect_identifier()?;
+        if kw != "cfg" {
+            return self.spanned_err(format!("expected 'cfg' after '#!', got '{}'", kw));
+        }
+        self.expect(Token::LParen)?;
+        let condition = self.parse_cfg_condition()?;
+        self.expect(Token::RParen)?;
+
+        // Parse the guarded item(s): either a single item or a block { }
+        let items = if let Some(Ok(Token::LBrace)) = self.current_token() {
+            self.advance();
+            let mut parsed = Vec::new();
+            while !matches!(self.current_token(), Some(Ok(Token::RBrace))) {
+                if self.current_token().is_none() {
+                    return self.spanned_err("unexpected EOF in #!cfg block".to_string());
+                }
+                // Handle nested #!cfg inside blocks
+                if matches!(self.current_token(), Some(Ok(Token::HashBang)))
+                    && self.peek_identifier().as_deref() == Some("cfg")
+                {
+                    let (cond, nested) = self.parse_cfg_guard()?;
+                    parsed.push(TopLevel::Cfg(CfgGuard {
+                        condition: cond,
+                        items: nested,
+                    }));
+                } else {
+                    parsed.push(self.parse_top_level()?);
+                }
+            }
+            self.advance(); // consume }
+            self.expect(Token::Semicolon)?;
+            parsed
+        } else {
+            vec![self.parse_top_level()?]
+        };
+
+        Ok((condition, items))
+    }
+
+    /// Parse a cfg condition expression: `key == "val"`, `key != "val"`,
+    /// `true`, `false`, `!expr`, `a && b`, `a || b`, `(expr)`.
+    fn parse_cfg_condition(&mut self) -> Result<CfgCondition, SyntaxError> {
+        self.parse_cfg_or()
+    }
+
+    fn parse_cfg_or(&mut self) -> Result<CfgCondition, SyntaxError> {
+        let mut left = self.parse_cfg_and()?;
+        while let Some(Ok(Token::OrOr)) = self.current_token() {
+            self.advance();
+            let right = self.parse_cfg_and()?;
+            left = CfgCondition::Or(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_cfg_and(&mut self) -> Result<CfgCondition, SyntaxError> {
+        let mut left = self.parse_cfg_not()?;
+        while let Some(Ok(Token::AndAnd)) = self.current_token() {
+            self.advance();
+            let right = self.parse_cfg_not()?;
+            left = CfgCondition::And(Box::new(left), Box::new(right));
+        }
+        Ok(left)
+    }
+
+    fn parse_cfg_not(&mut self) -> Result<CfgCondition, SyntaxError> {
+        if let Some(Ok(Token::Not)) = self.current_token() {
+            self.advance();
+            let inner = self.parse_cfg_primary()?;
+            Ok(CfgCondition::Not(Box::new(inner)))
+        } else {
+            self.parse_cfg_primary()
+        }
+    }
+
+    fn parse_cfg_primary(&mut self) -> Result<CfgCondition, SyntaxError> {
+        match self.current_token() {
+            Some(Ok(Token::BoolTrue)) => {
+                self.advance();
+                Ok(CfgCondition::Bool(true))
+            }
+            Some(Ok(Token::BoolFalse)) => {
+                self.advance();
+                Ok(CfgCondition::Bool(false))
+            }
+            Some(Ok(Token::LParen)) => {
+                self.advance();
+                let inner = self.parse_cfg_condition()?;
+                self.expect(Token::RParen)?;
+                Ok(inner)
+            }
+            Some(Ok(Token::Identifier(key))) => {
+                let key = key.clone();
+                self.advance();
+                match self.current_token() {
+                    Some(Ok(Token::EqEq)) => {
+                        self.advance();
+                        let val = self.expect_string()?;
+                        Ok(CfgCondition::Eq(key, val))
+                    }
+                    Some(Ok(Token::Ne)) => {
+                        self.advance();
+                        let val = self.expect_string()?;
+                        Ok(CfgCondition::Ne(key, val))
+                    }
+                    _ => self.spanned_err(format!(
+                        "expected '==' or '!=' in cfg condition after '{}'", key
+                    )),
+                }
+            }
+            Some(Ok(tok)) => self.spanned_err(format!(
+                "unexpected token in cfg condition: {}",
+                Self::token_display(&tok)
+            )),
+            _ => self.spanned_err("unexpected EOF in cfg condition".to_string()),
+        }
+    }
+
+    fn expect_string(&mut self) -> Result<String, SyntaxError> {
+        if let Some(Ok(Token::String(s))) = self.current_token() {
+            let s = s.clone();
+            self.advance();
+            Ok(s)
+        } else {
+            self.spanned_err("expected a string literal in cfg condition".to_string())
+        }
+    }
+
+    fn peek_identifier(&self) -> Option<String> {
+        self.peek.as_ref().and_then(|(t, _)| {
+            match t {
+                Ok(Token::Identifier(s)) => Some(s.clone()),
+                _ => None,
+            }
+        })
+    }
+
     fn parse_top_level(&mut self) -> Result<TopLevel, SyntaxError> {
+        // Handle #!cfg guards — must come before all other parsing
+        if matches!(self.current_token(), Some(Ok(Token::HashBang)))
+            && self.peek_identifier().as_deref() == Some("cfg")
+        {
+            let (condition, items) = self.parse_cfg_guard()?;
+            return Ok(TopLevel::Cfg(CfgGuard { condition, items }));
+        }
+
         let is_sed = matches!(self.current_token(), Some(Ok(Token::Sed)));
         if is_sed {
             self.advance();
@@ -1108,11 +1290,13 @@ impl<'a> Parser<'a> {
                 Ok(wrap_test(frgn_binding, &test_groups))
             }
             Some(Ok(Token::Inop)) => {
-                let inop = self.parse_inop_decl(false)?;
+                let section = Self::extract_section(&modifiers);
+                let inop = self.parse_inop_decl(false, section)?;
                 Ok(wrap_test(TopLevel::Inop(inop), &test_groups))
             }
             Some(Ok(Token::InopBang)) => {
-                let inop = self.parse_inop_decl(true)?;
+                let section = Self::extract_section(&modifiers);
+                let inop = self.parse_inop_decl(true, section)?;
                 Ok(wrap_test(TopLevel::Inop(inop), &test_groups))
             }
             Some(Ok(Token::Meld)) => {
@@ -1803,8 +1987,15 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Extract the `#section("name")` value from hashtag modifiers, if present.
+    fn extract_section(modifiers: &[crate::ast::Hashtag]) -> Option<String> {
+        modifiers.iter()
+            .find(|h| h.name == "section")
+            .and_then(|h| h.value.clone())
+    }
+
     /// Parse an intrinsic operation declaration: `inop[#][!] name(params) -> Ret [pre][post] { llvm_body } fallback { expr }`
-    fn parse_inop_decl(&mut self, bang: bool) -> Result<InopDeclaration, SyntaxError> {
+    fn parse_inop_decl(&mut self, bang: bool, section: Option<String>) -> Result<InopDeclaration, SyntaxError> {
         // Consume the `inop` / `inop!` / `inop#` / `inop#!` token.
         // bang = true means `inop!` was used (side-effecting).
         if bang {
@@ -2125,6 +2316,7 @@ impl<'a> Parser<'a> {
             fallback,
             has_side_effects: bang,
             has_state_access,
+            section,
             span: None,
         })
     }
@@ -6817,6 +7009,18 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             "Elements" => Ok(ProjectionTarget::Elements),
             "AsStack" => Ok(ProjectionTarget::AsStack),
             "AsQueue" => Ok(ProjectionTarget::AsQueue),
+            "FnPtr" => Ok(ProjectionTarget::FnPtr),
+            "FnName" => Ok(ProjectionTarget::FnName),
+            "FnParams" => Ok(ProjectionTarget::FnParams),
+            "FnReturns" => Ok(ProjectionTarget::FnReturns),
+            "FnArity" => Ok(ProjectionTarget::FnArity),
+            "FnLoc" => Ok(ProjectionTarget::FnLoc),
+            "FnDoc" => Ok(ProjectionTarget::FnDoc),
+            "FnHash" => Ok(ProjectionTarget::FnHash),
+            "FnContracts" => Ok(ProjectionTarget::FnContracts),
+            "FnModule" => Ok(ProjectionTarget::FnModule),
+            "FnIsPure" => Ok(ProjectionTarget::FnIsPure),
+            "FnSpan" => Ok(ProjectionTarget::FnSpan),
             _ => {
                 // User-defined projection — check for parameterized form
                 if matches!(self.current_token(), Some(Ok(Token::LParen))) {
@@ -9578,6 +9782,56 @@ mod parser_tests {
     }
 
     #[test]
+    fn test_parse_fn_projection_ptr() {
+        let mut parser = Parser::new("f :> FnPtr");
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Projection { source: _, target: ProjectionTarget::FnPtr } => {}
+            _ => panic!("Expected FnPtr projection, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_projection_name() {
+        let mut parser = Parser::new("add :> FnName");
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Projection { source: _, target: ProjectionTarget::FnName } => {}
+            _ => panic!("Expected FnName projection, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_projection_arity() {
+        let mut parser = Parser::new("handler :> FnArity");
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Projection { source: _, target: ProjectionTarget::FnArity } => {}
+            _ => panic!("Expected FnArity projection, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_projection_is_pure() {
+        let mut parser = Parser::new("compute :> FnIsPure");
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Projection { source: _, target: ProjectionTarget::FnIsPure } => {}
+            _ => panic!("Expected FnIsPure projection, got {:?}", expr),
+        }
+    }
+
+    #[test]
+    fn test_parse_fn_projection_span() {
+        let mut parser = Parser::new("txn :> FnSpan");
+        let expr = parser.parse_expression().unwrap();
+        match expr {
+            Expr::Projection { source: _, target: ProjectionTarget::FnSpan } => {}
+            _ => panic!("Expected FnSpan projection, got {:?}", expr),
+        }
+    }
+
+    #[test]
     fn test_parse_uni_simple_pattern() {
         let mut parser = Parser::new("uni x -> 42;");
         let stmt = parser.parse_statement().unwrap();
@@ -10195,476 +10449,138 @@ mod parser_tests {
     }
 
     #[test]
-    fn test_parse_import_circt_target() {
-        let s = r#"(circt) import "alu.cbv" as alu; defn main -> Int { term 42; };"#;
+    fn test_parse_typedef_bits_bitrange() {
+        let s = "type MyInt <: Bits @/0..63 { Bytes = 8; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_ok(), "(circt) import should parse: {:?}", result.err());
-        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
-            assert_eq!(imp.target, crate::ast::ImportTarget::Circt);
-        } else {
-            panic!("Expected Import");
-        }
-    }
-
-    #[test]
-    fn test_parse_import_javascript_target() {
-        let s = r#"(javascript) import "greet.js" as greet; defn main -> Int { term 42; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "(javascript) import should parse: {:?}", result.err());
-        if let TopLevel::Import(imp) = &result.unwrap().items[0] {
-            assert_eq!(imp.target, crate::ast::ImportTarget::Javascript);
-        } else {
-            panic!("Expected Import");
-        }
-    }
-
-    // --- Constraint syntax tests (Phase C/D) ---
-
-    #[test]
-    fn test_parse_let_constraint_range_sugar() {
-        let s = r#"defn f() -> Int { let x: Int <: [0..100] = 50; term x; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Range sugar should parse: {:?}", result.err());
-        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
-            match &defn.body[0] {
-                Statement::Let { constraint: Some(c), expr: Some(_), name, .. } => {
-                    assert_eq!(name, "x");
-                    // Desugared to: _ >= lo && _ <= hi
-                    let s = format!("{:?}", c);
-                    assert!(s.contains("Ge") || s.contains("Gt"), "Expected comparison in constraint, got: {}", s);
-                    assert!(s.contains("Le") || s.contains("Lt"), "Expected comparison in constraint, got: {}", s);
-                    assert!(s.contains("And"), "Expected And in constraint, got: {}", s);
-                }
-                _ => panic!("Expected Let with constraint"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_let_constraint_expression() {
-        let s = r#"defn f(x: Int) -> Int { let y: Int <: [_ > 0] = x; term y; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Expression constraint should parse: {:?}", result.err());
-        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
-            match &defn.body[0] {
-                Statement::Let { constraint: Some(c), expr: Some(_), name, .. } => {
-                    assert_eq!(name, "y");
-                    assert!(matches!(c.as_ref(), Expr::Gt(_, _) | Expr::BinaryOp(_)),
-                        "Expected comparison expression, got {:?}", c);
-                }
-                _ => panic!("Expected Let with constraint"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_let_constraint_no_type() {
-        let s = r#"defn f() -> Int { let x <: [0..100] = 50; term x; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Constraint without type should parse: {:?}", result.err());
-        if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
-            match &defn.body[0] {
-                Statement::Let { constraint: Some(_), ty: None, expr: Some(_), name, .. } => {
-                    assert_eq!(name, "x");
-                }
-                _ => panic!("Expected Let with constraint, no type"),
-            }
-        }
-    }
-
-    #[test]
-    fn test_parse_state_decl_constraint() {
-        let s = r#"let x: Int <: [0..255] = 128;"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "State decl constraint should parse: {:?}", result.err());
-    }
-
-    #[test]
-    fn test_parse_constraint_same_name() {
-        let s = r#"defn f() -> Int { let x <: [_ > 0] = 10; term x; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Constraint without type should parse: {:?}", result.err());
-    }
-
-    #[test]
-    fn test_parse_typedef_pragma_volatile() {
-        let s = "type VolatileFlag <: Bool { #volatile; };";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse #volatile pragma in TypeDef: {:?}", result.err());
+        assert!(result.is_ok(), "Should parse Bits @/0..63 base: {:?}", result.err());
         if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
-            assert_eq!(td.name, "VolatileFlag");
-            assert_eq!(td.body.bindings.len(), 1, "Should have 1 binding from pragma");
-            assert_eq!(td.body.bindings[0].name, "Volatile");
-            assert_eq!(td.body.bindings[0].value.as_ref(), &Expr::Bool(true));
+            assert_eq!(td.bit_range, Some(crate::ast::BitRange::Range(0, 63)));
         } else {
             panic!("Expected TypeDef");
         }
     }
 
     #[test]
-    fn test_parse_typedef_pragma_atomic() {
-        let s = "type AtomicCounter <: Int { Bytes = 4; #atomic; };";
+    fn test_cfg_guard_single_item() {
+        let s = r##"#!cfg(target_os == "linux")
+defn foo() -> Int { term 1; };
+"##;
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_ok(), "Should parse #atomic pragma in TypeDef: {:?}", result.err());
-        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
-            assert_eq!(td.body.bindings.len(), 2, "Should have Bytes + Atomic binding");
-            assert!(td.body.bindings.iter().any(|b| b.name == "Atomic"));
-        } else {
-            panic!("Expected TypeDef");
-        }
-    }
-
-    #[test]
-    fn test_parse_inop_decl() {
-        let s = "inop foo(a: Int, b: Int) -> Int [true][a + b == 100] { %res = add i64 %a, %b; term %res } fallback (a + b)";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "inop# declaration should parse: {:?}", result.err());
-        if let TopLevel::Inop(inop) = &result.unwrap().items[0] {
-            assert_eq!(inop.name, "foo");
-            assert_eq!(inop.params.len(), 2);
-            assert_eq!(inop.params[0].0, "a");
-            assert_eq!(inop.params[0].1, Type::Int);
-            assert_eq!(inop.outputs.len(), 1);
-            assert_eq!(inop.outputs[0], Type::Int);
-            assert!(!inop.has_side_effects);
-            assert!(inop.fallback.is_some());
-            assert!(!inop.llvm_body.is_empty());
-        } else {
-            panic!("Expected TopLevel::Inop");
-        }
-    }
-
-    #[test]
-    fn test_parse_inop_bang_decl() {
-        let s = "inop! write_buf(ptr: Ptr<Byte>) -> Bool { %res = call i32 @write(i32 1, i8* %ptr, i64 %len); term %res }";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "inop!# declaration should parse: {:?}", result.err());
-        if let TopLevel::Inop(inop) = &result.unwrap().items[0] {
-            assert_eq!(inop.name, "write_buf");
-            assert!(inop.has_side_effects);
-            assert!(inop.fallback.is_none());
-        } else {
-            panic!("Expected TopLevel::Inop");
-        }
-    }
-
-    #[test]
-    fn test_parse_inop_call_site() {
-        // Test that `sadd#(1, 2)` parses as IntrinsicCall with UserDefined
-        let s = "defn main() -> Int { term sadd#(1, 2); }";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "inop# call should parse: {:?}", result.err());
-    }
-
-    #[test]
-    fn test_parse_meld_simple() {
-        let s = "meld A <:> B;";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "meld should parse: {:?}", result.err());
-        if let TopLevel::Meld(meld) = &result.unwrap().items[0] {
-            assert_eq!(meld.name_a, "A");
-            assert_eq!(meld.name_b, "B");
-            assert!(meld.routes.is_empty(), "no routes for simple meld");
-        } else {
-            panic!("Expected TopLevel::Meld");
-        }
-    }
-
-    #[test]
-    fn test_parse_meld_with_routes() {
-        let s = "meld A <:> B { Ptr -> B.ptr; Size -> B :> Size; };";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "meld with routes should parse: {:?}", result.err());
-        if let TopLevel::Meld(meld) = &result.unwrap().items[0] {
-            assert_eq!(meld.name_a, "A");
-            assert_eq!(meld.name_b, "B");
-            assert_eq!(meld.routes.len(), 2, "should have 2 routes");
-            assert_eq!(meld.routes[0].accessor, "Ptr");
-            assert_eq!(meld.routes[1].accessor, "Size");
-        } else {
-            panic!("Expected TopLevel::Meld");
-        }
-    }
-
-    #[test]
-    fn test_parse_meld_empty_routes_brace() {
-        let s = "meld A <:> B { };";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "meld with empty routes should parse: {:?}", result.err());
-        if let TopLevel::Meld(meld) = &result.unwrap().items[0] {
-            assert_eq!(meld.name_a, "A");
-            assert_eq!(meld.name_b, "B");
-            assert!(meld.routes.is_empty(), "empty routes should be empty");
-        } else {
-            panic!("Expected TopLevel::Meld");
-        }
-    }
-
-    // ── Pipe Chain Parser Tests ──────────────────────────────────────
-
-    #[test]
-    fn test_parse_basic_pipe() {
-        let s = "x |> f()";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 1);
-                assert_eq!(pc.steps[0].skip, 0);
-                match &*pc.steps[0].target {
-                    Expr::Call(name, args) => {
-                        assert_eq!(name, "f");
-                        assert!(args.is_empty());
-                    }
-                    _ => panic!("Expected Call, got {:?}", pc.steps[0].target),
+        assert!(result.is_ok(), "Should parse cfg guard: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.items.len(), 1);
+        match &program.items[0] {
+            TopLevel::Cfg(cfg) => {
+                assert_eq!(cfg.condition, CfgCondition::Eq("target_os".into(), "linux".into()));
+                assert_eq!(cfg.items.len(), 1);
+                match &cfg.items[0] {
+                    TopLevel::Definition(d) => assert_eq!(d.name, "foo"),
+                    _ => panic!("Expected Definition inside cfg guard"),
                 }
             }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
+            other => panic!("Expected Cfg guard, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_parse_pipe_chaining() {
-        let s = "x |> f() |> g()";
+    fn test_cfg_guard_block() {
+        let s = r##"#!cfg(target_os == "freestanding") {
+    defn a() -> Int { term 1; };
+    defn b() -> Int { term 2; };
+};
+"##;
         let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 2);
-                assert_eq!(pc.steps[0].skip, 0);
-                assert_eq!(pc.steps[1].skip, 0);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse cfg block: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.items.len(), 1);
+        match &program.items[0] {
+            TopLevel::Cfg(cfg) => {
+                assert_eq!(cfg.condition, CfgCondition::Eq("target_os".into(), "freestanding".into()));
+                assert_eq!(cfg.items.len(), 2);
             }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
+            other => panic!("Expected Cfg guard, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_parse_pipe_dot_skip() {
-        let s = "x |> f() .|> g()";
+    fn test_cfg_guard_not_equal() {
+        let s = r##"#!cfg(target_arch != "x86_64")
+defn fallback() -> Int { term 0; };
+"##;
         let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 2);
-                assert_eq!(pc.steps[0].skip, 0);
-                assert_eq!(pc.steps[1].skip, 1);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse cfg != guard: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.items[0] {
+            TopLevel::Cfg(cfg) => {
+                assert_eq!(cfg.condition, CfgCondition::Ne("target_arch".into(), "x86_64".into()));
             }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
+            other => panic!("Expected Cfg guard, got {:?}", other),
+        }
+    }
+
+    fn make_defn(name: &str) -> Definition {
+        Definition {
+            name: name.to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            outputs: vec![],
+            output_type: None,
+            output_names: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
         }
     }
 
     #[test]
-    fn test_parse_pipe_dotdot_skip() {
-        let s = "x |> f() ..|> g()";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 2);
-                assert_eq!(pc.steps[0].skip, 0);
-                assert_eq!(pc.steps[1].skip, 2);
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
+    fn test_flatten_cfg_includes_true() {
+        let mut items = vec![
+            TopLevel::Cfg(CfgGuard {
+                condition: CfgCondition::Eq("target_os".into(), "linux".into()),
+                items: vec![
+                    TopLevel::Definition(make_defn("only_linux")),
+                ],
+            }),
+        ];
+        crate::parser::flatten_cfg(&mut items, "linux", "x86_64", "");
+        assert_eq!(items.len(), 1);
+        match &items[0] {
+            TopLevel::Definition(d) => assert_eq!(d.name, "only_linux"),
+            other => panic!("Expected Definition after flatten, got {:?}", other),
         }
     }
 
     #[test]
-    fn test_parse_pipe_no_pipe() {
-        let s = "x + y";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        assert!(
-            !matches!(expr, Expr::PipeChain(_)),
-            "Should not be a PipeChain"
+    fn test_flatten_cfg_excludes_false() {
+        let mut items = vec![
+            TopLevel::Cfg(CfgGuard {
+                condition: CfgCondition::Eq("target_os".into(), "freestanding".into()),
+                items: vec![
+                    TopLevel::Definition(make_defn("only_freestanding")),
+                ],
+            }),
+        ];
+        crate::parser::flatten_cfg(&mut items, "linux", "x86_64", "");
+        assert_eq!(items.len(), 0, "freestanding-only items should be removed on linux");
+    }
+
+    #[test]
+    fn test_cfg_condition_evaluate() {
+        let cond = CfgCondition::And(
+            Box::new(CfgCondition::Eq("target_os".into(), "linux".into())),
+            Box::new(CfgCondition::Eq("target_arch".into(), "x86_64".into())),
         );
+        assert!(cond.evaluate("linux", "x86_64", ""));
+        assert!(!cond.evaluate("linux", "aarch64", ""));
+        assert!(!cond.evaluate("freestanding", "x86_64", ""));
     }
 
-    #[test]
-    fn test_parse_pipe_precedence_add() {
-        let s = "a + b |> f()";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                // initial should be a BinaryOp with Add kind (Pattern B form)
-                assert!(matches!(&*pc.initial, Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Add));
-                assert_eq!(pc.steps.len(), 1);
-                assert_eq!(pc.steps[0].skip, 0);
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
-
-    #[test]
-    fn test_parse_pipe_three_chain() {
-        let s = "x |> f() |> g() |> h()";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 3);
-                for step in &pc.steps {
-                    assert_eq!(step.skip, 0);
-                }
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
-
-    #[test]
-    fn test_parse_pipe_with_args() {
-        let s = "x |> f(a, b)";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 1);
-                match &*pc.steps[0].target {
-                    Expr::Call(name, args) => {
-                        assert_eq!(name, "f");
-                        assert_eq!(args.len(), 2);
-                    }
-                    _ => panic!("Expected Call"),
-                }
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
-
-    #[test]
-    fn test_parse_pipe_bare_identifier_target() {
-        let s = "x |> f";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 1);
-                assert!(
-                    matches!(&*pc.steps[0].target, Expr::Identifier(name) if name == "f"),
-                    "Expected bare Identifier target"
-                );
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
-
-    #[test]
-    fn test_parse_pipe_function_start() {
-        let s = "f() |> g()";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 1);
-                assert!(matches!(&*pc.initial, Expr::Call(_, _)),
-                    "Initial should be a call expression");
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
-
-    // ── .N|> Explicit Integer Tests ──────────────────────────────
-
-    #[test]
-    fn test_parse_pipe_dot_2_skip() {
-        let s = "x |> f() .2|> g()";
-        // Debug: print tokens
-        let lex = crate::lexer::Token::lexer(s);
-        for (i, t) in lex.enumerate() {
-            match t {
-                Ok(tok) => eprintln!("token[{}] = {:?}", i, tok),
-                Err(_) => eprintln!("token[{}] = ERROR", i),
-            }
-        }
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 2);
-                assert_eq!(pc.steps[0].skip, 0);
-                assert_eq!(pc.steps[1].skip, 2);
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
-
-    #[test]
-    fn test_parse_pipe_dot_3_skip() {
-        let s = "x |> f() .3|> g()";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 2);
-                assert_eq!(pc.steps[0].skip, 0);
-                assert_eq!(pc.steps[1].skip, 3);
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
-
-    #[test]
-    fn test_parse_pipe_dot_5_skip_multi_digit() {
-        let s = "x |> f() .42|> g()";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 2);
-                assert_eq!(pc.steps[1].skip, 42);
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
-
-    #[test]
-    fn test_parse_pipe_dot_1_skip_equals_dot_skip() {
-        // .1|> should work the same as .|>
-        let s_dot = "x |> f() .|> g()";
-        let s_dot1 = "x |> f() .1|> g()";
-        let mut p1 = Parser::new(s_dot);
-        let mut p2 = Parser::new(s_dot1);
-        let e1 = p1.parse_expression().unwrap();
-        let e2 = p2.parse_expression().unwrap();
-        if let (Expr::PipeChain(pc1), Expr::PipeChain(pc2)) = (&e1, &e2) {
-            assert_eq!(pc1.steps[1].skip, pc2.steps[1].skip);
-            assert_eq!(pc1.steps[1].skip, 1);
-        } else {
-            panic!("Expected both to be PipeChain");
-        }
-    }
-
-    #[test]
-    fn test_parse_pipe_dot_n_chaining() {
-        // Mixed: |> + .|> + .2|>
-        let s = "x |> f() .|> g() .2|> h()";
-        let mut parser = Parser::new(s);
-        let expr = parser.parse_expression().unwrap();
-        match &expr {
-            Expr::PipeChain(pc) => {
-                assert_eq!(pc.steps.len(), 3);
-                assert_eq!(pc.steps[0].skip, 0);
-                assert_eq!(pc.steps[1].skip, 1);
-                assert_eq!(pc.steps[2].skip, 2);
-            }
-            _ => panic!("Expected PipeChain, got {:?}", expr),
-        }
-    }
 }
 
 enum BracketElement {

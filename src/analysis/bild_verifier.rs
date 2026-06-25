@@ -129,6 +129,7 @@ mod tests {
             fallback: None,
             has_side_effects: false,
             has_state_access: false,
+            section: None,
             llvm_body_spans: vec![],
             span: None,
         }

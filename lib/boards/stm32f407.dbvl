@@ -1,0 +1,7 @@
+schema lib/devices/uart.dbvs;
+schema lib/devices/gpio.dbvs;
+
+uart1 { base_addr: 0x40011000; size: 0x18; dr_offset: 0x00; sr_offset: 0x01; cr1_offset: 0x0C; cr2_offset: 0x10; };
+uart2 { base_addr: 0x40004400; size: 0x18; dr_offset: 0x00; sr_offset: 0x01; cr1_offset: 0x0C; cr2_offset: 0x10; };
+gpioa { base_addr: 0x40020000; size: 0x400; moder_offset: 0x00; odr_offset: 0x14; idr_offset: 0x10; bsrr_offset: 0x18; };
+gpiob { base_addr: 0x40020400; size: 0x400; moder_offset: 0x00; odr_offset: 0x14; idr_offset: 0x10; bsrr_offset: 0x18; };

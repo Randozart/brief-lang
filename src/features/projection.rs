@@ -199,6 +199,22 @@ impl ExprEval for ProjectionExpr {
                 Value::List(items) => Ok(Value::Queue(std::collections::VecDeque::from(items.clone()))),
                 _ => Err(RuntimeError::TypeMismatch("AsQueue requires List".into())),
             },
+            // Function metadata projections — handled by Interpreter::try_eval_fn_projection
+            // before dispatch reaches ProjectionExpr. These are unreachable fallbacks.
+            ProjectionTarget::FnPtr
+            | ProjectionTarget::FnName
+            | ProjectionTarget::FnParams
+            | ProjectionTarget::FnReturns
+            | ProjectionTarget::FnArity
+            | ProjectionTarget::FnLoc
+            | ProjectionTarget::FnDoc
+            | ProjectionTarget::FnHash
+            | ProjectionTarget::FnContracts
+            | ProjectionTarget::FnModule
+            | ProjectionTarget::FnIsPure
+            | ProjectionTarget::FnSpan => Err(RuntimeError::TypeMismatch(
+                "Fn projection requires a function/transaction/inop name, not a runtime value".into()
+            )),
             ProjectionTarget::BitRange(br) => match &source_val {
                 Value::Int(n) => {
                     let (lo, hi) = match br {
