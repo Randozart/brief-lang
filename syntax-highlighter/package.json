@@ -3,6 +3,7 @@
   "displayName": "Brief Language",
   "description": "Syntax highlighting, folding, bracket colorization, and intelligent editing for Brief (.bv), Rendered Brief (.rbv), and Embedded Brief (.ebv) files",
   "version": "0.1.0",
+  "icon": "images/extension-logo.png",
   "publisher": "randozart",
   "main": "./client/extension.js",
   "activationEvents": [
@@ -30,8 +31,8 @@
         "aliases": ["Brief", "brief"],
         "extensions": [".bv"],
         "icon": {
-          "light": "./images/extension-logo.svg",
-          "dark": "./images/extension-logo.svg"
+          "light": "./images/brief-logo.svg",
+          "dark": "./images/brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
@@ -70,8 +71,8 @@
         "aliases": ["Strict Brief", "strict-brief"],
         "extensions": [".sbv"],
         "icon": {
-          "light": "./images/extension-logo.svg",
-          "dark": "./images/extension-logo.svg"
+          "light": "./images/brief-logo.svg",
+          "dark": "./images/brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
