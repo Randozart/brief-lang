@@ -5376,6 +5376,31 @@ let spec = crate::target_spec::TargetSpec {
     }
 
     #[test]
+    fn test_inop_section_attribute() {
+        let mut backend = LlvmBackend::new();
+        let inop = TopLevel::Inop(InopDeclaration {
+            name: "init_hook".to_string(),
+            params: vec![],
+            outputs: vec![Type::Int],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec!["%r = add i64 0, 42".into(), "term %r;".into()],
+            fallback: None,
+            has_side_effects: false,
+            has_state_access: false,
+            section: Some(".init_array".into()),
+            llvm_body_spans: vec![],
+            span: None,
+        });
+        let program = Program {
+            items: vec![inop],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("section \".init_array\""),
+            "inop with #section should emit LLVM section attribute.\nGot:\n{}", output);
+    }
+
+    #[test]
     fn test_inop_bang_side_effects_flag() {
         let mut backend = LlvmBackend::new();
         let inop = TopLevel::Inop(InopDeclaration {

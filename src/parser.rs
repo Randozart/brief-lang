@@ -36,7 +36,16 @@ pub fn flatten_cfg(items: &mut Vec<TopLevel>, target_os: &str, target_arch: &str
     let mut i = 0;
     while i < items.len() {
         let (is_cfg, active) = match &items[i] {
-            TopLevel::Cfg(cfg) => (true, cfg.condition.evaluate(target_os, target_arch, board)),
+            TopLevel::Cfg(cfg) => {
+                let active = match cfg.condition.evaluate(target_os, target_arch, board) {
+                    Ok(v) => v,
+                    Err(warn) => {
+                        eprintln!("warning: {}", warn);
+                        false
+                    }
+                };
+                (true, active)
+            }
             _ => (false, false),
         };
         if is_cfg {
@@ -7009,17 +7018,17 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             "Elements" => Ok(ProjectionTarget::Elements),
             "AsStack" => Ok(ProjectionTarget::AsStack),
             "AsQueue" => Ok(ProjectionTarget::AsQueue),
-            "FnPtr" => Ok(ProjectionTarget::FnPtr),
-            "FnName" => Ok(ProjectionTarget::FnName),
-            "FnParams" => Ok(ProjectionTarget::FnParams),
-            "FnReturns" => Ok(ProjectionTarget::FnReturns),
-            "FnArity" => Ok(ProjectionTarget::FnArity),
-            "FnLoc" => Ok(ProjectionTarget::FnLoc),
-            "FnDoc" => Ok(ProjectionTarget::FnDoc),
-            "FnHash" => Ok(ProjectionTarget::FnHash),
-            "FnContracts" => Ok(ProjectionTarget::FnContracts),
-            "FnModule" => Ok(ProjectionTarget::FnModule),
-            "FnIsPure" => Ok(ProjectionTarget::FnIsPure),
+            "Address" => Ok(ProjectionTarget::Address),
+            "Name" => Ok(ProjectionTarget::Name),
+            "Params" => Ok(ProjectionTarget::Params),
+            "Returns" => Ok(ProjectionTarget::Returns),
+            "Arity" => Ok(ProjectionTarget::Arity),
+            "Loc" => Ok(ProjectionTarget::Loc),
+            "Doc" => Ok(ProjectionTarget::Doc),
+            "Hash" => Ok(ProjectionTarget::Hash),
+            "Contracts" => Ok(ProjectionTarget::Contracts),
+            "Module" => Ok(ProjectionTarget::Module),
+            "IsPure" => Ok(ProjectionTarget::IsPure),
             "FnSpan" => Ok(ProjectionTarget::FnSpan),
             _ => {
                 // User-defined projection — check for parameterized form
@@ -9783,41 +9792,41 @@ mod parser_tests {
 
     #[test]
     fn test_parse_fn_projection_ptr() {
-        let mut parser = Parser::new("f :> FnPtr");
+        let mut parser = Parser::new("f :> Address");
         let expr = parser.parse_expression().unwrap();
         match expr {
-            Expr::Projection { source: _, target: ProjectionTarget::FnPtr } => {}
-            _ => panic!("Expected FnPtr projection, got {:?}", expr),
+            Expr::Projection { source: _, target: ProjectionTarget::Address } => {}
+            _ => panic!("Expected Address projection, got {:?}", expr),
         }
     }
 
     #[test]
     fn test_parse_fn_projection_name() {
-        let mut parser = Parser::new("add :> FnName");
+        let mut parser = Parser::new("add :> Name");
         let expr = parser.parse_expression().unwrap();
         match expr {
-            Expr::Projection { source: _, target: ProjectionTarget::FnName } => {}
-            _ => panic!("Expected FnName projection, got {:?}", expr),
+            Expr::Projection { source: _, target: ProjectionTarget::Name } => {}
+            _ => panic!("Expected Name projection, got {:?}", expr),
         }
     }
 
     #[test]
     fn test_parse_fn_projection_arity() {
-        let mut parser = Parser::new("handler :> FnArity");
+        let mut parser = Parser::new("handler :> Arity");
         let expr = parser.parse_expression().unwrap();
         match expr {
-            Expr::Projection { source: _, target: ProjectionTarget::FnArity } => {}
-            _ => panic!("Expected FnArity projection, got {:?}", expr),
+            Expr::Projection { source: _, target: ProjectionTarget::Arity } => {}
+            _ => panic!("Expected Arity projection, got {:?}", expr),
         }
     }
 
     #[test]
     fn test_parse_fn_projection_is_pure() {
-        let mut parser = Parser::new("compute :> FnIsPure");
+        let mut parser = Parser::new("compute :> IsPure");
         let expr = parser.parse_expression().unwrap();
         match expr {
-            Expr::Projection { source: _, target: ProjectionTarget::FnIsPure } => {}
-            _ => panic!("Expected FnIsPure projection, got {:?}", expr),
+            Expr::Projection { source: _, target: ProjectionTarget::IsPure } => {}
+            _ => panic!("Expected IsPure projection, got {:?}", expr),
         }
     }
 
@@ -10576,9 +10585,20 @@ defn fallback() -> Int { term 0; };
             Box::new(CfgCondition::Eq("target_os".into(), "linux".into())),
             Box::new(CfgCondition::Eq("target_arch".into(), "x86_64".into())),
         );
-        assert!(cond.evaluate("linux", "x86_64", ""));
-        assert!(!cond.evaluate("linux", "aarch64", ""));
-        assert!(!cond.evaluate("freestanding", "x86_64", ""));
+        assert_eq!(cond.evaluate("linux", "x86_64", ""), Ok(true));
+        assert_eq!(cond.evaluate("linux", "aarch64", ""), Ok(false));
+        assert_eq!(cond.evaluate("freestanding", "x86_64", ""), Ok(false));
+    }
+
+    #[test]
+    fn test_cfg_condition_unknown_key_warning() {
+        // Unknown keys should produce Err, not silent false
+        let cond = CfgCondition::Eq("target_os".into(), "linux".into());
+        assert_eq!(cond.evaluate("linux", "x86_64", ""), Ok(true));
+        let cond_typo = CfgCondition::Eq("targt_os".into(), "linux".into());
+        let result = cond_typo.evaluate("linux", "x86_64", "");
+        assert!(result.is_err(), "typo in cfg key should produce warning");
+        assert!(result.unwrap_err().contains("unknown cfg key"), "warning should mention unknown key");
     }
 
 }

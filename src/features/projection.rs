@@ -201,17 +201,17 @@ impl ExprEval for ProjectionExpr {
             },
             // Function metadata projections — handled by Interpreter::try_eval_fn_projection
             // before dispatch reaches ProjectionExpr. These are unreachable fallbacks.
-            ProjectionTarget::FnPtr
-            | ProjectionTarget::FnName
-            | ProjectionTarget::FnParams
-            | ProjectionTarget::FnReturns
-            | ProjectionTarget::FnArity
-            | ProjectionTarget::FnLoc
-            | ProjectionTarget::FnDoc
-            | ProjectionTarget::FnHash
-            | ProjectionTarget::FnContracts
-            | ProjectionTarget::FnModule
-            | ProjectionTarget::FnIsPure
+            ProjectionTarget::Address
+            | ProjectionTarget::Name
+            | ProjectionTarget::Params
+            | ProjectionTarget::Returns
+            | ProjectionTarget::Arity
+            | ProjectionTarget::Loc
+            | ProjectionTarget::Doc
+            | ProjectionTarget::Hash
+            | ProjectionTarget::Contracts
+            | ProjectionTarget::Module
+            | ProjectionTarget::IsPure
             | ProjectionTarget::FnSpan => Err(RuntimeError::TypeMismatch(
                 "Fn projection requires a function/transaction/inop name, not a runtime value".into()
             )),

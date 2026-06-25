@@ -2614,17 +2614,17 @@ impl TypeChecker {
                         }
                     }
                     // ── Function metadata projections ────────────────────
-                    ProjectionTarget::FnPtr |
-                    ProjectionTarget::FnName |
-                    ProjectionTarget::FnParams |
-                    ProjectionTarget::FnReturns |
-                    ProjectionTarget::FnArity |
-                    ProjectionTarget::FnLoc |
-                    ProjectionTarget::FnDoc |
-                    ProjectionTarget::FnHash |
-                    ProjectionTarget::FnContracts |
-                    ProjectionTarget::FnModule |
-                    ProjectionTarget::FnIsPure |
+                    ProjectionTarget::Address |
+                    ProjectionTarget::Name |
+                    ProjectionTarget::Params |
+                    ProjectionTarget::Returns |
+                    ProjectionTarget::Arity |
+                    ProjectionTarget::Loc |
+                    ProjectionTarget::Doc |
+                    ProjectionTarget::Hash |
+                    ProjectionTarget::Contracts |
+                    ProjectionTarget::Module |
+                    ProjectionTarget::IsPure |
                     ProjectionTarget::FnSpan => {
                         if let Expr::Identifier(n) = source.as_ref() {
                             self.infer_fn_projection(n, target)
@@ -3355,8 +3355,8 @@ Expr::ObjectLiteral(fields) => {
     /// Return the default type for error recovery in Fn* projections.
     fn error_fn_projection_type(target: &ProjectionTarget) -> Type {
         match target {
-            ProjectionTarget::FnArity | ProjectionTarget::FnHash | ProjectionTarget::FnPtr => Type::Int,
-            ProjectionTarget::FnIsPure => Type::Bool,
+            ProjectionTarget::Arity | ProjectionTarget::Hash | ProjectionTarget::Address => Type::Int,
+            ProjectionTarget::IsPure => Type::Bool,
             ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Int, Type::Int]),
             _ => Type::String,
         }
@@ -3378,25 +3378,25 @@ Expr::ObjectLiteral(fields) => {
                 context: format!("{:?} projection requires a callable name", target),
             });
             return match target {
-                ProjectionTarget::FnArity | ProjectionTarget::FnHash | ProjectionTarget::FnPtr => Type::Int,
-                ProjectionTarget::FnIsPure => Type::Bool,
+                ProjectionTarget::Arity | ProjectionTarget::Hash | ProjectionTarget::Address => Type::Int,
+                ProjectionTarget::IsPure => Type::Bool,
                 ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Int, Type::Int]),
                 _ => Type::String,
             };
         }
 
         match target {
-            ProjectionTarget::FnPtr => Type::Int,
-            ProjectionTarget::FnName => Type::String,
-            ProjectionTarget::FnParams => Type::String,
-            ProjectionTarget::FnReturns => Type::String,
-            ProjectionTarget::FnArity => Type::Int,
-            ProjectionTarget::FnLoc => Type::String,
-            ProjectionTarget::FnDoc => Type::String,
-            ProjectionTarget::FnHash => Type::Int,
-            ProjectionTarget::FnContracts => Type::String,
-            ProjectionTarget::FnModule => Type::String,
-            ProjectionTarget::FnIsPure => Type::Bool,
+            ProjectionTarget::Address => Type::Int,
+            ProjectionTarget::Name => Type::String,
+            ProjectionTarget::Params => Type::String,
+            ProjectionTarget::Returns => Type::String,
+            ProjectionTarget::Arity => Type::Int,
+            ProjectionTarget::Loc => Type::String,
+            ProjectionTarget::Doc => Type::String,
+            ProjectionTarget::Hash => Type::Int,
+            ProjectionTarget::Contracts => Type::String,
+            ProjectionTarget::Module => Type::String,
+            ProjectionTarget::IsPure => Type::Bool,
             ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Int, Type::Int]),
             _ => unreachable!("non-Fn* target passed to infer_fn_projection"),
         }

@@ -1,0 +1,21 @@
+// Stateful inop pattern — accessing program state from BILD
+// Tier 2: Idioms
+//
+// Demonstrates the `(%state)` marker for inops that read and write
+// the program's state struct directly from LLVM IR.
+//
+// Usage:  The `_state` field is reserved for intra-transaction state.
+//         Only use (%state) for hot-path accumulation where the
+//         overhead of a pure defn is unacceptable.
+
+// Atomic accumulator: reads field 3 of %State, adds val, writes back
+// The `(%state)` marker adds `ptr %state` as the first parameter.
+inop! accum(val: Int) -> Int (%state)
+    [true][term > 0]
+{
+    %ptr = getelementptr inbounds %State, ptr %state, i32 0, i32 3
+    %old = load i64, i64* %ptr, align 8
+    %new = add i64 %old, %val
+    store i64 %new, i64* %ptr, align 8
+    term %new;
+} fallback val;

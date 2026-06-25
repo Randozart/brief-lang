@@ -35,8 +35,8 @@ inop! syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) ->
             : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6);
         default:
             "ud2"
-            : "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9}"
-            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6);
+            : "=r"
+            : ();
     };
     term %res;
 } fallback -1;
@@ -56,8 +56,8 @@ inop! syscall5(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int) -> Int
             : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5);
         default:
             "ud2"
-            : "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8}"
-            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5);
+            : "=r"
+            : ();
     };
     term %res;
 } fallback -1;
@@ -77,8 +77,8 @@ inop! syscall4(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int) -> Int
             : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4);
         default:
             "ud2"
-            : "={rax},{rax},{rdi},{rsi},{rdx},{r10}"
-            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4);
+            : "=r"
+            : ();
     };
     term %res;
 } fallback -1;
@@ -98,8 +98,8 @@ inop! syscall3(nr: Int, a1: Int, a2: Int, a3: Int) -> Int
             : (i64 %nr, i64 %a1, i64 %a2, i64 %a3);
         default:
             "ud2"
-            : "={rax},{rax},{rdi},{rsi},{rdx}"
-            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3);
+            : "=r"
+            : ();
     };
     term %res;
 } fallback -1;
@@ -119,8 +119,8 @@ inop! syscall2(nr: Int, a1: Int, a2: Int) -> Int
             : (i64 %nr, i64 %a1, i64 %a2);
         default:
             "ud2"
-            : "={rax},{rax},{rdi},{rsi}"
-            : (i64 %nr, i64 %a1, i64 %a2);
+            : "=r"
+            : ();
     };
     term %res;
 } fallback -1;
@@ -140,8 +140,8 @@ inop! syscall1(nr: Int, a1: Int) -> Int
             : (i64 %nr, i64 %a1);
         default:
             "ud2"
-            : "={rax},{rax},{rdi}"
-            : (i64 %nr, i64 %a1);
+            : "=r"
+            : ();
     };
     term %res;
 } fallback -1;

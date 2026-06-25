@@ -263,7 +263,7 @@ impl Clone for EnumVariantInfo {
 }
 
 /// Metadata for a callable declaration (defn/inop/txn).
-/// Used by function metadata projections (FnPtr, FnName, etc.).
+/// Used by function metadata projections (Address, Name, etc.).
 #[derive(Debug, Clone)]
 struct FnMeta {
     params: Vec<Type>,
@@ -5923,7 +5923,7 @@ impl Interpreter {
         }
     }
 
-    /// Try to evaluate a function metadata projection (FnPtr, FnName, etc.).
+    /// Try to evaluate a function metadata projection (Address, Name, etc.).
     /// Returns None if the source is not an identifier or the target is not Fn*.
     fn try_eval_fn_projection(&mut self, source: &Expr, target: &ProjectionTarget) -> Option<Result<Value, RuntimeError>> {
         let name = match source {
@@ -5931,17 +5931,17 @@ impl Interpreter {
             _ => return None,
         };
         match target {
-            ProjectionTarget::FnPtr
-            | ProjectionTarget::FnName
-            | ProjectionTarget::FnParams
-            | ProjectionTarget::FnReturns
-            | ProjectionTarget::FnArity
-            | ProjectionTarget::FnLoc
-            | ProjectionTarget::FnDoc
-            | ProjectionTarget::FnHash
-            | ProjectionTarget::FnContracts
-            | ProjectionTarget::FnModule
-            | ProjectionTarget::FnIsPure
+            ProjectionTarget::Address
+            | ProjectionTarget::Name
+            | ProjectionTarget::Params
+            | ProjectionTarget::Returns
+            | ProjectionTarget::Arity
+            | ProjectionTarget::Loc
+            | ProjectionTarget::Doc
+            | ProjectionTarget::Hash
+            | ProjectionTarget::Contracts
+            | ProjectionTarget::Module
+            | ProjectionTarget::IsPure
             | ProjectionTarget::FnSpan => {}
             _ => return None,
         }
@@ -5980,40 +5980,40 @@ impl Interpreter {
         };
 
         Some(match target {
-            ProjectionTarget::FnPtr => Ok(Value::Int(0)),  // sentinel; real addr only in codegen
-            ProjectionTarget::FnName => Ok(Value::String(name)),
-            ProjectionTarget::FnParams => {
+            ProjectionTarget::Address => Ok(Value::Int(0)),  // sentinel; real addr only in codegen
+            ProjectionTarget::Name => Ok(Value::String(name)),
+            ProjectionTarget::Params => {
                 let s = meta.params.iter()
                     .map(|t| format!("{:?}", t))
                     .collect::<Vec<_>>()
                     .join(", ");
                 Ok(Value::String(s))
             }
-            ProjectionTarget::FnReturns => {
+            ProjectionTarget::Returns => {
                 let s = meta.outputs.iter()
                     .map(|t| format!("{:?}", t))
                     .collect::<Vec<_>>()
                     .join(", ");
                 Ok(Value::String(s))
             }
-            ProjectionTarget::FnArity => Ok(Value::Int(meta.params.len() as i64)),
-            ProjectionTarget::FnLoc => {
+            ProjectionTarget::Arity => Ok(Value::Int(meta.params.len() as i64)),
+            ProjectionTarget::Loc => {
                 let loc = match meta.span {
                     Some(s) => format!("{}:{}", s.line, s.column),
                     None => String::new(),
                 };
                 Ok(Value::String(loc))
             }
-            ProjectionTarget::FnDoc => Ok(Value::String(String::new())), // doc comments not stored yet
-            ProjectionTarget::FnHash => {
+            ProjectionTarget::Doc => Ok(Value::String(String::new())), // doc comments not stored yet
+            ProjectionTarget::Hash => {
                 use std::hash::{Hash, Hasher};
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 name.hash(&mut hasher);
                 Ok(Value::Int(hasher.finish() as i64))
             }
-            ProjectionTarget::FnContracts => Ok(Value::String(String::new())), // contracts not serialized yet
-            ProjectionTarget::FnModule => Ok(Value::String(String::new())), // module tracking not implemented yet
-            ProjectionTarget::FnIsPure => Ok(Value::Bool(!meta.has_side_effects)),
+            ProjectionTarget::Contracts => Ok(Value::String(String::new())), // contracts not serialized yet
+            ProjectionTarget::Module => Ok(Value::String(String::new())), // module tracking not implemented yet
+            ProjectionTarget::IsPure => Ok(Value::Bool(!meta.has_side_effects)),
             ProjectionTarget::FnSpan => {
                 let (start, end) = match meta.span {
                     Some(s) => (s.start as i64, s.end as i64),
@@ -13634,7 +13634,7 @@ mod kani_full_tests {
         });
         let expr = Expr::Projection {
             source: Box::new(Expr::Identifier("add".into())),
-            target: ProjectionTarget::FnName,
+            target: ProjectionTarget::Name,
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::String("add".into()));
@@ -13658,7 +13658,7 @@ mod kani_full_tests {
         });
         let expr = Expr::Projection {
             source: Box::new(Expr::Identifier("add".into())),
-            target: ProjectionTarget::FnArity,
+            target: ProjectionTarget::Arity,
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(2));
@@ -13682,7 +13682,7 @@ mod kani_full_tests {
         });
         let expr = Expr::Projection {
             source: Box::new(Expr::Identifier("pure_fn".into())),
-            target: ProjectionTarget::FnIsPure,
+            target: ProjectionTarget::IsPure,
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(true));
@@ -13706,7 +13706,7 @@ mod kani_full_tests {
         });
         let expr = Expr::Projection {
             source: Box::new(Expr::Identifier("write_buf".into())),
-            target: ProjectionTarget::FnIsPure,
+            target: ProjectionTarget::IsPure,
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(false));
@@ -13717,7 +13717,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::Projection {
             source: Box::new(Expr::Identifier("undefined_fn".into())),
-            target: ProjectionTarget::FnPtr,
+            target: ProjectionTarget::Address,
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "Undefined function should error on Fn projection");

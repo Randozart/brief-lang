@@ -20,12 +20,15 @@ const UART_CR2:  Ptr<Byte> = (UART_BASE + 0x10) as Ptr<Byte>;
 const SR_TXE: Byte = 0x20;  // Transmit data register empty
 const SR_RXNE: Byte = 0x10; // Read data register not empty
 
+// Contract helper: check that a register address lies within a peripheral range
+defn in_range(reg: Ptr<Byte>, base: Int, end: Int) -> Bool {
+    term (reg as Int) >= base && (reg as Int) < end;
+};
+
 // Send a character via UART (polling)
 defn uart_send(c: Byte) -> Bool
-    [UART_SR as Int >= UART_BASE]
-    [UART_SR as Int <  UART_END]
-    [UART_DR as Int >= UART_BASE]
-    [UART_DR as Int <  UART_END]
+    [in_range(UART_SR, UART_BASE, UART_END)]
+    [in_range(UART_DR, UART_BASE, UART_END)]
 {
     // Wait until TX buffer is empty
     let mut status: Byte = volatile_load#(UART_SR);
@@ -38,10 +41,8 @@ defn uart_send(c: Byte) -> Bool
 
 // Receive a character via UART (polling)
 defn uart_recv() -> Byte
-    [UART_SR as Int >= UART_BASE]
-    [UART_SR as Int <  UART_END]
-    [UART_DR as Int >= UART_BASE]
-    [UART_DR as Int <  UART_END]
+    [in_range(UART_SR, UART_BASE, UART_END)]
+    [in_range(UART_DR, UART_BASE, UART_END)]
 {
     // Wait until RX buffer is full
     let mut status: Byte = volatile_load#(UART_SR);
@@ -54,8 +55,7 @@ defn uart_recv() -> Byte
 
 // Configure UART control register (set baud rate divisor)
 defn uart_set_baud(divisor: Int) -> Bool
-    [UART_CR1 as Int >= UART_BASE]
-    [UART_CR1 as Int <  UART_END]
+    [in_range(UART_CR1, UART_BASE, UART_END)]
     [divisor > 0]
     [divisor < 65536]
 {
@@ -64,8 +64,7 @@ defn uart_set_baud(divisor: Int) -> Bool
 
 // Read-modify-write: set a bit in a control register
 defn set_bit(reg: Ptr<Byte>, bit: Byte) -> Bool
-    [reg as Int >= UART_BASE]
-    [reg as Int <  UART_END]
+    [in_range(reg, UART_BASE, UART_END)]
 {
     let val: Byte = volatile_load#(reg);
     term volatile_store#(reg, val | bit);
@@ -73,8 +72,7 @@ defn set_bit(reg: Ptr<Byte>, bit: Byte) -> Bool
 
 // Read-modify-write: clear a bit in a control register
 defn clear_bit(reg: Ptr<Byte>, bit: Byte) -> Bool
-    [reg as Int >= UART_BASE]
-    [reg as Int <  UART_END]
+    [in_range(reg, UART_BASE, UART_END)]
 {
     let val: Byte = volatile_load#(reg);
     term volatile_store#(reg, val & !bit);
@@ -83,8 +81,7 @@ defn clear_bit(reg: Ptr<Byte>, bit: Byte) -> Bool
 // Block read: read N bytes from an MMIO FIFO into a local buffer
 // (demonstrates repeated volatile_load# with accumulating contract)
 defn fifo_read(fifo: Ptr<Byte>, count: Int) -> String
-    [fifo as Int >= UART_BASE]
-    [fifo as Int <  UART_END]
+    [in_range(fifo, UART_BASE, UART_END)]
     [count > 0]
     [count <= 64]
 {

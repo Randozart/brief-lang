@@ -5376,7 +5376,7 @@ impl LlvmBackend {
     /// types, the generic dispatch would: load i64, convert to native, exec
     /// op, convert back. The fast path emits native IR directly, skipping
     /// both conversions.
-    /// Emit LLVM IR for function metadata projections (FnPtr, FnName, etc.).
+    /// Emit LLVM IR for function metadata projections (Address, Name, etc.).
     /// Returns Some(register) if the target is an Fn* variant and the source is a function name.
     fn try_emit_fn_projection(&mut self, out: &mut String, source: &Expr, target: &ProjectionTarget, indent: &str) -> Option<TypedRegister> {
         use crate::ast::ProjectionTarget;
@@ -5385,22 +5385,22 @@ impl LlvmBackend {
             _ => return None,
         };
         let is_fn = matches!(target,
-            ProjectionTarget::FnPtr | ProjectionTarget::FnName |
-            ProjectionTarget::FnParams | ProjectionTarget::FnReturns |
-            ProjectionTarget::FnArity | ProjectionTarget::FnLoc |
-            ProjectionTarget::FnDoc | ProjectionTarget::FnHash |
-            ProjectionTarget::FnContracts | ProjectionTarget::FnModule |
-            ProjectionTarget::FnIsPure | ProjectionTarget::FnSpan);
+            ProjectionTarget::Address | ProjectionTarget::Name |
+            ProjectionTarget::Params | ProjectionTarget::Returns |
+            ProjectionTarget::Arity | ProjectionTarget::Loc |
+            ProjectionTarget::Doc | ProjectionTarget::Hash |
+            ProjectionTarget::Contracts | ProjectionTarget::Module |
+            ProjectionTarget::IsPure | ProjectionTarget::FnSpan);
         if !is_fn { return None; }
 
         let v = format!("%fnm{}", self.txn_counter); self.txn_counter += 1;
 
         // Dispatch without exhaustive match to avoid non-exhaustive pattern errors
-        if matches!(target, ProjectionTarget::FnPtr) {
+        if matches!(target, ProjectionTarget::Address) {
             writeln!(out, "{}{} = ptrtoint @{} to i64", indent, v, name).ok();
             return Some(TypedRegister { name: v, ty: Type::Int });
         }
-        if matches!(target, ProjectionTarget::FnArity) {
+        if matches!(target, ProjectionTarget::Arity) {
             let arity = self.defn_params.get(&name)
                 .map(|p| p.len() as i64)
                 .or_else(|| self.inop_decls.get(&name).map(|i| i.params.len() as i64))
@@ -5408,7 +5408,7 @@ impl LlvmBackend {
             writeln!(out, "{}{} = add i64 0, {}", indent, v, arity).ok();
             return Some(TypedRegister { name: v, ty: Type::Int });
         }
-        if matches!(target, ProjectionTarget::FnHash) {
+        if matches!(target, ProjectionTarget::Hash) {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             name.hash(&mut hasher);
@@ -5416,7 +5416,7 @@ impl LlvmBackend {
             writeln!(out, "{}{} = add i64 0, {}", indent, v, h).ok();
             return Some(TypedRegister { name: v, ty: Type::Int });
         }
-        if matches!(target, ProjectionTarget::FnIsPure) {
+        if matches!(target, ProjectionTarget::IsPure) {
             let is_inop_bang = self.inop_decls.get(&name).map(|i| i.has_side_effects).unwrap_or(false);
             let val = if is_inop_bang { 0 } else { 1 };
             writeln!(out, "{}{} = add i64 0, {}", indent, v, val).ok();

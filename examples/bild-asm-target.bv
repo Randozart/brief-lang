@@ -90,23 +90,6 @@ inop! memory_barrier() -> Int {
     term %res;
 } fallback 0;
 
-// Compound predicate: x86_64 on Linux only
-inop! fast_syscall(nr: Int, a1: Int, a2: Int, a3: Int) -> Int
-    [nr > 0][nr < 512]
-{
-    %res = asm target {
-        [arch("x86_64"), os("linux")]:
-            "syscall"
-            : "={rax},{rax},{rdi},{rsi},{rdx}"
-            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3);
-        default:
-            "ud2"
-            : "={rax},{rax},{rdi},{rsi},{rdx}"
-            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3);
-    };
-    term %res;
-} fallback -1;
-
 // Usage: call these in a defn
 defn demo_asm() -> Int {
     let features: Int = cpuid();

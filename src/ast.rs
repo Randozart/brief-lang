@@ -487,28 +487,28 @@ pub enum ProjectionTarget {
     /// Also used in TypeDef base types: `type MyInt <: Bits @/0..7`
     BitRange(BitRange),
     // ── Function metadata projections ────────────────────────────────────
-    /// Function entry point address: `add :> FnPtr` → Int (ptrtoint)
-    FnPtr,
-    /// Declaration name: `add :> FnName` → String
-    FnName,
-    /// Comma-separated parameter types: `add :> FnParams` → String
-    FnParams,
-    /// Comma-separated return types: `add :> FnReturns` → String
-    FnReturns,
-    /// Number of parameters: `add :> FnArity` → Int
-    FnArity,
-    /// Source location `file:line:col`: `add :> FnLoc` → String
-    FnLoc,
-    /// Doc comment text (or empty): `add :> FnDoc` → String
-    FnDoc,
-    /// Stable content hash: `add :> FnHash` → Int
-    FnHash,
-    /// Serialized pre/post condition: `add :> FnContracts` → String
-    FnContracts,
-    /// Module path: `add :> FnModule` → String
-    FnModule,
-    /// True for defn/inop/txn (callable): `add :> FnIsPure` → Bool
-    FnIsPure,
+    /// Function entry point address: `add :> Address` → Int (ptrtoint)
+    Address,
+    /// Declaration name: `add :> Name` → String
+    Name,
+    /// Comma-separated parameter types: `add :> Params` → String
+    Params,
+    /// Comma-separated return types: `add :> Returns` → String
+    Returns,
+    /// Number of parameters: `add :> Arity` → Int
+    Arity,
+    /// Source location `file:line:col`: `add :> Loc` → String
+    Loc,
+    /// Doc comment text (or empty): `add :> Doc` → String
+    Doc,
+    /// Stable content hash: `add :> Hash` → Int
+    Hash,
+    /// Serialized pre/post conditions: `add :> Contracts` → String
+    Contracts,
+    /// Module path (from import): `add :> Module` → String
+    Module,
+    /// True if defn/inop (without !): `add :> IsPure` → Bool
+    IsPure,
     /// Start and end line numbers: `add :> FnSpan` → (Int, Int)
     FnSpan,
     /// User-defined projection from a type declaration: `value :> MyField`
@@ -2363,30 +2363,43 @@ pub enum CfgCondition {
 
 impl CfgCondition {
     /// Evaluate the condition against the given target configuration.
-    pub fn evaluate(&self, target_os: &str, target_arch: &str, board: &str) -> bool {
+    /// Returns `Ok(true)` if the condition matches, `Ok(false)` if not,
+    /// or `Err(unknown_key)` if a cfg key doesn't match any known key.
+    pub fn evaluate(&self, target_os: &str, target_arch: &str, board: &str) -> Result<bool, String> {
         match self {
             CfgCondition::Eq(key, val) => {
                 let actual = match key.as_str() {
                     "target_os" => target_os,
                     "target_arch" => target_arch,
                     "board" => board,
-                    _ => return false,
+                    _ => return Err(format!("unknown cfg key \"{}\"", key)),
                 };
-                actual == val
+                Ok(actual == val)
             }
             CfgCondition::Ne(key, val) => {
                 let actual = match key.as_str() {
                     "target_os" => target_os,
                     "target_arch" => target_arch,
                     "board" => board,
-                    _ => return false,
+                    _ => return Err(format!("unknown cfg key \"{}\"", key)),
                 };
-                actual != val
+                Ok(actual != val)
             }
-            CfgCondition::And(a, b) => a.evaluate(target_os, target_arch, board) && b.evaluate(target_os, target_arch, board),
-            CfgCondition::Or(a, b) => a.evaluate(target_os, target_arch, board) || b.evaluate(target_os, target_arch, board),
-            CfgCondition::Not(c) => !c.evaluate(target_os, target_arch, board),
-            CfgCondition::Bool(b) => *b,
+            CfgCondition::And(a, b) => {
+                let a = a.evaluate(target_os, target_arch, board)?;
+                if !a { return Ok(false); }
+                b.evaluate(target_os, target_arch, board)
+            }
+            CfgCondition::Or(a, b) => {
+                let a = a.evaluate(target_os, target_arch, board)?;
+                if a { return Ok(true); }
+                b.evaluate(target_os, target_arch, board)
+            }
+            CfgCondition::Not(c) => {
+                let c = c.evaluate(target_os, target_arch, board)?;
+                Ok(!c)
+            }
+            CfgCondition::Bool(b) => Ok(*b),
         }
     }
 }
