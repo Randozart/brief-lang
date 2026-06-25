@@ -10689,6 +10689,43 @@ enum BracketContents {
     },
 }
 
+#[cfg(test)]
+mod within_tests {
+    use super::*;
+
+    #[test]
+    fn test_within_expression() {
+        let s = "let x: Int = foo() within 10 cycles (3) ~? 0;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse within: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_within_chained() {
+        let s = "let x: Int = a() within 10 cyc (2) ~? b() within 5 cyc (1) ~? 0;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse chained within: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_within_retry_keyword() {
+        let s = "let x: Int = a() within 10 seconds retry 3 ~? 0;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse retry kw: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_within_ms_unit() {
+        let s = "let x: Int = a() within 500 ms (5) ~? -1;";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse ms: {:?}", result.err());
+    }
+}
+
 #[cfg(all(kani, feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
