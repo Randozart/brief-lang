@@ -5943,6 +5943,12 @@ impl Interpreter {
                 Ok(Value::Ptr(*n as u64))
             }
 
+            // Identity casts (no-op)
+            (Value::Int(_), Type::Int) => Ok(val.clone()),
+            (Value::Float(_), Type::Float) => Ok(val.clone()),
+            (Value::Bool(_), Type::Bool) => Ok(val.clone()),
+            (Value::Ptr(_), Type::Applied(name, _)) if name == "Ptr" => Ok(val.clone()),
+
             // Meld-backed custom type cast: identity (reinterpretation, not conversion)
             (_, Type::Custom(_)) => Ok(val),
 
