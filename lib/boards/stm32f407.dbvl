@@ -1,7 +1,34 @@
 schema lib/devices/uart.dbvs;
 schema lib/devices/gpio.dbvs;
 
-uart1 { base_addr: 0x40011000; size: 0x18; dr_offset: 0x00; sr_offset: 0x01; cr1_offset: 0x0C; cr2_offset: 0x10; };
-uart2 { base_addr: 0x40004400; size: 0x18; dr_offset: 0x00; sr_offset: 0x01; cr1_offset: 0x0C; cr2_offset: 0x10; };
-gpioa { base_addr: 0x40020000; size: 0x400; moder_offset: 0x00; odr_offset: 0x14; idr_offset: 0x10; bsrr_offset: 0x18; };
-gpiob { base_addr: 0x40020400; size: 0x400; moder_offset: 0x00; odr_offset: 0x14; idr_offset: 0x10; bsrr_offset: 0x18; };
+// STM32F407 — UART peripherals (§30 of reference manual)
+uart1 {
+    base_addr: 0x40011000; size: 0x18;
+    dr_offset: 0x00; dr_size: 9; dr_access: "rw"; dr_reset: 0x00000000;
+    sr_offset: 0x01; sr_size: 9; sr_access: "ro"; sr_reset: 0x000000C0;
+    cr1_offset: 0x0C; cr1_size: 13; cr1_access: "rw"; cr1_reset: 0x00000000;
+    cr2_offset: 0x10; cr2_size: 15; cr2_access: "rw"; cr2_reset: 0x00000000;
+};
+uart2 {
+    base_addr: 0x40004400; size: 0x18;
+    dr_offset: 0x00; dr_size: 9; dr_access: "rw"; dr_reset: 0x00000000;
+    sr_offset: 0x01; sr_size: 9; sr_access: "ro"; sr_reset: 0x000000C0;
+    cr1_offset: 0x0C; cr1_size: 13; cr1_access: "rw"; cr1_reset: 0x00000000;
+    cr2_offset: 0x10; cr2_size: 15; cr2_access: "rw"; cr2_reset: 0x00000000;
+};
+
+// STM32F407 — GPIO peripherals (§8 of reference manual)
+gpioa {
+    base_addr: 0x40020000; size: 0x400;
+    moder_offset: 0x00; moder_size: 2; moder_access: "rw"; moder_reset: 0x00000000;
+    odr_offset: 0x14; odr_size: 16; odr_access: "rw"; odr_reset: 0x00000000;
+    idr_offset: 0x10; idr_size: 16; idr_access: "ro"; idr_reset: 0x00000000;
+    bsrr_offset: 0x18; bsrr_size: 32; bsrr_access: "wo"; bsrr_reset: 0x00000000;
+};
+gpiob {
+    base_addr: 0x40020400; size: 0x400;
+    moder_offset: 0x00; moder_size: 2; moder_access: "rw"; moder_reset: 0x00000000;
+    odr_offset: 0x14; odr_size: 16; odr_access: "rw"; odr_reset: 0x00000000;
+    idr_offset: 0x10; idr_size: 16; idr_access: "ro"; idr_reset: 0x00000000;
+    bsrr_offset: 0x18; bsrr_size: 32; bsrr_access: "wo"; bsrr_reset: 0x00000000;
+};

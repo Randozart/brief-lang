@@ -93,7 +93,118 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
         }));
     }
 
+    // 3. Flatten peripheral struct instances into per-register Int constants.
+    //    For each data entry keyed by a schema with base_addr + offset fields,
+    //    creates top-level constants like {key}_dr = base_addr + dr_offset.
+    items.extend(flatten_peripheral_constants(doc));
+
     items
+}
+
+/// Flatten schema-typed data entries with base_addr and offset fields into
+/// individual Int constants. This makes peripheral register addresses available
+/// as top-level constants for use in contracts and MMIO instructions.
+///
+/// Example: for entry `uart1 { base_addr: 0x40011000; dr_offset: 0x00; ... }`
+/// with schema UartPeripheral, creates:
+///   const uart1_base: Int = 0x40011000;
+///   const uart1_end: Int = 0x40011018;
+///   const uart1_dr: Int = 0x40011000;
+///   const uart1_sr: Int = 0x40011001;
+///   const uart1_cr1: Int = 0x4001100C;
+///   const uart1_cr2: Int = 0x40011010;
+fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
+    let mut result = Vec::new();
+
+    for group in &doc.data_groups {
+        let schema_name = match &group.schema_name {
+            Some(s) => s,
+            None => continue,
+        };
+        let schema = match doc.schemas.iter().find(|s| &s.name == schema_name) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        // Identify base_addr and size field indices
+        let base_idx = schema.fields.iter().position(|f| f.name == "base_addr");
+        let size_idx = schema.fields.iter().position(|f| f.name == "size");
+
+        for entry in &group.entries {
+            let key = match &entry.key {
+                Some(k) => k.clone(),
+                None => continue,
+            };
+
+            // Extract base_addr value
+            let base_addr = base_idx.and_then(|idx| entry.fields.get(idx)).and_then(|f| match f {
+                DataField::Named(_, DataValue::Int(n)) => Some(*n),
+                DataField::Positional(DataValue::Int(n)) => Some(*n),
+                _ => None,
+            });
+            let base = match base_addr {
+                Some(b) => b,
+                None => continue,
+            };
+
+            // Emit base constant
+            result.push(ast::TopLevel::Constant(ast::Constant {
+                name: format!("{}_base", key),
+                ty: ast::Type::Int,
+                expr: ast::Expr::Integer(base),
+            }));
+
+            // Emit end constant (base + size) if size is known
+            if let Some(sz) = size_idx.and_then(|idx| entry.fields.get(idx)).and_then(|f| match f {
+                DataField::Named(_, DataValue::Int(n)) => Some(*n),
+                DataField::Positional(DataValue::Int(n)) => Some(*n),
+                _ => None,
+            }) {
+                result.push(ast::TopLevel::Constant(ast::Constant {
+                    name: format!("{}_end", key),
+                    ty: ast::Type::Int,
+                    expr: ast::Expr::Integer(base + sz),
+                }));
+            }
+
+            // Emit register offset constants
+            for (i, field) in schema.fields.iter().enumerate() {
+                let fname = &field.name;
+                if fname == "base_addr" || fname == "size" {
+                    continue;
+                }
+                // Skip register metadata fields (_size, _access, _reset)
+                if fname.ends_with("_size") || fname.ends_with("_access") || fname.ends_with("_reset") {
+                    continue;
+                }
+                // Only flatten integer fields (offsets, control values)
+                if !matches!(field.ty, FieldType::UInt(_) | FieldType::Int) {
+                    continue;
+                }
+
+                if let Some(off) = entry.fields.get(i).and_then(|f| match f {
+                    DataField::Named(_, DataValue::Int(n)) => Some(*n),
+                    DataField::Positional(DataValue::Int(n)) => Some(*n),
+                    _ => None,
+                }) {
+                    // Strip _offset suffix for cleaner constant name
+                    let stem = if fname.ends_with("_offset") {
+                        &fname[..fname.len() - 7]
+                    } else {
+                        fname.as_str()
+                    };
+                    let const_name = format!("{}_{}", key, stem);
+                    result.push(ast::TopLevel::Constant(ast::Constant {
+                        name: const_name,
+                        ty: ast::Type::Int,
+                        expr: ast::Expr::Integer(base + off),
+                    }));
+                }
+            }
+        }
+    }
+
+    result
 }
 
 /// Convert a schema into a StructDefinition

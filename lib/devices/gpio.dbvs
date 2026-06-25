@@ -1,8 +1,31 @@
+// GPIO Peripheral Schema — STM32F407 reference manual §8
+// Each register field includes size (bits), access type, and reset value.
+
 schema GpioPeripheral {
-    base_addr: UInt[64];
-    size: UInt[32];
-    moder_offset: UInt[32];
-    odr_offset: UInt[32];
-    idr_offset: UInt[32];
-    bsrr_offset: UInt[32];
-}
+    base_addr: UInt[64];      // Peripheral base address
+    size: UInt[32];           // Address range in bytes (0x400 for GPIO)
+
+    // Mode register: 2 bits per pin × 16 pins, RW, reset 0x00000000
+    moder_offset: UInt[32];   // 0x00
+    moder_size: UInt[8];      // 2
+    moder_access: String;     // "rw"
+    moder_reset: UInt[32];    // 0x00000000
+
+    // Output data register: 16 bits, RW, reset 0x00000000
+    odr_offset: UInt[32];     // 0x14
+    odr_size: UInt[8];        // 16
+    odr_access: String;       // "rw"
+    odr_reset: UInt[32];      // 0x00000000
+
+    // Input data register: 16 bits, RO, reset 0x00000000
+    idr_offset: UInt[32];     // 0x10
+    idr_size: UInt[8];        // 16
+    idr_access: String;       // "ro"
+    idr_reset: UInt[32];      // 0x00000000
+
+    // Bit set/reset register: 32 bits, WO, reset 0x00000000
+    bsrr_offset: UInt[32];    // 0x18
+    bsrr_size: UInt[8];       // 32
+    bsrr_access: String;      // "wo"
+    bsrr_reset: UInt[32];     // 0x00000000
+};

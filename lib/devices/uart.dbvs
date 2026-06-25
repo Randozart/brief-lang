@@ -1,8 +1,31 @@
+// UART Peripheral Schema — STM32F407 reference manual §30
+// Register fields include size (bits), access type, and reset value.
+
 schema UartPeripheral {
-    base_addr: UInt[64];
-    size: UInt[32];
-    dr_offset: UInt[32];
-    sr_offset: UInt[32];
-    cr1_offset: UInt[32];
-    cr2_offset: UInt[32];
-}
+    base_addr: UInt[64];      // Peripheral base address
+    size: UInt[32];           // Address range in bytes (0x18 for UART)
+
+    // Data register: 9 bits, RW, reset 0x00000000
+    dr_offset: UInt[32];      // 0x00
+    dr_size: UInt[8];         // 9
+    dr_access: String;        // "rw"
+    dr_reset: UInt[32];       // 0x00000000
+
+    // Status register: 9 bits, RO, reset 0x000000C0
+    sr_offset: UInt[32];      // 0x01
+    sr_size: UInt[8];         // 9
+    sr_access: String;        // "ro"
+    sr_reset: UInt[32];       // 0x000000C0
+
+    // Control register 1: 13 bits, RW, reset 0x00000000
+    cr1_offset: UInt[32];     // 0x0C
+    cr1_size: UInt[8];        // 13
+    cr1_access: String;       // "rw"
+    cr1_reset: UInt[32];      // 0x00000000
+
+    // Control register 2: 15 bits, RW, reset 0x00000000
+    cr2_offset: UInt[32];     // 0x10
+    cr2_size: UInt[8];        // 15
+    cr2_access: String;       // "rw"
+    cr2_reset: UInt[32];      // 0x00000000
+};
