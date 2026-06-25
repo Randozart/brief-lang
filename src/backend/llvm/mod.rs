@@ -617,6 +617,7 @@ pub struct LlvmBackend {
 
     // ── Codegen State (per-function) ───────────────────────
     pub(crate) txn_counter: usize,
+    pub(crate) within_counter: usize,    // dedicated counter for Expr::Within (avoids SSA collisions)
     pub(crate) metadata_counter: usize,  // for !llvm.loop metadata nodes
     pub(crate) dep_graph: crate::analysis::dependency_graph::DependencyGraph, // trg dependency graph
     pending_cleanup: Vec<Statement>,
@@ -825,6 +826,7 @@ impl LlvmBackend {
             pgo_profile: None,
             pgo_guard_idx: 0,
             txn_counter: 0,
+            within_counter: 0,
             metadata_counter: 100,
             dep_graph: crate::analysis::dependency_graph::DependencyGraph {
                 topo_order: Vec::new(),
@@ -2017,6 +2019,7 @@ self.emit_declares(&mut out);
         }
         // Init
         self.txn_counter = 0;
+        self.within_counter = 0;
         self.emit_init_state(&mut out);
         self.emit_persistent_cell_ticks(&mut out);
         writeln!(out).ok();

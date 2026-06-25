@@ -264,9 +264,6 @@ impl LlvmBackend {
                             return TypedRegister { name: v.clone(), ty: Type::Int };
                         }
                         s if s == "i32" => {
-                            // i32 state fields are Char at the Brief level.
-                            // zext to i64 and preserve the Char type so that
-                            // downstream casts use Char→String conversion.
                             let ld = format!("%il{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, ld, p).ok();
                             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ld).ok();
@@ -274,8 +271,11 @@ impl LlvmBackend {
                         }
                         _ => {
                             writeln!(out, "{}{} = load {}, {}* {}, align {}{}", indent, v, ty, ty, p, self.align_of(ty), rng).ok();
+                            return TypedRegister { name: v.clone(), ty: Type::Int };
                         }
                     }
+                } else {
+                    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                 }
             }
             Expr::OwnedRef(name) => {
@@ -4144,35 +4144,67 @@ impl LlvmBackend {
                 return TypedRegister { name: v, ty: Type::Int };
             }
             Expr::Within { body, bound: _, unit: _, retries: _, fallback } => {
-                // Offset txn_counter to avoid colliding with registers in the parent block
-                let saved_tc = self.txn_counter;
-                self.txn_counter = self.txn_counter + 1000;
-                let wid = saved_tc;
+                // Evaluate body in the CURRENT block using direct GEP + load from %State
+                // for identifiers. This avoids SSA register dominance issues (the within
+                // blocks branch from here, so %State is always valid in all successors).
+                let wid = self.within_counter;
+                self.within_counter += 1;
                 let l_entry = format!("we_{}", wid);
-                let l_body = format!("wb_{}", wid);
                 let l_fallback = format!("wf_{}", wid);
                 let l_done = format!("wd_{}", wid);
                 let v_save = format!("%ws_{}", wid);
-                let v_res = format!("%wr_{}", wid);
+                let v_body = format!("%wb_{}", wid);
+                let v_result = format!("%wr_{}", wid);
 
+                // Load body value: try GEP+load, fallback to emit_expr, then to 0
+                let body_val = match body.as_ref() {
+                    Expr::Identifier(name) => {
+                        if let Some(&idx) = self.field_index_map.get(name) {
+                            let gep = format!("%wgp_{}_{}", wid, idx);
+                            let ld = format!("%wld_{}_{}", wid, idx);
+                            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
+                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, gep).ok();
+                            ld
+                        } else {
+                            // Identifier not in state — try emit_expr, fallback to 0
+                            let reg = self.emit_expr(out, body, indent);
+                            if !reg.name.is_empty() {
+                                let cp = format!("%wcp_{}", self.within_counter);
+                                self.within_counter += 1;
+                                writeln!(out, "{}{} = add i64 0, {}", indent, cp, reg.name).ok();
+                                cp
+                            } else {
+                                format!("%wz_{}", wid)
+                            }
+                        }
+                    }
+                    _ => {
+                        let reg = self.emit_expr(out, body, indent);
+                        let cp = format!("%wcp_{}", self.within_counter);
+                        self.within_counter += 1;
+                        writeln!(out, "{}{} = add i64 0, {}", indent, cp, reg.name).ok();
+                        cp
+                    }
+                };
+                writeln!(out, "{}{} = add i64 0, {}", indent, v_body, body_val).ok();
+
+                // Branch to entry, save body result
                 writeln!(out, "{}  br label %{}", indent, l_entry).ok();
                 writeln!(out, "{}  {}:", indent, l_entry).ok();
                 writeln!(out, "{}    {} = alloca i64, align 8", indent, v_save).ok();
-                writeln!(out, "{}    br label %{}", indent, l_body).ok();
-
-                writeln!(out, "{}  {}:", indent, l_body).ok();
-                let body_reg = self.emit_expr(out, body, &format!("{}    ", indent));
-                writeln!(out, "{}    store i64 {}, i64* {}, align 8", indent, body_reg.name, v_save).ok();
+                writeln!(out, "{}    store i64 {}, i64* {}, align 8", indent, v_body, v_save).ok();
                 writeln!(out, "{}    br label %{}", indent, l_done).ok();
 
+                // Fallback block: evaluate fallback in a clean block
                 writeln!(out, "{}  {}:", indent, l_fallback).ok();
                 let fb_reg = self.emit_expr(out, fallback, &format!("{}    ", indent));
                 writeln!(out, "{}    store i64 {}, i64* {}, align 8", indent, fb_reg.name, v_save).ok();
                 writeln!(out, "{}    br label %{}", indent, l_done).ok();
 
+                // Done: load result
                 writeln!(out, "{}  {}:", indent, l_done).ok();
-                writeln!(out, "{}    {} = load i64, i64* {}, align 8", indent, v_res, v_save).ok();
-                return TypedRegister { name: v_res.clone(), ty: body_reg.ty };
+                writeln!(out, "{}    {} = load i64, i64* {}, align 8", indent, v_result, v_save).ok();
+                return TypedRegister { name: v_result.clone(), ty: Type::Int };
             }
             _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }
         }
