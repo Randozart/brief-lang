@@ -3653,6 +3653,62 @@ fn count_calls(expr: &Expr, intrinsics: &mut u64, includes_io: &mut bool) {
     }
 }
 
+/// Check whether an expression is provably terminable (0 cycles at runtime).
+/// Used to validate the final fallback in a `~?` chain.
+/// Returns true if the expression is a literal, a proven-termination function,
+/// or a call to a 0-cost intrinsic. Rejects FFI calls, recursion, and `within`.
+pub fn is_proven_terminable(expr: &Expr) -> bool {
+    match expr {
+        // Literals — trivially 0 cycles
+        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
+        | Expr::String(_) | Expr::Term | Expr::Ellipsis => true,
+        Expr::Literal(_) => true,
+        // Identifiers — check via known definitions (handled at call site)
+        Expr::Identifier(_) => false, // cannot prove externally
+        // Intrinsic calls — check if cost is 0
+        Expr::IntrinsicCall { intrinsic, args } => {
+            let name = format!("{:?}", intrinsic).to_lowercase();
+            intrinsic_cost(&name) == Some(0)
+                && args.iter().all(|a| is_proven_terminable(a))
+        }
+        // Named calls — check if intrinsic
+        Expr::Call(name, args) => {
+            intrinsic_cost(name) == Some(0)
+                && args.iter().all(|a| is_proven_terminable(a))
+        }
+        // within ~? chains are NOT allowed in the fallback
+        Expr::Within { .. } => false,
+        // Compound expressions — all children must be terminable
+        Expr::Tuple(items) => items.iter().all(|i| is_proven_terminable(i)),
+        Expr::ListLiteral(items) => items.iter().all(|i| is_proven_terminable(i)),
+        Expr::Block(stmts, last) => {
+            stmts.iter().all(|s| matches!(s, Statement::Expression(_) | Statement::Term { .. }))
+                && is_proven_terminable(last)
+        }
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r)
+        | Expr::Div(l, r) | Expr::Mod(l, r) | Expr::Eq(l, r)
+        | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
+        | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r)
+        | Expr::Or(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r)
+        | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r)
+        | Expr::Concat(l, r) => is_proven_terminable(l) && is_proven_terminable(r),
+        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e)
+        | Expr::Cast(e, _) => is_proven_terminable(e),
+        Expr::ListIndex(list, idx) => is_proven_terminable(list) && is_proven_terminable(idx),
+        Expr::FieldAccess(obj, _) => is_proven_terminable(obj),
+        Expr::Projection { source, .. } => is_proven_terminable(source),
+        Expr::Slice { value, start, end, stride, mask } => {
+            is_proven_terminable(value)
+                && start.as_ref().map_or(true, |s| is_proven_terminable(s))
+                && end.as_ref().map_or(true, |e| is_proven_terminable(e))
+                && stride.as_ref().map_or(true, |s| is_proven_terminable(s))
+                && mask.as_ref().map_or(true, |m| is_proven_terminable(m))
+        }
+        // Everything else is not provably terminable
+        _ => false,
+    }
+}
+
 /// Estimate the total cost of a transaction body, including loop amplification.
 pub fn estimate_body_cost(
     body: &[Statement],
@@ -4063,6 +4119,34 @@ fn is_decreasing_expr(expr: &Expr, param_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[test]
+    fn test_is_proven_terminable_literal() {
+        assert!(is_proven_terminable(&Expr::Integer(42)));
+        assert!(is_proven_terminable(&Expr::String("hello".to_string())));
+        assert!(is_proven_terminable(&Expr::Bool(true)));
+        assert!(!is_proven_terminable(&Expr::Identifier("foo".to_string())));
+    }
+
+    #[test]
+    fn test_is_proven_terminable_within_rejected() {
+        let within = Expr::Within {
+            body: Box::new(Expr::Integer(1)),
+            bound: 10, unit: TimeUnit::Cycles,
+            retries: 0,
+            fallback: Box::new(Expr::Integer(0)),
+        };
+        assert!(!is_proven_terminable(&within));
+    }
+
+    #[test]
+    fn test_is_proven_terminable_intrinsic_zero() {
+        // compile intrinsic has 0 cost
+        assert!(is_proven_terminable(&Expr::Call("compile".to_string(), vec![])));
+        // print has non-zero cost
+        assert!(!is_proven_terminable(&Expr::Call("print".to_string(), vec![])));
+    }
 
     #[test]
     fn test_estimate_cost_simple_body() {

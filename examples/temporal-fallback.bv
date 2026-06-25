@@ -1,0 +1,45 @@
+// Temporal Fallback — ~? operator examples
+//
+// The ~? operator provides a timeout-based fallback for any expression.
+// Syntax: expr within N <unit> [(M) | retry M] ~? fallback_expr
+//
+// The fallback must be provably terminable (literal, 0-cycle intrinsic,
+// or proven-termination function).
+
+import { print_int } from "std/io.bv";
+
+// ── Basic form: timeout with retries ──
+//
+// Try compute(), retry up to 3 times (10 cycles each), fallback to 0
+let result = compute() within 10 cycles (3) ~? 0;
+print_int(result);
+
+// ── Single attempt, no retry ──
+let value = read_sensor() within 100 cyc ~? -1;
+print_int(value);
+
+// ── Using retry keyword instead of (N) ──
+let data = fetch() within 50 ms retry 2 ~? -1;
+
+// ── Chaining: a ~? b ~? c (right-associative) ──
+// Try a for 10 cycles (3 retries),
+// then b for 5 cycles (2 retries),
+// then c as final fallback (must be terminable)
+let result = a() within 10 cyc (3) ~? b() within 5 cyc (2) ~? 0;
+
+// ── Proven function as fallback ──
+let result = query_db() within 100 ms (3) ~? cache_lookup();
+
+// ── Watchdog bracket form ──
+rct txn process [x > 0][x == 0] ?[cycles <= 1000 retry 3] ~? log_timeout() {
+    &x = x - 1;
+    term;
+};
+
+// ── All time units ──
+let a = foo() within 10 cycles ~? 0;
+let b = foo() within 10 cyc ~? 0;
+let c = foo() within 30 s ~? 0;
+let d = foo() within 500 ms ~? 0;
+let e = foo() within 5 min ~? 0;
+let f = foo() within 1000 ns ~? 0;
