@@ -1617,9 +1617,31 @@ impl LlvmBackend {
                             writeln!(out, "  {} = load {}, ptr {}, align 8", src_val, src_ll_ty, src_gep).ok();
                             writeln!(out, "  store {} {}, ptr {}, align 8", dst_ll_ty, src_val, dst_gep).ok();
                         }
-                    }
                 }
             }
+            // Phase 4 (threaded): propagate wires from THREADED source cells.
+            // Threaded cells store outputs to atomic channel globals. We read
+            // those globals here and store the value into the target cell's
+            // state slot. This runs after all cell convergence passes.
+            for (from_cell, from_port, to_cell, to_param) in &self.cell_wires.clone() {
+                if !self.cell_thread_names.contains(from_cell) { continue; }
+                let dst_prefixed = format!("cell${}${}", to_cell, to_param);
+                if let Some(&dst_idx) = self.field_index_map.get(&dst_prefixed) {
+                    let dst_ll_ty = &self.field_types[dst_idx];
+                    let ch_val = format!("%ctw_val_{}_{}", self.txn_counter, from_cell);
+                    let ch_gep = format!("%ctw_ch_{}_{}", self.txn_counter, from_cell);
+                    let dst_gep = format!("%ctw_dst_{}_{}", self.txn_counter, from_cell);
+                    self.txn_counter += 1;
+                    // Volatile load from channel global
+                    writeln!(out, "  {} = load volatile {}, ptr @chan_val_{}_{}, align 8",
+                        ch_val, dst_ll_ty, from_cell, from_port).ok();
+                    writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
+                        dst_gep, dst_idx).ok();
+                    writeln!(out, "  store {} {}, ptr {}, align 8", dst_ll_ty, ch_val, dst_gep).ok();
+                }
+            }
+        }
+
         }
 
         self.state_reg_name = prev_state;
