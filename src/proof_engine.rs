@@ -3458,19 +3458,98 @@ impl CostEstimate {
 }
 
 /// Known per-intrinsic cycle costs (rough estimates).
+// ── Intrinsic cycle cost table ──
+//
+// Estimated cost per intrinsic call in CPU cycles. Used by the proof engine
+// to bound transaction execution time for watchdog timing contracts.
+// Costs are rough LLVM backend estimates — the interpreter may differ.
+//
+// Category key:  💠=math  💾=mem  📁=file  🖥=tty  🔄=sync  ⚡=ipc
+//                🌐=net  ⏱=time  🧵=thread  📦=coll  🏷=meta  🐧=posix
 fn intrinsic_cost(name: &str) -> Option<u64> {
     match name {
-        "getenv_int" | "getenv" | "setenv" | "getcwd" | "chdir" => Some(100),
-        "print_int" | "print_float" | "putchar" | "print" => Some(200),
-        "tty_raw_mode" | "tty_size" | "tty_read_key" => Some(200),
-        "str_bytes" | "strlen" => Some(10),
-        "shm_open" | "shm_unlink" | "ftruncate" | "munmap" | "mmap" => Some(1000),
+        // 💠 Math / bit manipulation — all ~2–20 cycles
+        "abs" | "bitreverse" | "bytecount" | "size" | "pop" => Some(5),
+        "sqrt" | "sin" | "cos" | "pow" | "ceil" | "floor" | "fabs" => Some(20),
+        "ctpop" | "ctlz" | "cttz" => Some(5),
+        "float_to_str" | "int_to_str" | "to_str" => Some(50),
+
+        // 🖥 TTY / console
+        "tty_raw_mode" | "tty_size" | "tty_read_key" | "ttyname" | "ioctl" | "is_tty" => Some(200),
+        "print" | "println" | "print_int" | "print_float" | "putchar" | "readln" => Some(200),
+
+        // 📁 File IO
+        "open" | "close" | "read" | "write" | "lseek" | "pread" | "pwrite" => Some(1000),
+        "stat" | "fstat" | "ftruncate" | "fsync" | "fdup" | "fdup2" | "fcntl" => Some(1000),
+        "read_file" | "write_file" | "readdir" => Some(50000),
+
+        // 📁 Directory / filesystem metadata
+        "mkdir" | "rmdir" | "unlink" | "rename" | "symlink" | "readlink" | "link" => Some(2000),
+        "chdir" | "chmod" | "chown" | "umask" | "access" | "realpath" => Some(2000),
+
+        // ⏱ Time
+        "time" | "clock_gettime" | "now" | "now_millis" | "now_micros" => Some(50),
+        "sleep" | "nanosleep" | "sleep_ms" | "sleep_us" => Some(1000),
+
+        // 🔄 Sync / atomic
         "atomic_load" | "atomic_store" | "atomic_cas" | "atomic_xchg" | "atomic_add" => Some(50),
-        "fence" => Some(10),
-        "spawn" | "spawn_with_output" => Some(10000),
-        "read_file" | "write_file" => Some(50000),
-        "sleep_ms" | "sleep_us" => Some(1000),
-        "now" | "now_millis" | "now_micros" => Some(50),
+        "fence" | "futex" => Some(10),
+
+        // ⚡ IPC
+        "pipe" | "shm_open" | "shm_unlink" => Some(1000),
+        "sem_open" | "sem_wait" | "sem_post" => Some(500),
+        "signal_fd" | "timerfd_create" => Some(500),
+
+        // 🌐 Networking
+        "socket" | "bind" | "listen" | "accept" | "connect" => Some(10000),
+        "send" | "recv" | "sendto" | "recvfrom" => Some(5000),
+        "setsockopt" | "getsockopt" | "shutdown" | "getaddrinfo" => Some(2000),
+
+        // 🧵 Threading
+        "thread_create" | "thread_join" => Some(100000),
+        "thread_exit" => Some(10),
+        "mutex_lock" | "mutex_unlock" => Some(200),
+        "condvar_wait" | "condvar_signal" | "condvar_broadcast" => Some(200),
+
+        // 🐧 Process
+        "spawn" | "spawn_with_output" => Some(100000),
+        "getpid" | "getppid" => Some(50),
+        "exit" | "abort" | "halt" => Some(10),
+
+        // 🐧 POSIX / system info
+        "getenv" | "setenv" | "unsetenv" | "getenv_int" | "getcwd" | "chdir" => Some(100),
+        "errno" | "get_random" | "uname" | "pagesize" | "cpu_count" | "hostname" => Some(200),
+        "strerror" | "strsignal" | "backtrace" => Some(500),
+        "getrlimit" | "setrlimit" | "mkstemp" | "mktemp" => Some(500),
+
+        // 🐧 User / group
+        "getuid" | "geteuid" | "getgid" | "getegid" | "getpwuid" | "getgrgid" => Some(200),
+        "getpriority" | "setpriority" | "sched_yield" => Some(100),
+
+        // 🐧 Memory management
+        "mmap" | "munmap" | "mprotect" | "brk" | "mlock" => Some(500),
+
+        // 📦 Collections / string (stdlib intrinsics)
+        "sort" | "reverse" => Some(500),
+        "range" => Some(100),
+        "trim_left" | "trim_right" | "to_lower" | "contains_at" | "find_from" | "splitn" => Some(200),
+        "contains" | "keys" | "values" => Some(50),
+        "str_bytes" | "strlen" => Some(10),
+
+        // 💠 Compile-time only — zero runtime cost
+        "compile" | "macro_error" | "macro_warn" | "macro_gensym" | "emit_file" => Some(0),
+
+        // 🧮 GPU intrinsics — negligible (register read)
+        "get_global_id" | "get_local_id" | "get_group_id"
+        | "get_num_groups" | "sub_group_barrier" => Some(5),
+
+        // 🔧 Dynamic linking
+        "dlopen" | "dlsym" | "dlclose" => Some(10000),
+
+        // 🧰 Signals
+        "sigaction" | "sigprocmask" | "kill" => Some(500),
+
+        // Unknown — return None (caller treats as expensive)
         _ => None,
     }
 }
