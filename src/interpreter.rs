@@ -146,6 +146,8 @@ pub enum RuntimeError {
     FuelExhausted,
     /// User-defined projection not found in type bindings
     UnsupportedProjection(String),
+    /// Watchdog timing bound exceeded — cycle counter hit the transaction's budget
+    Timeout(String),
 }
 
 // Helper functions for JSON serialization stdlib
@@ -273,6 +275,11 @@ pub struct Interpreter {
     /// Proof oracle fuel — decremented on every statement when set.
     /// When it hits zero, FuelExhausted is returned.
     oracle_fuel: Option<u64>,
+    /// Watchdog cycle counter — incremented on every statement.
+    /// When it exceeds cycle_budget, Timeout is returned.
+    cycle_counter: u64,
+    /// Watchdog cycle budget — the maximum number of statements before timeout.
+    cycle_budget: u64,
     pub type_universe: Option<crate::type_universe::TypeUniverse>,
     pub inop_decls: HashMap<String, InopDeclaration>,
     pub cell_defs: HashMap<String, CellDef>,
@@ -308,6 +315,8 @@ impl Clone for Interpreter {
             enum_variants: self.enum_variants.clone(),
             dbvl_cache: HashMap::new(),
             oracle_fuel: None,
+            cycle_counter: 0,
+            cycle_budget: u64::MAX,
             type_universe: self.type_universe.clone(),
             inop_decls: self.inop_decls.clone(),
             cell_defs: self.cell_defs.clone(),
@@ -464,6 +473,8 @@ impl Interpreter {
             enum_variants: HashMap::new(),
             dbvl_cache: HashMap::new(),
             oracle_fuel: None,
+            cycle_counter: 0,
+            cycle_budget: u64::MAX,
             type_universe: None,
             inop_decls: HashMap::new(),
             cell_defs: HashMap::new(),
@@ -2115,6 +2126,7 @@ impl Interpreter {
             match self.exec_stmt(stmt) {
                 Ok(()) => {}
                 Err(RuntimeError::FuelExhausted) => { break; }
+                Err(e @ RuntimeError::Timeout(_)) => { result = Err(e); break; }
                 Err(e) => { result = Err(e); break; }
             }
         }
@@ -2128,6 +2140,13 @@ impl Interpreter {
         if let Some(fuel) = self.oracle_fuel.as_mut() {
             if *fuel == 0 { return Err(RuntimeError::FuelExhausted); }
             *fuel -= 1;
+        }
+        // Increment watchdog cycle counter and check budget
+        self.cycle_counter += 1;
+        if self.cycle_counter > self.cycle_budget {
+            return Err(RuntimeError::Timeout(
+                format!("cycle budget exceeded ({} > {})", self.cycle_counter - 1, self.cycle_budget)
+            ));
         }
         match stmt {
             Statement::Assignment {
@@ -2354,12 +2373,14 @@ impl Interpreter {
                 // Fuel-injected execution with state rollback on exhaustion.
                 let saved_state = self.state.clone();
                 let saved_prior = self.prior_state.clone();
+                let saved_cycle = self.cycle_counter;
                 let fuel_limit = 100;
                 match self.exec_stmts_with_fuel(body, fuel_limit) {
                     Ok(()) => {}
-                    Err(RuntimeError::FuelExhausted) => {
+                    Err(RuntimeError::FuelExhausted) | Err(RuntimeError::Timeout(_)) => {
                         self.state = saved_state;
                         self.prior_state = saved_prior;
+                        self.cycle_counter = saved_cycle;
                         for stmt in handler {
                             self.exec_stmt(stmt)?;
                         }
@@ -9619,6 +9640,99 @@ mod tests {
         };
         i.exec_stmt(&stmt).unwrap();
         // Fuel exhausted — handler sets x = 999
+        assert_eq!(i.state.get("x"), Some(&Value::Int(999)));
+    }
+
+    #[test]
+    fn test_watchdog_cycle_counter_tracks_statements() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        i.cycle_budget = 100;
+        // Run 10 assignments — should stay under budget
+        for _ in 0..10 {
+            let stmt = Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: Expr::Integer(1),
+                timeout: None, modifiers: vec![],
+            };
+            i.exec_stmt(&stmt).unwrap();
+        }
+        assert_eq!(i.cycle_counter, 10);
+        // Budget = 100, so we should still be good
+        assert!(i.cycle_counter <= i.cycle_budget);
+    }
+
+    #[test]
+    fn test_watchdog_timeout_on_budget_exceeded() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        i.cycle_budget = 5;
+        // Run 5 statements — should stay under budget
+        for _ in 0..5 {
+            let stmt = Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: Expr::Integer(1),
+                timeout: None, modifiers: vec![],
+            };
+            i.exec_stmt(&stmt).unwrap();
+        }
+        assert_eq!(i.cycle_counter, 5);
+        // 6th statement should timeout
+        let stmt = Statement::Assignment {
+            lhs: Expr::Identifier("x".to_string()),
+            expr: Expr::Integer(1),
+            timeout: None, modifiers: vec![],
+        };
+        let err = i.exec_stmt(&stmt).unwrap_err();
+        match err {
+            RuntimeError::Timeout(msg) => {
+                assert!(msg.contains("budget exceeded"));
+            }
+            other => panic!("Expected Timeout, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_watchdog_timeout_in_oracle_triggers_handler() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        i.cycle_budget = 3;
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::OwnedRef("x".to_string()),
+                expr: Expr::Integer(1),
+                timeout: None, modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::OwnedRef("x".to_string()),
+                expr: Expr::Integer(2),
+                timeout: None, modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::OwnedRef("x".to_string()),
+                expr: Expr::Integer(3),
+                timeout: None, modifiers: vec![],
+            },
+            // 4th assignment — exceeds budget of 3
+            Statement::Assignment {
+                lhs: Expr::OwnedRef("x".to_string()),
+                expr: Expr::Integer(4),
+                timeout: None, modifiers: vec![],
+            },
+        ];
+        let stmt = Statement::Oracle {
+            handler: vec![
+                Statement::Assignment {
+                    lhs: Expr::OwnedRef("x".to_string()),
+                    expr: Expr::Integer(999),
+                    timeout: None, modifiers: vec![],
+                },
+            ],
+            body,
+            span: None,
+        };
+        i.exec_stmt(&stmt).unwrap();
+        // Cycle budget exceeded → handler runs and sets x = 999
         assert_eq!(i.state.get("x"), Some(&Value::Int(999)));
     }
 
