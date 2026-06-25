@@ -130,6 +130,14 @@
         {
           "name": "keyword.control.dbrief.brief",
           "match": "\\b(REGISTER|ALIAS|RULE|CHECK)\\b"
+        },
+        {
+          "name": "keyword.control.temporal.brief",
+          "match": "\\b(within|retry)\\b"
+        },
+        {
+          "name": "keyword.other.time-unit.brief",
+          "match": "\\b(cycles|cyc|seconds|s|milliseconds|ms|minutes|min|nanoseconds|ns)\\b"
         }
       ]
     },
@@ -192,16 +200,20 @@
           "match": "\\+|\\-|\\*|/"
         },
         {
+          "name": "keyword.operator.temporal-fallback.brief",
+          "match": "~\\?"
+        },
+        {
+          "name": "keyword.operator.term-until.brief",
+          "match": "~/"
+        },
+        {
           "name": "keyword.operator.bitwise.brief",
           "match": "~|&(?!&)|\\|(?!\\|)"
         },
         {
           "name": "keyword.operator.arrow.brief",
           "match": "->"
-        },
-        {
-          "name": "keyword.operator.term-until.brief",
-          "match": "~/"
         },
         {
           "name": "keyword.operator.assignment.brief",

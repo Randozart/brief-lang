@@ -1,165 +1,405 @@
-# Timing Bounds via Watchdog — Fully Proving Cycle/Seconds Constraints
+# Timing Bounds via Watchdog — `~?` Temporal Fallback Operator
 
 **Date:** 2026-06-24
-**Status:** Plan
+**Status:** Implementation in progress
 
-## Goal
+## Overview
 
-Integrate timing bounds (`cycles <= N`, `seconds <= N`) into the existing watchdog
-bracket system (`?[cond]`, `?![cond]`, `?#`), with **compile-time proof enabled
-at every level**.
+Integrate timing bounds (`cycles <= N`, `seconds <= N`) into the existing
+watchdog system, with the `~?` temporal fallback operator for ergonomic
+timeout handling. The fallback must be **provably terminable** at compile
+time (0-cycle intrinsic or proven-termination function).
 
-## Semantics
+## Semantics of `?` / `?!` / `?#`
 
 | Syntax | Compile-time | Runtime |
 |--------|-------------|---------|
-| `?[timing <= N]` | Cost estimate from structural recursion. If provably ≤ N, **no runtime overhead**. If unprovable, insert runtime counter. | Cycle counter + bounds check + handler. |
-| `?![timing <= N]` | Full proof attempt (same as `?`). Even if proven, **insert runtime counter anyway** (explicit double-check). | Same as `?` fallback. |
-| `?#[timing <= N]` | **Maximum proof effort**: structural recursion + bounded counter analysis + SMT-ish coverage. If still unprovable, same runtime fallback. | Same as `?` fallback. |
-
-All three **attempt compile-time proof**. The difference is effort and whether the
-runtime guard is suppressed or required.
-
-## Architecture
-
-```
-Proof Engine (src/proof_engine.rs)
-  │
-  ├── Structural Recursion Analysis
-  │     └── CostEstimate { cycles: Range<u64>, seconds: Range<f64> }
-  │         └── For each statement: add cost
-  │         └── For each loop: compute bound × per-iteration cost
-  │         └── For each intrinsic call: look up cost from intrinsic's ?# annotation
-  │
-  ├── Bounded Counter Analysis
-  │     └── Simulate loop up to bound, measure actual cost in interpreter ticks
-  │         (Already exists as the --optimize-budget precomputation path)
-  │
-  └── Comparison
-        └── cost_estimate.cycles.max <= watchdog.cycles_bound → PROVEN
-        └── cost_estimate.seconds.max <= watchdog.seconds_bound → PROVEN
-        └── Otherwise → emit runtime counter
-```
+| `?` | Tries to prove termination. If unprovable, inserts runtime counter | Cycle counter + bounds check |
+| `?!` | Full proof attempt but inserts runtime counter anyway | Always enforces at runtime |
+| `?#` | Maximum proof effort (structural recursion + bounded counter + SMT) | Runtime counter as fallback |
 
 ## Syntax
 
-### On transactions
+### Expression form — `within ... ~?`
 
 ```brief
-rct txn compute [i < N][i == N] ?[cycles <= 10000] {
-    &i = i + 1; &acc = acc + data[i];
-    term;
-};
+// Basic: time foo(), retry up to 3 times, fallback to bar()
+let result = foo() within 10 cycles (3) ~? bar();
 
-rct txn guarded [pre][post] ?![cycles <= 5000] {
-    ...
-};
+// Retry keyword (equivalent):
+let result = foo() within 10 cycles retry 3 ~? bar();
 
-rct txn heavy [pre][post] ?#[cycles <= 100000] {
-    ...
+// No retry (single attempt):
+let result = foo() within 5 ms ~? default_value;
+
+// Literal fallback:
+let result = sensor() within 100 cyc (5) ~? 0;
+
+// Proven function fallback:
+let result = query() within 50 ms (2) ~? cache_lookup();
+```
+
+### Watchdog bracket form — `?[cycles <= N retry M] ~? fallback`
+
+```brief
+rct txn process [x < N][x == N] ?[cycles <= 1000 retry 3] ~? log_timeout() {
+    &x = x + 1; term;
 };
 ```
 
-### On intrinsics and frgn declarations
+### Import-level default
 
 ```brief
-// Declare the intrinsic's own cost — used by the proof engine when this
-// intrinsic appears in a transaction body.
-intrinsic getenv_int#(name: String) -> Int ?# cycles <= 100;
-
-intrinsic read_file#(path: String) -> Result<String, String> ?# cycles <= 50000;
-
-intrinsic tty_read_key#() -> Int ?# cycles <= 10000;
+import frgn read_sensor() -> Int within 10 cycles (3) ~? 0;
+// Every call to read_sensor() is automatically wrapped
 ```
 
-### File-level default
+### Chaining (right-associative `~?`)
 
 ```brief
-// All transactions default to this timing bound unless overridden.
-#!watchdog cycles 1000000;
-// Or:
-#!watchdog seconds 5;
+let result = foo() within 10 cyc (3) ~? bar() within 5 cyc (2) ~? baz();
+// Parsed as: foo() within 10 cyc (3) ~? (bar() within 5 cyc (2) ~? baz())
+// If foo times out → try bar (5 cyc, 2 retries) → if that times out → run baz
 ```
 
-## Cost Model (Structural Recursion)
+### Retry syntax (both forms)
 
-Each Expr and Statement variant maps to a base cost in cycles:
+```brief
+foo() within 10 cycles retry 3 ~? bar()     // explicit keyword
+foo() within 10 cycles (3) ~? bar()          // compact parenthesized
+```
 
-| Construct | Base cost (cycles) |
-|-----------|-------------------|
-| `let x = <literal>` | 1 |
-| `let x = <ident>` | 1 |
-| `&x = <expr>` | 2 |
-| Binary op (add, sub, mul, etc.) | 2 |
-| `if [guard] { body }` | 2 + body |
-| Loop `[i < N][i == N] { body }` | N × (body + 2) |
-| Intrinsic call | intrinsic's declared cost |
-| frgn call | frgn's declared cost (if annotated) or `u64::MAX` (unknown) |
-| `term` / `term expr` | 1 |
-| Contract pre/post check | 3 |
+### Time units (pl only — programming, not literature)
 
-**Proving**: The proof engine walks the transaction body, summing costs.
-For loops: if the bound `N` is compile-time known (const, env var captured at
-compile time under `--optimize-budget`), use the concrete value.
-If `N` is a runtime-only value, the cost estimate is `N × per_iteration` —
-the proof engine checks if `N` has a declared upper bound (from a previous
-contract or watchdog), and if so, uses that as the worst case.
+| Short | Full | Meaning |
+|-------|------|---------|
+| `cyc` | `cycles` | CPU cycles |
+| `s` | `seconds` | Wall-clock seconds |
+| `ms` | `milliseconds` | Milliseconds |
+| `min` | `minutes` | Minutes |
+| `ns` | `nanoseconds` | Nanoseconds |
 
-## Files to modify
+## Operator: `~?`
 
-### Phase 1 — AST + Parser
+A new multi-character token `TildeQuestion`. Design rationale:
 
-| File | Changes |
-|------|---------|
-| `src/ast.rs` | Add `cycles_bound: Option<u64>`, `seconds_bound: Option<u64>`, `is_proven: bool` to `WatchdogSpec`. Add `TopLevel::WatchdogDirective { timing: TimingKind, bound: u64 }`. |
-| `src/parser.rs` | Parse `?[cycles <= N]` / `?![seconds <= N]` / `?#[cycles <= N]` in `parse_contract()`. Parse `#!watchdog cycles <N>;` as `TopLevel::WatchdogDirective`. |
+- **`~`** = temporal uncertainty / waiting / approximation
+- **`?`** = conditional fallback / "if not" / optionality (like Rust's `?`, Swift's `try?`)
+- Combined: "if this times out, fall back to that"
+- **Right-associative**: `a ~? b ~? c` = `a ~? (b ~? c)`
+- **Precedence**: binds looser than function calls — `foo() within 10 cyc ~? bar()` times `foo()`, not `foo() within 10 cyc` as some unit
+- Parser sees `~?` as a single token (not `~` followed by `?`), avoiding ambiguity with bitwise NOT
 
-### Phase 2 — Proof Engine: Cost Model
+### The `retry` parenthesized syntax
 
-| File | Changes |
-|------|---------|
-| `src/proof_engine.rs` | Add `CostEstimate { cycles: Range<u64>, seconds: Range<f64> }`. Implement `estimate_cost(stmts)`. For each intrinsic, look up its declared cost from `program.intrinsic_costs`. For loops, use the bound from the postcondition convergence contract. Compare against watchdog bound. Return `Proven` / `Unprovable`. |
+`foo() within 10 cycles (3) ~? bar()` — the `(3)` is a retry count modifier attached to the `within` clause, parsed as part of the timing guard, not as a parenthesized expression. Distinguishable from `(foo() + 3)` because `(N)` follows a time unit keyword, not an expression.
 
-### Phase 3 — Interpreter Runtime
+## Type Rule
 
-| File | Changes |
-|------|---------|
-| `src/interpreter.rs` | Add `cycle_count: u64` and `watchdog_handler: Option<Box<dyn FnMut>>` fields. Increment `cycle_count` before each statement. Check against watchdog bound. On overflow: state rollback + error. Handle `seconds` bound via `Instant::elapsed()`. |
+The body and the fallback must unify to the same type:
 
-### Phase 4 — LLVM Backend Runtime
+```brief
+let x: Int = foo() within 10 cyc (3) ~? 0;           // OK: both Int
+let x: String = foo() within 10 cyc (3) ~? "";        // OK: both String
+let x: Int = foo() within 10 cyc (3) ~? "fallback";   // ERROR: Int vs String
+```
 
-| File | Changes |
-|------|---------|
-| `src/backend/llvm/emit_toplevel.rs` | Add `%cycle_count` field to `%State` init. |
-| `src/backend/llvm/loop_engine.rs` | Emit `%cycle_count = add %cycle_count, 1` at tick entry. Emit `icmp ule %cycle_count, <bound>`, branch to watchdog handler on overflow. |
-| `src/backend/llvm/emit_stmt.rs` | Emit watchdog handler block (call to `@llvm.trap()` or user-defined exit). |
-| `src/backend/llvm/dispatch.rs` | Pass bound to tick loop. |
+`Expr::Within { body, bound, unit, retries, fallback }` has the unified type.
 
-### Phase 5 — Stdlib Annotations
+## Fallback Constraint: Provably Terminable
 
-| File | Changes |
-|------|---------|
-| `lib/std/env.bv` | `intrinsic getenv_int#(name: String) -> Int ?# cycles <= 100;` |
-| `lib/std/time.bv` | Annotate intrinsics with cycle costs. |
-| `lib/std/string.bv` | Annotate string intrinsics. |
-| `lib/std/io.bv` | Annotate read/write intrinsics. |
-| `lib/std/shm.bv` | Annotate shm/mmap intrinsics. |
-| `lib/std/tty.bv` | Annotate TTY intrinsics. |
-| `lib/std/process.bv` | Annotate spawn/* intrinsics. |
+The fallback expression MUST be proven terminable at compile time by the
+proof engine:
 
-## Test Plan
+- A literal value (`0`, `""`, `true`, `null`) — trivially 0 cycles
+- A function whose body the proof engine can prove terminates in 0 cycles
+- A function that only calls proven-terminable intrinsics (memory ops, etc.)
+- NO recursion
+- NO FFI calls (frgn)
+- NO `within ~?` chains that could themselves time out
 
-- **Parser tests**: Parse `?[cycles <= 100]`, `?![seconds <= 5]`, `?#[cycles <= 1000]`, `#!watchdog cycles 100`
-- **Proof engine tests**: `estimate_cost` returns correct sums for straight-line, loops, and intrinsic calls
-- **Interpreter tests**: Cycle counter increments per statement, watchdog fires at bound
-- **LLVM tests**: `%cycle_count` field exists in `%State`, bounds check branch emitted
-- **Integration test**: Transaction with `?[cycles <= 100]` runs correctly, exceed-bounds triggers handler
+Rationale: the fallback is the LAST resort — it must never itself fail.
+The proof engine validates this using `estimate_body_cost` with
+`cycles_upper_bound() == Some(0)`.
+
+## Lexer Changes
+
+| Token | Source | Notes |
+|-------|--------|-------|
+| `TildeQuestion` | `~?` | Single multi-char token |
+| `Within` | `within` | Reserved keyword |
+| `Retry` | `retry` | Reserved keyword |
+| `Cycles` / `Cyc` | `cycles` / `cyc` | Time unit |
+| `Seconds` / `S` | `seconds` / `s` | Time unit |
+| `Milliseconds` / `Ms` | `milliseconds` / `ms` | Time unit |
+| `Minutes` / `Min` | `minutes` / `min` | Time unit |
+| `Nanoseconds` / `Ns` | `nanoseconds` / `ns` | Time unit |
+
+## AST Changes
+
+### New variant on `Expr`
+
+```rust
+pub enum Expr {
+    // ... existing ...
+    Within {
+        body: Box<Expr>,
+        bound: u64,
+        unit: TimeUnit,
+        retries: u64,           // 0 = single attempt, no retry
+        fallback: Box<Expr>,    // must be provably terminable
+    },
+}
+```
+
+### New enum
+
+```rust
+pub enum TimeUnit {
+    Cycles,
+    Seconds,
+    Milliseconds,
+    Minutes,
+    Nanoseconds,
+}
+```
+
+### Extended `WatchdogSpec`
+
+```rust
+pub struct WatchdogSpec {
+    pub condition: Expr,
+    pub is_required: bool,
+    pub cycles_bound: Option<u64>,
+    pub seconds_bound: Option<u64>,
+    pub is_proven: bool,
+    pub retries: u64,
+    pub fallback: Option<Box<Expr>>,
+}
+```
+
+### Extended `ForeignBinding`
+
+```rust
+pub struct ForeignBinding {
+    // ... existing fields ...
+    pub default_watchdog: Option<(u64, TimeUnit, u64, Box<Expr>)>,
+}
+```
+
+## Parser Changes
+
+### Expression parsing order
+
+After parsing any expression, check for `within` keyword:
+
+```
+parse_expr() → parse_within_tail(expr):
+  if next token is "within":
+    parse bound (u64)
+    parse time unit (cycles/cyc/s/ms/min/ns)
+    parse optional retry:  "(" u64 ")"  or  "retry" u64
+    expect "~?"
+    parse fallback expression (recursive, for chaining)
+    return Expr::Within { body: expr, bound, unit, retries, fallback }
+  else:
+    return expr
+```
+
+Right-associativity: `a ~? b ~? c` → parse `a` as body, then `b ~? c` as
+the fallback expression (recursive call).
+
+### Watchdog bracket parsing
+
+Extend the external watchdog `?[cond]` parser to detect:
+
+```
+?[cycles <= N retry M]    → cycles_bound = N, retries = M
+?[seconds <= N retry M]   → seconds_bound = N, retries = M
+```
+
+Followed by optional `~? fallback_expr`.
+
+### Import frgn parsing
+
+```brief
+import frgn name(args) -> Type within N cycles (M) ~? fallback_expr;
+```
+
+Store parsed bounds in `ForeignBinding.default_watchdog`.
+
+## Typechecker Changes
+
+For `Expr::Within`:
+1. Typecheck `body` → type T
+2. Typecheck `fallback` → type F
+3. Unify(T, F) — must be the same type
+4. Result type of the expression is T
+
+## Proof Engine Changes
+
+### Fallback terminability check
+
+```rust
+pub fn is_proven_terminable(expr: &Expr) -> bool {
+    match expr {
+        // Literals are trivially 0-cycle
+        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_)
+        | Expr::String(_) | Expr::Char(_) | Expr::Term => true,
+        Expr::Identifier(_) => {
+            // Look up the definition; check if it terminates in 0 cycles
+            check_definition_terminates(name)
+        }
+        Expr::Call(name, args) => {
+            // Intrinsic cost == Some(0) or proven function
+            intrinsic_cost(name) == Some(0)
+                && args.iter().all(|a| is_proven_terminable(a))
+        }
+        // NO frgn calls, NO recursion, NO within ~? chains
+        _ => false,
+    }
+}
+```
+
+This runs at compile time during typechecking. If the fallback fails
+the check, emit a compile error.
+
+## Interpreter Changes
+
+### `eval_expr` for `Expr::Within`
+
+```
+fn eval_within(expr: Expr::Within) -> Result<Value, RuntimeError>:
+    let saved_budget = self.cycle_budget
+    let saved_counter = self.cycle_counter
+    let max_cycles = saved_counter + expr.bound
+
+    for attempt in 0..=expr.retries:
+        self.cycle_counter = saved_counter
+        self.cycle_budget = max_cycles
+
+        match self.eval_expr(&expr.body):
+            Ok(val) => {
+                self.cycle_budget = saved_budget
+                return Ok(val)
+            }
+            Err(RuntimeError::Timeout(_)) => {
+                // Reset state, continue to next retry
+                self.state = saved_state  // rollback
+            }
+            Err(e) => {
+                self.cycle_budget = saved_budget
+                return Err(e)
+            }
+
+    // All retries exhausted — evaluate fallback
+    self.cycle_budget = saved_budget
+    self.eval_expr(&expr.fallback)
+```
+
+### FFI default watchdog wrapping
+
+When `call_txn` invokes a `frgn` that has a `default_watchdog`, wrap the
+call in an implicit `Expr::Within` using the import's defaults.
+
+## LLVM Backend Changes
+
+### `emit_expr` for `Expr::Within`
+
+1. **Entry**: Alloca for retry counter + result register
+2. **Retry loop header**: Load counter, compare with `retries`, branch
+3. **Body**: Emit the guarded expression with cycle_count bounds check
+4. **On timeout**: Increment retry counter, branch to loop header
+5. **On retries exhausted**: Emit fallback expression
+6. **Merge phi**: Phi node to select body result or fallback result
+
+### Cycle counter connection
+
+The `%cycle_count` field in `%State` (from Phase 4) is read before the
+body starts, the bound is added, and a bounds check is inserted before
+each statement in the body. On overflow, branch to the retry/trap logic.
+
+## Syntax Highlighter (`brief.tmLanguage.json`, `dbrief.tmLanguage.json`)
+
+### Operators section — add `~?` before `~`
+
+Must come first so `~?` is matched as a single token before `~` grabs it.
+
+```json
+{
+  "name": "keyword.operator.temporal-fallback.brief",
+  "match": "~\\?"
+}
+```
+
+Also: move `~/` (term-until) before `~` for the same reason (fixes
+pre-existing bug where `~/` was never matched).
+
+### Keywords section — add `within`, `retry`
+
+```json
+{
+  "name": "keyword.control.temporal.brief",
+  "match": "\\b(within|retry)\\b"
+}
+```
+
+### Time units — add all forms
+
+```json
+{
+  "name": "keyword.other.time-unit.brief",
+  "match": "\\b(cycles|cyc|seconds|s|milliseconds|ms|minutes|min|nanoseconds|ns)\\b"
+}
+```
+
+## Example Files
+
+Create `examples/temporal-fallback.bv` demonstrating:
+
+1. **Basic form**: `foo() within 10 cycles (3) ~? fallback()`
+2. **Chaining**: `a() within 5 cyc (2) ~? b() within 5 cyc (2) ~? c()`
+3. **Watchdog bracket**: `?[cycles <= 1000 retry 3] ~? handler()`
+4. **Import default**: `import frgn read_sensor() -> Int within 10 cycles (3) ~? 0`
+5. **Literal fallback**: `read() within 100 cyc ~? 0`
+6. **All time units**: cyc, s, ms, min, ns
+7. **Both retry syntaxes**: `retry 3` and `(3)`
+
+## Architecture Docs
+
+Update `docs/architecture/features/` with:
+
+1. `docs/architecture/features/temporal-fallback.md` — full design
+2. Update `docs/architecture/features/statement.md` — watchdog section
+
+## File Manifest
+
+| File | Change |
+|------|--------|
+| `syntax-highlighter/syntaxes/brief.tmLanguage.json` | Add `~?`, `within`, `retry`, time units |
+| `syntax-highlighter/syntaxes/dbrief.tmLanguage.json` | Add `~?`, `within`, `retry`, time units |
+| `src/lexer.rs` | `TildeQuestion`, `within`, `retry`, time unit tokens |
+| `src/ast.rs` | `Expr::Within`, `TimeUnit`, `WatchdogSpec.*`, `ForeignBinding.default_watchdog` |
+| `src/parser.rs` | Parse `within` expressions, retry in watchdogs, frgn defaults |
+| `src/typechecker.rs` | Body/fallback type unification for `Expr::Within` |
+| `src/proof_engine.rs` | `is_proven_terminable()` check |
+| `src/interpreter.rs` | `eval_expr` for `Within`, retry loop, FFI default wrapping |
+| `src/backend/llvm/emit_expr.rs` | LLVM codegen for `Within` |
+| `src/backend/llvm/emit_toplevel.rs` | FFI default watchdog init |
+| `examples/temporal-fallback.bv` | All syntax forms demonstrated |
+| `docs/architecture/features/temporal-fallback.md` | Full design doc |
 
 ## Execution Order
 
-1. Phase 1 — AST + Parser ✅ ~1 session
-2. Phase 2 — Proof Engine cost model ~1 session
-3. Phase 3 — Interpreter runtime ~1 session
-4. Phase 4 — LLVM Backend runtime ~1 session
-5. Phase 5 — Stdlib annotations ~1 session
-6. Test + Fix ~1 session
+1. ✅ Syntax highlighter — add `~?`, `within`, `retry`, time units
+2. Lexer — `TildeQuestion` token, `within` keyword, time unit keywords
+3. AST — `Expr::Within`, `TimeUnit`, `WatchdogSpec`/`ForeignBinding` extensions
+4. Parser — within expressions, retry, frgn defaults
+5. Typechecker — body/fallback type unification
+6. Proof engine — `is_proven_terminable()` check
+7. Interpreter — retry loop + fallback eval in `eval_expr`
+8. LLVM backend — retry phi loop + fallback codegen
+9. FFI import defaults — automatic wrapping of frgn calls
+10. Tests — parser, typechecker, interpreter, LLVM, integration
+11. Example files — `examples/temporal-fallback.bv`
+12. Architecture docs — `temporal-fallback.md`
