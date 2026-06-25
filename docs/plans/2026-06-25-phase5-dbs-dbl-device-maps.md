@@ -181,7 +181,7 @@ After Phase 5, Brief programs can:
 import "target";  // loads board-level device constants
 
 // Interrupt handler registration
-volatile_store#(IVT_BASE + 32, timer_isr :> FnPtr);
+volatile_store#(IVT_BASE + 32, timer_isr :> Address);
 
 // MMIO register access with contracts
 let status: Byte = volatile_load#(uart_sr);

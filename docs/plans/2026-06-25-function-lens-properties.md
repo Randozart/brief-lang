@@ -18,23 +18,23 @@ A programmer writes:
 defn add(x: Int, y: Int) -> Int [x > 0][y > 0] { term x + y; };
 
 // Function properties via lens
-let addr: Int    = add :> FnPtr;       // entry address (for FFI callbacks)
-let name: String = add :> FnName;       // "add"
-let arity: Int   = add :> FnArity;      // 2
-let params: String = add :> FnParams;   // "Int, Int"
-let returns: String = add :> FnReturns; // "Int"
-let loc: String  = add :> FnLoc;        // "src/lib/math.bv:14"
-let doc: String  = add :> FnDoc;        // doc comment or ""
-let hash: Int    = add :> FnHash;       // stable content hash
-let contracts: String = add :> FnContracts; // "[x > 0][x > 0 && y > 0]"
-let module: String = add :> FnModule;   // "std/math"
-let is_pure: Bool = add :> FnIsPure;     // true (defn is always pure)
+let addr: Int    = add :> Address;       // entry address (for FFI callbacks)
+let name: String = add :> Name;       // "add"
+let arity: Int   = add :> Arity;      // 2
+let params: String = add :> Params;   // "Int, Int"
+let returns: String = add :> Returns; // "Int"
+let loc: String  = add :> Loc;        // "src/lib/math.bv:14"
+let doc: String  = add :> Doc;        // doc comment or ""
+let hash: Int    = add :> Hash;       // stable content hash
+let contracts: String = add :> Contracts; // "[x > 0][x > 0 && y > 0]"
+let module: String = add :> Module;   // "std/math"
+let is_pure: Bool = add :> IsPure;     // true (defn is always pure)
 ```
 
 The lens works identically on `inop!` and `txn`:
 ```brief
-let h: Int    = my_isr :> FnPtr;   // ISR address for IVT
-let doc: String = compute :> FnDoc; // txn doc string
+let h: Int    = my_isr :> Address;   // ISR address for IVT
+let doc: String = compute :> Doc; // txn doc string
 ```
 
 ---
@@ -47,17 +47,17 @@ Add to `ProjectionTarget` in `src/ast.rs`:
 
 | Variant | Returns | Description | Stable | Cost |
 |---|---|---|---|---|
-| `FnPtr` | `Int` | Function entry point address (lowered to `ptrtoint`) | ✅ | Trivial |
-| `FnName` | `String` | The declaration name as written | ✅ | Trivial |
-| `FnParams` | `String` | Comma-separated parameter types | ✅ | Trivial |
-| `FnReturns` | `String` | Comma-separated return types | ✅ | Trivial |
-| `FnArity` | `Int` | Number of parameters | ✅ | Trivial |
-| `FnLoc` | `String` | Source location `file:line:col` | ✅ | Trivial |
-| `FnDoc` | `String` | Doc comment text (or empty) | ✅ | Trivial |
-| `FnHash` | `Int` | Stable content hash (fxhash of name+params+body) | ✅ | Tiny |
-| `FnContracts` | `String` | Serialized pre/post condition | ✅ | Trivial |
-| `FnModule` | `String` | Module path (from `import` path) | ✅ | Trivial |
-| `FnIsPure` | `Bool` | True for `defn`, `inop` (without `!`), `txn` (callable) | ✅ | Trivial |
+| `Address` | `Int` | Function entry point address (lowered to `ptrtoint`) | ✅ | Trivial |
+| `Name` | `String` | The declaration name as written | ✅ | Trivial |
+| `Params` | `String` | Comma-separated parameter types | ✅ | Trivial |
+| `Returns` | `String` | Comma-separated return types | ✅ | Trivial |
+| `Arity` | `Int` | Number of parameters | ✅ | Trivial |
+| `Loc` | `String` | Source location `file:line:col` | ✅ | Trivial |
+| `Doc` | `String` | Doc comment text (or empty) | ✅ | Trivial |
+| `Hash` | `Int` | Stable content hash (fxhash of name+params+body) | ✅ | Tiny |
+| `Contracts` | `String` | Serialized pre/post condition | ✅ | Trivial |
+| `Module` | `String` | Module path (from `import` path) | ✅ | Trivial |
+| `IsPure` | `Bool` | True for `defn`, `inop` (without `!`), `txn` (callable) | ✅ | Trivial |
 | `FnSpan` | `(Int, Int)` | Start and end line numbers (1-indexed) | ✅ | Trivial |
 
 **Deferred** (not in first implementation):
@@ -72,18 +72,18 @@ Add to `ProjectionTarget` in `src/ast.rs`:
 
 All function metadata variants use the `Fn` prefix to avoid ambiguity with
 value-type projections. A function variable `f :> Ptr` extracts the Ptr property
-of `f`'s value (existing behavior) whereas `f :> FnPtr` extracts the function
+of `f`'s value (existing behavior) whereas `f :> Address` extracts the function
 entry address.
 
 ### 3. Parser
 
-**No changes.** `f :> FnPtr` is parsed by the existing `parse_projection_target`
+**No changes.** `f :> Address` is parsed by the existing `parse_projection_target`
 function, which already has a `_` catch-all for unrecognized names. New variants
-are handled by adding explicit `"FnPtr" => Ok(ProjectionTarget::FnPtr)` arms.
+are handled by adding explicit `"Address" => Ok(ProjectionTarget::Address)` arms.
 
 **File:** `src/parser.rs`
 **Function:** `parse_projection_target` (line 6973)
-**Change:** Add 12 new `"FnName" => Ok(ProjectionTarget::FnName)` match arms.
+**Change:** Add 12 new `"Name" => Ok(ProjectionTarget::Name)` match arms.
 **Lines added:** ~14
 
 ### 4. Typechecker
@@ -98,17 +98,17 @@ When the source expression is `Expr::Identifier(name)` and `name` resolves to a
 
 ```
 match target {
-    ProjectionTarget::FnPtr => Type::Int,
-    ProjectionTarget::FnName => Type::String,
-    ProjectionTarget::FnParams => Type::String,
-    ProjectionTarget::FnReturns => Type::String,
-    ProjectionTarget::FnArity => Type::Int,
-    ProjectionTarget::FnLoc => Type::String,
-    ProjectionTarget::FnDoc => Type::String,
-    ProjectionTarget::FnHash => Type::Int,
-    ProjectionTarget::FnContracts => Type::String,
-    ProjectionTarget::FnModule => Type::String,
-    ProjectionTarget::FnIsPure => Type::Bool,
+    ProjectionTarget::Address => Type::Int,
+    ProjectionTarget::Name => Type::String,
+    ProjectionTarget::Params => Type::String,
+    ProjectionTarget::Returns => Type::String,
+    ProjectionTarget::Arity => Type::Int,
+    ProjectionTarget::Loc => Type::String,
+    ProjectionTarget::Doc => Type::String,
+    ProjectionTarget::Hash => Type::Int,
+    ProjectionTarget::Contracts => Type::String,
+    ProjectionTarget::Module => Type::String,
+    ProjectionTarget::IsPure => Type::Bool,
     ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Int, Type::Int]),
 }
 ```
@@ -123,7 +123,7 @@ that checks whether `name` is registered in:
 
 **Error handling:**
 - If `name` is not a callable identifier, and the projection target is `Fn*`,
-  emit a diagnostic: "`FnPtr` projection requires a function, transaction, or
+  emit a diagnostic: "`Address` projection requires a function, transaction, or
   inop declaration name"
 - If `name` IS callable but the projection target is NOT `Fn*`, fall through
   to the existing projection logic (the function returns an Int, so `f :> Size`
@@ -147,10 +147,10 @@ pub enum OutputType {
 For `defn`, the type is determined by `output_type`. For `inop!`, by `outputs`.
 For `txn`, by `output_type` and `outputs`.
 
-The `FnParams` and `FnReturns` projections serialize these to strings. The
+The `Params` and `Returns` projections serialize these to strings. The
 format is:
-- `FnParams`: `"Int, Int, Bool"` — comma-separated type names
-- `FnReturns`: `"Int"` or `"Int, Bool"` — comma-separated type names
+- `Params`: `"Int, Int, Bool"` — comma-separated type names
+- `Returns`: `"Int"` or `"Int, Bool"` — comma-separated type names
 
 The element type names come from the `Type::display()` method (or a more
 compact serialization).
@@ -165,17 +165,17 @@ callable declaration in the interpreter's state, return the appropriate metadata
 
 | Target | Interpreter return value |
 |---|---|
-| `FnPtr` | `Value::Int(0)` — sentinel; real addresses only exist in codegen |
-| `FnName` | `Value::String(name.clone())` |
-| `FnParams` | `Value::String(params.join(", "))` |
-| `FnReturns` | `Value::String(returns.join(", "))` |
-| `FnArity` | `Value::Int(params.len() as i64)` |
-| `FnLoc` | `Value::String(loc)` — from declaration's span |
-| `FnDoc` | `Value::String(doc)` — extracted from comments |
-| `FnHash` | `Value::Int(hash)` — stable hash of name+params+returns+body |
-| `FnContracts` | `Value::String(contracts)` — pre/post as serialized string |
-| `FnModule` | `Value::String(module)` — from import path (or "") |
-| `FnIsPure` | `Value::Bool(true/false)` — false for `inop!` and reactive `txn` |
+| `Address` | `Value::Int(0)` — sentinel; real addresses only exist in codegen |
+| `Name` | `Value::String(name.clone())` |
+| `Params` | `Value::String(params.join(", "))` |
+| `Returns` | `Value::String(returns.join(", "))` |
+| `Arity` | `Value::Int(params.len() as i64)` |
+| `Loc` | `Value::String(loc)` — from declaration's span |
+| `Doc` | `Value::String(doc)` — extracted from comments |
+| `Hash` | `Value::Int(hash)` — stable hash of name+params+returns+body |
+| `Contracts` | `Value::String(contracts)` — pre/post as serialized string |
+| `Module` | `Value::String(module)` — from import path (or "") |
+| `IsPure` | `Value::Bool(true/false)` — false for `inop!` and reactive `txn` |
 | `FnSpan` | `Value::Tuple(vec![Value::Int(start), Value::Int(end)])` |
 
 **Detection of callable identifiers in interpreter:**
@@ -212,27 +212,27 @@ Populated once during interpreter initialization by scanning:
 
 | Target | LLVM IR |
 |---|---|
-| `FnPtr` | `%addr = ptrtoint @fn_name to i64` |
-| `FnName` | `@fn_name_str = private unnamed_addr constant [N x i8] c"name\00"` + `getelementptr` |
-| `FnParams` | Same as FnName — constant string global |
-| `FnReturns` | Same — constant string global |
-| `FnArity` | `add i64 0, N` |
-| `FnLoc` | Constant string global |
-| `FnDoc` | Constant string global |
-| `FnHash` | `add i64 0, HASH` |
-| `FnContracts` | Constant string global |
-| `FnModule` | Constant string global |
-| `FnIsPure` | `add i64 0, 1` (true) or `add i64 0, 0` (false) |
+| `Address` | `%addr = ptrtoint @fn_name to i64` |
+| `Name` | `@fn_name_str = private unnamed_addr constant [N x i8] c"name\00"` + `getelementptr` |
+| `Params` | Same as Name — constant string global |
+| `Returns` | Same — constant string global |
+| `Arity` | `add i64 0, N` |
+| `Loc` | Constant string global |
+| `Doc` | Constant string global |
+| `Hash` | `add i64 0, HASH` |
+| `Contracts` | Constant string global |
+| `Module` | Constant string global |
+| `IsPure` | `add i64 0, 1` (true) or `add i64 0, 0` (false) |
 | `FnSpan` | Insert into a 2-element `%Tuple` struct |
 
 **Implementation strategy for string constants:**
 
-For each function metadata string (FnName, FnParams, FnReturns, FnLoc, FnDoc,
-FnContracts, FnModule), the LLVM backend emits an anonymous global constant
+For each function metadata string (Name, Params, Returns, Loc, Doc,
+Contracts, Module), the LLVM backend emits an anonymous global constant
 the first time it's requested and caches it. Subsequent references reuse the
 same global.
 
-For number-valued targets (FnPtr, FnArity, FnHash, FnIsPure), inline constants
+For number-valued targets (Address, Arity, Hash, IsPure), inline constants
 are used.
 
 **Detection of callable identifiers in LLVM backend:**
@@ -242,7 +242,7 @@ The LLVM backend stores function metadata:
 - `self.inop_decls: HashMap<String, InopDeclaration>` (line 1605)
 - `self.defn_return_types: HashMap<String, Vec<Type>>` (line 1599)
 
-When `Expr::Projection { source: Expr::Identifier(name), target: FnPtr }`
+When `Expr::Projection { source: Expr::Identifier(name), target: Address }`
 is encountered, check if `name` is in any of these maps. If so, emit the
 function metadata projection. Otherwise, fall through to existing projection
 logic.
@@ -256,13 +256,13 @@ projection target. Since metadata strings are statically known, they can be
 inlined:
 
 ```rust
-ProjectionTarget::FnName => format!("\"{}\"", fn_name),
-ProjectionTarget::FnArity => format!("{}", arity),
-ProjectionTarget::FnParams => format!("\"{}\"", params),
+ProjectionTarget::Name => format!("\"{}\"", fn_name),
+ProjectionTarget::Arity => format!("{}", arity),
+ProjectionTarget::Params => format!("\"{}\"", params),
 // etc.
 ```
 
-`FnPtr` returns `0` (no real pointer in WASM). `FnIsPure` returns `true`/`false`.
+`Address` returns `0` (no real pointer in WASM). `IsPure` returns `true`/`false`.
 
 ### 8. CIRCT Backend
 
@@ -345,7 +345,7 @@ Add 12 new arms returning `SymbolicValue::Unknown`.
 
 ## Design Decision: No Indirect Calls
 
-`fn_name :> FnPtr` provides the **address** of a function as an integer. This is
+`fn_name :> Address` provides the **address** of a function as an integer. This is
 sufficient for FFI callbacks (passing to C via `frgn`) and embedded interrupt
 vector tables (storing via `volatile_store#`).
 
@@ -363,11 +363,11 @@ Every use case for indirect calls has a better Brief-native mechanism:
 |---|---|---|
 | `dispatch_table[i](arg)` | `rct txn` with contract convergence | Contract-proven, optimizable |
 | `sort(&cmp_fn, list)` | Generics + `:>` type dispatch | Static dispatch, inlinable |
-| `signal(SIGINT, &handler)` | `frgn signal(sig: Int, handler: Int)` + `handler :> FnPtr` | Address at boundary, contracts intact |
+| `signal(SIGINT, &handler)` | `frgn signal(sig: Int, handler: Int)` + `handler :> Address` | Address at boundary, contracts intact |
 
 ### Embedded Brief note
 
-For Embedded Brief targets, `fn_name :> FnPtr` is critical: it allows storing
+For Embedded Brief targets, `fn_name :> Address` is critical: it allows storing
 function addresses into interrupt vector tables, callback registration slots,
 and linker-specified entry points — all typed through contract-proven `inop!`
 declarations with `volatile_store#`. The address is just an integer; Brief's
@@ -390,7 +390,7 @@ Reason: The `fn(T) -> U` type and `&f` address-of operator required:
 - Updates at 204 `OwnedRef` match sites across 22+ source files
 - LLVM indirect call codegen
 
-All of this is obviated by `f :> FnPtr` lens syntax, which:
+All of this is obviated by `f :> Address` lens syntax, which:
 - Uses existing `:>` projection infrastructure (22 files already handle it)
 - Requires zero parser changes (existing `:>` parsing works)
 - Requires zero AST changes (new `ProjectionTarget` variants only)

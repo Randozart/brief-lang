@@ -160,7 +160,7 @@ type HashMap <: List {
 type SkipList<T> <: List<T> {
     InsertAt = _sl_insert;
     ExtractFrom = _sl_remove;
-    Contains(v) = _ :> _sl_search(v);
+    Contains(v) = _ :> sl_contains(v);
 };
 
 // ─────────────────────────────────────────────────────────────

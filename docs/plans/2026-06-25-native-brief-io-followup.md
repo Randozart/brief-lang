@@ -400,7 +400,7 @@ The `fn(T) -> U` type, `Expr::AddressOf`, and `&f` address-of operator are
 cancelled. Instead, function metadata is accessed via the existing `:>` lens:
 
 ```brief
-let addr: Int = add :> FnPtr;   // replaces &f
+let addr: Int = add :> Address;   // replaces &f
 ```
 
 Rationale:
