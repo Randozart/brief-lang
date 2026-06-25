@@ -4989,6 +4989,50 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         Ok(statements)
     }
 
+    /// Parse a time unit keyword. Returns an error if no time unit is found.
+    fn parse_time_unit(&mut self) -> Result<TimeUnit, SyntaxError> {
+        match self.current_token() {
+            Some(Ok(Token::Cycles)) => { self.advance(); Ok(TimeUnit::Cycles) }
+            Some(Ok(Token::Cyc)) => { self.advance(); Ok(TimeUnit::Cycles) }
+            Some(Ok(Token::Ms)) => { self.advance(); Ok(TimeUnit::Ms) }
+            Some(Ok(Token::Seconds)) => { self.advance(); Ok(TimeUnit::Seconds) }
+            Some(Ok(Token::Minute)) => { self.advance(); Ok(TimeUnit::Minutes) }
+            Some(Ok(Token::Minutes)) => { self.advance(); Ok(TimeUnit::Minutes) }
+            Some(Ok(Token::Nanoseconds)) => { self.advance(); Ok(TimeUnit::Nanoseconds) }
+            _ => {
+                // Also accept identifiers: cyc, s, ms, min, ns
+                if let Some(Ok(Token::Identifier(s))) = self.current_token() {
+                    match s.as_str() {
+                        "s" | "sec" | "seconds" | "secs" => { self.advance(); Ok(TimeUnit::Seconds) }
+                        "ms" => { self.advance(); Ok(TimeUnit::Ms) }
+                        "min" | "mins" | "minutes" => { self.advance(); Ok(TimeUnit::Minutes) }
+                        "ns" | "nanos" | "nanoseconds" => { self.advance(); Ok(TimeUnit::Nanoseconds) }
+                        "cyc" | "cycles" => { self.advance(); Ok(TimeUnit::Cycles) }
+                        _ => self.spanned_err("Expected time unit: cyc, s, ms, min, ns, or full name".to_string())
+                    }
+                } else {
+                    self.spanned_err("Expected time unit: cyc, s, ms, min, ns, or full name".to_string())
+                }
+            }
+        }
+    }
+
+    /// Parse a time unit keyword, defaulting to TimeUnit::Cycles if absent.
+    fn parse_time_unit_or_default(&mut self) -> Result<TimeUnit, SyntaxError> {
+        match self.current_token() {
+            Some(Ok(Token::Cycles)) | Some(Ok(Token::Cyc))
+            | Some(Ok(Token::Ms)) | Some(Ok(Token::Seconds))
+            | Some(Ok(Token::Minute)) | Some(Ok(Token::Minutes))
+            | Some(Ok(Token::Nanoseconds)) => self.parse_time_unit(),
+            Some(Ok(Token::Identifier(s))) => match s.as_str() {
+                "cyc" | "cycles" | "s" | "sec" | "secs" | "seconds"
+                | "ms" | "min" | "mins" | "minutes" | "ns" | "nanos" | "nanoseconds" => self.parse_time_unit(),
+                _ => Ok(TimeUnit::Cycles),
+            },
+            _ => Ok(TimeUnit::Cycles),
+        }
+    }
+
     /// Extract the base identifier from a potentially nested access expression.
     /// For `program.items[i]` → returns "program".
     fn get_base_identifier(&self, expr: &Expr) -> String {
@@ -5773,29 +5817,7 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                     if let Some(Ok(Token::Within)) = self.current_token() {
                         self.advance();
                         let expr = self.parse_expression()?;
-                        let unit = match self.current_token() {
-                            Some(Ok(Token::Cycles)) => {
-                                self.advance();
-                                TimeUnit::Cycles
-                            }
-                            Some(Ok(Token::Cyc)) => {
-                                self.advance();
-                                TimeUnit::Cycles
-                            }
-                            Some(Ok(Token::Ms)) => {
-                                self.advance();
-                                TimeUnit::Ms
-                            }
-                            Some(Ok(Token::Seconds)) => {
-                                self.advance();
-                                TimeUnit::Seconds
-                            }
-                            Some(Ok(Token::Minute)) => {
-                                self.advance();
-                                TimeUnit::Minutes
-                            }
-                            _ => TimeUnit::Cycles,
-                        };
+                        let unit = self.parse_time_unit_or_default()?;
                         timeout = Some((expr, unit));
                     }
 
@@ -6910,6 +6932,40 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 } else {
                     break; // leave # for outer parser (modifiers)
                 }
+            } else if let Some(Ok(Token::Within)) = self.current_token() {
+                // expr within N cycles (M) ~? fallback
+                self.advance();
+                let bound = self.expect_integer()?;
+                if bound < 0 {
+                    return self.spanned_err("Bound must be non-negative".to_string());
+                }
+                let unit = self.parse_time_unit()?;
+                let retries = if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let n = self.expect_integer()?;
+                    if n < 0 { return self.spanned_err("Retry must be non-negative".to_string()); }
+                    self.expect(Token::RParen)?;
+                    n as u64
+                } else if let Some(Ok(Token::Identifier(s))) = self.current_token() {
+                    if s == "retry" || s == "RETRY" {
+                        self.advance();
+                        let n = self.expect_integer()?;
+                        if n < 0 { return self.spanned_err("Retry must be non-negative".to_string()); }
+                        n as u64
+                    } else { 0 }
+                } else { 0 };
+                if !matches!(self.current_token(), Some(Ok(Token::TildeQuestion))) {
+                    return self.spanned_err("Expected '~?' after timeout bound".to_string());
+                }
+                self.advance();
+                let fallback = Box::new(self.parse_expression()?);
+                expr = Expr::Within {
+                    body: Box::new(expr),
+                    bound: bound as u64,
+                    unit,
+                    retries,
+                    fallback,
+                };
             } else {
                 break;
             }
@@ -7055,6 +7111,51 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 } else {
                     break; // leave # for outer parser (modifiers)
                 }
+            } else if let Some(Ok(Token::Within)) = self.current_token() {
+                // foo() within N cycles (M) ~? bar()
+                self.advance();
+                let bound = self.expect_integer()?;
+                if bound < 0 {
+                    return self.spanned_err("Bound must be non-negative".to_string());
+                }
+                let unit = self.parse_time_unit()?;
+                // Optional retry count: (N) or retry N
+                let retries = if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let n = self.expect_integer()?;
+                    if n < 0 {
+                        return self.spanned_err("Retry count must be non-negative".to_string());
+                    }
+                    self.expect(Token::RParen)?;
+                    n as u64
+                } else if let Some(Ok(Token::Identifier(s))) = self.current_token() {
+                    if s == "retry" || s == "RETRY" {
+                        self.advance();
+                        let n = self.expect_integer()?;
+                        if n < 0 {
+                            return self.spanned_err("Retry count must be non-negative".to_string());
+                        }
+                        n as u64
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                };
+                // Expect ~? and parse fallback
+                if let Some(Ok(Token::TildeQuestion)) = self.current_token() {
+                    self.advance();
+                } else {
+                    return self.spanned_err("Expected '~?' after timeout bound".to_string());
+                }
+                let fallback = Box::new(self.parse_expression()?);
+                expr = Expr::Within {
+                    body: Box::new(expr),
+                    bound: bound as u64,
+                    unit,
+                    retries,
+                    fallback,
+                };
             } else {
                 break;
             }
