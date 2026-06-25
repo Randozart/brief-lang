@@ -1,0 +1,82 @@
+// SkipList<T> — sorted list with O(log n) search/insert/delete.
+//
+// TypeDef links `<-` to _sl_insert and _sl_remove via the Custom strategy.
+// The inop fallbacks provide pure-Brief reference implementations for the
+// interpreter. The BILD bodies (stubbed with `term %res;`) are the hooks
+// for LLVM backend optimization — a real skip list structure with
+// multi-level forward pointers should be emitted here.
+//
+// Type definition: SkipList derives from List, sharing its flat i64 buffer
+// layout. The Custom strategy in InsertAt/ExtractFrom redirects `<-` to
+// the inop declarations below.
+
+type SkipList<T> <: List<T> {
+    InsertAt = _sl_insert;
+    ExtractFrom = _sl_remove;
+};
+
+// -- Inop declarations (dispatched by Custom strategy) --
+
+inop _sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
+    [true][term :> Size == list :> Size + 1]
+{ term %res; }
+fallback {
+    // Reference append: interpreter uses standard List push.
+    // A real BILD body would perform a skip list sorted insert.
+    &list <- val;
+    term list;
+};
+
+inop _sl_remove<T>(list: SkipList<T>) -> (T, SkipList<T>)
+    [list :> Size > 0][term :> 1 :> Size == list :> Size - 1]
+{ term %res; }
+fallback {
+    // Reference pop: interpreter uses standard List pop.
+    // A real BILD body would perform a skip list delete.
+    let v: T = <- &list;
+    term (v, list);
+};
+
+// -- Public API --
+
+defn new_skiplist<T>() -> SkipList<T>
+    [true][term :> Size == 0]
+{
+    term [];
+};
+
+defn sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
+    [true][list :> Contains(val) || term :> Size == list :> Size + 1]
+{
+    term &list <- val;
+};
+
+// Linear search for value. O(n) in the interpreter fallback;
+// O(log n) when the LLVM backend uses the skip list BILD body.
+txn sl_contains_loop<T>(list: SkipList<T>, val: T, i: Int)
+    [i < list :> Size][i == list :> Size] -> Bool
+{
+    [list[i] == val] {
+        term true;
+    };
+    &i = i + 1;
+    term false;
+};
+
+defn sl_contains<T>(list: SkipList<T>, val: T) -> Bool
+    [true][term == true || term == false]
+{
+    term sl_contains_loop(list, val, 0);
+};
+
+defn sl_to_list<T>(list: SkipList<T>) -> List<T> {
+    term list;
+};
+
+defn sl_len<T>(list: SkipList<T>) -> Int {
+    term list :> Size;
+};
+
+defn sl_is_empty<T>(list: SkipList<T>) -> Bool {
+    term (list :> Size) == 0;
+};

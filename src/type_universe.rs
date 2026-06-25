@@ -92,7 +92,7 @@ const KNOWN_CODECS: &[&str] = &["Utf8", "Utf16", "Big5", "ShiftJIS", "EucJP", "B
 
 /// Strategy for inserting into a collection.
 /// Maps from InsertAt binding strings to dispatch logic.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum InsertStrategy {
     /// Append to end (List::push / queue::push_back). Default for List.
     Append,
@@ -102,11 +102,15 @@ pub enum InsertStrategy {
     Sorted,
     /// Hash-based insert (HashMap insert).
     Hash,
+    /// User-defined function name for insert. The TypeDef's InsertAt binding
+    /// resolved to a string that doesn't match any built-in strategy.
+    /// `<-` dispatch calls this function with (collection, value).
+    Custom(String),
 }
 
 /// Strategy for extracting from a collection.
 /// Maps from ExtractFrom binding strings to dispatch logic.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ExtractStrategy {
     /// Pop from end (List::pop / stack::pop). Default for List/Stack.
     Pop,
@@ -114,6 +118,10 @@ pub enum ExtractStrategy {
     Shift,
     /// Hash-based extract (HashMap remove).
     Hash,
+    /// User-defined function name for extract. The TypeDef's ExtractFrom
+    /// binding resolved to a string that doesn't match any built-in strategy.
+    /// `<-` dispatch calls this function with (collection).
+    Custom(String),
 }
 
 impl TypeUniverse {
@@ -452,7 +460,7 @@ impl TypeUniverse {
             "prepend" => Some(InsertStrategy::Prepend),
             "sorted" => Some(InsertStrategy::Sorted),
             "hash" => Some(InsertStrategy::Hash),
-            _ => None,
+            _ => Some(InsertStrategy::Custom(strat.clone())),
         }
     }
 
@@ -466,7 +474,7 @@ impl TypeUniverse {
             "head" => Some(ExtractStrategy::Shift),
             "tail" => Some(ExtractStrategy::Pop),
             "hash" => Some(ExtractStrategy::Hash),
-            _ => None,
+            _ => Some(ExtractStrategy::Custom(strat.clone())),
         }
     }
 
@@ -808,7 +816,7 @@ mod tests {
         };
         let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
         let universe = TypeUniverse::build(&program);
-        assert_eq!(universe.insert_strategy("Custom"), None);
+        assert_eq!(universe.insert_strategy("Custom"), Some(InsertStrategy::Custom("custom_strat".into())));
     }
 
     #[test]

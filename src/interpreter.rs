@@ -289,6 +289,10 @@ pub struct Interpreter {
     /// Watchdog cycle budget — the maximum number of statements before timeout.
     cycle_budget: u64,
     pub type_universe: Option<crate::type_universe::TypeUniverse>,
+    /// Maps variable names to their declared type annotations.
+    /// Used by lookup_insert_strategy / lookup_extract_strategy to resolve
+    /// the declared type name for strategy dispatch (vs the variable name).
+    pub let_types: HashMap<String, crate::ast::Type>,
     /// Default watchdogs for frgn functions — wraps calls automatically.
     pub frgn_watchdogs: std::collections::HashMap<String, (u64, TimeUnit, u64, Option<Expr>)>,
     pub inop_decls: HashMap<String, InopDeclaration>,
@@ -328,6 +332,7 @@ impl Clone for Interpreter {
             cycle_counter: 0,
             cycle_budget: u64::MAX,
             type_universe: self.type_universe.clone(),
+            let_types: HashMap::new(),
             frgn_watchdogs: self.frgn_watchdogs.clone(),
             inop_decls: self.inop_decls.clone(),
             cell_defs: self.cell_defs.clone(),
@@ -487,6 +492,7 @@ impl Interpreter {
             cycle_counter: 0,
             cycle_budget: u64::MAX,
             type_universe: None,
+            let_types: HashMap::new(),
             frgn_watchdogs: std::collections::HashMap::new(),
             inop_decls: HashMap::new(),
             cell_defs: HashMap::new(),
@@ -738,6 +744,95 @@ impl Interpreter {
         Ok(result)
     }
 
+    /// Call a function by name with pre-evaluated Value arguments.
+    /// Tries inop first (uses fallback expression), then regular defn.
+    /// Used by Custom insert/extract strategy dispatch in arrow.rs.
+    pub(crate) fn call_custom_fn(&mut self, fn_name: &str, args: Vec<Value>) -> Result<Value, RuntimeError> {
+        if let Some(inop) = self.inop_decls.get(fn_name).cloned() {
+            if let Some(fallback) = inop.fallback {
+                let mut local_state = self.state.clone();
+                for (i, (param_name, _)) in inop.params.iter().enumerate() {
+                    if i < args.len() {
+                        local_state.insert(param_name.clone(), args[i].clone());
+                    }
+                }
+                let prev_state = std::mem::replace(&mut self.state, local_state);
+                let result = self.eval_expr(&fallback);
+                self.state = prev_state;
+                return result;
+            }
+        }
+        if let Some(defn) = self.definitions.get(fn_name).cloned() {
+            let mut local_scope = self.state.clone();
+            for (i, (param_name, _)) in defn.parameters.iter().enumerate() {
+                if i < args.len() {
+                    local_scope.insert(param_name.clone(), args[i].clone());
+                }
+            }
+            let old_state = std::mem::replace(&mut self.state, local_scope);
+            let old_return = self.return_value.take();
+            let mut result = Value::Void;
+            for stmt in &defn.body {
+                match stmt {
+                    Statement::Term { values: outputs, swan_song, .. } => {
+                        if outputs.len() > 1 {
+                            let mut collected = Vec::new();
+                            for out in outputs {
+                                if let Some(expr) = out {
+                                    collected.push(self.eval_expr(expr)?);
+                                }
+                            }
+                            if let Some(swan) = swan_song {
+                                self.exec_stmt(swan)?;
+                            }
+                            self.return_value = Some(Value::List(collected));
+                        } else if let Some(Some(expr)) = outputs.first() {
+                            result = self.eval_expr(expr)?;
+                            if let Some(swan) = swan_song {
+                                self.exec_stmt(swan)?;
+                            }
+                            self.return_value = Some(result.clone());
+                        }
+                    }
+                    Statement::TermBang { values: outputs, swan_song, .. } => {
+                        if outputs.len() > 1 {
+                            let mut collected = Vec::new();
+                            for out in outputs {
+                                if let Some(expr) = out {
+                                    collected.push(self.eval_expr(expr)?);
+                                }
+                            }
+                            if let Some(swan) = swan_song {
+                                self.exec_stmt(swan)?;
+                            }
+                            self.return_value = Some(Value::List(collected));
+                        } else if let Some(Some(expr)) = outputs.first() {
+                            result = self.eval_expr(expr)?;
+                            if let Some(swan) = swan_song {
+                                self.exec_stmt(swan)?;
+                            }
+                            self.return_value = Some(result.clone());
+                        }
+                    }
+                    _ => {
+                        self.exec_stmt(stmt)?;
+                    }
+                }
+                if self.return_value.is_some() {
+                    result = self.return_value.take().unwrap();
+                    break;
+                }
+            }
+            self.state = old_state;
+            self.return_value = old_return;
+            return Ok(result);
+        }
+        Err(RuntimeError::TypeMismatch(format!(
+            "unknown custom insert/extract function: `{}` — no inop or defn found with that name",
+            fn_name
+        )))
+    }
+
     pub(crate) fn call_txn(&mut self, name: &str, args: &[Expr]) -> Result<Value, RuntimeError> {
         let txn = match self.callable_txns.get(name) {
             Some(t) => t.clone(),
@@ -980,29 +1075,30 @@ impl Interpreter {
         }
     }
 
-    /// Try to apply an InsertAt strategy from TypeUniverse for the given scope/root name.
-    /// Returns Some(InsertStrategy) if a matching type is found with InsertAt defined.
+    /// Try to apply an InsertAt strategy from TypeUniverse for the given variable.
+    /// Resolves the variable's declared type (from `let_types`) to look up
+    /// the strategy in the type universe, rather than using the variable name.
     /// Falls back to None (caller uses default behavior).
     pub(crate) fn lookup_insert_strategy(&self, root_name: &str) -> Option<crate::type_universe::InsertStrategy> {
         let tu = self.type_universe.as_ref()?;
-        // Try the root variable name as a type name directly
-        if let Some(s) = tu.insert_strategy(root_name) {
-            return Some(s);
-        }
-        // Check if root is a known collection by value type fallback
-        // We don't have per-variable type info, so this is a best-effort heuristic.
-        // The canonical case is: variable named after its type, or a type in universe
-        // that derives from a collection type with the strategy.
-        None
+        // Resolve declared type from the type annotation, then look up strategy
+        let type_name = self.let_types.get(root_name).and_then(|t| match t {
+            crate::ast::Type::Custom(n) => Some(n.as_str()),
+            crate::ast::Type::Applied(n, _) => Some(n.as_str()),
+            _ => None,
+        })?;
+        tu.insert_strategy(type_name)
     }
 
     /// Try to apply an ExtractFrom strategy from TypeUniverse.
     pub(crate) fn lookup_extract_strategy(&self, root_name: &str) -> Option<crate::type_universe::ExtractStrategy> {
         let tu = self.type_universe.as_ref()?;
-        if let Some(s) = tu.extract_strategy(root_name) {
-            return Some(s);
-        }
-        None
+        let type_name = self.let_types.get(root_name).and_then(|t| match t {
+            crate::ast::Type::Custom(n) => Some(n.as_str()),
+            crate::ast::Type::Applied(n, _) => Some(n.as_str()),
+            _ => None,
+        })?;
+        tu.extract_strategy(type_name)
     }
 
     /// Convert a Value to a String for use as a HashMap key.
@@ -2234,6 +2330,9 @@ impl Interpreter {
                     }
                     if let Some(ann_ty) = ty {
                         self.check_type_guards(ann_ty, &value)?;
+                        self.let_types.insert(name.clone(), ann_ty.clone());
+                    } else {
+                        self.let_types.remove(name);
                     }
                     self.state.insert(name.clone(), value);
                 }
@@ -10297,6 +10396,255 @@ mod tests {
         assert!(result.is_err(), "inop# without fallback should error in interpreter");
         let err = format!("{:?}", result.unwrap_err());
         assert!(err.contains("no fallback"), "error should mention 'no fallback', got: {}", err);
+    }
+
+    #[test]
+    fn test_custom_insert_strategy_dispatch() {
+        let mut i = Interpreter::new();
+        use crate::ast::{TopLevel, Program, TypeDef, TypeDefBody, TypeBinding, InopDeclaration, Contract, Statement, Expr, Type, ArrowDir};
+        use crate::interpreter::Value;
+        // Set up type "MyList" with InsertAt = "my_insert"
+        let td = TypeDef {
+            name: "MyList".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("List".into())),
+            body: TypeDefBody {
+                bindings: vec![TypeBinding {
+                    name: "InsertAt".into(),
+                    params: vec![],
+                    value: Box::new(Expr::Identifier("my_insert".into())),
+                    span: None,
+                }],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = Program {
+            items: vec![TopLevel::TypeDef(Box::new(td))],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: crate::interpreter::StrictMode::Off,
+            dispatch_mode: crate::interpreter::DispatchMode::Sequential,
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        i.type_universe = Some(crate::type_universe::TypeUniverse::build(&program));
+        // Set up an inop "my_insert" whose fallback returns a known value
+        i.inop_decls.insert("my_insert".into(), InopDeclaration {
+            name: "my_insert".into(),
+            params: vec![("list".into(), Type::Void), ("val".into(), Type::Void)],
+            outputs: vec![Type::Int],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec![],
+            fallback: Some(Expr::Integer(999)),
+            has_side_effects: false,
+            has_state_access: false,
+            llvm_body_spans: vec![],
+            span: None,
+        });
+        // Declare variable with MyList type
+        let let_stmt = Statement::Let {
+            name: "x".into(),
+            ty: Some(Type::Custom("MyList".into())),
+            expr: Some(Expr::ListLiteral(vec![Expr::Integer(10)])),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: None,
+            is_override: false,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&let_stmt).unwrap();
+        assert_eq!(i.state.get("x"), Some(&Value::List(vec![Value::Int(10)])));
+        // Execute &x <- 42 — should dispatch through Custom("my_insert")
+        let push_stmt = Statement::Expression(Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("x".into())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::Integer(42))),
+        });
+        let result = i.exec_stmt(&push_stmt);
+        assert!(result.is_ok(), "ArrowMut Push should succeed: {:?}", result);
+        // The custom inop fallback returns Int(999), which replaces the collection value
+        assert_eq!(i.state.get("x"), Some(&Value::Int(999)),
+            "Custom strategy should have dispatched to my_insert# which returns 999");
+    }
+
+    #[test]
+    fn test_custom_extract_strategy_dispatch() {
+        let mut i = Interpreter::new();
+        use crate::ast::{TopLevel, Program, TypeDef, TypeDefBody, TypeBinding, InopDeclaration, Contract, Statement, Expr, Type, ArrowDir};
+        use crate::interpreter::Value;
+        // Set up type "MyQueue" with ExtractFrom = "my_extract"
+        let td = TypeDef {
+            name: "MyQueue".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("List".into())),
+            body: TypeDefBody {
+                bindings: vec![TypeBinding {
+                    name: "ExtractFrom".into(),
+                    params: vec![],
+                    value: Box::new(Expr::Identifier("my_extract".into())),
+                    span: None,
+                }],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = Program {
+            items: vec![TopLevel::TypeDef(Box::new(td))],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: crate::interpreter::StrictMode::Off,
+            dispatch_mode: crate::interpreter::DispatchMode::Sequential,
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        i.type_universe = Some(crate::type_universe::TypeUniverse::build(&program));
+        // Inop "my_extract" fallback returns (pushed_value, new_collection) as a 2-element tuple
+        i.inop_decls.insert("my_extract".into(), InopDeclaration {
+            name: "my_extract".into(),
+            params: vec![("list".into(), Type::Void)],
+            outputs: vec![Type::Int, Type::Void],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            llvm_body: vec![],
+            fallback: Some(Expr::ListLiteral(vec![
+                Expr::Integer(777),
+                Expr::ListLiteral(vec![]),
+            ])),
+            has_side_effects: false,
+            has_state_access: false,
+            llvm_body_spans: vec![],
+            span: None,
+        });
+        // Declare variable with MyQueue type
+        let let_stmt = Statement::Let {
+            name: "q".into(),
+            ty: Some(Type::Custom("MyQueue".into())),
+            expr: Some(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)])),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: None,
+            is_override: false,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&let_stmt).unwrap();
+        // Execute val <- &q — should dispatch through Custom("my_extract")
+        let pop_stmt = Statement::Expression(Expr::ArrowMut {
+            dir: ArrowDir::Pop,
+            target: Box::new(Expr::OwnedRef("q".into())),
+            index: Box::new(Expr::Term),
+            value: None,
+        });
+        let result = i.exec_stmt(&pop_stmt);
+        assert!(result.is_ok(), "ArrowMut Pop should succeed: {:?}", result);
+        // The custom inop fallback returns ([777, []], []). The first element (777) is
+        // the popped value. The second element ([]) is the new collection.
+        assert_eq!(i.state.get("q"), Some(&Value::List(vec![])),
+            "Custom extract should have updated collection to the second return element");
+    }
+
+    #[test]
+    fn test_custom_insert_strategy_with_defn() {
+        let mut i = Interpreter::new();
+        use crate::ast::{TopLevel, Program, TypeDef, TypeDefBody, TypeBinding, Definition, Statement, Expr, Type, ArrowDir};
+        use crate::interpreter::Value;
+        // Set up type "SList" with InsertAt = "sl_insert_fn"
+        let td = TypeDef {
+            name: "SList".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("List".into())),
+            body: TypeDefBody {
+                bindings: vec![TypeBinding {
+                    name: "InsertAt".into(),
+                    params: vec![],
+                    value: Box::new(Expr::Identifier("sl_insert_fn".into())),
+                    span: None,
+                }],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = Program {
+            items: vec![TopLevel::TypeDef(Box::new(td))],
+            comments: vec![],
+            reactor_speed: None,
+            attrs: vec![],
+            ffi: None,
+            strict_mode: crate::interpreter::StrictMode::Off,
+            dispatch_mode: crate::interpreter::DispatchMode::Sequential,
+            exit_condition: None,
+            out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        i.type_universe = Some(crate::type_universe::TypeUniverse::build(&program));
+        // Define a defn that appends and adds a sentinel value
+        let defn = Definition {
+            name: "sl_insert_fn".into(),
+            type_params: vec![],
+            parameters: vec![("l".into(), Type::Void), ("v".into(), Type::Void)],
+            outputs: vec![Type::Void],
+            output_type: None,
+            output_names: vec![],
+            contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![
+                Statement::Term {
+                    values: vec![Some(Expr::ArrowMut {
+                        dir: ArrowDir::Push,
+                        target: Box::new(Expr::OwnedRef("l".into())),
+                        index: Box::new(Expr::Term),
+                        value: Some(Box::new(Expr::Identifier("v".into()))),
+                    })],
+                    swan_song: None,
+                    modifiers: vec![],
+                },
+            ],
+            is_lambda: false,
+            modifiers: vec![],
+            variant_bodies: vec![],
+        };
+        i.definitions.insert("sl_insert_fn".into(), defn);
+        // Declare variable with SList type
+        let let_stmt = Statement::Let {
+            name: "s".into(),
+            ty: Some(Type::Custom("SList".into())),
+            expr: Some(Expr::ListLiteral(vec![Expr::Integer(1)])),
+            address: None,
+            address_expr: None,
+            bit_range: None,
+            constraint: None,
+            is_override: false,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&let_stmt).unwrap();
+        // Execute &s <- 42 — should dispatch through Custom("sl_insert_fn")
+        let push_stmt = Statement::Expression(Expr::ArrowMut {
+            dir: ArrowDir::Push,
+            target: Box::new(Expr::OwnedRef("s".into())),
+            index: Box::new(Expr::Term),
+            value: Some(Box::new(Expr::Integer(42))),
+        });
+        let result = i.exec_stmt(&push_stmt);
+        assert!(result.is_ok(), "ArrowMut Push via defn should succeed: {:?}", result);
+        // The defn appends 42 to the list
+        assert_eq!(i.state.get("s"), Some(&Value::List(vec![Value::Int(1), Value::Int(42)])),
+            "Custom strategy via defn should have appended 42");
     }
 
     #[test]

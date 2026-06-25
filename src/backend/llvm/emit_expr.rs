@@ -3658,9 +3658,26 @@ impl LlvmBackend {
                 let elem_val = self.emit_expr(out, val, indent);
                 let list_boxed = self.adapt_to_i64(out, indent, &list_val);
                 let elem_boxed = self.adapt_to_i64(out, indent, &elem_val);
-                // Check InsertAt strategy for this target
-                let prepend = self.check_insert_strategy(target).map_or(false,
-                    |s| s == crate::type_universe::InsertStrategy::Prepend);
+                // Check InsertAt strategy: Custom functions get an early call emission,
+                // built-in strategies determine prepend vs append behavior.
+                let push_strategy = self.check_insert_strategy(target);
+                if let Some(crate::type_universe::InsertStrategy::Custom(fn_name)) = &push_strategy {
+                    // Custom push: emit call @fn_name(i64, i64) -> i64
+                    writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})", indent, v, fn_name, list_boxed, elem_boxed).ok();
+                    // Store new list handle back to state field if target is OwnedRef
+                    if let Expr::OwnedRef(field_name) = target.as_ref() {
+                        if let Some(&idx) = self.field_index_map.get(field_name) {
+                            let ap = format!("%aap{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
+                            let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, v, ap, tn).ok();
+                        } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, v, slot).ok();
+                        }
+                    }
+                    return TypedRegister { name: v, ty: Type::Int };
+                }
+                let prepend = matches!(push_strategy, Some(crate::type_universe::InsertStrategy::Prepend));
                 // Unbox list header: inttoptr i64 to i64*
                 let hp = format!("%ahp{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_boxed).ok();
@@ -3793,6 +3810,33 @@ impl LlvmBackend {
             // we still allocate a fresh buffer of len-1. An arena allocator
             // (planned) would replace the free+malloc with a bump pointer reset.
             Expr::ArrowMut { dir: ArrowDir::Pop, target, index, value: None } => {
+                let pop_strategy = self.check_extract_strategy(target);
+                if let Some(crate::type_universe::ExtractStrategy::Custom(fn_name)) = &pop_strategy {
+                    // Custom extract: call @fn_name(i64) -> { i64, i64 }
+                    let list_val = self.emit_expr(out, target, indent);
+                    let list_boxed = self.adapt_to_i64(out, indent, &list_val);
+                    let call_reg = format!("%pc{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = call {{ i64, i64 }} @{}(i64 {})", indent, call_reg, fn_name, list_boxed).ok();
+                    // Extract popped value (index 0) and new collection handle (index 1)
+                    writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 0", indent, v, call_reg).ok();
+                    let new_list = format!("%pnl{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 1", indent, new_list, call_reg).ok();
+                    // Store new list handle back to state
+                    if let Expr::OwnedRef(field_name) = target.as_ref() {
+                        if let Some(&idx) = self.field_index_map.get(field_name) {
+                            let ap = format!("%pap{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
+                            let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, new_list, ap, tn).ok();
+                        } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
+                            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_list, slot).ok();
+                        }
+                    }
+                    let popped = v.clone();
+                    return TypedRegister { name: popped, ty: Type::Int };
+                }
+                // Determine pop index: Shift strategy removes from front (0), otherwise end (len-1)
+                let should_shift = matches!(pop_strategy, Some(crate::type_universe::ExtractStrategy::Shift));
                 let list_val = self.emit_expr(out, target, indent);
                 let list_boxed = self.adapt_to_i64(out, indent, &list_val);
                 // Unbox list header
@@ -3803,9 +3847,12 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
                 let len = format!("%pln{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
-                // Compute target index: len - 1 (pop from end) or expression value
+                // Compute target index: 0 for shift, len - 1 for pop, or expression value
                 let pop_idx = format!("%ppi{}", self.txn_counter); self.txn_counter += 1;
                 match index.as_ref() {
+                    Expr::Term if should_shift => {
+                        writeln!(out, "{}{} = add i64 0, 0", indent, pop_idx).ok();
+                    }
                     Expr::Term => {
                         writeln!(out, "{}{} = add i64 {}, -1", indent, pop_idx, len).ok();
                     }

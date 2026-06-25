@@ -150,7 +150,21 @@ type HashMap <: List {
 };
 
 // ─────────────────────────────────────────────────────────────
-// 7. User-Defined: Matrix4x4 with Custom Projections
+// 7. SkipList<T> — Sorted List with Custom InsertAt
+//
+// Derives from List, overrides `<-` via InsertAt = _sl_insert.
+// The compiler's Custom strategy dispatches the arrow operator
+// to the named function instead of using default list append.
+// ─────────────────────────────────────────────────────────────
+
+type SkipList<T> <: List<T> {
+    InsertAt = _sl_insert;
+    ExtractFrom = _sl_remove;
+    Contains(v) = _ :> _sl_search(v);
+};
+
+// ─────────────────────────────────────────────────────────────
+// 8. User-Defined: Matrix4x4 with Custom Projections
 // ─────────────────────────────────────────────────────────────
 
 type Matrix4x4 <: Bits @/0..(16 * 8 - 1) {
@@ -166,7 +180,7 @@ type Matrix4x4 <: Bits @/0..(16 * 8 - 1) {
 };
 
 // ─────────────────────────────────────────────────────────────
-// 8. RISC-V Instruction Decode
+// 9. RISC-V Instruction Decode
 //
 // Demonstrates @/ bit-fields for real hardware decoding.
 // ─────────────────────────────────────────────────────────────
@@ -188,7 +202,7 @@ type RV32I <: Bits @/0..31 {
 };
 
 // ─────────────────────────────────────────────────────────────
-// 9. Tier-Ignorance Example
+// 10. Tier-Ignorance Example
 //
 // CBV (Circuit Brief) ignores Codec, ElementType, AllowIndex,
 // AllowSlice, AllowArrow — these are host-tier metadata that
@@ -207,7 +221,7 @@ type Counter <: Bits @/0..7 {
 };
 
 // ─────────────────────────────────────────────────────────────
-// 10. Lazy Foreign Lens: CString
+// 11. Lazy Foreign Lens: CString
 //
 // A zero-copy lens over C's char* — strlen runs only on
 // explicit Size query, not on character access.

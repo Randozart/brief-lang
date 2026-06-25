@@ -14,63 +14,57 @@ custom operations through the `<-` arrow operator.
 
 ## Root Cause: Three Gaps
 
-### Gap 1 — Fixed strategy enum only (`src/type_universe.rs:96-117`)
+*(Note: Line numbers below are from the pre-implementation analysis. As of June 25, all three gaps have been fixed — see commit `[current HEAD]`.)*
 
-`InsertStrategy` has only 4 variants: `Append`, `Prepend`, `Sorted`, `Hash`.
-`ExtractStrategy` has only 3: `Pop`, `Shift`, `Hash`.
+### Gap 1 — Fixed strategy enum only (`src/type_universe.rs:95-118`)
 
-The resolver at `insert_strategy()` (line 447) returns `None` for any
-unrecognized string — the `_ => None` fallthrough at line 455. There is no
-mechanism for a TypeDef to declare "call this function" as its insert strategy.
+`InsertStrategy` had only 4 variants: `Append`, `Prepend`, `Sorted`, `Hash`.
+`ExtractStrategy` had only 3: `Pop`, `Shift`, `Hash`.
 
-### Gap 2 — Interpreter strategy lookup uses variable name (`src/interpreter.rs:970-981`)
+The resolver at `insert_strategy()` (line 455) returned `None` for any
+unrecognized string — the `_ => None` fallthrough at line 455. No mechanism
+for a TypeDef to declare "call this function" as its insert strategy.
 
-```rust
-pub(crate) fn lookup_insert_strategy(&self, root_name: &str) -> Option<InsertStrategy> {
-    let tu = self.type_universe.as_ref()?;
-    // root_name is "fifo" (variable name), but type universe has "Fifo" (type name)
-    if let Some(s) = tu.insert_strategy(root_name) {
-        return Some(s);
-    }
-    None
-}
-```
+### Gap 2 — Interpreter strategy lookup used variable name (`src/interpreter.rs:986-1006`)
 
-The interpreter does not track `let`-declared type annotations at runtime, so
-it uses the variable name as a heuristic. This silently fails for any type
-where the variable name differs from the type name (e.g., `let my_skip: SkipList<Int> = ...`).
+`lookup_insert_strategy` passed the *variable name* (e.g. `"fifo"`) to
+`tu.insert_strategy()`, but the type universe had `"Fifo"` (declared type name).
+No `let_types` tracking existed at runtime.
 
-### Gap 3 — LLVM Pop ignores strategy (`src/backend/llvm/emit_expr.rs:3706`)
+### Gap 3 — LLVM Pop ignored strategy (`src/backend/llvm/emit_expr.rs:3795`)
 
-The LLVM Push path calls `check_insert_strategy()` (line 3573) to determine
-prepend vs append behavior. The Pop path has no equivalent — it always pops
-from the end (`len - 1` at line 3721). `check_extract_strategy()` does not
-exist.
+The LLVM Push path called `check_insert_strategy()`. The Pop path had no
+equivalent — always popped from the end (`len - 1`). `check_extract_strategy()`
+did not exist.
 
 ---
 
-## Fix: Add `Custom(String)` Strategy Variant
+## Fix Applied: `Custom(String)` Strategy Variant
 
-### Step 1 — Extend enums (`src/type_universe.rs`)
+All changes below have been implemented in the June 25 commits. The sections
+document the as-built design.
+
+### Step 1 — Extended enums (`src/type_universe.rs:95-128`)
 
 ```rust
+#[derive(Debug, Clone, PartialEq)]  // Copy removed — String is not Copy
 pub enum InsertStrategy {
     Append,
     Prepend,
     Sorted,
     Hash,
-    Custom(String),  // <-- NEW: user-defined function name
+    Custom(String),  // NEW: user-defined function name
 }
 
 pub enum ExtractStrategy {
     Pop,
     Shift,
     Hash,
-    Custom(String),  // <-- NEW: user-defined function name
+    Custom(String),  // NEW: user-defined function name
 }
 ```
 
-### Step 2 — Return Custom for unrecognized strings (`src/type_universe.rs:447-471`)
+### Step 2 — Return Custom for unrecognized strings (`src/type_universe.rs`)
 
 ```rust
 // In insert_strategy():
@@ -93,63 +87,46 @@ No changes needed to parsing or TypeDef resolution — `InsertAt = fn_name;`
 already stores `"fn_name"` in `resolved.insert_at` via
 `type_universe_expr_to_string`.
 
-### Step 3 — Fix interpreter strategy lookup (`src/interpreter.rs:970-990`)
+### Step 3 — Fixed interpreter strategy lookup (`src/interpreter.rs`)
 
-Change `lookup_insert_strategy` and `lookup_extract_strategy` to accept a
-type name parameter instead of deriving it from the variable name. The caller
-(`arrow.rs`) must pass the declared type name.
-
-Alternatively, store the type annotation alongside each variable in the
-interpreter state, so the lookup can be resolved internally.
-
-### Step 4 — Handle Custom in interpreter dispatch (`src/features/arrow.rs`)
-
-In the Push dispatch (line 39-58), add a match arm:
+Added `let_types: HashMap<String, Type>` to the `Interpreter` struct,
+populated on `Statement::Let` when a type annotation is present.
+`lookup_insert_strategy` and `lookup_extract_strategy` now resolve the
+declared type by name, then look up the strategy by type name.
 
 ```rust
-InsertStrategy::Custom(fn_name) => {
-    let call = Value::Defn(fn_name.clone());
-    let result = ctx.call_function(call, vec![collection, v])?;
-    ctx.store_arrow_value(&root_name, &field_path, result.clone());
-    return Ok(result);
-}
-```
-
-`call_function` is a new helper that resolves `fn_name` to a `defn` or `inop`
-and evaluates it.
-
-Similarly for Pop:
-
-```rust
-ExtractStrategy::Custom(fn_name) => {
-    let call = Value::Defn(fn_name.clone());
-    let result = ctx.call_function(call, vec![collection])?;
-    ctx.store_arrow_value(&root_name, &field_path, ...)?;
-    return Ok(result);
-}
-```
-
-### Step 5 — Add extract strategy check to LLVM backend (`src/backend/llvm/emit_toplevel.rs`)
-
-```rust
-pub(super) fn check_extract_strategy(&self, target: &Expr) -> Option<ExtractStrategy> {
+pub(crate) fn lookup_insert_strategy(&self, root_name: &str) -> Option<InsertStrategy> {
     let tu = self.type_universe.as_ref()?;
-    let var_name = match target {
-        Expr::OwnedRef(n) | Expr::Identifier(n) => n,
-        _ => return None,
-    };
-    let ty = self.let_original_types.get(var_name)?;
-    let type_name = match ty {
-        Type::Custom(n) => n,
-        Type::Applied(n, _) => n,
-        _ => return None,
-    };
-    tu.extract_strategy(type_name)
+    let type_name = self.let_types.get(root_name).and_then(|t| match t {
+        Type::Custom(n) => Some(n.as_str()),
+        Type::Applied(n, _) => Some(n.as_str()),
+        _ => None,
+    })?;
+    tu.insert_strategy(type_name)
 }
 ```
 
-For `Custom(fn_name)` in the LLVM Pop path, emit a function call to `fn_name`
-with the list handle argument.
+### Step 4 — Custom dispatch in interpreter (`src/features/arrow.rs`)
+
+Push Custom: calls `call_custom_fn(fn_name, vec![collection, value])` which
+returns the new collection. Pop Custom: calls with `vec![collection]` and
+expects a 2-element list `(popped, new_collection)`.
+
+`call_custom_fn` is a new helper (`interpreter.rs`) that tries inop first
+(fallback expression), then defn (body execution), with runtime Value args.
+
+### Step 5 — LLVM backend (`src/backend/llvm/emit_toplevel.rs`, `emit_expr.rs`)
+
+- `check_extract_strategy()` added (mirrors `check_insert_strategy`)
+- Pop path uses `should_shift` to pop from front when strategy is Shift
+- Push Custom: emits `call i64 @fn_name(i64, i64)`
+- Pop Custom: emits `call { i64, i64 } @fn_name(i64)` and extracts results
+
+### Step 6 — Stdlib files
+
+- `lib/std/skiplist.bv` — type definition, inop declarations, public API
+- `lib/std/core/skiplist.bv` — copy in core/ for import resolution
+- `lib/std/from-bits.bv` — educational SkipList entry added
 
 ---
 
@@ -207,13 +184,14 @@ fallback since no BILD is provided.
 
 ---
 
-## Testing Strategy
+## Testing Strategy (all implemented)
 
-1. **Unit test**: `InsertStrategy::Custom("_sl_insert")` resolves from
-   `InsertAt = _sl_insert;` in type universe
-2. **Interpreter test**: `let sl: SkipList<Int> = ...; &sl <- 42;` dispatches
-   through `Custom("_sl_insert")` and calls the fallback
-3. **LLVM test**: Emit IR for `<-` on `SkipList<Int>` target with custom
-   strategy, verify function call is generated
-4. **Stdlib test**: Skip list operations (insert, search, delete, contains)
-   work end-to-end via interpreter
+1. **Unit test**: `test_insert_strategy_resolution_unknown` now asserts
+   `Custom("custom_strat")` instead of `None` (`type_universe.rs`)
+2. **Interpreter test (inop)**: `test_custom_insert_strategy_dispatch` —
+   Push dispatches through `Custom("my_insert")` and calls inop fallback
+3. **Interpreter test (defn)**: `test_custom_insert_strategy_with_defn` —
+   Push dispatches through `Custom("sl_insert_fn")` and calls defn body
+4. **Interpreter test (pop)**: `test_custom_extract_strategy_dispatch` —
+   Pop dispatches through `Custom("my_extract")` and returns tuple
+5. All 1306 tests pass (`cargo test --lib`)

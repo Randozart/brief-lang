@@ -54,6 +54,12 @@ impl ExprTypecheck for ArrowTransferExpr { fn typecheck(&self, _: &mut TypeCheck
                             ctx.store_arrow_value(&root_name, &field_path, Value::List(c.clone()));
                             return Ok(Value::List(c));
                         }
+                        (_, crate::type_universe::InsertStrategy::Custom(fn_name)) => {
+                            // Custom insert: call fn_name(collection, value) -> new_collection
+                            let result = ctx.call_custom_fn(&fn_name, vec![collection.clone(), v.clone()])?;
+                            ctx.store_arrow_value(&root_name, &field_path, result.clone());
+                            return Ok(result);
+                        }
                         _ => {} // Fall through to default dispatch
                     }
                 }
@@ -113,6 +119,19 @@ impl ExprTypecheck for ArrowTransferExpr { fn typecheck(&self, _: &mut TypeCheck
                             let removed = list.remove(0);
                             ctx.store_arrow_value(&root_name, &field_path, Value::List(list.clone()));
                             return Ok(removed);
+                        }
+                        (_, crate::type_universe::ExtractStrategy::Custom(fn_name)) => {
+                            // Custom extract: fn(collection) -> (popped, new_collection)
+                            let result = ctx.call_custom_fn(&fn_name, vec![collection.clone()])?;
+                            match result {
+                                Value::List(pair) if pair.len() == 2 => {
+                                    ctx.store_arrow_value(&root_name, &field_path, pair[1].clone());
+                                    return Ok(pair[0].clone());
+                                }
+                                _ => return Err(RuntimeError::TypeMismatch(
+                                    "Custom extract function must return (value, new_collection)".into()
+                                )),
+                            }
                         }
                         _ => {} // Fall through to default dispatch
                     }
