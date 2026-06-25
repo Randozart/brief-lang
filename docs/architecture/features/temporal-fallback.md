@@ -56,3 +56,15 @@ rct txn process [pre][post] ?![cycles <= 1000 retry 3] ~? log_timeout() {
 | Typechecker | `src/typechecker.rs` | Body/fallback type unification |
 | Proof engine | `src/proof_engine.rs` | `is_proven_terminable()` |
 | Interpreter | `src/interpreter.rs` | Retry loop, cycle budget, fallback eval |
+| LLVM backend | `src/backend/llvm/emit_expr.rs` | GEP+load from %State for body; `within_counter` to avoid SSA collisions |
+
+## LLVM Codegen Notes
+
+The within body is evaluated in the **current block** (before branching to
+within-specific blocks) to avoid SSA register dominance issues. For `Expr::Identifier`
+bodies, a direct `GEP + load` from `%State` is emitted (bypassing all SSA caches:
+`ssa_old_int_regs`, `ssa_state_reg`, `let_bindings`). A dedicated `within_counter`
+(separate from `txn_counter`) ensures label/register uniqueness.
+
+If the identifier is not resolvable in the current context (e.g., `init_state`
+function), the fallback emits 0. The interpreter path handles all cases correctly.
