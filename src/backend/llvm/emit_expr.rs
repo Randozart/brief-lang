@@ -2441,6 +2441,11 @@ impl LlvmBackend {
                     }
                     Intrinsic::VolatileLoad => {
                         let addr = self.emit_expr(out, &args[0], indent);
+                        // Safety net: typechecker should have caught non-Ptr types
+                        debug_assert!(
+                            matches!(&addr.ty, Type::Applied(n, _) if n == "Ptr"),
+                            "volatile_load# expected Ptr<T>, got {:?}", addr.ty
+                        );
                         let ptr = format!("%vlptr{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
                         // Extract T from Ptr<T> argument type
@@ -2478,6 +2483,11 @@ impl LlvmBackend {
                     Intrinsic::VolatileStore => {
                         let addr = self.emit_expr(out, &args[0], indent);
                         let val = self.emit_expr(out, &args[1], indent);
+                        // Safety net: typechecker should have caught non-Ptr types
+                        debug_assert!(
+                            matches!(&addr.ty, Type::Applied(n, _) if n == "Ptr"),
+                            "volatile_store# expected Ptr<T>, got {:?}", addr.ty
+                        );
                         let ptr = format!("%vsptr{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
                         // Extract T from Ptr<T> argument type

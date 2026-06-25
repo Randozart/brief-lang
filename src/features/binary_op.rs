@@ -113,7 +113,7 @@ impl ExprEval for BinaryOpExpr {
             (_, Value::Regex(_), _) | (_, _, Value::Regex(_)) => {
                 return Err(RuntimeError::TypeMismatch(format!("binary op {:?} on Regex", self.kind)))
             }
-            _ => return Err(RuntimeError::TypeMismatch(format!("binary op {:?}", self.kind))),
+            _ => return Err(RuntimeError::TypeMismatch(format!("binary op {:?} on ({:?}, {:?})", self.kind, self.left, self.right))),
         })
     }
 }

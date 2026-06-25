@@ -245,7 +245,10 @@ pub fn desugar_asm_target(body: &[String]) -> Vec<String> {
             }
 
             if !found_close {
-                // Unclosed asm target block — keep original lines
+                eprintln!(
+                    "warning: unclosed asm target block starting at line {} — expected '}}'",
+                    i
+                );
                 result.extend(block_lines);
                 continue;
             }

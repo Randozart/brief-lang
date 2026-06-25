@@ -12,7 +12,9 @@
     "onLanguage:dbrief",
     "onLanguage:sbrief",
     "onLanguage:srbv",
-    "onLanguage:sebv"
+    "onLanguage:sebv",
+    "onLanguage:abv",
+    "onLanguage:cbv"
   ],
   "engines": {
     "vscode": "^1.60.0"
@@ -25,28 +27,18 @@
     "languages": [
       {
         "id": "brief",
-        "aliases": [
-          "Brief",
-          "brief"
-        ],
-        "extensions": [
-          ".bv"
-        ],
+        "aliases": ["Brief", "brief"],
+        "extensions": [".bv"],
         "icon": {
-          "light": "./images/brief-logo.svg",
-          "dark": "./images/brief-logo.svg"
+          "light": "./images/extension-logo.svg",
+          "dark": "./images/extension-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "rbv",
-        "aliases": [
-          "Rendered Brief",
-          "rendered-brief"
-        ],
-        "extensions": [
-          ".rbv"
-        ],
+        "aliases": ["Rendered Brief", "rendered-brief", "Brief Render", "brief-render"],
+        "extensions": [".rbv"],
         "icon": {
           "light": "./images/r-brief-logo.svg",
           "dark": "./images/r-brief-logo.svg"
@@ -55,13 +47,8 @@
       },
       {
         "id": "ebv",
-        "aliases": [
-          "Embedded Brief",
-          "embedded-brief"
-        ],
-        "extensions": [
-          ".ebv"
-        ],
+        "aliases": ["Embedded Brief", "embedded-brief", "Brief Embed", "brief-embed"],
+        "extensions": [".ebv"],
         "icon": {
           "light": "./images/e-brief-logo.svg",
           "dark": "./images/e-brief-logo.svg"
@@ -70,15 +57,8 @@
       },
       {
         "id": "dbrief",
-        "aliases": [
-          "Data Brief",
-          "dbrief"
-        ],
-        "extensions": [
-          ".dbv",
-          ".dbvl",
-          ".dbvs"
-        ],
+        "aliases": ["Data Brief", "dbrief", "Brief Data", "brief-data"],
+        "extensions": [".dbv", ".dbvl", ".dbvs"],
         "icon": {
           "light": "./images/d-brief-logo.svg",
           "dark": "./images/d-brief-logo.svg"
@@ -87,28 +67,18 @@
       },
       {
         "id": "sbrief",
-        "aliases": [
-          "Strict Brief",
-          "strict-brief"
-        ],
-        "extensions": [
-          ".sbv"
-        ],
+        "aliases": ["Strict Brief", "strict-brief"],
+        "extensions": [".sbv"],
         "icon": {
-          "light": "./images/brief-logo.svg",
-          "dark": "./images/brief-logo.svg"
+          "light": "./images/extension-logo.svg",
+          "dark": "./images/extension-logo.svg"
         },
         "configuration": "./language-configuration.json"
       },
       {
         "id": "srbv",
-        "aliases": [
-          "Strict Rendered Brief",
-          "strict-rendered-brief"
-        ],
-        "extensions": [
-          ".srbv"
-        ],
+        "aliases": ["Strict Rendered Brief", "strict-rendered-brief", "Strict Render", "strict-render"],
+        "extensions": [".srbv"],
         "icon": {
           "light": "./images/r-brief-logo.svg",
           "dark": "./images/r-brief-logo.svg"
@@ -117,16 +87,31 @@
       },
       {
         "id": "sebv",
-        "aliases": [
-          "Strict Embedded Brief",
-          "strict-embedded-brief"
-        ],
-        "extensions": [
-          ".sebv"
-        ],
+        "aliases": ["Strict Embedded Brief", "strict-embedded-brief", "Strict Embed", "strict-embed"],
+        "extensions": [".sebv"],
         "icon": {
           "light": "./images/e-brief-logo.svg",
           "dark": "./images/e-brief-logo.svg"
+        },
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "abv",
+        "aliases": ["Accelerated Brief", "accelerated-brief", "Brief Accel", "brief-accel"],
+        "extensions": [".abv"],
+        "icon": {
+          "light": "./images/a-brief-logo.svg",
+          "dark": "./images/a-brief-logo.svg"
+        },
+        "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "cbv",
+        "aliases": ["Circuit Brief", "circuit-brief", "Brief Circuit", "brief-circuit"],
+        "extensions": [".cbv"],
+        "icon": {
+          "light": "./images/c-brief-logo.svg",
+          "dark": "./images/c-brief-logo.svg"
         },
         "configuration": "./language-configuration.json"
       }
@@ -164,6 +149,16 @@
       },
       {
         "language": "sebv",
+        "scopeName": "source.brief",
+        "path": "./syntaxes/brief.tmLanguage.json"
+      },
+      {
+        "language": "abv",
+        "scopeName": "source.brief",
+        "path": "./syntaxes/brief.tmLanguage.json"
+      },
+      {
+        "language": "cbv",
         "scopeName": "source.brief",
         "path": "./syntaxes/brief.tmLanguage.json"
       }

@@ -2009,22 +2009,75 @@ impl TypeChecker {
                     Intrinsic::Exit | Intrinsic::Halt => Type::Bool,
                     Intrinsic::VolatileLoad => {
                         // Return type is T from Ptr<T> argument
-                        if let Some(arg_ty) = args.first() {
-                            let t = self.infer_expression(arg_ty);
+                        if args.len() != 1 {
+                            self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                expected: "exactly 1 argument".to_string(),
+                                found: format!("{} arguments", args.len()),
+                                context: "volatile_load# requires a single Ptr<T> argument".to_string(),
+                            });
+                            Type::Void
+                        } else {
+                            let t = self.infer_expression(&args[0]);
                             if let Type::Applied(name, inner) = &t {
                                 if name == "Ptr" {
                                     inner.first().cloned().unwrap_or(Type::Void)
                                 } else {
+                                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                        expected: "Ptr<T>".to_string(),
+                                        found: self.type_to_string(&t),
+                                        context: "volatile_load# requires a Ptr<T> argument, got a non-pointer type".to_string(),
+                                    });
                                     Type::Void
                                 }
                             } else {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Ptr<T>".to_string(),
+                                    found: self.type_to_string(&t),
+                                    context: "volatile_load# requires a Ptr<T> argument, got a non-pointer type".to_string(),
+                                });
                                 Type::Void
                             }
-                        } else {
-                            Type::Void
                         }
                     }
-                    Intrinsic::VolatileStore => Type::Bool,
+                    Intrinsic::VolatileStore => {
+                        // Validate: exactly 2 arguments, (Ptr<T>, T)
+                        if args.len() != 2 {
+                            self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                expected: "exactly 2 arguments".to_string(),
+                                found: format!("{} arguments", args.len()),
+                                context: "volatile_store# requires (Ptr<T>, T) arguments".to_string(),
+                            });
+                            Type::Bool
+                        } else {
+                            let ptr_ty = self.infer_expression(&args[0]);
+                            let val_ty = self.infer_expression(&args[1]);
+                            if let Type::Applied(name, inner) = &ptr_ty {
+                                if name == "Ptr" {
+                                    let expected_val_ty = inner.first().cloned().unwrap_or(Type::Void);
+                                    if val_ty != expected_val_ty && expected_val_ty != Type::Void {
+                                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                            expected: self.type_to_string(&expected_val_ty),
+                                            found: self.type_to_string(&val_ty),
+                                            context: "volatile_store# value type must match Ptr<T> pointee type".to_string(),
+                                        });
+                                    }
+                                } else {
+                                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                        expected: "Ptr<T> as first argument".to_string(),
+                                        found: self.type_to_string(&ptr_ty),
+                                        context: "volatile_store# requires a Ptr<T> as the first argument".to_string(),
+                                    });
+                                }
+                            } else {
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Ptr<T> as first argument".to_string(),
+                                    found: self.type_to_string(&ptr_ty),
+                                    context: "volatile_store# requires a Ptr<T> as the first argument".to_string(),
+                                });
+                            }
+                            Type::Bool
+                        }
+                    }
                     Intrinsic::Time | Intrinsic::Socket | Intrinsic::Accept => Type::Int,
                     Intrinsic::Sort | Intrinsic::Reverse => Type::Bool,
                     Intrinsic::Range => Type::Custom("List".to_string()),
@@ -2344,8 +2397,12 @@ impl TypeChecker {
                                 Type::Applied("Ptr".to_string(), vec![Type::Char])
                             }
                             _ => {
-                                // &x :> Ptr → Ptr<typeof(x)>
-                                Type::Applied("Ptr".to_string(), vec![src_ty.clone()])
+                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                    expected: "Ptr, List, String, or struct".to_string(),
+                                    found: self.type_to_string(&src_ty),
+                                    context: format!(":> Ptr projection is not supported on {}", self.type_to_string(&src_ty)),
+                                });
+                                Type::Void
                             }
                         }
                     }
@@ -2830,6 +2887,19 @@ Expr::ObjectLiteral(fields) => {
                     expected: "String".to_string(),
                     found: type_name,
                     context: "cannot perform arithmetic with String and non-String type".to_string(),
+                });
+                Type::Custom("type_error".to_string())
+            }
+            // Ptr<T> + Int → preserves Ptr<T>
+            (Type::Applied(n, _), Type::Int) | (Type::Int, Type::Applied(n, _)) if n == "Ptr" => {
+                l_ty.clone()
+            }
+            // Ptr<T> + non-Int → error
+            (Type::Applied(n, _), other) | (other, Type::Applied(n, _)) if n == "Ptr" => {
+                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                    expected: "Int".to_string(),
+                    found: self.type_to_string(other),
+                    context: format!("cannot perform arithmetic on {} with {}", self.type_to_string(l_ty), self.type_to_string(r_ty)),
                 });
                 Type::Custom("type_error".to_string())
             }

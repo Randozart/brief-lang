@@ -38,6 +38,9 @@
       "include": "#booleans"
     },
     {
+      "include": "#intrinsics"
+    },
+    {
       "include": "#constants"
     },
     {
@@ -105,7 +108,7 @@
         },
         {
           "name": "keyword.declaration.brief",
-          "match": "\\b(sig|defn|let|const|trg|SIG|DEFN|LET|CONST|TRG|struct|rstruct|enum|STRUCT|RSTRUCT|ENUM)\\b"
+          "match": "\\b(sig|defn|let|const|trg|SIG|DEFN|LET|CONST|TRG|struct|rstruct|enum|STRUCT|RSTRUCT|ENUM|inop|INOP|bild|BILD|type|TYPE|fallback|FALLBACK)\\b"
         },
         {
           "name": "keyword.declaration.ffi.brief",
@@ -125,7 +128,7 @@
         },
         {
           "name": "keyword.import.brief",
-          "match": "\\b(import|from|IMPORT|FROM|as|AS)\\b"
+          "match": "\\b(import|from|IMPORT|FROM|as|AS|target|TARGET)\\b"
         },
         {
           "name": "keyword.control.dbrief.brief",
@@ -134,6 +137,10 @@
         {
           "name": "keyword.control.temporal.brief",
           "match": "\\b(within|retry)\\b"
+        },
+        {
+          "name": "storage.modifier.brief",
+          "match": "\\b(mmio|MMIO|wake|WAKE|nowake|NOWAKE)\\b"
         },
         {
           "name": "keyword.other.time-unit.brief",
@@ -145,7 +152,7 @@
       "patterns": [
         {
           "name": "support.type.primitive.brief",
-          "match": "\\b(Int|Float|String|Bool|Data|Void|UInt)\\b"
+          "match": "\\b(Int|Float|String|Bool|Data|Void|UInt|Ptr|Bits)\\b"
         },
         {
           "name": "entity.name.type.custom.brief",
@@ -188,6 +195,14 @@
           "match": "==|!="
         },
         {
+          "name": "keyword.operator.push.brief",
+          "match": "<-"
+        },
+        {
+          "name": "keyword.operator.subtype.brief",
+          "match": "<:"
+        },
+        {
           "name": "keyword.operator.relational.brief",
           "match": "<=|>=|<|>"
         },
@@ -214,6 +229,14 @@
         {
           "name": "keyword.operator.arrow.brief",
           "match": "->"
+        },
+        {
+          "name": "keyword.operator.projection.brief",
+          "match": ":>"
+        },
+        {
+          "name": "keyword.operator.push.brief",
+          "match": "<-"
         },
         {
           "name": "keyword.operator.assignment.brief",
@@ -269,6 +292,14 @@
         {
           "name": "constant.language.result.brief",
           "match": "\\b(Ok|Err|OK|ERR|Some|None|SOME|NONE)\\b"
+        }
+      ]
+    },
+    "intrinsics": {
+      "patterns": [
+        {
+          "name": "support.function.intrinsic.brief",
+          "match": "\\b[a-z_][a-zA-Z0-9_]*#"
         }
       ]
     },
