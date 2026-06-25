@@ -203,14 +203,28 @@ impl LlvmBackend {
             writeln!(out, "  call i32 @pthread_create(ptr %ct_{}, ptr null, ptr @cell_thread_{}, ptr %cell_state_{})", name, name, name).ok();
         }
         writeln!(out, "  br label %tick").ok();
+        // Memcpy round-trip SROA: alloca a local copy of %State and operate
+        // on the copy. LLVM's SROA can scalarize the local alloca, promoting
+        // field accesses to phi nodes. Without this, the pointer argument to
+        // @reactor_tick prevents SROA from seeing the field access pattern.
+        //
+        // The memcpy at entry copies state in, @reactor_tick operates on the
+        // local copy, then memcpy copies back. LLVM inlines the memcpy calls
+        // at -O2/-O3, SROA scalarizes the alloca, and the result is that
+        // field loads become phi reads instead of memory operations.
+        let state_size = self.compute_state_size_bytes();
         writeln!(out, "  tick:").ok();
+        writeln!(out, "  %state_copy = alloca %State, align 8").ok();
+        writeln!(out, "  call void @llvm.memcpy.p0.p0.i64(ptr %state_copy, ptr %state, i64 {}, i1 false)", state_size).ok();
         // Increment cycle_count on every tick
         emit_cycle_count_increment(self, out);
         if self.has_async_txns && !self.is_lightweight_async {
             self.emit_async_phase(out);
         } else {
-            writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
+            writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state_copy)").ok();
         }
+        // Memcpy round-trip epilogue: copy state back from local alloca
+        writeln!(out, "  call void @llvm.memcpy.p0.p0.i64(ptr %state, ptr %state_copy, i64 {}, i1 false)", state_size).ok();
         let has_exit = self.exit_condition.is_some();
         if has_exit {
             let cond = self.exit_condition.clone().unwrap();

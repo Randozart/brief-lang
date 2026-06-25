@@ -65,6 +65,20 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
         _ => None,
     }
 }
+
+/// Map an LLVM type string to its byte size. Used by compute_state_size_bytes.
+fn llvm_type_byte_size(t: &str) -> i64 {
+    match t {
+        "i8" | "i1" => 1,
+        "i16" => 2,
+        "i32" | "float" => 4,
+        "i64" | "double" | "i8*" | "ptr" => 8,
+        // For aggregate or unknown types, assume max alignment (8 bytes)
+        // to err on the side of larger allocation.
+        _ => 8,
+    }
+}
+
 /// Map a type name string to its primitive Type variant.
 /// Used by `resolve_bild_type` to resolve aliases and melds.
 fn primitive_from_name(name: &str) -> Option<Type> {
@@ -2958,10 +2972,18 @@ self.emit_declares(&mut out);
 
     /// Mark a register as a chimera value with the given backing type.
     pub(crate) fn mark_chimera(&mut self, reg_name: &str, backing_type: &str) {
-        self.chimera_map.insert(reg_name.to_string(), ChimeraInfo {
-            is_chimera: true,
-            backing_type: backing_type.to_string(),
-        });
+        if let Some(c) = self.chimera_map.get_mut(reg_name) {
+            c.is_chimera = true;
+            c.backing_type = backing_type.to_string();
+        } else {
+            self.chimera_map.insert(reg_name.to_string(), ChimeraInfo { is_chimera: true, backing_type: backing_type.to_string() });
+        }
+    }
+
+    /// Compute the total size of the %State struct in bytes from field_types.
+    /// Used by the memcpy round-trip SROA optimization in emit_main.
+    pub(crate) fn compute_state_size_bytes(&self) -> i64 {
+        self.field_types.iter().map(|t| llvm_type_byte_size(t)).sum()
     }
 
     // ── Adaptive Layout — apply field modes ──────────────────
