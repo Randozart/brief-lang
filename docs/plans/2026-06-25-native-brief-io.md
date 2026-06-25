@@ -21,6 +21,153 @@ not code.
   bounds. No borrow checker, no GC, no runtime tag. Just `[ptr >= BASE][ptr < END]`.
 - **C runtime becomes optional** — Thread pool and arch startup remain as a
   compatibility shim; terminal/file/socket/timer I/O all go native.
+- **BILD is just LLVM IR with Brief conventions** — The emission is verbatim
+  paste. Any LLVM IR instruction works. BILD adds only label-based params,
+  automatic `term`→`ret` lowering, and the new `asm target { }` desugaring.
+- **Every new syntax gets an example file** — `examples/` receives a working
+  `.bv` file demonstrating each new construct before it lands in stdlib.
+- **Arch docs and learn-brief updated in the same commit** — structural
+  language changes always include documentation in the same diff.
+
+## Language extensions beyond Phases 1-6
+
+Three language extensions make every "not replaced" case expressible in
+pure Brief. They are prerequisites that run alongside Phases 1-3.
+
+### Extension A: Universal asm in BILD — `asm target { }`
+
+A new BILD statement that desugars to target-specific LLVM inline asm at
+BILD compile time. Syntax:
+
+```bild
+inop! syscall(nr: Int, a1: Int, a2: Int, a3: Int) -> Int {
+    %res = asm target {
+        [arch("x86_64")]:
+            "mov %2, %%r10; syscall"
+            : "={rax},{rax},{rdi},{rsi},{rdx},{r10}"
+            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3);
+        [arch("aarch64")]:
+            "svc #0"
+            : "={x0},{x8},{x0},{x1},{x2}"
+            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3);
+        [arch("riscv64")]:
+            "ecall"
+            : "={a0},{a7},{a0},{a1},{a2}"
+            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3);
+        default:
+            "ud2"
+            : "={rax},{rax},{rdi},{rsi},{rdx}"
+            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3);
+    };
+    term %res;
+} fallback -1;
+```
+
+**Desugaring rules:**
+1. Compiler evaluates `target_arch` (same mechanism as `#!cfg`)
+2. Selects the matching `[arch("...")]` arm (first match wins; `default` always matches)
+3. `[arch("x86_64", "amd64")]` — multiple arch names, matches any
+4. `[os("linux")]` — predicate on `target_os` instead of `target_arch`
+5. Compound: `[arch("x86_64"), os("windows")]` — both must match
+6. Desugars the triple `"instr" : "constraints" : (types %reg1, %reg2)` into
+   standard LLVM `call <ty> asm "<instr>", "<constraints>"(<types> %reg1, %reg2)`
+7. The result register appears first in the constraint string (like `={rax}`)
+
+**Where this applies in BILD:**
+The `asm target { }` block can appear anywhere a BILD statement is expected.
+It desugars to a single `call asm` statement — one line of LLVM IR, selected
+and assembled at BILD compile time.
+
+### Extension B: Function pointer type `fn(T) -> U` and `&f` address-of
+
+```brief
+type SignalHandler = fn(Int) -> Void;
+
+defn my_handler(sig: Int) -> Void { ... };
+
+let h: SignalHandler = &my_handler;
+h(signum);
+```
+
+Also works for `inop!` declarations:
+
+```brief
+inop! __trampoline(fn: fn(Int) -> Int, arg: Int) -> Int {
+    %res = call i64 %fn(i64 %arg);
+    term %res;
+} fallback 0;
+
+// Get the address as an integer (for passing to clone/sigaction syscall)
+let handler_addr: Int = &__trampoline as Int;
+```
+
+**LLVM IR mapping:**
+- `&f` on a `defn` or `inop!` → LLVM function pointer (`i64` boxed, or `ptr` in opaque pointer mode)
+- Indirect call `h(args)` → `call i64 %h(i64 %arg)` with appropriate `bitcast`
+- `fn(Int) -> Int` type → `ptr` in LLVM IR, assigned in the type system as `Type::Fn(Vec<Type>, Box<Type>)`
+
+**Safety:**
+- Calling a `fn` pointer has the same contract requirements as calling the
+  original function — the compiler can verify pre/post at the indirect call
+  site if the function pointer type carries the contract signature.
+- A bare `fn(Int) -> Int` without contracts is allowed but the compiler emits
+  a note that contract verification was skipped.
+
+### Extension C: `#section("name")` attribute on `inop!` declarations
+
+```brief
+#section(".init_array")
+inop! __constructor() -> Void {
+    call void @__rt_init();
+    ret void;
+}
+
+#section(".isr_vector")
+inop! __vector_table() -> Void {
+    // Emit interrupt vector entries as data
+    ...
+};
+```
+
+**LLVM IR:** `define void @__constructor() section ".init_array" { ... }`
+
+**Use cases:**
+- `.init_array` — constructors run before `main` (POSIX)
+- `.isr_vector` — interrupt vector table (bare-metal ARM/RISC-V)
+- `.text.itcm` — tightly-coupled memory (performance-critical)
+- `.ramfunc` — functions that must run from RAM
+
+### Extension D: Symexec fallthrough for all LLVM IR opcodes
+
+The BILD symbolic execution engine (`bild_symexec.rs`) currently errors on
+unsupported opcodes (`inttoptr`, `ptrtoint`, `bitcast`, `phi`, `br`, `switch`,
+etc.). Change these from error to opaque — matching the existing treatment of
+`load`/`store`/`call`/`alloca`/`GEP`.
+
+```rust
+// Before: SymExecError::UnsupportedOpcode
+// After: Ok(SymValue::Opaque)
+```
+
+This means:
+- BILD bodies using any LLVM IR instruction compile and run correctly
+- Contract verification falls through to the `fallback` expression
+- No compilation errors for using `inttoptr`/`phi`/`br` in BILD
+- The "BILD subset" is now "all of LLVM IR" for compilation purposes
+
+### How these eliminate the "not replaced" items
+
+| Item | Previously "not replaced" | Now expressible via |
+|------|--------------------------|---------------------|
+| **Thread creation** | Needed C trampoline | `clone` syscall via `asm target { }`, stack via `mmap` syscall, thread entry via `fn` pointer — all in an `inop!` body |
+| **Dynamic linking** | Needed `dlopen`/`dlsym` from C | `openat` + `mmap` syscalls + pure Brief ELF parser on `Ptr<Byte>`; `dlsym` is a symbol table walk |
+| **Signal handlers** | C function with specific ABI | `sigaction` syscall via `asm target { }`, handler is an `inop!` with `#section` if needed, passed as `fn` pointer |
+| **Arch startup** | C `__attribute__((constructor))` | `#section(".init_array") inop! __ctor() { ... }` |
+| **TLS setup** | Inline asm in C | `asm target { [arch("x86_64")]: "wrfsbase %0" : ... }` in an `inop!` body |
+
+The "not replaced" list in Phase 6 is removed — everything is expressible.
+
+---
 
 ## Phase 1: `Ptr<T>` as a first-class Brief type
 
@@ -125,29 +272,30 @@ auto-generated `volatile_load#`/`volatile_store#` accessor.
 ## Phase 3: BILD-inline syscalls for kernel operations
 
 Not a compiler intrinsic — a BILD `inop!` declaration in the standard library.
+Uses the `asm target { }` syntax (Extension A) for cross-architecture dispatch
+within a single `inop!` body.
 
-### x86_64 Linux syscall (example)
+### Universal syscall (one `inop!` for all architectures)
 
 ```brief
-// lib/std/x86_64/linux/syscall.bv
+// lib/std/syscall.bv
 inop! syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int
     [nr > 0][nr < 512]
 {
-    %res = call i64 asm "syscall", "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9}"
-        (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6);
-    term %res;
-} fallback -1;
-```
-
-### aarch64 Linux syscall
-
-```brief
-// lib/std/aarch64/linux/syscall.bv
-inop! syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) -> Int
-    [nr > 0][nr < 512]
-{
-    %res = call i64 asm "svc #0", "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5}"
-        (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6);
+    %res = asm target {
+        [arch("x86_64")]:
+            "syscall"
+            : "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9}"
+            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6);
+        [arch("aarch64")]:
+            "svc #0"
+            : "={x0},{x8},{x0},{x1},{x2},{x3},{x4},{x5}"
+            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6);
+        default:
+            "ud2"
+            : "={rax},{rax},{rdi},{rsi},{rdx},{r10},{r8},{r9}"
+            : (i64 %nr, i64 %a1, i64 %a2, i64 %a3, i64 %a4, i64 %a5, i64 %a6);
+    };
     term %res;
 } fallback -1;
 ```
@@ -155,23 +303,10 @@ inop! syscall6(nr: Int, a1: Int, a2: Int, a3: Int, a4: Int, a5: Int, a6: Int) ->
 ### Why BILD is sufficient
 
 - BILD bodies are pasted verbatim into LLVM IR output
+- `asm target { }` desugars to a single `call asm` statement at BILD compile time
 - LLVM `call asm` supports full inline assembly with register constraints
 - The `fallback` expression provides interpreter/non-LLVM semantics
 - Zero C required — `llc` produces the binary directly
-
-### Note on cross-architecture syscall dispatch
-
-The syscall `inop!` is selected by `#!cfg` (Phase 4). A portable stdlib
-module imports the arch-appropriate one:
-
-```brief
-// lib/std/syscall.bv
-#!cfg(target_arch == "x86_64")
-    include "x86_64/linux/syscall.bv";
-
-#!cfg(target_arch == "aarch64")
-    include "aarch64/linux/syscall.bv";
-```
 
 ---
 
@@ -332,14 +467,18 @@ defn read_char() -> Byte
 | `Futex` | `syscall#(SYS_futex, ...)` |
 | `SigAction`/`SigProcMask` | `syscall#(SYS_rt_sigaction/SYS_rt_sigprocmask, ...)` |
 
-### Not replaced (remain as `frgn`)
+### What remains as `frgn` after all phases
 
-- **Thread creation** — requires runtime startup (TLS, stack setup)
-- **Dynamic linking** (`dlopen`/`dlsym`) — requires loader
-- **GPU intrinsics** (`get_global_id#` etc.) — hardware-specific, not I/O
+With the language extensions (A–D), nothing is fundamentally inexpressible in
+pure Brief. The following remain as `frgn` only for pragmatic reasons:
+
+- **GPU intrinsics** (`get_global_id#` etc.) — hardware-specific, no C involved
 - **Math intrinsics** (`sqrt#`, `sin#`, etc.) — LLVM native, zero C needed
 - **Collection helpers** (`sort#`, `reverse#`, `trim_left#`) — pure Brief now,
   already being migrated; no C dependency
+
+Thread creation, dynamic linking, signal handling, and arch startup are all
+expressible via syscalls + BILD + function pointers. See Extensions A–D above.
 
 ### Impact on `brief_rt.c`
 
@@ -375,12 +514,52 @@ Each intrinsic migration:
 
 ---
 
+## Documentation and examples commitment
+
+Every new syntax construct MUST ship with:
+
+### Example files (`examples/`)
+
+| New syntax | Example file | Content |
+|---|---|---|
+| `Ptr<T>` type + ops | `examples/ptr-arithmetic.bv` | Arithmetic, casts, comparisons |
+| `volatile_load#`/`volatile_store#` | `examples/volatile-io.bv` | MMIO-style read/write with contracts |
+| `asm target { }` in BILD | `examples/bild-asm-target.bv` | Multi-arch asm dispatch |
+| `fn(T) -> U` + `&f` | `examples/function-pointers.bv` | Indirect calls, address-of |
+| `#section("name")` | `examples/section-attr.bv` | Section placement on inop! |
+| `#!cfg(...)` | `examples/cfg-guards.bv` | Conditional compilation |
+| `import "target"` | `examples/target-import.bv` | Board DBL import + MMIO access |
+
+### Architecture docs (`docs/architecture/`)
+
+| Document | Content |
+|---|---|
+| `docs/architecture/features/ptr.md` | `Ptr<T>` type, operations, contract integration |
+| `docs/architecture/features/volatile-io.md` | `volatile_load#`/`volatile_store#` semantics |
+| `docs/architecture/features/bild.md` | Add `asm target { }`, `#section` to BILD reference |
+| `docs/architecture/features/cfg.md` | `#!cfg` condition reference |
+| `docs/architecture/features/fn-ptr.md` | Function pointer type, `&f` syntax |
+| `docs/architecture/features/target-import.md` | DBL-based board import |
+
+### Learn Brief (`learn-brief/`)
+
+Add or update lessons covering:
+- Pointers and MMIO (`learn-brief/07-pointers-and-mmio.md`)
+- Platform-aware code with `#!cfg` (`learn-brief/08-platform-code.md`)
+- BILD and inline assembly (`learn-brief/09-bild-and-asm.md`)
+- Targets and device trees (`learn-brief/10-targets-and-boards.md`)
+
+All documentation changes must land in the **same commit** as the structural
+change they describe.
+
 ## Per-commit checklist
 
 - `cargo test --lib` — all tests pass
 - `cargo build` — no warnings
 - Praetor on new/changed files (complexity ≤ 15, lines ≤ 100, params ≤ 6)
 - Update architecture docs if API contracts changed
+- Update `learn-brief/` for any user-facing syntax change
+- Create or update example `.bv` file for every new construct
 - Kani harnesses for all safety-critical `Ptr<T>` operations
 - `_ => return None;` fallthrough unchanged in all optimization passes
 - No weakening of existing optimization paths

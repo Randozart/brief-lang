@@ -2612,6 +2612,18 @@ Expr::ObjectLiteral(fields) => {
             | Expr::SigCallExpr(_) | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_)
             | Expr::TypeRef(_) => Type::Custom("unknown".to_string()),
             Expr::SliceExpr(e) => self.infer_expression(&e.value),
+            Expr::Within { body, fallback, .. } => {
+                let t1 = self.infer_expression(body);
+                let t2 = self.infer_expression(fallback);
+                if t1 != t2 {
+                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                        expected: format!("{:?}", t1),
+                        found: format!("{:?}", t2),
+                        context: "within ~? body and fallback must have the same type".to_string(),
+                    });
+                }
+                t1
+            }
             _ => Type::Custom("unknown".to_string()),
         }
     }
