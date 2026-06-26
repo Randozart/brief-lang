@@ -70,7 +70,56 @@ Marked `DEFERRED` in code:
 |----|-------------|-------------|
 | D-1 | Topological sort for forward references | Current single-pass requires declaration order |
 | D-2 | Full codec signature validation | Minimal check sufficient for now |
-| D-3 | InsertAt/ExtractFrom strategy synthesis | Stub — actual LLVM codegen deferred |
+| D-3 | ~~InsertAt/ExtractFrom strategy synthesis~~ | **Implemented** — Custom(String) variant dispatches to named inops |
 | D-5 | `:> Size` uniformity across scalars | Not blocking current use |
 | D-7 | Runtime guard synthesis for constraints | Backend work deferred |
 | D-8 | User-defined projection typecheck/codegen | Needs TypeUniverse wired into typechecker and LLVM backend |
+
+### D-3: InsertAt/ExtractFrom Custom strategy (implemented 2026-06-25)
+
+When a TypeDef declares `InsertAt = fn_name` or `ExtractFrom = fn_name`
+and the strategy string doesn't match any built-in name (`append`, `prepend`,
+`sorted`, `hash`, `pop`, `shift`), the resolver returns
+`InsertStrategy::Custom(fn_name)` instead of `None`.
+
+Both the interpreter and LLVM backend dispatch `<-` to the named function:
+
+- **Interpreter**: `call_custom_fn(fn_name, [collection, value])` for Push;
+  `call_custom_fn(fn_name, [collection])` expecting `(popped, new_collection)` for Pop.
+- **LLVM backend**: emits `call i64 @fn_name(i64, i64)` for Push;
+  `call { i64, i64 } @fn_name(i64)` for Pop.
+
+The function name is looked up first as an `inop` declaration (uses fallback),
+then as a `defn` (executes body).
+
+Example:
+```brief
+type SkipList<T> <: List<T> {
+    InsertAt = sl_insert;
+    ExtractFrom = sl_remove;
+};
+
+inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
+    [[term :> Size == list :> Size + 1]
+{ ... BILD body ... } fallback sl_append(list, val);
+```
+
+The strategy system also fixes **interpreter variable-name vs type-name lookup**:
+`lookup_insert_strategy` uses `let_types` (declared type annotations) to resolve
+the type name, not the variable name. This means `let sl: SkipList<Int> = ...`
+correctly maps `sl` to `SkipList` for strategy resolution.
+
+### InsertAt/ExtractFrom binding format
+
+```brief
+type MyCollection <: List {
+    InsertAt = sl_insert;       // Custom(strategy) → calls sl_insert#(list, val)
+    ExtractFrom = sl_remove;    // Custom(strategy) → calls sl_remove#(list)
+};
+```
+
+Known built-in strategy names:
+- `InsertAt`: `append`, `prepend`, `sorted`, `hash`
+- `ExtractFrom`: `pop`, `shift`, `head`, `tail`, `hash`
+
+Any other string is treated as a `Custom(fn_name)` function name reference.

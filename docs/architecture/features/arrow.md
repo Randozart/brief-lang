@@ -72,27 +72,65 @@ The transfer with filter uses a subtype projection (`<:` syntax) as the filter �
 
 ## Insert/Extract Strategies
 
-The `TypeUniverse` can configure custom strategies:
+The `TypeUniverse` can configure custom strategies via `type ... <: List { InsertAt = ... }`.
+The strategy system resolves the binding string to an `InsertStrategy` or `ExtractStrategy`
+variant:
 
 ```brief
-// Prepend strategy (compile-time)
-// type_universe defines InsertStrategy for this type
+// Built-in strategies:
+type Fifo <: List { InsertAt = prepend; ExtractFrom = shift; };
+type Mapped <: List { InsertAt = hash; };
 
-// Sorted insert strategy
-// type_universe defines InsertStrategy::Sorted for ordered types
+// Custom function strategy:
+type SkipList<T> <: List<T> {
+    InsertAt = sl_insert;    // dispatches to sl_insert#(list, val)
+    ExtractFrom = sl_remove; // dispatches to sl_remove#(list)
+};
 ```
 
-When configured, arrow operations respect the strategy instead of the default behavior.
+When a Custom strategy is configured, arrow operations dispatch to the named
+function instead of using the default behavior:
+
+- **Push**: calls `fn_name(collection, value)` → returns updated collection
+- **Pop**: calls `fn_name(collection)` → returns `(popped_value, updated_collection)`
+
+### Strategy resolution
+
+| Strategy string | Result |
+|----------------|--------|
+| `append` | `InsertStrategy::Append` (default) |
+| `prepend` | `InsertStrategy::Prepend` |
+| `sorted` | `InsertStrategy::Sorted` |
+| `hash` | `InsertStrategy::Hash` |
+| anything else | `InsertStrategy::Custom(name)` |
+
+Same for `ExtractFrom`: `pop`, `shift`, `head`, `tail`, `hash` are built-in;
+anything else becomes `ExtractStrategy::Custom(name)`.
+
+### Interpreter
+
+`lookup_insert_strategy` uses the variable's declared type annotation
+(`let_types`) to resolve the type name, then looks up the strategy in
+the TypeUniverse. This fixes the variable-name vs type-name mismatch
+that previously prevented strategies from firing in the interpreter.
+
+### LLVM backend
+
+- Push Custom: emits `call i64 @fn_name(i64 %list, i64 %elem)`
+- Pop Custom: emits `call { i64, i64 } @fn_name(i64 %list)` then extracts results
+- Shift strategy: pops from front (index 0) instead of end
 
 ## Backend Status
 
 | Backend | Status |
 |---------|--------|
-| Interpreter | ✅ Full evaluation for all collection types |
-| LLVM | ⚠️ Stub — emits `%arr: Void` |
-| Webstack | ✅ ArrowMut, ArrowDiscard, ArrowTransfer return `JsValue::TRUE` |
+| Interpreter | ✅ Full evaluation for all collection types + Custom strategy dispatch |
+| LLVM | ✅ Custom strategy for Push/Pop, Shift strategy, check_extract_strategy |
 
 ## Related
 
-- `examples/arrow-mutation.bv` — Complete demo of all arrow operations
-- `docs/architecture/features/collection.md` — Collection types and type dispatch
+- `docs/architecture/features/typedef.md` — InsertAt/ExtractFrom binding syntax
+- `docs/architecture/features/inop.md` — Writing inops for Custom strategy dispatch
+- `lib/std/skiplist.bv` — Full example: SkipList with Custom strategy
+- `examples/inop-skiplist-dispatch.bv` — Demo of `<-` on SkipList
+- `examples/arrow-mutation.bv` — Demo of all built-in arrow operations

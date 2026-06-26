@@ -1,7 +1,8 @@
 # `inop` / `inop!` — User-Defined Intrinsic Operations
 
-**Date added:** 2026-06-22
-**Status:** Implemented (parser, LLVM codegen, interpreter fallback, typechecker, transition graph integration)
+**Date added:** 2026-06-22  
+**Updated:** 2026-06-26 (generic <T> params, Custom strategy dispatch)  
+**Status:** Implemented (parser, LLVM codegen, interpreter fallback, typechecker, Custom strategy)
 
 ## Purpose
 
@@ -13,6 +14,9 @@ full dialect reference.
 
 This is the user-facing counterpart of the builtin `#`-intrinsic system.
 
+Inops can also be bound to the `<-` arrow operator via TypeDef `InsertAt`/`ExtractFrom`
+with `Custom` strategy names — see `docs/architecture/features/typedef.md`.
+
 ## Syntax
 
 ### Declaration
@@ -21,8 +25,13 @@ This is the user-facing counterpart of the builtin `#`-intrinsic system.
 // Pure (eligible for CSE, DCE, precomputation):
 inop sadd(a: Int, b: Int) -> Int { %res = add i64 %a, %b; term %res; } fallback a + b;
 
+// Generic type parameter:
+inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
+    [[term :> Size == list :> Size + 1]
+{ ... BILD body ... } fallback sl_append(list, val);
+
 // Side-effecting (not reorderable/eliminable):
-inop! write_buf(ptr: Ptr<Byte>, len: Int) -> Int { %res = call i32 @write(i32 1, i8* %ptr, i64 %len); term %res; } fallback 0;
+inop! write_buf(ptr: Ptr<Int>, len: Int) -> Int { %res = call i32 @write(i32 1, i8* %ptr, i64 %len); term %res; } fallback 0;
 ```
 
 | Keyword | `has_side_effects` | Semantics |
@@ -32,29 +41,39 @@ inop! write_buf(ptr: Ptr<Byte>, len: Int) -> Int { %res = call i32 @write(i32 1,
 
 The `#` on the keyword is cosmetic (`inop` ≡ `inop#`, `inop!` ≡ `inop#!`).
 Contract brackets `[pre][post]` go before `-> Type` to avoid parse_type
-greedily consuming `[` as a generic type parameter.
+greedily consuming `[` as a generic type parameter. The `(%state)` marker
+must come AFTER the contract: `inop! foo() -> Int [pre][post] (%state) { ... }`.
+
+### Generic type parameters
+
+Inops support type parameters `<T, U, ...>` for type-level polymorphism.
+The type variables are resolved at compile time from the call-site argument
+types. The BILD body uses concrete LLVM types (all Brief values are `i64` at
+the LLVM level), so generics are a type-checker-only abstraction:
+
+```brief
+inop atomic_load<T>(ptr: Ptr<T>) -> T {
+    %p = inttoptr i64 %ptr to ptr
+    %v = load atomic i64, ptr %p acquire, align 8
+    term %v;
+} fallback 0;
+```
 
 ### Call site
 
-All inops are called via the existing `name#(args)` syntax:
+All inops are called via the existing `name#(args)` syntax, or via direct
+function call when imported by name:
 
 ```brief
 let r = sadd#(x, y);
 let n = write_buf#(ptr, len);
+let sl: SkipList<Int> = [];
+&sl <- 42;        // dispatches via Custom strategy to sl_insert#
 ```
 
-The parser checks `Intrinsic::from_name(name)` first (built-in intrinsics),
-then falls back to the program's `inop_decls` map via `Intrinsic::UserDefined(name)`.
-
-### Parameter type mapping (BILD)
-
-| Brief type | LLVM type | BILD name | Example |
-|------------|-----------|-----------|---------|
-| `Int` | `i64` | `%x` | `add i64 %x, %y` |
-| `Float` | `float` | `%f` | `fadd float %f, %g` |
-| `Bool` | `i8` | `%b` | `trunc i8 %b to i1` |
-| `Char` | `i32` | `%c` | `add i32 %c, 1` |
-| `String` / `Data` | `i8*` | `%s` | `call i64 @strlen(i8* %s)` |
+Direct calls (`sl_insert(list, val)`) work when the inop is imported by name.
+The typechecker resolves `Expr::Call` against inop_decls before falling through
+to `Type::Custom(name)`.
 
 ### BILD body
 
@@ -67,27 +86,26 @@ Key rules:
 - Statements are separated by `;`
 - Newlines are lexer whitespace (discarded)
 - `term` / `term!` is the unified terminator — `term %val` lowers to `ret i64 %val`
-- The `%state` pointer is unavailable (explicit params only)
-- Single output type (Phase 1)
+- Multi-output: `term %v, %list;` lowers to `insertvalue { i64, i64 } undef, i64 %v, 0` / `insertvalue ... , i64 %list, 1` / `ret { i64, i64 } ...`
+- The `%state` pointer is available via `(%state)` marker on the declaration
+- `#section(".init_array")` attribute before `inop!` emits the function in a specific ELF section
 
 ### Fallback block
 
 ```brief
 } fallback expr;
+} fallback { block_expr };
 ```
 
-The `fallback { ... }` was initially designed with braces but `{ expr }` is
-parsed as an ObjectLiteral (field:value pairs), not a block expression.
-Use bare `fallback expr` — no braces.
-
-The fallback is optional but strongly recommended. Without it:
-- Interpreter cannot evaluate the intrinsic
-- Non-LLVM backends (Webstack, CIRCT) cannot compile
-- Contract verification is blocked
+The fallback is a single Brief expression or block. It provides the reference
+implementation for the interpreter and non-LLVM backends (Webstack, CIRCT).
+Without a fallback, the interpreter raises `MissingInopFallback` and the
+Webstack/CIRCT backends cannot compile.
 
 ## Typechecking
 
 - `InopDeclaration` params are validated against call-site argument types
+- Generic type parameters are resolved from call-site argument types and substituted into the return type
 - The return type is inferred from the declaration's `outputs` field
 - Unknown `UserDefined` names emit diagnostic U001
 - `inop_decls: HashMap<String, InopDeclaration>` is collected during Pass 1
@@ -104,6 +122,7 @@ If no fallback exists, a `RuntimeError::MissingInopFallback(name)` is raised.
 - Declaration: `emit_inop()` emits the BILD body as `define i64 @name(%State* %state, <native ty> %param1, ...)`
 - Call site: pre-evaluates args, emits `call <native_ty> @name(%State* %state, <native_ty> arg1, ...)`
 - `term %res` → `ret i64 %res`
+- `term %v, %lh;` (multi-output) → `insertvalue { i64, i64 } ...` / `ret { i64, i64 } ...`
 - `term!` → `ret i64` (with swan song if present)
 - User `defn main` is renamed to `brief_main` to avoid collision with `define i32 @main()`
 
@@ -111,6 +130,14 @@ If no fallback exists, a `RuntimeError::MissingInopFallback(name)` is raised.
 
 Both fall through to the fallback expression on `Intrinsic::UserDefined`.
 No BILD codegen is attempted.
+
+### Custom strategy binding
+
+When a TypeDef declares `InsertAt = fn_name` or `ExtractFrom = fn_name`,
+the `<-` operator dispatches to the named inop via the `Custom(String)`
+strategy variant. The LLVM backend emits:
+- Push: `call i64 @fn_name(i64 %collection, i64 %value)`
+- Pop: `call { i64, i64 } @fn_name(i64 %collection)` (returns pair)
 
 ## Transition graph integration
 
@@ -127,24 +154,30 @@ and `compute_effectively_pure`.
 
 | File | Role |
 |------|------|
-| `src/ast.rs` | `InopDeclaration` struct, `TopLevel::Inop`, `Intrinsic::UserDefined(String)` |
+| `src/ast.rs` | `InopDeclaration` struct, `type_params` field, `TopLevel::Inop`, `Intrinsic::UserDefined(String)` |
 | `src/lexer.rs` | `Inop` / `InopBang` tokens |
-| `src/parser.rs` | `parse_inop_decl()`, `#(args)` fallback |
-| `src/typechecker.rs` | `inop_decls`, return type inference, U001 validation |
+| `src/parser.rs` | `parse_inop_decl()`, `#(args)` fallback, `<T>` type param parsing |
+| `src/typechecker.rs` | `inop_decls`, return type inference, generic substitution, U001 validation |
 | `src/interpreter.rs` | `inop_decls`, fallback evaluation |
 | `src/analysis/transition_graph.rs` | Side-effect flag via `intrinsic_has_side_effects` |
 | `src/backend/llvm/mod.rs` | `inop_decls` collection, emission loop |
 | `src/backend/llvm/emit_toplevel.rs` | `emit_inop()`, `term`→`ret` lowering, `brief_main` rename |
-| `src/backend/llvm/emit_expr.rs` | `UserDefined` call codegen |
+| `src/backend/llvm/emit_expr.rs` | `UserDefined` call codegen, `check_extract_strategy` |
 | `src/backend/webstack.rs` | Fallback-only (no LLVM IR) |
 | `src/backend/circt.rs` | Fallback-only (no LLVM IR) |
 | `src/import_resolver.rs` | Track `Inop` in visibility maps |
 | `src/lsp.rs` | Symbol completion for inop declarations |
-| `tests/fixtures/inop_sadd.bv` | E2E test fixture |
-| `tests/llvm_backend_test.rs` | IR verification + binary execution test |
+| `lib/std/skiplist.bv` | SkipList stdlib with Custom strategy bindings |
+| `lib/std/atomic.bv` | Atomic operations via inop BILD |
+| `lib/std/state.bv` | Stateful `(%state)` inop pattern |
 
 ## See also
 
 - `docs/architecture/features/bild.md` — BILD dialect reference (grammar, type mapping, inline asm, lowering)
-- `learn-brief/14-bild.md` — tutorial: writing your first BILD program
-- `examples/inop-sadd.bv` — complete working example
+- `docs/architecture/features/typedef.md` — `InsertAt`/`ExtractFrom` Custom strategy for `<-` dispatch
+- `examples/inop-sadd.bv` — basic inop with BILD
+- `examples/inop-skiplist-dispatch.bv` — SkipList Custom strategy dispatch
+- `examples/inop-ring-buffer.bv` — ring buffer demo
+- `examples/inop-syscall-io.bv` — syscall wrapper inops
+- `examples/inop-isr-table.bv` — ISR vector table with `#section` + `(%state)`
+- `examples/inop-uart-mmap.bv` — MMIO registers with flattened board constants

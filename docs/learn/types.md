@@ -1,6 +1,6 @@
 # Types in Brief — Learning Guide
 
-**Last updated:** 2026-06-20
+**Last updated:** 2026-06-26
 
 ## Type Derivation (`<:`)
 
@@ -124,6 +124,35 @@ These two properties define where elements go when pushing and where they come f
 | `:> Size - 1` | Last (Stack pop) |
 | `<: { MAX(.k) }` | Max-heap ordered |
 | `<: { MIN(.k) }` | Min-heap ordered |
+
+#### Custom strategy dispatch
+
+When `InsertAt` or `ExtractFrom` is set to a name that doesn't match any
+built-in strategy string, the compiler treats it as a reference to a
+user-defined function (typically an `inop` or `defn`). The `<-` arrow
+operator dispatches to that function instead of using the default behavior:
+
+```brief
+type SkipList<T> <: List<T> {
+    InsertAt = sl_insert;     // &sl <- val → sl_insert#(sl, val)
+    ExtractFrom = sl_remove;  // val <- &sl → sl_remove#(sl)
+};
+
+inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T> {
+    ... BILD (malloc/memcpy/free) ...
+} fallback sl_append(list, val);
+```
+
+The function is resolved first as an `inop` (uses fallback for interpreter,
+BILD for LLVM), then as a `defn` (executes body). The interpreter tracks
+declared types via `let_types` so that `let sl: SkipList<Int> = []` correctly
+maps `sl` to `SkipList<Int>` for strategy resolution.
+
+Built-in strategy names:
+- `InsertAt`: `append`, `prepend`, `sorted`, `hash`
+- `ExtractFrom`: `pop`, `shift`, `head`, `tail`, `hash`
+
+Any other string becomes `Custom(fn_name)`.
 
 ### How it works (Two-Pass Pipeline)
 
