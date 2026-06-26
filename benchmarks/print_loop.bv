@@ -1,23 +1,22 @@
-// Print Loop — structurally-live benchmark using transparent FFI
+// Print Loop — Runtime-variable bound via __get_env_int
+// Iterates up to BOUND, printing progress every 100000 iterations.
+// Bound is a state field, so the compiler cannot constant-fold.
 //
-// Tests:
-//   - FFI output via __print_int (transparent, no compiler magic)
-//   - Pure-counter fold prevention (FFI call blocks fold via statement_contains_ffi)
-//   - Structural liveness: every __print_int output is naturally observable
-//   - Native loop execution with guarded conditional print
-//
-// import "link/brief_rt.c": tells compiler driver to compile and link brief_rt.c.
-// __print_int: provided by brief_rt.c as a plain C function — no compiler magic.
+// Build:
+//   ./target/release/brief-compiler llvm benchmarks/print_loop.bv \
+//       --out benchmarks --optimize-budget 256
 
-#!exit ops == N;
+#!exit ops == bound;
 
+import { get_env_int } from "std/env.bv";
+import "link/brief_rt.c";
+
+let bound: Int = get_env_int("BOUND");
 let ops: Int = 0;
-let N: Int = getenv_int#("BOUND");
-const print_interval: Int = 100000;
 
-rct txn work [ops < N][ops == N] {
+rct txn work [bound > 0 && ops < bound][ops == bound] {
     &ops = ops + 1;
-    [ops % print_interval == 0] {
+    [ops % 100000 == 0] {
         print_int#(ops);
     };
     term;

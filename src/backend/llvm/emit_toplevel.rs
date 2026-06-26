@@ -804,6 +804,12 @@ impl LlvmBackend {
         }
         self.txn_counter = 0;
         self.terminated = false;
+        // 2026-06-26: in_callable_txn must be true so Statement::Term in the
+        // defn body emits a ret instruction (emit_stmt.rs line 78). Without
+        // this, Statement::Term becomes a no-op, terminated stays false, and
+        // the function falls through to "ret i64 0" — every defn silently
+        // returns zero regardless of its actual computation.
+        self.in_callable_txn = true;
         for s in &d.body {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");

@@ -1052,6 +1052,29 @@ pub fn compute_referenced_fields(program: &crate::ast::Program) -> HashSet<Strin
         if let Some(body) = body {
             scan_for_state_identifiers(body, &state_fields, &mut referenced);
         }
+        // Also scan preconditions and postconditions — a field used only in
+        // a contract (e.g. `let N = getenv_int#("BOUND")` referenced in
+        // `[count < N]`) must not be eliminated as dead.
+        if let crate::ast::TopLevel::Transaction(t) = item {
+            collect_state_identifiers(&t.contract.pre_condition, &state_fields, &mut referenced);
+            collect_state_identifiers(&t.contract.post_condition, &state_fields, &mut referenced);
+        }
+    }
+
+    // Scan the program's exit condition (#!exit) — a field referenced only
+    // in the exit condition must not be eliminated.
+    if let Some(ref exit_cond) = program.exit_condition {
+        collect_state_identifiers(exit_cond, &state_fields, &mut referenced);
+    }
+
+    // Scan state field initializers — a field's initializer may reference
+    // another state field that would otherwise appear unused.
+    for item in &program.items {
+        if let crate::ast::TopLevel::StateDecl(s) = item {
+            if let Some(ref expr) = s.expr {
+                collect_state_identifiers(expr, &state_fields, &mut referenced);
+            }
+        }
     }
 
     // If any %state-accessing inop exists, all state fields are live
@@ -1115,6 +1138,13 @@ fn collect_state_identifiers(expr: &crate::ast::Expr, state_fields: &HashSet<Str
         | crate::ast::Expr::And(l, r) | crate::ast::Expr::Or(l, r) => {
             collect_state_identifiers(l, state_fields, out);
             collect_state_identifiers(r, state_fields, out);
+        }
+        crate::ast::Expr::BinaryOp(bop) => {
+            collect_state_identifiers(&bop.left, state_fields, out);
+            collect_state_identifiers(&bop.right, state_fields, out);
+        }
+        crate::ast::Expr::UnaryOp(uop) => {
+            collect_state_identifiers(&uop.operand, state_fields, out);
         }
         crate::ast::Expr::Not(inner) | crate::ast::Expr::Neg(inner)
         | crate::ast::Expr::Cast(inner, _) => {
@@ -1367,6 +1397,13 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
         | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
             collect_identifiers(a, out);
             collect_identifiers(b, out);
+        }
+        Expr::BinaryOp(bop) => {
+            collect_identifiers(&bop.left, out);
+            collect_identifiers(&bop.right, out);
+        }
+        Expr::UnaryOp(uop) => {
+            collect_identifiers(&uop.operand, out);
         }
         Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Projection { source: a, .. } => {
             collect_identifiers(a, out);

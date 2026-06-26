@@ -1539,6 +1539,11 @@ impl LlvmBackend {
         }
 
         self.exit_condition = program.exit_condition.clone();
+        // Normalize BinaryOp/UnaryOp exit conditions to old-style variants
+        // so emit_exit_expr and check_exit_condition_idents can handle them.
+        if let Some(ref mut cond) = self.exit_condition {
+            *cond = Box::new(cond.normalize_to_old_recursive());
+        }
         self.build_field_index(program);
 
         // Scan for cell-to-cell wires from TrgBinding statements
@@ -1620,6 +1625,18 @@ impl LlvmBackend {
             }
         }
 
+        // Verify all #!exit identifiers exist as state fields or constants.
+        // Run BEFORE field elimination so we see the full field set.
+        if let Some(ref cond) = self.exit_condition {
+            let errors = self.check_exit_condition_idents(cond);
+            if !errors.is_empty() {
+                for err in &errors {
+                    eprintln!("{}", err);
+                }
+                std::process::exit(1);
+            }
+        }
+
         // Phase 1: Apply adaptive layout — eliminate Never fields, append cache slots.
         // Must run AFTER trigger_names is populated (above) to prevent trigger field elimination.
         {
@@ -1673,17 +1690,6 @@ impl LlvmBackend {
             }
         }
 
-        // Verify all #!exit identifiers exist as state fields or constants.
-        if let Some(ref cond) = self.exit_condition {
-            let errors = self.check_exit_condition_idents(cond);
-            if !errors.is_empty() {
-                for err in &errors {
-                    eprintln!("{}", err);
-                }
-                std::process::exit(1);
-            }
-        }
-
         // Select optimization strategy via extracted decision tree
         let strategy = self.select_optimization_strategy(program, &analysis, &txns);
         let dispatch_mode = strategy.dispatch_mode;
@@ -1727,7 +1733,7 @@ self.emit_declares(&mut out);
                 if pi > 0 { write!(out, ", ").ok(); }
                 write!(out, "{}", pt).ok();
             }
-            writeln!(out, ") #1").ok();
+            writeln!(out, ") #6").ok();
         }
 
         // Declare memory/string helpers used by inline concat and FFI marshaling
@@ -2560,7 +2566,6 @@ self.emit_declares(&mut out);
         writeln!(out).ok();
         writeln!(out, "attributes #0 = {{").ok();
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn").ok();
-        writeln!(out, "    memory(argmem: readwrite)").ok();
         writeln!(out, "}}").ok();
         writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn }}").ok();
         writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(readwrite) }}").ok();
@@ -2571,7 +2576,6 @@ self.emit_declares(&mut out);
         if !self.slp_hazard_fns.is_empty() {
             writeln!(out, "attributes #4 = {{").ok();
             writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn").ok();
-            writeln!(out, "    memory(argmem: readwrite)").ok();
             writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
             writeln!(out, "}}").ok();
             writeln!(out, "attributes #5 = {{").ok();
@@ -2579,6 +2583,7 @@ self.emit_declares(&mut out);
             writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
             writeln!(out, "}}").ok();
         }
+        writeln!(out, "attributes #6 = {{ nounwind }}").ok();
         // Range metadata
         if !range_meta.is_empty() {
             writeln!(out).ok();
@@ -3001,6 +3006,10 @@ self.emit_declares(&mut out);
     {
         let all_state_fields: std::collections::HashSet<String> = self.field_index_map.keys().cloned().collect();
         let referenced_fields = crate::analysis::transition_graph::compute_referenced_fields(program);
+        // Union with live_fields to prevent elimination of precondition-only,
+        // postcondition-only, or exit-condition-only fields. live_fields includes
+        // fields referenced in contracts and #!exit expressions.
+        let referenced_fields: std::collections::HashSet<String> = referenced_fields.union(live_fields).cloned().collect();
         self.field_modes = crate::analysis::transition_graph::assign_field_modes(
             &all_state_fields, &referenced_fields, projection_usage);
         // Triggers must never be eliminated — they're accessed by the event loop,

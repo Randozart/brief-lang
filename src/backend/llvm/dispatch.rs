@@ -354,6 +354,10 @@ impl LlvmBackend {
                     ));
                 }
             }
+            Expr::BinaryOp(bop) => {
+                self.check_exit_condition_idents_inner(&bop.left, errors);
+                self.check_exit_condition_idents_inner(&bop.right, errors);
+            }
             Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
             | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
                 self.check_exit_condition_idents_inner(l, errors);

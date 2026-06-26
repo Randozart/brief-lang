@@ -2133,7 +2133,7 @@ fn link_and_optimize(
     // Step 4: opt -O3 on merged module
     let opt_status = {
         let mut cmd = std::process::Command::new("opt");
-        cmd.args(["-O3", "-S", "-mtriple=x86_64-pc-linux-gnu", "-ffast-math", "-o"]);
+        cmd.args(["-O3", "-mtriple=x86_64-pc-linux-gnu", "-ffast-math", "-o"]);
         cmd.arg(&merged_opt_bc);
         cmd.arg(&merged_bc);
         for flag in llvm_extra_flags {

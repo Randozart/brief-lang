@@ -1587,7 +1587,7 @@ impl Expr {
     }
 
     /// Recursively normalize, always returning an owned Expr in old-style form.
-    fn normalize_to_old_recursive(&self) -> Expr {
+    pub(crate) fn normalize_to_old_recursive(&self) -> Expr {
         match self.normalize_to_old() {
             Some(normalized) => normalized,
             None => self.clone(),

@@ -75,6 +75,10 @@ impl LlvmBackend {
                 if let Some(swan) = swan_song {
                     self.emit_stmt(out, swan, indent);
                 }
+                // in_callable_txn: set by emit_definition (defn) and
+                // emit_callable_txn. When true, Term emits a ret with the
+                // computed value and sets terminated=true. When false, Term
+                // is a no-op — the caller's outer fallback ret handles it.
                 if self.in_callable_txn {
                     // Store value to result slot, branch to post label
                     if let Some(Some(v)) = values.first() {

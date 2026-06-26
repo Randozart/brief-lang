@@ -2733,6 +2733,7 @@ let spec = crate::target_spec::TargetSpec {
     }
 
     #[test]
+    #[should_panic(expected = "emit_expr: FieldAccess: field 'nonexistent' not found on object")]
     fn test_field_access_unknown_struct_falls_back() {
         let mut backend = LlvmBackend::new();
         fn empty_contract() -> Contract {
@@ -2772,9 +2773,7 @@ let spec = crate::target_spec::TargetSpec {
             ],
             ..empty_program()
         };
-        let output = backend.generate(&program);
-        assert!(output.contains("call void @llvm.trap()"),
-            "Unknown struct FieldAccess should emit @llvm.trap(). Got: {}", output);
+        backend.generate(&program);
     }
 
     #[test]

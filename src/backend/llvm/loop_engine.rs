@@ -84,8 +84,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = bitcast float {} to i64", indent, v, l).ok();
                         }
                         _ => {
-                            writeln!(out, "{}call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 undef, 0 ; unknown field type", indent, v).ok();
+                            panic!("emit_exit_expr: unknown field type '{}' for field '{}' in #!exit expression", ft, name);
                         }
                     }
                 } else if self.constants.contains_key(name) {
@@ -94,12 +93,10 @@ impl LlvmBackend {
                     if let Some(t) = self.triggers.get(name).cloned() {
                         self.emit_trg_load(out, indent, &v, &t.address, &t.ty);
                     } else {
-                        writeln!(out, "{}call void @llvm.trap()", indent).ok();
-                        writeln!(out, "{}{} = add i64 undef, 0 ; trigger not found", indent, v).ok();
+                        panic!("emit_exit_expr: trigger '{}' registered in trigger_names but missing from triggers map", name);
                     }
                 } else {
-                    writeln!(out, "{}call void @llvm.trap()", indent).ok();
-                    writeln!(out, "{}{} = add i64 undef, 0 ; unknown exit id '{}'", indent, v, name).ok();
+                    panic!("emit_exit_expr: identifier '{}' in #!exit is not a state field, constant, or trigger", name);
                 }
                 v
             }
@@ -171,10 +168,27 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = xor i64 {}, 1", indent, v, inner).ok();
                 v
             }
-            _ => {
-                writeln!(out, "{}call void @llvm.trap()", indent).ok();
-                writeln!(out, "{}{} = add i64 undef, 0 ; unsupported exit expr", indent, v).ok();
+            Expr::BinaryOp(bop) => {
+                let lv = self.emit_exit_expr(out, &bop.left, indent);
+                let rv = self.emit_exit_expr(out, &bop.right, indent);
+                use crate::features::binary_op::BinaryOpKind;
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
+                match bop.kind {
+                    BinaryOpKind::Eq => writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, lv, rv),
+                    BinaryOpKind::Ne => writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, cmp, lv, rv),
+                    BinaryOpKind::Lt => writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cmp, lv, rv),
+                    BinaryOpKind::Le => writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, cmp, lv, rv),
+                    BinaryOpKind::Gt => writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, cmp, lv, rv),
+                    BinaryOpKind::Ge => writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, cmp, lv, rv),
+                    BinaryOpKind::And => writeln!(out, "{}{} = and i64 {}, {}", indent, cmp, lv, rv),
+                    BinaryOpKind::Or  => writeln!(out, "{}{} = or i64 {}, {}", indent, cmp, lv, rv),
+                    _ => panic!("emit_exit_expr: unsupported BinaryOp kind {:?} in #!exit", bop.kind),
+                }.ok();
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
                 v
+            }
+            _ => {
+                panic!("emit_exit_expr: unsupported expression type in #!exit: {:?}", expr);
             }
         }
     }

@@ -312,8 +312,7 @@ impl LlvmBackend {
                         };
                     }
                 }
-                writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                writeln!(out, "{}{} = add i64 0, 0 ; @{} (not found)", indent, v, name).ok();
+                panic!("emit_expr: PriorState field '{}' not found in field_index_map", name);
             }
             // Binary ops
             Expr::Add(l, r) => {
@@ -674,8 +673,7 @@ impl LlvmBackend {
                             let boxed = self.adapt_to_i64(out, indent, &n);
                             writeln!(out, "{}{} = call i64 @__str_bytes__(i64 {})", indent, v, boxed).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::Size => {
@@ -688,8 +686,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
                             writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::Pop => {
@@ -710,8 +707,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dpp, pi).ok();
                             writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::Contains => {
@@ -724,8 +720,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, list_boxed, elem_boxed).ok();
                             writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::Keys | Intrinsic::Values => {
@@ -735,8 +730,7 @@ impl LlvmBackend {
                             // Return the list as-is (Keys/Values of a List is the list itself)
                             writeln!(out, "{}{} = add i64 0, {}", indent, v, list_boxed).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     // System I/O intrinsics (stubs — passthrough to frgn calls)
@@ -846,8 +840,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{}:", indent, dl).ok();
                             writeln!(out, "{}{} = phi i64 [ {}, %{} ], [ {}, %{} ]", indent, v, e_re, el, o_re, ol).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::WriteFile => {
@@ -1978,8 +1971,7 @@ impl LlvmBackend {
                             let boxed = self.adapt_to_i64(out, indent, &list_val);
                             writeln!(out, "{}{} = call i64 @__sort_list__(i64 {})", indent, v, boxed).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::Reverse => {
@@ -1988,8 +1980,7 @@ impl LlvmBackend {
                             let boxed = self.adapt_to_i64(out, indent, &list_val);
                             writeln!(out, "{}{} = call i64 @__reverse_list__(i64 {})", indent, v, boxed).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::Range => {
@@ -1998,8 +1989,7 @@ impl LlvmBackend {
                             let boxed = self.adapt_to_i64(out, indent, &end_val);
                             writeln!(out, "{}{} = call i64 @__range__(i64 {})", indent, v, boxed).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::TrimLeft => {
@@ -2013,8 +2003,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
                             writeln!(out, "{}{} = call i64 @__trim_left__(ptr {})", indent, v, cp).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::TrimRight => {
@@ -2028,8 +2017,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
                             writeln!(out, "{}{} = call i64 @__trim_right__(ptr {})", indent, v, cp).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::ToLower => {
@@ -2043,8 +2031,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
                             writeln!(out, "{}{} = call i64 @__to_lower__(ptr {})", indent, v, cp).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::ContainsAt => {
@@ -2066,8 +2053,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp2, dp2).ok();
                             writeln!(out, "{}{} = call i64 @__contains_at__(ptr {}, ptr {}, i64 {})", indent, v, cp, cp2, start).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::FindFrom => {
@@ -2089,8 +2075,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp2, dp2).ok();
                             writeln!(out, "{}{} = call i64 @__find_from__(ptr {}, ptr {}, i64 {})", indent, v, cp, cp2, start).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 -1, 0", indent, v).ok();
+                            panic!("emit_expr: Intrinsic::FindFrom called with fewer than 3 arguments");
                         }
                     }
                     Intrinsic::SplitN => {
@@ -2112,8 +2097,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp2, dp2).ok();
                             writeln!(out, "{}{} = call i64 @__splitn__(ptr {}, ptr {}, i64 {})", indent, v, cp, cp2, n_val).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::IntToStr => {
@@ -2122,8 +2106,7 @@ impl LlvmBackend {
                             let boxed = self.adapt_to_i64(out, indent, &n);
                             writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, v, boxed).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
                     Intrinsic::Strlen => {
@@ -2134,8 +2117,7 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, unbox, ptr_name).ok();
                             writeln!(out, "{}{} = call i64 @strlen(ptr {})", indent, v, unbox).ok();
                         } else {
-                            writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            panic!("emit_expr: intrinsic called without required arguments");
                         }
                     }
 
@@ -2732,15 +2714,13 @@ impl LlvmBackend {
                                 match self.struct_types.get(name) {
                                     Some(fields) => fields.len() as i64 * 8,
                                     None => {
-                                        writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                                        writeln!(out, "{}{} = add i64 0, 0 ; bytes: unknown struct", indent, v).ok();
+                                        panic!("emit_expr: Bytes projection on unknown struct type '{:?}'", name);
                                         return TypedRegister { name: v, ty: Type::Int };
                                     }
                                 }
                             }
                             _ => {
-                                writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                                writeln!(out, "{}{} = add i64 0, 0 ; bytes: unknown type", indent, v).ok();
+                                panic!("emit_expr: Bytes projection on unknown type {:?}", src_val.ty);
                                 return TypedRegister { name: v, ty: Type::Int };
                             }
                         };
@@ -2874,12 +2854,12 @@ impl LlvmBackend {
                         if let Some(tr) = self.try_projection_fast_path(out, &src_val, name.as_str(), arg_expr, indent, &v) {
                             return tr;
                         }
-                        writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                        panic!("emit_expr: unhandled UserDefinedWithArg projection '{}'", name);
+                        return TypedRegister { name: v, ty: Type::Int };
                     }
                     ProjectionTarget::UserDefined(_) => {
-                        writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                        panic!("emit_expr: unhandled UserDefined projection (no fast-path matched)");
+                        return TypedRegister { name: v, ty: Type::Int };
                     }
                     ProjectionTarget::BitRange(br) => {
                         // Extract bits via lshr + and
@@ -3007,8 +2987,8 @@ impl LlvmBackend {
                         return TypedRegister { name: v, ty: ft };
                     }
                 } else {
-                    writeln!(out, "{}  call void @llvm.trap()", indent).ok();
-                    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                    panic!("emit_expr: FieldAccess: field '{}' not found on object", field);
+                    return TypedRegister { name: v, ty: Type::Int };
                 }
             }
             // ── PatternMatch ────────────────────────────────────
@@ -4131,11 +4111,11 @@ impl LlvmBackend {
             Expr::CellCall(callee, args) => {
                 let callee_name = match callee.as_ref() {
                     Expr::Identifier(name) => name.clone(),
-                    _ => { writeln!(out, "{}call void @llvm.trap()", indent).ok(); writeln!(out, "{}unreachable", indent).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+                    _ => { panic!("emit_expr: CellCall with non-identifier callee: {:?}", callee); return TypedRegister { name: v, ty: Type::Int }; }
                 };
                 let cell = match self.cell_defs.get(&callee_name) {
                     Some(c) => c.clone(),
-                    None => { writeln!(out, "{}call void @llvm.trap()", indent).ok(); writeln!(out, "{}unreachable", indent).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+                    None => { panic!("emit_expr: CellCall: cell '{}' not found in cell_defs", callee_name); return TypedRegister { name: v, ty: Type::Int }; }
                 };
 
                 // 1. Store input args to prefixed parameter fields
