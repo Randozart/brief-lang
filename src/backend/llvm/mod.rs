@@ -655,6 +655,21 @@ pub struct LlvmBackend {
     loop_exit_label: Option<String>,
     phi_induction_reg: Option<(String, String, String)>, // (counter_field, phi_reg, next_reg)
     pending_post_hoist: Vec<(String, String)>, // post-loop prints saved for emission after canonical loop exit
+    // 2026-06-26: Per-field phi back-edge tracking. Populated by emit_stmt
+    // when an assignment to a state field occurs (field_name → stored_reg).
+    // Consumed by the phi latch at loop back-edge to feed updated values
+    // back into per-field phi nodes, eliminating GEP+load round-trips.
+    pending_phi_backedge: HashMap<String, String>,
+    /// Track per-field phi register names for the canonical loop phdr block.
+    /// Map from field name to the phi register (e.g. "%phi_seed"), used to
+    /// override ssa_old_int_regs in the body path and to emit back-edge
+    /// values in the latch path.
+    phi_field_regs: HashMap<String, String>,
+    /// Back-edge register names for the phi latch, one per field.
+    /// (e.g. "%be_seed") — holds either the updated value from the body or
+    /// a copy of the phi register itself for unchanged fields.
+    backedge_field_regs: HashMap<String, String>,
+    used_phi_loop: bool, // true = per-field phi mode; false = memory mode
     param_slots: HashMap<String, String>,
     state_reg_name: String,
 
@@ -868,6 +883,10 @@ impl LlvmBackend {
             loop_exit_label: None,
             phi_induction_reg: None,
             pending_post_hoist: Vec::new(),
+            pending_phi_backedge: HashMap::new(),
+            phi_field_regs: HashMap::new(),
+            backedge_field_regs: HashMap::new(),
+            used_phi_loop: false,
             param_slots: HashMap::new(),
             range_bounds: HashMap::new(),
             field_to_meta_idx: HashMap::new(),

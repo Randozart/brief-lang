@@ -494,6 +494,12 @@ impl LlvmBackend {
                             writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty), tn).ok();
                         }
                     }
+                    // 2026-06-26: Track the stored value for per-field phi
+                    // back-edge. When the canonical loop uses phi nodes for
+                    // state fields, the latch needs the updated register value
+                    // to feed back into the phi (instead of reloading from
+                    // %State, which would add a GEP+load round-trip).
+                    self.pending_phi_backedge.insert(fname.clone(), val_boxed.clone());
                     // Phase 2: Invalidate ALL cache targets on field store
                     if let Some(targets) = self.cache_slots.get(&fname) {
                         for (_target, &(_cache_idx, valid_idx)) in targets {
@@ -663,10 +669,20 @@ impl LlvmBackend {
                             }
                         }
                     }
-                    // Clear stale old-value caches — guard may have modified state
-                    // via insertvalue; pre-guard cached values are now incorrect.
-                    self.ssa_old_int_regs.clear();
-                    self.ssa_old_float_regs.clear();
+                    // 2026-06-26: Only clear cached pre-tick regs in SSA phi
+                    // mode where the guard may have modified state via
+                    // insertvalue. In memory mode (ssa_pre_reg.is_none()),
+                    // Brief's reactive semantics guarantee all reads within
+                    // a tick see pre-tick values — the guard's stores affect
+                    // the next tick, not the current one. Clearing here forces
+                    // ALL subsequent field references to fall back to GEP+load
+                    // from %State, adding a load+store round-trip per field
+                    // per iteration. This is the single largest performance gap
+                    // vs Clang (which keeps everything in phi nodes).
+                    if ssa_pre_reg.is_some() {
+                        self.ssa_old_int_regs.clear();
+                        self.ssa_old_float_regs.clear();
+                    }
                     self.terminated = prev_terminated;
                 } else {
                     // Then-path terminated (e.g. term! → program exit).

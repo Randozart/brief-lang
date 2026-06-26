@@ -884,25 +884,45 @@ impl LlvmBackend {
         // Detect canonical loop pattern: simple single counter [count < bound]
         let has_canonical_loop = txns.len() == 1 && {
             let pre = &txns[0].1.contract.pre_condition;
+            // 2026-06-26: Match both old-style Expr::Lt and the new
+            // Expr::BinaryOp(BinaryOpExpr { kind: Lt, ... }) form.
             match pre {
                 Expr::Lt(lhs, rhs) => {
                     matches!(lhs.as_ref(), Expr::Identifier(_))
                         && (matches!(rhs.as_ref(), Expr::Identifier(_)) || matches!(rhs.as_ref(), Expr::Integer(_)))
+                }
+                Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => {
+                    matches!(bop.left.as_ref(), Expr::Identifier(_))
+                        && (matches!(bop.right.as_ref(), Expr::Identifier(_)) || matches!(bop.right.as_ref(), Expr::Integer(_)))
                 }
                 _ => false
             }
         };
         if has_canonical_loop {
             let txn = &txns[0].1;
-            let counter_name = if let Expr::Lt(lhs, _) = &txn.contract.pre_condition {
-                if let Expr::Identifier(name) = lhs.as_ref() { Some(name.clone()) } else { None }
-            } else { None };
+            let counter_name = {
+                let pre = &txn.contract.pre_condition;
+                let lhs = match pre {
+                    Expr::Lt(l, _) => l.as_ref(),
+                    Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => bop.left.as_ref(),
+                    _ => return,
+                };
+                if let Expr::Identifier(name) = lhs { Some(name.clone()) } else { None }
+            };
             if let Some(ref cname) = counter_name {
-                let bound_name = if let Expr::Lt(_, rhs) = &txn.contract.pre_condition {
-                    if let Expr::Identifier(name) = rhs.as_ref() { Some(name.clone()) }
-                    else if let Expr::Integer(n) = rhs.as_ref() { Some(n.to_string()) }
-                    else { None }
-                } else { None };
+                let bound_name = {
+                    let pre = &txn.contract.pre_condition;
+                    let rhs = match pre {
+                        Expr::Lt(_, r) => r.as_ref(),
+                        Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => bop.right.as_ref(),
+                        _ => return,
+                    };
+                    match rhs {
+                        Expr::Identifier(name) => Some(name.clone()),
+                        Expr::Integer(n) => Some(n.to_string()),
+                        _ => None,
+                    }
+                };
                 // Load bound once before loop
                 if let Some(ref bname) = bound_name {
                     if let Some(&b_idx) = self.field_index_map.get(bname) {
@@ -924,11 +944,55 @@ impl LlvmBackend {
                             b_val.clone()
                         };
                         self.emit_prealloc_for_body(out, "  ", &txn.body, &bound_reg);
+                        // 2026-06-26: Emit a named block before the per-field
+                        // init loads so we have a stable predecessor label for
+                        // the phi nodes at phdr. The `br label` terminates the
+                        // preceding init block (genv_af32 / etc.) which has no
+                        // native terminator.
+                        let init_blk = format!("loop_init_{}", self.txn_counter);
+                        writeln!(out, "  br label %{}", init_blk).ok();
+                        writeln!(out, "  {}:", init_blk).ok();
+                        // Per-field phi nodes for ALL scalar state fields so
+                        // values flow through SSA registers, not GEP+load/store
+                        // round-trips. Load initial values from %State in this
+                        // block, then phi at phdr.
+                        self.phi_field_regs.clear();
+                        self.backedge_field_regs.clear();
+                        let mut init_regs: HashMap<String, String> = HashMap::new();
+                        for (name, &idx) in &self.field_index_map {
+                            if let Some(ref bname) = bound_name {
+                                if name == bname || *name == *bname { continue; }
+                            }
+                            let ty = &self.field_types[idx];
+                            let gep_init = format!("%gep_init_{}", self.txn_counter);
+                            let init_load = format!("%init_field_{}", self.txn_counter);
+                            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                                gep_init, idx).ok();
+                            writeln!(out, "  {} = load {}, {}* {}, align {}",
+                                init_load, ty, ty, gep_init, self.align_of(ty)).ok();
+                            init_regs.insert(name.clone(), init_load);
+                            let phi_reg = format!("%phi_{}", name);
+                            let be_reg = format!("%be_{}", name);
+                            self.phi_field_regs.insert(name.clone(), phi_reg);
+                            self.backedge_field_regs.insert(name.clone(), be_reg);
+                            self.txn_counter += 1;
+                        }
                         let pi_name = format!("%pi_{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "  br label %phdr").ok();
                         writeln!(out, "  phdr:").ok();
                         let pn_name = format!("%pn_{}", self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "  {} = phi i64 [ 0, %entry ], [ {}, %platch ]", pi_name, pn_name).ok();
+                        writeln!(out, "  {} = phi i64 [ 0, %{} ], [ {}, %platch ]", pi_name, init_blk, pn_name).ok();
+                        // 2026-06-26: Per-field phis for all scalar state fields.
+                        // Each phi selects between the init-block initial load
+                        // and the latch back-edge value (reloaded from %State for
+                        // modified fields, identity for unchanged).
+                        for (name, phi_reg) in &self.phi_field_regs {
+                            let init_reg = &init_regs[name];
+                            let be_reg = &self.backedge_field_regs[name];
+                            let ty = &self.field_types[*self.field_index_map.get(name).unwrap()];
+                            writeln!(out, "  {} = phi {} [ {}, %{} ], [ {}, %platch ]",
+                                phi_reg, ty, init_reg, init_blk, be_reg).ok();
+                        }
                         let pc_name = format!("%pc_{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "  {} = icmp slt i64 {}, {}", pc_name, pi_name, bound_imm).ok();
                         writeln!(out, "  br i1 {}, label %ptick, label %pdoneloop", pc_name).ok();
@@ -951,9 +1015,14 @@ impl LlvmBackend {
             if !all_push_targets.is_empty() {
                 // Try to extract bound from the first txn's precondition
                 if let Some((_, first_txn)) = txns.iter().find(|(_, t)| t.is_reactive) {
-                    if let Expr::Lt(_, rhs) = &first_txn.contract.pre_condition {
+                    let rhs = match &first_txn.contract.pre_condition {
+                        Expr::Lt(_, r) => Some(r.as_ref()),
+                        Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => Some(bop.right.as_ref()),
+                        _ => None,
+                    };
+                    if let Some(rhs) = rhs {
                         let bound_reg = format!("%bound_mt{}", self.txn_counter); self.txn_counter += 1;
-                        match rhs.as_ref() {
+                        match rhs {
                             Expr::Integer(n) => {
                                 writeln!(out, "  {} = add i64 0, {}", bound_reg, n).ok();
                                 self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
@@ -1060,7 +1129,16 @@ impl LlvmBackend {
             if self.phi_induction_reg.is_some() {
                 // Canonical loop: phi induction variable already guarantees precondition.
                 // Skip precondition check — body runs unconditionally.
-                self.pre_load_all_fields(out, "%state");
+                // 2026-06-26: Use per-field phi registers instead of
+                // pre_load_all_fields (GEP+load). The phi registers are defined
+                // at the phdr block and dominate the ptick body block. This
+                // eliminates a load+store round-trip per field per iteration.
+                // pending_phi_backedge is populated by emit_stmt when it
+                // processes &field = expr assignments.
+                self.pending_phi_backedge.clear();
+                for (name, phi_reg) in &self.phi_field_regs {
+                    self.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
+                }
                 if let Some((ref cname, ref pi_reg, _)) = self.phi_induction_reg {
                     self.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
                 }
@@ -1145,6 +1223,30 @@ impl LlvmBackend {
             writeln!(out, "  br label %platch").ok();
             writeln!(out, "  platch:").ok();
             writeln!(out, "  {} = add i64 {}, 1", pn_reg, pi_reg).ok();
+            // 2026-06-26: Emit per-field back-edge values for the phi phdr.
+            // For modified fields (pending_phi_backedge contains the field),
+            // the body stored a new value into %State — reload it so the next
+            // iteration's phi sees the updated result. GVN can eliminate the
+            // store+reload pair since they use the same GEP address.
+            // For unmodified fields, use the phi register itself (identity),
+            // which GVN trivially eliminates via copy propagation.
+            for (name, be_reg) in &self.backedge_field_regs {
+                if let Some(stored_reg) = self.pending_phi_backedge.get(name) {
+                    // Field was modified by the body; reload from %State
+                    if let Some(&idx) = self.field_index_map.get(name) {
+                        let ty = &self.field_types[idx];
+                        let gep = format!("%gep_be_{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                            gep, idx).ok();
+                        writeln!(out, "  {} = load {}, {}* {}, align {}",
+                            be_reg, ty, ty, gep, self.align_of(ty)).ok();
+                    }
+                } else {
+                    // Field was not modified; use the phi value itself
+                    let phi_reg = self.phi_field_regs.get(name).cloned().unwrap_or_default();
+                    writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg).ok();
+                }
+            }
             super::emit_loop_metadata(out, "  ", "phdr", &mut self.metadata_counter, &mut self.pending_metadata);
             writeln!(out, "  pdoneloop:").ok();
             // Emit post-loop prints after loop exit
