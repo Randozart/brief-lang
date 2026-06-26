@@ -64,10 +64,10 @@ defn gpio_toggle() -> Int
 
 // Self-test: verify constants match known STM32F407 addresses
 defn self_check() -> Bool {
-    term uart1_dr  == 0x40011000
-      && uart1_sr  == 0x40011001
+    term uart1_dr == 0x40011000
+      && uart1_sr == 0x40011001
       && uart1_cr1 == 0x4001100C
       && gpioa_odr == 0x40020014
       && uart1_end == 0x40011018
-      && gpioa_end == 0x40020400
+      && gpioa_end == 0x40020400;
 };
