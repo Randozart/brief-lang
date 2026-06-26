@@ -960,13 +960,16 @@ impl SymbolicExecutor {
         // Check all path constraints for feasibility.
         // Negated constraints must NOT be truthy (if they are, the path is impossible).
         // Non-negated constraints must be truthy (if they aren't, the path is impossible).
+        // For symbolic/unknown variables, assume feasibility (avoid false positives).
         for constraint in &state.constraints {
+            let truthy = self.is_truthy(&constraint.condition, state);
+            let is_symbolic = self.has_symbolic_vars(&constraint.condition, state);
             if constraint.is_negated {
-                if self.is_truthy(&constraint.condition, state) {
+                if truthy && !is_symbolic {
                     return false;
                 }
             } else {
-                if !self.is_truthy(&constraint.condition, state) {
+                if !truthy && !is_symbolic {
                     return false;
                 }
             }
@@ -978,6 +981,25 @@ impl SymbolicExecutor {
 
         let post_true = self.is_truthy(post, state);
         post_true
+    }
+
+    /// Check if an expression references any symbolic variables (not in state).
+    fn has_symbolic_vars(&self, expr: &Expr, state: &SymbolicState) -> bool {
+        match expr {
+            Expr::Identifier(name) => {
+                if let Some(val) = state.vars.get(name) {
+                    matches!(val, SymbolicValue::Symbolic(_))
+                } else {
+                    true // Not in state → treat as symbolic
+                }
+            }
+            Expr::And(l, r) | Expr::Or(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r)
+            | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) => {
+                self.has_symbolic_vars(l, state) || self.has_symbolic_vars(r, state)
+            }
+            Expr::Not(inner) | Expr::BitNot(inner) => self.has_symbolic_vars(inner, state),
+            _ => false,
+        }
     }
 
     fn verify_post_with_prior(&self, initial_vars: &HashMap<String, SymbolicValue>, state: &SymbolicState, post: &Expr) -> bool {

@@ -4262,7 +4262,6 @@ let span = self.current_span();
         if !is_reactive && matches!(self.current_token(), Some(Ok(Token::LBracket))) {
             let c = self.parse_contract()?;
             if c.pre_condition != Expr::Bool(true) || c.post_condition != Expr::Bool(true) {
-                eprintln!("note: txn contracts read more clearly before the return type — use `[pre][post] -> Type` instead of `-> Type [pre][post]`");
             }
             contract = c;
         }
@@ -4480,7 +4479,6 @@ let span = self.current_span();
                 // We parse it but emit a soft hint so users learn the canonical form.
                 let c = self.parse_contract()?;
                 if c.pre_condition != Expr::Bool(true) || c.post_condition != Expr::Bool(true) {
-                    eprintln!("note: contracts read more clearly before the return type — use `[pre][post] -> Type` instead of `-> Type [pre][post]`");
                 }
                 c
             } else {

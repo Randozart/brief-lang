@@ -7,6 +7,8 @@
 //   4. Read-modify-write on control registers
 //   5. Block transfer from MMIO device to buffer
 
+import "std/types";
+
 const UART_BASE: Int = 0x40011000;
 const UART_END:  Int = 0x40011018;
 
@@ -31,7 +33,7 @@ defn uart_send(c: Byte) -> Bool
     [in_range(UART_DR, UART_BASE, UART_END)]
 {
     // Wait until TX buffer is empty
-    let mut status: Byte = volatile_load#(UART_SR);
+    let status: Byte = volatile_load#(UART_SR);
     while (status & SR_TXE) == 0 {
         &status = volatile_load#(UART_SR);
     };
@@ -45,7 +47,7 @@ defn uart_recv() -> Byte
     [in_range(UART_DR, UART_BASE, UART_END)]
 {
     // Wait until RX buffer is full
-    let mut status: Byte = volatile_load#(UART_SR);
+    let status: Byte = volatile_load#(UART_SR);
     while (status & SR_RXNE) == 0 {
         &status = volatile_load#(UART_SR);
     };
@@ -85,8 +87,8 @@ defn fifo_read(fifo: Ptr<Byte>, count: Int) -> String
     [count > 0]
     [count <= 64]
 {
-    let mut buf: String = "";
-    let mut i: Int = 0;
+    let buf: String = "";
+    let i: Int = 0;
     rct txn loop [i < count][i == count] {
         [i < count] {
             let c: Byte = volatile_load#(fifo);
