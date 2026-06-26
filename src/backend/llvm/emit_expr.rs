@@ -3677,6 +3677,10 @@ impl LlvmBackend {
                 // emitted here (always) so the branch target exists even
                 // when the fast path returns early.
                 let slow_l = format!("push_slow_{}", self.txn_counter); self.txn_counter += 1;
+                // Track whether we emitted a branch to slow_l. If not (e.g.
+                // prepend mode or no prealloc info), we need a br label %slow_l
+                // to terminate the preceding basic block before the label.
+                let mut emitted_slow_branch = false;
                 if !prepend {
                 if let Expr::OwnedRef(field_name) = target.as_ref() {
                     if let Some((cap_reg, buf_i64)) = self.field_prealloc_info.get(field_name.as_str()).cloned() {
@@ -3685,6 +3689,7 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = icmp ult i64 {}, {}", indent, cap_check, old_len, cap_reg).ok();
                         let fast_l = format!("push_fast_{}", self.txn_counter); self.txn_counter += 1;
                         writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cap_check, fast_l, slow_l).ok();
+                        emitted_slow_branch = true;
                         // Fast path: write element at header[2 + old_len], increment length.
                         // Uses buf_i64 (preallocated i64* buffer from prealloc_info)
                         // rather than hp (which alias the same memory but may be stale
@@ -3720,6 +3725,12 @@ impl LlvmBackend {
                         return TypedRegister { name: v, ty: Type::Int };
                     }
                 }
+                }
+                // If the fast-path branch was not emitted (e.g. prepend mode or
+                // no prealloc info), terminate the preceding block so LLVM does
+                // not see an unterminated basic block before the label.
+                if !emitted_slow_branch {
+                    writeln!(out, "{}br label %{}", indent, slow_l).ok();
                 }
                 writeln!(out, "{}{}:", indent, slow_l).ok();
                 // Allocate: when inside an arena scope (loop/tick), use bump

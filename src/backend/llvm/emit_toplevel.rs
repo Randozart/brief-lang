@@ -110,6 +110,9 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @time(i64*) nounwind").ok();
         writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(i8*) nounwind").ok();
+        // 2026-06-26: realloc used by the arena allocator grow path when
+        // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
+        writeln!(out, "declare i8* @realloc(i8*, i64) nounwind").ok();
         writeln!(out, "declare i64 @__read_file__(i64)").ok();
         writeln!(out, "declare i64 @__write_file__(i64, i64)").ok();
         writeln!(out, "declare i64 @__readln__()").ok();
@@ -929,6 +932,12 @@ impl LlvmBackend {
             self.txn_counter = 0;
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
+            // 2026-06-26: Reset in_callable_txn — emit_definition may have left
+            // it true from a prior TopLevel::Definition. Reactive transactions
+            // use the non-callable code path (emit_stmt.rs:162). Without this,
+            // term!/TermBang inside guards takes the callable path, emits no
+            // ret/br, and leaves basic blocks unterminated.
+            self.in_callable_txn = false;
             self.returns_i64 = false;
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
@@ -971,6 +980,9 @@ impl LlvmBackend {
             self.txn_counter = 0;
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
+            // 2026-06-26: Reset in_callable_txn — same rationale as the
+            // assume_action path above (emit_definition leaks into txn).
+            self.in_callable_txn = false;
             self.returns_i64 = false;
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");

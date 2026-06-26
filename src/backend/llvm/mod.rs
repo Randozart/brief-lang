@@ -1203,6 +1203,17 @@ impl LlvmBackend {
         if let Some((ref ptr, ref end, ref base)) = self.arena_slots.clone() {
             let c = self.arena_counter;
             self.arena_counter += 1;
+            // 2026-06-26: emit br label %check_l before the check label to
+            // terminate whatever block the caller left unterminated (callers
+            // emit straight-line code before emit_arena_alloc). Without this,
+            // LLVM sees the check label as a new basic block whose predecessor
+            // has no terminator — "expected instruction opcode" error.
+            // The check label is also used as the PHI predecessor for the
+            // "no grow needed" path (aaok_N), avoiding the old self-loop PHI
+            // that listed aaok_N as its own predecessor.
+            let check_l = format!("aacheck_{}", c);
+            writeln!(out, "{}br label %{}", indent, check_l).ok();
+            writeln!(out, "{}{}:", indent, check_l).ok();
             let cur = format!("%aacur{}", c);
             writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, cur, ptr).ok();
             let new_ptr = format!("%aanew{}", c);
@@ -1232,7 +1243,7 @@ impl LlvmBackend {
             writeln!(out, "{}{}:", indent, ok_l).ok();
             let phi = format!("%aaphi{}", c);
             writeln!(out, "{}{} = phi i8* [ {}, %{} ], [ {}, %{} ]",
-                indent, phi, cur, ok_l, new_base, grow_l).ok();
+                indent, phi, cur, check_l, new_base, grow_l).ok();
             writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_ptr, ptr).ok();
             phi
         } else {

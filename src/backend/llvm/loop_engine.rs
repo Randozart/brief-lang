@@ -39,7 +39,15 @@ impl LlvmBackend {
         self.txn_counter += 1;
         match expr {
             Expr::Integer(n) => { return self.emit_expr(out, expr, indent).name; }
-            Expr::Bool(_) | Expr::Float(_) | Expr::Neg(_) | Expr::String(_) => {
+            // Expr::Float is handled separately: emit the bit pattern as i64
+            // so comparison operators (icmp) see i64 on both sides. This avoids
+            // the invalid `bitcast float to i64` and type mismatch with icmp.
+            Expr::Float(f) => {
+                let bits = f.to_bits() as i64;
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, bits).ok();
+                return v;
+            }
+            Expr::Bool(_) | Expr::Neg(_) | Expr::String(_) => {
                 return self.emit_expr(out, expr, indent).name;
             }
             Expr::Char(c) => {
@@ -50,6 +58,11 @@ impl LlvmBackend {
                 match lit.as_ref() {
                     crate::features::literal::LiteralExpr::Char(c) => {
                         writeln!(out, "{}{} = add i64 0, {}", indent, v, *c as i32).ok();
+                        return v;
+                    }
+                    crate::features::literal::LiteralExpr::Float(f) => {
+                        let bits = f.to_bits() as i64;
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, bits).ok();
                         return v;
                     }
                     _ => return self.emit_expr(out, expr, indent).name,
@@ -78,10 +91,18 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, l, p).ok();
                             writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, l).ok();
                         }
+                        // 2026-06-26: float -> i32 bitcast (same size), then
+                        // zext to i64 so comparison operators see i64 on both sides.
+                        // The comparison uses icmp on the integer bit pattern —
+                        // correct for equality, but ordering of negative floats
+                        // compares inverted vs mathematical (high bit is sign).
+                        // TODO: emit fcmp for float-typed exit comparisons.
                         "float" => {
                             let l = format!("%exit_l{}", self.txn_counter); self.txn_counter += 1;
+                            let i = format!("%exit_i{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load float, float* {}, align 4", indent, l, p).ok();
-                            writeln!(out, "{}{} = bitcast float {} to i64", indent, v, l).ok();
+                            writeln!(out, "{}{} = bitcast float {} to i32", indent, i, l).ok();
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
                         }
                         _ => {
                             panic!("emit_exit_expr: unknown field type '{}' for field '{}' in #!exit expression", ft, name);
