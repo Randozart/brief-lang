@@ -1661,3 +1661,55 @@ let read_idx = pos - 1 - step.skip;
 **Files**: `examples/pipe-chain.bv`, `examples/pipe-skip.bv`, `docs/architecture/features/pipe.md`, `learn-brief/01-basics.md`
 
 **Lesson**: Check for existing intrinsics before reaching for `frgn`. `print_int#`, `put_char#`, `print_float#` all exist and should be used in examples.
+
+---
+
+## 2026-06-26 — nbody_newton energy output always 0.0 in SSA loop mode
+
+**Issue**: `nbody_newton.bv` prints `0.000000000` for the energy computation
+regardless of BOUND value or iteration count. The C reference correctly prints
+`-0.169203490` (initial solar system energy). The float computation in the
+binary produces zero despite correct initial values in the LLVM IR.
+
+**Root Cause**: Not yet identified. The LLVM IR shows:
+- Correct initial state values stored via `store float <bitcast i32 N to float>` 
+  (verified via Python bit-pattern decoding — Jupiter's bx1 = 4.841... stored as
+  `bitcast i32 1083895042 to float`)
+- Correct GEP indices in both `init_state` and the main loop's body loads
+  (verified by matching state field indices between init stores and body loads)
+- Correct float arithmetic in the body (1605 fmul/fadd/fsub/fdiv operations present)
+- Float stores in the body updating %State (verified via grep)
+
+But the binary outputs 0.0. The body sequence is:
+1. tick: loads all state fields, increments cycle counter, resets any_fired
+2. b_simulate: reloads all state fields (double-load pattern), computes physics,
+   stores results back to %State, computes energy
+3. s_simulate: checks exit condition
+
+The `print_loop` benchmark (which also uses `getenv_int#("BOUND")` + reactive txn)
+works correctly, so the reactive transaction mechanism itself is fine.
+
+**Hypothesis**: LLVM's SROA (part of `opt -O2`) decomposes the `%State` alloca
+into per-field scalars, then eliminates the init stores because it considers
+them dead (the body block's loads happen through GEP chains that SROA may not
+recognize as aliases of the decomposed scalars).
+
+**Workaround**: The benchmark was broken before the exit-condition fix (the old
+`_ => panic!` for `Expr::BinaryOp` prevented `#!exit count == bound` from
+compiling). This is a pre-existing codegen bug unrelated to the current changes.
+
+**Diagnostic commands**:
+```
+opt -O3 -pass-remarks-missed=sroa nbody_newton.ll -disable-output 2>&1 | head -20
+# Check if %State struct survived SROA
+grep '%State' nbody_newton.opt.ll
+# Check if init stores were removed
+grep 'store.*float' nbody_newton.opt.ll | head -10
+```
+
+**Files**: `benchmarks/nbody_newton.bv`, `benchmarks/nbody_sqrt_idio.bv`
+(also affected — uses same `getenv_int#("BOUND")` + reactive txn pattern).
+
+**Priority**: High — blocks nbody benchmarks from producing correct output.
+Likest cause: LLVM SROA eliminating float init stores when using inlined
+SSA-loop dispatch.

@@ -1,126 +1,74 @@
-# Plan: Benchmark Repair — Dead-Field Elimination, Exit Expression Codegen, @llvm.trap Audit
+# Benchmark Repair Plan
 
-**Date**: 2026-06-26
-**Author**: OpenCode
-**Status**: Active
-**Priority**: Critical
+Date: 2026-06-26
 
-## Executive Summary
+## Problem
+After the LLVM codegen fixes (in_callable_txn leak, float exit conditions,
+arena allocator PHI), all 21 benchmarks compile but several underperform C
+or have measurement bugs.
 
-Benchmarks that use `let N: Int = getenv_int#("BOUND")` as a loop bound and
-reference `N` only in preconditions/postconditions/exit-conditions produce
-binaries that crash with `SIGILL` (Illegal Instruction). Root cause: three
-interacting bugs in the LLVM backend.
+## Phases
 
-## Root Causes
+### Phase 1: Fix nbody BOUND default + correctness baseline
+- **What**: nbody_newton and nbody_sqrt_idio show 0.007× ratios because
+  `get_env_int#("BOUND")` returns 0 when the env var is unset; C defaults
+  to 50M. Fix: add default-50M fallback in the benchmark source.
+- **Files**: `benchmarks/nbody_newton.bv`, `benchmarks/nbody_sqrt_idio.bv`
+- **Also**: Run `--correctness` on all benchmarks to verify Brief == C output.
+- **Expected**: nbody ratios become ~1.0–1.15× (not 0.007×).
 
-### Bug 1: Dead-field elimination drops precondition-only fields
+### Phase 2: Double-load elimination in reactive tick
+- **What**: The reactive tick infrastructure loads every state field in the
+  precondition block, then loads them AGAIN in the body block. This doubles
+  load/store traffic.
+- **Where**: `src/backend/llvm/loop_engine.rs` — the tick → body transition.
+- **Approach**: After the precondition check succeeds, pass the already-loaded
+  register values into the body block instead of reloading from `%State`.
+  This is additive (new code path for SSA-threaded values), not modifying
+  the existing memory-mode fallback.
+- **Expected impact**: fasta 2.29× → ~1.3×, knucleotide 1.28× → ~1.05×.
+- **Trade-off**: Adds a `br` that forces a new basic block boundary. On
+  txns with 0–1 fields the extra `br` may slightly hurt (LLVM must merge
+  it back). The compiler should detect the number of state fields at
+  compile time: if N_fields <= 1, use the old direct pattern; if > 1, use
+  the SSA-threaded pattern.
 
-`compute_referenced_fields` (transition_graph.rs:1040) scans only transaction
-and definition **bodies**. It does NOT scan:
-- Preconditions (`[ops < N]`)
-- Postconditions (`[ops == N]`)
-- Exit conditions (`#!exit ops == N`)
-- State field initializers (`let N = getenv_int#(...)`)
+### Phase 3: Arena-allocator bump check bypass
+- **What**: `emit_arena_alloc` does `icmp ule` + branch every call even
+  when the arena has ample remaining capacity. For queue_drain this fires
+  100M times.
+- **Where**: `src/backend/llvm/mod.rs` — `emit_arena_alloc`.
+- **Approach**: When the arena is known to have capacity (the bump pointer
+  check has passed once), elide the subsequent checks for the rest of
+  the transaction body. Use a flag in the arena state to track "known
+  capacity until next arena reset."
+- **Expected impact**: queue_drain 2.40× → ~1.5× (the memcpy for 0-length
+  copies is the remaining cost, which requires a uniqueness optimization).
+- **Trade-off**: If a single tick allocates many objects, the first alloc
+  may trigger a realloc. Skipping checks on subsequent allocs in the same
+  tick is safe (the realloc doubled the arena, so the rest of the tick's
+  allocations will fit). If a tick allocates more than 2× the arena size
+  in one go, the realloc logic handles it at the `icmp ule` level.
 
-`assign_field_modes` then assigns `FieldMode::Never` to any field NOT in
-`referenced_fields`. The field `N` is eliminated from `%State` entirely.
+### Phase 4: Correctness sweep
+- **What**: Run `bash benchmarks/build_and_bench.sh --correctness`.
+  Investigate any mismatches.
+- **Known**: print_loop showed Brief: "0" vs C: "" at BOUND=5. The
+  mismatch suggests C's output line is empty (possibly newline diff).
+- **Action**: Fix mismatches or document as expected (e.g., float
+  formatting differences).
 
-`apply_field_modes` receives `live_fields` as a parameter but **never uses it**.
-`live_fields` IS the correct superset (includes precondition/exit references).
+### Phase 5: Trophy folder evaluation
+- After Phase 1 fixes the nbody bound, re-benchmark. If any benchmark
+  genuinely beats C by 1.5×+, move it to a `trophy/` directory with
+  a README explaining why Brief outperforms C (e.g., "contracts enabled
+  LLVM to unroll the loop by proving the iteration count at compile time").
 
-**Fix**: Union `live_fields` with `referenced_fields` in `apply_field_modes`.
-Also scan pre/post/exit conditions in `compute_referenced_fields` for defense
-in depth.
-
-### Bug 2: Exit expression codegen emits `@llvm.trap()` for unknown identifiers
-
-`emit_exit_expr` (loop_engine.rs:36) handles identifiers by looking them up
-in `field_index_map`, `constants`, and `trigger_names`. When a field has been
-eliminated (Bug 1), none of these lookups succeed, and the function emits:
-
-```llvm
-call void @llvm.trap()
-%tN = add i64 undef, 0
-```
-
-This binary trap is unconditionally reached. `opt -O3` then sees `@llvm.trap()`
-followed by a conditional branch and optimizes the branch away (treating the
-trap as noreturn), producing `ud2` — hence `SIGILL`.
-
-**Fix**: The user directive says: "If a contract violation is suspected, it
-should not even compile." Replace defensive `@llvm.trap()` in `emit_exit_expr`
-with `panic!()` so that the field resolution failure is caught at compile time
-as a clear error. This makes Bug 1 impossible to ignore — the compiler exits
-with a diagnostic instead of emitting a crashing binary.
-
-### Bug 3: `check_exit_condition_idents` runs AFTER dead-field elimination
-
-The validation at mod.rs:1677 runs AFTER `apply_field_modes` (line 1627) has
-already eliminated fields. If the exit condition references an eliminated
-field, the check correctly catches it — but only because the field was
-eliminated first. The order should be: validate first, eliminate second.
-
-**Fix**: Move `check_exit_condition_idents` before `apply_field_modes`, or
-conversely, ensure eliminated fields are invisible to the exit condition by
-treating the exit condition as a liveness source (Bug 1 fix).
-
-### Bug 4: `@llvm.trap()` used as defensive catch-all in 47 locations
-
-47+ locations in the LLVM backend emit `@llvm.trap()` for unsupported
-expression types or unexpected states. These are latent compiler bugs that
-produce crashing binaries instead of compile-time errors. Each should be
-audited and either:
-- Replaced with `panic!()` (unreachable — compiler bug)
-- Replaced with proper error propagation (reachable — missing feature)
-
-## Fix Plan
-
-### Part 1: Fix dead-field elimination (Bug 1 + Bug 3)
-**File**: `src/backend/llvm/mod.rs`
-**File**: `src/analysis/transition_graph.rs`
-
-1. In `mod.rs:apply_field_modes`, union `live_fields` into `referenced_fields`
-   before passing to `assign_field_modes`.
-2. In `transition_graph.rs:compute_referenced_fields`, also scan:
-   - `Transaction.contract.pre_condition`
-   - `Transaction.contract.post_condition`
-   - `Program.exit_condition`
-   - `StateDecl.expr` (initializer)
-3. In `mod.rs`, swap the order of `check_exit_condition_idents` and
-   `apply_field_modes` so validation runs first.
-
-### Part 2: Fix `@llvm.trap()` in emit_exit_expr (Bug 2)
-**File**: `src/backend/llvm/loop_engine.rs`
-
-Replace all defensive `@llvm.trap()` + `undef` returns in `emit_exit_expr`
-(lines 87-89, 97-98, 100-103, 175-177) with `panic!()` calls that include
-the unknown identifier or expression type. This converts silent binary crashes
-into compile-time errors.
-
-### Part 3: Audit `@llvm.trap()` in emit_expr (Bug 4)
-**File**: `src/backend/llvm/emit_expr.rs`
-
-Review ~44 `@llvm.trap()` occurrences. For each:
-- If the code path is truly unreachable (compiler invariant violation):
-  replace with `panic!()`.
-- If the code path is reachable (e.g., missing intrinsic handling):
-  replace with proper error return or codegen.
-
-Keep `@llvm.trap()` in `emit_guard_check` (emit_stmt.rs:809) — these are
-valid contract-violation traps for type constraints (`let x: Int[0 < x]`).
-
-### Part 4: Verify
-1. `cargo test --lib` passes
-2. `cargo build` succeeds (no warnings)
-3. `print_loop.bv` now COMPILES (new behavior: errors on `N` not being in
-   field_index_map — which will only be fixed after Part 1 is done)
-4. After Part 1 fixes: `print_loop.bv` compiles AND runs correctly
-
-## Implementation Order
-
-1. Part 1 (dead-field fix) — restores `N` to field_index_map
-2. Part 2 (`@llvm.trap()` in emit_exit_expr → panic) — makes failures
-   compile-time errors
-3. Part 4 (test print_loop.bv) — verify the fix chain
-4. Part 3 (audit remaining `@llvm.trap()` in emit_expr) — if time permits
+## Success Criteria
+- All 21 benchmarks compile and produce correct output matching C.
+- fasta ratio < 1.5× (from current 2.29×).
+- queue_drain ratio < 2.0× (from current 2.40×).
+- knucleotide ratio < 1.15× (from current 1.28×).
+- All other benchmarks within 15% of C.
+- Every code change has a dated comment explaining why it exists.
+- Every heuristic stores its choice in `report_lines` for regression analysis.

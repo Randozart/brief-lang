@@ -340,6 +340,47 @@ it. The more LLVM knows, the more aggressively it can optimize.
 13. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
     requires removing `Copy` and adjusting comparison code.
 
+## Commenting Mandate (Backend Updates)
+
+**Every backend code change must include a comment explaining why it was made
+and what it fixes or enables.** The comment format is:
+```
+// YYYY-MM-DD: <short description of why this exists>
+// <what problem it solves, what pattern it targets>
+```
+Comments must be placed at the site of the change, not in a commit message.
+If the change has trade-offs (faster path A but slower path B), the comment
+must document them and explain why the chosen approach is optimal for the
+targeted situation.
+
+## Regression Watch & Trade-Off Analysis
+
+**Every optimization must consider its effect on ALL code paths, not just the
+one it targets.** Before committing an optimization:
+
+1. **Identify the pattern** the optimization targets (e.g., "reactive txn with
+   3-5 state fields and a cheap body").
+
+2. **Identify when it would hurt** — what workloads pay more under the new
+   codegen? (e.g., "adds a `br` that forces a new basic block, which LLVM
+   must then merge back — ~0.1% overhead on 3-field txns").
+
+3. **Eliminate trade-offs where possible**: If the code can detect at compile
+   time which path is better, emit different IR for each situation. The default
+   answer is NOT "pick one" — it is "detect and branch in the compiler."
+   Only settle for a single strategy when runtime detection is impossible
+   (e.g., property of the input data, not the program structure).
+
+4. **Benchmark both paths** before and after. Compare against C baseline. If
+   the optimization helps benchmark A by 2× but hurts benchmark B by 0.1×,
+   it may still be worth it — but the comment must explicitly state the cost.
+
+5. **Add a regression check**: When a heuristic chooses between two codegen
+   strategies, store a `bool` field on `LlvmBackend` that records which
+   strategy was chosen per transaction. The field must be documented and the
+   choice must be logged in `report_lines` so benchmark output shows which
+   path was taken for each transaction. This makes regressions diagnosable.
+
 ## Testing Mandate
 
 **Every new feature, every code path, every match arm must have corresponding
