@@ -1,0 +1,41 @@
+// inop-syscall-io: OS-level I/O via syscall inops
+//
+// Demonstrates:
+//   1. syscall3/syscall1 from std/syscall for read/write/exit
+//   2. Cross-architecture: x86_64 (syscall), AArch64 (svc #0), RISC-V (ecall)
+//   3. The interpreter fallback returns -1 (marker for "unsupported in interpreter")
+//   4. Contract bounds for syscall numbers
+//
+// Usage: brief-compiler check examples/inop-syscall-io.bv
+
+import { syscall1, syscall3 } from "std/syscall";
+
+const SYS_WRITE: Int = 1;    // Linux x86_64 write
+const SYS_READ:  Int = 0;    // Linux x86_64 read
+const SYS_EXIT:  Int = 60;   // Linux x86_64 exit
+const STDOUT:    Int = 1;    // file descriptor
+const STDIN:     Int = 0;    // file descriptor
+
+// Write a buffer to stdout
+defn write_stdout(buf: Ptr<Byte>, count: Int) -> Int
+    [count > 0][count <= 4096]
+{
+    let r: Int = syscall3(SYS_WRITE, STDOUT, buf as Int, count);
+    term r;
+};
+
+// Read from stdin into a buffer
+defn read_stdin(buf: Ptr<Byte>, count: Int) -> Int
+    [count > 0][count <= 4096]
+{
+    let r: Int = syscall3(SYS_READ, STDIN, buf as Int, count);
+    term r;
+};
+
+// Exit the process with a status code
+defn exit_process(code: Int) -> Int
+    [code >= 0][code < 256]
+{
+    let r: Int = syscall1(SYS_EXIT, code);
+    term r;
+};

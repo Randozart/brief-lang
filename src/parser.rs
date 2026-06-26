@@ -2013,6 +2013,23 @@ impl<'a> Parser<'a> {
             self.expect(Token::Inop)?;
         }
         let name = self.expect_identifier()?;
+
+        // Parse optional type parameters: <T> or <T, U>
+        let mut type_params = Vec::new();
+        if let Some(Ok(Token::Lt)) = self.current_token() {
+            self.advance();
+            loop {
+                let param = self.expect_identifier()?;
+                type_params.push(param);
+                if let Some(Ok(Token::Comma)) = self.current_token() {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::Gt)?;
+        }
+
         let params = if let Some(Ok(Token::LParen)) = self.current_token() {
             self.advance();
             let mut p = Vec::new();
@@ -2317,6 +2334,7 @@ impl<'a> Parser<'a> {
 
         Ok(InopDeclaration {
             name,
+            type_params,
             params,
             outputs,
             contract,

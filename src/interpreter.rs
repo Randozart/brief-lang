@@ -10456,6 +10456,7 @@ mod tests {
         let mut i = Interpreter::new();
         let inop = InopDeclaration {
             name: "test_add".into(),
+            type_params: vec![],
             params: vec![("x".into(), Type::Int), ("y".into(), Type::Int)],
             outputs: vec![Type::Int],
             contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -10497,6 +10498,7 @@ mod tests {
         let mut i = Interpreter::new();
         let inop = InopDeclaration {
             name: "no_fallback".into(),
+            type_params: vec![],
             params: vec![("x".into(), Type::Int)],
             outputs: vec![Type::Int],
             contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -10558,6 +10560,7 @@ mod tests {
         // Set up an inop "my_insert" whose fallback returns a known value
         i.inop_decls.insert("my_insert".into(), InopDeclaration {
             name: "my_insert".into(),
+            type_params: vec![],
             params: vec![("list".into(), Type::Void), ("val".into(), Type::Void)],
             outputs: vec![Type::Int],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -10637,6 +10640,7 @@ mod tests {
         // Inop "my_extract" fallback returns (pushed_value, new_collection) as a 2-element tuple
         i.inop_decls.insert("my_extract".into(), InopDeclaration {
             name: "my_extract".into(),
+            type_params: vec![],
             params: vec![("list".into(), Type::Void)],
             outputs: vec![Type::Int, Type::Void],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -13693,6 +13697,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         i.inop_decls.insert("write_buf".to_string(), InopDeclaration {
             name: "write_buf".into(),
+            type_params: vec![],
             params: vec![("buf".into(), Type::Int)],
             outputs: vec![Type::Int],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),

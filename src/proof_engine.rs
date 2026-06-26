@@ -1217,6 +1217,25 @@ fn format_expr(expr: &Expr) -> String {
             };
             format!("{}#({})", name, args_str)
         }
+        Expr::Projection { source, target } => {
+            format!("({} :> {:?})", format_expr(source), target)
+        }
+        Expr::FieldAccess(source, field) => {
+            format!("{}.{}", format_expr(source), field)
+        }
+        Expr::ListIndex(source, index) => {
+            format!("{}[{}]", format_expr(source), format_expr(index))
+        }
+        Expr::OwnedRef(name) => format!("&{}", name),
+        Expr::PriorState(name) => format!("@{}", name),
+        Expr::Term => "term".to_string(),
+        Expr::Sub(l, r) => format!("{} - {}", format_expr(l), format_expr(r)),
+        Expr::Shr(l, r) => format!("{} >> {}", format_expr(l), format_expr(r)),
+        Expr::Shl(l, r) => format!("{} << {}", format_expr(l), format_expr(r)),
+        Expr::BitAnd(l, r) => format!("{} & {}", format_expr(l), format_expr(r)),
+        Expr::BitOr(l, r) => format!("{} | {}", format_expr(l), format_expr(r)),
+        Expr::BitXor(l, r) => format!("{} ^ {}", format_expr(l), format_expr(r)),
+        Expr::BitNot(inner) => format!("~{}", format_expr(inner)),
         _ => "<expr>".to_string(),
     }
 }

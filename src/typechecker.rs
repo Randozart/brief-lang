@@ -2178,15 +2178,34 @@ impl TypeChecker {
                     // GLUE file emission intrinsic
                     Intrinsic::EmitFile => Type::Bool,
                     Intrinsic::UserDefined(name) => {
-                        self.inop_decls.get(name)
-                            .map(|d| {
-                                if d.outputs.len() > 1 {
-                                    Type::Tuple(d.outputs.clone())
+                        if let Some(inop) = self.inop_decls.get(name) {
+                            if inop.outputs.len() > 1 {
+                                Type::Tuple(inop.outputs.clone())
+                            } else if let Some(ret_ty) = inop.outputs.first() {
+                                let ty = ret_ty.clone();
+                                if !inop.type_params.is_empty() && !args.is_empty() {
+                                    let mut substitutions = HashMap::new();
+                                    for (i, param_ty) in inop.params.iter().enumerate() {
+                                        if let Some(arg) = args.get(i) {
+                                            let arg_ty = self.infer_expression(arg);
+                                            let s = self.extract_type_substitutions(&param_ty.1, &arg_ty);
+                                            substitutions.extend(s);
+                                        }
+                                    }
+                                    if !substitutions.is_empty() {
+                                        self.substitute_type_vars(&ty, &substitutions)
+                                    } else {
+                                        ty
+                                    }
                                 } else {
-                                    d.outputs.first().cloned().unwrap_or(Type::Void)
+                                    ty
                                 }
-                            })
-                            .unwrap_or(Type::Void)
+                            } else {
+                                Type::Void
+                            }
+                        } else {
+                            Type::Void
+                        }
                     }
                 }
             }
@@ -2247,6 +2266,12 @@ impl TypeChecker {
                     Type::Applied("Option".to_string(), vec![Type::TypeVar("T".to_string())])
                 } else if let Some(enum_name) = self.enum_variants.get(name) {
                     Type::Custom(enum_name.clone())
+                } else if let Some(inop) = self.inop_decls.get(name) {
+                    if inop.outputs.len() > 1 {
+                        Type::Tuple(inop.outputs.clone())
+                    } else {
+                        inop.outputs.first().cloned().unwrap_or(Type::Void)
+                    }
                 } else {
                     Type::Custom(name.clone())
                 }
@@ -3063,9 +3088,15 @@ Expr::ObjectLiteral(fields) => {
             (Type::Bool, Type::Int) | (Type::Int, Type::Bool) |
             (Type::UInt, Type::Float) | (Type::Float, Type::UInt) |
             (Type::UInt, Type::Char) | (Type::Char, Type::UInt) |
-            (Type::UInt, Type::String) | (Type::String, Type::UInt) |
-            (Type::Bool, Type::String) | (Type::String, Type::Bool)
+            (Type::UInt, Type::Bool) | (Type::Bool, Type::UInt)
         ) { return true; }
+
+        // Allow Byte <-> Int and Byte <-> UInt casts
+        if (matches!(src, Type::Custom(n) if n == "Byte") && matches!(dst, Type::Int | Type::UInt))
+            || (matches!(dst, Type::Custom(n) if n == "Byte") && matches!(src, Type::Int | Type::UInt))
+        {
+            return true;
+        }
         // Ptr ↔ Int cast: any Int can become Ptr<T>, any Ptr<T> can become Int
         if let Type::Applied(name, _) = src { if name == "Ptr" && *dst == Type::Int { return true; } }
         if let Type::Applied(name, _) = dst { if name == "Ptr" && *src == Type::Int { return true; } }
@@ -3829,6 +3860,7 @@ mod tests {
         let mut ctx = super::TypeChecker::new();
         let inop = InopDeclaration {
             name: "test_sadd".into(),
+            type_params: vec![],
             params: vec![("a".into(), Type::Int), ("b".into(), Type::Int)],
             outputs: vec![Type::Int],
             contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),

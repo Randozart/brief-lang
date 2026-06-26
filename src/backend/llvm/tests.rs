@@ -5349,6 +5349,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_inop_declaration_emission() {
         let inop = TopLevel::Inop(InopDeclaration {
             name: "sadd".into(),
+            type_params: vec![],
             params: vec![("a".into(), Type::Int), ("b".into(), Type::Int)],
             outputs: vec![Type::Int],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -5380,6 +5381,7 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let inop = TopLevel::Inop(InopDeclaration {
             name: "init_hook".to_string(),
+            type_params: vec![],
             params: vec![],
             outputs: vec![Type::Int],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -5405,6 +5407,7 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let inop = TopLevel::Inop(InopDeclaration {
             name: "write_buf".to_string(),
+            type_params: vec![],
             params: vec![("val".to_string(), Type::Int)],
             outputs: vec![Type::Bool],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),

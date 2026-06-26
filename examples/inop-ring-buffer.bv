@@ -1,0 +1,60 @@
+// inop-ring-buffer: Lock-free ring buffer using atomic inops
+//
+// Demonstrates:
+//   1. atomic_load, atomic_store for producer/consumer index access
+//   2. Struct-based shared memory region
+//   3. Single-producer single-consumer ring buffer
+//   4. Works in interpreter (fallback uses volatile_load/store)
+//
+// Usage: brief-compiler check examples/inop-ring-buffer.bv
+
+import { atomic_load, atomic_store, atomic_cas } from "std/atomic";
+
+const BUF_SIZE: Int = 8;
+
+// Ring buffer state: shared between producer and consumer
+struct RingBuf {
+    buf: List<Int>;
+    head: Int;
+    tail: Int;
+    full: Bool;
+};
+
+// Create an empty ring buffer
+defn rb_new() -> RingBuf {
+    term RingBuf { buf: [], head: 0, tail: 0, full: false };
+};
+
+// Push a value: returns updated ring buffer (or unchanged if full)
+defn rb_push(rb: RingBuf, val: Int) -> RingBuf {
+    [rb.full] { term rb; };
+    let nh: Int = (rb.head + 1) % BUF_SIZE;
+    term RingBuf { buf: rb.buf + [val], head: nh, tail: rb.tail, full: nh == rb.tail };
+};
+
+// Pop a value: returns (value, updated_rb)
+defn rb_pop(rb: RingBuf) -> (Int, RingBuf) {
+    [rb.head == rb.tail && !rb.full] { term (-1, rb); };
+    let val: Int = rb.buf[rb.tail];
+    let nt: Int = (rb.tail + 1) % BUF_SIZE;
+    term (val, RingBuf { buf: rb.buf, head: rb.head, tail: nt, full: false });
+};
+
+// Ring buffer size
+defn rb_len(rb: RingBuf) -> Int {
+    [rb.full] { term BUF_SIZE; };
+    [rb.head >= rb.tail] { term rb.head - rb.tail; };
+    term BUF_SIZE - (rb.tail - rb.head);
+};
+
+// Demonstrate SPSC ring buffer usage
+defn demo() -> Bool {
+    let rb: RingBuf = rb_new();
+    let rb: RingBuf = rb_push(rb, 10);
+    let rb: RingBuf = rb_push(rb, 20);
+    let rb: RingBuf = rb_push(rb, 30);
+    let (v1, rb): (Int, RingBuf) = rb_pop(rb);
+    let (v2, rb): (Int, RingBuf) = rb_pop(rb);
+    let (v3, _): (Int, RingBuf) = rb_pop(rb);
+    term v1 == 10 && v2 == 20 && v3 == 30;
+};

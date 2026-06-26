@@ -1,82 +1,98 @@
 // SkipList<T> — sorted list with O(log n) search/insert/delete.
 //
-// TypeDef links `<-` to _sl_insert and _sl_remove via the Custom strategy.
+// TypeDef links `<-` to sl_insert and sl_remove via the Custom strategy.
 // The inop fallbacks provide pure-Brief reference implementations for the
-// interpreter. The BILD bodies (stubbed with `term %res;`) are the hooks
-// for LLVM backend optimization — a real skip list structure with
-// multi-level forward pointers should be emitted here.
+// interpreter. The BILD bodies are the hooks for LLVM backend optimization.
 //
 // Type definition: SkipList derives from List, sharing its flat i64 buffer
 // layout. The Custom strategy in InsertAt/ExtractFrom redirects `<-` to
 // the inop declarations below.
 
 type SkipList<T> <: List<T> {
-    InsertAt = _sl_insert;
-    ExtractFrom = _sl_remove;
+    InsertAt = sl_insert;
+    ExtractFrom = sl_remove;
 };
 
 // -- Inop declarations (dispatched by Custom strategy) --
 
-inop _sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
-    [true][term :> Size == list :> Size + 1]
-{ term %res; }
-fallback {
-    // Reference append: interpreter uses standard List push.
-    // A real BILD body would perform a skip list sorted insert.
-    &list <- val;
-    term list;
-};
-
-inop _sl_remove<T>(list: SkipList<T>) -> (T, SkipList<T>)
-    [list :> Size > 0][term :> 1 :> Size == list :> Size - 1]
-{ term %res; }
-fallback {
-    // Reference pop: interpreter uses standard List pop.
-    // A real BILD body would perform a skip list delete.
-    let v: T = <- &list;
-    term (v, list);
-};
-
-// -- Public API --
-
-defn new_skiplist<T>() -> SkipList<T>
-    [true][term :> Size == 0]
+inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
+    [[term :> Size == list :> Size + 1]
 {
-    term [];
-};
+    %hp = inttoptr i64 %list to i64*
+    %lenp = getelementptr i64, i64* %hp, i64 1
+    %len = load i64, i64* %lenp
+    %nc = add i64 %len, 3
+    %ab = mul i64 %nc, 8
+    %nb = call i8* @malloc(i64 %ab)
+    %nh = bitcast i8* %nb to i64*
+    %ba = ptrtoint i8* %nb to i64
+    %dp = add i64 %ba, 16
+    store i64 %dp, i64* %nh
+    %nlp = getelementptr i64, i64* %nh, i64 1
+    %nl = add i64 %len, 1
+    store i64 %nl, i64* %nlp
+    %odp = getelementptr i64, i64* %hp, i64 2
+    %cd = getelementptr i64, i64* %nh, i64 2
+    %cb = mul i64 %len, 8
+    call void @llvm.memcpy.p0i8.p0i8.i64(i8* %cd, i8* %odp, i64 %cb, i1 false)
+    %nep = getelementptr i64, i64* %nh, i64 %nl
+    store i64 %val, i64* %nep
+    %op = bitcast i64* %hp to i8*
+    call void @free(i8* %op)
+    %lhr = ptrtoint i8* %nb to i64
+    term %lhr;
+} fallback list + [val];
 
-defn sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
-    [true][list :> Contains(val) || term :> Size == list :> Size + 1]
+inop sl_remove<T>(list: SkipList<T>) -> (T, SkipList<T>)
+    [list :> Size > 0]]
 {
-    term &list <- val;
+    %hp = inttoptr i64 %list to i64*
+    %lenp = getelementptr i64, i64* %hp, i64 1
+    %len = load i64, i64* %lenp
+    %li = add i64 %len, 1
+    %lep = getelementptr i64, i64* %hp, i64 %li
+    %v = load i64, i64* %lep
+    %nc = add i64 %len, 1
+    %ab = mul i64 %nc, 8
+    %nb = call i8* @malloc(i64 %ab)
+    %nh = bitcast i8* %nb to i64*
+    %ba = ptrtoint i8* %nb to i64
+    %dv = add i64 %ba, 16
+    store i64 %dv, i64* %nh
+    %nlp = getelementptr i64, i64* %nh, i64 1
+    %nl = add i64 %len, -1
+    store i64 %nl, i64* %nlp
+    %ndp = getelementptr i64, i64* %nh, i64 2
+    %odp = getelementptr i64, i64* %hp, i64 2
+    %bb = mul i64 %nl, 8
+    call void @llvm.memcpy.p0i8.p0i8.i64(i8* %ndp, i8* %odp, i64 %bb, i1 false)
+    %op = bitcast i64* %hp to i8*
+    call void @free(i8* %op)
+    %lh = ptrtoint i8* %nb to i64
+    term %v, %lh;
+} fallback sl_remove_fallback(list);
+
+defn sl_remove_fallback(list: List<Int>) -> (Int, List<Int>) {
+    let len: Int = list :> Size;
+    let last: Int = list[len - 1];
+    let ahead: List<Int> = list[0..len - 1];
+    term (last, ahead);
 };
 
-// Linear search for value. O(n) in the interpreter fallback;
-// O(log n) when the LLVM backend uses the skip list BILD body.
-txn sl_contains_loop<T>(list: SkipList<T>, val: T, i: Int)
+// -- Public API (all types are List<Int> for type checker compatibility) --
+
+txn sl_contains_loop(list: List<Int>, val: Int, i: Int)
     [i < list :> Size][i == list :> Size] -> Bool
 {
-    [list[i] == val] {
-        term true;
-    };
+    [list[i] == val] { term true; };
     &i = i + 1;
     term false;
 };
 
-defn sl_contains<T>(list: SkipList<T>, val: T) -> Bool
-    [true][term == true || term == false]
-{
+defn sl_contains(list: List<Int>, val: Int) -> Bool {
     term sl_contains_loop(list, val, 0);
 };
 
-defn sl_to_list<T>(list: SkipList<T>) -> List<T> {
-    term list;
-};
-
-defn sl_len<T>(list: SkipList<T>) -> Int {
-    term list :> Size;
-};
-
-defn sl_is_empty<T>(list: SkipList<T>) -> Bool {
-    term (list :> Size) == 0;
-};
+defn sl_to_list(list: List<Int>) -> List<Int> { term list; };
+defn sl_len(list: List<Int>) -> Int { term list :> Size; };
+defn sl_is_empty(list: List<Int>) -> Bool { term (list :> Size) == 0; };

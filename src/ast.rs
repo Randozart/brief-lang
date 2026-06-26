@@ -1267,6 +1267,7 @@ impl Intrinsic {
 #[derive(Debug, Clone)]
 pub struct InopDeclaration {
     pub name: String,
+    pub type_params: Vec<String>,
     pub params: Vec<(String, Type)>,
     pub outputs: Vec<Type>,
     pub contract: Contract,

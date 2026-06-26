@@ -412,6 +412,7 @@ mod tests {
     fn make_inop(name: &str, params: Vec<(&str, Type)>, body: Vec<&str>, fallback: Option<Expr>) -> InopDeclaration {
         InopDeclaration {
             name: name.to_string(),
+            type_params: vec![],
             params: params.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
             outputs: vec![Type::Int],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),

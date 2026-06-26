@@ -1,0 +1,43 @@
+// inop-isr-table: Interrupt vector table via #section + (%state)
+//
+// Demonstrates:
+//   1. #section(".isr_vectors") to place code in a specific ELF section
+//   2. (%state) marker for direct state struct access in BILD
+//   3. ptrtoint to convert function addresses to vector table entries
+//   4. inop! for side-effecting ISR registration
+//
+// Usage: brief-compiler --llvm build examples/inop-isr-table.bv
+
+import { syscall1 } from "std/syscall";
+
+// Simple UART ISR: read a byte and acknowledge
+defn uart_isr() -> Int {
+    term volatile_load#(0x40011000 as Ptr<Int>);
+};
+
+// Timer ISR: clear interrupt flag
+defn timer_isr() -> Int {
+    volatile_store#(0x40000010 as Ptr<Int>, 0x01);
+    term 1;
+};
+
+// ISR vector table placed in .isr_vectors section.
+// The (%state) marker gives the BILD body access to %State struct.
+#section(".isr_vectors") inop! vector_table() -> Int (%state)
+{
+    %slot_uart = getelementptr inbounds %State, ptr %state, i32 0, i32 32
+    %uart_addr = ptrtoint @uart_isr to i64
+    store i64 %uart_addr, i64* %slot_uart, align 8
+
+    %slot_timer = getelementptr inbounds %State, ptr %state, i32 0, i32 33
+    %timer_addr = ptrtoint @timer_isr to i64
+    store i64 %timer_addr, i64* %slot_timer, align 8
+
+    term 1;
+} fallback 0;
+
+// Enable interrupts (placeholder)
+defn enable_interrupts() -> Int {
+    let r: Int = syscall1(0, 0);
+    term r;
+};

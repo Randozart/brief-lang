@@ -287,6 +287,59 @@ The `_ => return None;` fallthrough must remain unchanged.
 Preserve contract information in codegen so the optimizer can reason about
 it. The more LLVM knows, the more aggressively it can optimize.
 
+### Contract Rules
+
+1. **`defn` needs no contract** — body is linear, translation from inputs
+   to outputs is inherently provable. Add contracts only when you need
+   the optimization leverage they unlock.
+
+2. **`txn` must have at least one contract side** — either `[pre][post]`,
+   `[pre]]`, or `[[post]`. Convergence must be provable.
+
+3. **`inop` should have meaningful contracts** — BILD body is opaque to
+   the proof engine; the contract IS the specification.
+
+4. **`[true][true]` is rejected** — parser enforces at least one
+   meaningful constraint. Use `[[post]` or `[pre]]` sugar instead.
+
+5. **`[[post]` = `[true][post]`** — postcondition-only.
+   **`[pre]]` = `[pre][true]`** — precondition-only.
+
+6. **`[true][term == true \|\| term == false]` is a useless tautology** —
+   the type system already guarantees the return type. Write a contract
+   that actually constrains behavior.
+
+7. **Single-bracket `[expr]` is ambiguous** — parser rejects it.
+   Must be `[[expr]` or `[expr]]`.
+
+### Inop Conventions
+
+8. **Inops follow intrinsic naming**, not private-underscore:
+   `sl_insert#` not `_sl_insert`. The `_` prefix convention does not
+   exist in Brief.
+
+9. **`(%state)` marker comes AFTER the contract**:
+   `inop! foo() -> Int [pre][post] (%state) { BILD }`.
+
+### Common Syntax Traps
+
+10. **`<-` is statement-level** — it breaks the expression parser.
+    You cannot write `let x = &list <- val`. Use standalone
+    `&list <- val;` or `let x = &list <- ;` (pop only).
+
+11. **`Byte` is defined in `lib/std/types.bv`** — do not assume it
+    exists without importing. If the type isn't needed, use `Int`.
+
+### Type System
+
+12. **`type Foo <: List { ... }` creates a TypeDef** — but `Foo<Int>`
+    is NOT automatically assignable to `List<Int>` in the type checker.
+    Projections like `:> Size` and index `foo[i]` may fail on `Foo<Int>`
+    even though the runtime representation is identical.
+
+13. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
+    requires removing `Copy` and adjusting comparison code.
+
 ## Testing Mandate
 
 **Every new feature, every code path, every match arm must have corresponding
