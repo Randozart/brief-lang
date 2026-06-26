@@ -95,9 +95,9 @@ BENCHMARKS=(
     "queue_drain_sym"
     "queue_drain_idio"
     "interval_step"
-    "gpu/saxpy"
-    "meld-bridge"
-    "meld-bridge-sym"
+    # "gpu/saxpy"        # no .bv file exists
+    # "meld-bridge"      # no .bv file exists
+    # "meld-bridge-sym"  # no .bv file exists
 )
 
 # ── BUILD FUNCTIONS ───────────────────────────────────────────────────

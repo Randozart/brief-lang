@@ -1244,7 +1244,14 @@ impl LlvmBackend {
             let phi = format!("%aaphi{}", c);
             writeln!(out, "{}{} = phi i8* [ {}, %{} ], [ {}, %{} ]",
                 indent, phi, cur, check_l, new_base, grow_l).ok();
-            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_ptr, ptr).ok();
+            // 2026-06-26: compute the new bump from the PHI value (not from
+            // the pre-realloc cur), so the grow path uses %aanb + size_reg
+            // instead of the dangling old-bump pointer. Without this fix,
+            // realloc frees the old buffer but the bump update still points
+            // into freed memory — catastrophic corruption on next allocation.
+            let new_bump = format!("%aanbp{}", c);
+            writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, new_bump, phi, size_reg).ok();
+            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_bump, ptr).ok();
             phi
         } else {
             let c = self.arena_counter;

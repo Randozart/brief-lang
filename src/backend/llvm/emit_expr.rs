@@ -3726,9 +3726,13 @@ impl LlvmBackend {
                     }
                 }
                 }
-                // If the fast-path branch was not emitted (e.g. prepend mode or
-                // no prealloc info), terminate the preceding block so LLVM does
-                // not see an unterminated basic block before the label.
+                // 2026-06-26: If the fast-path branch was not emitted (e.g.
+                // prepend mode or no prealloc info), terminate the preceding
+                // block with br %slow_l so LLVM does not see an unterminated
+                // basic block before the label. The push_slow label was always
+                // emitted unconditionally, but its preceding br i1 only fired
+                // when prealloc info existed — leaving the block unterminated
+                // ("expected instruction opcode") for all other cases.
                 if !emitted_slow_branch {
                     writeln!(out, "{}br label %{}", indent, slow_l).ok();
                 }

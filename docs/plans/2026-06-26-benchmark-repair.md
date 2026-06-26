@@ -72,3 +72,43 @@ or have measurement bugs.
 - All other benchmarks within 15% of C.
 - Every code change has a dated comment explaining why it exists.
 - Every heuristic stores its choice in `report_lines` for regression analysis.
+
+---
+
+## Investigation Results
+
+### Phase 2: Double-load — Confirmed Accidental Artifact
+
+Introduced in commit `847e0f9d` (2026-06-10, "R2+R3: Float boxing
+elimination + per-field GEP loops"). The old code loaded `%State` once
+into a single SSA register, then used `extractvalue` in both the tick
+and body blocks — natural sharing across blocks because `tick` dominates
+`b_body`. The per-field GEP replacement blindly called
+`pre_load_all_fields` in both blocks without threading the values across.
+No comment or commit message explains the duplication. **The double-load
+is an accidental artifact with zero intentional design rationale.**
+
+**Implementation approach (revised)**:
+Instead of saving/restoring `let_bindings` maps (which would couple the
+two emission phases), we can fix this more surgically: in
+`pre_load_all_fields`, after loading each field, store the register name
+into a new `preloaded_regs: HashMap<String, String>` map. Then, when a
+subsequent `pre_load_all_fields` call sees the same field in
+`preloaded_regs`, it emits `add i64 0, <saved_reg>` instead of
+`GEP + load`. This reuses the SSA value from the dominating block
+without any structural change to the tick/body block layout.
+
+### Phase 3: Arena Bump Check — Confirmed Overly Conservative
+
+Present since commit `d35fbd7e` (2026-06-23) where the arena was first
+introduced. The straightforward "check before every malloc replacement"
+was never tightened. There has never been a version that skipped the
+per-allocation check. **The per-allocation check is an overly conservative
+default, not an intentional safety measure.**
+
+**Implementation approach (revised)**:
+Add a `bool` field `arena_known_ok` to `LlvmBackend`. Set to `true` after
+a successful bump alloc (the `icmp ule` passes). Before emitting the
+check in `emit_arena_alloc`, skip it if the flag is set. Reset to `false`
+in `emit_arena_reset()`. For the grow path, reset to `false` (the realloc
+changed the arena size, so the next allocation needs a fresh check).

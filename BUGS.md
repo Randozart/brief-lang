@@ -1713,3 +1713,44 @@ grep 'store.*float' nbody_newton.opt.ll | head -10
 **Priority**: High — blocks nbody benchmarks from producing correct output.
 Likest cause: LLVM SROA eliminating float init stores when using inlined
 SSA-loop dispatch.
+
+---
+
+## 2026-06-26 — queue_drain crashes at BOUND≥2 with realloc(): invalid pointer
+
+**Issue**: `queue_drain.bv` with `BOUND=2` crashes with `realloc(): invalid pointer`.
+`BOUND=1` works. The crash is pre-existing — present in both the benchmark-script
+binary and freshly compiled binaries. Not caused by any of the 2026-06-26 fixes.
+
+**Root Cause**: Not yet fully identified. Initial investigation shows:
+- The crash is in the arena allocator's second `realloc` call (size ~1MB), called
+  with `oldmem=0x40c2b0` (a BSS/data segment address, not a heap address).
+- The first `realloc` succeeds, returning a valid heap address stored to `%arbase2`.
+- On the second call, `%arbase2` contains a stale BSS pointer instead of the
+  first `realloc`'s result.
+- The arena's bump pointer (`%arptr2`) is correctly advanced after allocation
+  (the 2026-06-26 fix ensures the bump is computed from the PHI-selected base,
+  not the old dangling pre-realloc pointer).
+- The push operation reads `%aol91` (list header slot encoding) from the old
+  queue pointer (correct reactive semantics — reads see pre-tick state). The
+  allocation size `(%aol91 + 3) * 8` is small (~32 bytes), so the bump check
+  should pass and never reach `realloc`. But the crash shows an 1MB realloc,
+  meaning the bump check IS failing — suggesting the bump or end pointer is
+  corrupted.
+
+**Hypothesis**: The list header encoding (slot 1 stores a packed length+capacity,
+not bare length) leaks into the allocation size calculation. The push operation
+uses the raw slot 1 value as if it were a length, but for lists with capacity
+padding it may be much larger. Then `(%aol91 + 3) * 8` exceeds the arena,
+triggering realloc with a stale base pointer.
+
+**Workaround**: Use `BOUND=1` (single iteration). For full benchmarking, the
+benchmark script uses `BOUND=5` for correctness and `BOUND=50000000` for timing
+— both crash.
+
+**Files**: `benchmarks/queue_drain.bv`, `benchmarks/queue_drain_idio.bv`
+
+**Priority**: Medium — blocks queue_drain benchmarks from producing correct
+output at BOUND≥2. Likely a list header encoding issue in the inop code.
+
+---

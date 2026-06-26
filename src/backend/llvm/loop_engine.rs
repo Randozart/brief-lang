@@ -1075,7 +1075,15 @@ impl LlvmBackend {
                 // Store post_hoist for emission after loop exit (in pdoneloop)
                 self.pending_post_hoist = post_hoist.clone();
             } else if !matches!(pre, Expr::Bool(true)) {
+                // 2026-06-26: pre_load_all_fields loads ALL state fields into
+                // ssa_old_float_regs / ssa_old_int_regs so the precondition
+                // check can reference them.  Save these registers and restore
+                // them in the body block instead of calling pre_load_all_fields
+                // again — the tick block dominates the body block, so the
+                // original SSA values are available without reloading.
                 self.pre_load_all_fields(out, "%state");
+                let saved_float_regs = self.ssa_old_float_regs.clone();
+                let saved_int_regs = self.ssa_old_int_regs.clone();
                 let cond = self.emit_expr(out, pre, "  ");
                 let i1 = if cond.ty == Type::Bool {
                     cond.name.clone()
@@ -1093,7 +1101,11 @@ impl LlvmBackend {
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
-                self.pre_load_all_fields(out, "%state");
+                // 2026-06-26: Use the tick's pre-loaded registers instead of
+                // reloading — the tick block dominates b_body, so the original
+                // GEP+load SSA values are available without memory traffic.
+                self.ssa_old_float_regs = saved_float_regs;
+                self.ssa_old_int_regs = saved_int_regs;
                 self.loop_exit_label = Some("done".into());
                 for s in body_stmts { self.emit_stmt(out, s, "  "); }
                 self.loop_exit_label = None;
