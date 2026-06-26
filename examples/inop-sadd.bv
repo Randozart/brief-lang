@@ -19,7 +19,8 @@ rct txn run [tick < 1][tick == 1] {
     [tick == 0] {
         let x: Int = sadd#(10, 20);
         term! -> print_int#(x);
-    } else {
+    };
+    [tick != 0] {
         &tick = tick + 1;
         term;
     };

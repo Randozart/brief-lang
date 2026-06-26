@@ -2344,7 +2344,9 @@ impl Interpreter {
                     } else {
                         self.let_types.remove(name);
                     }
-                    self.state.insert(name.clone(), value);
+                    if name != "_" {
+                        self.state.insert(name.clone(), value);
+                    }
                 }
             }
             Statement::InlineAsm { .. } => {}

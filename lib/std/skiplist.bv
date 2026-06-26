@@ -41,7 +41,12 @@ inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
     call void @free(i8* %op)
     %lhr = ptrtoint i8* %nb to i64
     term %lhr;
-} fallback list + [val];
+} fallback sl_append(list, val);
+
+defn sl_append(list: List<Int>, val: Int) -> List<Int> {
+    &list <- val;
+    term list;
+};
 
 inop sl_remove<T>(list: SkipList<T>) -> (T, SkipList<T>)
     [list :> Size > 0]]

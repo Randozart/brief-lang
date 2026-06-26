@@ -5436,7 +5436,12 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                         constraint: None,
                     })
                 } else {
-                    let name = self.expect_identifier()?;
+                    let name = if let Some(Ok(Token::Underscore)) = self.current_token() {
+                        self.advance();
+                        "_".to_string()
+                    } else {
+                        self.expect_identifier()?
+                    };
 
                     // Check for `<:` — constraint or subtype projection
                     if self.check_lt_colon() {

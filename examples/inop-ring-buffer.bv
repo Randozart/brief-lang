@@ -26,10 +26,13 @@ defn rb_new() -> RingBuf {
 };
 
 // Push a value: returns updated ring buffer (or unchanged if full)
+// Push a value: returns updated ring buffer (or unchanged if full)
 defn rb_push(rb: RingBuf, val: Int) -> RingBuf {
     [rb.full] { term rb; };
     let nh: Int = (rb.head + 1) % BUF_SIZE;
-    term RingBuf { buf: rb.buf + [val], head: nh, tail: rb.tail, full: nh == rb.tail };
+    let b: List<Int> = rb.buf;
+    &b <- val;
+    term RingBuf { buf: b, head: nh, tail: rb.tail, full: nh == rb.tail };
 };
 
 // Pop a value: returns (value, updated_rb)
