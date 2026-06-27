@@ -1033,51 +1033,75 @@ impl RegionAnalyzer {
         }
     }
 
+    // 2026-06-27: iterative arithmetic evaluation — replaces recursive version
+    // to prevent stack overflow on deeply nested arithmetic expressions.
     fn eval_expr_simple(expr: &Expr, bindings: &HashMap<String, i64>) -> Option<i64> {
-        match expr {
-            Expr::Integer(n) => Some(*n),
-            Expr::Bool(b) => Some(if *b { 1 } else { 0 }),
-            Expr::Identifier(n) | Expr::OwnedRef(n) => bindings.get(n).copied(),
-            Expr::Add(a, b) => Some(Self::eval_expr_simple(a, bindings)?.wrapping_add(Self::eval_expr_simple(b, bindings)?)),
-            Expr::Sub(a, b) => Some(Self::eval_expr_simple(a, bindings)?.wrapping_sub(Self::eval_expr_simple(b, bindings)?)),
-            Expr::Mul(a, b) => Some(Self::eval_expr_simple(a, bindings)?.wrapping_mul(Self::eval_expr_simple(b, bindings)?)),
-            Expr::Div(a, b) => {
-                let rhs = Self::eval_expr_simple(b, bindings)?;
-                if rhs == 0 { return None; }
-                Some(Self::eval_expr_simple(a, bindings)? / rhs)
+        // Stack: (left_expr, right_expr, op_to_apply)
+        // Post-order: push children first, then combine results.
+        enum Op { Add, Sub, Mul, Div, Mod, And, Or, Eq, Ne, Lt, Le, Gt, Ge,
+                  BitAnd, BitOr, BitXor, Shl, Shr, Not, Neg, BitNot, Cast, Id }
+        struct Frame<'a> { expr: &'a Expr, state: u8, left: Option<i64> }
+
+        let mut stack: Vec<Frame> = vec![Frame { expr, state: 0, left: None }];
+        let mut results: Vec<i64> = vec![];
+
+        while let Some(mut f) = stack.pop() {
+            match f.state {
+                0 => match f.expr {
+                    Expr::Integer(n) => results.push(*n),
+                    Expr::Bool(b) => results.push(if *b { 1 } else { 0 }),
+                    Expr::Identifier(n) | Expr::OwnedRef(n) => {
+                        if let Some(&v) = bindings.get(n) { results.push(v); }
+                        else { return None; }
+                    }
+                    Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b)
+                    | Expr::Div(a, b) | Expr::Mod(a, b)
+                    | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
+                    | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b)
+                    | Expr::And(a, b) | Expr::Or(a, b)
+                    | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+                    | Expr::Shl(a, b) | Expr::Shr(a, b) => {
+                        f.state = 1;
+                        stack.push(f);
+                        stack.push(Frame { expr: b, state: 0, left: None });
+                        stack.push(Frame { expr: a, state: 0, left: None });
+                    }
+                    Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _) => {
+                        f.state = 1;
+                        stack.push(f);
+                        stack.push(Frame { expr: a, state: 0, left: None });
+                    }
+                    _ => return None,
+                },
+                1 => match f.expr {
+                    Expr::Add(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_add(r)); }
+                    Expr::Sub(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_sub(r)); }
+                    Expr::Mul(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_mul(r)); }
+                    Expr::Div(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l / r); }
+                    Expr::Mod(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l % r); }
+                    Expr::And(_, _) => { let rv = results.pop()?; let lv = results.pop()?; results.push(if lv != 0 && rv != 0 { 1 } else { 0 }); }
+                    Expr::Or(_, _) => { let rv = results.pop()?; let lv = results.pop()?; results.push(if lv != 0 || rv != 0 { 1 } else { 0 }); }
+                    Expr::Eq(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l == r { 1 } else { 0 }); }
+                    Expr::Ne(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l != r { 1 } else { 0 }); }
+                    Expr::Lt(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l < r { 1 } else { 0 }); }
+                    Expr::Le(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l <= r { 1 } else { 0 }); }
+                    Expr::Gt(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l > r { 1 } else { 0 }); }
+                    Expr::Ge(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l >= r { 1 } else { 0 }); }
+                    Expr::BitAnd(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l & r); }
+                    Expr::BitOr(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l | r); }
+                    Expr::BitXor(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l ^ r); }
+                    Expr::Shl(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l << (r as u32 & 63)); }
+                    Expr::Shr(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l >> (r as u32 & 63)); }
+                    Expr::Not(_) => { let v = results.pop()?; results.push(if v == 0 { 1 } else { 0 }); }
+                    Expr::Neg(_) => { let v = results.pop()?; results.push(-v); }
+                    Expr::BitNot(_) => { let v = results.pop()?; results.push(!v); }
+                    Expr::Cast(_, _) => {} // result already on stack
+                    _ => unreachable!(),
+                },
+                _ => unreachable!(),
             }
-            Expr::Mod(a, b) => {
-                let rhs = Self::eval_expr_simple(b, bindings)?;
-                if rhs == 0 { return None; }
-                Some(Self::eval_expr_simple(a, bindings)? % rhs)
-            }
-            Expr::And(a, b) => {
-                let av = Self::eval_expr_simple(a, bindings)?;
-                let bv = Self::eval_expr_simple(b, bindings)?;
-                Some(if av != 0 && bv != 0 { 1 } else { 0 })
-            }
-            Expr::Or(a, b) => {
-                let av = Self::eval_expr_simple(a, bindings)?;
-                let bv = Self::eval_expr_simple(b, bindings)?;
-                Some(if av != 0 || bv != 0 { 1 } else { 0 })
-            }
-            Expr::Not(a) => Some(if Self::eval_expr_simple(a, bindings)? == 0 { 1 } else { 0 }),
-            Expr::Neg(a) => Some(-Self::eval_expr_simple(a, bindings)?),
-            Expr::Eq(a, b) => Some(if Self::eval_expr_simple(a, bindings)? == Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
-            Expr::Ne(a, b) => Some(if Self::eval_expr_simple(a, bindings)? != Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
-            Expr::Lt(a, b) => Some(if Self::eval_expr_simple(a, bindings)? < Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
-            Expr::Le(a, b) => Some(if Self::eval_expr_simple(a, bindings)? <= Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
-            Expr::Gt(a, b) => Some(if Self::eval_expr_simple(a, bindings)? > Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
-            Expr::Ge(a, b) => Some(if Self::eval_expr_simple(a, bindings)? >= Self::eval_expr_simple(b, bindings)? { 1 } else { 0 }),
-            Expr::BitAnd(a, b) => Some(Self::eval_expr_simple(a, bindings)? & Self::eval_expr_simple(b, bindings)?),
-            Expr::BitOr(a, b) => Some(Self::eval_expr_simple(a, bindings)? | Self::eval_expr_simple(b, bindings)?),
-            Expr::BitXor(a, b) => Some(Self::eval_expr_simple(a, bindings)? ^ Self::eval_expr_simple(b, bindings)?),
-            Expr::BitNot(a) => Some(!Self::eval_expr_simple(a, bindings)?),
-            Expr::Shl(a, b) => Some(Self::eval_expr_simple(a, bindings)? << (Self::eval_expr_simple(b, bindings)? as u32 & 63)),
-            Expr::Shr(a, b) => Some(Self::eval_expr_simple(a, bindings)? >> (Self::eval_expr_simple(b, bindings)? as u32 & 63)),
-            Expr::Cast(a, _) => Self::eval_expr_simple(a, bindings),
-            _ => None,
         }
+        results.pop()
     }
 
     /// Extract range bounds from a desugared constraint expression.
@@ -1321,154 +1345,217 @@ fn expr_to_var_set(expr: &Expr) -> HashSet<String> {
     vars
 }
 
+// 2026-06-27: iterative variable collection — replaces recursive version.
 fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
-    match expr {
-        Expr::Identifier(n) | Expr::OwnedRef(n) => { vars.insert(n.clone()); }
-        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
-        | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
-        | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
-        | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
-        | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
-            collect_var_ids(a, vars);
-            collect_var_ids(b, vars);
+    let mut work: Vec<&Expr> = vec![expr];
+    while let Some(e) = work.pop() {
+        match e {
+            Expr::Identifier(n) | Expr::OwnedRef(n) => { vars.insert(n.clone()); }
+            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+            | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
+            | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
+            | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+            | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
+                work.push(b);
+                work.push(a);
+            }
+            Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
+            | Expr::Projection { source: a, .. } => { work.push(a); }
+            Expr::Call(_, args) => { work.extend(args.iter().rev()); }
+            Expr::ListLiteral(elems) | Expr::Tuple(elems) => { work.extend(elems.iter().rev()); }
+            Expr::ListIndex(l, i) => { work.push(i); work.push(l); }
+            Expr::FieldAccess(o, _) => { work.push(o); }
+            Expr::Block(_, last) | Expr::TupleDestructure(_, last) => { work.push(last); }
+            _ => {}
         }
-        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-        | Expr::Projection { source: a, .. } => collect_var_ids(a, vars),
-        Expr::Call(_, args) => { for a in args { collect_var_ids(a, vars); } }
-        Expr::ListLiteral(elems) => { for e in elems { collect_var_ids(e, vars); } }
-        Expr::Tuple(elems) => { for e in elems { collect_var_ids(e, vars); } }
-        Expr::ListIndex(l, i) => { collect_var_ids(l, vars); collect_var_ids(i, vars); }
-        Expr::FieldAccess(o, _) => collect_var_ids(o, vars),
-        Expr::Block(_, last) | Expr::TupleDestructure(_, last) => collect_var_ids(last, vars),
-        _ => {}
     }
 }
 
+// 2026-06-27: iterative count — replaces recursive version to prevent
+// stack overflow on deep statement nesting (Oracle with nested Foreach).
 fn count_statements_recursive(body: &[Statement]) -> usize {
-    body.iter().map(|s| {
+    let mut count = 0;
+    let mut work: Vec<&Statement> = body.iter().collect();
+    while let Some(s) = work.pop() {
+        count += 1;
         match s {
-            Statement::Assignment { .. } | Statement::Let { .. } | Statement::Expression(_) => 1,
-            Statement::Guarded { statements, .. } => 1 + count_statements_recursive(statements),
-            Statement::OnExit { body, .. } => 1 + count_statements_recursive(body),
-            Statement::Term { .. } | Statement::TermBang { .. } | Statement::Unification { .. }
-            | Statement::InlineAsm { .. } | Statement::Alka(_)
-            | Statement::LocalTrigger { .. } | Statement::Escape(_) => 1,
-            Statement::SyncBlock { body } => 1 + count_statements_recursive(body),
-            Statement::Foreach { body, .. } => 1 + count_statements_recursive(body),
-            Statement::Oracle { body, handler, .. } => 1 + count_statements_recursive(body) + count_statements_recursive(handler),
-            Statement::Await { .. } => 1,
-            Statement::Async { body, .. } => 1 + count_statements_recursive(std::slice::from_ref(body.as_ref())),
-            Statement::AsyncAwait { body, .. } => 1 + count_statements_recursive(std::slice::from_ref(body.as_ref())),
-            Statement::TrgBinding { .. } => 1,
+            Statement::Guarded { statements, .. } => {
+                work.extend(statements.iter().rev());
+            }
+            Statement::OnExit { body: inner, .. } => {
+                work.extend(inner.iter().rev());
+            }
+            Statement::SyncBlock { body: inner } => {
+                work.extend(inner.iter().rev());
+            }
+            Statement::Foreach { body: inner, .. } => {
+                work.extend(inner.iter().rev());
+            }
+            Statement::Oracle { body, handler, .. } => {
+                work.extend(body.iter().rev());
+                work.extend(handler.iter().rev());
+            }
+            Statement::Async { body: inner, .. } => {
+                work.push(inner);
+            }
+            Statement::AsyncAwait { body: inner, .. } => {
+                work.push(inner);
+            }
+            _ => {}
         }
-    }).sum()
+    }
+    count
 }
 
+// 2026-06-27: iterative statement walk — replaces recursive version to prevent
+// stack overflow on deeply nested guarded blocks.
 fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
-    match stmt {
-        Statement::Term { .. } | Statement::TermBang { .. } | Statement::InlineAsm { .. } | Statement::Alka(_) => true,
-        Statement::Assignment { expr, .. } => expr_has_call(expr),
-        Statement::Let { expr, .. } => {
-            expr.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
+    let mut work: Vec<&Statement> = vec![stmt];
+    while let Some(s) = work.pop() {
+        match s {
+            Statement::Term { .. } | Statement::TermBang { .. }
+            | Statement::InlineAsm { .. } | Statement::Alka(_) => return true,
+            Statement::Assignment { expr, .. } if expr_has_call(expr) => return true,
+            Statement::Let { expr, .. } => {
+                if let Some(e) = expr { if expr_has_call(e) { return true; } }
+            }
+            Statement::Expression(e) if expr_has_call(e) => return true,
+            Statement::Guarded { condition, statements, .. } => {
+                if expr_has_call(condition) { return true; }
+                work.extend(statements.iter().rev());
+            }
+            Statement::Unification { expr, .. } if expr_has_call(expr) => return true,
+            Statement::OnExit { body, .. } => {
+                work.extend(body.iter().rev());
+            }
+            Statement::Foreach { body, .. } => {
+                work.extend(body.iter().rev());
+            }
+            Statement::Oracle { body, handler, .. } => {
+                work.extend(body.iter().rev());
+                work.extend(handler.iter().rev());
+            }
+            Statement::Await { expr, .. } if expr_has_call(expr) => return true,
+            Statement::Async { body, .. } => { work.push(body); }
+            Statement::AsyncAwait { body, .. } => { work.push(body); }
+            _ => {}
         }
-        Statement::Expression(e) => expr_has_call(e),
-        Statement::Guarded { condition, statements, .. } => {
-            expr_has_call(condition)
-                || statements.iter().any(|s| has_ffi_or_terminator_stmt(s))
-        }
-        Statement::Unification { expr, .. } => expr_has_call(expr),
-        Statement::Escape(_) => false,
-        Statement::OnExit { body, .. } => body.iter().any(|s| has_ffi_or_terminator_stmt(s)),
-        Statement::LocalTrigger { .. } => false,
-        Statement::SyncBlock { .. } => false,
-        Statement::Foreach { body, .. } => body.iter().any(|s| has_ffi_or_terminator_stmt(s)),
-        Statement::Oracle { body, handler, .. } => {
-            body.iter().any(|s| has_ffi_or_terminator_stmt(s))
-                || handler.iter().any(|s| has_ffi_or_terminator_stmt(s))
-        }
-        Statement::Await { expr, .. } => expr_has_call(expr),
-        Statement::Async { body, .. } => has_ffi_or_terminator_stmt(body),
-        Statement::AsyncAwait { body, .. } => has_ffi_or_terminator_stmt(body),
-        Statement::TrgBinding { .. } => false,
     }
+    false
 }
 
 pub(crate) fn has_ffi_or_trigger_stmt_in_chain(body: &[Statement]) -> bool {
     body.iter().any(|s| has_ffi_or_terminator_stmt(s))
 }
 
-fn has_ffi_or_trigger_stmt(stmt: &Statement, _trigger_vars: &HashSet<String>) -> bool {
-    match stmt {
-        Statement::Term { .. } | Statement::TermBang { .. } | Statement::InlineAsm { .. } | Statement::Alka(_) => true,
-        Statement::Assignment { lhs: _, expr, .. } => {
-            expr_has_call(expr)
+// 2026-06-27: iterative statement walk — replaces recursive version to prevent
+// stack overflow on deeply nested guarded blocks.
+fn has_ffi_or_trigger_stmt(stmt: &Statement, trigger_vars: &HashSet<String>) -> bool {
+    let mut work: Vec<&Statement> = vec![stmt];
+    while let Some(s) = work.pop() {
+        match s {
+            Statement::Term { .. } | Statement::TermBang { .. }
+            | Statement::InlineAsm { .. } | Statement::Alka(_) => return true,
+            Statement::Assignment { lhs, expr, .. } => {
+                if expr_has_call(expr) { return true; }
+                // Also check if lhs references a trigger variable
+                if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
+                    if trigger_vars.contains(n) { return true; }
+                }
+            }
+            Statement::Let { expr, .. } => {
+                if let Some(e) = expr { if expr_has_call(e) { return true; } }
+            }
+            Statement::Expression(e) if expr_has_call(e) => return true,
+            Statement::Guarded { condition, statements, .. } => {
+                if expr_has_call(condition) { return true; }
+                work.extend(statements.iter().rev());
+            }
+            Statement::Unification { expr, .. } if expr_has_call(expr) => return true,
+            Statement::OnExit { body, .. } => {
+                work.extend(body.iter().rev());
+            }
+            Statement::Foreach { body, .. } => {
+                work.extend(body.iter().rev());
+            }
+            Statement::Oracle { body, handler, .. } => {
+                work.extend(body.iter().rev());
+                work.extend(handler.iter().rev());
+            }
+            Statement::Await { expr, .. } if expr_has_call(expr) => return true,
+            Statement::Async { body, .. } => { work.push(body); }
+            Statement::AsyncAwait { body, .. } => { work.push(body); }
+            _ => {}
         }
-        Statement::Let { expr, .. } => {
-            expr.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
-        }
-        Statement::Expression(e) => expr_has_call(e),
-        Statement::Guarded { condition, statements, .. } => {
-            expr_has_call(condition)
-                || statements.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars))
-        }
-        Statement::Unification { expr, .. } => expr_has_call(expr),
-        Statement::Escape(_) => false,
-        Statement::OnExit { body, .. } => body.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars)),
-        Statement::LocalTrigger { .. } => false,
-        Statement::SyncBlock { .. } => false,
-        Statement::Foreach { body, .. } => body.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars)),
-        Statement::Oracle { body, handler, .. } => {
-            body.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars))
-                || handler.iter().any(|s| has_ffi_or_trigger_stmt(s, _trigger_vars))
-        }
-        Statement::Await { expr, .. } => expr_has_call(expr),
-        Statement::Async { body, .. } => has_ffi_or_trigger_stmt(body.as_ref(), _trigger_vars),
-        Statement::AsyncAwait { body, .. } => has_ffi_or_trigger_stmt(body.as_ref(), _trigger_vars),
-        Statement::TrgBinding { .. } => false,
     }
+    false
 }
 
+// 2026-06-27: iterative AST walk — replaces recursive version to prevent
+// stack overflow on deeply nested expression trees (officina-cli's complex
+// Match arms with deeply nested binary ops).
 fn expr_has_call(expr: &Expr) -> bool {
-    match expr {
-        Expr::Call(_, _) => true,
-        Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
-        | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
-        | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
-        | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
-        | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
-            expr_has_call(a) || expr_has_call(b)
+    let mut work: Vec<&Expr> = vec![expr];
+    while let Some(e) = work.pop() {
+        match e {
+            Expr::Call(_, _) => return true,
+            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+            | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
+            | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
+            | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+            | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
+                work.push(b);
+                work.push(a);
+            }
+            Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
+            | Expr::Projection { source: a, .. } => {
+                work.push(a);
+            }
+            Expr::ListLiteral(elems) | Expr::Tuple(elems) => {
+                work.extend(elems.iter().rev());
+            }
+            Expr::ListIndex(l, i) => {
+                work.push(i);
+                work.push(l);
+            }
+            Expr::FieldAccess(o, _) => {
+                work.push(o);
+            }
+            Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
+                work.push(last);
+            }
+            Expr::Match { value, arms } => {
+                for arm in arms.iter().rev() {
+                    work.push(&arm.body);
+                }
+                work.push(value);
+            }
+            Expr::PatternMatch { value, .. } => {
+                work.push(value);
+            }
+            Expr::StructInstance(_, fields) | Expr::ObjectLiteral(fields) => {
+                for (_, e) in fields.iter().rev() {
+                    work.push(e);
+                }
+            }
+            Expr::Slice { value, start, end, stride, mask } => {
+                if let Some(m) = mask { work.push(m); }
+                if let Some(s) = stride { work.push(s); }
+                if let Some(e) = end { work.push(e); }
+                if let Some(s) = start { work.push(s); }
+                work.push(value);
+            }
+            Expr::MultiSlice { value, ops } => {
+                for op in ops.iter().rev() {
+                    if let BracketOp::Mask(m) = op { work.push(m); }
+                    if let BracketOp::Stride(s) = op { work.push(s); }
+                }
+                work.push(value);
+            }
+            _ => {}
         }
-        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-        | Expr::Projection { source: a, .. } => expr_has_call(a),
-        Expr::ListLiteral(elems) => elems.iter().any(|e| expr_has_call(e)),
-        Expr::Tuple(elems) => elems.iter().any(|e| expr_has_call(e)),
-        Expr::ListIndex(l, i) => expr_has_call(l) || expr_has_call(i),
-        Expr::FieldAccess(o, _) => expr_has_call(o),
-        Expr::Block(_, last) | Expr::TupleDestructure(_, last) => expr_has_call(last),
-        Expr::Match { value, arms } => {
-            expr_has_call(value)
-                || arms.iter().any(|arm| expr_has_call(&arm.body))
-        }
-        Expr::PatternMatch { value, .. } => expr_has_call(value),
-        Expr::StructInstance(_, fields) => fields.iter().any(|(_, e)| expr_has_call(e)),
-        Expr::ObjectLiteral(fields) => fields.iter().any(|(_, e)| expr_has_call(e)),
-        Expr::Slice { value, start, end, stride, mask } => {
-            expr_has_call(value)
-                || start.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
-                || end.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
-                || stride.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
-                || mask.as_ref().map(|e| expr_has_call(e)).unwrap_or(false)
-        }
-        Expr::MultiSlice { value, ops } => {
-            expr_has_call(value)
-                || ops.iter().any(|op| match op {
-                    BracketOp::Mask(m) => expr_has_call(m),
-                    BracketOp::Stride(s) => expr_has_call(s),
-                    BracketOp::Coord(_) => false,
-                })
-        }
-        _ => false,
     }
+    false
 }
 
 fn has_term_or_unify_escape(body: &[Statement]) -> bool {

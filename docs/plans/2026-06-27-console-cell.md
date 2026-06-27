@@ -242,6 +242,47 @@ The `prev_key` tracking in the Console cell's transactions handles the dirty-fla
 
 ---
 
+## Eliminating Recursive AST Walks in Region Analyzer
+
+### Problem
+
+Four recursive functions in `src/analysis/region.rs` accumulate enough stack
+depth to overflow the debug build on large programs (officina-cli):
+
+| Function | Lines | Walk type | Depth risk |
+|----------|-------|-----------|-----------|
+| `expr_has_call` | 1431-1472 | Expression AST | High — deep Match/Slice nesting |
+| `count_statements_recursive` | 1347-1365 | Statement body | Low — shallow nesting |
+| `has_ffi_or_terminator_stmt` | 1367-1394 | Stmt + expr | Medium — combined |
+| `has_ffi_or_trigger_stmt` | 1400-1428 | Stmt + expr | Medium — combined |
+
+### Fix pattern
+
+Each function is converted from recursion to an explicit `Vec` work stack.
+No tree reconstruction is needed (unlike `substitute_expr`) — they are
+boolean or count queries.
+
+**`expr_has_call`**: Walk AST with a `Vec<&Expr>` stack. Return `true`
+immediately on `Expr::Call`. Push children for composite nodes.
+
+**`count_statements_recursive`**: Walk with `Vec<&Statement>` stack.
+Accumulate count, push nested statement bodies.
+
+**`has_ffi_or_terminator_stmt` / `has_ffi_or_trigger_stmt`**: Walk with
+`Vec<&Statement>` stack. Return `true` on any terminating/ffi statement.
+Push nested bodies. Call `expr_has_call` on assignment expressions.
+
+### Files modified
+
+`src/analysis/region.rs` — four functions, ~180 lines total.
+
+### Verification
+
+- `cargo test --lib` — all 1300 tests pass
+- `brief build officina.bv` — no stack overflow in debug build
+
+---
+
 ## Option A: Top-Level Macro Code Generation via `Value::Items`
 
 ### Problem
