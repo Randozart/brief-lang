@@ -260,7 +260,9 @@ impl LlvmBackend {
         // Increment cycle_count on every tick
         emit_cycle_count_increment(self, out);
         if self.has_async_txns && !self.is_lightweight_async {
-            self.emit_async_phase(out);
+            // 2026-06-27: Pass %state_copy so reactor_tick modifies the local
+            // copy, and the subsequent memcpy carries post-tick values forward.
+            self.emit_async_phase(out, "%state_copy");
         } else {
             writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state_copy)").ok();
         }
@@ -1010,7 +1012,13 @@ impl LlvmBackend {
                 }
             }
         }
-        if !has_canonical_loop {
+        // 2026-06-27: Use phi_induction_reg.is_none() instead of
+        // !has_canonical_loop because has_canonical_loop can be true while
+        // phi_induction_reg is None (when the bound is a global constant not
+        // in field_index_map — precompute_sum case). In that situation the
+        // canonical loop setup silently skips phi creation, and we need the
+        // any_fired fallback even though has_canonical_loop is true.
+        if self.phi_induction_reg.is_none() {
             // Phase 2 preallocation for multi-txn SSA: scan all txn bodies
             // for push targets and preallocate if a bound is available from
             // any txn's contract (e.g., shared [count < N] across txns).
@@ -1142,8 +1150,20 @@ impl LlvmBackend {
                 // pending_phi_backedge is populated by emit_stmt when it
                 // processes &field = expr assignments.
                 self.pending_phi_backedge.clear();
+                // 2026-06-27: Classify phi regs by field type — float fields
+                // go into ssa_old_float_regs so body lookups find the correct
+                // register. Previously all phi regs went to ssa_old_int_regs,
+                // causing float field reads to fall back to "0.0" (nbody bug).
                 for (name, phi_reg) in &self.phi_field_regs {
-                    self.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
+                    if let Some(&idx) = self.field_index_map.get(name) {
+                        if self.field_types[idx] == "float" {
+                            self.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
+                        } else {
+                            self.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
+                        }
+                    } else {
+                        self.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
+                    }
                 }
                 if let Some((ref cname, ref pi_reg, _)) = self.phi_induction_reg {
                     self.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
@@ -1181,7 +1201,9 @@ impl LlvmBackend {
                 let done_l = format!("done_{}", name);
                 writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, done_l).ok();
                 writeln!(out, "  {}:", body_l).ok();
-                writeln!(out, "  store i8 1, ptr %any_fired").ok();
+                // 2026-06-27: Only emit any_fired when no phi induction reg;
+                // canonical phi loop uses counter for exit, not any_fired.
+                if self.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
                 self.let_bindings.clear(); self.let_binding_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
                 self.terminated = false;
                 self.returns_i64 = false;
@@ -1215,7 +1237,9 @@ impl LlvmBackend {
                     self.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
                 }
                 self.loop_exit_label = Some("done".into());
-                writeln!(out, "  store i8 1, ptr %any_fired").ok();
+                // 2026-06-27: Only emit any_fired when no phi induction reg
+                // (same rationale as the precondition body branch above).
+                if self.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
                 for s in body_stmts { self.emit_stmt(out, s, "  "); }
                 self.loop_exit_label = None;
                 self.ssa_old_float_regs.clear();
@@ -1653,7 +1677,7 @@ impl LlvmBackend {
             }
             if self.has_async_txns && !self.is_lightweight_async {
                 writeln!(out, "async_phase:").ok();
-                self.emit_async_phase(out);
+                self.emit_async_phase(out, "%state");
                 writeln!(out, "  br label %do_wait").ok();
             }
             writeln!(out, "do_wait:").ok();

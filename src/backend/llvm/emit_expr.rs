@@ -3793,9 +3793,19 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, copy_bytes, old_len).ok();
                 writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
                     indent, copy_dst, old_dp, copy_bytes).ok();
-                // Store new element at position 0 for prepend, or old_len for append
+                // Store new element at position 0 for prepend, or old_len+2 for append
+                // (list header is 2 slots: capacity at 0, length at 1; elements start at 2).
                 let ne_ptr = format!("%aep{}", self.txn_counter); self.txn_counter += 1;
-                let new_elem_pos = if prepend { "2".to_string() } else { old_len.clone() };
+                let new_elem_pos = if prepend {
+                    "2".to_string()
+                } else {
+                    // 2026-06-27: Compute element position = old_len + 2 account for
+                    // the 2 header slots. Previously used old_len directly, which
+                    // overwrote header slot 0 or the first element (queue_drain crash).
+                    let ep = format!("%aep2{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = add i64 {}, 2", indent, ep, old_len).ok();
+                    ep
+                };
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ne_ptr, new_hp, new_elem_pos).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, elem_boxed, ne_ptr).ok();
                 // Store new list handle back to state field if target is OwnedRef
@@ -3805,6 +3815,11 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                         let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
+                        // 2026-06-27: Record field as modified for per-field phi
+                        // back-edge reload. Without this, the phi back-edge for
+                        // this field remains a pass-through (old value), causing
+                        // the next tick to see the pre-push handle (queue_drain).
+                        self.pending_phi_backedge.insert(field_name.clone(), base.clone());
                     } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
                         writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
                     }
@@ -3836,6 +3851,9 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                             let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, new_list, ap, tn).ok();
+                            // 2026-06-27: Record field as modified for per-field
+                            // phi back-edge reload (same rationale as push).
+                            self.pending_phi_backedge.insert(field_name.clone(), new_list.clone());
                         } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
                             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_list, slot).ok();
                         }
@@ -3929,6 +3947,9 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
                         let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
                         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
+                        // 2026-06-27: Record field as modified for per-field
+                        // phi back-edge reload (same rationale as push).
+                        self.pending_phi_backedge.insert(field_name.clone(), base.clone());
                     } else if let Some(slot) = self.param_slots.get(field_name).cloned() {
                         writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
                     }
@@ -4844,11 +4865,15 @@ impl LlvmBackend {
 
     /// Emit the async phase calls in main: release workers, run sequential
     /// reactor, wait for workers. Used by emit_main and emit_enum_main.
-    pub(crate) fn emit_async_phase(&self, out: &mut String) {
+    pub(crate) fn emit_async_phase(&self, out: &mut String, state_var: &str) {
         if !self.has_async_txns || self.is_lightweight_async { return; }
         writeln!(out, "  call void @__barrier_release__()").ok();
         // Sequential reactor runs in main thread concurrently with workers
-        writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
+        // 2026-06-27: Use state_var parameter instead of hardcoded %state.
+        // The tick-loop path passes %state_copy so reactor_tick modifies the
+        // local copy, and the subsequent memcpy from %state_copy → %state
+        // carries the post-tick values into exit-condition checks (async_counters).
+        writeln!(out, "  call void @reactor_tick(ptr noalias nocapture {})", state_var).ok();
         writeln!(out, "  call void @__barrier_wait__()").ok();
     }
 

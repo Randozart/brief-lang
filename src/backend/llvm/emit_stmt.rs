@@ -484,6 +484,9 @@ impl LlvmBackend {
                         "float" => {
                             let fl = self.native_float_or_box(out, indent, &val.to_string());
                             writeln!(out, "{}store{} float {}, float* {}, align {}, !tbaa !{}", indent, vol_str, fl, p, self.align_of(&ty), tn).ok();
+                            // 2026-06-27: Update ssa_old_float_regs so subsequent
+                            // body reads see the stored float value.
+                            self.ssa_old_float_regs.insert(fname.clone(), fl);
                         }
                         s if s == "i8*" || s == "ptr" => {
                             let fp = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
@@ -500,6 +503,18 @@ impl LlvmBackend {
                     // to feed back into the phi (instead of reloading from
                     // %State, which would add a GEP+load round-trip).
                     self.pending_phi_backedge.insert(fname.clone(), val_boxed.clone());
+                    // 2026-06-27: Update ssa_old registers so subsequent body
+                    // reads (guards, let-bindings) see the stored value. In the
+                    // per-field phi path, ssa_old_int_regs starts with phi regs
+                    // (pre-tick values). Without this update, a guard after a
+                    // field write reads the pre-write value (ring_buffer bug).
+                    // Note: float case updates ssa_old_float_regs inside its
+                    // match arm above (fl is local to that arm).
+                    if ty != "float" && ty != "i8*" && ty != "ptr" {
+                        self.ssa_old_int_regs.insert(fname.clone(), val_boxed.clone());
+                    } else if ty == "i8*" || ty == "ptr" {
+                        self.ssa_old_int_regs.insert(fname.clone(), val_boxed.clone());
+                    }
                     // Phase 2: Invalidate ALL cache targets on field store
                     if let Some(targets) = self.cache_slots.get(&fname) {
                         for (_target, &(_cache_idx, valid_idx)) in targets {

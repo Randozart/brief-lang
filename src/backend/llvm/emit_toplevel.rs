@@ -1246,6 +1246,12 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        // 2026-06-27: Clear ssa_old int/float regs so identifier lookups fall
+        // through to GEP+load from %state. Without this, stale entries from a
+        // prior emit (main function) produce forward references to registers
+        // not defined in this function (precompute_sum: %t28 undefined).
+        self.ssa_old_int_regs.clear();
+        self.ssa_old_float_regs.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         if cond.ty == Type::Bool {
             writeln!(out, "  ret i1 {}", cond).ok();
@@ -1288,6 +1294,10 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
         self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        // 2026-06-27: Clear ssa_old int/float regs so identifier lookups fall
+        // through to GEP+load from %state (same rationale as emit_pre_function).
+        self.ssa_old_int_regs.clear();
+        self.ssa_old_float_regs.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = if cond.ty == Type::Bool {
             cond.name.clone()

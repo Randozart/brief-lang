@@ -45,6 +45,13 @@ impl LlvmBackend {
 
         writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
+        // 2026-06-27: Clear ssa_old regs at reactor_tick entry — they may
+        // contain stale entries from the main function emit (e.g., from
+        // emit_ssa_main's per-field phi setup or emit_stmt's ssa_old reg
+        // update). Without this, inline txn body identifier lookups find
+        // stale register names not defined in this function.
+        self.ssa_old_int_regs.clear();
+        self.ssa_old_float_regs.clear();
         // Arena init: shared arena for all txns in this tick.
         // Previously each @txn_name had its own 64KB arena (Approach 2),
         // but inlining shares one arena across all txns, saving memory.
@@ -203,6 +210,10 @@ impl LlvmBackend {
 
         writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
+        // 2026-06-27: Clear ssa_old regs at reactor_tick entry (same
+        // rationale as the sequential reactor counterpart).
+        self.ssa_old_int_regs.clear();
+        self.ssa_old_float_regs.clear();
         // Arena init for parallel reactor — shared across all parallel txns.
         self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
@@ -304,6 +315,12 @@ impl LlvmBackend {
             let saved_types = self.let_binding_types.clone();
             let saved_floats = self.reg_float_cache.clone();
             let saved_typecache = self.reg_type_cache.clone();
+            // 2026-06-27: Save/restore ssa_old regs to prevent cross-txn
+            // contamination. The ring_buffer fix (update ssa_old_int_regs after
+            // GEP+store) pollutes these across inline txn bodies — the second
+            // txn's identifier lookups find stale registers from the first txn.
+            let saved_old_int = self.ssa_old_int_regs.clone();
+            let saved_old_float = self.ssa_old_float_regs.clone();
 
             // Emit precondition assume (for LLVM opt) — the br instruction
             // already guards execution, so this is just for metadata.
@@ -321,6 +338,8 @@ impl LlvmBackend {
             self.let_binding_types = saved_types;
             self.reg_float_cache = saved_floats;
             self.reg_type_cache = saved_typecache;
+            self.ssa_old_int_regs = saved_old_int;
+            self.ssa_old_float_regs = saved_old_float;
         }
     }
 
