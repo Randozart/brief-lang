@@ -240,6 +240,79 @@ The `prev_key` tracking in the Console cell's transactions handles the dirty-fla
 7. **Create**: Macro + tests (or document fallback)
 8. **Optional**: Convert officina to use Console cell
 
+---
+
+## Option A: Top-Level Macro Code Generation via `Value::Items`
+
+### Problem
+
+`compile#()` cannot generate top-level items (defn, txn, struct, enum, etc.).
+The root cause is twofold:
+
+1. `Value::Block(Vec<Statement>)` can only hold statements.
+2. The macro expansion system (`expand_macro_calls_in_items`) unconditionally wraps
+   results in `TopLevel::Statement`.
+
+### Solution: `Value::Items(Vec<TopLevel>)`
+
+**Step 1: Add `Items` variant to `Value` enum**
+
+File: [`src/interpreter.rs:64-102`](../../../src/interpreter.rs)
+
+Add `Items(Vec<TopLevel>)` as a new variant after `Block(Vec<Statement>)`.
+Every match on `Value` needs a handler — most can use `_ =>` fallthrough or
+explicitly map to `Value::Block(...)` for backward compat.
+
+**Step 2: Update `compile#()` intrinsic to return `Value::Items`**
+
+File: [`src/interpreter.rs:5079-5108`](../../../src/interpreter.rs)
+
+Change from extracting only `Statement`/`TriggerBinding`:
+
+```rust
+Ok(Value::Items(prog.items))   // return ALL items
+```
+
+**Step 3: Add `value_to_items` conversion**
+
+File: [`src/features/macros/template.rs`](../../../src/features/macros/template.rs)
+
+Add `pub fn value_to_items(value: &Value) -> Vec<TopLevel>` that handles
+`Value::Items(items)` and falls back to `value_to_statements` for other variants.
+
+**Step 4: Update `expand_macro_calls_in_items` to accept `Value::Items`**
+
+File: [`src/features/macros/expand.rs:257-288`](../../../src/features/macros/expand.rs)
+
+When the macro returns `Value::Items`, insert the items directly (not wrapped
+in `TopLevel::Statement`). When it returns other values (including `Block`),
+continue to wrap the result in `TopLevel::Statement` as before.
+
+**Step 5: `value_to_statements` fallback for `Value::Items`**
+
+If someone calls a macro that returns `Items` from statement context (inside a
+function body), the expansion should convert each `TopLevel::Statement` to a
+`Statement` and skip non-statement items. This maintains backward compatibility.
+
+### Impact
+
+| Aspect | Before | After |
+|--------|--------|-------|
+| `compile#("let x: Int = 0;")` | Silently dropped | Injected as `TopLevel::StateDecl` |
+| `compile#("trg inp @ Console!;")` | Injected as `Statement::TrgBinding` | Injected as `TopLevel::TriggerBinding` |
+| `compile#("defn foo() { ... }")` | Silently dropped | Injected as `TopLevel::Definition` |
+| Match arms to update | 0 | ~35 (all `Value` matches) |
+| Risk | Low — fallthrough handles unknown | Low — `_ =>` fallthrough for unmigrated matches |
+
+### Why not do this now
+
+The officina refactor only needs the Console cell (which works via direct
+`trg @ Console!` syntax). The `compile#()` fix enables macros to generate
+arbitrary top-level items, which is valuable but orthogonal to the immediate
+goal of trying out the Console cell.
+
+---
+
 ## Risk Register
 
 | Risk | Impact | Mitigation |

@@ -709,6 +709,11 @@ impl TypeChecker {
                     self.declare_variable(&trg.name, trg.ty.clone());
                     self.trigger_names.insert(trg.name.clone());
                 }
+                TopLevel::TriggerBinding { name, ty, .. } => {
+                    let trig_ty = ty.clone().unwrap_or(crate::ast::Type::String);
+                    self.declare_variable(name, trig_ty);
+                    self.trigger_names.insert(name.clone());
+                }
                 TopLevel::ForeignBinding {
                     name,
                     toml_path,

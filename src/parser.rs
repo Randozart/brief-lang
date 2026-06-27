@@ -4050,6 +4050,8 @@ let span = self.current_span();
         let name = self.expect_identifier()?;
         self.expect(Token::Colon)?;
         let ty = self.parse_type()?;
+        let _trg_name = name.clone(); // saved for cell binding shorthand
+        let _trg_ty = ty.clone();     // saved for cell binding shorthand
 
         let mut address: crate::ast::LinkRef = crate::ast::LinkRef::Explicit(0);
         let mut bit_range: Option<BitRange> = None;
@@ -4101,9 +4103,8 @@ let span = self.current_span();
                                     address = crate::ast::LinkRef::Signal(sig_name);
                                 }
                                 _ => {
-                                    let ident = name.clone();
-                                    let trg_name = name.clone();
-                                    self.advance(); // consume identifier
+                                    let cell_ident = name.clone();
+                                    self.advance(); // consume the identifier
                                     // Check for @ CellName! or @ CellName!.port shorthand
                                     if let Some(Ok(Token::Not)) = self.current_token() {
                                         self.advance(); // consume !
@@ -4111,15 +4112,21 @@ let span = self.current_span();
                                             self.advance();
                                             self.expect_identifier().unwrap_or_default()
                                         } else { String::new() };
-                                        // Signal the top-level handler to create a TriggerBinding
                                         self.pending_cell_binding = Some((
-                                            trg_name, ident, port, Some(ty.clone())
+                                            _trg_name.clone(), cell_ident, port, Some(_trg_ty.clone())
                                         ));
-                                        // Set address to avoid parse error (won't be used)
+                                        address = crate::ast::LinkRef::Explicit(0);
+                                    } else if let Some(Ok(Token::Dot)) = self.current_token() {
+                                        // @ instance.port (no !) — cell binding with explicit port
+                                        self.advance(); // consume .
+                                        let port = self.expect_identifier().unwrap_or_default();
+                                        self.pending_cell_binding = Some((
+                                            _trg_name.clone(), cell_ident, port, Some(_trg_ty.clone())
+                                        ));
                                         address = crate::ast::LinkRef::Explicit(0);
                                     } else {
                                         // Backward compat: @ identifier as link reference
-                                        address = crate::ast::LinkRef::Linked(ident);
+                                        address = crate::ast::LinkRef::Linked(cell_ident);
                                     }
                                 }
                             }

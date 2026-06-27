@@ -1,15 +1,9 @@
 // Console — terminal input cell.
 // Provides line-buffered console input with duplicate-safe line detection.
-// Outputs `line: String` (the emitted line) and `line_id: Int` (monotonic
-// sequence counter guaranteeing output change on every Enter).
+// Outputs `line: String` (the emitted line on Enter) and `line_id: Int`
+// (monotonically incrementing sequence counter — fires on every Enter).
 //
-// Usage (interpreter):
-//
-//   import "std/console.bv";
-//   let test_input: Char = '\n';   // simulated keypress
-//   let con = cell Console(test_input);
-//
-// Usage:
+// Import exposes the cell (not `sed`). Usage:
 //
 //   import "std/console.bv";
 //   trg inp: String @ Console!;
@@ -18,6 +12,25 @@
 // The `@ Console!` shorthand creates an async persistent Console instance
 // and binds a trigger to its `line` output port. The `Console!` suffix
 // with `!` is required — it matches the `cell!` persistent declaration.
+//
+// For duplicate-safe detection (same input twice), bind to `line_id`:
+//
+//   trg inp_line: String @ Console.line;
+//   trg inp_id: Int @ Console.line_id;
+//   let last_id: Int = -1;
+//   rct txn handle [inp_id != last_id]] {
+//       process(inp_line);
+//       &last_id = inp_id;
+//       term;
+//   };
+//
+// Ctrl+C is NOT emitted as a line — it returns '\x03' via stdin. Handle
+// it separately with a `trg raw: Char @stdin#;` for shutdown, or check
+// for it inside the handler.
+//
+// Terminal raw mode must be enabled by the application before use:
+//   tty_raw_mode#(true);  // enable
+//   tty_raw_mode#(false); // disable on exit
 
 cell! Console -> line: String, line_id: Int {
     line: String = "";
