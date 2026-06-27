@@ -101,6 +101,7 @@ pub fn arb_trigger_decl(_max_depth: usize) -> impl Strategy<Value = TopLevel> {
             is_wake: true,
             is_const: false,
             span: None,
+            modifiers: vec![],
         })
     })
 }

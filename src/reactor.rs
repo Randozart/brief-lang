@@ -649,6 +649,7 @@ mod tests {
             is_wake: true,
             is_const: false,
             span: None,
+            modifiers: vec![],
         });
         let reactor = build_reactor(&simple_program(vec![trg]));
         assert!(reactor.triggers.contains_key("keypress"));

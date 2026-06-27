@@ -9,11 +9,15 @@
 //   let test_input: Char = '\n';   // simulated keypress
 //   let con = cell Console(test_input);
 //
-// Usage (LLVM backend — pending parser support for @instance.port bindings):
+// Usage:
 //
 //   import "std/console.bv";
 //   trg inp: String @ Console!;
-//   rct txn handle [inp != ""]] { process(inp); &inp = ""; term; };
+//   rct txn handle [[inp != ""] { process(inp); &inp = ""; term; };
+//
+// The `@ Console!` shorthand creates an async persistent Console instance
+// and binds a trigger to its `line` output port. The `Console!` suffix
+// with `!` is required — it matches the `cell!` persistent declaration.
 
 cell! Console -> line: String, line_id: Int {
     buffer: String = "";

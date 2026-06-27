@@ -835,6 +835,7 @@ mod tests {
             is_wake: true,
             is_const: false,
             span: None,
+            modifiers: vec![],
         })
     }
 
@@ -959,8 +960,9 @@ mod tests {
             TopLevel::Trigger(TriggerDeclaration {
                 name: "btn".to_string(), ty: Type::Bool,
                 address: LinkRef::Linked("button0".to_string()),
-                bit_range: None, stages: vec![], condition: None,
                 is_wake: true, is_const: false, span: None,
+                bit_range: None, stages: vec![], condition: None,
+                modifiers: vec![],
             }),
         ]));
         // Linked triggers use the linked name as port name
@@ -974,8 +976,9 @@ mod tests {
             TopLevel::Trigger(TriggerDeclaration {
                 name: "btn".to_string(), ty: Type::Bool,
                 address: LinkRef::Explicit(0),
-                bit_range: None, stages: vec![], condition: None,
                 is_wake: true, is_const: false, span: None,
+                modifiers: vec![],
+                bit_range: None, stages: vec![], condition: None,
             }),
         ]));
         // Wake triggers produce a wake_ output port

@@ -2215,6 +2215,7 @@ pub struct TriggerDeclaration {
     pub is_wake: bool,
     pub is_const: bool,
     pub span: Option<Span>,
+    pub modifiers: Vec<Hashtag>,
 }
 
 #[derive(Debug, Clone)]

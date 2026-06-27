@@ -601,6 +601,7 @@ mod tests {
             is_wake: true,
             is_const: false,
             span: None,
+            modifiers: vec![],
         })
     }
 

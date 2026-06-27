@@ -600,6 +600,7 @@ fn empty_program() -> Program {
                     condition: None,
                     is_wake: false,
                     is_const: false,
+                    modifiers: vec![],
                     span: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
@@ -947,6 +948,7 @@ fn empty_program() -> Program {
                     condition: None,
                     is_wake,
                     is_const: false,
+                    modifiers: vec![],
                     span: None,
                 }),
                 TopLevel::Transaction(Transaction {
@@ -1021,6 +1023,7 @@ fn empty_program() -> Program {
             condition: None,
             is_wake: true,
             is_const: false,
+            modifiers: vec![],
             span: None,
         }));
         let output = LlvmBackend::new().generate(&p1);
@@ -1098,6 +1101,7 @@ fn empty_program() -> Program {
                     is_wake: true,
                     is_const: false,
                     span: None,
+                    modifiers: vec![],
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
@@ -1269,6 +1273,7 @@ fn empty_program() -> Program {
                     condition: None,
                     is_wake: true,
                     is_const: true,
+                    modifiers: vec![],
                     span: None,
                 }),
                 TopLevel::Transaction(Transaction {
@@ -1460,7 +1465,7 @@ fn empty_program() -> Program {
             items.push(TopLevel::Trigger(TriggerDeclaration {
                 name: trg_name.to_string(), ty: trg_ty,
                 address: LinkRef::Explicit(0), bit_range: None,
-                stages: vec![], condition: None, is_wake: true, is_const: false, span: None,
+                stages: vec![], condition: None, is_wake: true, is_const: false, modifiers: vec![], span: None,
             }));
         }
         for (txn_name, body) in txns {
@@ -1876,7 +1881,7 @@ fn empty_program() -> Program {
             ty: trg_ty,
             address: LinkRef::Linked("__io_pending".to_string()),
             bit_range: None, stages: vec![], condition: None,
-            is_wake, is_const: false, span: None,
+            is_wake, is_const: false, modifiers: vec![], span: None,
         }));
         let pre = Expr::And(
             Box::new(Expr::Identifier(trg_name.to_string())),

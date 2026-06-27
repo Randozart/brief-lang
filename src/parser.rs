@@ -86,6 +86,9 @@ pub struct Parser<'a> {
     /// Track whether a top-level executable statement has been seen.
     /// Declarations after the first statement are a compile error.
     seen_top_level_stmt: bool,
+    /// When set by parse_trigger_body, the top-level trg handler uses this
+    /// to emit a TopLevel::TriggerBinding instead of TopLevel::Trigger.
+    pending_cell_binding: Option<(String, String, String, Option<Type>)>, // (trigger_name, cell_name, port, ty)
     /// Names of top-level items marked with `sed` (file-private).
     sed_item_names: Vec<String>,
     /// When true, @ident and @{expr} produce interpolation markers (inside quote { })
@@ -112,6 +115,7 @@ impl<'a> Parser<'a> {
             seen_top_level_stmt: false,
             sed_item_names: Vec::new(),
             in_quote_block: false,
+            pending_cell_binding: None,
         }
     }
 
@@ -1262,14 +1266,24 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Trg)) => {
                 self.advance();
                 let trg = self.parse_trigger_body(false)?;
-                // Hardware-addressed triggers (Explicit with non-zero address) require const.
-                // Explicit(0) is the default for unbound triggers — no @ was specified.
-                if let crate::ast::LinkRef::Explicit(addr) = trg.address {
-                    if addr != 0 && !trg.is_const {
-                        return self.spanned_err("hardware-addressed triggers must be declared 'const trg'".to_string());
+                // Check if parse_trigger_body detected a cell binding
+                if let Some((binding_name, cell_name, port, ty)) = self.pending_cell_binding.take() {
+                    Ok(wrap_test(TopLevel::TriggerBinding {
+                        name: binding_name,
+                        ty,
+                        instance: Expr::Identifier(cell_name),
+                        port,
+                        modifiers: vec![],
+                    }, &test_groups))
+                } else {
+                    // Hardware-addressed triggers (Explicit with non-zero address) require const.
+                    if let crate::ast::LinkRef::Explicit(addr) = trg.address {
+                        if addr != 0 && !trg.is_const {
+                            return self.spanned_err("hardware-addressed triggers must be declared 'const trg'".to_string());
+                        }
                     }
+                    Ok(wrap_test(TopLevel::Trigger(trg), &test_groups))
                 }
-                Ok(wrap_test(TopLevel::Trigger(trg), &test_groups))
             }
             Some(Ok(Token::Frgn)) => {
                 let frgn_binding = self.parse_frgn_binding()?;
@@ -1372,6 +1386,7 @@ impl<'a> Parser<'a> {
                     TopLevel::Definition(d) => Some(d.name.clone()),
                     TopLevel::Transaction(t) => Some(t.name.clone()),
                     TopLevel::Trigger(t) => Some(t.name.clone()),
+                    TopLevel::TriggerBinding { name, .. } => Some(name.clone()),
                     TopLevel::StateDecl(s) => Some(s.name.clone()),
                     TopLevel::Struct(s) => Some(s.name.clone()),
                     TopLevel::Enum(e) => Some(e.name.clone()),
@@ -4086,9 +4101,26 @@ let span = self.current_span();
                                     address = crate::ast::LinkRef::Signal(sig_name);
                                 }
                                 _ => {
-                                    // Backward compat: @ identifier as link reference
-                                    address = crate::ast::LinkRef::Linked(name.clone());
-                                    self.advance();
+                                    let ident = name.clone();
+                                    let trg_name = name.clone();
+                                    self.advance(); // consume identifier
+                                    // Check for @ CellName! or @ CellName!.port shorthand
+                                    if let Some(Ok(Token::Not)) = self.current_token() {
+                                        self.advance(); // consume !
+                                        let port = if let Some(Ok(Token::Dot)) = self.current_token() {
+                                            self.advance();
+                                            self.expect_identifier().unwrap_or_default()
+                                        } else { String::new() };
+                                        // Signal the top-level handler to create a TriggerBinding
+                                        self.pending_cell_binding = Some((
+                                            trg_name, ident, port, Some(ty.clone())
+                                        ));
+                                        // Set address to avoid parse error (won't be used)
+                                        address = crate::ast::LinkRef::Explicit(0);
+                                    } else {
+                                        // Backward compat: @ identifier as link reference
+                                        address = crate::ast::LinkRef::Linked(ident);
+                                    }
                                 }
                             }
                         }
@@ -4154,6 +4186,7 @@ let span = self.current_span();
             is_wake,
             is_const,
             span,
+            modifiers: vec![],
         })
     }
 

@@ -1295,6 +1295,34 @@ impl Interpreter {
                 }
             } else if let TopLevel::Cell(cell) = item {
                 self.cell_defs.insert(cell.name.clone(), cell.as_ref().clone());
+            } else if let TopLevel::TriggerBinding { name, ty, instance, port, modifiers: _ } = item {
+                // Handle trg name: Type @ CellName!.port — register cell + bind trigger
+                if let Expr::Identifier(cell_name) = instance {
+                    let cell_name = cell_name.clone();
+                    let cell_def_opt = self.cell_defs.get(&cell_name).cloned();
+                    if let Some(cell_def) = cell_def_opt {
+                        let port_name = if port.is_empty() {
+                            // Shorthand: auto-detect single output port
+                            if let Some(ref ot) = cell_def.output_type {
+                                let names = self.extract_output_names(ot);
+                                names.first().cloned().unwrap_or_default()
+                            } else { String::new() }
+                        } else { port.clone() };
+                        // Register as persistent cell if not already registered
+                        if !self.persistent_cells.contains_key(&cell_name) {
+                            self.register_persistent_cell(&cell_def, &[], None).unwrap_or_else(|_| {
+                                String::new()
+                            });
+                        }
+                        // Create trigger binding entry
+                        self.trg_bindings.push(TrgBindingReg {
+                            trigger_name: name.clone(),
+                            cell_name,
+                            port_name,
+                            ty: ty.clone(),
+                        });
+                    }
+                }
             }
         }
 
@@ -5058,11 +5086,18 @@ impl Interpreter {
                         let mut parser = crate::parser::Parser::new(&code);
                         match parser.parse() {
                             Ok(prog) => {
-                                // Extract all TopLevel::Statement bodies into a flat Block
+                                // Extract all TopLevel items into a flat Block
                                 let mut stmts = Vec::new();
                                 for item in prog.items {
-                                    if let crate::ast::TopLevel::Statement(stmt) = item {
-                                        stmts.push(*stmt);
+                                    match item {
+                                        crate::ast::TopLevel::Statement(stmt) => stmts.push(*stmt),
+                                        crate::ast::TopLevel::TriggerBinding { name, ty, instance, port, modifiers } => {
+                                            // Convert TriggerBinding to its statement-level equivalent
+                                            stmts.push(crate::ast::Statement::TrgBinding {
+                                                name, ty, instance, port, modifiers,
+                                            });
+                                        }
+                                        _ => {} // skip other top-level items
                                     }
                                 }
                                 Ok(Value::Block(stmts))
@@ -11174,6 +11209,7 @@ mod tests {
                 is_wake: false,
                 is_const: false,
                 span: None,
+                modifiers: vec![],
             }],
             span: None, modifiers: vec![],
         };
