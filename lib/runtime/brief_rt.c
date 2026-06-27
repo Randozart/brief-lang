@@ -272,8 +272,13 @@ void __rt_init(void) {
     setup_timer(&g_timer_1hz,   SIGRTMIN + 1, 1,   0);
     setup_timer(&g_timer_100hz, SIGRTMIN + 2, 0,   10000000); /* 10ms */
 
-    /* Ensure stdout buffer is line-buffered for __print */
-    setvbuf(stdout, NULL, _IOLBF, 0);
+    /* 2026-06-26: Removed setvbuf(stdout, NULL, _IOLBF, 0).
+     * Line-buffering makes fputc ~2.1× slower on glibc (each call checks
+     * ch == '\n'). __print and __print_int already call fflush(stdout)
+     * explicitly, so line-buffering is redundant for correctness.
+     * Glibc's default auto-selects fully-buffered (pipes/files) or
+     * line-buffered (TTY), matching standard C behavior. Users who need
+     * interactive flushing can call setvbuf themselves via frgn. */
     setvbuf(stderr, NULL, _IOFBF, 65536);  /* buffer FFI stderr output (e.g. fasta __putchar) */
 
     /* Set stdin to non-blocking mode for @stdin# trigger */

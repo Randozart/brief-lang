@@ -227,9 +227,15 @@ impl LlvmBackend {
             writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (ptr)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
             writeln!(out, "  call void @__thread_pool_init__(i32 {}, i8** %tp_fn_ptr)", count).ok();
         }
-        // Line-buffer stdout so \n auto-flushes (matching default TTY behavior)
-        writeln!(out, "  %so_init = load ptr, ptr @stdout").ok();
-        writeln!(out, "  call i32 @setvbuf(ptr %so_init, ptr null, i32 1, i64 0)").ok();
+        // 2026-06-26: Removed setvbuf(stdout, NULL, _IOLBF, 0). The
+        // _IOLBF (line-buffered) mode makes fputc ~2.1× slower on glibc
+        // compared to the default fully-buffered mode (automatic for
+        // non-TTY). Glibc's default auto-selects fully-buffered for pipes
+        // and line-buffered for TTYs — matching C program behavior.
+        // If interactive flushing on \n is needed, users can call:
+        //   frgn setvbuf(...);
+        //   setvbuf(stdout, NULL, 1, 0);  // _IOLBF = 1
+        // in their program.
         // Spawn persistent cell threads
         for name in &self.cell_thread_names {
             let cell_state_type = format!("%CellState.{}", name);
@@ -872,9 +878,9 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
-        // Line-buffer stdout so \n auto-flushes (matching default TTY behavior)
-        writeln!(out, "  %so_init = load ptr, ptr @stdout").ok();
-        writeln!(out, "  call i32 @setvbuf(ptr %so_init, ptr null, i32 1, i64 0)").ok();
+        // 2026-06-26: Removed setvbuf(stdout, NULL, _IOLBF, 0) — see
+        // the same pattern in emit_main() for rationale.
+        // Alternative: frgn setvbuf(...); setvbuf(stdout, NULL, 1, 0);
         // Arena for reactive tick scope: allocates a 64KB scratch buffer
         // that all collection operations within the reactive loop will
         // bump-allocate from. At each tick boundary the arena is reset

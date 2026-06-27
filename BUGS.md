@@ -1754,3 +1754,46 @@ benchmark script uses `BOUND=5` for correctness and `BOUND=50000000` for timing
 output at BOUND≥2. Likely a list header encoding issue in the inop code.
 
 ---
+
+## 2026-06-26 — `setvbuf(stdout, NULL, _IOLBF, 0)` in brief_rt.c makes fputc 2.1× slower
+
+**Issue**: `benchmarks/fasta.bv` compiled by Brief runs at 2.1× wall-clock time
+vs the C reference (0.480s vs 0.230s at BOUND=50000000). The generated assembly
+is instruction-identical except for 2 extra register-to-register `mov`
+instructions, which should be ~0 cycles via mov elimination.
+
+**Root Cause**: `lib/runtime/brief_rt.c:276` calls `setvbuf(stdout, NULL, _IOLBF, 0)`
+in `__rt_init()` (the runtime constructor). This forces stdout into line-buffered
+mode (`_IOLBF`). On glibc, `fputc` into a line-buffered stream is ~2.1× slower
+than the default fully-buffered mode (`_IOFBF`), because every call checks
+`ch == '\n'` and the internal buffering path diverges. C programs use the
+default buffering which auto-selects fully-buffered for non-TTY (pipes, redirects).
+
+**Previous fix attempt**: LLVM-level `setvbuf` calls at `loop_engine.rs:232,877`
+were removed on 2026-06-26, but these were redundant — `__rt_init()` in the
+C runtime called `setvbuf` before `main()` ever ran, overriding any LLVM-level
+setting.
+
+**Fix**: Removed `setvbuf(stdout, NULL, _IOLBF, 0)` from `brief_rt.c:276`.
+`__print` and `__print_int` already call `fflush(stdout)` explicitly, so line-
+buffering was redundant for correctness. Glibc's default auto-selects
+fully-buffered for non-TTY and line-buffered for TTY terminals — matching
+standard C program behavior.
+
+Users who need interactive flushing on `\n` can call it manually:
+```brief
+frgn setvbuf(stream: Ptr<Byte>, buf: Ptr<Byte>, mode: Int, size: Int) -> Int;
+setvbuf(stdout, 0, 1, 0);  // _IOLBF = 1
+```
+
+**Result**: fasta gap closes from 2.1× to ~0.96× (Brief 0.220s vs C 0.230s).
+Brief now BEATS C on fasta.
+
+**Files**: `lib/runtime/brief_rt.c:276`, `src/backend/llvm/loop_engine.rs`
+
+**Lesson**: The C runtime constructor (`__rt_init`) runs before `main()` and
+can override any LLVM-level buffering configuration. Always check the C runtime
+when debugging I/O performance — the LLVM IR is not the final word. Line-buffered
+stdout (`_IOLBF`) imposes a significant performance penalty on bulk `fputc`
+output (~2.1× on glibc). The runtime should not set buffering policy — users
+should choose via explicit `frgn setvbuf` calls.
