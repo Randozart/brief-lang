@@ -1797,3 +1797,28 @@ when debugging I/O performance — the LLVM IR is not the final word. Line-buffe
 stdout (`_IOLBF`) imposes a significant performance penalty on bulk `fputc`
 output (~2.1× on glibc). The runtime should not set buffering policy — users
 should choose via explicit `frgn setvbuf` calls.
+
+## 2026-06-27 — `try_eval_cfloat` missing `Expr::BinaryOp` normalization (nbody 0.0 energy bug)
+
+- **Issue**: All nbody benchmarks output `0.000000000` for total energy regardless
+  of iteration count. C reference produces `-0.169152707`.
+- **Root Cause**: The parser always creates the new-style packed variant
+  `Expr::BinaryOp` for arithmetic operations. The `try_eval_cfloat` function in
+  `src/backend/llvm/mod.rs` only matched old-style variants (`Expr::Add`,
+  `Expr::Mul`, etc.). Since `Expr::BinaryOp` fell through to `_ => None`,
+  `try_eval_cfloat` returned `None` for expressions like `4.0 * pi * pi`, and the
+  fallback emission produced `"0.0"` (line 1945). This made `solar_mass`,
+  `pi * pi`, and all derived mass constants `constant float 0.0` in the IR.
+  Since all gravitational forces were 0, the energy stayed 0.
+- **Fix**: Added `normalize_to_old()` call at the beginning of `try_eval_cfloat`,
+  mirroring the proven pattern in `eval_const_expr` (`proof_engine.rs:1323`).
+  This converts `Expr::BinaryOp` to old-style `Expr::Add`/`Expr::Mul`/etc.
+  before the match dispatches.
+- **Files**: `src/backend/llvm/mod.rs:44-47`
+- **Lesson**: Any function that processes expression trees by matching on old-style
+  variants (`Expr::Add`, `Expr::Mul`, etc.) must first normalize new-style
+  `Expr::BinaryOp` via `normalize_to_old()`. The parser switched to the new
+  packed variant for all operations, but many matchers were never updated. Search
+  for `Expr::Add` in match arms and verify `BinaryOp` is handled. This is the
+  same pattern as `eval_const_expr` in the proof engine — the integer path was
+  fixed but the float path was missed.

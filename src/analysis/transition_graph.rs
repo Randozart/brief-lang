@@ -270,6 +270,11 @@ fn extract_valid_bounded_pre(pre: &Expr, inc: &Option<IncrementInfo>) -> Option<
 /// Applied bottom-up with fixpoint iteration (max 5 passes) to handle
 /// chains like `((x + R) - R) + 1` → `x + 1`.
 fn simplify_expr(expr: &Expr) -> Expr {
+    // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
+    // so the match below can recurse into children for simplification.
+    if let Some(norm) = expr.normalize_to_old() {
+        return simplify_expr(&norm);
+    }
     let expr = match expr {
         // Recurse first: simplify children bottom-up
         Expr::Add(a, b) => Expr::Add(
@@ -557,7 +562,14 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
                 Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
                 _ => continue,
             };
-            if let Expr::Add(a, b) = expr {
+            // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
+            // so the Add/Sub checks below can detect increment patterns.
+            let normalized = expr.normalize_to_old();
+            let expr_ref: &Expr = match normalized {
+                Some(ref norm) => norm,
+                None => expr,
+            };
+            if let Expr::Add(a, b) = expr_ref {
                 if let (Expr::Identifier(var), Some(delta)) = (a.as_ref(), get_int(b)) {
                     if *var == name && delta > 0 {
                         return Some(IncrementInfo { var: name.clone(), delta });
@@ -570,7 +582,7 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
                 }
             }
             // Decreasing counter: count = count - delta or count = count - 1
-            if let Expr::Sub(a, b) = expr {
+            if let Expr::Sub(a, b) = expr_ref {
                 if let (Expr::Identifier(var), Some(delta)) = (a.as_ref(), get_int(b)) {
                     if *var == name && delta > 0 {
                         return Some(IncrementInfo { var: name.clone(), delta });
@@ -578,7 +590,7 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
                 }
             }
             // Interval bounds: (x + R1) - R2 where net step R1 - R2 ≥ 1
-            if let Expr::Sub(inner, rhs) = expr {
+            if let Expr::Sub(inner, rhs) = expr_ref {
                 if let Expr::Add(lhs, rhs2) = inner.as_ref() {
                     let is_self_add = matches!(lhs.as_ref(), Expr::Identifier(v) if *v == name);
                     if is_self_add {
@@ -806,6 +818,11 @@ fn references_triggers_or_ffi(expr: &Expr) -> bool {
 }
 
 fn references_triggers_or_ffi_with_decls(expr: &Expr, inop_decls: &HashMap<String, bool>) -> bool {
+    // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
+    // so FFI references inside them are properly detected.
+    if let Some(norm) = expr.normalize_to_old() {
+        return references_triggers_or_ffi_with_decls(&norm, inop_decls);
+    }
     match expr {
         Expr::Call(_, _) => true,
         Expr::IntrinsicCall { intrinsic, .. } => intrinsic_has_side_effects(intrinsic, inop_decls),

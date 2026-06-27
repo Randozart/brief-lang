@@ -1,8 +1,11 @@
 # Brief Compiler - Agent Guidelines
 
-See CLAUDE.md for complete documentation. This file is the condensed active
-guidelines (~330 lines). Historical context is in `AGENTS_HISTORY.md` and
+This file is the condensed active guidelines (~330 lines). Historical context is in `AGENTS_HISTORY.md` and
 the full snapshot backup at `AGENTS_HISTORY_2.md`.
+
+## IMPORTANT CONSIDERATION
+
+This is NOT some "go fast and break things" type SaaS. We are building a compiler. Whenever you think "This would be too much effort" or "This is too large a refactor, we should defer/drop this", DON'T. Patches are UNACCEPTABLE. We are going for code correctness for ALL programs written in Brief, not just the test case we happen to be working on. This is also why we MUST comment on EVERY code change we make. This makes it visible WHY the code is there, and prevents critical code from being removed.
 
 ## Philosophy
 
@@ -73,6 +76,11 @@ proven at compile time, not `unsafe` blocks.
 - **Dynamic optimization path switching**: Choose layouts at compile time based on liveness evidence
 - **Transitive compatibility inference**: Each compatibility must be explicitly declared
 - **Weakening existing optimization paths**: Additional match arms only, never modify existing arms
+- **Old-style Expr match without BinaryOp normalization**: The parser creates `Expr::BinaryOp`/`Expr::UnaryOp`
+  (new-style packed variants) for all operations. Any function matching `Expr::Add`, `Expr::Mul`, etc.
+  (old-style variants) must first normalize via `expr.normalize_to_old()`. Missing this produces
+  silent wrong output — e.g., `try_eval_cfloat` returned `None` for `4.0 * pi * pi`, causing all
+  nbody mass constants to be `constant float 0.0` in the IR. **Always normalize before matching.**
 
 ## For OpenCode
 

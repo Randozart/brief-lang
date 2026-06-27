@@ -49,6 +49,11 @@ fn structural_hash(expr: &Expr) -> u64 {
 }
 
 fn structural_hash_into(expr: &Expr, h: &mut u64) {
+    // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
+    // so hash is consistent regardless of expression representation.
+    if let Some(norm) = expr.normalize_to_old() {
+        return structural_hash_into(&norm, h);
+    }
     match expr {
         // ── Leaf variants ───────────────────────────────────────
         Expr::Integer(n) => { *h = combine(*h, 1); *h = combine(*h, *n as u64); }
@@ -166,6 +171,12 @@ impl SimplifyCache {
 /// Simplify an expression using bottom-up rewriting with a hash-cons cache.
 /// Returns `None` if the budget is exceeded (caller should use the original expression).
 pub fn simplify_cached(expr: &Expr, cache: &mut SimplifyCache) -> Option<Expr> {
+    // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
+    // so simplification rules apply regardless of expression representation.
+    if let Some(norm) = expr.normalize_to_old() {
+        return simplify_cached(&norm, cache);
+    }
+
     if !cache.has_budget() {
         return None;
     }
@@ -417,6 +428,10 @@ pub fn simplify_program(program: &mut crate::ast::Program, budget: u64) {
                 for stmt in &mut txn.body {
                     simplify_stmt(stmt, &mut cache);
                 }
+            }
+            TopLevel::Constant(c) => {
+                // 2026-06-27: Apply simplification to constant initializer expressions.
+                c.expr = simplify_cached(&c.expr, &mut cache).unwrap_or_else(|| c.expr.clone());
             }
             _ => {}
         }

@@ -41,6 +41,12 @@ pub(crate) fn float_to_llvm_hex(f: f64) -> String {
 /// Used to fold `const m0: Float = 4.0 * pi * pi` into a literal before
 /// global emission, avoiding the `constant float 0` bug.
 fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Option<f64> {
+    // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants so the
+    // match below can process them. Without this, const Float = a * b * c
+    // produces `constant float 0.0` in the IR (nbody mass bug).
+    if let Some(normalized) = expr.normalize_to_old() {
+        return try_eval_cfloat(&normalized, constants);
+    }
     match expr {
         Expr::Float(f) => Some(*f),
         Expr::Literal(lit) => {
@@ -1464,6 +1470,11 @@ impl LlvmBackend {
     }
 
     fn check_expr_embedded(&mut self, expr: &Expr, ctx_name: &str, threading_intrinsics: &[Intrinsic]) {
+        // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
+        // so the match below can recurse into children for threading checks.
+        if let Some(norm) = expr.normalize_to_old() {
+            return self.check_expr_embedded(&norm, ctx_name, threading_intrinsics);
+        }
         match expr {
             Expr::IntrinsicCall { intrinsic, .. } => {
                 if threading_intrinsics.contains(intrinsic) {

@@ -224,6 +224,11 @@ pub fn validate_hashtags_in_program(program: &Program, backend: &str, strict: bo
 
 /// Intent: Collect all identifiers referenced by an expression.
 pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet<String>) {
+    // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
+    // so identifiers in those expressions are collected for dependency tracking.
+    if let Some(norm) = expr.normalize_to_old() {
+        return collect_expr_identifiers(&norm, ids);
+    }
     match expr {
         Expr::Identifier(n) | Expr::OwnedRef(n) | Expr::PriorState(n) => {
             ids.insert(n.clone());
@@ -359,6 +364,11 @@ pub fn peephole_optimize_program(program: &Program) -> Program {
             TopLevel::Definition(defn) => {
                 defn.body = peephole_optimize_body(&defn.body);
             }
+            TopLevel::Constant(c) => {
+                // 2026-06-27: Peephole-optimize constant initializer expressions
+                // so const Float = 4.0 * pi * pi can be folded at the AST level.
+                c.expr = peephole_optimize_expr(&c.expr);
+            }
             _ => {}
         }
     }
@@ -454,6 +464,11 @@ fn peephole_optimize_stmt(stmt: &Statement) -> Option<Statement> {
 }
 
 fn peephole_optimize_expr(expr: &Expr) -> Expr {
+    // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
+    // so the match below can apply constant folding to them.
+    if let Some(norm) = expr.normalize_to_old() {
+        return peephole_optimize_expr(&norm);
+    }
     match expr {
         Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b) => {
             let a = peephole_optimize_expr(a);
