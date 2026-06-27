@@ -252,70 +252,89 @@ impl RegionAnalyzer {
         }
     }
 
+    /// Iterative identifier collection. Uses explicit stack to avoid recursion.
     fn collect_identifiers(&mut self, expr: &Expr, reader_for: &str) {
-        match expr {
-            Expr::Identifier(name) | Expr::OwnedRef(name) => {
-                self.deps
-                    .entry(reader_for.to_string())
-                    .or_default()
-                    .insert(name.clone());
-                self.rev_deps
-                    .entry(name.clone())
-                    .or_default()
-                    .insert(reader_for.to_string());
-            }
-            Expr::Add(a, b)
-            | Expr::Sub(a, b)
-            | Expr::Mul(a, b)
-            | Expr::Div(a, b)
-            | Expr::Mod(a, b)
-            | Expr::Eq(a, b)
-            | Expr::Ne(a, b)
-            | Expr::Lt(a, b)
-            | Expr::Le(a, b)
-            | Expr::Gt(a, b)
-            | Expr::Ge(a, b)
-            | Expr::And(a, b)
-            | Expr::Or(a, b)
-            | Expr::BitAnd(a, b)
-            | Expr::BitOr(a, b)
-            | Expr::BitXor(a, b)
-            | Expr::Shl(a, b)
-            | Expr::Shr(a, b)
-            | Expr::Concat(a, b) => {
-                self.collect_identifiers(a, reader_for);
-                self.collect_identifiers(b, reader_for);
-            }
-            Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-            | Expr::Projection { source: a, .. } => {
-                self.collect_identifiers(a, reader_for);
-            }
-            Expr::Call(_, args) => {
-                for arg in args {
-                    self.collect_identifiers(arg, reader_for);
+        let rf = reader_for.to_string();
+        let mut work: Vec<&Expr> = vec![expr];
+
+        while let Some(e) = work.pop() {
+            match e {
+                Expr::Identifier(name) | Expr::OwnedRef(name) => {
+                    self.deps.entry(rf.clone()).or_default().insert(name.clone());
+                    self.rev_deps.entry(name.clone()).or_default().insert(rf.clone());
                 }
-            }
-            Expr::ListLiteral(elems) => {
-                for e in elems {
-                    self.collect_identifiers(e, reader_for);
+                Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b)
+                | Expr::Div(a, b) | Expr::Mod(a, b)
+                | Expr::Eq(a, b) | Expr::Ne(a, b)
+                | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b)
+                | Expr::And(a, b) | Expr::Or(a, b)
+                | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+                | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
+                    work.push(b);
+                    work.push(a);
                 }
-            }
-            Expr::Tuple(elems) => {
-                for e in elems {
-                    self.collect_identifiers(e, reader_for);
+                Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
+                | Expr::Projection { source: a, .. } => {
+                    work.push(a);
                 }
+                Expr::Call(_, args) => {
+                    for arg in args.iter().rev() {
+                        work.push(arg);
+                    }
+                }
+                Expr::ListLiteral(elems) | Expr::Tuple(elems) => {
+                    for e in elems.iter().rev() {
+                        work.push(e);
+                    }
+                }
+                Expr::ListIndex(list, idx) => {
+                    work.push(idx);
+                    work.push(list);
+                }
+                Expr::FieldAccess(obj, _) => {
+                    work.push(obj);
+                }
+                Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
+                    work.push(last);
+                }
+                Expr::Match { value, arms } => {
+                    for arm in arms.iter().rev() {
+                        if let Some(g) = &arm.guard { work.push(g); }
+                        work.push(&arm.body);
+                    }
+                    work.push(value.as_ref());
+                }
+                Expr::PatternMatch { value, .. } => {
+                    work.push(value.as_ref());
+                }
+                Expr::Within { body, fallback, .. } => {
+                    work.push(fallback);
+                    work.push(body);
+                }
+                Expr::Slice { value, start, end, stride, mask } => {
+                    if let Some(s) = start { work.push(s); }
+                    if let Some(e) = end { work.push(e); }
+                    if let Some(s) = stride { work.push(s); }
+                    if let Some(m) = mask { work.push(m); }
+                    work.push(value);
+                }
+                Expr::MultiSlice { value, ops } => {
+                    for op in ops.iter().rev() {
+                        match op {
+                            BracketOp::Mask(m) => work.push(m.as_ref()),
+                            BracketOp::Stride(s) => work.push(s.as_ref()),
+                            BracketOp::Coord(_) => {}
+                        }
+                    }
+                    work.push(value);
+                }
+                Expr::StructInstance(_, fields) | Expr::ObjectLiteral(fields) => {
+                    for (_, e) in fields.iter().rev() {
+                        work.push(e);
+                    }
+                }
+                _ => {}
             }
-            Expr::ListIndex(list, idx) => {
-                self.collect_identifiers(list, reader_for);
-                self.collect_identifiers(idx, reader_for);
-            }
-            Expr::FieldAccess(obj, _) => {
-                self.collect_identifiers(obj, reader_for);
-            }
-            Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
-                self.collect_identifiers(last, reader_for);
-            }
-            _ => {}
         }
     }
 
@@ -1580,153 +1599,288 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
     }
 }
 
+/// Post-order iterative substitution using explicit stack.
+/// Replaces `old_var` with `new_expr` in an expression tree without recursion.
 fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
-    match expr {
-        Expr::Identifier(n) | Expr::OwnedRef(n) if n == old_var => new_expr.clone(),
-        Expr::Add(a, b) => Expr::Add(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Sub(a, b) => Expr::Sub(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Mul(a, b) => Expr::Mul(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Div(a, b) => Expr::Div(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Mod(a, b) => Expr::Mod(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Eq(a, b) => Expr::Eq(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Ne(a, b) => Expr::Ne(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Lt(a, b) => Expr::Lt(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Le(a, b) => Expr::Le(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Gt(a, b) => Expr::Gt(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Ge(a, b) => Expr::Ge(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::And(a, b) => Expr::And(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Or(a, b) => Expr::Or(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::BitAnd(a, b) => Expr::BitAnd(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::BitOr(a, b) => Expr::BitOr(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::BitXor(a, b) => Expr::BitXor(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Shl(a, b) => Expr::Shl(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Shr(a, b) => Expr::Shr(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Concat(a, b) => Expr::Concat(
-            Box::new(substitute_expr(a, old_var, new_expr)),
-            Box::new(substitute_expr(b, old_var, new_expr)),
-        ),
-        Expr::Not(a) => Expr::Not(Box::new(substitute_expr(a, old_var, new_expr))),
-        Expr::Neg(a) => Expr::Neg(Box::new(substitute_expr(a, old_var, new_expr))),
-        Expr::BitNot(a) => Expr::BitNot(Box::new(substitute_expr(a, old_var, new_expr))),
-        Expr::Cast(a, t) => Expr::Cast(Box::new(substitute_expr(a, old_var, new_expr)), t.clone()),
-        Expr::Call(name, args) => Expr::Call(
-            name.clone(),
-            args.iter().map(|a| substitute_expr(a, old_var, new_expr)).collect(),
-        ),
-        Expr::ListLiteral(elems) => Expr::ListLiteral(
-            elems.iter().map(|e| substitute_expr(e, old_var, new_expr)).collect(),
-        ),
-        Expr::Tuple(elems) => Expr::Tuple(
-            elems.iter().map(|e| substitute_expr(e, old_var, new_expr)).collect(),
-        ),
-        Expr::ListIndex(l, i) => Expr::ListIndex(
-            Box::new(substitute_expr(l, old_var, new_expr)),
-            Box::new(substitute_expr(i, old_var, new_expr)),
-        ),
-        Expr::Projection { source: a, .. } => Expr::Projection { source: Box::new(substitute_expr(a, old_var, new_expr)), target: ProjectionTarget::Size },
-        Expr::FieldAccess(o, f) => Expr::FieldAccess(
-            Box::new(substitute_expr(o, old_var, new_expr)),
-            f.clone(),
-        ),
-        Expr::Block(stmts, last) => Expr::Block(
-            substitute_var(stmts, old_var, new_expr),
-            Box::new(substitute_expr(last, old_var, new_expr)),
-        ),
-        Expr::TupleDestructure(bindings, body) => Expr::TupleDestructure(
-            bindings.clone(),
-            Box::new(substitute_expr(body, old_var, new_expr)),
-        ),
-        Expr::Match { value, arms } => Expr::Match {
-            value: Box::new(substitute_expr(value, old_var, new_expr)),
-            arms: arms.iter().map(|arm| crate::ast::MatchArm {
-                pattern: arm.pattern.clone(),
-                guard: arm.guard.as_ref().map(|g| Box::new(substitute_expr(g, old_var, new_expr))),
-                body: Box::new(substitute_expr(&arm.body, old_var, new_expr)),
-            }).collect(),
-        },
-        Expr::PatternMatch { value, variant, fields } => Expr::PatternMatch {
-            value: Box::new(substitute_expr(value, old_var, new_expr)),
-            variant: variant.clone(),
-            fields: fields.clone(),
-        },
-        Expr::StructInstance(name, fields) => Expr::StructInstance(
-            name.clone(),
-            fields.iter().map(|(n, e)| (n.clone(), substitute_expr(e, old_var, new_expr))).collect(),
-        ),
-        Expr::ObjectLiteral(fields) => Expr::ObjectLiteral(
-            fields.iter().map(|(n, e)| (n.clone(), substitute_expr(e, old_var, new_expr))).collect(),
-        ),
-        Expr::Slice { value, start, end, stride, mask } => Expr::Slice {
-            value: Box::new(substitute_expr(value, old_var, new_expr)),
-            start: start.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
-            end: end.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
-            stride: stride.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
-            mask: mask.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
-        },
-        Expr::MultiSlice { value, ops } => Expr::MultiSlice {
-            value: Box::new(substitute_expr(value, old_var, new_expr)),
-            ops: ops.iter().map(|op| match op {
-                BracketOp::Coord(c) => BracketOp::Coord(c.clone()),
-                BracketOp::Mask(m) => BracketOp::Mask(Box::new(substitute_expr(m, old_var, new_expr))),
-                BracketOp::Stride(s) => BracketOp::Stride(Box::new(substitute_expr(s, old_var, new_expr))),
-            }).collect(),
-        },
-        _ => expr.clone(),
+    let owned_new = new_expr.clone();
+    let owned_old = old_var.to_string();
+
+    // ── Helper function pointers for binary/unary ops ──
+    fn add(l: Expr, r: Expr) -> Expr { Expr::Add(Box::new(l), Box::new(r)) }
+    fn sub(l: Expr, r: Expr) -> Expr { Expr::Sub(Box::new(l), Box::new(r)) }
+    fn mul(l: Expr, r: Expr) -> Expr { Expr::Mul(Box::new(l), Box::new(r)) }
+    fn div(l: Expr, r: Expr) -> Expr { Expr::Div(Box::new(l), Box::new(r)) }
+    fn modop(l: Expr, r: Expr) -> Expr { Expr::Mod(Box::new(l), Box::new(r)) }
+    fn eq(l: Expr, r: Expr) -> Expr { Expr::Eq(Box::new(l), Box::new(r)) }
+    fn ne(l: Expr, r: Expr) -> Expr { Expr::Ne(Box::new(l), Box::new(r)) }
+    fn lt(l: Expr, r: Expr) -> Expr { Expr::Lt(Box::new(l), Box::new(r)) }
+    fn le(l: Expr, r: Expr) -> Expr { Expr::Le(Box::new(l), Box::new(r)) }
+    fn gt(l: Expr, r: Expr) -> Expr { Expr::Gt(Box::new(l), Box::new(r)) }
+    fn ge(l: Expr, r: Expr) -> Expr { Expr::Ge(Box::new(l), Box::new(r)) }
+    fn and(l: Expr, r: Expr) -> Expr { Expr::And(Box::new(l), Box::new(r)) }
+    fn or(l: Expr, r: Expr) -> Expr { Expr::Or(Box::new(l), Box::new(r)) }
+    fn bitand(l: Expr, r: Expr) -> Expr { Expr::BitAnd(Box::new(l), Box::new(r)) }
+    fn bitor(l: Expr, r: Expr) -> Expr { Expr::BitOr(Box::new(l), Box::new(r)) }
+    fn bitxor(l: Expr, r: Expr) -> Expr { Expr::BitXor(Box::new(l), Box::new(r)) }
+    fn shl(l: Expr, r: Expr) -> Expr { Expr::Shl(Box::new(l), Box::new(r)) }
+    fn shr(l: Expr, r: Expr) -> Expr { Expr::Shr(Box::new(l), Box::new(r)) }
+    fn concat(l: Expr, r: Expr) -> Expr { Expr::Concat(Box::new(l), Box::new(r)) }
+    fn not(v: Expr) -> Expr { Expr::Not(Box::new(v)) }
+    fn neg(v: Expr) -> Expr { Expr::Neg(Box::new(v)) }
+    fn bitnot(v: Expr) -> Expr { Expr::BitNot(Box::new(v)) }
+
+    // Work stack entries
+    enum W {
+        Proc(Expr),
+        B0(Expr),
+        /// Unary combine (must capture no data — use naive free function pointers)
+        B1(fn(Expr) -> Expr),
+        /// Binary combine (must capture no data — use naive free function pointers)
+        B2(fn(Expr, Expr) -> Expr),
+        /// N-ary combine with data capture via Box<dyn FnOnce>
+        Args(usize, Box<dyn FnOnce(Vec<Expr>) -> Expr>),
     }
+
+    macro_rules! binop {
+        ($work:ident, $f:expr, $a:expr, $b:expr) => {{
+            $work.push(W::B2($f));
+            $work.push(W::Proc($b));
+            $work.push(W::Proc($a));
+        }};
+    }
+    macro_rules! unop {
+        ($work:ident, $f:expr, $a:expr) => {{
+            $work.push(W::B1($f));
+            $work.push(W::Proc($a));
+        }};
+    }
+
+    let mut work: Vec<W> = vec![W::Proc(expr.clone())];
+    let mut results: Vec<Expr> = vec![];
+
+    // Helper to push Proc entries for each expression in reverse order
+    macro_rules! push_procs_rev {
+        ($work:ident, $first:expr $(, $rest:expr)*) => {{
+            $work.push(W::Proc($first));
+            $( $work.push(W::Proc($rest)); )*
+        }};
+    }
+
+    while let Some(w) = work.pop() {
+        match w {
+            W::Proc(e) => match e {
+                Expr::Identifier(n) if n == owned_old => {
+                    results.push(owned_new.clone());
+                }
+                Expr::OwnedRef(n) if n == owned_old => {
+                    results.push(owned_new.clone());
+                }
+                Expr::Identifier(n) => { results.push(Expr::Identifier(n)); }
+                Expr::OwnedRef(n) => { results.push(Expr::OwnedRef(n)); }
+                Expr::Integer(_) | Expr::Float(_) | Expr::String(_)
+                | Expr::Char(_) | Expr::Bool(_) | Expr::Term
+                | Expr::Ellipsis | Expr::RegexLiteral(_) | Expr::TypeRef(_)
+                | Expr::SharedMem(_) | Expr::Literal(_) => {
+                    results.push(e);
+                }
+                Expr::Add(a, b) => binop!(work, add, *a, *b),
+                Expr::Sub(a, b) => binop!(work, sub, *a, *b),
+                Expr::Mul(a, b) => binop!(work, mul, *a, *b),
+                Expr::Div(a, b) => binop!(work, div, *a, *b),
+                Expr::Mod(a, b) => binop!(work, modop, *a, *b),
+                Expr::Eq(a, b) => binop!(work, eq, *a, *b),
+                Expr::Ne(a, b) => binop!(work, ne, *a, *b),
+                Expr::Lt(a, b) => binop!(work, lt, *a, *b),
+                Expr::Le(a, b) => binop!(work, le, *a, *b),
+                Expr::Gt(a, b) => binop!(work, gt, *a, *b),
+                Expr::Ge(a, b) => binop!(work, ge, *a, *b),
+                Expr::And(a, b) => binop!(work, and, *a, *b),
+                Expr::Or(a, b) => binop!(work, or, *a, *b),
+                Expr::BitAnd(a, b) => binop!(work, bitand, *a, *b),
+                Expr::BitOr(a, b) => binop!(work, bitor, *a, *b),
+                Expr::BitXor(a, b) => binop!(work, bitxor, *a, *b),
+                Expr::Shl(a, b) => binop!(work, shl, *a, *b),
+                Expr::Shr(a, b) => binop!(work, shr, *a, *b),
+                Expr::Concat(a, b) => binop!(work, concat, *a, *b),
+                Expr::Not(a) => unop!(work, not, *a),
+                Expr::Neg(a) => unop!(work, neg, *a),
+                Expr::BitNot(a) => unop!(work, bitnot, *a),
+                Expr::Cast(a, t) => {
+                    let t2 = t;
+                    work.push(W::Args(1, Box::new(move |v| Expr::Cast(Box::new(v[0].clone()), t2.clone()))));
+                    work.push(W::Proc(*a));
+                }
+                Expr::Call(name, args) => {
+                    let n = args.len();
+                    let name2 = name;
+                    work.push(W::Args(n, Box::new(move |v| Expr::Call(name2, v))));
+                    for a in args.into_iter().rev() {
+                        work.push(W::Proc(a));
+                    }
+                }
+                Expr::ListLiteral(elems) => {
+                    let n = elems.len();
+                    work.push(W::Args(n, Box::new(Expr::ListLiteral)));
+                    for e in elems.into_iter().rev() {
+                        work.push(W::Proc(e));
+                    }
+                }
+                Expr::Tuple(elems) => {
+                    let n = elems.len();
+                    work.push(W::Args(n, Box::new(Expr::Tuple)));
+                    for e in elems.into_iter().rev() {
+                        work.push(W::Proc(e));
+                    }
+                }
+                Expr::ListIndex(l, i) => {
+                    work.push(W::Args(2, Box::new(|v| Expr::ListIndex(Box::new(v[0].clone()), Box::new(v[1].clone())))));
+                    work.push(W::Proc(*i));
+                    work.push(W::Proc(*l));
+                }
+                Expr::Projection { source, target: ref t } => {
+                    let t2 = t.clone();
+                    work.push(W::Args(1, Box::new(move |v| Expr::Projection { source: Box::new(v[0].clone()), target: t2.clone() })));
+                    work.push(W::Proc(*source));
+                }
+                Expr::FieldAccess(obj, f) => {
+                    let f2 = f;
+                    work.push(W::Args(1, Box::new(move |v| Expr::FieldAccess(Box::new(v[0].clone()), f2.clone()))));
+                    work.push(W::Proc(*obj));
+                }
+                Expr::Block(stmts, last) => {
+                    let s = substitute_var(&stmts, &owned_old, &owned_new);
+                    work.push(W::Args(1, Box::new(move |v| Expr::Block(s.clone(), Box::new(v[0].clone())))));
+                    work.push(W::Proc(*last));
+                }
+                Expr::TupleDestructure(bindings, body) => {
+                    let b = bindings;
+                    work.push(W::Args(1, Box::new(move |v| Expr::TupleDestructure(b.clone(), Box::new(v[0].clone())))));
+                    work.push(W::Proc(*body));
+                }
+                Expr::Match { value, arms } => {
+                    let arms2 = arms.clone();
+                    let num_children = 1 + arms.iter().map(|a| 1 + a.guard.is_some() as usize).sum::<usize>();
+                    work.push(W::Args(num_children, Box::new(move |v| {
+                        let mut idx = 1;
+                        Expr::Match {
+                            value: Box::new(v[0].clone()),
+                            arms: arms2.iter().map(|arm| {
+                                let guard_result = if arm.guard.is_some() {
+                                    let r = v[idx].clone(); idx += 1; Some(Box::new(r))
+                                } else { None };
+                                let body = v[idx].clone(); idx += 1;
+                                crate::ast::MatchArm {
+                                    pattern: arm.pattern.clone(),
+                                    guard: guard_result,
+                                    body: Box::new(body),
+                                }
+                            }).collect(),
+                        }
+                    })));
+                    work.push(W::Proc(*value));
+                    for arm in arms.into_iter().rev() {
+                        work.push(W::Proc(*arm.body));
+                        if let Some(g) = arm.guard {
+                            work.push(W::Proc(*g));
+                        }
+                    }
+                }
+                Expr::PatternMatch { value, variant, fields } => {
+                    let v = variant;
+                    let f = fields;
+                    work.push(W::Args(1, Box::new(move |v2| Expr::PatternMatch {
+                        value: Box::new(v2[0].clone()), variant: v.clone(), fields: f.clone(),
+                    })));
+                    work.push(W::Proc(*value));
+                }
+                Expr::StructInstance(name, fields) => {
+                    let n = name;
+                    let names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                    let count = fields.len();
+                    work.push(W::Args(count, Box::new(move |v| {
+                        Expr::StructInstance(n.clone(), names.iter().cloned().zip(v.into_iter()).collect())
+                    })));
+                    for (_, e) in fields.into_iter().rev() {
+                        work.push(W::Proc(e));
+                    }
+                }
+                Expr::ObjectLiteral(fields) => {
+                    let names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+                    let count = fields.len();
+                    work.push(W::Args(count, Box::new(move |v| {
+                        Expr::ObjectLiteral(names.iter().cloned().zip(v.into_iter()).collect())
+                    })));
+                    for (_, e) in fields.into_iter().rev() {
+                        work.push(W::Proc(e));
+                    }
+                }
+                Expr::Slice { value, start, end, stride, mask } => {
+                    let has_start = start.is_some();
+                    let has_end = end.is_some();
+                    let has_stride = stride.is_some();
+                    let has_mask = mask.is_some();
+                    let child_count = 1
+                        + has_start as usize + has_end as usize
+                        + has_stride as usize + has_mask as usize;
+                    work.push(W::Args(child_count, Box::new(move |v| {
+                        let mut idx = 0;
+                        let sv = v[idx].clone(); idx += 1;
+                        let st = if has_start { let r = v[idx].clone(); idx += 1; Some(Box::new(r)) } else { None };
+                        let en = if has_end { let r = v[idx].clone(); idx += 1; Some(Box::new(r)) } else { None };
+                        let strd = if has_stride { let r = v[idx].clone(); idx += 1; Some(Box::new(r)) } else { None };
+                        let msk = if has_mask { let r = v[idx].clone(); idx += 1; Some(Box::new(r)) } else { None };
+                        Expr::Slice { value: Box::new(sv), start: st, end: en, stride: strd, mask: msk }
+                    })));
+                    work.push(W::Proc(*value));
+                    if let Some(s) = start { work.push(W::Proc(*s)); }
+                    if let Some(e) = end { work.push(W::Proc(*e)); }
+                    if let Some(s) = stride { work.push(W::Proc(*s)); }
+                    if let Some(m) = mask { work.push(W::Proc(*m)); }
+                }
+                Expr::MultiSlice { value, ops } => {
+                    let child_count = 1 + ops.iter().filter(|op| matches!(op, BracketOp::Mask(_) | BracketOp::Stride(_))).count();
+                    let ops_clone = ops.clone();
+                    work.push(W::Args(child_count, Box::new(move |v| {
+                        let mut idx = 1;
+                        Expr::MultiSlice {
+                            value: Box::new(v[0].clone()),
+                            ops: ops_clone.iter().map(|op| match op {
+                                BracketOp::Coord(c) => BracketOp::Coord(c.clone()),
+                                BracketOp::Mask(_) => { let r = v[idx].clone(); idx += 1; BracketOp::Mask(Box::new(r)) }
+                                BracketOp::Stride(_) => { let r = v[idx].clone(); idx += 1; BracketOp::Stride(Box::new(r)) }
+                            }).collect(),
+                        }
+                    })));
+                    work.push(W::Proc(*value));
+                    for op in ops.into_iter().rev() {
+                        match op {
+                            BracketOp::Coord(_) => {}
+                            BracketOp::Mask(m) => work.push(W::Proc(*m)),
+                            BracketOp::Stride(s) => work.push(W::Proc(*s)),
+                        }
+                    }
+                }
+                other => { results.push(other); }
+            },
+            W::B0(e) => { results.push(e); }
+            W::B1(f) => {
+                let a = results.pop().expect("B1: no result");
+                results.push(f(a));
+            }
+            W::B2(f) => {
+                let b = results.pop().expect("B2: no right result");
+                let a = results.pop().expect("B2: no left result");
+                results.push(f(a, b));
+            }
+            W::Args(n, f) => {
+                let len = results.len();
+                let args: Vec<Expr> = results.drain(len - n..).collect();
+                results.push(f(args));
+            }
+        }
+    }
+
+    results.pop().expect("substitute_expr: no result")
 }
 
 #[cfg(test)]
