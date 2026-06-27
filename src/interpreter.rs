@@ -4994,6 +4994,17 @@ impl Interpreter {
                             .unwrap_or(0);
                         Ok(Value::Int(val))
                     }
+                    Intrinsic::SetStdoutBuf => {
+                        let mode = match values.remove(0) {
+                            Value::Int(v) => v,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("set_stdout_buf requires Int, got {:?}", v))),
+                        };
+                        // mode: 0=_IOFBF, 1=_IOLBF, 2=_IONBF
+                        // Rust's stdio doesn't expose setvbuf — inform user
+                        eprintln!("note: set_stdout_buf#({}) is a no-op in interpreter mode", mode);
+                        Ok(Value::Bool(true))
+                    }
                     Intrinsic::Compile => {
                         let code = match values.remove(0) {
                             Value::String(v) => v,

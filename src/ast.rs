@@ -669,6 +669,8 @@ pub enum Intrinsic {
     PutChar,
     PrintFloat,
     GetEnvInt,
+    /// set_stdout_buf#(mode: Int) -> Bool — control stdout buffering
+    SetStdoutBuf,
 
     // ===== Math intrinsics (2026-06-18) — trigonometric =====
     /// sin#(Float) -> Float — trigonometric sine
@@ -984,6 +986,7 @@ impl Intrinsic {
             "putchar" => Some(Intrinsic::PutChar),
             "print_float" => Some(Intrinsic::PrintFloat),
             "getenv_int" => Some(Intrinsic::GetEnvInt),
+            "set_stdout_buf" => Some(Intrinsic::SetStdoutBuf),
             // D12: Random / Entropy
             "errno" => Some(Intrinsic::Errno),
             "getrandom" => Some(Intrinsic::GetRandom),
@@ -1181,6 +1184,7 @@ impl Intrinsic {
             Intrinsic::PutChar => "putchar",
             Intrinsic::PrintFloat => "print_float",
             Intrinsic::GetEnvInt => "getenv_int",
+            Intrinsic::SetStdoutBuf => "set_stdout_buf",
             // D12: Random / Entropy
             Intrinsic::Errno => "errno",
             Intrinsic::GetRandom => "getrandom",

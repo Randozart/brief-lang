@@ -2188,6 +2188,15 @@ impl LlvmBackend {
                         writeln!(out, "{}{} = phi i64 [ 0, %{} ], [ {}, %{} ]",
                             indent, v, nul_l, av, ok_l).ok();
                     }
+                    Intrinsic::SetStdoutBuf => {
+                        let mode = self.emit_expr(out, &args[0], indent);
+                        let mt = format!("%gbm{}", self.txn_counter); self.txn_counter += 1;
+                        let so = format!("%gbso{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mode).ok();
+                        writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                        writeln!(out, "{}{} = call i32 @setvbuf(ptr {}, ptr null, i32 {}, i64 0)",
+                            indent, v, so, mt).ok();
+                    }
                     Intrinsic::Compile => {
                         // compile#() is compile-time only — should never reach LLVM backend
                         panic!("compile#() called at runtime — this is a compiler bug");

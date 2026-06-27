@@ -669,6 +669,18 @@ emits inline calls to libc functions (`fprintf`, `fputc`, `getenv`, `atol`).
 | `putchar#` | `(c: Char) -> Bool` | `fputc(c, stdout)` + `fflush(stdout)` |
 | `print_float#` | `(d: Float) -> Bool` | `fprintf(stdout, "%.9f\n", d)` + `fflush(stdout)` |
 | `getenv_int#` | `(name: String) -> Int` | `getenv(name)` → `atol(result)` or 0 if null |
+| `set_stdout_buf#` | `(mode: Int) -> Bool` | `setvbuf(stdout, NULL, trunc(mode), 0)` |
+
+`set_stdout_buf#` gives the user explicit control over stdout's buffering mode.
+Chosen as a dedicated intrinsic over modifying `putchar#` (per-character mode arg
+is architecturally wrong — buffering is a stream property, not per-call). The
+mode argument matches glibc constants:
+- `0` = `_IOFBF` (fully-buffered, fastest — also the default for non-TTY)
+- `1` = `_IOLBF` (line-buffered, flushes on `\n`)
+- `2` = `_IONBF` (unbuffered, every write is a syscall)
+
+If not called, stdout uses glibc's default auto-detection (fully-buffered for
+pipes/files, line-buffered for TTYs).
 
 **Format string pool** (shared globals at module level):
 ```llvm

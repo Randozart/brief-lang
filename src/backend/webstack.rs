@@ -911,6 +911,10 @@ impl WebstackGenerator {
                     Intrinsic::GetEnvInt => {
                         format!("Number(process.env[{}] || \"0\")", joined)
                     }
+                    Intrinsic::SetStdoutBuf => {
+                        let msg = format!("set_stdout_buf#({}) is a no-op in WASM", joined);
+                        format!("(() => {{ console.warn(\"{}\"); return 1; }})()", msg)
+                    }
                     Intrinsic::GetEnv => {
                         format!("(process.env[{}] || \"\")", joined)
                     }
@@ -1312,6 +1316,7 @@ impl WebstackGenerator {
                     }
                     Intrinsic::PutChar => format!("put_char({})", joined),
                     Intrinsic::GetEnvInt => format!("get_env_int({})", joined),
+                    Intrinsic::SetStdoutBuf => format!("set_stdout_buf({})", joined),
                     Intrinsic::Strlen => format!("strlen({})", joined),
                     Intrinsic::ReadFile => format!("read_file({})", joined),
                     Intrinsic::Abs => format!("({}).abs()", joined),

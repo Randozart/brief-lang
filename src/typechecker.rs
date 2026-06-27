@@ -2132,7 +2132,7 @@ impl TypeChecker {
                     Intrinsic::GetPid | Intrinsic::GetPPid | Intrinsic::ClockGetTime
                     | Intrinsic::NanoSleep => Type::Int,
                     // Benchmark intrinsics (2026-06-16)
-                    Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat => Type::Bool,
+                    Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat | Intrinsic::SetStdoutBuf => Type::Bool,
                     Intrinsic::GetEnvInt => Type::Int,
                     // Math intrinsics
                     Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow => Type::Float,
