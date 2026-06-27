@@ -248,3 +248,40 @@ The `prev_key` tracking in the Console cell's transactions handles the dirty-fla
 | `$!macro` can't generate top-level items | Macro approach fails | Fall back to documented 5-line pattern |
 | `rct txn` inside `quote` doesn't parse as statement | Handler can't be macro-generated | Split: macro generates trg only, user writes handler |
 | Duplicate-input loss despite line_id counter | Incorrect behavior | Ensure output comparison uses the latest cell output, not cached |
+
+---
+
+## Remaining Gaps (post-commit)
+
+### Gap 1: `trg @ CellName!` shorthand parser support
+
+**Root cause**: `parse_trigger_body` (4092) handles `@` by matching `LinkRef` variants (`stdin#`, `timer#`, `link`, integer address). `Console!` parses as `Identifier("Console")` + `Token::Not(!)`, falling through to `LinkRef::Linked("Console")` then erroring on the unparsed `!`.
+
+**Fix**: Add a `trg @ CellName!` shorthand branch. After `@`, if token is an identifier followed by `!`, consume both, look up the cell def, verify single output port, create binding.
+
+**File**: `src/parser.rs` — `parse_trigger_body` `@` handler (~line 4119)
+**Est**: ~20 lines
+
+### Gap 2: `cell Console` return type inference
+
+**Root cause**: Typechecker `infer_expression` for `Expr::CellCall` (line 2279) returns the cell's `OutputType`. For multi-output cells like `Console -> line: String, line_id: Int`, the type isn't structurally resolvable as a let-binding type.
+
+**Fix**: Ensure `check_cell_definition` registers the structural tuple type, and `infer_expression` returns `Type::Tuple(...)` for multi-output cells.
+
+**File**: `src/typechecker.rs` — `Expr::CellCall` inference (~line 2279)
+**Est**: ~15 lines
+
+### Gap 3: LLVM backend internal trigger codegen
+
+**Root cause**: `emit_persistent_cell_ticks` (emit_toplevel.rs:1592), `emit_cell_thread` (1710), and `CellCall` codegen (emit_expr.rs:4156) don't emit IR for internal triggers before the transaction loop.
+
+**Fix**: Add IR emission for `LinkRef::Stdin` at the start of each cell's convergence pass: call `@tty_read_key`, type-convert i64→i8 for Char, store to the cell's prefixed GEP slot.
+
+**Files**: `src/backend/llvm/emit_toplevel.rs`, `src/backend/llvm/emit_expr.rs`
+**Est**: ~40 lines
+
+### Priority
+
+1. **Gap 1** (parser shorthand) — unlocks `trg inp @ Console!` syntax and `$!console_input` macro
+2. **Gap 3** (LLVM codegen) — makes Console cell work in compiled binaries
+3. **Gap 2** (type inference) — affects variable typing, lowest priority
