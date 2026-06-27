@@ -909,17 +909,6 @@ impl<'a> Parser<'a> {
 
         while self.current_token().is_some() {
             let item = self.parse_top_level()?;
-            let is_stmt = matches!(&item, TopLevel::Statement(_));
-            if self.seen_top_level_stmt && !is_stmt {
-                let span = self.current_span().unwrap_or(crate::errors::Span { start: 0, end: 0, line: 0, column: 0 });
-                return Err(SyntaxError::InvalidStatement {
-                    reason: "Declarations must precede top-level executable statements".to_string(),
-                    span,
-                });
-            }
-            if is_stmt {
-                self.seen_top_level_stmt = true;
-            }
             items.push(item);
         }
         Ok(Program {

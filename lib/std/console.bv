@@ -1,0 +1,44 @@
+// Console — terminal input cell.
+// Provides line-buffered console input with duplicate-safe line detection.
+// Outputs `line: String` (the emitted line) and `line_id: Int` (monotonic
+// sequence counter guaranteeing output change on every Enter).
+//
+// Usage (interpreter):
+//
+//   import "std/console.bv";
+//   let test_input: Char = '\n';   // simulated keypress
+//   let con = cell Console(test_input);
+//
+// Usage (LLVM backend — pending parser support for @instance.port bindings):
+//
+//   import "std/console.bv";
+//   trg inp: String @ Console!;
+//   rct txn handle [inp != ""]] { process(inp); &inp = ""; term; };
+
+cell! Console -> line: String, line_id: Int {
+    buffer: String = "";
+    prev_key: Char = '\0';
+    seq: Int = 0;
+
+    trg raw: Char @ stdin#;
+
+    rct txn process [raw != prev_key]] {
+        [raw == '\n'] {
+            &line = buffer;
+            &seq = seq + 1;
+            &line_id = seq;
+            &buffer = "";
+        };
+
+        [raw == '\x7f' && buffer :> Size > 0] {
+            &buffer = Slice(buffer, 0, buffer :> Size - 1);
+        };
+
+        [raw >= ' ' && raw != '\x7f'] {
+            &buffer = buffer + (String)raw;
+        };
+
+        &prev_key = raw;
+        term;
+    };
+};

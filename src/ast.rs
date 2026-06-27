@@ -2295,6 +2295,14 @@ pub enum TopLevel {
     /// User-defined intrinsic operation via `inop#` / `inop!#` declaration.
     Inop(InopDeclaration),
     ResourceDecl(ResourceDeclaration), // NEW: rsrc/resource
+    /// `trg name @ instance.port;` — bind a trigger to a component's output port at top level.
+    TriggerBinding {
+        name: String,
+        ty: Option<Type>,
+        instance: Expr,
+        port: String,
+        modifiers: Vec<Hashtag>,
+    },
     /// `cell` / `cell!` — cybernetic cell with isolated state space.
     Cell(Box<CellDef>),
     Struct(StructDefinition),
