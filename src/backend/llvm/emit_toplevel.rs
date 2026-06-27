@@ -1616,6 +1616,44 @@ impl LlvmBackend {
 
         for name in &names {
             let cell = self.cell_defs.get(name).unwrap().clone();
+
+            // Evaluate internal triggers before running transactions
+            for trg in &cell.internal_triggers {
+                let trg_key = format!("cell${}${}", name, trg.name);
+                let trg_idx_opt = self.field_index_map.get(&trg_key).copied();
+                if let Some(trg_idx) = trg_idx_opt {
+                    let trg_ll_ty = self.field_types[trg_idx].clone();
+                    match &trg.address {
+                        crate::ast::LinkRef::Stdin => {
+                            let read_expr = crate::ast::Expr::IntrinsicCall {
+                                intrinsic: crate::ast::Intrinsic::TtyReadKey,
+                                args: vec![],
+                            };
+                            let result = self.emit_expr(out, &read_expr, "  ");
+                            let conv = format!("%cit_{}_{}", self.txn_counter, trg.name);
+                            self.txn_counter += 1;
+                            if trg.ty == crate::ast::Type::Char {
+                                writeln!(out, "  {} = trunc i64 {} to i8", conv, result.name).ok();
+                            } else {
+                                writeln!(out, "  {} = trunc i64 {} to i32", conv, result.name).ok();
+                            }
+                            let gep = format!("%cit_gep_{}_{}", self.txn_counter, trg.name);
+                            self.txn_counter += 1;
+                            writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
+                                gep, trg_idx).ok();
+                            writeln!(out, "  store {} {}, ptr {}, align 1", trg_ll_ty, conv, gep).ok();
+                        }
+                        _ => {
+                            let gep = format!("%cit_gep_{}_{}", self.txn_counter, trg.name);
+                            self.txn_counter += 1;
+                            writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
+                                gep, trg_idx).ok();
+                            writeln!(out, "  store {} 0, ptr {}, align 1", trg_ll_ty, gep).ok();
+                        }
+                    }
+                }
+            }
+
             for txn in &cell.transactions {
                 let pre = Self::rewrite_cell_identifiers(
                     &txn.contract.pre_condition, name);
@@ -1673,6 +1711,29 @@ impl LlvmBackend {
                         }
                 }
             }
+            // Sync cell output ports to parent trigger bindings
+            for (trg_name, cell_name, port_name) in &self.cell_trigger_bindings.clone() {
+                if cell_name != name { continue; }
+                let src_key = format!("cell${}${}", cell_name, port_name);
+                let dst_key = trg_name.clone();
+                if let Some(&src_idx) = self.field_index_map.get(&src_key) {
+                    if let Some(&dst_idx) = self.field_index_map.get(&dst_key) {
+                        let src_ll_ty = &self.field_types[src_idx];
+                        let dst_ll_ty = &self.field_types[dst_idx];
+                        let src_gep = format!("%cos_src_{}_{}", self.txn_counter, cell_name);
+                        let dst_gep = format!("%cos_dst_{}_{}", self.txn_counter, cell_name);
+                        let src_val = format!("%cos_val_{}_{}", self.txn_counter, cell_name);
+                        self.txn_counter += 1;
+                        writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
+                            src_gep, src_idx).ok();
+                        writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
+                            dst_gep, dst_idx).ok();
+                        writeln!(out, "  {} = load {}, ptr {}, align 8", src_val, src_ll_ty, src_gep).ok();
+                        writeln!(out, "  store {} {}, ptr {}, align 8", dst_ll_ty, src_val, dst_gep).ok();
+                    }
+                }
+            }
+
             // Phase 4 (threaded): propagate wires from THREADED source cells.
             // Threaded cells store outputs to atomic channel globals. We read
             // those globals here and store the value into the target cell's
@@ -1799,7 +1860,8 @@ impl LlvmBackend {
                 let prefixed = format!("cell${}${}", cell_name, port_name);
                 if let Some(&idx) = cs_imap.get(&prefixed) {
                     let ll_ty = &cs_tys[idx];
-                    writeln!(out, "@chan_val_{}_{} = global {} 0, align 8", cell_name, port_name, ll_ty).ok();
+                    let init = if ll_ty.contains('*') { "null" } else { "0" };
+                    writeln!(out, "@chan_val_{}_{} = global {} {}, align 8", cell_name, port_name, ll_ty, init).ok();
                 }
             }
         } else {
@@ -1808,7 +1870,8 @@ impl LlvmBackend {
                 let prefixed = format!("cell${}${}", cell_name, port_name);
                 if let Some(&idx) = self.field_index_map.get(&prefixed) {
                     let ll_ty = &self.field_types[idx];
-                    writeln!(out, "@chan_val_{}_{} = global {} 0, align 8", cell_name, port_name, ll_ty).ok();
+                    let init = if ll_ty.contains('*') { "null" } else { "0" };
+                    writeln!(out, "@chan_val_{}_{} = global {} {}, align 8", cell_name, port_name, ll_ty, init).ok();
                 }
             }
         }

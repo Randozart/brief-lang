@@ -20,7 +20,7 @@
 // with `!` is required — it matches the `cell!` persistent declaration.
 
 cell! Console -> line: String, line_id: Int {
-    buffer: String = "";
+    line: String = "";
     prev_key: Char = '\0';
     seq: Int = 0;
 
@@ -28,18 +28,12 @@ cell! Console -> line: String, line_id: Int {
 
     rct txn process [raw != prev_key]] {
         [raw == '\n'] {
-            &line = buffer;
             &seq = seq + 1;
             &line_id = seq;
-            &buffer = "";
-        };
-
-        [raw == '\x7f' && buffer :> Size > 0] {
-            &buffer = Slice(buffer, 0, buffer :> Size - 1);
         };
 
         [raw >= ' ' && raw != '\x7f'] {
-            &buffer = buffer + (String)raw;
+            &line = to_str#(raw);
         };
 
         &prev_key = raw;

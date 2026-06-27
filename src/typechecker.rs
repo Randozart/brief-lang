@@ -921,15 +921,32 @@ impl TypeChecker {
             self.check_output_type_names(ot, &mut seen_names);
         }
 
-        // 2. Validate each transaction and definition within the cell
+        // 2. Register cell fields, parameters, and internal triggers in scope
+        self.push_scope();
+        for field in &cell.fields {
+            self.scopes.last_mut().unwrap().insert(field.name.clone(), field.ty.clone());
+        }
+        for (param_name, param_ty) in &cell.parameters {
+            self.scopes.last_mut().unwrap().insert(param_name.clone(), param_ty.clone());
+        }
+        for trg in &cell.internal_triggers {
+            self.scopes.last_mut().unwrap().insert(trg.name.clone(), trg.ty.clone());
+        }
+        // Register output port names as local variables
+        if let Some(ref ot) = cell.output_type {
+            self.register_cell_output_ports(ot);
+        }
+
+        // 3. Validate each transaction and definition within the cell
         for txn in &cell.transactions {
             self.check_transaction(txn);
         }
         for defn in &cell.definitions {
             self.check_definition(defn);
         }
+        self.pop_scope();
 
-        // 3. Check that cell! (persistent) has at least one transaction
+        // 4. Check that cell! (persistent) has at least one transaction
         if cell.is_persistent && cell.transactions.is_empty() {
             self.diagnostics.borrow_mut().push(
                 Diagnostic::new("C001", Severity::Error, "persistent cell must have at least one transaction")
@@ -940,10 +957,11 @@ impl TypeChecker {
             );
         }
 
-        // 4. Cell isolation: verify transactions don't reference external state
+        // 5. Cell isolation: verify transactions don't reference external state
         let local_names: std::collections::HashSet<&str> = std::collections::HashSet::from_iter(
             cell.fields.iter().map(|f| f.name.as_str())
                 .chain(cell.parameters.iter().map(|(n, _)| n.as_str()))
+                .chain(cell.internal_triggers.iter().map(|t| t.name.as_str()))
                 .chain(["true", "false", "null"].iter().cloned())
         );
         for txn in &cell.transactions {
@@ -954,6 +972,27 @@ impl TypeChecker {
     fn check_cell_expression_isolation(&self, txn: &Transaction, local_names: &std::collections::HashSet<&str>, cell_name: &str) {
         for stmt in &txn.body {
             self.check_cell_stmt_isolation(stmt, local_names, cell_name);
+        }
+    }
+
+    /// Recursively register output port names from an OutputType into the current scope.
+    fn register_cell_output_ports(&mut self, ot: &OutputType) {
+        match ot {
+            OutputType::Named(name, inner) => {
+                if let OutputType::Single(ty) = inner.as_ref() {
+                    self.scopes.last_mut().unwrap().insert(name.clone(), ty.clone());
+                } else {
+                    self.register_cell_output_ports(inner);
+                }
+            }
+            OutputType::Tuple(types) | OutputType::Union(types) => {
+                for t in types {
+                    self.register_cell_output_ports(t);
+                }
+            }
+            OutputType::Array(_) | OutputType::Single(_) => {
+                // Single/Array without name — skip (unnamed ports use field names)
+            }
         }
     }
 
@@ -2706,7 +2745,16 @@ Expr::ObjectLiteral(fields) => {
                     _ => {
                         let l_ty = self.infer_expression(&bop.left);
                         let r_ty = self.infer_expression(&bop.right);
-                        if l_ty == Type::Float || r_ty == Type::Float {
+                        // String concatenation: handle + on two strings
+                        if bop.kind == BinaryOpKind::Add
+                            && (l_ty == Type::String || r_ty == Type::String)
+                        {
+                            if l_ty == Type::String && r_ty == Type::String {
+                                Type::String
+                            } else {
+                                Type::String // allow String + other (resolved at runtime)
+                            }
+                        } else if l_ty == Type::Float || r_ty == Type::Float {
                             Type::Float
                         } else {
                             let is_l_ptr = matches!(&l_ty, Type::Applied(n, _) if n == "Ptr");

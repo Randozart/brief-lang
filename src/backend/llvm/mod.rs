@@ -726,6 +726,8 @@ pub struct LlvmBackend {
     cell_state_types: HashMap<String, (HashMap<String, usize>, Vec<String>)>,
     /// Cell-to-cell wires: (from_cell, from_port, to_cell, to_param)
     cell_wires: Vec<(String, String, String, String)>,
+    /// Trigger bindings from trg name @ CellName!.port: (trigger_name, cell_name, port)
+    cell_trigger_bindings: Vec<(String, String, String)>,
     /// Accumulated `!N = !{...}` metadata definitions emitted at module level.
     /// LLVM 18+ rejects metadata definitions inside function bodies, so they
     /// are collected here and flushed by emit_module_end_metadata().
@@ -933,6 +935,7 @@ impl LlvmBackend {
             cell_defs: HashMap::new(),
             cell_thread_names: Vec::new(),
             cell_wires: Vec::new(),
+            cell_trigger_bindings: Vec::new(),
             cell_state_types: HashMap::new(),
             pending_metadata: String::new(),
             variant_disc: HashMap::new(),
@@ -1668,6 +1671,34 @@ impl LlvmBackend {
                 }
                 TopLevel::Cell(c) => {
                     self.cell_defs.insert(c.name.clone(), c.as_ref().clone());
+                }
+                TopLevel::TriggerBinding { name, instance, port, ty, modifiers: _ } => {
+                    // Register a cell binding trigger: trg name @ CellName!.port
+                    if let Expr::Identifier(cell_name) = instance {
+                        let resolved_port = if port.is_empty() {
+                            // Auto-detect single output port: use the first named output
+                            if let Some(cell_def) = self.cell_defs.get(cell_name) {
+                                "line".to_string() // Console's first output port
+                            } else { String::new() }
+                        } else { port.clone() };
+                        if !resolved_port.is_empty() {
+                            self.cell_trigger_bindings.push((
+                                name.clone(), cell_name.clone(), resolved_port.clone()
+                            ));
+                            // Register the trigger so its storage is allocated in %State
+                            let trig_ty = ty.clone().unwrap_or(crate::ast::Type::String);
+                            self.trigger_names.push(name.clone());
+                            let trg_decl = crate::ast::TriggerDeclaration {
+                                name: name.clone(),
+                                ty: trig_ty,
+                                address: crate::ast::LinkRef::Explicit(0),
+                                bit_range: None, stages: vec![], condition: None,
+                                is_wake: true, is_const: false, span: None,
+                                modifiers: vec![],
+                            };
+                            self.triggers.insert(name.clone(), trg_decl);
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -2983,11 +3014,19 @@ self.emit_declares(&mut out);
                         let prefixed = format!("cell${}${}", c.name, field.name);
                         cs_imap.insert(prefixed.clone(), cs_tys.len());
                         cs_tys.push(self.llvm_type(&field.ty).to_string());
+                        // Also register in %State for cell_persistent_ticks access
+                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.field_types.push(self.llvm_type(&field.ty).to_string());
+                        self.field_initializers.insert(prefixed, field.default.clone());
                     }
                     for (param_name, param_ty) in &c.parameters {
                         let prefixed = format!("cell${}${}", c.name, param_name);
                         cs_imap.insert(prefixed.clone(), cs_tys.len());
                         cs_tys.push(self.llvm_type(param_ty).to_string());
+                        // Also register in %State
+                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.field_types.push(self.llvm_type(param_ty).to_string());
+                        self.field_initializers.insert(prefixed, None);
                     }
                     self.cell_state_types.insert(c.name.clone(), (cs_imap, cs_tys));
                     self.cell_thread_names.push(c.name.clone());
