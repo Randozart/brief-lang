@@ -33,7 +33,7 @@ cell! Console -> line: String, line_id: Int {
         };
 
         [raw >= ' ' && raw != '\x7f'] {
-            &line = to_str#(raw);
+            &line = line + (String)raw;
         };
 
         &prev_key = raw;

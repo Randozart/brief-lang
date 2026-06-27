@@ -47,6 +47,10 @@ impl DependencyGraph {
                     graph.all_vars.insert(trg.name.clone());
                     graph.is_trg.insert(trg.name.clone());
                 }
+                TopLevel::TriggerBinding { name, .. } => {
+                    graph.all_vars.insert(name.clone());
+                    graph.is_trg.insert(name.clone());
+                }
                 TopLevel::Transaction(txn) => {
                     // Transaction names are callable, not state variables
                     // But local variables inside bodies may reference state vars
@@ -549,6 +553,9 @@ fn statement_ids(stmt: &Statement, ids: &mut Vec<String>) {
         }
         Statement::Expression(expr) => {
             collect_expr_ids_inner(expr, ids);
+        }
+        Statement::TrgBinding { name, .. } => {
+            ids.push(name.clone());
         }
         _ => {}
     }

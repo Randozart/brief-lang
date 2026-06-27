@@ -1632,10 +1632,13 @@ impl LlvmBackend {
                             let result = self.emit_expr(out, &read_expr, "  ");
                             let conv = format!("%cit_{}_{}", self.txn_counter, trg.name);
                             self.txn_counter += 1;
-                            if trg.ty == crate::ast::Type::Char {
+                            // tty_read_key returns i64; trunc to match the state slot's type
+                            let ll_storage_ty = &trg_ll_ty;
+                            if ll_storage_ty == "i8" {
                                 writeln!(out, "  {} = trunc i64 {} to i8", conv, result.name).ok();
                             } else {
-                                writeln!(out, "  {} = trunc i64 {} to i32", conv, result.name).ok();
+                                // i32 for Char, i64 for Int, etc.
+                                writeln!(out, "  {} = trunc i64 {} to {}", conv, result.name, ll_storage_ty).ok();
                             }
                             let gep = format!("%cit_gep_{}_{}", self.txn_counter, trg.name);
                             self.txn_counter += 1;

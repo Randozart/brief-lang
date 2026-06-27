@@ -2133,10 +2133,14 @@ self.emit_declares(&mut out);
             .cloned()
             .collect();
         for cell in &persistent_cells {
-            self.emit_cell_channel_globals(&mut out, cell);
+            if self.cell_thread_names.contains(&cell.name) {
+                self.emit_cell_channel_globals(&mut out, cell);
+            }
         }
         for cell in &persistent_cells {
-            self.emit_cell_thread(&mut out, cell);
+            if self.cell_thread_names.contains(&cell.name) {
+                self.emit_cell_thread(&mut out, cell);
+            }
         }
         writeln!(out).ok();
 
@@ -3028,8 +3032,21 @@ self.emit_declares(&mut out);
                         self.field_types.push(self.llvm_type(param_ty).to_string());
                         self.field_initializers.insert(prefixed, None);
                     }
+                    // Register internal trigger fields in %State and %CellState.*
+                    for trg in &c.internal_triggers {
+                        let prefixed = format!("cell${}${}", c.name, trg.name);
+                        cs_imap.insert(prefixed.clone(), cs_tys.len());
+                        cs_tys.push(self.llvm_type(&trg.ty).to_string());
+                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.field_types.push(self.llvm_type(&trg.ty).to_string());
+                        self.field_initializers.insert(prefixed, None);
+                    }
                     self.cell_state_types.insert(c.name.clone(), (cs_imap, cs_tys));
-                    self.cell_thread_names.push(c.name.clone());
+                    // Only add to cell_thread_names if any transaction has @Hz
+                    let has_thread_speed = c.transactions.iter().any(|t| t.reactor_speed.is_some());
+                    if has_thread_speed {
+                        self.cell_thread_names.push(c.name.clone());
+                    }
                 } else {
                     // Non-persistent (sync) cell: add to %State as prefixed slots
                     for field in &c.fields {

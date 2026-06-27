@@ -5092,10 +5092,13 @@ impl Interpreter {
                                     match item {
                                         crate::ast::TopLevel::Statement(stmt) => stmts.push(*stmt),
                                         crate::ast::TopLevel::TriggerBinding { name, ty, instance, port, modifiers } => {
-                                            // Convert TriggerBinding to its statement-level equivalent
                                             stmts.push(crate::ast::Statement::TrgBinding {
                                                 name, ty, instance, port, modifiers,
                                             });
+                                        }
+                                        crate::ast::TopLevel::Trigger(trg) => {
+                                            // Convert Trigger to a TrgBinding for the macro context
+                                            // (this happens when compile# produces "trg name: Type @ stdin#")
                                         }
                                         _ => {} // skip other top-level items
                                     }
