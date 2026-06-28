@@ -639,10 +639,9 @@ pub struct LlvmBackend {
     pub(crate) txn_counter: usize,
     pub(crate) within_counter: usize,    // dedicated counter for Expr::Within (avoids SSA collisions)
     pub(crate) metadata_counter: usize,  // for !llvm.loop metadata nodes
-    /// 2026-06-28: Global register counter — NEVER reset. Used for %t{N} names
-    /// to guarantee uniqueness across all functions and inlining. Unlike
-    /// txn_counter which is reset per function, this avoids SSA collisions
-    /// after LLVM inlines functions into each other.
+    /// 2026-06-28: Global register counter — never reset. Kept for reference;
+    /// not currently used for %t{N} names (txn_counter is per-function for
+    /// SSA dominance correctness). See docs/plan for unify discussion.
     pub(crate) glob_counter: usize,
     pub(crate) dep_graph: crate::analysis::dependency_graph::DependencyGraph, // trg dependency graph
     pending_cleanup: Vec<Statement>,

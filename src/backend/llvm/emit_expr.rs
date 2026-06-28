@@ -27,17 +27,12 @@ impl LlvmBackend {
         // but first fix the exponential blowup (add depth cap or move to separate pass).
         // See patches/2026-06-13-remove-simplify-from-emit-expr.patch for exact removed code.
         let expr = expr.clone();
-        // 2026-06-28: Use glob_counter (NEVER reset) for register names to prevent
-        // SSA collisions when LLVM inlines functions or when txn_counter resets
-        // reuse the same %t{N} across different code paths within one function.
-        let v = format!("%t{}", self.glob_counter);
-        self.glob_counter += 1;
+        let v = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
         // 2026-06-28: fix empty-indent emit_expr — use default indent to prevent
         // %t{N} SSA violations. The empty indent comes from the definition body
         // emission path that doesn't pass indent through correctly.
         let indent = if indent.is_empty() { "  " } else { indent };
-        // 2026-06-28: Use glob_counter (NEVER reset) for register names to prevent
-        // SSA collisions when LLVM inlines functions across compilation units.
         match &expr {
             Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); return TypedRegister { name: v, ty: Type::Int }; }
             Expr::Bool(b) => { if *b { writeln!(out, "{}{} = and i1 true, true", indent, v).ok(); } else { writeln!(out, "{}{} = xor i1 true, true", indent, v).ok(); } return TypedRegister { name: v, ty: Type::Bool }; }

@@ -35,8 +35,8 @@ impl LlvmBackend {
     /// All values are emitted as `i64` for uniformity; comparisons are zext'd from `i1`.
     pub(crate) fn emit_exit_expr(&mut self, out: &mut String, expr: &Expr, indent: &str) -> String {
 
-        let v = format!("%t{}", self.glob_counter);
-        self.glob_counter += 1;
+        let v = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
         match expr {
             Expr::Integer(n) => { return self.emit_expr(out, expr, indent).name; }
             // Expr::Float is handled separately: emit the bit pattern as i64
@@ -127,7 +127,7 @@ impl LlvmBackend {
             Expr::Eq(l, r) => {
                 let lv = self.emit_exit_expr(out, l, indent);
                 let rv = self.emit_exit_expr(out, r, indent);
-                let cmp = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, lv, rv).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
                 v
@@ -135,7 +135,7 @@ impl LlvmBackend {
             Expr::Ne(l, r) => {
                 let lv = self.emit_exit_expr(out, l, indent);
                 let rv = self.emit_exit_expr(out, r, indent);
-                let cmp = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, cmp, lv, rv).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
                 v
@@ -143,7 +143,7 @@ impl LlvmBackend {
             Expr::Lt(l, r) => {
                 let lv = self.emit_exit_expr(out, l, indent);
                 let rv = self.emit_exit_expr(out, r, indent);
-                let cmp = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cmp, lv, rv).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
                 v
@@ -151,7 +151,7 @@ impl LlvmBackend {
             Expr::Le(l, r) => {
                 let lv = self.emit_exit_expr(out, l, indent);
                 let rv = self.emit_exit_expr(out, r, indent);
-                let cmp = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, cmp, lv, rv).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
                 v
@@ -159,7 +159,7 @@ impl LlvmBackend {
             Expr::Gt(l, r) => {
                 let lv = self.emit_exit_expr(out, l, indent);
                 let rv = self.emit_exit_expr(out, r, indent);
-                let cmp = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, cmp, lv, rv).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
                 v
@@ -167,7 +167,7 @@ impl LlvmBackend {
             Expr::Ge(l, r) => {
                 let lv = self.emit_exit_expr(out, l, indent);
                 let rv = self.emit_exit_expr(out, r, indent);
-                let cmp = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, cmp, lv, rv).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
                 v
@@ -193,7 +193,7 @@ impl LlvmBackend {
                 let lv = self.emit_exit_expr(out, &bop.left, indent);
                 let rv = self.emit_exit_expr(out, &bop.right, indent);
                 use crate::features::binary_op::BinaryOpKind;
-                let cmp = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let cmp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 match bop.kind {
                     BinaryOpKind::Eq => writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, lv, rv),
                     BinaryOpKind::Ne => writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, cmp, lv, rv),
@@ -272,7 +272,7 @@ impl LlvmBackend {
         if has_exit {
             let cond = self.exit_condition.clone().unwrap();
             let val = self.emit_exit_expr(out, &cond, "  ");
-            let tr = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+            let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
             if has_wake_triggers {
                 let md_idx = super::emit_loop_metadata_nodes(&mut self.metadata_counter, &mut self.pending_metadata);
@@ -1285,7 +1285,7 @@ impl LlvmBackend {
             writeln!(out, "  ret i32 0").ok();
         } else if let Some(ref cond) = self.exit_condition.clone() {
             let val = self.emit_exit_expr(out, cond, "  ");
-            let tr = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+            let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
             if has_wake_triggers {
                 let md_idx = super::emit_loop_metadata_nodes(&mut self.metadata_counter, &mut self.pending_metadata);
@@ -1667,7 +1667,7 @@ impl LlvmBackend {
                 let cond = self.exit_condition.clone().unwrap();
                 writeln!(out, "exit_check:").ok();
                 let val = self.emit_exit_expr(out, &cond, "  ");
-                let tr = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let tr = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "  {} = trunc i64 {} to i1", tr, val).ok();
                 if self.has_async_txns && !self.is_lightweight_async {
                     writeln!(out, "  br i1 {}, label %done, label %async_phase", tr).ok();

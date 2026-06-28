@@ -1,10 +1,10 @@
-# 2026-06-28: Set 8MB stack for debug builds to prevent stack overflow on
-# large projects (e.g., officina-cli with 14 modules + complex expression ASTs).
-# Debug builds have ~4x larger stack frames than release builds, and the default
-# 2MB stack is insufficient. 8MB matches the Linux default `ulimit -s`.
+# 2026-06-28: Set 32MB stack for debug builds to prevent stack overflow on
+# large projects (e.g., officina-cli with 14 modules). Debug builds have ~4x
+# larger stack frames than release builds, and the default 2MB is insufficient
+# for the cumulative depth of the compilation pipeline. 32MB gives headroom
+# for any project without changing the compiler's architecture.
 #
-# Note: this only works if passed via --config or RUSTFLAGS env var because
-# .cargo/config is deprecated and .cargo/config.toml is not read by older cargo.
-# Use: RUSTFLAGS="-C link-args=-Wl,-z,stack-size=8388608" cargo build
+# Note: Cargo may not auto-read .cargo/config.toml. If it doesn't work,
+# use: RUSTFLAGS="-C link-args=-Wl,-z,stack-size=33554432" cargo build
 [target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "link-args=-Wl,-z,stack-size=8388608"]
+rustflags = ["-C", "link-args=-Wl,-z,stack-size=33554432"]

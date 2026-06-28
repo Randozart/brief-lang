@@ -35,10 +35,23 @@ impl LlvmBackend {
             // All Char registers from emit_expr are already i64 (boxed).
             // No zext needed — the register is already the right width.
             r.name.clone()
+        // 2026-06-28: String/Data registers can be either native i8* (from
+        // function params or arg slots) or boxed i64 (from emit_expr's %t{N}
+        // registers, ListIndex loads, or %State field loads). Check the
+        // register name prefix to decide: %t and %d prefixes are from
+        // emit_expr (always i64); other prefixes like %p_ are native i8*.
         } else if r.ty == Type::String || r.ty == Type::Data {
-            let p = format!("%rp{}", self.txn_counter); self.txn_counter += 1;
-            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
-            p
+            let is_boxed = r.name.starts_with("%t") || r.name.starts_with("%d");
+            if is_boxed {
+                // Already i64 (boxed) — just use as-is
+                // This happens with ListIndex loads like rules[i] where the
+                // element type is String but the actual register is i64.
+                r.name.clone()
+            } else {
+                let p = format!("%rp{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
+                p
+            }
         // 2026-06-20: Check reg_float_cache before bitcasting — guarantees correctness if
         // the register name is i64-boxed but Type::Float (e.g. intrinsic float returns,
         // callable txn param marshaling). The cache maps i64 register names to their native
@@ -794,8 +807,8 @@ impl LlvmBackend {
             }
             Statement::TrgBinding { name, instance, .. } => {
                 let val = self.emit_expr(out, instance, indent);
-                let reg = format!("%t{}", self.glob_counter);
-                self.glob_counter += 1;
+                let reg = format!("%t{}", self.txn_counter);
+                self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 0, {}", indent, reg, val.name).ok();
                 self.let_bindings.insert(name.clone(), reg);
                 if let Some(ty) = self.let_binding_types.get(&val.name).cloned() {
