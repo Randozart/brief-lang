@@ -1595,6 +1595,13 @@ impl LlvmBackend {
     /// one convergence pass on each registered persistent cell. Called from the
     /// main reactor loop after `@reactor_tick`.
     pub(super) fn emit_persistent_cell_ticks(&mut self, out: &mut String) {
+        // 2026-06-28: Clear let_bindings at function entry. Stale bindings from
+        // the convergence loop (loop_engine.rs) leak across function boundaries
+        // because let_bindings is a shared HashMap. This causes emit_expr to
+        // return registers that were defined in a different basic block, producing
+        // SSA dominance violations ("Instruction does not dominate all uses").
+        self.let_bindings.clear();
+        self.let_binding_types.clear();
         let names: Vec<String> = self.cell_defs.iter()
             .filter(|(_, c)| c.is_persistent)
             .map(|(name, _)| name.clone())

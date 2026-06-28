@@ -667,13 +667,21 @@ impl LlvmBackend {
                     writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, then_l, end_l).ok();
                 }
                 writeln!(out, "{}{}:", indent, then_l).ok();
-                // Save let bindings + types — values defined in the then-path
-                // use SSA registers local to %then_l and don't dominate %end_l.
+                // 2026-06-28: Save SSA old-int/old-float regs + let bindings.
+                // Values defined in the guard body (then_l) use SSA registers
+                // local to that block and don't dominate the merge block (end_l).
+                // Without saving/restoring, subsequent reads of state fields
+                // via ssa_old_int_regs would use registers from the guard body,
+                // producing "Instruction does not dominate all uses" errors.
                 let saved_bindings = self.let_bindings.clone();
                 let saved_types = self.let_binding_types.clone();
+                let saved_old_int = self.ssa_old_int_regs.clone();
+                let saved_old_float = self.ssa_old_float_regs.clone();
                 for s in statements { self.emit_stmt(out, s, &format!("{}  ", indent)); }
                 self.let_bindings = saved_bindings;
                 self.let_binding_types = saved_types;
+                self.ssa_old_int_regs = saved_old_int;
+                self.ssa_old_float_regs = saved_old_float;
                 if !self.terminated {
                     // Emit a sentinel then-exit block so the phi at end_l:
                     // (a) has a single predecessor from the then-path (not then_l
