@@ -5732,8 +5732,9 @@ impl LlvmBackend {
         let &(cache_idx, valid_idx) = self.cache_slots.get(&field_name)
             .and_then(|targets| targets.get(target_name))?;
 
-        let v = format!("%t{}", self.glob_counter);
-        self.glob_counter += 1;
+        // 2026-06-28: Use txn_counter to prevent %t{N} collision
+        let v = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
         let valid_gep = format!("%cvp{}", self.txn_counter);
         self.txn_counter += 1;
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
@@ -5942,8 +5943,9 @@ impl LlvmBackend {
                 }
             } else {
                 // No route for this field — emit 0 as placeholder
-                let v = format!("%t{}", self.glob_counter);
-                self.glob_counter += 1;
+                // 2026-06-28: Use txn_counter to prevent %t{N} collision
+                let v = format!("%t{}", self.txn_counter);
+                self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                 field_results.push((field_name.clone(), field_ty.clone(), v));
             }
@@ -5961,21 +5963,23 @@ impl LlvmBackend {
 
         // For multi-field types: allocate a struct on the heap
         let total_size = field_results.len() * 8; // each field is i64
-        let alloc = format!("%t{}", self.glob_counter);
-        self.glob_counter += 1;
+        // 2026-06-28: Use txn_counter to prevent %t{N} collision
+        let alloc = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
         writeln!(out, "{}{} = call i8* @malloc(i64 {})", indent, alloc, total_size).ok();
-        let struct_ptr = format!("%t{}", self.glob_counter);
-        self.glob_counter += 1;
+        let struct_ptr = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, struct_ptr, alloc).ok();
 
         for (i, (_name, _ty, reg)) in field_results.iter().enumerate() {
-            let gep = format!("%t{}", self.glob_counter);
-            self.glob_counter += 1;
+            // 2026-06-28: Use txn_counter to prevent %t{N} collision
+            let gep = format!("%t{}", self.txn_counter);
+            self.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, gep, struct_ptr, i).ok();
             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, reg, gep).ok();
         }
 
-        let struct_ptr_name = format!("%t{}", self.glob_counter - 1);
+        let struct_ptr_name = format!("%t{}", self.txn_counter - 1);
         TypedRegister { name: struct_ptr_name, ty: Type::Custom(target_name.clone()) }
     }
 
@@ -5984,8 +5988,9 @@ impl LlvmBackend {
     fn emit_direct_projection(&mut self, out: &mut String, src_val: &TypedRegister,
         target_name: &str, indent: &str) -> Option<TypedRegister>
     {
-        let v = format!("%t{}", self.glob_counter);
-        self.glob_counter += 1;
+        // 2026-06-28: Use txn_counter to prevent %t{N} collision
+        let v = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
         match target_name {
             "Ptr" => {
                 writeln!(out, "{}{} = add i64 0, {} ; ptr", indent, v, src_val.name).ok();

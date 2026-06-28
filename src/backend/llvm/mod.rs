@@ -643,12 +643,14 @@ pub struct LlvmBackend {
     /// not currently used for %t{N} names (txn_counter is per-function for
     /// SSA dominance correctness). See docs/plan for unify discussion.
     pub(crate) glob_counter: usize,
+    /// 2026-06-28: Monotonically increasing counter for emit_trg_event_epoll_wait
+    /// register names. Previously used txn_counter with a save/restore pattern
+    /// that rewound the counter, causing %t{N} collisions in @main().
+    /// This counter is NEVER reset, ensuring each call gets a unique ID.
     pub(crate) dep_graph: crate::analysis::dependency_graph::DependencyGraph, // trg dependency graph
     /// 2026-06-28: Set of all %t{N} register names emitted in the current function.
     /// Used by emit_expr to detect and skip counter collisions when txn_counter
     /// is restored to a previous value (e.g., by emit_trg_event_epoll_wait).
-    pub(crate) reg_counter_cache: std::collections::HashSet<String>,
-    pub(crate) last_txn_counter: Option<usize>,
     pending_cleanup: Vec<Statement>,
     pub(crate) let_bindings: HashMap<String, String>,
     pub(crate) let_binding_types: HashMap<String, Type>,
@@ -888,8 +890,6 @@ impl LlvmBackend {
             },  // start above likely conflict range
             has_cycles: false,
             pending_cleanup: Vec::new(),
-            reg_counter_cache: std::collections::HashSet::new(),
-            last_txn_counter: None,
             let_bindings: HashMap::new(),
             let_binding_types: HashMap::new(),
             let_original_types: HashMap::new(),
@@ -2522,7 +2522,6 @@ self.emit_declares(&mut out);
                 );
                 self.txn_counter = 0;
                 self.within_counter = 0;
-                self.reg_counter_cache.clear();
                 self.emit_ssa_main(&mut out, &txns, has_wake_triggers);
             } else if !txns.is_empty() {
                 // reactor loop fallback — only reached for async dispatch or MMIO
@@ -2546,7 +2545,6 @@ self.emit_declares(&mut out);
                 }
                 self.txn_counter = 0;
                 self.within_counter = 0;
-                self.reg_counter_cache.clear();
                 self.emit_main(&mut out, has_wake_triggers);
                 // Wake trigger metadata
                 if has_wake_triggers {
@@ -2562,7 +2560,6 @@ self.emit_declares(&mut out);
                 // Main
                 self.txn_counter = 0;
                 self.within_counter = 0;
-                self.reg_counter_cache.clear();
                 self.emit_main(&mut out, false);
             }
             }
