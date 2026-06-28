@@ -2995,6 +2995,14 @@ self.emit_declares(&mut out);
                     .insert(t.name.clone(), self.field_types.len());
                 self.field_types.push(self.llvm_type(&t.ty).to_string());
                 self.field_initializers.insert(t.name.clone(), None);
+            } else if let TopLevel::TriggerBinding { name, ty, .. } = item {
+                // Trigger bindings (trg name: Type @ Console!) get a state slot
+                // like regular triggers, so emit_expr can load their value.
+                let trig_ty = ty.clone().unwrap_or(crate::ast::Type::String);
+                self.field_index_map
+                    .insert(name.clone(), self.field_types.len());
+                self.field_types.push(self.llvm_type(&trig_ty).to_string());
+                self.field_initializers.insert(name.clone(), None);
             } else if let TopLevel::Cell(c) = item {
                 // Cell fields are handled differently depending on whether the
                 // cell is persistent (threaded) or sync (non-threaded).

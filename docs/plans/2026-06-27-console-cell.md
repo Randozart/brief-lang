@@ -437,7 +437,66 @@ any project without changing the compiler's architecture.
 
 ---
 
+---
+
+## Remaining Items (Post-Gap-Close)
+
+### Item 1: Restore line buffering in `console.bv`
+
+**What**: Change `&line = (String)raw;` back to `&line = line + (String)raw;`.
+The string concat fix in the LLVM backend now handles this correctly.
+
+**File**: `lib/std/console.bv` — 1 line change.
+
+### Item 2: Fix officina `action` field on `Option<Match>`
+
+**What**: `matched.action` fails because `matched: Option<Match>` doesn't forward
+field access. Fix: add `unwrap#(matched)` before accessing fields, or teach the
+LLVM backend `FieldAccess` code to unwrap `Option<T>` → `T` when the object
+type is `Option<Custom(name))`.
+
+**Two approaches**:
+- **Source fix** (1 line in officina): `let m = unwrap#(matched); term m.action;`
+- **Compiler fix** (~30 lines in `emit_expr.rs`): In the `FieldAccess` handler,
+  if `obj_val.ty` is `Type::Option(inner)` or `Type::Custom("Option")`, check
+  the Option's inner type and unwrap before field lookup.
+
+### Item 3: `Value::Items(Vec<TopLevel>)` for `compile#()`
+
+**Goal**: Allow macros to generate arbitrary top-level items
+(`StateDecl`, `Definition`, `Transaction`, `TriggerBinding`, etc.)
+via `compile#()`.
+
+**Implementation**:
+1. Add `Items(Vec<TopLevel>)` variant to the `Value` enum in `src/interpreter.rs`
+2. Update `compile#()` handler to return `Value::Items(prog.items)` instead
+   of filtering only `Statement` and `TriggerBinding` items
+3. Add `value_to_items` in `src/features/macros/template.rs` —
+   converts `Value::Items(items)` to `Vec<TopLevel>`; falls back to
+   `value_to_statements` wrapped in `TopLevel::Statement` for other values
+4. Update `expand_macro_calls_in_items` in `src/features/macros/expand.rs`
+   to detect `Value::Items` return and inject items directly into the
+   program (not wrapped in `TopLevel::Statement`)
+5. Handle `Value::Items` in all `Value` match arms that need it —
+   `value_to_statements` can convert items to statements lossily
+
+**Files**: `src/interpreter.rs`, `src/features/macros/template.rs`,
+`src/features/macros/expand.rs`, `src/ast.rs` (Value enum)
+
+**Result**: `$!console_input("inp");` expands `trg inp: String @ Console!;` as
+a `TopLevel::TriggerBinding` (not wrapped in `TopLevel::Statement`), and
+`compile#("let x: Int = 0; defn foo() -> Int { term x; };");` generates
+proper top-level items.
+
 ### Priority
+
+1. **Item 1**: 1 line, immediate win.
+2. **Item 2**: Unblocks officina compilation. Source fix is 1 line; compiler
+   fix is cleaner but larger.
+3. **Item 3**: Largest change, unlocks macro potential. Requires `Value` enum
+   change (impacts ~35 match arms across codebase).
+
+---
 
 1. **Gap 1** (parser shorthand) — unlocks `trg inp @ Console!` syntax and `$!console_input` macro
 2. **Gap 3** (LLVM codegen) — makes Console cell work in compiled binaries

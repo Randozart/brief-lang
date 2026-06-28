@@ -185,6 +185,33 @@ impl LlvmBackend {
                                 writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                                 return TypedRegister { name: v.clone(), ty: Type::Int };
                             }
+                        } else if matches!(t.address, crate::ast::LinkRef::Explicit(0)) {
+                            // Cell-binding triggers (trg name @ Console!) and other
+                            // Explicit(0) triggers load from the %State field.
+                            if let Some(&idx) = self.field_index_map.get(name) {
+                                let ll_ty = &self.field_types[idx];
+                                let sge = format!("%sge_{}", self.txn_counter); self.txn_counter += 1;
+                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, sge, idx).ok();
+                                let ev = format!("%ev_{}", self.txn_counter); self.txn_counter += 1;
+                                match ll_ty.as_str() {
+                                    "i8" => { writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, ev, sge).ok(); }
+                                    "i32" => { writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, ev, sge).ok(); }
+                                    _ => { writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ev, sge).ok(); }
+                                }
+                                // 2026-06-28: String/Data types are boxed as i64 in %State.
+                                // emit_trg_load_finish expects i8* for String; convert here.
+                                if matches!(t.ty, Type::String | Type::Data) {
+                                    let ip = format!("%tip_{}", self.txn_counter); self.txn_counter += 1;
+                                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ip, ev).ok();
+                                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ip).ok();
+                                } else {
+                                    self.emit_trg_load_finish(out, indent, &v, ev, &t.ty);
+                                }
+                                return TypedRegister { name: v.clone(), ty: t.ty.clone() };
+                            } else {
+                                writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                                return TypedRegister { name: v.clone(), ty: Type::Int };
+                            }
                         } else {
                             self.emit_trg_load(out, indent, &v, &t.address, &t.ty);
                             return TypedRegister { name: v.clone(), ty: t.ty.clone() };
