@@ -394,6 +394,49 @@ goal of trying out the Console cell.
 **Files**: `src/backend/llvm/emit_toplevel.rs`, `src/backend/llvm/emit_expr.rs`
 **Est**: ~40 lines
 
+---
+
+## Pre-Existing Officina Bugs Fixed
+
+### Bug 1: `FieldAccess` — struct field via `ListIndex` returns wrong type
+
+**Root cause**: `Expr::ListIndex` in the LLVM backend always returns
+`TypedRegister { ty: Type::Int }`, even when the list's element type is
+a struct like `UnderstandRule`. When `let rule = rules[i];` is emitted,
+`let_binding_types["rule"]` stores `Type::Int` instead of
+`Type::Custom("UnderstandRule")`. Subsequent `rule.slot_count` fails
+because `FieldAccess` can't find the struct.
+
+**Fix** (`src/backend/llvm/emit_expr.rs:2672`): After emitting the
+ListIndex GEP+load, check the list expression's type. If it's
+`Type::Applied("List", [el_ty])`, propagate `el_ty` as the result type
+instead of defaulting to `Type::Int`.
+
+**Secondary fix** (`src/backend/llvm/emit_toplevel.rs`): Register function
+parameter names in `let_binding_types` so `defn foo(x: StructType)` can
+access `x.field` without a `let` binding in between.
+
+### Bug 2: Debug build stack overflow
+
+**Root cause**: Debug builds have ~4x larger stack frames per function call
+(debu-info, no inlining). The officina project's 14 modules + complex
+expression trees create a call chain deep enough to overflow the default
+2MB stack in debug mode but not in release mode.
+
+**Fix** (`.cargo/config.toml`): Set linker stack size to 8MB for debug
+builds. This matches the Linux default `ulimit -s` and gives headroom for
+any project without changing the compiler's architecture.
+
+### Files modified
+
+| File | Change |
+|------|--------|
+| `.cargo/config.toml` | Added `-C link-args=-Wl,-z,stack-size=8388608` for debug builds |
+| `src/backend/llvm/emit_expr.rs` | `ListIndex` returns element type from list's `Applied("List", [T])` |
+| `src/backend/llvm/emit_toplevel.rs` | Register `defn`/`txn` parameter names in `let_binding_types` |
+
+---
+
 ### Priority
 
 1. **Gap 1** (parser shorthand) — unlocks `trg inp @ Console!` syntax and `$!console_input` macro

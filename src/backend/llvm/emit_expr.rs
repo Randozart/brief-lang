@@ -2669,6 +2669,9 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
             }
             // ── ListIndex ───────────────────────────────────────
+            // 2026-06-27: propagate element type from the list's type so that
+            // downstream FieldAccess can resolve struct fields (e.g. `rules[i].slot_count`).
+            // Without this, the result is Type::Int and the struct lookup fails.
             Expr::ListIndex(list, index) => {
                 let list_val = self.emit_expr(out, list, indent);
                 let idx_val = self.emit_expr(out, index, indent);
@@ -2681,6 +2684,25 @@ impl LlvmBackend {
                 let ep = format!("%xep{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, idx_val.name).ok();
                 writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, ep).ok();
+                // 2026-06-27: propagate element type from List<T> so downstream
+                // FieldAccess can resolve struct fields (e.g., rules[i].slot_count).
+                // The list_val.ty may be transformed to Ptr by the backend, so we
+                // also check the original variable's type from let_binding_types.
+                let el_ty = match &list_val.ty {
+                    Type::Applied(name, args) if name == "List" => args.first().cloned(),
+                    _ => {
+                        if let Expr::Identifier(var_name) = list.as_ref() {
+                            self.let_binding_types.get(var_name).and_then(|ty| {
+                                if let Type::Applied(name, args) = ty {
+                                    if name == "List" { args.first().cloned() } else { None }
+                                } else { None }
+                            })
+                        } else { None }
+                    }
+                };
+                if let Some(et) = el_ty {
+                    return TypedRegister { name: v, ty: et };
+                }
             }
             // ── Projection ──────────────────────────────────────
             Expr::Projection { source, target } => {
