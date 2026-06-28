@@ -15,9 +15,7 @@ pub fn expand_templates(program: &mut Program, ctx: &mut MacroContext) -> Result
 
 /// Phase 1b: Expand all macro calls in the program.
 /// Re-runs Phase 1a on macro output since macros can emit template calls.
-pub fn expand_macros(program: &mut Program, ctx: &mut MacroContext) -> Result<(), String> {
-    collect_macro_defs(program, ctx);
-    expand_macro_calls_in_items(&mut program.items, ctx)?;
+pub fn expand_macros(program: &mut Program, ctx: &mut MacroContext) -> Result<(), String> {    collect_macro_defs(program, ctx);    expand_macro_calls_in_items(&mut program.items, ctx)?;
     // Re-run Phase 1a: macros may emit template calls
     expand_template_calls_in_items(&mut program.items, ctx)
 }
@@ -259,30 +257,42 @@ pub(crate) fn expand_macro_calls_in_items(
     ctx: &mut MacroContext,
 ) -> Result<(), String> {
     let mut i = 0;
-    while i < items.len() {
-        let expanded = match &items[i] {
-            TopLevel::Statement(stmt) => expand_macro_in_stmt(stmt, ctx)?,
-            _ => None,
-        };
-        if let Some(new_stmts) = expanded {
-            items.remove(i);
-            for (j, s) in new_stmts.into_iter().enumerate() {
-                items.insert(i + j, TopLevel::Statement(Box::new(s)));
-            }
-            i += 1;
-        } else {
-            // Recurse into definitions/transactions for sub-expression macro calls
-            match &mut items[i] {
-                TopLevel::Definition(def) => {
-                    expand_macro_in_stmts(&mut def.body, ctx)?;
+    while i < items.len() {        if let TopLevel::Statement(stmt) = &items[i] {
+            if let Statement::Expression(Expr::MacroCall { name, args, block, span: _ }) = stmt.as_ref() {                let def = ctx.macros.get(name)
+                    .ok_or_else(|| format!("undefined macro '{}'", name))?
+                    .clone();
+                let mut interpreter = crate::interpreter::Interpreter::new();
+                let value = template::expand_macro(ctx, &mut interpreter, &def, args, block.clone())?;                match &value {
+                    crate::interpreter::Value::Items(new_items) => {
+                        items.remove(i);
+                        for (j, item) in new_items.iter().cloned().enumerate() {
+                            items.insert(i + j, item);
+                        }
+                        i += new_items.len();
+                    }
+                    _ => {
+                        let new_stmts = template::value_to_statements(&value);
+                        items.remove(i);
+                        for (j, s) in new_stmts.into_iter().enumerate() {
+                            items.insert(i + j, TopLevel::Statement(Box::new(s)));
+                        }
+                        i += 1;
+                    }
                 }
-                TopLevel::Transaction(txn) => {
-                    expand_macro_in_stmts(&mut txn.body, ctx)?;
-                }
-                _ => {}
+                continue;
             }
-            i += 1;
         }
+        // Recurse into definitions/transactions for sub-expression macro calls
+        match &mut items[i] {
+            TopLevel::Definition(def) => {
+                expand_macro_in_stmts(&mut def.body, ctx)?;
+            }
+            TopLevel::Transaction(txn) => {
+                expand_macro_in_stmts(&mut txn.body, ctx)?;
+            }
+            _ => {}
+        }
+        i += 1;
     }
     Ok(())
 }

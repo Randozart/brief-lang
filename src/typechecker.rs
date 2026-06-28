@@ -1938,7 +1938,10 @@ impl TypeChecker {
             }
             Statement::TrgBinding { name, ty, instance, port, .. } => {
                 let instance_ty = self.infer_expression(instance);
-                if !self.types_compatible(&instance_ty, &Type::Int) {
+                // 2026-06-28: Cell identifiers (e.g., Console in trg inp @ Console!)
+                // resolve to Custom("CellName"), not Int. Accept cell names too.
+                let is_cell_ref = matches!(instance, Expr::Identifier(cn) if self.cell_defs.contains_key(cn));
+                if !is_cell_ref && !self.types_compatible(&instance_ty, &Type::Int) {
                     self.errors.borrow_mut().push(TypeError::TypeMismatch {
                         expected: "Int (cell instance handle)".to_string(),
                         found: self.type_to_string(&instance_ty),

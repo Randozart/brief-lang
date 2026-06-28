@@ -66,7 +66,7 @@ impl ExprEval for ProjectionExpr {
                         | Value::Defn(_) | Value::DbvlTable(_) | Value::Regex(_)
                         | Value::Ptr(_) => 8,
                     Value::Void => 0,
-                    Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Type(..) => {
+                    Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
                         return Err(RuntimeError::TypeMismatch("Alignment on compile-time value".into()));
                     }
                 };
@@ -113,7 +113,7 @@ impl ExprEval for ProjectionExpr {
                     Value::Instance { .. } => 14, Value::Enum(..) => 15,
                     Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Regex(_) => 18,
                     Value::Ptr(_) => 19, Value::Void => 0,
-                    Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Type(..) => {
+                    Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
                         unreachable!("compile-time only value")
                     }
                 };

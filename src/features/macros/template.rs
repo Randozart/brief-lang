@@ -76,9 +76,42 @@ pub fn expand_macro(
 }
 
 /// Convert a Value to a Vec of AST Statements for injection into the program.
+/// Convert a macro return value to a Vec<Statement> for statement-level injection.
+/// For `Value::Items`, converts items to statements lossily (StateDecl → Let,
+/// TriggerBinding → TrgBinding, drops other items).
 pub fn value_to_statements(value: &crate::interpreter::Value) -> Vec<Statement> {
     match value {
         crate::interpreter::Value::Block(stmts) => stmts.clone(),
+        crate::interpreter::Value::Items(items) => {
+            let mut stmts = Vec::new();
+            for item in items {
+                match item {
+                    crate::ast::TopLevel::Statement(stmt) => stmts.push(*stmt.clone()),
+                    crate::ast::TopLevel::StateDecl(s) => stmts.push(Statement::Let {
+                        name: s.name.clone(),
+                        ty: Some(s.ty.clone()),
+                        expr: s.expr.clone(),
+                        address: s.address,
+                        address_expr: None,
+                        bit_range: s.bit_range.clone(),
+                        constraint: s.constraint.clone(),
+                        is_override: s.is_override,
+                        modifiers: vec![],
+                    }),
+                    crate::ast::TopLevel::TriggerBinding { name, ty, instance, port, modifiers } => {
+                        stmts.push(Statement::TrgBinding {
+                            name: name.clone(),
+                            ty: ty.clone(),
+                            instance: instance.clone(),
+                            port: port.clone(),
+                            modifiers: modifiers.clone(),
+                        });
+                    }
+                    _ => {} // skip non-convertible top-level items
+                }
+            }
+            stmts
+        }
         crate::interpreter::Value::Stmt(stmt) => vec![*stmt.clone()],
         crate::interpreter::Value::Expr(expr) => {
             vec![Statement::Expression(*expr.clone())]
@@ -86,6 +119,19 @@ pub fn value_to_statements(value: &crate::interpreter::Value) -> Vec<Statement> 
         other => {
             // Wrap non-AST values as expression statements
             vec![Statement::Expression(expr_from_value(other))]
+        }
+    }
+}
+
+/// Convert a macro return value to `Vec<TopLevel>` for top-level injection.
+/// For `Value::Items`, returns the items directly. For other values,
+/// wraps the result in `TopLevel::Statement` (lossy).
+pub fn value_to_items(value: &crate::interpreter::Value) -> Vec<crate::ast::TopLevel> {
+    match value {
+        crate::interpreter::Value::Items(items) => items.clone(),
+        other => {
+            let stmts = value_to_statements(other);
+            stmts.into_iter().map(|s| crate::ast::TopLevel::Statement(Box::new(s))).collect()
         }
     }
 }

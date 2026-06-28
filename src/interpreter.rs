@@ -60,7 +60,7 @@ pub(crate) struct DbvlTableInner {
     pub schema_key_index: Option<usize>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -98,7 +98,46 @@ pub enum Value {
     Expr(Box<crate::ast::Expr>),
     Stmt(Box<crate::ast::Statement>),
     Block(Vec<crate::ast::Statement>),
+    /// Full top-level items (for compile#() with non-Statement items like
+    /// StateDecl, Definition, Transaction, TriggerBinding, etc.)
+    Items(Vec<crate::ast::TopLevel>),
     Type(crate::ast::Type),
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Int(a), Value::Int(b)) => a == b,
+            (Value::Float(a), Value::Float(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Char(a), Value::Char(b)) => a == b,
+            (Value::Bool(a), Value::Bool(b)) => a == b,
+            (Value::Data(a), Value::Data(b)) => a == b,
+            (Value::List(a), Value::List(b)) => a == b,
+            (Value::Tuple(a), Value::Tuple(b)) => a == b,
+            (Value::HashMap(a), Value::HashMap(b)) => a == b,
+            (Value::HashSet(a), Value::HashSet(b)) => a == b,
+            (Value::StringBuilder(a), Value::StringBuilder(b)) => a == b,
+            (Value::Stack(a), Value::Stack(b)) => a == b,
+            (Value::Queue(a), Value::Queue(b)) => a == b,
+            (Value::Instance { typename: a1, fields: a2 }, Value::Instance { typename: b1, fields: b2 }) => a1 == b1 && a2 == b2,
+            (Value::Enum(a1, a2, a3), Value::Enum(b1, b2, b3)) => a1 == b1 && a2 == b2 && a3 == b3,
+            (Value::Defn(a), Value::Defn(b)) => a == b,
+            (Value::Void, Value::Void) => true,
+            (Value::DbvlTable(a), Value::DbvlTable(b)) => a == b,
+            (Value::Regex(a), Value::Regex(b)) => a == b,
+            (Value::Ptr(a), Value::Ptr(b)) => a == b,
+            (Value::Expr(a), Value::Expr(b)) => a == b,
+            (Value::Stmt(a), Value::Stmt(b)) => a == b,
+            (Value::Block(a), Value::Block(b)) => a == b,
+            (Value::Items(_), Value::Items(_)) => {
+                // Items are compile-time only; identical discriminant is sufficient
+                true
+            }
+            (Value::Type(a), Value::Type(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -134,6 +173,7 @@ impl fmt::Display for Value {
             Value::Expr(_) => write!(f, "<Expr>"),
             Value::Stmt(_) => write!(f, "<Stmt>"),
             Value::Block(_) => write!(f, "<Block>"),
+            Value::Items(_) => write!(f, "<Items>"),
             Value::Type(t) => write!(f, "<Type {:?}>", t),
         }
     }
@@ -210,7 +250,7 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
             JsonValue::Object(map)
         }
         Value::Regex(_) => JsonValue::Null,
-        Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Type(..) => {
+        Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
             unreachable!("compile-time only value")
         }
     }
@@ -5086,24 +5126,9 @@ impl Interpreter {
                         let mut parser = crate::parser::Parser::new(&code);
                         match parser.parse() {
                             Ok(prog) => {
-                                // Extract all TopLevel items into a flat Block
-                                let mut stmts = Vec::new();
-                                for item in prog.items {
-                                    match item {
-                                        crate::ast::TopLevel::Statement(stmt) => stmts.push(*stmt),
-                                        crate::ast::TopLevel::TriggerBinding { name, ty, instance, port, modifiers } => {
-                                            stmts.push(crate::ast::Statement::TrgBinding {
-                                                name, ty, instance, port, modifiers,
-                                            });
-                                        }
-                                        crate::ast::TopLevel::Trigger(trg) => {
-                                            // Convert Trigger to a TrgBinding for the macro context
-                                            // (this happens when compile# produces "trg name: Type @ stdin#")
-                                        }
-                                        _ => {} // skip other top-level items
-                                    }
-                                }
-                                Ok(Value::Block(stmts))
+                                // 2026-06-28: Return all items as Value::Items so the
+                                // macro expander can inject them at the top level.
+                                Ok(Value::Items(prog.items))
                             }
                             Err(e) => Err(RuntimeError::TypeMismatch(
                                 format!("compile#: parse error: {}", e))),
