@@ -488,9 +488,43 @@ a `TopLevel::TriggerBinding` (not wrapped in `TopLevel::Statement`), and
 `compile#("let x: Int = 0; defn foo() -> Int { term x; };");` generates
 proper top-level items.
 
-### Priority
+---
 
-1. **Item 1**: 1 line, immediate win.
+## `%t{N}` Duplicate Register Bug
+
+### Symptoms
+
+`opt/llc` rejects `officina.ll` with:
+```
+error: multiple definition of local value named 't26'
+%t26 = add i64 0, 0
+```
+
+### Root Cause
+
+The compiler emits `%t{N}` register names from `self.txn_counter` in `emit_expr.rs:30`.
+When a callable txn returns a tuple, the destructuring code in `emit_stmt.rs:234` creates
+`%td*` names but the subsequent `emit_expr` for the destructured variable can produce
+a `%t{N}` name with a leading indent of `""` (empty). This causes two `%t26`
+definitions in the same function — one with no indent (from the empty-indent path)
+and one with `"  "` indent (from the normal path).
+
+### Unsuccessful Fix Attempts
+
+1. **Removing `txn_counter = 0` resets** (lines 932, 980, 1111) — didn't help because
+   the duplicate is within a SINGLE function, not across functions.
+2. **Removing `alwaysinline`** — not the cause, the collision is in the raw IR.
+3. **Searching for empty-indent `emit_expr` calls** — no production code passes `""`.
+
+### Next Steps
+
+The fix requires finding the code path that emits `%t{N}` with empty indent.
+Most likely in `emit_stmt.rs` or `emit_expr.rs` in the tuple destructure path
+where `indent` is derived from a context that doesn't pass it through correctly.
+Alternatively, a post-processing pass can scan the IR for duplicate `%t{N}` names
+and rename them.
+
+### Priority
 2. **Item 2**: Unblocks officina compilation. Source fix is 1 line; compiler
    fix is cleaner but larger.
 3. **Item 3**: Largest change, unlocks macro potential. Requires `Value` enum

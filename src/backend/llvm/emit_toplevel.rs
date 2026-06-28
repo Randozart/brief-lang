@@ -929,7 +929,10 @@ impl LlvmBackend {
             writeln!(out, "  body:").ok();
             self.ssa_old_int_regs.clear();
             self.ssa_old_float_regs.clear();
-            self.txn_counter = 0;
+            // 2026-06-28: Do NOT reset txn_counter here — this emits into the
+            // existing @main() function. Resetting would produce duplicate
+            // %t{N} registers across inlined transactions, violating SSA.
+            // The counter keeps incrementing across all inlined transactions.
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             // 2026-06-26: Reset in_callable_txn — emit_definition may have left
@@ -977,7 +980,9 @@ impl LlvmBackend {
             writeln!(out, "  entry:").ok();
             self.ssa_old_int_regs.clear();
             self.ssa_old_float_regs.clear();
-            self.txn_counter = 0;
+            // 2026-06-28: Do NOT reset txn_counter here — functions marked
+            // alwaysinline may be inlined into the caller, causing register
+            // collisions. Let the counter keep incrementing globally.
             self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             // 2026-06-26: Reset in_callable_txn — same rationale as the
