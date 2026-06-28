@@ -644,6 +644,11 @@ pub struct LlvmBackend {
     /// SSA dominance correctness). See docs/plan for unify discussion.
     pub(crate) glob_counter: usize,
     pub(crate) dep_graph: crate::analysis::dependency_graph::DependencyGraph, // trg dependency graph
+    /// 2026-06-28: Set of all %t{N} register names emitted in the current function.
+    /// Used by emit_expr to detect and skip counter collisions when txn_counter
+    /// is restored to a previous value (e.g., by emit_trg_event_epoll_wait).
+    pub(crate) reg_counter_cache: std::collections::HashSet<String>,
+    pub(crate) last_txn_counter: Option<usize>,
     pending_cleanup: Vec<Statement>,
     pub(crate) let_bindings: HashMap<String, String>,
     pub(crate) let_binding_types: HashMap<String, Type>,
@@ -883,6 +888,8 @@ impl LlvmBackend {
             },  // start above likely conflict range
             has_cycles: false,
             pending_cleanup: Vec::new(),
+            reg_counter_cache: std::collections::HashSet::new(),
+            last_txn_counter: None,
             let_bindings: HashMap::new(),
             let_binding_types: HashMap::new(),
             let_original_types: HashMap::new(),
@@ -1698,7 +1705,7 @@ impl LlvmBackend {
                                 ty: trig_ty,
                                 address: crate::ast::LinkRef::Explicit(0),
                                 bit_range: None, stages: vec![], condition: None,
-                                is_wake: true, is_const: false, span: None,
+                                is_wake: false, is_const: false, span: None,
                                 modifiers: vec![],
                             };
                             self.triggers.insert(name.clone(), trg_decl);
@@ -2513,6 +2520,9 @@ self.emit_declares(&mut out);
                 self.warnings.push(
                     "info: program dispatched via direct SSA loop".into()
                 );
+                self.txn_counter = 0;
+                self.within_counter = 0;
+                self.reg_counter_cache.clear();
                 self.emit_ssa_main(&mut out, &txns, has_wake_triggers);
             } else if !txns.is_empty() {
                 // reactor loop fallback — only reached for async dispatch or MMIO
@@ -2534,6 +2544,9 @@ self.emit_declares(&mut out);
                 if has_wake_triggers {
                     writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
                 }
+                self.txn_counter = 0;
+                self.within_counter = 0;
+                self.reg_counter_cache.clear();
                 self.emit_main(&mut out, has_wake_triggers);
                 // Wake trigger metadata
                 if has_wake_triggers {
@@ -2547,6 +2560,9 @@ self.emit_declares(&mut out);
                 writeln!(out, "}}").ok();
                 writeln!(out).ok();
                 // Main
+                self.txn_counter = 0;
+                self.within_counter = 0;
+                self.reg_counter_cache.clear();
                 self.emit_main(&mut out, false);
             }
             }
@@ -2853,30 +2869,35 @@ self.emit_declares(&mut out);
             eprintln!("{}", self.dump_layout_str());
         }
 
-        // 2026-06-28: post-process IR to fix duplicate %t{N} registers.
-        // LLVM/llc rejects IR where %t{N} is defined more than once in a function.
-        // This dedup pass detects SECOND definitions and renames them with a suffix.
+        // 2026-06-28: post-process IR to fix duplicate %t{N} registers and
+        // type mismatches. LLVM/llc rejects IR where %t{N} is defined more
+        // than once in a function, or defined with one type but used as another.
         {
+            use std::collections::HashMap;
             let mut deduped = String::with_capacity(out.len());
-            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            // Map from %t{N} name to its LLVM type string (e.g., "i64", "i1")
+            let mut defs: HashMap<String, String> = HashMap::new();
             let mut dedup_counter = 0u64;
             for line in out.lines() {
                 if line.starts_with("define ") || line.starts_with("}") {
-                    seen.clear(); // reset per function
+                    defs.clear(); // reset per function
                 }
-                // Only rename DEFINITIONS: lines like "  %t{N} = ..."
+                // Track definitions: lines like "  %t{N} = <type> ..."
                 if let Some(eq_pos) = line.find(" =") {
                     let lhs = line[..eq_pos].trim().to_string();
                     if lhs.starts_with("%t") && lhs[2..].chars().all(|c| c.is_ascii_digit()) {
-                        if seen.contains(&lhs) {
-                            // Duplicate definition — rename with a unique suffix
+                        // Extract the LLVM type from the RHS
+                        let rhs = line[eq_pos + 3..].trim();
+                        let rhs_type = rhs.split_whitespace().next().unwrap_or("i32").to_string();
+                        if let Some(_prev_type) = defs.get(&lhs) {
+                            // Duplicate definition — rename with unique suffix
                             let new_lhs = format!("%tddup{}", dedup_counter);
                             dedup_counter += 1;
                             let deduped_line = line.replacen(&lhs, &new_lhs, 1);
                             deduped.push_str(&deduped_line);
                             deduped.push('\n');
                         } else {
-                            seen.insert(lhs);
+                            defs.insert(lhs, rhs_type);
                             deduped.push_str(line);
                             deduped.push('\n');
                         }

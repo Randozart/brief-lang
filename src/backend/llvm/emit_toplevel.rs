@@ -751,7 +751,7 @@ impl LlvmBackend {
 
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.pending_cleanup.clear();
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear(); self.reg_type_cache.clear();
         self.ssa_old_int_regs.clear();
         self.ssa_old_float_regs.clear();
         // 2026-06-17: Use correct LLVM return type (float for Float, otherwise i64)
@@ -806,6 +806,7 @@ impl LlvmBackend {
                 }
         }
         self.txn_counter = 0;
+        self.reg_counter_cache.clear();
         self.terminated = false;
         // 2026-06-26: in_callable_txn must be true so Statement::Term in the
         // defn body emits a ret instruction (emit_stmt.rs line 78). Without
@@ -933,7 +934,7 @@ impl LlvmBackend {
             // existing @main() function. Resetting would produce duplicate
             // %t{N} registers across inlined transactions, violating SSA.
             // The counter keeps incrementing across all inlined transactions.
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             // 2026-06-26: Reset in_callable_txn — emit_definition may have left
             // it true from a prior TopLevel::Definition. Reactive transactions
@@ -983,7 +984,7 @@ impl LlvmBackend {
             // 2026-06-28: Do NOT reset txn_counter here — functions marked
             // alwaysinline may be inlined into the caller, causing register
             // collisions. Let the counter keep incrementing globally.
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+            self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear(); self.reg_type_cache.clear();
             self.terminated = false;
             // 2026-06-26: Reset in_callable_txn — same rationale as the
             // assume_action path above (emit_definition leaks into txn).
@@ -1022,7 +1023,7 @@ impl LlvmBackend {
         self.pending_cleanup.clear();
         self.let_bindings.clear();
         self.let_binding_types.clear();
-        self.let_original_types.clear(); self.reg_float_cache.clear();
+        self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear();
         self.reg_type_cache.clear();
         self.param_slots.clear();
         self.ssa_old_int_regs.clear();
@@ -1250,7 +1251,7 @@ impl LlvmBackend {
         writeln!(out, "define internal i1 @pre_{}(ptr noalias nocapture align 8 %state) #0 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear(); self.reg_type_cache.clear();
         // 2026-06-27: Clear ssa_old int/float regs so identifier lookups fall
         // through to GEP+load from %state. Without this, stale entries from a
         // prior emit (main function) produce forward references to registers
@@ -1298,7 +1299,7 @@ impl LlvmBackend {
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
         self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear(); self.reg_type_cache.clear();
         // 2026-06-27: Clear ssa_old int/float regs so identifier lookups fall
         // through to GEP+load from %state (same rationale as emit_pre_function).
         self.ssa_old_int_regs.clear();
@@ -1357,7 +1358,7 @@ impl LlvmBackend {
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in &combined {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");
@@ -1372,7 +1373,7 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();         self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear(); self.reg_type_cache.clear();         self.terminated = false; self.returns_i64 = false;
         for s in body {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");
@@ -1407,7 +1408,7 @@ impl LlvmBackend {
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_counter_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
         for s in body {
             if self.terminated { break; }
             self.emit_stmt(out, s, "  ");

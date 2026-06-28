@@ -45,13 +45,15 @@ impl LlvmBackend {
             Expr::String(s) | Expr::RegexLiteral(s) => {
                 let si = self.string_constants.iter().position(|x| x == s).unwrap_or(0);
                 let g = format!("@str.{}", si);
-                let bp = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                // 2026-06-28: Use txn_counter to prevent %t{N} collision with
+                // emit_expr's register allocation (which also uses txn_counter).
+                let bp = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, bp, s.len() + 1, g).ok();
                 // Tag static string pointers with bit 0 (=1) so concat can distinguish
                 // them from heap-allocated strings and avoid freeing static data.
-                let pi = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let pi = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, pi, bp).ok();
-                let ori = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let ori = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = or i64 {}, 1", indent, ori, pi).ok();
                 writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, v, ori).ok();
                 return TypedRegister { name: v, ty: Type::String };
@@ -463,7 +465,8 @@ impl LlvmBackend {
                     };
                     let call_ret = if is_float_ret { "float" } else { "i64" };
                     let args_str = marshaled.join(", ");
-                    let call_result = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                    // 2026-06-28: Use txn_counter to prevent %t{N} collision
+                    let call_result = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                     writeln!(out, "{}{} = call {} @{}({})", indent, call_result, call_ret, name, args_str).ok();
 
                     // Pipe-syntax frgn: emit sentinel checks using select (branchless).
@@ -485,7 +488,8 @@ impl LlvmBackend {
                                 let ptr = format!("%pipe_ptr{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ptr, call_result).ok();
                                 writeln!(out, "{}{} = icmp eq i8* {}, null", indent, is_null, ptr).ok();
-                                let select_reg = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                                // 2026-06-28: Use txn_counter to prevent %t{N} collision
+                                let select_reg = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                                 let fbr = fallback_reg.as_ref().map(|r| r.name.as_str()).unwrap_or("null");
                                 writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}",
                                     indent, select_reg, is_null, fbr, call_result).ok();
@@ -495,7 +499,8 @@ impl LlvmBackend {
                                 // NaN check for float returns
                                 let is_nan = format!("%pipe_nan{}", self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = fcmp uno float {}, {}", indent, is_nan, call_result, call_result).ok();
-                                let select_reg = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                                // 2026-06-28: Use txn_counter to prevent %t{N} collision
+                                let select_reg = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                                 let fbr = fallback_reg.as_ref().map(|r| r.name.as_str()).unwrap_or("0.0");
                                 writeln!(out, "{}{} = select i1 {}, float {}, float {}",
                                     indent, select_reg, is_nan, fbr, call_result).ok();
@@ -4195,7 +4200,8 @@ impl LlvmBackend {
             }
             Expr::Cast(inner, target_ty) => {
                 let inner_val = self.emit_expr(out, inner, indent);
-                let cv = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                // 2026-06-28: Use txn_counter to prevent %t{N} collision
+                let cv = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 self.emit_cast_convert(out, indent, &cv, &inner_val.name, Some(inner_val.ty), target_ty);
                 // Casts to boxed types (String/Data) produce i64, not native i8*.
                 let ret_ty = if matches!(target_ty, Type::String | Type::Data) {
@@ -4337,12 +4343,14 @@ impl LlvmBackend {
                             _ => Type::Int,
                         };
                         if ret_ty == Type::Int && ll_ty != "i64" {
-                            let boxed = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                            // 2026-06-28: Use txn_counter to prevent %t{N} collision
+                            let boxed = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = zext {} {} to i64", indent, boxed, ll_ty, v).ok();
                             return TypedRegister { name: boxed, ty: Type::Int };
                         }
                         if ret_ty == Type::String {
-                            let boxed = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                            // 2026-06-28: Use txn_counter to prevent %t{N} collision
+                            let boxed = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, boxed, v).ok();
                             return TypedRegister { name: boxed, ty: Type::Int };
                         }
@@ -5242,13 +5250,15 @@ impl LlvmBackend {
             writeln!(out, "{}{}:", indent, after_free_b_label).ok();
         }
 
-        let v = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+        // 2026-06-28: Use txn_counter to prevent %t{N} collision with
+        // emit_expr's register allocation (which also uses txn_counter).
+        let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, v, result).ok();
         // Box to i64 — downstream code expects i64 (ptrtoint).
-        let vi = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+        let vi = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, vi, v).ok();
         // Tag as temporary (bit 1 = 1) so future concat calls can free it
-        let vi_tagged = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+        let vi_tagged = format!("%t{}", self.txn_counter); self.txn_counter += 1;
         writeln!(out, "{}{} = or i64 {}, 2", indent, vi_tagged, vi).ok();
         TypedRegister { name: vi_tagged, ty: Type::Int }
     }
@@ -5269,7 +5279,12 @@ impl LlvmBackend {
                 _ => None,
             };
             if let Some(folded) = result {
-                let v = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                // 2026-06-28: Use txn_counter to prevent %t{N} collision with
+                // emit_expr's register allocation (which also uses txn_counter).
+                // Previously used glob_counter which caused duplicate %t{N} defs
+                // in the same function — the deduplicator cannot fix uses that
+                // reference the renamed register via internal maps (let_bindings).
+                let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 0, {}", indent, v, folded).ok();
                 return TypedRegister { name: v, ty: Type::Int };
             }
@@ -5285,7 +5300,7 @@ impl LlvmBackend {
             // 2026-06-17: Skip float path if either operand is String/Data
             // (prevents pointer→float corruption, e.g. String + Float).
             if a.ty == Type::String || a.ty == Type::Data || b.ty == Type::String || b.ty == Type::Data {
-                let v = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+                let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
                 let a_i64 = self.adapt_to_i64(out, indent, &a);
                 let b_i64 = self.adapt_to_i64(out, indent, &b);
                 writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
@@ -5299,7 +5314,12 @@ impl LlvmBackend {
                 TypedRegister { name: fr, ty: Type::Float }
             }
         } else {
-            let v = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+            // 2026-06-28: Use txn_counter to prevent %t{N} collision with
+            // emit_expr's register allocation (which also uses txn_counter).
+            // Previously used glob_counter which caused duplicate %t{N} defs
+            // in the same function — the deduplicator cannot fix uses that
+            // reference the renamed register via internal maps (let_bindings).
+            let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             let a_i64 = self.adapt_to_i64(out, indent, &a);
             let b_i64 = self.adapt_to_i64(out, indent, &b);
             writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
@@ -5334,7 +5354,7 @@ impl LlvmBackend {
                 "oge" => li >= ri,
                 _ => false,
             };
-            let v = format!("%t{}", self.glob_counter); self.glob_counter += 1;
+            let v = format!("%t{}", self.txn_counter); self.txn_counter += 1;
             if result {
                 writeln!(out, "{}{} = and i1 true, true", indent, v).ok();
             } else {
@@ -5808,8 +5828,9 @@ impl LlvmBackend {
             }
             // Pattern 2: intrinsic call — "strlen#(Ptr)" etc.
             Expr::IntrinsicCall { intrinsic, args } => {
-                let v = format!("%t{}", self.glob_counter);
-                self.glob_counter += 1;
+                // 2026-06-28: Use txn_counter to prevent %t{N} collision
+                let v = format!("%t{}", self.txn_counter);
+                self.txn_counter += 1;
                 // Handle strlen#(arg) — the common meld route for CString.Size
                 if let crate::ast::Intrinsic::Strlen = intrinsic {
                     if args.len() == 1 {
@@ -5913,8 +5934,9 @@ impl LlvmBackend {
                     field_results.push((field_name.clone(), field_ty.clone(), reg.name));
                 } else {
                     // Route evaluation failed — emit 0 as placeholder
-                    let v = format!("%t{}", self.glob_counter);
-                    self.glob_counter += 1;
+        // 2026-06-28: Use txn_counter to prevent %t{N} collision
+        let v = format!("%t{}", self.txn_counter);
+        self.txn_counter += 1;
                     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
                     field_results.push((field_name.clone(), field_ty.clone(), v));
                 }

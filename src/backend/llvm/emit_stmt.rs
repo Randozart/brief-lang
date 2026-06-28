@@ -40,6 +40,11 @@ impl LlvmBackend {
         // registers, ListIndex loads, or %State field loads). Check the
         // register name prefix to decide: %t and %d prefixes are from
         // emit_expr (always i64); other prefixes like %p_ are native i8*.
+        // 2026-06-28: String/Data registers can be either native i8* (from
+        // function params or arg slots) or boxed i64 (from emit_expr's %t{N}
+        // registers, ListIndex loads, or %State field loads). Check the
+        // register name prefix to decide: %t and %d prefixes are from
+        // emit_expr (always i64); other prefixes like %p_ are native i8*.
         } else if r.ty == Type::String || r.ty == Type::Data {
             let is_boxed = r.name.starts_with("%t") || r.name.starts_with("%d");
             if is_boxed {
