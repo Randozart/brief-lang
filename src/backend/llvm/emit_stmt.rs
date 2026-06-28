@@ -794,8 +794,8 @@ impl LlvmBackend {
             }
             Statement::TrgBinding { name, instance, .. } => {
                 let val = self.emit_expr(out, instance, indent);
-                let reg = format!("%t{}", self.txn_counter);
-                self.txn_counter += 1;
+                let reg = format!("%t{}", self.glob_counter);
+                self.glob_counter += 1;
                 writeln!(out, "{}{} = add i64 0, {}", indent, reg, val.name).ok();
                 self.let_bindings.insert(name.clone(), reg);
                 if let Some(ty) = self.let_binding_types.get(&val.name).cloned() {

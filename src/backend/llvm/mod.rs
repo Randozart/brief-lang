@@ -639,6 +639,11 @@ pub struct LlvmBackend {
     pub(crate) txn_counter: usize,
     pub(crate) within_counter: usize,    // dedicated counter for Expr::Within (avoids SSA collisions)
     pub(crate) metadata_counter: usize,  // for !llvm.loop metadata nodes
+    /// 2026-06-28: Global register counter — NEVER reset. Used for %t{N} names
+    /// to guarantee uniqueness across all functions and inlining. Unlike
+    /// txn_counter which is reset per function, this avoids SSA collisions
+    /// after LLVM inlines functions into each other.
+    pub(crate) glob_counter: usize,
     pub(crate) dep_graph: crate::analysis::dependency_graph::DependencyGraph, // trg dependency graph
     pending_cleanup: Vec<Statement>,
     pub(crate) let_bindings: HashMap<String, String>,
@@ -867,6 +872,7 @@ impl LlvmBackend {
             pgo_guard_idx: 0,
             txn_counter: 0,
             within_counter: 0,
+            glob_counter: 0,
             metadata_counter: 100,
             dep_graph: crate::analysis::dependency_graph::DependencyGraph {
                 topo_order: Vec::new(),
@@ -2846,6 +2852,45 @@ self.emit_declares(&mut out);
         // Phase 4: --layout diagnostic flag — print field layout after generation
         if self.dump_layout {
             eprintln!("{}", self.dump_layout_str());
+        }
+
+        // 2026-06-28: post-process IR to fix duplicate %t{N} registers.
+        // LLVM/llc rejects IR where %t{N} is defined more than once in a function.
+        // This dedup pass detects SECOND definitions and renames them with a suffix.
+        {
+            let mut deduped = String::with_capacity(out.len());
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut dedup_counter = 0u64;
+            for line in out.lines() {
+                if line.starts_with("define ") || line.starts_with("}") {
+                    seen.clear(); // reset per function
+                }
+                // Only rename DEFINITIONS: lines like "  %t{N} = ..."
+                if let Some(eq_pos) = line.find(" =") {
+                    let lhs = line[..eq_pos].trim().to_string();
+                    if lhs.starts_with("%t") && lhs[2..].chars().all(|c| c.is_ascii_digit()) {
+                        if seen.contains(&lhs) {
+                            // Duplicate definition — rename with a unique suffix
+                            let new_lhs = format!("%tddup{}", dedup_counter);
+                            dedup_counter += 1;
+                            let deduped_line = line.replacen(&lhs, &new_lhs, 1);
+                            deduped.push_str(&deduped_line);
+                            deduped.push('\n');
+                        } else {
+                            seen.insert(lhs);
+                            deduped.push_str(line);
+                            deduped.push('\n');
+                        }
+                    } else {
+                        deduped.push_str(line);
+                        deduped.push('\n');
+                    }
+                } else {
+                    deduped.push_str(line);
+                    deduped.push('\n');
+                }
+            }
+            out = deduped;
         }
 
         out
