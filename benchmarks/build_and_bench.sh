@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
     struct timespec start, end;
     clock_gettime(CLOCK_MONOTONIC, &start);
     pid_t pid = fork();
-    if (pid == 0) { execvp(argv[1], &argv[1]); _exit(127); }
+    if (pid == 0) { freopen("/dev/null", "w", stdout); execvp(argv[1], &argv[1]); _exit(127); }
     int status; waitpid(pid, &status, 0);
     clock_gettime(CLOCK_MONOTONIC, &end);
     double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;

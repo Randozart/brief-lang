@@ -490,6 +490,21 @@ proper top-level items.
 
 ---
 
+## Officina Source Fixes (2026-06-28)
+
+### Bug 6: Missing `Option` import
+
+Added `import "std/option";` to `rules.bv`, `understand.bv`, and `prompt.bv`.
+Also copied `lib/std/option.bv` to the officina-cli project's `lib/std/` directory
+and fixed wrong `uni` syntax (`=` → `->`).
+
+### Bug 7: `split` name shadow
+
+Renamed local `split(input)` to `words(input)` in `understand.bv`. Updated all
+call sites (`tokenize` and pattern matching).
+
+---
+
 ## `%t{N}` Duplicate Register Bug
 
 ### Symptoms
