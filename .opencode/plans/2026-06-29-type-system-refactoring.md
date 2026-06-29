@@ -558,3 +558,298 @@ type properties come from the universe. No behavioral change.
    that doesn't support `bf16_add#` with no inop fallback.
 6. No intrinsic/op mapping ever silently falls back to `i64` opaque
    behavior — it either resolves or errors.
+
+---
+
+## 9. The Clean Backend Vision: Single Match Arm
+
+The refactored backend has exactly **one** type match arm — `Type::universe_key()` —
+that maps `Type` enum variants to canonical string names for universe lookup.
+After this, every backend decision is a universe query, not a match arm:
+
+```rust
+impl Type {
+    /// Canonical name for universe lookup. This is the ONLY place
+    /// in the codebase where the Type enum is matched for backend
+    /// representation decisions.
+    pub fn universe_key(&self) -> &str {
+        match self {
+            Type::Int => "Int",
+            Type::Bool => "Bool",
+            Type::Float => "Float",
+            Type::Float64 => "Float64",
+            Type::Int8 => "Int8",
+            Type::UInt8 => "UInt8",
+            Type::Int16 => "Int16",
+            Type::UInt16 => "UInt16",
+            Type::Int32 => "Int32",
+            Type::UInt32 => "UInt32",
+            Type::Char => "Char",
+            Type::String => "String",
+            Type::Data => "Data",
+            Type::Void => "Void",
+            Type::Custom(name) => name.as_str(),
+            Type::Enum(name) => name.as_str(),
+            Type::Sig(name) => name.as_str(),
+            _ => "Int",  // safe fallback — already i64
+        }
+    }
+}
+```
+
+Every backend function becomes a trivial universe query:
+
+```rust
+// BEFORE: 7 scattered match arms, 50+ lines
+fn llvm_type(&self, ty: &Type) -> &str { match ty { ... } }
+fn tbaa_node(ty_str: &str) -> i32 { match ty_str { ... } }
+fn byte_size(&self, ty: &Type) -> u64 { ... }
+
+// AFTER: zero match arms, all from universe
+fn llvm_type(&self, ty: &Type) -> &str {
+    &self.universe.get(ty.universe_key()).llvm_type
+}
+fn byte_size(&self, ty: &Type) -> u64 {
+    self.universe.get(ty.universe_key()).bytes
+}
+fn storage_kind(&self, ty: &Type) -> StorageKind {
+    self.universe.get(ty.universe_key()).storage
+}
+```
+
+### Performance: Compile-Time
+
+`Type::universe_key()` compiles to an LLVM jump table — identical cost to the
+current 7 scattered match arms. The universe lookup (HashMap<String, ResolvedType>)
+is ~10-20ns. For benchmarks, this is noise. If profiling ever shows it matters,
+introduce `TypeKey` — an integer index into a `Vec<ResolvedType>`:
+
+```rust
+#[derive(Copy, Clone)]
+pub struct TypeKey(pub usize);
+
+impl Type {
+    pub fn universe_key(&self) -> TypeKey {
+        match self {
+            Type::Int => TypeKey(0),   // O(1) jump table
+            Type::Float => TypeKey(8), // Vec index — no hashing
+            Type::Custom(name) => TypeKey::resolve(name), // HashMap for custom
+            _ => TypeKey(0),
+        }
+    }
+}
+
+impl TypeUniverse {
+    /// O(1) flat array lookup — zero hashing overhead
+    pub fn lookup(&self, key: TypeKey) -> &ResolvedType {
+        &self.types[key.0]
+    }
+}
+```
+
+### Performance: Runtime (Compiled Brief Programs)
+
+The universe approach produces **byte-for-byte identical** machine code for
+built-in types. The `fadd` instruction emitted for `Float + Float` is the
+same `fadd` whether the backend got `"float"` from a match arm or a
+universe query.
+
+**Why they're identical:** The universe doesn't change WHAT IR gets emitted.
+It changes WHERE the backend LOOKS to decide what to emit. The decision
+output is the same. The binary has no trace of the decision path.
+
+**User-defined types** get the same optimization treatment as built-in
+types when they use the same intrinsics:
+
+```brief
+type MyFloat <: Float {}               // inherits — identical codegen
+type MyFloat <: Bits { Add = fadd#; }  // same intrinsic — same IR
+```
+
+A user-defined type is only slower when the type author makes an explicit
+choice that trades performance for semantics:
+
+```brief
+type SaturatingU8 <: Bits {
+    Add = llvm.uadd.sat.i8#;  // saturating add: different intrinsic, ~1 extra instr
+}
+type BFloat16 <: Bits {
+    Add = inop! { /* software */ };  // software fallback: slower by design
+}
+```
+
+These aren't limitations of the universe. They're the type author making
+explicit trade-offs that the current system hides as opaque magic.
+
+---
+
+## 10. Dynamic TBAA Tree Generation
+
+Today's `tbaa_node()` maps LLVM type STRINGS to hardcoded integer indices:
+
+```rust
+fn tbaa_node(ty_str: &str) -> i32 {
+    match ty_str {
+        "i64" => 1, "i8" => 2, "i32" => 3,
+        "i8*" | "ptr" => 4, "float" | "double" => 5,
+        _ => 1,
+    }
+}
+```
+
+This is fragile — it matches on LLVM type strings, not Brief types. A
+`Custom("MyStruct")` type whose underlying LLVM type is `"float"` gets
+TBAA node 1 (Int) instead of 5 (Float).
+
+**After refactoring:** Store the TBAA GROUP NAME in the universe, generate
+metadata indices dynamically at module emission time:
+
+```rust
+pub struct ResolvedType {
+    // ...
+    pub tbaa_group: String,  // "Int", "Float", "Bool", "Char", "String"
+}
+```
+
+At module emission, a pass collects all unique `tbaa_group` values from
+types referenced in the current compilation unit and generates:
+
+```llvm
+!0 = !{!"Brief"}            ; root
+!1 = !{!"Int", !0}          ; all boxed integers
+!2 = !{!"Float", !0}        ; all float types (Float, Float64, user float types)
+!3 = !{!"Bool", !0}
+!4 = !{!"Char", !0}
+!5 = !{!"String", !0}
+```
+
+A user-defined type declaring `TBAA = Float` automatically gets TBAA node
+`!2` — no new match arm, no code change. LLVM's alias analyzer sees it
+as "same as Float" and optimizes accordingly.
+
+---
+
+## 11. Risk Analysis & Edge Cases
+
+### R1. Cross-Type Composition Coercion Gap
+
+When composing `Float + Int`, the naive engine does:
+`result = Unbox(rhs) → FAdd(self, tmp)`
+
+But `Unbox(Int)` emits `i64` and `FAdd32` expects `float` (f32). Passing
+`i64` to `fadd` triggers an LLVM verifier error.
+
+**Solution:** The composition engine must resolve a **coercion path**.
+Each type declares `Coercion(to_type) → intrinsic`:
+
+```rust
+pub struct ConversionPath {
+    pub source_ty: TypeKey,
+    pub target_ty: TypeKey,
+    pub conversion_op: Intrinsic, // e.g., SIToFP, FPExt, FPTrunc
+}
+```
+
+The composition engine queries: given `TypeA + TypeB`, where `TypeA.op(Add)`
+expects parameter type `Param`, does `TypeB.unbox() → Param` exist? If not,
+query for `ConversionPath(TypeB, Param)`.
+
+For `Float + Int`: `Unbox(Int) → i64`, `Convert(i64 → f32) = SIToFP`,
+`FAdd(self, converted)`.
+
+This is automatically derivable for all built-in type pairs — no user
+declaration needed. User-defined types can override or add conversion paths.
+
+### R2. Opaque Pointers (LLVM 15+)
+
+LLVM 15+ uses opaque `ptr` instead of typed `i8*`, `i64*`. If the universe
+stores `llvm_type = "ptr"`, the backend loses context for GEP calculations
+and aggregate access.
+
+**Solution:** Add an `IndirectionKind` property:
+
+```rust
+pub enum IndirectionKind {
+    Scalar,   // points to a scalar value (e.g., i8*)
+    Struct,   // points to a struct with named fields
+    Array,    // points to a homogenous array
+    Opaque,   // opaque pointer — no structure known
+}
+```
+
+The backend checks this property to decide whether GEP requires field
+offsets or array index calculations.
+
+### R3. `TypeKey` for Hot-Path Performance
+
+`HashMap<String, ResolvedType>` lookups add hashing overhead in hot codegen
+paths. For deeply nested expressions (e.g., `a + b * c - d / e`), each
+type lookup adds ~20ns.
+
+**Solution:** Use `TypeKey` (integer index) instead of `String` keys for
+all hot paths. Maintain a `HashMap<String, TypeKey>` for name→index
+resolution; codegen uses `TypeKey` exclusively.
+
+```rust
+impl TypeUniverse {
+    pub fn get_by_key(&self, key: TypeKey) -> &ResolvedType {
+        &self.types[key.0]  // O(1), no hashing, no branching
+    }
+}
+```
+
+### R4. Embedded Mode Allocation Strategy
+
+If a type declares `OnExit = __rust_vec_drop#;` (heap deallocation), but the
+target is embedded (freestanding, no heap), compilation should fail.
+
+**Solution:** Add `AllocationStrategy` property:
+
+```rust
+pub enum AllocationStrategy {
+    Stack,  // stack-allocated, no destructor
+    Static, // statically allocated, no destructor
+    Heap,   // heap-allocated, requires free/drop
+}
+```
+
+The backend validation pass checks: if `target.freestanding == true` and
+any type in the universe has `AllocationStrategy::Heap`, emit a compile error.
+
+### R5. Compile-Time Validation (Safety)
+
+The contract system (`[pre][post]`) constrains intrinsic behavior.
+Operator→intrinsic mappings specify implementation. They're orthogonal:
+
+- `Float.Add` uses `fadd#` intrinsic.
+- Contract: `[pre: true][post: result == x + y]`.
+- The contract checker verifies the intrinsic satisfies the contract.
+- The backend emits the intrinsic call.
+- If the intrinsic doesn't exist on the target, compilation fails.
+
+No unsafe path exists — every operator maps to a validated intrinsic,
+every intrinsic is checked against the target backend before emission.
+
+---
+
+## 12. Refined Implementation Path
+
+### Phase A: Backend Internal Refactoring (3-4 weeks)
+
+| Week | Task | Verification |
+|------|------|-------------|
+| 1 | Add `Type::universe_key()`, populate built-in types | `cargo test --lib` |
+| 2 | Replace `llvm_type()`, `tbaa_node()`, `byte_size()` | Generated IR diff |
+| 3 | Replace `adapt_to_i64()`, `ensure_float_reg()`, `TypeConverter` | Generated IR diff |
+| 4 | Dynamic TBAA generation, consolidate duplicates, remove dead code | `cargo test --lib` |
+
+### Phase B: User-Facing Operator System (4-6 weeks)
+
+| Week | Task | Verification |
+|------|------|-------------|
+| 1 | Add operator syntax to parser | Parse test cases |
+| 2 | Add operator→intrinsic resolution to universe builder | `cargo test --lib` |
+| 3 | Build cross-type composition engine with coercion paths | Cross-type test cases |
+| 4 | Build backend validation pass (intrinsic support checking) | Error message tests |
+| 5 | Build `TypeKey` optimization for hot paths | Benchmark no regression |
+| 6 | Migrate built-in types to explicit universe declarations | Full test suite |
