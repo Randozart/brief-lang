@@ -6102,8 +6102,11 @@ impl LlvmBackend {
             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, reg, gep).ok();
         }
 
-        let struct_ptr_name = format!("%t{}", self.fun.txn_counter - 1);
-        TypedRegister { name: struct_ptr_name, ty: Type::Custom(target_name.clone()) }
+        // 2026-06-29: FIXED — return struct_ptr (base of allocated struct) instead of
+        // struct_ptr_name (which was computed as txn_counter-1 after the loop, pointing
+        // to the LAST field's GEP register). The old code returned a pointer to the last
+        // field instead of the struct base, causing memory corruption in FFI consumers.
+        TypedRegister { name: struct_ptr, ty: Type::Custom(target_name.clone()) }
     }
 
     /// Emit a direct projection on a value without going through the meld route check.

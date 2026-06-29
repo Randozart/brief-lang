@@ -1092,9 +1092,28 @@ pub fn compile_to_spirv(ir: &str) -> Result<Vec<u8>, String> {
     use std::io::Write;
     use std::process::Command;
 
+    // 2026-06-29: FIXED TOCTOU race — use unique filenames with process + thread ID.
+    // The old code used fixed paths "brief_kernel.ll"/"brief_kernel.spv" which caused
+    // file corruption under parallel builds (cargo test --lib -- --test-threads=N).
+    // Each compiler invocation now gets a unique filename.
     let tmp_dir = std::env::temp_dir();
-    let ir_path = tmp_dir.join("brief_kernel.ll");
-    let spv_path = tmp_dir.join("brief_kernel.spv");
+    let unique_id = format!(
+        "brief_kernel_{}_{}",
+        std::process::id(),
+        // Thread ID — use an atomic counter as fallback when thread::id().as_u64() is unstable
+        {
+            #[cfg(feature = "nightly")]
+            { std::thread::current().id().as_u64() }
+            #[cfg(not(feature = "nightly"))]
+            { 0u64 }
+        }
+    );
+    // Add a monotonic counter as extra uniqueness guarantee even within a single thread
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static KERNEL_COUNTER: AtomicU64 = AtomicU64::new(0);
+    let seq = KERNEL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let ir_path = tmp_dir.join(format!("{}_{}.ll", unique_id, seq));
+    let spv_path = tmp_dir.join(format!("{}_{}.spv", unique_id, seq));
 
     let mut file = std::fs::File::create(&ir_path)
         .map_err(|e| format!("Failed to create temp IR file: {}", e))?;

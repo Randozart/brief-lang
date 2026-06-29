@@ -503,7 +503,7 @@ pub(super) fn tbaa_node(ty_str: &str) -> i32 {
         "i8"  => 2,  // Bool
         "i32" => 3,  // Char
         "i8*" | "ptr" => 4,  // String / Data
-        "float" => 5, // Float
+        "float" | "double" => 5, // Float / Float64
         _ => 1,  // fallback: Int
     }
 }
