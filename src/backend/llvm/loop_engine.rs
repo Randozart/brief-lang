@@ -389,7 +389,8 @@ impl LlvmBackend {
             self.txn_counter += 1;
             let tn = crate::backend::llvm::tbaa_node(ty_str);
             writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", old_reg, ty_str, ty_str, gep, self.align_of(ty_str), tn).ok();
-            if ty_str == "float" {
+            // 2026-06-29: Track both "float" (Float) and "double" (Float64) as float regs
+            if ty_str == "float" || ty_str == "double" {
                 self.ssa_old_float_regs.insert(field_name.clone(), old_reg);
             } else {
                 self.ssa_old_int_regs.insert(field_name.clone(), old_reg);

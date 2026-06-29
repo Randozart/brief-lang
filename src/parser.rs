@@ -7522,6 +7522,16 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
                 self.advance();
                 Ok(Expr::Literal(Box::new(LiteralExpr::Float(val))))
             }
+            Some(Ok(Token::IntegerI8(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Int8)) }
+            Some(Ok(Token::IntegerI16(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Int16)) }
+            Some(Ok(Token::IntegerI32(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Int32)) }
+            Some(Ok(Token::IntegerI64(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Int)) }
+            Some(Ok(Token::IntegerU8(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::UInt8)) }
+            Some(Ok(Token::IntegerU16(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::UInt16)) }
+            Some(Ok(Token::IntegerU32(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::UInt32)) }
+            Some(Ok(Token::IntegerU64(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::UInt)) }
+            Some(Ok(Token::Float32(f))) => { let f = *f; self.advance(); Ok(Expr::Literal(Box::new(LiteralExpr::Float(f)))) }
+            Some(Ok(Token::Float64(f))) => { let f = *f; self.advance(); Ok(Expr::Float64(f)) }
             Some(Ok(Token::String(val))) => {
                 let val = val.clone();
                 self.advance();

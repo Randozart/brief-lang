@@ -533,6 +533,13 @@ impl LlvmBackend {
                             // body reads see the stored float value.
                             self.ssa_old_float_regs.insert(fname.clone(), fl);
                         }
+                        "double" => {
+                            // 2026-06-29: Float64 field store — bitcast i64 back to double
+                            let fl = format!("%nffl{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, fl, val_boxed).ok();
+                            writeln!(out, "{}store{} double {}, double* {}, align {}, !tbaa !{}", indent, vol_str, fl, p, self.align_of(&ty), tn).ok();
+                            self.ssa_old_float_regs.insert(fname.clone(), fl);
+                        }
                         s if s == "i8*" || s == "ptr" => {
                             let fp = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, fp, val_boxed).ok();
@@ -553,9 +560,9 @@ impl LlvmBackend {
                     // per-field phi path, ssa_old_int_regs starts with phi regs
                     // (pre-tick values). Without this update, a guard after a
                     // field write reads the pre-write value (ring_buffer bug).
-                    // Note: float case updates ssa_old_float_regs inside its
-                    // match arm above (fl is local to that arm).
-                    if ty != "float" && ty != "i8*" && ty != "ptr" {
+                    // Note: float and double cases update ssa_old_float_regs inside their
+                    // match arms above (fl is local to those arms).
+                    if ty != "float" && ty != "double" && ty != "i8*" && ty != "ptr" {
                         self.ssa_old_int_regs.insert(fname.clone(), val_boxed.clone());
                     } else if ty == "i8*" || ty == "ptr" {
                         self.ssa_old_int_regs.insert(fname.clone(), val_boxed.clone());

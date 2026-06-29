@@ -2052,7 +2052,15 @@ impl TypeChecker {
                     self.infer_expression(arg);
                 }
                 match intrinsic {
-                    Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil | Intrinsic::Floor => Type::Float,
+                    Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil | Intrinsic::Floor => {
+                        if args.is_empty() {
+                            Type::Float
+                        } else {
+                            let arg_ty = self.infer_expression(&args[0]);
+                            // 2026-06-29: Match input type — Float64 arg → Float64 return, Float arg → Float return
+                            if arg_ty == Type::Float64 { Type::Float64 } else { Type::Float }
+                        }
+                    }
                     Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz | Intrinsic::Abs | Intrinsic::Bitreverse => Type::Int,
                     Intrinsic::ByteCount | Intrinsic::Size | Intrinsic::Strlen => Type::Int,
                     Intrinsic::StrBytes => Type::Custom("List".to_string()),

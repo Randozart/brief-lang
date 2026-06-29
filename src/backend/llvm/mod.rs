@@ -1810,9 +1810,11 @@ impl LlvmBackend {
         let consts_snapshot: Vec<(String, (Type, Expr))> = self.constants.iter()
             .map(|(k, v)| (k.clone(), v.clone())).collect();
         for (name, (ty, expr)) in consts_snapshot {
-            if ty == Type::Float {
+            // 2026-06-29: Fold both Float and Float64 constant expressions
+            if ty == Type::Float || ty == Type::Float64 {
                 if let Some(val) = try_eval_cfloat(&expr, &self.constants) {
-                    self.constants.insert(name, (Type::Float, Expr::Float(val)));
+                    let new_expr = if ty == Type::Float64 { Expr::Float64(val) } else { Expr::Float(val) };
+                    self.constants.insert(name, (ty.clone(), new_expr));
                 }
             }
         }
@@ -2091,6 +2093,14 @@ self.emit_declares(&mut out);
             writeln!(out, "}}>, align 8").ok();
         }
         if !self.string_constants.is_empty() { writeln!(out).ok(); }
+
+        // 2026-06-29: Global sentinel for all empty list literals `[]`.
+        // LLVM eliminates stack-allocated empty lists (dead alloca elimination)
+        // because ptrtoint/inttoptr round-trip is invisible to SROA. A single
+        // rodata constant { data_ptr=0, length=0 } handles all [] instances
+        // with zero runtime cost and zero allocation. See docs/plans/2026-06-29-list-allocation-fix.md.
+        writeln!(out, "@ll_empty_list = private unnamed_addr constant {{ i64, i64 }} {{ i64 0, i64 0 }}").ok();
+        writeln!(out).ok();
 
         // Run SLP hazard analysis before emitting function definitions and attributes.
         // This populates slp_hazard_fns so that slp_attr() returns the correct attribute

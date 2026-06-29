@@ -110,9 +110,16 @@ impl LlvmBackend {
                 }
                 // SSA body mode: prefer pre-extracted old-value register
                 // for float fields so all body ops are independent.
+                // 2026-06-29: Check field type to return Float (float) or Float64 (double).
                 if let Some(old_reg) = self.ssa_old_float_regs.get(name) {
                     self.reg_float_cache.insert(old_reg.clone(), old_reg.clone());
-                    return TypedRegister { name: old_reg.clone(), ty: Type::Float };
+                    let brief_ty = if let Some(&idx) = self.field_index_map.get(name) {
+                        let ft = &self.field_types[idx];
+                        if ft == "double" { Type::Float64 } else { Type::Float }
+                    } else {
+                        Type::Float
+                    };
+                    return TypedRegister { name: old_reg.clone(), ty: brief_ty };
                 }
                 if let Some(ref ssa_reg) = self.ssa_state_reg.clone() {
                 if let Some(&addr) = self.mmio_fields.get(name) {
@@ -178,6 +185,10 @@ impl LlvmBackend {
                     if let Some(ty) = self.let_binding_types.get(name) {
                         if *ty == Type::Float {
                             return TypedRegister { name: reg.clone(), ty: Type::Float };
+                        }
+                        // 2026-06-29: Float64 let-binding — return native double register
+                        if *ty == Type::Float64 {
+                            return TypedRegister { name: reg.clone(), ty: Type::Float64 };
                         }
                         if *ty == Type::Char {
                             // All Char registers from emit_expr are already i64.
@@ -273,6 +284,12 @@ impl LlvmBackend {
                             return TypedRegister { name: v, ty: Type::Bool };
                         }
                         _ => {
+                            // 2026-06-29: Handle Float64 constant loading (load as double, return native)
+                            if *ty == Type::Float64 {
+                                writeln!(out, "{}{} = load double, double* @{}, align 8", indent, v, name).ok();
+                                self.reg_float_cache.insert(v.clone(), v.clone());
+                                return TypedRegister { name: v.clone(), ty: Type::Float64 };
+                            }
                             let ll_ty = match ty {
                                 Type::Float => "float",
                                 Type::Int | Type::UInt => "i64",
@@ -319,6 +336,12 @@ impl LlvmBackend {
                             writeln!(out, "{}{} = load float, float* {}, align 4", indent, v, p).ok();
                             self.reg_float_cache.insert(v.clone(), v.clone());
                             return TypedRegister { name: v.clone(), ty: Type::Float };
+                        }
+                        s if s == "double" => {
+                            // 2026-06-29: Float64 field reads — load double, return Float64
+                            writeln!(out, "{}{} = load double, double* {}, align 8", indent, v, p).ok();
+                            self.reg_float_cache.insert(v.clone(), v.clone());
+                            return TypedRegister { name: v.clone(), ty: Type::Float64 };
                         }
                         s if s == "i8*" => {
                             let ld = format!("%ild{}", self.txn_counter); self.txn_counter += 1;
@@ -2713,53 +2736,75 @@ impl LlvmBackend {
             }
             // ── ListLiteral ──────────────────────────────────────
             Expr::ListLiteral(items) => {
-                let n = items.len() as i64;
-                let total = n + 2;
-                let ai = format!("%lai{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = alloca i64, i64 {}", indent, ai, total).ok();
-                let dp_ptr = format!("%ldp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, ai).ok();
-                let dp_val = format!("%ldv{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
-                let s0 = format!("%ls0{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, ai).ok();
-                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp_val, s0).ok();
-                let s1 = format!("%ls1{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, ai).ok();
-                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, s1).ok();
-                for (i, item) in items.iter().enumerate() {
-                    let iv = self.emit_expr(out, item, indent);
-                    let adapted = self.adapt_to_i64(out, indent, &iv);
-                    let ep = format!("%lep{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, ai, (i as i64) + 2).ok();
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, adapted, ep).ok();
+                if items.is_empty() {
+                    // 2026-06-29: Empty list → global rodata sentinel @ll_empty_list.
+                    // Stack alloca would be eliminated by -O2 (dead via ptrtoint round-trip),
+                    // and a global is correct for all empty lists (no per-element data to own).
+                    // See docs/plans/2026-06-29-list-allocation-fix.md.
+                    writeln!(out, "{}{} = ptrtoint {{ i64, i64 }}* @ll_empty_list to i64", indent, v).ok();
+                } else {
+                    // 2026-06-29: Non-empty list → malloc instead of alloca.
+                    // alloca creates dangling pointers when stored in %State (persists across ticks).
+                    // malloc is safe for both local (LLVM promotes to stack) and persistent (stays heap) lists.
+                    // See docs/plans/2026-06-29-list-allocation-fix.md.
+                    let n = items.len() as i64;
+                    let total = n + 2;
+                    let ai = format!("%lai{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = call i8* @malloc(i64 {})", indent, ai, total * 8).ok();
+                    let cast = format!("%lac{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, cast, ai).ok();
+                    let dp_ptr = format!("%ldp{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, cast).ok();
+                    let dp_val = format!("%ldv{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
+                    let s0 = format!("%ls0{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, cast).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp_val, s0).ok();
+                    let s1 = format!("%ls1{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, cast).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, s1).ok();
+                    for (i, item) in items.iter().enumerate() {
+                        let iv = self.emit_expr(out, item, indent);
+                        let adapted = self.adapt_to_i64(out, indent, &iv);
+                        let ep = format!("%lep{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, cast, (i as i64) + 2).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, adapted, ep).ok();
+                    }
+                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, cast).ok();
                 }
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
             }
             // ── Tuple ───────────────────────────────────────────
             Expr::Tuple(items) => {
-                let n = items.len() as i64;
-                let total = n + 2;
-                let ai = format!("%tai{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = alloca i64, i64 {}", indent, ai, total).ok();
-                let dp_ptr = format!("%tdp{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, ai).ok();
-                let dp_val = format!("%tdv{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
-                let s0 = format!("%ts0{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, ai).ok();
-                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp_val, s0).ok();
-                let s1 = format!("%ts1{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, ai).ok();
-                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, s1).ok();
-                for (i, item) in items.iter().enumerate() {
-                    let iv = self.emit_expr(out, item, indent);
-                    let adapted = self.adapt_to_i64(out, indent, &iv);
-                    let ep = format!("%tep{}", self.txn_counter); self.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, ai, (i as i64) + 2).ok();
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, adapted, ep).ok();
+                if items.is_empty() {
+                    // 2026-06-29: Empty tuple → global rodata sentinel (same format as empty list).
+                    writeln!(out, "{}{} = ptrtoint {{ i64, i64 }}* @ll_empty_list to i64", indent, v).ok();
+                } else {
+                    // 2026-06-29: Non-empty tuple → malloc instead of alloca (same rationale as lists).
+                    let n = items.len() as i64;
+                    let total = n + 2;
+                    let ai = format!("%tai{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = call i8* @malloc(i64 {})", indent, ai, total * 8).ok();
+                    let cast = format!("%tac{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, cast, ai).ok();
+                    let dp_ptr = format!("%tdp{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, cast).ok();
+                    let dp_val = format!("%tdv{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
+                    let s0 = format!("%ts0{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, cast).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp_val, s0).ok();
+                    let s1 = format!("%ts1{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, cast).ok();
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, s1).ok();
+                    for (i, item) in items.iter().enumerate() {
+                        let iv = self.emit_expr(out, item, indent);
+                        let adapted = self.adapt_to_i64(out, indent, &iv);
+                        let ep = format!("%tep{}", self.txn_counter); self.txn_counter += 1;
+                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, cast, (i as i64) + 2).ok();
+                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, adapted, ep).ok();
+                    }
+                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, cast).ok();
                 }
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
             }
             // ── ListIndex ───────────────────────────────────────
             // 2026-06-27: propagate element type from the list's type so that

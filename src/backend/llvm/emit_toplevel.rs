@@ -1,6 +1,6 @@
 use crate::analysis::bild_asm;
 use crate::ast::{Expr, Statement, TopLevel, Type};
-use crate::backend::llvm::{float_to_llvm_hex, LlvmBackend, TypedRegister};
+use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
 use std::fmt::Write;
 
 impl LlvmBackend {
@@ -482,6 +482,13 @@ impl LlvmBackend {
                     writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
                     writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
                 }
+                // 2026-06-29: Float64 initializer in init_state — bitcast i64 hex to double
+                Some(Expr::Float64(f)) => {
+                    let h = float64_to_llvm_hex(f);
+                    let bits_reg = format!("%ip{}b", reg - 1);
+                    writeln!(out, "  {} = bitcast i64 {} to double", bits_reg, h).ok();
+                    writeln!(out, "  store double {}, double* {}, align {}", bits_reg, p, self.align_of("double")).ok();
+                }
                 Some(Expr::Neg(ref inner)) => {
                     match inner.as_ref() {
                         Expr::Float(f) => {
@@ -489,6 +496,13 @@ impl LlvmBackend {
                             let bits_reg = format!("%ip{}b", reg - 1);
                             writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
                             writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
+                        }
+                        // 2026-06-29: Negative Float64 initializer in init_state
+                        Expr::Float64(f) => {
+                            let h = float64_to_llvm_hex(-*f);
+                            let bits_reg = format!("%ip{}b", reg - 1);
+                            writeln!(out, "  {} = bitcast i64 {} to double", bits_reg, h).ok();
+                            writeln!(out, "  store double {}, double* {}, align {}", bits_reg, p, self.align_of("double")).ok();
                         }
                         Expr::Literal(lit) => {
                             if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
@@ -561,6 +575,12 @@ impl LlvmBackend {
                         "float" => {
                             let fl = self.native_float_or_box(out, "  ", &val_reg.to_string());
                             writeln!(out, "  store float {}, float* {}, align {}", fl, p, self.align_of("float")).ok();
+                        }
+                        // 2026-06-29: Float64 init store — bitcast i64 back to double
+                        "double" => {
+                            let fl = format!("%ip{}d", reg); reg += 1;
+                            writeln!(out, "  {} = bitcast i64 {} to double", fl, boxed).ok();
+                            writeln!(out, "  store double {}, double* {}, align {}", fl, p, self.align_of("double")).ok();
                         }
                         "i8*" => {
                             let t = format!("%ip{}t", reg); reg += 1;
@@ -637,6 +657,13 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
                     writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
                 }
+                // 2026-06-29: Float64 initializer — bitcast i64 hex directly to double
+                Some(Expr::Float64(f)) => {
+                    let h = float64_to_llvm_hex(f);
+                    let bits_reg = format!("%ip_{}b", idx);
+                    writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
+                    writeln!(out, "{}store double {}, double* {}, align {}", indent, bits_reg, p, self.align_of("double")).ok();
+                }
                 Some(Expr::Neg(ref inner)) => {
                     match inner.as_ref() {
                         Expr::Float(f) => {
@@ -644,6 +671,13 @@ impl LlvmBackend {
                             let bits_reg = format!("%ip_{}b", idx);
                             writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
                             writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
+                        }
+                        // 2026-06-29: Negative Float64 initializer
+                        Expr::Float64(f) => {
+                            let h = float64_to_llvm_hex(-*f);
+                            let bits_reg = format!("%ip_{}b", idx);
+                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
+                            writeln!(out, "{}store double {}, double* {}, align {}", indent, bits_reg, p, self.align_of("double")).ok();
                         }
                         Expr::Literal(lit) => {
                             if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
@@ -735,6 +769,12 @@ impl LlvmBackend {
                         "float" => {
                             let fl = self.native_float_or_box(out, indent, &val_reg.to_string());
                             writeln!(out, "{}store float {}, float* {}, align {}", indent, fl, p, self.align_of("float")).ok();
+                        }
+                        "double" => {
+                            // 2026-06-29: Float64 init store — bitcast i64 back to double
+                            let fl = format!("%ip_{}d", idx);
+                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, fl, boxed).ok();
+                            writeln!(out, "{}store double {}, double* {}, align {}", indent, fl, p, self.align_of("double")).ok();
                         }
                         "i8*" => {
                             let t = format!("%ip_{}t", idx);
