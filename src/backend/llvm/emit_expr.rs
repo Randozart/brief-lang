@@ -44,9 +44,51 @@ impl LlvmBackend {
             Expr::String(_) | Expr::RegexLiteral(_) => return crate::backend::llvm::expr::literal::emit_string(self, out, &v, &expr, indent),
             Expr::Char(_) => return crate::backend::llvm::expr::literal::emit_char(self, out, &v, &expr, indent),
             Expr::Term => return crate::backend::llvm::expr::literal::emit_term(self, out, &v, indent),
+            // 2026-06-29: Arithmetic and bitwise expressions dispatched to expr::math
             Expr::BinaryOp(bop) => return bop.emit_llvm(self, out, &ExprDispatch),
             Expr::UnaryOp(uop) => return uop.emit_llvm(self, out, &ExprDispatch),
             Expr::Literal(lit) => return lit.emit_llvm(self, out, &ExprDispatch),
+            Expr::Add(_, _) => return crate::backend::llvm::expr::math::emit_add(self, out, &v, &expr, indent),
+            Expr::Sub(_, _) => return crate::backend::llvm::expr::math::emit_sub(self, out, &v, &expr, indent),
+            Expr::Mul(_, _) => return crate::backend::llvm::expr::math::emit_mul(self, out, &v, &expr, indent),
+            Expr::Div(_, _) => return crate::backend::llvm::expr::math::emit_div(self, out, &v, &expr, indent),
+            Expr::Mod(_, _) => return crate::backend::llvm::expr::math::emit_mod(self, out, &v, &expr, indent),
+            Expr::Neg(_) => return crate::backend::llvm::expr::math::emit_neg(self, out, &v, &expr, indent),
+            Expr::BitAnd(_, _) => return crate::backend::llvm::expr::math::emit_bitand(self, out, &v, &expr, indent),
+            Expr::BitOr(_, _) => return crate::backend::llvm::expr::math::emit_bitor(self, out, &v, &expr, indent),
+            Expr::BitXor(_, _) => return crate::backend::llvm::expr::math::emit_bitxor(self, out, &v, &expr, indent),
+            Expr::BitNot(_) => return crate::backend::llvm::expr::math::emit_bitnot(self, out, &v, &expr, indent),
+            Expr::Shl(_, _) => return crate::backend::llvm::expr::math::emit_shl(self, out, &v, &expr, indent),
+            Expr::Shr(_, _) => return crate::backend::llvm::expr::math::emit_shr(self, out, &v, &expr, indent),
+            // Comparisons & logical ops (still inline, no submodule yet)
+            Expr::Eq(l, r) => { return self.emit_fcmp(out, indent, l, r, "oeq"); }
+            Expr::Ne(l, r) => { return self.emit_fcmp(out, indent, l, r, "one"); }
+            Expr::Lt(l, r) => { return self.emit_fcmp(out, indent, l, r, "olt"); }
+            Expr::Le(l, r) => { return self.emit_fcmp(out, indent, l, r, "ole"); }
+            Expr::Gt(l, r) => { return self.emit_fcmp(out, indent, l, r, "ogt"); }
+            Expr::Ge(l, r) => { return self.emit_fcmp(out, indent, l, r, "oge"); }
+            Expr::And(l, r) => {
+                let a = self.emit_expr(out, l, indent);
+                let b = self.emit_expr(out, r, indent);
+                let an = self.as_bool_reg(out, indent, &a);
+                let bn = self.as_bool_reg(out, indent, &b);
+                writeln!(out, "{}{} = and i1 {}, {}", indent, v, an, bn).ok();
+                return TypedRegister { name: v, ty: Type::Bool };
+            }
+            Expr::Or(l, r) => {
+                let a = self.emit_expr(out, l, indent);
+                let b = self.emit_expr(out, r, indent);
+                let an = self.as_bool_reg(out, indent, &a);
+                let bn = self.as_bool_reg(out, indent, &b);
+                writeln!(out, "{}{} = or i1 {}, {}", indent, v, an, bn).ok();
+                return TypedRegister { name: v, ty: Type::Bool };
+            }
+            Expr::Not(e) => {
+                let inner = self.emit_expr(out, e, indent);
+                let name = self.as_bool_reg(out, indent, &inner);
+                writeln!(out, "{}{} = xor i1 {}, true", indent, v, name).ok();
+                return TypedRegister { name: v, ty: Type::Bool };
+            }
             Expr::Identifier(name) => {
                 // SSA body mode: prefer pre-extracted old-value register
                 // for int fields so all body ops are independent.
@@ -369,74 +411,7 @@ impl LlvmBackend {
                 }
                 panic!("emit_expr: PriorState field '{}' not found in field_index_map", name);
             }
-            // Binary ops
-            Expr::Add(l, r) => {
-                // 2026-06-17: String + String → inline concat. Both typed as
-                // Type::Int (boxed), so check the AST recursively.
-                if self.is_string_chain(l) || self.is_string_chain(r) {
-                    let a = self.emit_expr(out, l, indent);
-                    let b = self.emit_expr(out, r, indent);
-                    return self.emit_inline_concat(out, indent, &a, &b);
-                }
-                return self.emit_binop(out, indent, l, r, "add", "fadd");
-            }
-            Expr::Sub(l, r) => { return self.emit_binop(out, indent, l, r, "sub", "fsub"); }
-            Expr::Mul(l, r) => { return self.emit_binop(out, indent, l, r, "mul", "fmul"); }
-            Expr::Div(l, r) => { return self.emit_binop(out, indent, l, r, "sdiv", "fdiv"); }
-            Expr::Mod(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = srem i64 {}, {}", indent, v, a, b).ok(); }
-            // Comparisons
-            Expr::Eq(l, r) => { return self.emit_fcmp(out, indent, l, r, "oeq"); }
-            Expr::Ne(l, r) => { return self.emit_fcmp(out, indent, l, r, "one"); }
-            Expr::Lt(l, r) => { return self.emit_fcmp(out, indent, l, r, "olt"); }
-            Expr::Le(l, r) => { return self.emit_fcmp(out, indent, l, r, "ole"); }
-            Expr::Gt(l, r) => { return self.emit_fcmp(out, indent, l, r, "ogt"); }
-            Expr::Ge(l, r) => { return self.emit_fcmp(out, indent, l, r, "oge"); }
-            // Logical
-            Expr::And(l, r) => {
-                let a = self.emit_expr(out, l, indent);
-                let b = self.emit_expr(out, r, indent);
-                let an = self.as_bool_reg(out, indent, &a);
-                let bn = self.as_bool_reg(out, indent, &b);
-                writeln!(out, "{}{} = and i1 {}, {}", indent, v, an, bn).ok();
-                return TypedRegister { name: v, ty: Type::Bool };
-            }
-            Expr::Or(l, r) => {
-                let a = self.emit_expr(out, l, indent);
-                let b = self.emit_expr(out, r, indent);
-                let an = self.as_bool_reg(out, indent, &a);
-                let bn = self.as_bool_reg(out, indent, &b);
-                writeln!(out, "{}{} = or i1 {}, {}", indent, v, an, bn).ok();
-                return TypedRegister { name: v, ty: Type::Bool };
-            }
-            Expr::Not(e) => {
-                let inner = self.emit_expr(out, e, indent);
-                let name = self.as_bool_reg(out, indent, &inner);
-                writeln!(out, "{}{} = xor i1 {}, true", indent, v, name).ok();
-                return TypedRegister { name: v, ty: Type::Bool };
-            }
-            Expr::Neg(e) => {
-                let inner = self.emit_expr(out, e, indent);
-                if inner.ty == Type::Float64 {
-                    let fl = self.ensure_float_reg(out, indent, &inner);
-                    writeln!(out, "{}{} = fsub fast double -0.0, {}", indent, v, fl).ok();
-                    return TypedRegister { name: v, ty: Type::Float64 };
-                } else if inner.ty == Type::Float {
-                    let fl = self.ensure_float_reg(out, indent, &inner);
-                    writeln!(out, "{}{} = fsub fast float -0.0, {}", indent, v, fl).ok();
-                    self.fun.reg_float_cache.insert(v.clone(), v.clone());
-                    return TypedRegister { name: v, ty: Type::Float };
-                } else {
-                    writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner.name).ok();
-                    return TypedRegister { name: v, ty: Type::Int };
-                }
-            }
-            // Bitwise
-            Expr::BitAnd(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = and i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::BitOr(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = or i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::BitXor(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = xor i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::BitNot(e) => { let inner = self.emit_expr(out, e, indent); writeln!(out, "{}{} = xor i64 {}, -1", indent, v, inner).ok(); }
-            Expr::Shl(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = shl i64 {}, {}", indent, v, a, b).ok(); }
-            Expr::Shr(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); writeln!(out, "{}{} = lshr i64 {}, {}", indent, v, a, b).ok(); }
+            // 2026-06-29: Arithmetic/comparison/logical/bitwise dispatched to expr submodules
             Expr::Concat(l, r) => { let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent)); return self.emit_inline_concat(out, indent, &a, &b); }
             // Call
             Expr::Call(name, args) => {

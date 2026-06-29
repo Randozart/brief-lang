@@ -5,7 +5,7 @@
 //
 // Migration status:
 //   literal.rs   — DONE (integers, floats, bools, strings, char, term)
-//   math.rs      — TODO
+//   math.rs      — DONE (add, sub, mul, div, mod, neg, bitwise ops)
 //   compare.rs   — TODO
 //   collections.rs — TODO
 //   field.rs     — TODO
@@ -16,3 +16,4 @@
 //   misc.rs      — TODO
 
 pub mod literal;
+pub mod math;
