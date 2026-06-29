@@ -820,7 +820,15 @@ impl LlvmBackend {
                     list: list.clone(),
                     body: body.clone(),
                     modifiers: modifiers.clone(),
-                }.emit_llvm(self, out, &StmtDispatch, indent);
+                }.emit_llvm(self, out, &mut {
+                    crate::backend::llvm::LLVMBuilder::new()
+                }, &StmtDispatch, indent, &mut |_backend: &mut crate::backend::llvm::LlvmBackend,
+                                                      _out: &mut String,
+                                                      _builder: &mut crate::backend::llvm::LLVMBuilder,
+                                                      _expr: &crate::ast::Expr,
+                                                      _indent: &str| {
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Int }
+                });
             }
             Statement::Oracle { body, handler, .. } => {
                 for s in body {

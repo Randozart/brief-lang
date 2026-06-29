@@ -91,13 +91,22 @@ pub trait ExprCodegenLLVM {
 }
 
 /// LLVM Codegen — statement features.
+/// 2026-06-29: Added builder + emit_expr parameters (Phase 4b).
 pub trait StmtCodegenLLVM {
     fn emit_llvm(
         &self,
         ctx: &mut crate::backend::llvm::LlvmBackend,
         out: &mut String,
+        builder: &mut crate::backend::llvm::LLVMBuilder,
         dispatch: &StmtDispatch,
         indent: &str,
+        emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
     );
 }
 

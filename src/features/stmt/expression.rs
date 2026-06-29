@@ -15,7 +15,17 @@ impl StmtEval for ExpressionStmt {
     }
 }
 impl StmtCodegenLLVM for ExpressionStmt {
-    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &StmtDispatch, _indent: &str) {}
+    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &StmtDispatch, _indent: &str,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) {}
 }
 impl StmtCodegenWebstack for ExpressionStmt {
     fn emit_js(&self, _ctx: &mut crate::backend::webstack::WebstackGenerator, _out: &mut String, _dispatch: &StmtDispatch) {}

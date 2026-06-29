@@ -38,7 +38,17 @@ impl StmtEval for ForeachStmt {
 }
 
 impl StmtCodegenLLVM for ForeachStmt {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &StmtDispatch, indent: &str) {
+    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &StmtDispatch, indent: &str,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) {
         let list_val = ctx.emit_expr(out, &self.list, indent);
         let tc = ctx.fun.txn_counter; ctx.fun.txn_counter += 20;
         let hp = format!("%fe_hp_{}", tc);
