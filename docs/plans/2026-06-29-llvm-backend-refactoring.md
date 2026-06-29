@@ -714,3 +714,18 @@ Week 4:
 8. `docs/architecture/backend-refactor.md` exists and is accurate
 9. No TODO, todo!, unreachable!, or stubs remain
 10. Praetor complexity ≤ 15, lines ≤ 100, params ≤ 6 on all new files
+
+---
+
+### Phase 7: Type System Refactoring (Planned)
+
+See `.opencode/plans/2026-06-29-type-system-refactoring.md` for the complete
+plan to make types first-class universe citizens. Key goals:
+
+- Move ALL type→LLVM mappings from backend match arms to TypeUniverse queries
+- Add operator→intrinsic mapping to type declarations
+- Allow user-defined types from `Bits` with full optimization treatment
+- Intrinsic registry with backend support checking
+- Zero runtime cost, compile-time validation only
+
+Phase 7 begins after the current backend refactoring phases are stabilized.

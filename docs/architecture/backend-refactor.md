@@ -140,13 +140,16 @@ pub trait ExprCodegenLLVM {
 |------|---------|
 | `context.rs` | CompilerContext, FunctionContext, BlockContext, FunctionGuard |
 | `builder.rs` | LLVMBuilder, Instruction, LlvmType, TypeConverter |
-| `mod.rs` | LlvmBackend struct, generate(), shared helpers |
-| `emit_expr.rs` | Expression codegen (4,002 lines — 35% reduced) |
+| `mod.rs` | LlvmBackend struct, generate(), shared API |
+| `helpers.rs` | Shared helper functions (emit_binop, emit_fcmp, etc.) |
+| `emit_expr.rs` | **43 lines** — thin dispatcher to `expr/` submodules |
 | `expr/literal.rs` | Integer, Float, Bool, String, Char, Term |
 | `expr/math.rs` | Add, Sub, Mul, Div, Mod, Neg, bitwise ops |
 | `expr/compare.rs` | Eq, Ne, Lt, Le, Gt, Ge, And, Or, Not |
 | `expr/collections.rs` | ListLiteral, Tuple |
 | `expr/intrinsics.rs` | 200+ intrinsic variants (sqrt, sin, print, etc.) |
+| `expr/identifier.rs` | Identifier, OwnedRef, PriorState |
+| `expr/rest.rs` | All remaining handlers (Call, FieldAccess, Arrow, Match, etc.) |
 | `emit_stmt.rs` | Statement codegen |
 | `emit_toplevel.rs` | Top-level emits (header, declares, definitions) |
 | `loop_engine.rs` | 3 loop emission strategies |
