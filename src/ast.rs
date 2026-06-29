@@ -123,12 +123,19 @@ pub enum Dimension {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Int,
+    Int8,
+    Int16,
+    Int32,
     Float,
+    Float64,
     String,
     Bool,
     Data,
     Void,
     UInt,
+    UInt8,
+    UInt16,
+    UInt32,
     Char,  // Unicode codepoint type
     // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
     // are defined as regular structs/enums in stdlib, not as AST variants.
@@ -1319,7 +1326,9 @@ pub enum IsTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Integer(i64),
+    IntegerSuffixed(i64, Type),
     Float(f64),
+    Float64(f64),
     String(String),
     RegexLiteral(String), // @"..." — regex pattern literal
     Char(char),  // NEW: Char literal

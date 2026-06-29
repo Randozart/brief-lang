@@ -186,8 +186,15 @@ impl MemorySpec {
 fn format_type(ty: &Type) -> String {
     match ty {
         Type::Int => "Int".to_string(),
+        Type::Int8 => "Int8".to_string(),
+        Type::Int16 => "Int16".to_string(),
+        Type::Int32 => "Int32".to_string(),
         Type::UInt => "UInt".to_string(),
+        Type::UInt8 => "UInt8".to_string(),
+        Type::UInt16 => "UInt16".to_string(),
+        Type::UInt32 => "UInt32".to_string(),
         Type::Float => "Float".to_string(),
+        Type::Float64 => "Float64".to_string(),
         Type::Bool => "Bool".to_string(),
         Type::String => "String".to_string(),
         Type::Void => "void".to_string(),
@@ -237,7 +244,11 @@ fn format_bit_range(br: &BitRange) -> String {
 fn estimate_type_size(ty: &Type) -> usize {
     match ty {
         Type::Int | Type::UInt => 8,
+        Type::Int8 | Type::UInt8 => 1,
+        Type::Int16 | Type::UInt16 => 2,
+        Type::Int32 | Type::UInt32 => 4,
         Type::Float => 8,
+        Type::Float64 => 8,
         Type::Bool => 1,
         Type::String => 24,
         Type::Void => 0,

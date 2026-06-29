@@ -370,6 +370,19 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::TypeU32)) => { self.advance(); Ok("u32".to_string()) }
             Some(Ok(Token::TypeI64)) => { self.advance(); Ok("i64".to_string()) }
             Some(Ok(Token::TypeU64)) => { self.advance(); Ok("u64".to_string()) }
+            Some(Ok(Token::TypeInt8)) => { self.advance(); Ok("Int8".to_string()) }
+            Some(Ok(Token::TypeInt16)) => { self.advance(); Ok("Int16".to_string()) }
+            Some(Ok(Token::TypeInt32)) => { self.advance(); Ok("Int32".to_string()) }
+            Some(Ok(Token::TypeInt64)) => { self.advance(); Ok("Int64".to_string()) }
+            Some(Ok(Token::TypeUInt8)) => { self.advance(); Ok("UInt8".to_string()) }
+            Some(Ok(Token::TypeUInt16)) => { self.advance(); Ok("UInt16".to_string()) }
+            Some(Ok(Token::TypeUInt32)) => { self.advance(); Ok("UInt32".to_string()) }
+            Some(Ok(Token::TypeUInt64)) => { self.advance(); Ok("UInt64".to_string()) }
+            Some(Ok(Token::TypeFloat32)) => { self.advance(); Ok("Float32".to_string()) }
+            Some(Ok(Token::TypeF32)) => { self.advance(); Ok("F32".to_string()) }
+            Some(Ok(Token::TypeFloat64)) => { self.advance(); Ok("Float64".to_string()) }
+            Some(Ok(Token::TypeF64)) => { self.advance(); Ok("F64".to_string()) }
+            Some(Ok(Token::TypeDouble)) => { self.advance(); Ok("Double".to_string()) }
             _ => Err(SyntaxError::UnexpectedToken {
                 expected: "identifier".to_string(),
                 found: self.fmt_current_token(),
@@ -1740,14 +1753,14 @@ impl<'a> Parser<'a> {
             "void" => Ok(Type::Void),
             "Data" => Ok(Type::Data),
             // Shorthand sized types (syntactic sugar for Int/UInt @/xN)
-            "u8" => Ok(Type::Constrained(Box::new(Type::UInt), BitRange::Any(8))),
-            "i8" => Ok(Type::Constrained(Box::new(Type::Int), BitRange::Any(8))),
-            "u16" => Ok(Type::Constrained(Box::new(Type::UInt), BitRange::Any(16))),
-            "i16" => Ok(Type::Constrained(Box::new(Type::Int), BitRange::Any(16))),
-            "u32" => Ok(Type::Constrained(Box::new(Type::UInt), BitRange::Any(32))),
-            "i32" => Ok(Type::Constrained(Box::new(Type::Int), BitRange::Any(32))),
-            "u64" => Ok(Type::Constrained(Box::new(Type::UInt), BitRange::Any(64))),
-            "i64" => Ok(Type::Constrained(Box::new(Type::Int), BitRange::Any(64))),
+            "u8" => Ok(Type::UInt8),
+            "i8" => Ok(Type::Int8),
+            "u16" => Ok(Type::UInt16),
+            "i16" => Ok(Type::Int16),
+            "u32" => Ok(Type::UInt32),
+            "i32" => Ok(Type::Int32),
+            "u64" => Ok(Type::UInt),
+            "i64" => Ok(Type::Int),
             other => Ok(Type::Custom(other.to_string())),
         }
     }
@@ -1779,6 +1792,19 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::TypeI32)) => { self.advance(); Ok("i32".to_string()) }
             Some(Ok(Token::TypeU64)) => { self.advance(); Ok("u64".to_string()) }
             Some(Ok(Token::TypeI64)) => { self.advance(); Ok("i64".to_string()) }
+            Some(Ok(Token::TypeInt8)) => { self.advance(); Ok("Int8".to_string()) }
+            Some(Ok(Token::TypeInt16)) => { self.advance(); Ok("Int16".to_string()) }
+            Some(Ok(Token::TypeInt32)) => { self.advance(); Ok("Int32".to_string()) }
+            Some(Ok(Token::TypeInt64)) => { self.advance(); Ok("Int64".to_string()) }
+            Some(Ok(Token::TypeUInt8)) => { self.advance(); Ok("UInt8".to_string()) }
+            Some(Ok(Token::TypeUInt16)) => { self.advance(); Ok("UInt16".to_string()) }
+            Some(Ok(Token::TypeUInt32)) => { self.advance(); Ok("UInt32".to_string()) }
+            Some(Ok(Token::TypeUInt64)) => { self.advance(); Ok("UInt64".to_string()) }
+            Some(Ok(Token::TypeFloat32)) => { self.advance(); Ok("Float32".to_string()) }
+            Some(Ok(Token::TypeF32)) => { self.advance(); Ok("F32".to_string()) }
+            Some(Ok(Token::TypeFloat64)) => { self.advance(); Ok("Float64".to_string()) }
+            Some(Ok(Token::TypeF64)) => { self.advance(); Ok("F64".to_string()) }
+            Some(Ok(Token::TypeDouble)) => { self.advance(); Ok("Double".to_string()) }
             Some(Ok(Token::Err)) => { self.advance(); Ok("Err".to_string()) }
             _ => self.spanned_err(format!("Expected type name, found {}", self.fmt_current_token())),
         }
@@ -6329,35 +6355,75 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
             // Shorthand sized integer types (syntactic sugar for Int/UInt @/xN)
             Some(Ok(Token::TypeU8)) => {
                 self.advance();
-                Type::Constrained(Box::new(Type::UInt), BitRange::Any(8))
+                Type::UInt8
             }
             Some(Ok(Token::TypeI8)) => {
                 self.advance();
-                Type::Constrained(Box::new(Type::Int), BitRange::Any(8))
+                Type::Int8
             }
             Some(Ok(Token::TypeU16)) => {
                 self.advance();
-                Type::Constrained(Box::new(Type::UInt), BitRange::Any(16))
+                Type::UInt16
             }
             Some(Ok(Token::TypeI16)) => {
                 self.advance();
-                Type::Constrained(Box::new(Type::Int), BitRange::Any(16))
+                Type::Int16
             }
             Some(Ok(Token::TypeU32)) => {
                 self.advance();
-                Type::Constrained(Box::new(Type::UInt), BitRange::Any(32))
+                Type::UInt32
             }
             Some(Ok(Token::TypeI32)) => {
                 self.advance();
-                Type::Constrained(Box::new(Type::Int), BitRange::Any(32))
+                Type::Int32
             }
             Some(Ok(Token::TypeU64)) => {
                 self.advance();
-                Type::Constrained(Box::new(Type::UInt), BitRange::Any(64))
+                Type::UInt
             }
             Some(Ok(Token::TypeI64)) => {
                 self.advance();
-                Type::Constrained(Box::new(Type::Int), BitRange::Any(64))
+                Type::Int
+            }
+            Some(Ok(Token::TypeInt8)) | Some(Ok(Token::TypeI8)) => {
+                self.advance();
+                Type::Int8
+            }
+            Some(Ok(Token::TypeUInt8)) | Some(Ok(Token::TypeU8)) => {
+                self.advance();
+                Type::UInt8
+            }
+            Some(Ok(Token::TypeInt16)) | Some(Ok(Token::TypeI16)) => {
+                self.advance();
+                Type::Int16
+            }
+            Some(Ok(Token::TypeUInt16)) | Some(Ok(Token::TypeU16)) => {
+                self.advance();
+                Type::UInt16
+            }
+            Some(Ok(Token::TypeInt32)) | Some(Ok(Token::TypeI32)) => {
+                self.advance();
+                Type::Int32
+            }
+            Some(Ok(Token::TypeUInt32)) | Some(Ok(Token::TypeU32)) => {
+                self.advance();
+                Type::UInt32
+            }
+            Some(Ok(Token::TypeInt64)) | Some(Ok(Token::TypeI64)) => {
+                self.advance();
+                Type::Int
+            }
+            Some(Ok(Token::TypeUInt64)) | Some(Ok(Token::TypeU64)) => {
+                self.advance();
+                Type::UInt
+            }
+            Some(Ok(Token::TypeFloat32)) | Some(Ok(Token::TypeF32)) => {
+                self.advance();
+                Type::Float
+            }
+            Some(Ok(Token::TypeFloat64)) | Some(Ok(Token::TypeF64)) | Some(Ok(Token::TypeDouble)) => {
+                self.advance();
+                Type::Float64
             }
             // Note: HashMap, HashSet, StringBuilder, Stack, Queue are parsed as
             // regular identifiers (Custom/Applied types) defined in stdlib.
@@ -8115,7 +8181,17 @@ fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         // that parse_primary() does for `Ident { ... }`.
         let mut value = match self.current_token() {
             Some(Ok(Token::Integer(n))) => { let n = *n; self.advance(); Expr::Literal(Box::new(LiteralExpr::Integer(n))) }
+            Some(Ok(Token::IntegerI8(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Int8) }
+            Some(Ok(Token::IntegerI16(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Int16) }
+            Some(Ok(Token::IntegerI32(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Int32) }
+            Some(Ok(Token::IntegerI64(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Int) }
+            Some(Ok(Token::IntegerU8(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::UInt8) }
+            Some(Ok(Token::IntegerU16(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::UInt16) }
+            Some(Ok(Token::IntegerU32(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::UInt32) }
+            Some(Ok(Token::IntegerU64(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::UInt) }
             Some(Ok(Token::Float(f))) => { let f = *f; self.advance(); Expr::Literal(Box::new(LiteralExpr::Float(f))) }
+            Some(Ok(Token::Float32(f))) => { let f = *f; self.advance(); Expr::Literal(Box::new(LiteralExpr::Float(f))) }
+            Some(Ok(Token::Float64(f))) => { let f = *f; self.advance(); Expr::Float64(f) }
             Some(Ok(Token::String(s))) => { let s = s.clone(); self.advance(); Expr::Literal(Box::new(LiteralExpr::String(s))) }
             Some(Ok(Token::Char(c))) => { let c = *c; self.advance(); Expr::Literal(Box::new(LiteralExpr::Char(c))) }
             Some(Ok(Token::BoolTrue)) => { self.advance(); Expr::Literal(Box::new(LiteralExpr::Bool(true))) }
@@ -9006,7 +9082,7 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse u8 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Constrained(inner, BitRange::Any(8)) if matches!(**inner, Type::UInt)));
+            assert!(matches!(&decl.ty, Type::UInt8), "Expected UInt8, got {:?}", decl.ty);
         }
 
         // Test i16 shorthand
@@ -9015,7 +9091,7 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse i16 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Constrained(inner, BitRange::Any(16)) if matches!(**inner, Type::Int)));
+            assert!(matches!(&decl.ty, Type::Int16), "Expected Int16, got {:?}", decl.ty);
         }
 
         // Test u32 shorthand
@@ -9024,7 +9100,7 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse u32 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Constrained(inner, BitRange::Any(32)) if matches!(**inner, Type::UInt)));
+            assert!(matches!(&decl.ty, Type::UInt32), "Expected UInt32, got {:?}", decl.ty);
         }
 
         // Test i64 shorthand
@@ -9033,7 +9109,7 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse i64 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Constrained(inner, BitRange::Any(64)) if matches!(**inner, Type::Int)));
+            assert!(matches!(&decl.ty, Type::Int), "Expected Int, got {:?}", decl.ty);
         }
     }
 

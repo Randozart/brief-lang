@@ -133,7 +133,7 @@ impl SymbolicValue {
                 LiteralExpr::Term => SymbolicValue::Unknown,
             },
             Expr::Integer(n) => SymbolicValue::Concrete(*n),
-            Expr::Float(f) => SymbolicValue::ConcreteFloat(*f),
+            Expr::Float(f) | Expr::Float64(f) => SymbolicValue::ConcreteFloat(*f),
             Expr::Bool(b) => SymbolicValue::Concrete(if *b { 1 } else { 0 }),
             Expr::Identifier(name) => vars
                 .get(name)
@@ -1199,7 +1199,7 @@ fn format_expr(expr: &Expr) -> String {
     match expr {
         Expr::Literal(lit) => lit.format(),
         Expr::Integer(n) => n.to_string(),
-        Expr::Float(f) => f.to_string(),
+        Expr::Float(f) | Expr::Float64(f) => f.to_string(),
         Expr::String(s) => format!("\"{}\"", s),
         Expr::Bool(b) => b.to_string(),
         Expr::Identifier(name) => name.clone(),
@@ -2635,7 +2635,7 @@ impl ProofEngine {
             Expr::UnaryOp(uop) => {
                 self.collect_identifiers(&uop.operand, vars);
             }
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
+            Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
             | Expr::ProjectionExpr(_) | Expr::CallExpr(_) | Expr::ListLiteralExpr(_)
             | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_) | Expr::SliceExpr(_)
             | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_) | Expr::StructInstanceExpr(_)
@@ -2867,7 +2867,11 @@ impl ProofEngine {
             Type::Custom(name) => name.clone(),
             Type::Sig(name) => format!("sig {}", name),
             Type::Int => "Int".to_string(),
+            Type::Int8 => "Int8".to_string(),
+            Type::Int16 => "Int16".to_string(),
+            Type::Int32 => "Int32".to_string(),
             Type::Float => "Float".to_string(),
+            Type::Float64 => "Float64".to_string(),
             Type::String => "String".to_string(),
             Type::Bool => "Bool".to_string(),
             Type::Data => "Data".to_string(),
@@ -2907,6 +2911,9 @@ impl ProofEngine {
             }
             Type::Enum(name) => name.clone(),
             Type::UInt => "UInt".to_string(),
+            Type::UInt8 => "UInt8".to_string(),
+            Type::UInt16 => "UInt16".to_string(),
+            Type::UInt32 => "UInt32".to_string(),
             Type::Char => "Char".to_string(),
             // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
             // are regular structs/enums defined in stdlib, handled via

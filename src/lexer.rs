@@ -395,8 +395,28 @@ pub enum Token {
     #[regex(r"0x[0-9a-fA-F]+", |lex| i64::from_str_radix(&lex.slice()[2..], 16).ok())]
     #[regex(r"[0-9]+", |lex| lex.slice().parse().ok())]
     Integer(i64),
+    #[regex(r"[0-9]+i8", |lex| lex.slice().trim_end_matches("i8").parse().ok())]
+    IntegerI8(i64),
+    #[regex(r"[0-9]+i16", |lex| lex.slice().trim_end_matches("i16").parse().ok())]
+    IntegerI16(i64),
+    #[regex(r"[0-9]+i32", |lex| lex.slice().trim_end_matches("i32").parse().ok())]
+    IntegerI32(i64),
+    #[regex(r"[0-9]+i64", |lex| lex.slice().trim_end_matches("i64").parse().ok())]
+    IntegerI64(i64),
+    #[regex(r"[0-9]+u8", |lex| lex.slice().trim_end_matches("u8").parse().ok())]
+    IntegerU8(i64),
+    #[regex(r"[0-9]+u16", |lex| lex.slice().trim_end_matches("u16").parse().ok())]
+    IntegerU16(i64),
+    #[regex(r"[0-9]+u32", |lex| lex.slice().trim_end_matches("u32").parse().ok())]
+    IntegerU32(i64),
+    #[regex(r"[0-9]+u64", |lex| lex.slice().trim_end_matches("u64").parse().ok())]
+    IntegerU64(i64),
     #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().parse().ok())]
     Float(f64),
+    #[regex(r"[0-9]+\.[0-9]+f32", |lex| lex.slice().trim_end_matches("f32").parse().ok())]
+    Float32(f64),
+    #[regex(r"[0-9]+\.[0-9]+f64", |lex| lex.slice().trim_end_matches("f64").parse().ok())]
+    Float64(f64),
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
         let inner = &s[1..s.len()-1];
@@ -528,6 +548,34 @@ pub enum Token {
     #[token("u64")]
     TypeU64,
 
+    // Long-form type keyword aliases
+    #[token("Int8")]
+    TypeInt8,
+    #[token("Int16")]
+    TypeInt16,
+    #[token("Int32")]
+    TypeInt32,
+    #[token("Int64")]
+    TypeInt64,
+    #[token("UInt8")]
+    TypeUInt8,
+    #[token("UInt16")]
+    TypeUInt16,
+    #[token("UInt32")]
+    TypeUInt32,
+    #[token("UInt64")]
+    TypeUInt64,
+    #[token("Float32")]
+    TypeFloat32,
+    #[token("F32")]
+    TypeF32,
+    #[token("Float64")]
+    TypeFloat64,
+    #[token("F64")]
+    TypeF64,
+    #[token("Double")]
+    TypeDouble,
+
     // Identifiers
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Identifier(String),
@@ -653,7 +701,17 @@ impl std::fmt::Display for Token {
             Token::Ampersand => write!(f, "&"),
             Token::At => write!(f, "@"),
             Token::Integer(n) => write!(f, "{}", n),
+            Token::IntegerI8(n) => write!(f, "{}i8", n),
+            Token::IntegerI16(n) => write!(f, "{}i16", n),
+            Token::IntegerI32(n) => write!(f, "{}i32", n),
+            Token::IntegerI64(n) => write!(f, "{}i64", n),
+            Token::IntegerU8(n) => write!(f, "{}u8", n),
+            Token::IntegerU16(n) => write!(f, "{}u16", n),
+            Token::IntegerU32(n) => write!(f, "{}u32", n),
+            Token::IntegerU64(n) => write!(f, "{}u64", n),
             Token::Float(n) => write!(f, "{}", n),
+            Token::Float32(n) => write!(f, "{}f32", n),
+            Token::Float64(n) => write!(f, "{}f64", n),
             Token::String(s) => write!(f, "\"{}\"", s),
             Token::Char(c) => write!(f, "'{}'", c),
             Token::TypeInt => write!(f, "Int"),
@@ -676,6 +734,19 @@ impl std::fmt::Display for Token {
             Token::TypeU32 => write!(f, "u32"),
             Token::TypeI64 => write!(f, "i64"),
             Token::TypeU64 => write!(f, "u64"),
+            Token::TypeInt8 => write!(f, "Int8"),
+            Token::TypeInt16 => write!(f, "Int16"),
+            Token::TypeInt32 => write!(f, "Int32"),
+            Token::TypeInt64 => write!(f, "Int64"),
+            Token::TypeUInt8 => write!(f, "UInt8"),
+            Token::TypeUInt16 => write!(f, "UInt16"),
+            Token::TypeUInt32 => write!(f, "UInt32"),
+            Token::TypeUInt64 => write!(f, "UInt64"),
+            Token::TypeFloat32 => write!(f, "Float32"),
+            Token::TypeF32 => write!(f, "F32"),
+            Token::TypeFloat64 => write!(f, "Float64"),
+            Token::TypeF64 => write!(f, "F64"),
+            Token::TypeDouble => write!(f, "Double"),
             Token::Minutes => write!(f, "minutes"),
             Token::Nanoseconds => write!(f, "nanoseconds"),
             Token::TildeQuestion => write!(f, "~?"),

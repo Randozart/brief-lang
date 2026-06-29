@@ -1870,7 +1870,7 @@ impl Interpreter {
     fn rewrite_identifiers(&self, expr: &Expr, uid: usize, cell_name: &str) -> Expr {
         let prefix = |name: &str| -> String { format!("{}${}.{}", cell_name, uid, name) };
         match expr {
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::RegexLiteral(_)
+            Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::String(_) | Expr::RegexLiteral(_)
                 | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Ellipsis
                 | Expr::SharedMem(_) => expr.clone(),
             Expr::Literal(lit) => Expr::Literal(lit.clone()),
@@ -2916,7 +2916,9 @@ impl Interpreter {
             Expr::Literal(lit) => lit.evaluate(self, &ExprDispatch),
             // Legacy scalar variants — keep inline until Phase 14 (variant removal)
             Expr::Integer(v) => Ok(Value::Int(*v)),
+            Expr::IntegerSuffixed(v, _) => Ok(Value::Int(*v)),
             Expr::Float(v) => Ok(Value::Float(*v)),
+            Expr::Float64(v) => Ok(Value::Float(*v)),
             Expr::String(v) => Ok(Value::String(v.clone())),
             Expr::RegexLiteral(v) => {
                 match crate::analysis::dfa::compile_to_dfa(v) {

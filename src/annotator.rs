@@ -159,7 +159,11 @@ impl Annotator {
     fn type_to_string(&self, ty: &Type) -> String {
         match ty {
             Type::Int => "Int".to_string(),
+            Type::Int8 => "Int8".to_string(),
+            Type::Int16 => "Int16".to_string(),
+            Type::Int32 => "Int32".to_string(),
             Type::Float => "Float".to_string(),
+            Type::Float64 => "Float64".to_string(),
             Type::String => "String".to_string(),
             Type::Bool => "Bool".to_string(),
             Type::Data => "Data".to_string(),
@@ -201,6 +205,9 @@ impl Annotator {
             }
             Type::Enum(name) => name.clone(),
             Type::UInt => "UInt".to_string(),
+            Type::UInt8 => "UInt8".to_string(),
+            Type::UInt16 => "UInt16".to_string(),
+            Type::UInt32 => "UInt32".to_string(),
             Type::Char => "Char".to_string(),
             // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
             // are regular structs/enums defined in stdlib, handled via

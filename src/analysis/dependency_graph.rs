@@ -355,7 +355,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             collect_expr_ids_inner(value, ids);
         }
         // Literal leaves — no identifiers
-        Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_)
+        Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::String(_) | Expr::Char(_)
         | Expr::Bool(_) | Expr::Term | Expr::Ellipsis | Expr::TypeRef(_)
         | Expr::RegexLiteral(_) | Expr::SharedMem(_) => {}
         // Pattern B wrappers — literal leaves, no identifiers

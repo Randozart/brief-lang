@@ -36,7 +36,7 @@ impl LlvmBackend {
         match &expr {
             Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); return TypedRegister { name: v, ty: Type::Int }; }
             Expr::Bool(b) => { if *b { writeln!(out, "{}{} = and i1 true, true", indent, v).ok(); } else { writeln!(out, "{}{} = xor i1 true, true", indent, v).ok(); } return TypedRegister { name: v, ty: Type::Bool }; }
-            Expr::Float(f) => {
+            Expr::Float(f) | Expr::Float64(f) => {
                 let bits = float_to_llvm_hex(*f);
                 writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, bits).ok();
                 self.reg_float_cache.insert(v.clone(), v.clone());
@@ -4445,7 +4445,7 @@ impl LlvmBackend {
         let p = |name: &str| -> String { format!("cell${}${}", cell_name, name) };
         match expr {
             // Leaf nodes — no identifiers
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::RegexLiteral(_)
+            Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::String(_) | Expr::RegexLiteral(_)
                 | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Ellipsis
                 | Expr::SharedMem(_) => expr.clone(),
             Expr::Literal(lit) => Expr::Literal(lit.clone()),

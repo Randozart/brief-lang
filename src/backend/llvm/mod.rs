@@ -48,7 +48,7 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
         return try_eval_cfloat(&normalized, constants);
     }
     match expr {
-        Expr::Float(f) => Some(*f),
+        Expr::Float(f) | Expr::Float64(f) => Some(*f),
         Expr::Literal(lit) => {
             if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                 Some(*f)
@@ -421,7 +421,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::FromCheck(e, _) => { collect_strings_expr(e, seen, out); }
         Expr::Like(l, r) => { collect_strings_expr(l, seen, out); collect_strings_expr(r, seen, out); }
         // Terminals
-        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
+        Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
         | Expr::Ellipsis | Expr::TypeRef(_) | Expr::OwnedRef(_) | Expr::PriorState(_)
         | Expr::SharedMem(_) => {}
         // Macro/template nodes — should be expanded before reaching backends
@@ -1924,7 +1924,7 @@ self.emit_declares(&mut out);
                 Type::Bool => "i1", _ => "i64",
             };
             let key = match expr {
-                Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
+                Expr::Float(f) | Expr::Float64(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
                 Expr::Literal(lit) => match lit.as_ref() {
                     crate::features::literal::LiteralExpr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
                     crate::features::literal::LiteralExpr::Integer(n) => format!("{}:{}", llvm_ty, n),
@@ -1935,7 +1935,7 @@ self.emit_declares(&mut out);
                 Expr::Integer(n) => format!("{}:{}", llvm_ty, n),
                 Expr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
                 Expr::Neg(inner) => match inner.as_ref() {
-                    Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f)),
+                    Expr::Float(f) | Expr::Float64(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f)),
                     Expr::Literal(lit) => {
                         if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                             format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f))
@@ -1972,7 +1972,7 @@ self.emit_declares(&mut out);
                 Type::Bool => "i1", _ => "i64",
             };
             let val_str = match expr {
-                Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
+                Expr::Float(f) | Expr::Float64(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
                 Expr::Literal(lit) => match lit.as_ref() {
                     crate::features::literal::LiteralExpr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
                     crate::features::literal::LiteralExpr::Integer(n) => n.to_string(),
@@ -1984,7 +1984,7 @@ self.emit_declares(&mut out);
                 Expr::Integer(n) => n.to_string(),
                 Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
                 Expr::Neg(inner) => match inner.as_ref() {
-                    Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f)),
+                    Expr::Float(f) | Expr::Float64(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f)),
                     Expr::Literal(lit) => {
                         if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                             format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f))
