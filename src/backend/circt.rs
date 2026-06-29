@@ -160,8 +160,16 @@ impl CirctBackend {
         match ty {
             Type::Bool => "i1".into(),
             Type::Int | Type::UInt => "i64".into(),
+            // 2026-06-29: Fixed-width types for CIRCT backend
+            Type::Int8 => "si8".into(),
+            Type::Int16 => "si16".into(),
+            Type::Int32 => "si32".into(),
+            Type::UInt8 => "ui8".into(),
+            Type::UInt16 => "ui16".into(),
+            Type::UInt32 => "ui32".into(),
             Type::Char => "i32".into(),
             Type::Float => "f64".into(),
+            Type::Float64 => "f64".into(),
             Type::Constrained(inner, bit_range) => {
                 let width = match bit_range {
                     BitRange::Single(w) => *w,

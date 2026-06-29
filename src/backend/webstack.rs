@@ -378,6 +378,9 @@ impl WebstackGenerator {
                     let signal_type = match &decl.ty {
                         Type::Int => SignalType::Int,
                         Type::Float => SignalType::Float,
+                        // 2026-06-29: Fixed-width types for webstack
+                        Type::Int8 | Type::Int16 | Type::Int32 | Type::UInt8 | Type::UInt16 | Type::UInt32 => SignalType::Int,
+                        Type::Float64 => SignalType::Float,
                         Type::Bool => SignalType::Bool,
                         Type::String => SignalType::String,
                         Type::Applied(name, _) if name == "List" => SignalType::List,
@@ -431,6 +434,9 @@ impl WebstackGenerator {
                     let signal_type = match &trg.ty {
                         Type::Int => SignalType::Int,
                         Type::Float => SignalType::Float,
+                        // 2026-06-29: Fixed-width types for webstack
+                        Type::Int8 | Type::Int16 | Type::Int32 | Type::UInt8 | Type::UInt16 | Type::UInt32 => SignalType::Int,
+                        Type::Float64 => SignalType::Float,
                         Type::Bool => SignalType::Bool,
                         Type::String => SignalType::String,
                         _ => SignalType::Int,
