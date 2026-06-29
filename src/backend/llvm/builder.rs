@@ -446,11 +446,23 @@ impl LLVMBuilder {
         self.instructions.len()
     }
 
+    /// Emit a raw instruction string (bridge for gradual migration from writeln!)
+    /// This should be used sparingly — prefer the typed emit_* methods.
+    /// 2026-06-29: Added for Phase 4 migration bridge.
+    pub fn writeln(&mut self, s: &str) {
+        self.emit_void(s);
+    }
+
     /// Reset the builder for a new function.
     /// Keeps the reg_counter and label_counter (never rewound) but clears
     /// accumulated instructions.
     pub fn clear(&mut self) {
         self.instructions.clear();
+    }
+
+    /// Emit a raw instruction with a result register (bridge for gradual migration).
+    pub fn emit_raw(&mut self, result: Option<String>, op: String) {
+        self.instructions.push(Instruction::new(result, op));
     }
 }
 

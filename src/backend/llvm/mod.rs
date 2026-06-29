@@ -18,6 +18,7 @@ mod tests;
 #[cfg(all(kani, feature = "kani_full"))]
 mod kani;
 
+pub use builder::LLVMBuilder;
 pub use context::{CompilerContext, FunctionContext, FunctionGuard};
 
 fn escape_llvm_string(s: &str) -> String {
