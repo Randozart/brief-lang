@@ -195,10 +195,9 @@ impl LlvmBackend {
         writeln!(out, "declare i32 @getsockopt(i32, i32, i32, ptr, ptr)").ok();
     }
 
-    pub(super) fn llvm_type(&self, ty: &Type) -> &str {
+    fn fallback_llvm_type(ty: &Type) -> &'static str {
         match ty {
             Type::Int | Type::UInt => "i64",
-            // 2026-06-29: Fixed-width integer/float type to LLVM type mapping
             Type::Int8 | Type::UInt8 => "i8",
             Type::Int16 | Type::UInt16 => "i16",
             Type::Int32 | Type::UInt32 => "i32",
@@ -211,6 +210,17 @@ impl LlvmBackend {
             _ => "i64",
         }
     }
+
+    pub(super) fn llvm_type(&self, ty: &Type) -> &str {
+        // 2026-06-29: Phase 7A — universe query replaces match arms.
+        // Falls back to a minimal inline match when universe is not available
+        // (e.g., in unit tests that construct LlvmBackend directly).
+        self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(ty))
+            .map(|r| r.llvm_type.as_str())
+            .unwrap_or_else(|| Self::fallback_llvm_type(ty))
+    }
+
 
     pub(super) fn native_float_or_box(&mut self, out: &mut String, indent: &str, val_reg: &str) -> String {
         if let Some(cached) = self.fun.reg_float_cache.get(val_reg) {
@@ -230,13 +240,17 @@ impl LlvmBackend {
         if let Some(cached) = self.fun.reg_float_cache.get(&reg.name) {
             return cached.clone();
         }
-        // 2026-06-29: Float64 is a native double, no conversion needed.
-        // Must check before Type::Float since Float64 is not Float.
-        if reg.ty == Type::Float64 {
-            return reg.name.clone();
-        }
-        if reg.ty == Type::Float {
-            // Native float, not in cache → already a native float register.
+        // 2026-06-29: Phase 7A — query universe for storage mode.
+        // Fallback to Float/Float64 check when universe is not available.
+        let is_native = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(&reg.ty))
+            .map(|r| r.storage == "Native")
+            .unwrap_or_else(|| {
+                // Fallback: Float and Float64 are always native
+                reg.ty == Type::Float || reg.ty == Type::Float64
+            });
+
+        if is_native {
             return reg.name.clone();
         }
         self.native_float_or_box(out, indent, &reg.name)

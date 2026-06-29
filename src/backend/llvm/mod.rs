@@ -512,6 +512,20 @@ pub(super) fn tbaa_node(ty_str: &str) -> i32 {
 }
 
     /// Why a 6-node TBAA tree: Brief has exactly 5 scalar types that map to
+
+/// Map a Brief type to its TBAA metadata node index via universe lookup.
+/// 2026-06-29: Phase 7A replacement for string-based tbaa_node().
+/// Falls back to 1 (Int) for types without a universe entry.
+pub(super) fn tbaa_node_for_type(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> i32 {
+    match universe.get_by_type(ty).map(|r| r.tbaa_node.as_str()) {
+        Some("Int") | None => 1,
+        Some("Bool") => 2,
+        Some("Char") => 3,
+        Some("String") => 4,
+        Some("Float") => 5,
+        _ => 1, // fallback: Int
+    }
+}
     /// distinct LLVM storage types (i64, i8, i32, i8*, float). The root "Brief"
     /// node groups them under a single type tree so that LLVM's TBAA can
     /// distinguish Int stores from Float stores even though both may be i64

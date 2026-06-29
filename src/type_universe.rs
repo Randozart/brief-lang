@@ -633,6 +633,13 @@ impl TypeUniverse {
         self.types.get(name)
     }
 
+    /// Look up a Type by its universe key (canonical name).
+    /// Convenience wrapper around `get(ty.universe_key())`.
+    /// 2026-06-29: Added for Phase 7A backend match arm replacement.
+    pub fn get_by_type(&self, ty: &crate::ast::Type) -> Option<&ResolvedType> {
+        self.get(ty.universe_key())
+    }
+
     /// Check if a direct meld exists between types `a` and `b`.
     /// Transitive melds are NOT resolved — only explicit `meld A <:> B` declarations.
     /// Returns the MeldDeclaration if found.

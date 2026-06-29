@@ -199,6 +199,42 @@ impl Type {
     pub fn is_numeric(&self) -> bool {
         self.is_integral() || self.is_float_type()
     }
+
+    // ── Phase 7A: Canonical universe key for backend property lookups ──
+    //
+    // 2026-06-29: Maps every Type variant to its canonical name for
+    // TypeUniverse lookup. This is the SOLE place in the codebase where
+    // Type variants are matched for backend representation decisions.
+    // All other backend functions (llvm_type, tbaa_node, byte_size, etc.)
+    // use this key to query the universe.
+    //
+    // Returns "Int" as safe fallback for types without a universe entry.
+    pub fn universe_key(&self) -> &str {
+        match self {
+            Type::Int => "Int",
+            Type::UInt => "UInt",
+            Type::Int8 => "Int8",
+            Type::UInt8 => "UInt8",
+            Type::Int16 => "Int16",
+            Type::UInt16 => "UInt16",
+            Type::Int32 => "Int32",
+            Type::UInt32 => "UInt32",
+            Type::Float => "Float",
+            Type::Float64 => "Float64",
+            Type::Bool => "Bool",
+            Type::Char => "Char",
+            Type::String => "String",
+            Type::Data => "Data",
+            Type::Void => "Void",
+            Type::Custom(name) => name.as_str(),
+            Type::Enum(name) => name.as_str(),
+            Type::Sig(name) => name.as_str(),
+            // Compound types without universe entries: use Int as safe default
+            Type::Union(_) | Type::Tuple(_) | Type::TypeVar(_)
+            | Type::Generic(_, _) | Type::Applied(_, _)
+            | Type::Vector(_, _) | Type::Constrained(_, _) => "Int",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
