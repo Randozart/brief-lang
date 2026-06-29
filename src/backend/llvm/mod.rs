@@ -1,3 +1,4 @@
+pub mod builder;
 pub mod context;
 pub mod directive;
 pub mod dispatch;
