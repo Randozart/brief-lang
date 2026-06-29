@@ -744,6 +744,102 @@ impl TypeUniverse {
     pub fn allows_arrow(&self, name: &str) -> bool {
         self.types.get(name).map(|t| t.allow_arrow).unwrap_or(true)
     }
+
+    // ── Phase 7B: Operator Resolution ─────────────────────────
+    //
+    // 2026-06-29: Resolves operator calls to their implementation.
+    // Handles both exact type matches and cross-type composition.
+
+    /// Resolve an operator call `type_name . rune(param_type_name)` to its
+    /// implementation expression. Returns the OpDeclaration if found.
+    /// Tries exact match first, then cross-type composition via conversion.
+    pub fn resolve_operator(
+        &self,
+        type_name: &str,
+        rune: crate::ast::OpRune,
+        param_type_name: Option<&str>,
+    ) -> Option<&crate::ast::OpDeclaration> {
+        let rt = self.types.get(type_name)?;
+
+        // 1. Exact match: look up (rune, Some(param_type))
+        if let Some(param) = param_type_name {
+            if let Some(op) = rt.operators.get(&(rune, Some(param.to_string()))) {
+                return Some(op);
+            }
+        }
+
+        // 2. Look up (rune, None) — unary operator (no param)
+        if let Some(op) = rt.operators.get(&(rune, None)) {
+            return Some(op);
+        }
+
+        // 3. Cross-type composition: param type differs from declared param
+        // Check if there's a base operator and try to compose via conversion
+        if let Some(param) = param_type_name {
+            if let Some(base_op) = rt.operators.iter().find(|((r, _), _)| *r == rune) {
+                let (_key, op) = base_op;
+                // If there's a conversion path from param_type to the operator's
+                // expected parameter type, the composition is valid in principle.
+                let expected_param = op.param_type.as_ref()
+                    .and_then(|e| match e.as_ref() {
+                        crate::ast::Expr::TypeRef(n) => Some(n.as_str()),
+                        _ => None,
+                    });
+                if let Some(expected) = expected_param {
+                    if param != expected && self.has_conversion_path(param, expected) {
+                        return Some(op);
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Check if a conversion path exists from source type to target type.
+    /// A conversion exists if:
+    /// 1. Source == Target (same type)
+    /// 2. Direct meld between types
+    /// 3. Source can unbox to i64 AND target can box from i64 (round trip)
+    /// 4. Source is already i64 (box_op = None = identity) — trivially converts
+    /// 5. Target is already i64 (unbox_op = None = identity) — trivially converts
+    /// 6. Base type inheritance chain
+    fn has_conversion_path(&self, source: &str, target: &str) -> bool {
+        // 1. Same type — trivially convertible
+        if source == target {
+            return true;
+        }
+
+        // 2. Direct meld between source and target
+        if self.find_meld(source, target).is_some() {
+            return true;
+        }
+
+        // 3-5. Check via i64 round-trip
+        if let (Some(src_rt), Some(tgt_rt)) = (self.types.get(source), self.types.get(target)) {
+            // Source can produce i64 (either via box_op or because it IS i64)
+            let src_to_i64 = src_rt.box_op.is_some() || src_rt.llvm_type == "i64";
+            // Target can receive i64 (either via unbox_op or because it IS i64)
+            let tgt_from_i64 = tgt_rt.unbox_op.is_some() || tgt_rt.llvm_type == "i64";
+            if src_to_i64 && tgt_from_i64 {
+                return true;
+            }
+        }
+
+        // 6. Base type inheritance chain
+        if let Some(src_rt) = self.types.get(source) {
+            if src_rt.base == target || self.types.get(&src_rt.base).map(|b| b.base.as_str() == target).unwrap_or(false) {
+                return true;
+            }
+        }
+        if let Some(tgt_rt) = self.types.get(target) {
+            if tgt_rt.base == source {
+                return true;
+            }
+        }
+
+        false
+    }
 }
 
 /// Convert a TypeDef expression to a display string for metadata storage.
@@ -770,7 +866,7 @@ fn type_universe_expr_to_string(e: &Expr) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Comment, DispatchMode, Expr, MeldDeclaration, StrictMode, TopLevel, TypeBinding, TypeDef, TypeDefBody, Program};
+    use crate::ast::{Comment, DispatchMode, Expr, MeldDeclaration, OpDeclaration, OpRune, StrictMode, TopLevel, TypeBinding, TypeDef, TypeDefBody, Program};
 
     fn make_program(items: Vec<TopLevel>) -> Program {
         Program {
@@ -1097,5 +1193,95 @@ mod tests {
         assert!(universe.find_meld("A", "B").is_some(), "meld A <:> B should be found");
         assert!(universe.find_meld("B", "A").is_some(), "meld B <:> A should also be found (bidirectional)");
         assert!(universe.find_meld("A", "C").is_none(), "meld A <:> C should NOT be found (no declaration)");
+    }
+
+    // ── Phase 7B: Operator Resolution Tests ───────────────────
+    #[test]
+    fn test_resolve_operator_add() {
+        let td = TypeDef {
+            name: "MyFloat".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Bits".into())),
+            body: TypeDefBody {
+                bindings: vec![
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
+                ],
+                operators: vec![
+                    OpDeclaration {
+                        rune: OpRune::Add,
+                        param_type: Some(Box::new(Expr::TypeRef("MyFloat".into()))),
+                        return_type: Box::new(Expr::TypeRef("MyFloat".into())),
+                        implementation: Box::new(Expr::Identifier("my_add".into())),
+                        span: None,
+                    },
+                ],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        let op = universe.resolve_operator("MyFloat", OpRune::Add, Some("MyFloat"));
+        assert!(op.is_some(), "Should resolve Add(MyFloat) -> MyFloat");
+        assert_eq!(op.unwrap().rune, OpRune::Add);
+    }
+
+    #[test]
+    fn test_resolve_operator_no_match() {
+        let td = TypeDef {
+            name: "MyInt".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Bits".into())),
+            body: TypeDefBody {
+                bindings: vec![
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
+                ],
+                operators: vec![],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        let op = universe.resolve_operator("MyInt", OpRune::Mul, Some("MyInt"));
+        assert!(op.is_none(), "Should not resolve undeclared operator");
+    }
+
+    #[test]
+    fn test_has_conversion_path_same_type() {
+        let td = TypeDef {
+            name: "T".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Bits".into())),
+            body: TypeDefBody {
+                bindings: vec![
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
+                ],
+                operators: vec![],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        assert!(universe.has_conversion_path("T", "T"), "Same type should always be convertible");
+    }
+
+    #[test]
+    fn test_has_conversion_path_via_box_unbox() {
+        // Float has box_op and unbox_op — it should be convertible to/from Int
+        let program = make_program(vec![]);
+        let universe = TypeUniverse::build(&program);
+        // Both Float and Int have box/unbox, so conversion via i64 is possible
+        assert!(universe.has_conversion_path("Float", "Int"),
+            "Float should have conversion path via i64 (box→unbox)");
+        assert!(universe.has_conversion_path("Int", "Float"),
+            "Int should have conversion path via i64 (box→unbox)");
     }
 }
