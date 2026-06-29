@@ -98,6 +98,11 @@ impl LlvmBackend {
         writeln!(out, "declare float @llvm.fabs.f32(float) #1").ok();
         writeln!(out, "declare float @llvm.ceil.f32(float) #1").ok();
         writeln!(out, "declare float @llvm.floor.f32(float) #1").ok();
+        // 2026-06-29: Double-precision (Float64) intrinsic variants
+        writeln!(out, "declare double @llvm.sqrt.f64(double) #1").ok();
+        writeln!(out, "declare double @llvm.fabs.f64(double) #1").ok();
+        writeln!(out, "declare double @llvm.ceil.f64(double) #1").ok();
+        writeln!(out, "declare double @llvm.floor.f64(double) #1").ok();
         writeln!(out, "declare i64 @llvm.ctpop.i64(i64) #1").ok();
         writeln!(out, "declare i64 @llvm.ctlz.i64(i64, i1) #1").ok();
         writeln!(out, "declare i64 @llvm.cttz.i64(i64, i1) #1").ok();
@@ -176,8 +181,13 @@ impl LlvmBackend {
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {
         match ty {
             Type::Int | Type::UInt => "i64",
+            // 2026-06-29: Fixed-width integer/float type to LLVM type mapping
+            Type::Int8 | Type::UInt8 => "i8",
+            Type::Int16 | Type::UInt16 => "i16",
+            Type::Int32 | Type::UInt32 => "i32",
             Type::Bool => "i8",
             Type::Float => "float",
+            Type::Float64 => "double",
             Type::Char => "i32",
             Type::String | Type::Data => "i8*",
             Type::Void => "void",
@@ -202,6 +212,11 @@ impl LlvmBackend {
         // float to i64 at function entry; the cache maps boxed→native).
         if let Some(cached) = self.reg_float_cache.get(&reg.name) {
             return cached.clone();
+        }
+        // 2026-06-29: Float64 is a native double, no conversion needed.
+        // Must check before Type::Float since Float64 is not Float.
+        if reg.ty == Type::Float64 {
+            return reg.name.clone();
         }
         if reg.ty == Type::Float {
             // Native float, not in cache → already a native float register.
@@ -404,11 +419,12 @@ impl LlvmBackend {
 
     pub(super) fn align_of(&self, ty: &str) -> u32 {
         match ty {
-            "i64" => 8,
-            "float" => 4,
+            "i64" | "double" => 8,
+            "float" | "i32" => 4,
+            "i16" => 2,
             "i8" => 1,
-            "i32" => 4,
             _ => 8,
+
         }
     }
 

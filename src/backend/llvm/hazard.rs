@@ -201,7 +201,11 @@ impl LlvmBackend {
 
     pub(super) fn is_float_field(&self, name: &str) -> bool {
         self.field_index_map.get(name)
-            .map(|&idx| self.field_types[idx] == "float")
+            // 2026-06-29: Check for both "float" (Float) and "double" (Float64)
+            .map(|&idx| {
+                let ll_ty = &self.field_types[idx];
+                ll_ty == "float" || ll_ty == "double"
+            })
             .unwrap_or(false)
     }
 

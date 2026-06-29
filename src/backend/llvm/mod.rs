@@ -37,6 +37,13 @@ pub(crate) fn float_to_llvm_hex(f: f64) -> String {
     format!("{}", bits)
 }
 
+// 2026-06-29: For Float64 literals (f64), bitcast directly to i64 bits
+// without truncating through f32. Used by Expr::Float64 emission.
+pub(crate) fn float64_to_llvm_hex(f: f64) -> String {
+    let bits = f.to_bits();
+    format!("{}", bits)
+}
+
 /// Recursively evaluate a constant expression tree to a concrete f64.
 /// Used to fold `const m0: Float = 4.0 * pi * pi` into a literal before
 /// global emission, avoiding the `constant float 0` bug.
@@ -58,6 +65,9 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
         }
         Expr::Identifier(name) => {
             if let Some((Type::Float, inner)) = constants.get(name) {
+                try_eval_cfloat(inner, constants)
+            // 2026-06-29: Also resolve Float64 constants (e.g. const pi: Float64 = 3.14f64)
+            } else if let Some((Type::Float64, inner)) = constants.get(name) {
                 try_eval_cfloat(inner, constants)
             } else {
                 None
@@ -90,7 +100,15 @@ fn llvm_type_byte_size(t: &str) -> i64 {
 fn primitive_from_name(name: &str) -> Option<Type> {
     match name {
         "Int" | "UInt" | "Signed" | "Unsigned" => Some(Type::Int),
+        // 2026-06-29: Fixed-width type aliases for BILD type resolution
+        "Int8" | "I8" => Some(Type::Int8),
+        "Int16" | "I16" => Some(Type::Int16),
+        "Int32" | "I32" => Some(Type::Int32),
+        "UInt8" | "U8" => Some(Type::UInt8),
+        "UInt16" | "U16" => Some(Type::UInt16),
+        "UInt32" | "U32" => Some(Type::UInt32),
         "Float" => Some(Type::Float),
+        "Float64" | "F64" | "Double" => Some(Type::Float64),
         "Bool" => Some(Type::Bool),
         "Char" => Some(Type::Char),
         "String" => Some(Type::String),
@@ -623,6 +641,11 @@ pub struct LlvmBackend {
     // ── State Fields ───────────────────────────────────────
     field_index_map: HashMap<String, usize>,
     field_types: Vec<String>,
+    // 2026-06-29: Original Brief type per field, parallel to field_types.
+    // Needed because multiple Brief types map to the same LLVM type string
+    // (e.g. Char and Int32 both → "i32"), and we must restore the correct
+    // Brief type when reading fields back from the %State struct.
+    field_brief_types: Vec<Type>,
     pub(crate) field_initializers: HashMap<String, Option<Expr>>,
     range_bounds: HashMap<String, (i64, i64)>,
     field_to_meta_idx: HashMap<String, usize>,
@@ -869,6 +892,7 @@ impl LlvmBackend {
             spec: None,
             field_index_map: HashMap::new(),
             field_types: Vec::new(),
+            field_brief_types: Vec::new(),
             field_initializers: HashMap::new(),
             mmio_fields: HashMap::new(),
             mmio_initializers: HashMap::new(),
@@ -985,6 +1009,16 @@ impl LlvmBackend {
     pub fn with_optimize_report(mut self, report: bool) -> Self {
         self.optimize_report = report;
         self
+    }
+
+    // 2026-06-29: Push a field type, recording both the LLVM type string and
+    // the original Brief Type. Parallel to field_types/field_brief_types.
+    // The Brief Type is needed when reading fields back from %State to
+    // distinguish types that share the same LLVM representation (e.g. Char
+    // and Int32 both → "i32", Bool and Int8 both → "i8").
+    pub(super) fn push_field_type(&mut self, ty: &Type) {
+        self.field_types.push(self.llvm_type(ty).to_string());
+        self.field_brief_types.push(ty.clone());
     }
 
     pub fn with_optimize_size(mut self, byte_limit: u64) -> Self {
@@ -1622,6 +1656,7 @@ impl LlvmBackend {
             let idx = self.field_index_map.len();
             self.field_index_map.insert("__trg_epfd".to_string(), idx);
             self.field_types.push("i32".to_string());
+            self.field_brief_types.push(Type::Int);
             self.field_initializers.insert("__trg_epfd".to_string(), None);
         }
         // Inject synthetic cycle_count field for watchdog timing
@@ -1629,6 +1664,7 @@ impl LlvmBackend {
             let idx = self.field_index_map.len();
             self.field_index_map.insert("cycle_count".to_string(), idx);
             self.field_types.push("i64".to_string());
+            self.field_brief_types.push(Type::Int);
             self.field_initializers.insert("cycle_count".to_string(), Some(Expr::Integer(0)));
         }
         self.validate_schema_types();
@@ -1920,11 +1956,20 @@ self.emit_declares(&mut out);
         let mut alias_map: HashMap<String, String> = HashMap::new(); // name → canonical_name
         for (name, (ty, expr)) in &self.constants {
             let llvm_ty = match ty {
-                Type::Float => "float", Type::Int | Type::UInt => "i64",
-                Type::Bool => "i1", _ => "i64",
+                // 2026-06-29: Updated for fixed-width types
+                Type::Float64 => "double",
+                Type::Float => "float",
+                Type::Int | Type::UInt => "i64",
+                Type::Int8 | Type::UInt8 => "i8",
+                Type::Int16 | Type::UInt16 => "i16",
+                Type::Int32 | Type::UInt32 => "i32",
+                Type::Bool => "i1",
+                _ => "i64",
             };
             let key = match expr {
-                Expr::Float(f) | Expr::Float64(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
+                // 2026-06-29: Float64 uses f64-to-i64 bitcast; Float uses f32-to-i32 bitcast
+                Expr::Float64(f) => format!("{}:bitcast(i64 {} to double)", llvm_ty, float64_to_llvm_hex(*f)),
+                Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
                 Expr::Literal(lit) => match lit.as_ref() {
                     crate::features::literal::LiteralExpr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
                     crate::features::literal::LiteralExpr::Integer(n) => format!("{}:{}", llvm_ty, n),
@@ -1933,9 +1978,11 @@ self.emit_declares(&mut out);
                     crate::features::literal::LiteralExpr::Char(_) | crate::features::literal::LiteralExpr::Term => format!("{}:{}", llvm_ty, name),
                 },
                 Expr::Integer(n) => format!("{}:{}", llvm_ty, n),
+                Expr::IntegerSuffixed(n, _) => format!("{}:{}", llvm_ty, n),
                 Expr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
                 Expr::Neg(inner) => match inner.as_ref() {
-                    Expr::Float(f) | Expr::Float64(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f)),
+                    Expr::Float64(f) => format!("{}:bitcast(i64 {} to double)", llvm_ty, float64_to_llvm_hex(-*f)),
+                    Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f)),
                     Expr::Literal(lit) => {
                         if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                             format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f))
@@ -1961,18 +2008,31 @@ self.emit_declares(&mut out);
             let canonical = alias_map.get(name).cloned().unwrap_or_else(|| name.clone());
             if canonical != *name {
                 let llvm_ty = match ty {
-                    Type::Float => "float", Type::Int | Type::UInt => "i64",
-                    Type::Bool => "i1", _ => "i64",
+                    Type::Float64 => "double",
+                    Type::Float => "float",
+                    Type::Int | Type::UInt => "i64",
+                    Type::Int8 | Type::UInt8 => "i8",
+                    Type::Int16 | Type::UInt16 => "i16",
+                    Type::Int32 | Type::UInt32 => "i32",
+                    Type::Bool => "i1",
+                    _ => "i64",
                 };
                 writeln!(out, "@{} = alias {}, {}* @{}", name, llvm_ty, llvm_ty, canonical).ok();
                 continue;
             }
             let llvm_ty = match ty {
-                Type::Float => "float", Type::Int | Type::UInt => "i64",
-                Type::Bool => "i1", _ => "i64",
+                Type::Float64 => "double",
+                Type::Float => "float",
+                Type::Int | Type::UInt => "i64",
+                Type::Int8 | Type::UInt8 => "i8",
+                Type::Int16 | Type::UInt16 => "i16",
+                Type::Int32 | Type::UInt32 => "i32",
+                Type::Bool => "i1",
+                _ => "i64",
             };
             let val_str = match expr {
-                Expr::Float(f) | Expr::Float64(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
+                Expr::Float64(f) => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(*f)),
+                Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
                 Expr::Literal(lit) => match lit.as_ref() {
                     crate::features::literal::LiteralExpr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
                     crate::features::literal::LiteralExpr::Integer(n) => n.to_string(),
@@ -1982,9 +2042,11 @@ self.emit_declares(&mut out);
                     crate::features::literal::LiteralExpr::Term => "0".to_string(),
                 },
                 Expr::Integer(n) => n.to_string(),
+                Expr::IntegerSuffixed(n, _) => n.to_string(),
                 Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
                 Expr::Neg(inner) => match inner.as_ref() {
-                    Expr::Float(f) | Expr::Float64(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f)),
+                    Expr::Float64(f) => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(-*f)),
+                    Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f)),
                     Expr::Literal(lit) => {
                         if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                             format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f))
@@ -3041,13 +3103,13 @@ self.emit_declares(&mut out);
                         self.mmio_fields.remove(&s.name);
                         self.field_index_map
                             .insert(s.name.clone(), self.field_types.len());
-                        self.field_types.push(self.llvm_type(&s.ty).to_string());
+                        self.push_field_type(&s.ty);
                         self.field_initializers.insert(s.name.clone(), s.expr.clone());
                     }
                 } else {
                     self.field_index_map
                         .insert(s.name.clone(), self.field_types.len());
-                    self.field_types.push(self.llvm_type(&s.ty).to_string());
+                    self.push_field_type(&s.ty);
                     self.field_initializers.insert(s.name.clone(), s.expr.clone());
                 }
             } else if let TopLevel::Trigger(t) = item {
@@ -3055,7 +3117,7 @@ self.emit_declares(&mut out);
                 // can store their values and emit_expr can load them.
                 self.field_index_map
                     .insert(t.name.clone(), self.field_types.len());
-                self.field_types.push(self.llvm_type(&t.ty).to_string());
+                self.push_field_type(&t.ty);
                 self.field_initializers.insert(t.name.clone(), None);
             } else if let TopLevel::TriggerBinding { name, ty, .. } = item {
                 // Trigger bindings (trg name: Type @ Console!) get a state slot
@@ -3063,7 +3125,7 @@ self.emit_declares(&mut out);
                 let trig_ty = ty.clone().unwrap_or(crate::ast::Type::String);
                 self.field_index_map
                     .insert(name.clone(), self.field_types.len());
-                self.field_types.push(self.llvm_type(&trig_ty).to_string());
+                self.push_field_type(&trig_ty);
                 self.field_initializers.insert(name.clone(), None);
             } else if let TopLevel::Cell(c) = item {
                 // Cell fields are handled differently depending on whether the
@@ -3090,7 +3152,7 @@ self.emit_declares(&mut out);
                         cs_tys.push(self.llvm_type(&field.ty).to_string());
                         // Also register in %State for cell_persistent_ticks access
                         self.field_index_map.insert(prefixed.clone(), self.field_types.len());
-                        self.field_types.push(self.llvm_type(&field.ty).to_string());
+                        self.push_field_type(&field.ty);
                         self.field_initializers.insert(prefixed, field.default.clone());
                     }
                     for (param_name, param_ty) in &c.parameters {
@@ -3099,7 +3161,7 @@ self.emit_declares(&mut out);
                         cs_tys.push(self.llvm_type(param_ty).to_string());
                         // Also register in %State
                         self.field_index_map.insert(prefixed.clone(), self.field_types.len());
-                        self.field_types.push(self.llvm_type(param_ty).to_string());
+                        self.push_field_type(param_ty);
                         self.field_initializers.insert(prefixed, None);
                     }
                     // Register internal trigger fields in %State and %CellState.*
@@ -3108,7 +3170,7 @@ self.emit_declares(&mut out);
                         cs_imap.insert(prefixed.clone(), cs_tys.len());
                         cs_tys.push(self.llvm_type(&trg.ty).to_string());
                         self.field_index_map.insert(prefixed.clone(), self.field_types.len());
-                        self.field_types.push(self.llvm_type(&trg.ty).to_string());
+                        self.push_field_type(&trg.ty);
                         self.field_initializers.insert(prefixed, None);
                     }
                     self.cell_state_types.insert(c.name.clone(), (cs_imap, cs_tys));
@@ -3122,13 +3184,13 @@ self.emit_declares(&mut out);
                     for field in &c.fields {
                         let prefixed = format!("cell${}${}", c.name, field.name);
                         self.field_index_map.insert(prefixed.clone(), self.field_types.len());
-                        self.field_types.push(self.llvm_type(&field.ty).to_string());
+                        self.push_field_type(&field.ty);
                         self.field_initializers.insert(prefixed, field.default.clone());
                     }
                     for (param_name, param_ty) in &c.parameters {
                         let prefixed = format!("cell${}${}", c.name, param_name);
                         self.field_index_map.insert(prefixed.clone(), self.field_types.len());
-                        self.field_types.push(self.llvm_type(param_ty).to_string());
+                        self.push_field_type(param_ty);
                         self.field_initializers.insert(prefixed, None);
                     }
                 }
@@ -3210,8 +3272,10 @@ self.emit_declares(&mut out);
         // IMPORTANT: sort by original index to preserve deterministic field ordering.
         let mut old_pairs: Vec<(String, usize)> = self.field_index_map.drain().collect();
         let old_types = std::mem::take(&mut self.field_types);
+        let old_brief_types = std::mem::take(&mut self.field_brief_types);
         self.field_index_map.reserve(old_pairs.len());
         self.field_types.reserve(old_types.len());
+        self.field_brief_types.reserve(old_brief_types.len());
         old_pairs.sort_by_key(|(_, idx)| *idx);
 
         for (name, _old_idx) in &old_pairs {
@@ -3228,6 +3292,10 @@ self.emit_declares(&mut out);
                         .unwrap_or(0);
                     self.field_index_map.insert(name.clone(), new_idx);
                     self.field_types.push(old_types[orig_type_idx].clone());
+                    // 2026-06-29: Preserve the original Brief type alongside LLVM type
+                    self.field_brief_types.push(
+                        old_brief_types.get(orig_type_idx).cloned().unwrap_or(Type::Int)
+                    );
                 }
             }
         }
@@ -3241,8 +3309,10 @@ self.emit_declares(&mut out);
                     for target_name in targets {
                         let cache_idx = self.field_types.len();
                         self.field_types.push("i64".to_string());
+            self.field_brief_types.push(Type::Int);
                         let valid_idx = self.field_types.len();
                         self.field_types.push("i8".to_string());
+                        self.field_brief_types.push(Type::Bool);
                         target_map.insert(target_name.clone(), (cache_idx, valid_idx));
                     }
                 }
@@ -3250,8 +3320,10 @@ self.emit_declares(&mut out);
                 if target_map.is_empty() {
                     let cache_idx = self.field_types.len();
                     self.field_types.push("i64".to_string());
+            self.field_brief_types.push(Type::Int);
                     let valid_idx = self.field_types.len();
                     self.field_types.push("i8".to_string());
+                        self.field_brief_types.push(Type::Bool);
                     target_map.insert("_".to_string(), (cache_idx, valid_idx));
                 }
                 self.cache_slots.insert(name.clone(), target_map);

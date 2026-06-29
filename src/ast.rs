@@ -152,6 +152,55 @@ pub enum Type {
     Constrained(Box<Type>, BitRange),
 }
 
+// 2026-06-29: Fixed-width type helpers for the explicit-width types feature
+// bit_width() and is_signed() enable the typechecker, interpreter, and
+// backends to handle all integer/float widths uniformly without match
+// duplication. Used by typechecker (binary_op_type, is_cast_valid,
+// types_are_width_compatible) and LLVM backend (type mapping, codegen).
+impl Type {
+    pub fn bit_width(&self) -> Option<u64> {
+        match self {
+            Type::Int8 | Type::UInt8 => Some(8),
+            Type::Int16 | Type::UInt16 => Some(16),
+            Type::Int32 | Type::UInt32 => Some(32),
+            Type::Int | Type::UInt => Some(64),
+            Type::Float => Some(32),
+            Type::Float64 => Some(64),
+            _ => None,
+        }
+    }
+
+    pub fn is_signed(&self) -> Option<bool> {
+        match self {
+            Type::Int8 | Type::Int16 | Type::Int32 | Type::Int => Some(true),
+            Type::UInt8 | Type::UInt16 | Type::UInt32 | Type::UInt => Some(false),
+            Type::Float | Type::Float64 => Some(true), // floats are signed in representation
+            _ => None,
+        }
+    }
+
+    // 2026-06-29: Returns true for any fixed-width integer type
+    // Used by typechecker's is_cast_valid to allow all integer↔integer casts
+    pub fn is_integral(&self) -> bool {
+        matches!(self,
+            Type::Int8 | Type::Int16 | Type::Int32 | Type::Int |
+            Type::UInt8 | Type::UInt16 | Type::UInt32 | Type::UInt
+        )
+    }
+
+    // 2026-06-29: Returns true for any fixed-width float type
+    // Used by typechecker's is_cast_valid to allow float↔float casts
+    pub fn is_float_type(&self) -> bool {
+        matches!(self, Type::Float | Type::Float64)
+    }
+
+    // 2026-06-29: Returns true for any numeric type (integer or float)
+    // Used by typechecker's is_cast_valid to allow cross-family casts
+    pub fn is_numeric(&self) -> bool {
+        self.is_integral() || self.is_float_type()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TypeParam {
     pub name: String,

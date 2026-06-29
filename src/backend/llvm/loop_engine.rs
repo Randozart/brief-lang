@@ -325,7 +325,9 @@ impl LlvmBackend {
         };
         self.ssa_old_float_regs.clear();
         for (field_name, &field_idx) in &self.field_index_map {
-            if self.field_types[field_idx] == "float" {
+            // 2026-06-29: Also check for "double" (Float64) fields
+            let ll_ty = &self.field_types[field_idx];
+            if ll_ty == "float" || ll_ty == "double" {
                 let old_reg = format!("%{}_old_{}", field_name, self.txn_counter);
                 self.txn_counter += 1;
                 writeln!(out, "  {} = extractvalue %State {}, {}", old_reg, ssa_reg, field_idx).ok();
@@ -341,8 +343,6 @@ impl LlvmBackend {
     ///
     /// Why separate loops (float vs !float) instead of one loop: keeps hot
     /// float fields together in cache when iterating field_index_map.
-    /// Future: float fields may use f64 instead of i64 box, needing
-    /// different extractvalue types.
     pub(crate) fn pre_extract_int_fields(&mut self, out: &mut String) {
         let ssa_reg = match self.ssa_state_reg.clone() {
             Some(r) => r,
@@ -350,7 +350,9 @@ impl LlvmBackend {
         };
         self.ssa_old_int_regs.clear();
         for (field_name, &field_idx) in &self.field_index_map {
-            if self.field_types[field_idx] != "float" {
+            // 2026-06-29: Skip both "float" and "double" — they're extracted in float loop
+            let ll_ty = &self.field_types[field_idx];
+            if ll_ty != "float" && ll_ty != "double" {
                 let old_reg = format!("%{}_old_{}", field_name, self.txn_counter);
                 self.txn_counter += 1;
                 writeln!(out, "  {} = extractvalue %State {}, {}", old_reg, ssa_reg, field_idx).ok();
@@ -1154,9 +1156,11 @@ impl LlvmBackend {
                 // go into ssa_old_float_regs so body lookups find the correct
                 // register. Previously all phi regs went to ssa_old_int_regs,
                 // causing float field reads to fall back to "0.0" (nbody bug).
+                // 2026-06-29: Also check for "double" (Float64) fields.
                 for (name, phi_reg) in &self.phi_field_regs {
                     if let Some(&idx) = self.field_index_map.get(name) {
-                        if self.field_types[idx] == "float" {
+                        let ll_ty = &self.field_types[idx];
+                        if ll_ty == "float" || ll_ty == "double" {
                             self.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
                         } else {
                             self.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
@@ -1338,6 +1342,11 @@ impl LlvmBackend {
                         writeln!(out, "  {} = load float, float* {}, align 4", val, gep).ok();
                         self.emit_post_print(out, intrinsic_name, &val, "float", "  ");
                     }
+                    // 2026-06-29: Float64 → load double, print as double (skip fpext)
+                    "double" => {
+                        writeln!(out, "  {} = load double, double* {}, align 8", val, gep).ok();
+                        self.emit_post_print(out, intrinsic_name, &val, "double", "  ");
+                    }
                     _ => {
                         writeln!(out, "  {} = load i64, i64* {}, align 8", val, gep).ok();
                         self.emit_post_print(out, intrinsic_name, &val, "i64", "  ");
@@ -1359,11 +1368,18 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, i64 {})", indent, res, so, fmt_reg, reg).ok();
             }
             "print_float" => {
-                let fd = format!("%ppl_f{}", self.txn_counter); self.txn_counter += 1;
-                writeln!(out, "{}{} = fpext float {} to double", indent, fd, reg).ok();
-                writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt_reg).ok();
-                writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
-                    indent, res, so, fmt_reg, fd).ok();
+                // 2026-06-29: Float64 (double) skips fpext, Float (float) needs fpext to double
+                if ty == "double" {
+                    writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt_reg).ok();
+                    writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
+                        indent, res, so, fmt_reg, reg).ok();
+                } else {
+                    let fd = format!("%ppl_f{}", self.txn_counter); self.txn_counter += 1;
+                    writeln!(out, "{}{} = fpext float {} to double", indent, fd, reg).ok();
+                    writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt_reg).ok();
+                    writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
+                        indent, res, so, fmt_reg, fd).ok();
+                }
             }
             "putchar" => {
                 let ct = format!("%ppl_g{}", self.txn_counter); self.txn_counter += 1;

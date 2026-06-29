@@ -1237,7 +1237,11 @@ impl TypeChecker {
     /// Validate that a type is allowed in .abv context.
     fn validate_gpu_type(&self, ty: &Type) {
         match ty {
-            Type::Int | Type::UInt | Type::Float | Type::Bool | Type::Char => {}
+            // 2026-06-29: Added fixed-width integer/float types to GPU allowed list
+            Type::Int | Type::UInt | Type::Float | Type::Bool | Type::Char
+            | Type::Int8 | Type::Int16 | Type::Int32
+            | Type::UInt8 | Type::UInt16 | Type::UInt32
+            | Type::Float64 => {}
             Type::String => {} // allowed for constants
             Type::Vector(elem, _) => self.validate_gpu_type(elem),
             _ => {
@@ -1993,6 +1997,8 @@ impl TypeChecker {
     pub(crate) fn infer_expression(&self, expr: &Expr) -> Type {
         match expr {
             Expr::Integer(_) => Type::Int,
+            // 2026-06-29: IntegerSuffixed carries its type from the parser (e.g. 42i8 → Type::Int8)
+            Expr::IntegerSuffixed(_, ty) => ty.clone(),
             Expr::Float(_) => {
                 match self.target {
                     CompilationTarget::Verilog => {
@@ -2020,6 +2026,8 @@ impl TypeChecker {
                 }
                 Type::Float
             }
+            // 2026-06-29: Float64 is a separate AST variant for explicit f64 literals (e.g. 3.14f64)
+            Expr::Float64(_) => Type::Float64,
             Expr::String(_) => Type::String,
             Expr::RegexLiteral(_) => Type::String,
             Expr::Char(_) => Type::Char,
@@ -2762,8 +2770,16 @@ Expr::ObjectLiteral(fields) => {
                             } else {
                                 Type::String // allow String + other (resolved at runtime)
                             }
+                        // 2026-06-29: Handle Float64 binary ops (same-type only)
+                        } else if l_ty == Type::Float64 && r_ty == Type::Float64 {
+                            Type::Float64
                         } else if l_ty == Type::Float || r_ty == Type::Float {
                             Type::Float
+                        // 2026-06-29: Handle fixed-width integer type preservation
+                        // If both operands are the same fixed-width type, preserve it.
+                        // Mixed-width ops will be caught as type errors during codegen.
+                        } else if l_ty.is_integral() && l_ty == r_ty {
+                            l_ty
                         } else {
                             let is_l_ptr = matches!(&l_ty, Type::Applied(n, _) if n == "Ptr");
                             let is_r_ptr = matches!(&r_ty, Type::Applied(n, _) if n == "Ptr");
@@ -2985,6 +3001,15 @@ Expr::ObjectLiteral(fields) => {
             }
             (Type::Int, Type::Int) => int_type,
             (Type::Float, _) | (_, Type::Float) => float_type,
+            // 2026-06-29: Fixed-width same-type binary ops (no implicit widening)
+            // Each pair must match exactly — Int8 + Int16 is a type error.
+            (Type::Int8, Type::Int8) => Type::Int8,
+            (Type::Int16, Type::Int16) => Type::Int16,
+            (Type::Int32, Type::Int32) => Type::Int32,
+            (Type::UInt8, Type::UInt8) => Type::UInt8,
+            (Type::UInt16, Type::UInt16) => Type::UInt16,
+            (Type::UInt32, Type::UInt32) => Type::UInt32,
+            (Type::Float64, Type::Float64) => Type::Float64,
             (Type::String, Type::String) => Type::String,
             (Type::String, other) | (other, Type::String) => {
                 let type_name = format!("{:?}", other);
@@ -3133,23 +3158,29 @@ Expr::ObjectLiteral(fields) => {
 
     fn is_cast_valid(&self, src: &Type, dst: &Type) -> bool {
         if src == dst { return true; }
-        // Check primitive cast pairs
+
+        // 2026-06-29: Use the new Type helper methods for numeric type casts.
+        // All integer↔integer, float↔float, and cross-family casts are valid.
+        // This replaces the previous hardcoded pair list which only covered Int/UInt/Float.
+        if src.is_integral() && dst.is_integral() { return true; }
+        if src.is_float_type() && dst.is_float_type() { return true; }
+        if src.is_numeric() && dst.is_numeric() { return true; }
+
+        // Check primitive cast pairs for non-numeric types
         if matches!((src, dst),
-            (Type::Int, Type::Float) | (Type::Float, Type::Int) |
             (Type::Int, Type::Char) | (Type::Char, Type::Int) |
-            (Type::Int, Type::UInt) | (Type::UInt, Type::Int) |
-            (Type::Float, Type::Char) | (Type::Char, Type::Float) |
             (Type::Int, Type::String) | (Type::String, Type::Int) |
             (Type::Char, Type::String) | (Type::String, Type::Char) |
-            (Type::Bool, Type::Int) | (Type::Int, Type::Bool) |
-            (Type::UInt, Type::Float) | (Type::Float, Type::UInt) |
+            (Type::Int, Type::Bool) | (Type::Bool, Type::Int) |
             (Type::UInt, Type::Char) | (Type::Char, Type::UInt) |
-            (Type::UInt, Type::Bool) | (Type::Bool, Type::UInt)
+            (Type::UInt, Type::Bool) | (Type::Bool, Type::UInt) |
+            (Type::Float, Type::Char) | (Type::Char, Type::Float) |
+            (Type::Float64, Type::Char) | (Type::Char, Type::Float64)
         ) { return true; }
 
-        // Allow Byte <-> Int and Byte <-> UInt casts
-        if (matches!(src, Type::Custom(n) if n == "Byte") && matches!(dst, Type::Int | Type::UInt))
-            || (matches!(dst, Type::Custom(n) if n == "Byte") && matches!(src, Type::Int | Type::UInt))
+        // Allow Byte <-> Int, Byte <-> UInt, Byte <-> Int8/16/32, Byte <-> UInt8/16/32
+        if (matches!(src, Type::Custom(n) if n == "Byte") && dst.is_integral())
+            || (matches!(dst, Type::Custom(n) if n == "Byte") && src.is_integral())
         {
             return true;
         }
@@ -3202,7 +3233,16 @@ Expr::ObjectLiteral(fields) => {
             | (Type::Bool, Type::Bool)
             | (Type::Void, Type::Void)
             | (Type::Char, Type::Char)
-            | (Type::Data, Type::Data) => true,
+            | (Type::Data, Type::Data)
+            // 2026-06-29: Fixed-width same-type compatibility
+            // No implicit widening — Int8 is NOT compatible with Int16
+            | (Type::Int8, Type::Int8)
+            | (Type::Int16, Type::Int16)
+            | (Type::Int32, Type::Int32)
+            | (Type::UInt8, Type::UInt8)
+            | (Type::UInt16, Type::UInt16)
+            | (Type::UInt32, Type::UInt32)
+            | (Type::Float64, Type::Float64) => true,
             (Type::Int, Type::UInt) | (Type::UInt, Type::Int) => true,
             (Type::Vector(ia, da), Type::Vector(ib, db)) => {
                 da.len() == db.len() && da.iter().zip(db.iter()).all(|(l, r)| {
@@ -3256,9 +3296,15 @@ Expr::ObjectLiteral(fields) => {
     /// Used by E004 to determine if a field type mismatch is significant.
     fn types_are_width_compatible(&self, a: &Type, b: &Type) -> bool {
         if a == b { return true; }
-        // All 64-bit types
+        // 2026-06-29: Use bit_width() helper instead of hardcoded lists.
+        // This automatically handles all new fixed-width types (Int8, Float64, etc.).
+        // Falls back to the old hardcoded categories for types without bit_width.
+        if let (Some(aw), Some(bw)) = (a.bit_width(), b.bit_width()) {
+            return aw == bw;
+        }
+        // All 64-bit types without explicit bit_width
         let wide = [Type::Int, Type::UInt, Type::Float, Type::String, Type::Data];
-        // All 32-bit types
+        // All 32-bit types without explicit bit_width
         let narrow = [Type::Char, Type::Bool];
         // Check if both are in the same width category
         let a_wide = wide.iter().any(|t| self.types_compatible(a, t));

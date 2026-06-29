@@ -40,11 +40,6 @@ impl LlvmBackend {
         // registers, ListIndex loads, or %State field loads). Check the
         // register name prefix to decide: %t and %d prefixes are from
         // emit_expr (always i64); other prefixes like %p_ are native i8*.
-        // 2026-06-28: String/Data registers can be either native i8* (from
-        // function params or arg slots) or boxed i64 (from emit_expr's %t{N}
-        // registers, ListIndex loads, or %State field loads). Check the
-        // register name prefix to decide: %t and %d prefixes are from
-        // emit_expr (always i64); other prefixes like %p_ are native i8*.
         } else if r.ty == Type::String || r.ty == Type::Data {
             let is_boxed = r.name.starts_with("%t") || r.name.starts_with("%d");
             if is_boxed {
@@ -57,11 +52,7 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
                 p
             }
-        // 2026-06-20: Check reg_float_cache before bitcasting — guarantees correctness if
-        // the register name is i64-boxed but Type::Float (e.g. intrinsic float returns,
-        // callable txn param marshaling). The cache maps i64 register names to their native
-        // float counterpart. Without this check, bitcast float %i64_reg causes LLVM verifier
-        // errors. See docs/plans/2026-06-20-float-boxing-dual-path-plan.md.
+        // 2026-06-20: Check reg_float_cache before bitcasting
         } else if r.ty == Type::Float {
             if let Some(cached) = self.reg_float_cache.get(&r.name) {
                 let bi = format!("%rbi{}", self.txn_counter); self.txn_counter += 1;
@@ -76,6 +67,36 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
                 ze
             }
+        // 2026-06-29: Float64 → bitcast double to i64 directly (same width, no zext)
+        } else if r.ty == Type::Float64 {
+            let bi = format!("%rbi{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = bitcast double {} to i64", indent, bi, r.name).ok();
+            bi
+        // 2026-06-29: Fixed-width integer types need sign/zero extension to i64
+        } else if r.ty == Type::Int8 {
+            let ex = format!("%rex{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = sext i8 {} to i64", indent, ex, r.name).ok();
+            ex
+        } else if r.ty == Type::UInt8 {
+            let ex = format!("%rex{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = zext i8 {} to i64", indent, ex, r.name).ok();
+            ex
+        } else if r.ty == Type::Int16 {
+            let ex = format!("%rex{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = sext i16 {} to i64", indent, ex, r.name).ok();
+            ex
+        } else if r.ty == Type::UInt16 {
+            let ex = format!("%rex{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = zext i16 {} to i64", indent, ex, r.name).ok();
+            ex
+        } else if r.ty == Type::Int32 {
+            let ex = format!("%rex{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = sext i32 {} to i64", indent, ex, r.name).ok();
+            ex
+        } else if r.ty == Type::UInt32 {
+            let ex = format!("%rex{}", self.txn_counter); self.txn_counter += 1;
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, ex, r.name).ok();
+            ex
         } else {
             r.name.clone()
         }
@@ -444,6 +465,11 @@ impl LlvmBackend {
                                     let fl = self.native_float_or_box(out, indent, &val.to_string());
                                     writeln!(out, "{}{} = insertvalue %State {}, float {}, {}", indent, new_reg, ssa_reg, fl, idx).ok();
                                 }
+                                // 2026-06-29: Float64 fields store double directly in %State
+                                "double" => {
+                                    let fl = self.ensure_float_reg(out, indent, &val);
+                                    writeln!(out, "{}{} = insertvalue %State {}, double {}, {}", indent, new_reg, ssa_reg, fl, idx).ok();
+                                }
                                 "i8*" => {
                                     let p = format!("%fp{}", self.txn_counter); self.txn_counter += 1;
                                     writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, val_boxed).ok();
@@ -453,7 +479,8 @@ impl LlvmBackend {
                                     writeln!(out, "{}{} = insertvalue %State {}, i64 {}, {}", indent, new_reg, ssa_reg, val_boxed, idx).ok();
                                 }
                             }
-                            if ty != "float" {
+                            // 2026-06-29: Float64 (double) fields need SSA float reg tracking too
+                            if ty != "float" && ty != "double" {
                                 let re = format!("%re_{}_{}", fname, self.txn_counter); self.txn_counter += 1;
                                 writeln!(out, "{}{} = extractvalue %State {}, {}", indent, re, new_reg, idx).ok();
                             self.ssa_old_int_regs.insert(fname.clone(), re);
