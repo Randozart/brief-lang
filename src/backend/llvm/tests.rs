@@ -2025,8 +2025,8 @@ fn empty_program() -> Program {
     fn test_check_exit_condition_idents_valid() {
         // Known identifiers (state field + constant) should produce no errors
         let mut backend = LlvmBackend::new();
-        backend.field_index_map.insert("ops".to_string(), 0);
-        backend.constants.insert("N".to_string(), (Type::Int, Expr::Integer(100)));
+        backend.ctx.field_index_map.insert("ops".to_string(), 0);
+        backend.ctx.constants.insert("N".to_string(), (Type::Int, Expr::Integer(100)));
 
         let expr = Expr::Eq(
             Box::new(Expr::Identifier("ops".to_string())),
@@ -2041,8 +2041,8 @@ fn empty_program() -> Program {
     fn test_check_exit_condition_idents_invalid() {
         // Unknown identifier should produce an error
         let mut backend = LlvmBackend::new();
-        backend.field_index_map.insert("ops".to_string(), 0);
-        backend.constants.insert("N".to_string(), (Type::Int, Expr::Integer(100)));
+        backend.ctx.field_index_map.insert("ops".to_string(), 0);
+        backend.ctx.constants.insert("N".to_string(), (Type::Int, Expr::Integer(100)));
 
         let expr = Expr::Eq(
             Box::new(Expr::Identifier("ops".to_string())),
@@ -2142,7 +2142,7 @@ fn empty_program() -> Program {
         let mut backend = LlvmBackend::new();
         let _output = backend.generate(&program);
         // Natural death should have set has_natural_exit
-        assert!(backend.has_natural_exit,
+        assert!(backend.ctx.has_natural_exit,
             "Foldable wake program should have natural exit");
         // Exit check should be emitted (trunc + branch to done)
         assert!(_output.contains("label %done"),
@@ -2161,7 +2161,7 @@ fn empty_program() -> Program {
         let program = make_wake_trg_program("io", "__io_pending", Type::Bool, true);
         let mut backend = LlvmBackend::new();
         let _output = backend.generate(&program);
-        assert!(!backend.has_natural_exit,
+        assert!(!backend.ctx.has_natural_exit,
             "Program with persistent txn should NOT have natural exit");
         // Warning about missing exit path should fire
         let has_warning = backend.warnings().iter().any(|w| {
@@ -2180,7 +2180,7 @@ fn empty_program() -> Program {
         let program = make_exit_program(None, Type::Int, false);
         let mut backend = LlvmBackend::new();
         let _output = backend.generate(&program);
-        assert!(!backend.has_natural_exit,
+        assert!(!backend.ctx.has_natural_exit,
             "Non-wake program should NOT use natural death");
     }
 
@@ -2415,8 +2415,8 @@ let spec = crate::target_spec::TargetSpec {
         let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
         aliases.insert("uart_debug".to_string(), crate::dbrief::DbriefType::Data);
         let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
-        assert_eq!(backend.schema_aliases.len(), 1);
-        assert!(backend.schema_aliases.contains_key("uart_debug"));
+        assert_eq!(backend.ctx.schema_aliases.len(), 1);
+        assert!(backend.ctx.schema_aliases.contains_key("uart_debug"));
         let output = backend.generate(&empty_program());
         assert!(output.contains("ModuleID"));
     }
@@ -2511,7 +2511,7 @@ let spec = crate::target_spec::TargetSpec {
         aliases.insert("gpio0".to_string(), crate::dbrief::DbriefType::UInt(32));
         aliases.insert("gpio1".to_string(), crate::dbrief::DbriefType::UInt(32));
         let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
-        assert_eq!(backend.schema_aliases.len(), 2);
+        assert_eq!(backend.ctx.schema_aliases.len(), 2);
         let output = backend.generate(&empty_program());
         assert!(output.contains("ModuleID"));
     }
@@ -2629,9 +2629,9 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         assert!(output.contains("ModuleID"), "Output should be valid IR");
-        assert!(backend.struct_types.contains_key("Point"),
+        assert!(backend.ctx.struct_types.contains_key("Point"),
             "Struct 'Point' should be registered");
-        assert_eq!(backend.struct_types["Point"].len(), 2);
+        assert_eq!(backend.ctx.struct_types["Point"].len(), 2);
     }
 
     fn make_point_program(body: Vec<Statement>) -> Program {
@@ -2851,12 +2851,12 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let _ = backend.generate(&program);
-        assert!(backend.enum_types.contains_key("Option"));
-        assert!(backend.variant_disc.contains_key("None"));
-        assert!(backend.variant_disc.contains_key("Some"));
-        assert_eq!(backend.variant_disc.get("None").map(|(_, d, _)| *d), Some(0));
-        assert_eq!(backend.variant_disc.get("Some").map(|(_, d, _)| *d), Some(1));
-        assert_eq!(backend.variant_disc.get("Some").map(|(_, _, f)| *f), Some(1));
+        assert!(backend.ctx.enum_types.contains_key("Option"));
+        assert!(backend.ctx.variant_disc.contains_key("None"));
+        assert!(backend.ctx.variant_disc.contains_key("Some"));
+        assert_eq!(backend.ctx.variant_disc.get("None").map(|(_, d, _)| *d), Some(0));
+        assert_eq!(backend.ctx.variant_disc.get("Some").map(|(_, d, _)| *d), Some(1));
+        assert_eq!(backend.ctx.variant_disc.get("Some").map(|(_, _, f)| *f), Some(1));
     }
 
     #[test]
@@ -3062,9 +3062,9 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let _ = backend.generate(&program);
-        assert_eq!(backend.variant_disc.get("Leaf").map(|(_, d, _)| *d), Some(0));
-        assert_eq!(backend.variant_disc.get("Node").map(|(_, d, _)| *d), Some(1));
-        assert_eq!(backend.variant_disc.get("Node").map(|(_, _, f)| *f), Some(2));
+        assert_eq!(backend.ctx.variant_disc.get("Leaf").map(|(_, d, _)| *d), Some(0));
+        assert_eq!(backend.ctx.variant_disc.get("Node").map(|(_, d, _)| *d), Some(1));
+        assert_eq!(backend.ctx.variant_disc.get("Node").map(|(_, _, f)| *f), Some(2));
     }
 
     // ── Collection (list) tests ────────────────────────────────────
@@ -5058,9 +5058,9 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_embedded_mode_flag() {
         let backend = LlvmBackend::new().with_embedded_mode(true);
-        assert!(backend.is_embedded, "with_embedded_mode(true) should set is_embedded");
+        assert!(backend.ctx.is_embedded, "with_embedded_mode(true) should set is_embedded");
         let backend2 = LlvmBackend::new().with_embedded_mode(false);
-        assert!(!backend2.is_embedded, "with_embedded_mode(false) should not set is_embedded");
+        assert!(!backend2.ctx.is_embedded, "with_embedded_mode(false) should not set is_embedded");
     }
 
     #[test]
@@ -5135,7 +5135,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_embedded_rejects_recursion() {
         let mut backend = LlvmBackend::new().with_embedded_mode(true);
-        backend.has_cycles = true;
+        backend.ctx.has_cycles = true;
         let program = empty_program();
         backend.check_embedded_restrictions(&program);
         let has_warning = backend.warnings().iter().any(|w| w.contains("unbounded recursion"));
@@ -5515,8 +5515,8 @@ let spec = crate::target_spec::TargetSpec {
         let output = backend.generate(&program);
         assert!(output.contains("define i64 @write_buf"),
             "inop should be named write_buf.\nGot:\n{}", output);
-        let decl = backend.inop_decls.get("write_buf");
-        assert!(decl.is_some(), "inop! should be stored in backend.inop_decls");
+        let decl = backend.ctx.inop_decls.get("write_buf");
+        assert!(decl.is_some(), "inop! should be stored in backend.ctx.inop_decls");
         assert!(decl.unwrap().has_side_effects, "inop! should have has_side_effects = true");
     }
 
@@ -5559,9 +5559,9 @@ let spec = crate::target_spec::TargetSpec {
         // With single-lens usage, no cache slots should be appended.
         // %State should still be just `{ i64 }`
         assert!(!output.contains("cache"), "single-lens → no cache slots in %State: {}", output);
-        assert!(backend.field_modes.is_empty() || backend.field_modes.values().all(|m| matches!(m, crate::analysis::FieldMode::Always)),
+        assert!(backend.ctx.field_modes.is_empty() || backend.ctx.field_modes.values().all(|m| matches!(m, crate::analysis::FieldMode::Always)),
             "single-lens → all fields Always");
-        assert!(backend.cache_slots.is_empty(), "single-lens → no cache slots");
+        assert!(backend.ctx.cache_slots.is_empty(), "single-lens → no cache slots");
     }
 
     #[test]
@@ -5605,9 +5605,9 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         // With dual-lens usage, cache slots should be appended and cache IR emitted.
-        assert!(backend.cache_slots.contains_key("x"),
-            "dual-lens → cache slots field for x: {:?}", backend.cache_slots);
-        let x_targets = backend.cache_slots.get("x").expect("x should have cache targets");
+        assert!(backend.ctx.cache_slots.contains_key("x"),
+            "dual-lens → cache slots field for x: {:?}", backend.ctx.cache_slots);
+        let x_targets = backend.ctx.cache_slots.get("x").expect("x should have cache targets");
         assert!(x_targets.contains_key("Size") || x_targets.contains_key("Ptr"),
             "dual-lens → x should have Size or Ptr cache: {:?}", x_targets);
         assert!(output.contains("icmp ne i8"),
@@ -5644,7 +5644,7 @@ let spec = crate::target_spec::TargetSpec {
             ("CString".into(), "String".into()),
             meld_decl,
         );
-        backend.type_universe = Some(universe);
+        backend.ctx.type_universe = Some(universe);
 
         // Test 1: Identity route "Ptr" → emits add i64 0, <src> ; ptr
         let mut out = String::new();

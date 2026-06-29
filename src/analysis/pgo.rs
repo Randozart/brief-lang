@@ -2,6 +2,7 @@ use crate::interpreter::Interpreter;
 use crate::ast::Program;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone)]
 pub struct PgoProfile {
     pub branch_counts: HashMap<String, (u64, u64)>,
 }

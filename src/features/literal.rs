@@ -78,8 +78,8 @@ impl ExprCodegenLLVM for LiteralExpr {
         out: &mut String,
         _dispatch: &ExprDispatch,
     ) -> crate::backend::llvm::TypedRegister {
-        let v = format!("%t{}", ctx.txn_counter);
-        ctx.txn_counter += 1;
+        let v = format!("%t{}", ctx.fun.txn_counter);
+        ctx.fun.txn_counter += 1;
         match self {
             LiteralExpr::Integer(n) => {
                 writeln!(out, "{indent}{v} = add i64 0, {n}", indent = "", v = v, n = n).ok();
@@ -98,15 +98,15 @@ impl ExprCodegenLLVM for LiteralExpr {
             // to bitcast an i64 register as float. See docs/plans/2026-06-20-float-boxing-dual-path-plan.md
             LiteralExpr::Float(f) => {
                 let bits = crate::backend::llvm::float_to_llvm_hex(*f);
-                let fl = format!("%ff{}", ctx.txn_counter); ctx.txn_counter += 1;
+                let fl = format!("%ff{}", ctx.fun.txn_counter); ctx.fun.txn_counter += 1;
                 writeln!(out, "{indent}{fl} = bitcast i32 {bits} to float", indent = "", fl = fl, bits = bits).ok();
-                ctx.reg_float_cache.insert(fl.clone(), fl.clone());
+                ctx.fun.reg_float_cache.insert(fl.clone(), fl.clone());
                 crate::backend::llvm::TypedRegister { name: fl, ty: Type::Float }
             }
             LiteralExpr::String(s) => {
-                let si = ctx.string_constants.iter().position(|x| x == s).unwrap_or(0);
+                let si = ctx.ctx.string_constants.iter().position(|x| x == s).unwrap_or(0);
                 let g = format!("@str.{}", si);
-                let p = format!("%sp{}", ctx.txn_counter); ctx.txn_counter += 1;
+                let p = format!("%sp{}", ctx.fun.txn_counter); ctx.fun.txn_counter += 1;
                 writeln!(out, "{indent}{p} = getelementptr inbounds [{len} x i8], [{len} x i8]* {g}, i64 0, i64 0",
                     indent = "", p = p, len = s.len() + 1, g = g).ok();
                 writeln!(out, "{indent}{v} = ptrtoint i8* {p} to i64", indent = "", v = v, p = p).ok();
@@ -115,7 +115,7 @@ impl ExprCodegenLLVM for LiteralExpr {
                 crate::backend::llvm::TypedRegister { name: v, ty: Type::Int }
             }
             LiteralExpr::Char(c) => {
-                let ci = format!("%cc{}", ctx.txn_counter); ctx.txn_counter += 1;
+                let ci = format!("%cc{}", ctx.fun.txn_counter); ctx.fun.txn_counter += 1;
                 writeln!(out, "{indent}{ci} = add i32 0, {cval}", indent = "", ci = ci, cval = *c as i32).ok();
                 writeln!(out, "{indent}{v} = zext i32 {ci} to i64", indent = "", v = v, ci = ci).ok();
                 // v is i64 (boxed Char). Type::Int so adapt_to_i64 passes through.

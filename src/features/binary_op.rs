@@ -146,7 +146,7 @@ impl ExprCodegenLLVM for BinaryOpExpr {
             BinaryOpKind::Div => ctx.emit_binop(out, "", &self.left, &self.right, "sdiv", "fdiv"),
             BinaryOpKind::Mod => {
                 let (a, b) = (ctx.emit_expr(out, &self.left, ""), ctx.emit_expr(out, &self.right, ""));
-                let v = format!("%t{}", ctx.txn_counter); ctx.txn_counter += 1;
+                let v = format!("%t{}", ctx.fun.txn_counter); ctx.fun.txn_counter += 1;
                 writeln!(out, "{} = srem i64 {}, {}", v, a, b).ok();
                 crate::backend::llvm::TypedRegister { name: v, ty: crate::ast::Type::Int }
             }

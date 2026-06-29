@@ -22,8 +22,8 @@ impl LlvmBackend {
     /// Emit cleanup calls for all local variables whose type has an
     /// OnExit foreign destructor. Called at scope exit points.
     fn emit_on_exit_cleanup(&mut self, out: &mut String, indent: &str) {
-        let Some(ref universe) = self.type_universe else { return };
-        for (name, ty) in &self.let_binding_types {
+        let Some(ref universe) = self.ctx.type_universe else { return };
+        for (name, ty) in &self.fun.let_binding_types {
             let type_name = match ty {
                 crate::ast::Type::Custom(n) => n,
                 crate::ast::Type::Applied(n, _) => n,
@@ -31,29 +31,29 @@ impl LlvmBackend {
             };
             let Some(resolved) = universe.types.get(type_name) else { continue };
             let Some(ref on_exit_fn) = resolved.on_exit else { continue };
-            let Some(reg) = self.let_bindings.get(name) else { continue };
+            let Some(reg) = self.fun.let_bindings.get(name) else { continue };
             // Emit: call void @on_exit_fn(i64 %reg)
             writeln!(out, "{}{} = call i64 @{}(i64 {})",
                 indent,
-                format!("%pcl{}", self.txn_counter),
+                format!("%pcl{}", self.fun.txn_counter),
                 on_exit_fn,
                 reg
             ).ok();
-            self.txn_counter += 1;
+            self.fun.txn_counter += 1;
         }
     }
 
     /// Check the target expression for an InsertAt strategy by looking up
     /// the variable's type in the TypeUniverse.
     pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::InsertStrategy> {
-        let tu = self.type_universe.as_ref()?;
+        let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
             crate::ast::Expr::OwnedRef(n) => n,
             crate::ast::Expr::Identifier(n) => n,
             _ => return None,
         };
         // Look up the variable's declared type
-        let ty = self.let_original_types.get(var_name)?;
+        let ty = self.fun.let_original_types.get(var_name)?;
         let type_name = match ty {
             crate::ast::Type::Custom(n) => n,
             crate::ast::Type::Applied(n, _) => n,
@@ -65,13 +65,13 @@ impl LlvmBackend {
     /// Check the target expression for an ExtractFrom strategy by looking up
     /// the variable's type in the TypeUniverse.
     pub(super) fn check_extract_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::ExtractStrategy> {
-        let tu = self.type_universe.as_ref()?;
+        let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
             crate::ast::Expr::OwnedRef(n) => n,
             crate::ast::Expr::Identifier(n) => n,
             _ => return None,
         };
-        let ty = self.let_original_types.get(var_name)?;
+        let ty = self.fun.let_original_types.get(var_name)?;
         let type_name = match ty {
             crate::ast::Type::Custom(n) => n,
             crate::ast::Type::Applied(n, _) => n,
@@ -196,11 +196,11 @@ impl LlvmBackend {
     }
 
     pub(super) fn native_float_or_box(&mut self, out: &mut String, indent: &str, val_reg: &str) -> String {
-        if let Some(cached) = self.reg_float_cache.get(val_reg) {
+        if let Some(cached) = self.fun.reg_float_cache.get(val_reg) {
             return cached.clone();
         }
-        let tr = format!("%nftr{}", self.txn_counter); self.txn_counter += 1;
-        let fl = format!("%nffl{}", self.txn_counter); self.txn_counter += 1;
+        let tr = format!("%nftr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        let fl = format!("%nffl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val_reg).ok();
         writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
         fl
@@ -210,7 +210,7 @@ impl LlvmBackend {
         // Check cache first — even float-typed registers may have their
         // native float counterpart cached (e.g. parameter marshaling boxes
         // float to i64 at function entry; the cache maps boxed→native).
-        if let Some(cached) = self.reg_float_cache.get(&reg.name) {
+        if let Some(cached) = self.fun.reg_float_cache.get(&reg.name) {
             return cached.clone();
         }
         // 2026-06-29: Float64 is a native double, no conversion needed.
@@ -230,7 +230,7 @@ impl LlvmBackend {
     /// and stores the epfd in a synthetic state field.
     pub(super) fn emit_trg_init(&mut self, out: &mut String) {
         // Need at least one built-in trigger to emit setup
-        let has_builtin = self.triggers.iter().any(|(_, trg)| matches!(
+        let has_builtin = self.ctx.triggers.iter().any(|(_, trg)| matches!(
             &trg.address,
             crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_)
         ));
@@ -252,15 +252,15 @@ impl LlvmBackend {
         writeln!(out, "  {} = call i32 @epoll_create1(i32 0)", epfd).ok();
 
         // Store epfd in epfd_field slot
-        let sge = format!("%sge{}", self.txn_counter); self.txn_counter += 1;
-        if let Some(epfd_idx) = self.field_index_map.get("__trg_epfd") {
+        let sge = format!("%sge{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        if let Some(epfd_idx) = self.ctx.field_index_map.get("__trg_epfd") {
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, epfd_idx).ok();
             writeln!(out, "  store i32 {}, i32* {}, align 4", epfd, sge).ok();
         }
 
         // Per-trigger setup
-        for (name, trg) in &self.triggers {
-            let bit = self.dep_graph.bit_index.get(name).copied().unwrap_or(0);
+        for (name, trg) in &self.ctx.triggers {
+            let bit = self.ctx.dep_graph.bit_index.get(name).copied().unwrap_or(0);
             match &trg.address {
                 crate::ast::LinkRef::Stdin => {
                     // fcntl(0, F_SETFL, O_NONBLOCK)
@@ -370,16 +370,16 @@ impl LlvmBackend {
         match address {
             crate::ast::LinkRef::Explicit(addr) => {
                 let store_ty = super::trg_llvm_storage_ty(trg_ty);
-                let tr_counter = self.txn_counter;
-                self.txn_counter += 1;
+                let tr_counter = self.fun.txn_counter;
+                self.fun.txn_counter += 1;
                 let raw = format!("%tr{}", tr_counter);
                 writeln!(out, "{}{} = load volatile {}, {}* inttoptr (i64 {} to {}*), align 1", indent, raw, store_ty, store_ty, addr, store_ty).ok();
                 self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
             }
             crate::ast::LinkRef::Linked(sym) => {
                 let store_ty = super::trg_llvm_storage_ty(trg_ty);
-                let tr_counter = self.txn_counter;
-                self.txn_counter += 1;
+                let tr_counter = self.fun.txn_counter;
+                self.fun.txn_counter += 1;
                 let raw = format!("%tr{}", tr_counter);
                 writeln!(out, "{}{} = load volatile {}, {}* @{}", indent, raw, store_ty, store_ty, sym).ok();
                 self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
@@ -430,7 +430,7 @@ impl LlvmBackend {
 
     pub(super) fn declare_state_type(&mut self, out: &mut String) {
         // Emit %CellState.<name> types for persistent cells (used by thread functions)
-        for (cell_name, (cs_imap, cs_tys)) in &self.cell_state_types {
+        for (cell_name, (cs_imap, cs_tys)) in &self.ctx.cell_state_types {
             write!(out, "%CellState.{} = type {{ ", cell_name).ok();
             for (i, f) in cs_tys.iter().enumerate() {
                 if i > 0 { write!(out, ", ").ok(); }
@@ -439,12 +439,12 @@ impl LlvmBackend {
             writeln!(out, " }}").ok();
         }
 
-        if self.field_types.is_empty() {
+        if self.ctx.field_types.is_empty() {
             writeln!(out, "%State = type {{ i64 }}").ok();
             return;
         }
         write!(out, "%State = type {{ ").ok();
-        for (i, f) in self.field_types.iter().enumerate() {
+        for (i, f) in self.ctx.field_types.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
             write!(out, "{}", f).ok();
         }
@@ -464,14 +464,14 @@ impl LlvmBackend {
         writeln!(out, "define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
         let mut reg = 0u32;
-        let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
-            .map(|(name, &idx)| (name.clone(), idx, self.field_types[idx].clone()))
+        let mut fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
+            .map(|(name, &idx)| (name.clone(), idx, self.ctx.field_types[idx].clone()))
             .collect();
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, ty) in fields {
             let p = format!("%ip{}", reg); reg += 1;
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", p, idx).ok();
-            let init_clone = self.field_initializers.get(&name).and_then(|e| e.clone());
+            let init_clone = self.ctx.field_initializers.get(&name).and_then(|e| e.clone());
             match init_clone {
                 Some(Expr::Integer(n)) => {
                     writeln!(out, "  store i64 {}, i64* {}, align {}", n, p, self.align_of("i64")).ok();
@@ -531,14 +531,14 @@ impl LlvmBackend {
                         crate::features::literal::LiteralExpr::String(s) => s,
                         _ => unreachable!(),
                     };
-                    let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                    let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
                     let g = format!("@str.{}", si);
                     let str_p = format!("%ip{}s", reg); reg += 1;
                     writeln!(out, "  {} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", str_p, s.len() + 1, g).ok();
                     writeln!(out, "  store i8* {}, i8** {}, align {}", str_p, p, self.align_of("i8*")).ok();
                 }
                 Some(Expr::String(s)) => {
-                    let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                    let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
                     let g = format!("@str.{}", si);
                     let str_p = format!("%ip{}s", reg); reg += 1;
                     writeln!(out, "  {} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", str_p, s.len() + 1, g).ok();
@@ -608,8 +608,8 @@ impl LlvmBackend {
         }
         let mmio_inits: Vec<(u64, Expr)> = {
             let mut v = Vec::new();
-            for (name, &addr) in &self.mmio_fields {
-                if let Some(Some(expr)) = self.mmio_initializers.get(name).cloned() {
+            for (name, &addr) in &self.ctx.mmio_fields {
+                if let Some(Some(expr)) = self.ctx.mmio_initializers.get(name).cloned() {
                     v.push((addr, expr.clone()));
                 }
             }
@@ -646,15 +646,15 @@ impl LlvmBackend {
     ///   introduce poison which inhibits downstream optimizations like load elimination.
     pub(super) fn emit_inline_init_stores(&mut self, out: &mut String, state_ptr: &str) {
         let indent = if state_ptr == "%state" { "  " } else { "" };
-        let mut fields: Vec<(String, usize, String)> = self.field_index_map.iter()
-            .map(|(name, &idx)| (name.clone(), idx, self.field_types[idx].clone()))
+        let mut fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
+            .map(|(name, &idx)| (name.clone(), idx, self.ctx.field_types[idx].clone()))
             .collect();
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, _ty) in &fields {
             let p = format!("%ip_{}", idx);
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, state_ptr, idx).ok();
-            let init_clone = self.field_initializers.get(name).and_then(|e| e.clone());
-            let ty = self.field_types[*idx].clone();
+            let init_clone = self.ctx.field_initializers.get(name).and_then(|e| e.clone());
+            let ty = self.ctx.field_types[*idx].clone();
             match init_clone {
                 Some(Expr::Integer(n)) => {
                     writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, n, p, self.align_of("i64")).ok();
@@ -715,7 +715,7 @@ impl LlvmBackend {
                         crate::features::literal::LiteralExpr::String(s) => s,
                         _ => unreachable!(),
                     };
-                    let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                    let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
                     let g = format!("@str.{}", si);
                     let str_p = format!("%ip_{}s", idx);
                     writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
@@ -731,7 +731,7 @@ impl LlvmBackend {
                     // 2026-06-17: Store actual string constant pointer, not null.
                     // The string is stored as a bitcast of @str.N to i8*, matching
                     // what Expr::String emits in emit_expr.rs:32.
-                    let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                    let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
                     let g = format!("@str.{}", si);
                     let str_p = format!("%ip_{}s", idx);
                     writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
@@ -812,7 +812,7 @@ impl LlvmBackend {
             }
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
-        for (_field_name, targets) in &self.cache_slots {
+        for (_field_name, targets) in &self.ctx.cache_slots {
             for (_target_name, &(cache_idx, valid_idx)) in targets {
                 let cp = format!("%icp_{}", cache_idx);
                 writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
@@ -825,15 +825,15 @@ impl LlvmBackend {
     }
 
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
-        self.pending_cleanup.clear();
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
-        self.ssa_old_int_regs.clear();
-        self.ssa_old_float_regs.clear();
+        self.fun.pending_cleanup.clear();
+        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
         // 2026-06-17: Use correct LLVM return type (float for Float, otherwise i64)
         let is_float_fn = d.outputs.iter().any(|t| matches!(t, Type::Float));
         let ll_ret_ty = if is_float_fn { "float" } else { "i64" };
-        self.fn_ret_ty = ll_ret_ty.to_string();
-        self.returns_i64 = !is_float_fn;
+        self.fun.fn_ret_ty = ll_ret_ty.to_string();
+        self.fun.returns_i64 = !is_float_fn;
         // Rename user `main` to `brief_main` to avoid collision with
         // the runtime entry point `define i32 @main()` in loop_engine.rs.
         let ll_name: &str = if d.name == "main" { "brief_main" } else { &d.name };
@@ -844,8 +844,8 @@ impl LlvmBackend {
         }
         writeln!(out, ") local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
-        self.ssa_old_int_regs.clear();
-        self.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
             let conv = format!("%ac{}", i);
@@ -859,7 +859,7 @@ impl LlvmBackend {
                         let m = format!("%ai{}", i);
                         writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
                         writeln!(out, "  {} = zext i32 {} to i64", conv, m).ok();
-                        self.reg_float_cache.insert(conv.clone(), raw.to_string());
+                        self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
                     }
                     _ => {}
                 }
@@ -867,34 +867,34 @@ impl LlvmBackend {
             } else {
                 reg = raw;
             }
-            self.let_bindings.insert(n.clone(), reg.clone());
+            self.fun.let_bindings.insert(n.clone(), reg.clone());
             // Boxed params (Bool/Char/String/Data) are stored as i64,
             // so mark them as Type::Int so downstream doesn't treat them
             // as native i1/i32/i8*. Float stays Type::Float (handled specially).
                 if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data) {
-                    self.let_binding_types.insert(n.clone(), Type::Int);
+                    self.fun.let_binding_types.insert(n.clone(), Type::Int);
                     // 2026-06-17: Save original type for String/Data params so
                     // is_string_chain can detect string variables by original type.
-                    self.let_original_types.insert(n.clone(), t.clone());
+                    self.fun.let_original_types.insert(n.clone(), t.clone());
                 } else {
-                    self.let_binding_types.insert(n.clone(), t.clone());
+                    self.fun.let_binding_types.insert(n.clone(), t.clone());
                 }
         }
-        self.txn_counter = 0;
-        self.terminated = false;
+        self.fun.txn_counter = 0;
+        self.fun.terminated = false;
         // 2026-06-26: in_callable_txn must be true so Statement::Term in the
         // defn body emits a ret instruction (emit_stmt.rs line 78). Without
         // this, Statement::Term becomes a no-op, terminated stays false, and
         // the function falls through to "ret i64 0" — every defn silently
         // returns zero regardless of its actual computation.
-        self.in_callable_txn = true;
+        self.fun.in_callable_txn = true;
         for s in &d.body {
-            if self.terminated { break; }
+            if self.fun.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
         // Foreign destructor cleanup: emit OnExit calls before returning
         self.emit_on_exit_cleanup(out, "  ");
-        if !self.terminated {
+        if !self.fun.terminated {
             if is_float_fn {
                 writeln!(out, "  ret float 0.0").ok();
             } else {
@@ -929,15 +929,15 @@ impl LlvmBackend {
             self.emit_callable_txn(out, txn, name);
             return;
         }
-        self.pending_cleanup.clear();
-        self.range_bounds = Self::extract_ranges(&txn.contract.pre_condition);
-        self.field_to_meta_idx.clear();
-        for (f, &(lo, hi)) in &self.range_bounds {
+        self.fun.pending_cleanup.clear();
+        self.ctx.range_bounds = Self::extract_ranges(&txn.contract.pre_condition);
+        self.ctx.field_to_meta_idx.clear();
+        for (f, &(lo, hi)) in &self.ctx.range_bounds {
             if hi < i64::MAX {
                 let mi = range_meta.len();
                 let dlo = if lo > i64::MIN { lo } else { i64::MIN };
                 range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, dlo, hi));
-                self.field_to_meta_idx.insert(f.clone(), mi);
+                self.ctx.field_to_meta_idx.insert(f.clone(), mi);
             }
         }
         // Resolve #inline / #?inline directives from transaction modifiers.
@@ -974,7 +974,7 @@ impl LlvmBackend {
                 Some("alwaysinline") => " alwaysinline",
                 Some("inlinehint") => " inlinehint",
                 _ => {
-                    if !self.has_cycles { " alwaysinline" } else { "" }
+                    if !self.ctx.has_cycles { " alwaysinline" } else { "" }
                 }
             }
         };
@@ -1002,21 +1002,21 @@ impl LlvmBackend {
             self.emit_arena_init(out, "  ");
             writeln!(out, "  br i1 true, label %body, label %rollback").ok();
             writeln!(out, "  body:").ok();
-            self.ssa_old_int_regs.clear();
-            self.ssa_old_float_regs.clear();
+            self.fun.ssa_old_int_regs.clear();
+            self.fun.ssa_old_float_regs.clear();
             // 2026-06-28: Do NOT reset txn_counter here — this emits into the
             // existing @main() function. Resetting would produce duplicate
             // %t{N} registers across inlined transactions, violating SSA.
             // The counter keeps incrementing across all inlined transactions.
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
-            self.terminated = false;
+            self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+            self.fun.terminated = false;
             // 2026-06-26: Reset in_callable_txn — emit_definition may have left
             // it true from a prior TopLevel::Definition. Reactive transactions
             // use the non-callable code path (emit_stmt.rs:162). Without this,
             // term!/TermBang inside guards takes the callable path, emits no
             // ret/br, and leaves basic blocks unterminated.
-            self.in_callable_txn = false;
-            self.returns_i64 = false;
+            self.fun.in_callable_txn = false;
+            self.fun.returns_i64 = false;
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
@@ -1028,10 +1028,10 @@ impl LlvmBackend {
                 ));
             }
             for s in &reordered {
-                if self.terminated { break; }
+                if self.fun.terminated { break; }
                 self.emit_stmt(out, s, "  ");
             }
-            if !self.terminated {
+            if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
                 writeln!(out, "  ret void").ok();
             }
@@ -1053,17 +1053,17 @@ impl LlvmBackend {
         } else {
             writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
-            self.ssa_old_int_regs.clear();
-            self.ssa_old_float_regs.clear();
+            self.fun.ssa_old_int_regs.clear();
+            self.fun.ssa_old_float_regs.clear();
             // 2026-06-28: Do NOT reset txn_counter here — functions marked
             // alwaysinline may be inlined into the caller, causing register
             // collisions. Let the counter keep incrementing globally.
-            self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
-            self.terminated = false;
+            self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+            self.fun.terminated = false;
             // 2026-06-26: Reset in_callable_txn — same rationale as the
             // assume_action path above (emit_definition leaks into txn).
-            self.in_callable_txn = false;
-            self.returns_i64 = false;
+            self.fun.in_callable_txn = false;
+            self.fun.returns_i64 = false;
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
@@ -1075,10 +1075,10 @@ impl LlvmBackend {
                 ));
             }
             for s in &reordered {
-                if self.terminated { break; }
+                if self.fun.terminated { break; }
                 self.emit_stmt(out, s, "  ");
             }
-            if !self.terminated {
+            if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
                 writeln!(out, "  ret void").ok();
             }
@@ -1086,7 +1086,7 @@ impl LlvmBackend {
         }
 
         // Collect GPU kernel for this transaction if it has #gpu / #!gpu / #?gpu.
-        if self.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
+        if self.ctx.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
             let is_speculative = txn.modifiers.iter()
                 .any(|m| m.name == "gpu" && m.speculative);
             self.collect_gpu_kernel(name, &txn.body, is_speculative);
@@ -1094,14 +1094,14 @@ impl LlvmBackend {
     }
 
     pub(super) fn emit_callable_txn(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
-        self.pending_cleanup.clear();
-        self.let_bindings.clear();
-        self.let_binding_types.clear();
-        self.let_original_types.clear(); self.reg_float_cache.clear();
-        self.reg_type_cache.clear();
-        self.param_slots.clear();
-        self.ssa_old_int_regs.clear();
-        self.ssa_old_float_regs.clear();
+        self.fun.pending_cleanup.clear();
+        self.fun.let_bindings.clear();
+        self.fun.let_binding_types.clear();
+        self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear();
+        self.fun.reg_type_cache.clear();
+        self.fun.param_slots.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
 
         let has_return = if let Some(ref ot) = txn.output_type {
             match ot {
@@ -1164,7 +1164,7 @@ impl LlvmBackend {
             let slot = format!("%p{}_s", i);
             writeln!(out, "  {} = alloca i64, align 8", slot).ok();
             writeln!(out, "  store i64 {}, i64* {}, align 8", conv, slot).ok();
-            self.param_slots.insert(n.clone(), slot);
+            self.fun.param_slots.insert(n.clone(), slot);
         }
 
         writeln!(out, "  br label %loop").ok();
@@ -1172,29 +1172,29 @@ impl LlvmBackend {
 
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             let slot = format!("%p{}_s", i);
-            let loaded = format!("%p{}_l{}", i, self.txn_counter);
-            self.txn_counter += 1;
+            let loaded = format!("%p{}_l{}", i, self.fun.txn_counter);
+            self.fun.txn_counter += 1;
             writeln!(out, "  {} = load i64, i64* {}, align 8", loaded, slot).ok();
-            self.let_bindings.insert(n.clone(), loaded);
+            self.fun.let_bindings.insert(n.clone(), loaded);
             // loaded is i64 (boxed value from param slot). Store Type::Int
             // for boxed types so downstream doesn't treat them as native.
             if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data | Type::Float) {
-                self.let_binding_types.insert(n.clone(), Type::Int);
+                self.fun.let_binding_types.insert(n.clone(), Type::Int);
             } else {
-                self.let_binding_types.insert(n.clone(), t.clone());
+                self.fun.let_binding_types.insert(n.clone(), t.clone());
             }
         }
 
-        self.callable_txn_result = Some("%result".to_string());
-        self.callable_txn_post_label = Some("post".to_string());
-        self.in_callable_txn = true;
-        self.txn_counter = 0;
-        self.terminated = false;
-        self.returns_i64 = has_return;
+        self.fun.callable_txn_result = Some("%result".to_string());
+        self.fun.callable_txn_post_label = Some("post".to_string());
+        self.fun.in_callable_txn = true;
+        self.fun.txn_counter = 0;
+        self.fun.terminated = false;
+        self.fun.returns_i64 = has_return;
 
         if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
             let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
-            let i1 = format!("%pc{}", self.txn_counter); self.txn_counter += 1;
+            let i1 = format!("%pc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             if cond.ty == Type::Bool {
                 writeln!(out, "  {} = and i1 {}, true", i1, cond).ok();
             } else {
@@ -1208,14 +1208,14 @@ impl LlvmBackend {
         writeln!(out, "body:").ok();
 
         for s in &txn.body {
-            if self.terminated { break; }
+            if self.fun.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
 
         // Foreign destructor cleanup: emit OnExit calls before loop exit
         self.emit_on_exit_cleanup(out, "  ");
 
-        if !self.terminated {
+        if !self.fun.terminated {
             writeln!(out, "  br label %post").ok();
         }
         writeln!(out, "post:").ok();
@@ -1223,7 +1223,7 @@ impl LlvmBackend {
 
         writeln!(out, "done:").ok();
         if has_return {
-            let ret = format!("%ret{}", self.txn_counter); self.txn_counter += 1;
+            let ret = format!("%ret{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "  {} = load i64, i64* %result, align 8", ret).ok();
             writeln!(out, "  ret i64 {}", ret).ok();
         } else {
@@ -1231,10 +1231,10 @@ impl LlvmBackend {
         }
         writeln!(out, "}}").ok();
 
-        self.callable_txn_result = None;
-        self.callable_txn_post_label = None;
-        self.in_callable_txn = false;
-        self.param_slots.clear();
+        self.fun.callable_txn_result = None;
+        self.fun.callable_txn_post_label = None;
+        self.fun.in_callable_txn = false;
+        self.fun.param_slots.clear();
     }
 
     //
@@ -1262,15 +1262,15 @@ impl LlvmBackend {
     //   optimizer still gets the info) but slightly slower (barrier cost).
     pub(super) fn emit_precondition_check(&mut self, out: &mut String, pre: &Expr, indent: &str) {
         let cond = self.emit_expr(out, pre, indent);
-        let i1 = format!("%pi{}", self.txn_counter); self.txn_counter += 1;
+        let i1 = format!("%pi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         if cond.ty == Type::Bool {
             // cond is already i1 (native bool)
             writeln!(out, "{}{} = and i1 {}, true", indent, i1, cond).ok();
         } else {
             writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1, cond).ok();
         }
-        let panic_l = format!("pp{}", self.txn_counter); self.txn_counter += 1;
-        let safe_l = format!("ps{}", self.txn_counter); self.txn_counter += 1;
+        let panic_l = format!("pp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        let safe_l = format!("ps{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, i1, safe_l, panic_l).ok();
         writeln!(out, "{}{}:", indent, panic_l).ok();
         writeln!(out, "{}  unreachable", indent).ok();
@@ -1282,12 +1282,12 @@ impl LlvmBackend {
         match pre {
             Expr::Lt(lhs, rhs) if matches!(rhs.as_ref(), Expr::Integer(_)) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
-                    if let Some(&idx) = self.field_index_map.get(name) {
+                    if let Some(&idx) = self.ctx.field_index_map.get(name) {
                         let bound = if let Expr::Integer(b) = rhs.as_ref() { *b } else { 0 };
-                        let gep = format!("%prg{}", self.txn_counter); self.txn_counter += 1;
-                        let ty = &self.field_types[idx];
+                        let gep = format!("%prg{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                        let ty = &self.ctx.field_types[idx];
                         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
-                        let rl = format!("%prl{}", self.txn_counter); self.txn_counter += 1;
+                        let rl = format!("%prl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let tn = crate::backend::llvm::tbaa_node(ty);
                         writeln!(out, "{}{} = load {}, {}* {}, align {}, !tbaa !{}, !range !{{{}, {}}}",
                             indent, rl, ty, ty, gep, self.align_of(ty), tn, 0i64, bound).ok();
@@ -1324,26 +1324,26 @@ impl LlvmBackend {
         if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
         writeln!(out, "define internal i1 @pre_{}(ptr noalias nocapture align 8 %state) #0 {{", name).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.fun.txn_counter = 0;
+        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
         // 2026-06-27: Clear ssa_old int/float regs so identifier lookups fall
         // through to GEP+load from %state. Without this, stale entries from a
         // prior emit (main function) produce forward references to registers
         // not defined in this function (precompute_sum: %t28 undefined).
-        self.ssa_old_int_regs.clear();
-        self.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         if cond.ty == Type::Bool {
             writeln!(out, "  ret i1 {}", cond).ok();
         } else {
-            let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
+            let i1 = format!("%ri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
             writeln!(out, "  ret i1 {}", i1).ok();
         }
         writeln!(out, "}}").ok();
 
         // Collect GPU kernel for callable txns with #gpu directives.
-        if self.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
+        if self.ctx.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
             let is_speculative = txn.modifiers.iter()
                 .any(|m| m.name == "gpu" && m.speculative);
             self.collect_gpu_kernel(name, &txn.body, is_speculative);
@@ -1372,30 +1372,30 @@ impl LlvmBackend {
         let async_attr = self.slp_attr(&async_name, "#0");
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0;
-        self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();
+        self.fun.txn_counter = 0;
+        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
         // 2026-06-27: Clear ssa_old int/float regs so identifier lookups fall
         // through to GEP+load from %state (same rationale as emit_pre_function).
-        self.ssa_old_int_regs.clear();
-        self.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = if cond.ty == Type::Bool {
             cond.name.clone()
         } else {
-            let i1 = format!("%ri{}", self.txn_counter); self.txn_counter += 1;
+            let i1 = format!("%ri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
             i1
         };
-        let txn_fire_l = format!("txn_fire_{}", self.txn_counter + 1);
+        let txn_fire_l = format!("txn_fire_{}", self.fun.txn_counter + 1);
         writeln!(out, "  br i1 {}, label %{}, label %{}_done", i1, txn_fire_l, async_name).ok();
         writeln!(out, "{}:", txn_fire_l).ok();
-        self.terminated = false;
-        self.returns_i64 = false;
+        self.fun.terminated = false;
+        self.fun.returns_i64 = false;
         for s in &txn.body {
-            if self.terminated { break; }
+            if self.fun.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "{}_done:", async_name).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
@@ -1432,12 +1432,12 @@ impl LlvmBackend {
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
         for s in &combined {
-            if self.terminated { break; }
+            if self.fun.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
     }
 
@@ -1447,12 +1447,12 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear();         self.terminated = false; self.returns_i64 = false;
+        self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();         self.fun.terminated = false; self.fun.returns_i64 = false;
         for s in body {
-            if self.terminated { break; }
+            if self.fun.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "  rollback:").ok();
         match action {
             "exit" => {
@@ -1482,12 +1482,12 @@ impl LlvmBackend {
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0; self.let_bindings.clear(); self.let_binding_types.clear(); self.let_original_types.clear(); self.reg_float_cache.clear(); self.reg_type_cache.clear(); self.terminated = false; self.returns_i64 = false;
+        self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
         for s in body {
-            if self.terminated { break; }
+            if self.fun.terminated { break; }
             self.emit_stmt(out, s, "  ");
         }
-        if !self.terminated { writeln!(out, "  ret void").ok(); }
+        if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
     }
 
@@ -1536,8 +1536,8 @@ impl LlvmBackend {
         } else {
             "i64".to_string()
         };
-        self.fn_ret_ty = ll_ret_ty.clone();
-        self.returns_i64 = !is_float_fn && !is_multi_output;
+        self.fun.fn_ret_ty = ll_ret_ty.clone();
+        self.fun.returns_i64 = !is_float_fn && !is_multi_output;
 
         write!(out, "define {} @{}(", ll_ret_ty, inop.name).ok();
         if inop.has_state_access {
@@ -1551,9 +1551,9 @@ impl LlvmBackend {
             } else {
                 write!(out, "{} %{}", native_ty, n).ok();
             }
-            self.let_bindings.insert(n.clone(), format!("%{}", n));
-            self.let_binding_types.insert(n.clone(), resolved.clone());
-            self.let_original_types.insert(n.clone(), t.clone());
+            self.fun.let_bindings.insert(n.clone(), format!("%{}", n));
+            self.fun.let_binding_types.insert(n.clone(), resolved.clone());
+            self.fun.let_original_types.insert(n.clone(), t.clone());
         }
         if let Some(ref section) = inop.section {
             writeln!(out, ") section \"{}\" local_unnamed_addr #0 {{", section).ok();
@@ -1561,8 +1561,8 @@ impl LlvmBackend {
             writeln!(out, ") local_unnamed_addr #0 {{").ok();
         }
         writeln!(out, "  entry:").ok();
-        self.txn_counter = 0;
-        self.terminated = false;
+        self.fun.txn_counter = 0;
+        self.fun.terminated = false;
 
         for line in &desugared_body {
             let trimmed = line.trim();
@@ -1572,7 +1572,7 @@ impl LlvmBackend {
                     writeln!(out, "  store i64 {}, ptr %state, align 8", after).ok();
                 }
                 writeln!(out, "  br label %done").ok();
-                self.terminated = true;
+                self.fun.terminated = true;
             } else if trimmed == "term" || trimmed.starts_with("term ") {
                 let after = trimmed.strip_prefix("term").map(|s| s.trim()).unwrap_or("");
                 if !after.is_empty() {
@@ -1582,25 +1582,25 @@ impl LlvmBackend {
                         for (i, reg) in regs.iter().enumerate() {
                             let base_ty = if is_float_fn { "float" } else { "i64" };
                             if i == 0 {
-                                writeln!(out, "  %mv{} = insertvalue {} undef, {} {}, 0", self.txn_counter, ll_ret_ty, base_ty, reg).ok();
+                                writeln!(out, "  %mv{} = insertvalue {} undef, {} {}, 0", self.fun.txn_counter, ll_ret_ty, base_ty, reg).ok();
                             } else {
-                                writeln!(out, "  %mv{} = insertvalue {} %mv{}, {} {}, {}", self.txn_counter, ll_ret_ty, self.txn_counter - 1, base_ty, reg, i).ok();
+                                writeln!(out, "  %mv{} = insertvalue {} %mv{}, {} {}, {}", self.fun.txn_counter, ll_ret_ty, self.fun.txn_counter - 1, base_ty, reg, i).ok();
                             }
-                            self.txn_counter += 1;
+                            self.fun.txn_counter += 1;
                         }
-                        writeln!(out, "  ret {} %mv{}", ll_ret_ty, self.txn_counter - 1).ok();
+                        writeln!(out, "  ret {} %mv{}", ll_ret_ty, self.fun.txn_counter - 1).ok();
                     } else if is_float_fn { writeln!(out, "  ret float {}", after).ok(); }
                     else { writeln!(out, "  ret i64 {}", after).ok(); }
                 } else {
                     if is_float_fn { writeln!(out, "  ret float 0.0").ok(); }
                     else { writeln!(out, "  ret i64 0").ok(); }
                 }
-                self.terminated = true;
+                self.fun.terminated = true;
             } else {
                 writeln!(out, "  {}", line).ok();
             }
         }
-        if !self.terminated {
+        if !self.fun.terminated {
             if is_float_fn { writeln!(out, "  ret float 0.0").ok(); }
             else { writeln!(out, "  ret i64 0").ok(); }
         }
@@ -1649,7 +1649,7 @@ fn sig_number(name: &str) -> i32 {
 impl LlvmBackend {
     /// Emit a library shim — no main function, only `__brief_init_state`
     /// and dso_local wrappers for #export functions.
-    /// Called when `self.library_mode` is true.
+    /// Called when `self.ctx.library_mode` is true.
     pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         // The #export wrappers are already emitted by emit_definition (called
         // earlier in generate()). We only need to add __brief_init_state.
@@ -1675,9 +1675,9 @@ impl LlvmBackend {
         // because let_bindings is a shared HashMap. This causes emit_expr to
         // return registers that were defined in a different basic block, producing
         // SSA dominance violations ("Instruction does not dominate all uses").
-        self.let_bindings.clear();
-        self.let_binding_types.clear();
-        let names: Vec<String> = self.cell_defs.iter()
+        self.fun.let_bindings.clear();
+        self.fun.let_binding_types.clear();
+        let names: Vec<String> = self.ctx.cell_defs.iter()
             .filter(|(_, c)| c.is_persistent)
             .map(|(name, _)| name.clone())
             .collect();
@@ -1698,18 +1698,18 @@ impl LlvmBackend {
         writeln!(out, "define void @cell_persistent_ticks(ptr noalias nocapture align 8 %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
 
-        let prev_state = self.state_reg_name.clone();
-        self.state_reg_name = "%state".to_string();
+        let prev_state = self.fun.state_reg_name.clone();
+        self.fun.state_reg_name = "%state".to_string();
 
         for name in &names {
-            let cell = self.cell_defs.get(name).unwrap().clone();
+            let cell = self.ctx.cell_defs.get(name).unwrap().clone();
 
             // Evaluate internal triggers before running transactions
             for trg in &cell.internal_triggers {
                 let trg_key = format!("cell${}${}", name, trg.name);
-                let trg_idx_opt = self.field_index_map.get(&trg_key).copied();
+                let trg_idx_opt = self.ctx.field_index_map.get(&trg_key).copied();
                 if let Some(trg_idx) = trg_idx_opt {
-                    let trg_ll_ty = self.field_types[trg_idx].clone();
+                    let trg_ll_ty = self.ctx.field_types[trg_idx].clone();
                     match &trg.address {
                         crate::ast::LinkRef::Stdin => {
                             let read_expr = crate::ast::Expr::IntrinsicCall {
@@ -1717,8 +1717,8 @@ impl LlvmBackend {
                                 args: vec![],
                             };
                             let result = self.emit_expr(out, &read_expr, "  ");
-                            let conv = format!("%cit_{}_{}", self.txn_counter, trg.name);
-                            self.txn_counter += 1;
+                            let conv = format!("%cit_{}_{}", self.fun.txn_counter, trg.name);
+                            self.fun.txn_counter += 1;
                             // tty_read_key returns i64; trunc to match the state slot's type
                             let ll_storage_ty = &trg_ll_ty;
                             if ll_storage_ty == "i8" {
@@ -1727,15 +1727,15 @@ impl LlvmBackend {
                                 // i32 for Char, i64 for Int, etc.
                                 writeln!(out, "  {} = trunc i64 {} to {}", conv, result.name, ll_storage_ty).ok();
                             }
-                            let gep = format!("%cit_gep_{}_{}", self.txn_counter, trg.name);
-                            self.txn_counter += 1;
+                            let gep = format!("%cit_gep_{}_{}", self.fun.txn_counter, trg.name);
+                            self.fun.txn_counter += 1;
                             writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
                                 gep, trg_idx).ok();
                             writeln!(out, "  store {} {}, ptr {}, align 1", trg_ll_ty, conv, gep).ok();
                         }
                         _ => {
-                            let gep = format!("%cit_gep_{}_{}", self.txn_counter, trg.name);
-                            self.txn_counter += 1;
+                            let gep = format!("%cit_gep_{}_{}", self.fun.txn_counter, trg.name);
+                            self.fun.txn_counter += 1;
                             writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
                                 gep, trg_idx).ok();
                             writeln!(out, "  store {} 0, ptr {}, align 1", trg_ll_ty, gep).ok();
@@ -1754,7 +1754,7 @@ impl LlvmBackend {
 
                 let cond_i1 = {
                     let r = format!("%cpct_{}_{}", name, txn.name);
-                    self.txn_counter += 1;
+                    self.fun.txn_counter += 1;
                     if cond.ty == Type::Bool {
                         writeln!(out, "  {} = and i1 {}, true", r, cond.name).ok();
                     } else {
@@ -1780,18 +1780,18 @@ impl LlvmBackend {
             // a separate channel-read path in the main loop).
             let is_threaded = self.cell_thread_names.contains(name);
             if !is_threaded {
-                for (from_cell, from_port, to_cell, to_param) in &self.cell_wires.clone() {
+                for (from_cell, from_port, to_cell, to_param) in &self.ctx.cell_wires.clone() {
                     if from_cell != name { continue; }
                     let src_prefixed = format!("cell${}${}", from_cell, from_port);
                     let dst_prefixed = format!("cell${}${}", to_cell, to_param);
-                    if let Some(&src_idx) = self.field_index_map.get(&src_prefixed) {
-                        if let Some(&dst_idx) = self.field_index_map.get(&dst_prefixed) {
-                            let src_ll_ty = &self.field_types[src_idx];
-                            let dst_ll_ty = &self.field_types[dst_idx];
-                            let src_gep = format!("%cpw_src_{}_{}", self.txn_counter, from_cell);
-                            let dst_gep = format!("%cpw_dst_{}_{}", self.txn_counter, from_cell);
-                            let src_val = format!("%cpw_val_{}_{}", self.txn_counter, from_cell);
-                            self.txn_counter += 1;
+                    if let Some(&src_idx) = self.ctx.field_index_map.get(&src_prefixed) {
+                        if let Some(&dst_idx) = self.ctx.field_index_map.get(&dst_prefixed) {
+                            let src_ll_ty = &self.ctx.field_types[src_idx];
+                            let dst_ll_ty = &self.ctx.field_types[dst_idx];
+                            let src_gep = format!("%cpw_src_{}_{}", self.fun.txn_counter, from_cell);
+                            let dst_gep = format!("%cpw_dst_{}_{}", self.fun.txn_counter, from_cell);
+                            let src_val = format!("%cpw_val_{}_{}", self.fun.txn_counter, from_cell);
+                            self.fun.txn_counter += 1;
                             writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
                                 src_gep, src_idx).ok();
                             writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
@@ -1802,18 +1802,18 @@ impl LlvmBackend {
                 }
             }
             // Sync cell output ports to parent trigger bindings
-            for (trg_name, cell_name, port_name) in &self.cell_trigger_bindings.clone() {
+            for (trg_name, cell_name, port_name) in &self.ctx.cell_trigger_bindings.clone() {
                 if cell_name != name { continue; }
                 let src_key = format!("cell${}${}", cell_name, port_name);
                 let dst_key = trg_name.clone();
-                if let Some(&src_idx) = self.field_index_map.get(&src_key) {
-                    if let Some(&dst_idx) = self.field_index_map.get(&dst_key) {
-                        let src_ll_ty = &self.field_types[src_idx];
-                        let dst_ll_ty = &self.field_types[dst_idx];
-                        let src_gep = format!("%cos_src_{}_{}", self.txn_counter, cell_name);
-                        let dst_gep = format!("%cos_dst_{}_{}", self.txn_counter, cell_name);
-                        let src_val = format!("%cos_val_{}_{}", self.txn_counter, cell_name);
-                        self.txn_counter += 1;
+                if let Some(&src_idx) = self.ctx.field_index_map.get(&src_key) {
+                    if let Some(&dst_idx) = self.ctx.field_index_map.get(&dst_key) {
+                        let src_ll_ty = &self.ctx.field_types[src_idx];
+                        let dst_ll_ty = &self.ctx.field_types[dst_idx];
+                        let src_gep = format!("%cos_src_{}_{}", self.fun.txn_counter, cell_name);
+                        let dst_gep = format!("%cos_dst_{}_{}", self.fun.txn_counter, cell_name);
+                        let src_val = format!("%cos_val_{}_{}", self.fun.txn_counter, cell_name);
+                        self.fun.txn_counter += 1;
                         writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
                             src_gep, src_idx).ok();
                         writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
@@ -1828,15 +1828,15 @@ impl LlvmBackend {
             // Threaded cells store outputs to atomic channel globals. We read
             // those globals here and store the value into the target cell's
             // state slot. This runs after all cell convergence passes.
-            for (from_cell, from_port, to_cell, to_param) in &self.cell_wires.clone() {
+            for (from_cell, from_port, to_cell, to_param) in &self.ctx.cell_wires.clone() {
                 if !self.cell_thread_names.contains(from_cell) { continue; }
                 let dst_prefixed = format!("cell${}${}", to_cell, to_param);
-                if let Some(&dst_idx) = self.field_index_map.get(&dst_prefixed) {
-                    let dst_ll_ty = &self.field_types[dst_idx];
-                    let ch_val = format!("%ctw_val_{}_{}", self.txn_counter, from_cell);
-                    let ch_gep = format!("%ctw_ch_{}_{}", self.txn_counter, from_cell);
-                    let dst_gep = format!("%ctw_dst_{}_{}", self.txn_counter, from_cell);
-                    self.txn_counter += 1;
+                if let Some(&dst_idx) = self.ctx.field_index_map.get(&dst_prefixed) {
+                    let dst_ll_ty = &self.ctx.field_types[dst_idx];
+                    let ch_val = format!("%ctw_val_{}_{}", self.fun.txn_counter, from_cell);
+                    let ch_gep = format!("%ctw_ch_{}_{}", self.fun.txn_counter, from_cell);
+                    let dst_gep = format!("%ctw_dst_{}_{}", self.fun.txn_counter, from_cell);
+                    self.fun.txn_counter += 1;
                     // Volatile load from channel global
                     writeln!(out, "  {} = load volatile {}, ptr @chan_val_{}_{}, align 8",
                         ch_val, dst_ll_ty, from_cell, from_port).ok();
@@ -1849,7 +1849,7 @@ impl LlvmBackend {
 
         }
 
-        self.state_reg_name = prev_state;
+        self.fun.state_reg_name = prev_state;
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -1864,17 +1864,17 @@ impl LlvmBackend {
         // in emit_main. We temporarily replace field_index_map and field_types with
         // the cell-local versions so all GEP loads/stores resolve against the
         // %CellState.<name> type instead of %State.
-        let saved_imap = self.field_index_map.clone();
-        let saved_types = self.field_types.clone();
-        let saved_state_reg = self.state_reg_name.clone();
+        let saved_imap = self.ctx.field_index_map.clone();
+        let saved_types = self.ctx.field_types.clone();
+        let saved_state_reg = self.fun.state_reg_name.clone();
 
-        if let Some((cs_imap, cs_tys)) = self.cell_state_types.get(cell_name) {
-            self.field_index_map = cs_imap.clone();
-            self.field_types = cs_tys.clone();
+        if let Some((cs_imap, cs_tys)) = self.ctx.cell_state_types.get(cell_name) {
+            self.ctx.field_index_map = cs_imap.clone();
+            self.ctx.field_types = cs_tys.clone();
         }
         writeln!(out, "define i8* @cell_thread_{}(ptr %state) local_unnamed_addr #0 {{", cell_name).ok();
         writeln!(out, "  entry:").ok();
-        self.state_reg_name = "%state".to_string();
+        self.fun.state_reg_name = "%state".to_string();
 
         let tick_ns = 1_000_000; // 1kHz default
         writeln!(out, "  %ts_sec = alloca i64, align 8").ok();
@@ -1896,7 +1896,7 @@ impl LlvmBackend {
             let skip_l = format!(".ct_{}_{}_s", cell_name, txn.name);
             let cond_i1 = {
                 let r = format!("%cti_{}_{}", cell_name, txn.name);
-                self.txn_counter += 1;
+                self.fun.txn_counter += 1;
                 if cond.ty == Type::Bool {
                     writeln!(out, "  {} = and i1 {}, true", r, cond.name).ok();
                 } else {
@@ -1920,10 +1920,10 @@ impl LlvmBackend {
         let output_names = Self::extract_output_names_llvm(&cell.output_type);
         for port_name in &output_names {
             let prefixed = format!("cell${}${}", cell_name, port_name);
-            if let Some(&idx) = self.field_index_map.get(&prefixed) {
-                let ll_ty = &self.field_types[idx];
+            if let Some(&idx) = self.ctx.field_index_map.get(&prefixed) {
+                let ll_ty = &self.ctx.field_types[idx];
                 let gep = format!("%ctg_{}_{}", cell_name, port_name);
-                writeln!(out, "  {} = getelementptr {}, ptr {}, i32 0, i32 {}", gep, cell_state_type, self.state_reg_name, idx).ok();
+                writeln!(out, "  {} = getelementptr {}, ptr {}, i32 0, i32 {}", gep, cell_state_type, self.fun.state_reg_name, idx).ok();
                 let val = format!("%ctv_{}_{}", cell_name, port_name);
                 writeln!(out, "  {} = load {}, ptr {}, align 8", val, ll_ty, gep).ok();
                 writeln!(out, "  store atomic {} {}, ptr @chan_val_{}_{} seq_cst, align 8", ll_ty, val, cell_name, port_name).ok();
@@ -1932,9 +1932,9 @@ impl LlvmBackend {
         // Set dirty flag
         writeln!(out, "  store atomic i8 1, ptr @chan_dirty_{} seq_cst, align 1", cell_name).ok();
 
-        self.state_reg_name = saved_state_reg;
-        self.field_index_map = saved_imap;
-        self.field_types = saved_types;
+        self.fun.state_reg_name = saved_state_reg;
+        self.ctx.field_index_map = saved_imap;
+        self.ctx.field_types = saved_types;
         writeln!(out, "  br label %loop").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -1945,7 +1945,7 @@ impl LlvmBackend {
         let cell_name = &cell.name;
         let output_names = Self::extract_output_names_llvm(&cell.output_type);
         // For persistent cells, look up field types in cell_state_types
-        if let Some((cs_imap, cs_tys)) = self.cell_state_types.get(cell_name) {
+        if let Some((cs_imap, cs_tys)) = self.ctx.cell_state_types.get(cell_name) {
             for port_name in &output_names {
                 let prefixed = format!("cell${}${}", cell_name, port_name);
                 if let Some(&idx) = cs_imap.get(&prefixed) {
@@ -1958,8 +1958,8 @@ impl LlvmBackend {
             // Fall back to field_index_map for non-persistent cells (shouldn't happen)
             for port_name in &output_names {
                 let prefixed = format!("cell${}${}", cell_name, port_name);
-                if let Some(&idx) = self.field_index_map.get(&prefixed) {
-                    let ll_ty = &self.field_types[idx];
+                if let Some(&idx) = self.ctx.field_index_map.get(&prefixed) {
+                    let ll_ty = &self.ctx.field_types[idx];
                     let init = if ll_ty.contains('*') { "null" } else { "0" };
                     writeln!(out, "@chan_val_{}_{} = global {} {}, align 8", cell_name, port_name, ll_ty, init).ok();
                 }

@@ -1,5 +1,5 @@
 use crate::ast::{Expr, Program, Statement, TopLevel, Type};
-use crate::backend::llvm::{find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
+use crate::backend::llvm::{find_perfect_hash, sparsity_ratio, FoldParam, FunctionGuard, LlvmBackend};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -50,16 +50,16 @@ impl LlvmBackend {
         // emit_ssa_main's per-field phi setup or emit_stmt's ssa_old reg
         // update). Without this, inline txn body identifier lookups find
         // stale register names not defined in this function.
-        self.ssa_old_int_regs.clear();
-        self.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
         // Arena init: shared arena for all txns in this tick.
         // Previously each @txn_name had its own 64KB arena (Approach 2),
         // but inlining shares one arena across all txns, saving memory.
         self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
-        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.trigger_names
+        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.ctx.trigger_names
             .iter()
-            .filter_map(|tn| self.triggers.get(tn).map(|t| (tn.clone(), t.clone())))
+            .filter_map(|tn| self.ctx.triggers.get(tn).map(|t| (tn.clone(), t.clone())))
             .collect();
         for (tn, t) in &trigger_snapshot {
             let sz = format!("%sz_{}", tn);
@@ -169,7 +169,7 @@ impl LlvmBackend {
                 let writes = crate::backend::collect_assigned_identifiers(&t.body);
                 let mut mask = 0u64;
                 for w in &writes {
-                    if let Some(&idx) = self.field_index_map.get(w.as_str()) {
+                    if let Some(&idx) = self.ctx.field_index_map.get(w.as_str()) {
                         if idx < 64 { mask |= 1u64 << idx; }
                     }
                 }
@@ -212,14 +212,14 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
         // 2026-06-27: Clear ssa_old regs at reactor_tick entry (same
         // rationale as the sequential reactor counterpart).
-        self.ssa_old_int_regs.clear();
-        self.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.ssa_old_float_regs.clear();
         // Arena init for parallel reactor — shared across all parallel txns.
         self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
-        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.trigger_names
+        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.ctx.trigger_names
             .iter()
-            .filter_map(|tn| self.triggers.get(tn).map(|t| (tn.clone(), t.clone())))
+            .filter_map(|tn| self.ctx.triggers.get(tn).map(|t| (tn.clone(), t.clone())))
             .collect();
         for (tn, t) in &trigger_snapshot {
             let sz = format!("%sz_{}", tn);
@@ -300,27 +300,25 @@ impl LlvmBackend {
     // ── INLINE TXN BODY HELPER ──────────────────────────────────
     //
     // Emits a txn body inline within the reactor_tick function instead of
-    // calling it as a separate @txn_name function. Saves/restores backend
-    // state (terminated, let_bindings) to prevent cross-txn contamination.
+    // calling it as a separate @txn_name function. Uses FunctionGuard RAII
+    // to save/restore all FunctionContext fields, preventing cross-txn
+    // state contamination without manual per-field clone/restore.
+    //
+    // 2026-06-29: Replaced manual 7-field save/restore with FunctionGuard.
+    // The guard clones the entire FunctionContext at scope entry and restores
+    // it on drop. This ensures new FunctionContext fields are automatically
+    // protected without editing this function.
     fn emit_inline_txn_body(&mut self, out: &mut String, indent: &str,
                              txns: &[(String, &crate::ast::Transaction)],
                              txn_name: &str) {
         let first_name = self.resolve_dispatch_first_txn(txn_name);
         if let Some((_, txn)) = txns.iter().find(|(n, _)| n == &first_name) {
-            // Save state that the body might modify
-            let prev_terminated = self.terminated;
-            self.terminated = false;
-            self.returns_i64 = false;
-            let saved_bindings = self.let_bindings.clone();
-            let saved_types = self.let_binding_types.clone();
-            let saved_floats = self.reg_float_cache.clone();
-            let saved_typecache = self.reg_type_cache.clone();
-            // 2026-06-27: Save/restore ssa_old regs to prevent cross-txn
-            // contamination. The ring_buffer fix (update ssa_old_int_regs after
-            // GEP+store) pollutes these across inline txn bodies — the second
-            // txn's identifier lookups find stale registers from the first txn.
-            let saved_old_int = self.ssa_old_int_regs.clone();
-            let saved_old_float = self.ssa_old_float_regs.clone();
+            // 2026-06-29: FunctionGuard snapshots ALL FunctionContext state;
+            // restore() at the end puts it back. No more forgetting fields.
+            let guard = FunctionGuard::new(&self.fun);
+
+            self.fun.terminated = false;
+            self.fun.returns_i64 = false;
 
             // Emit precondition assume (for LLVM opt) — the br instruction
             // already guards execution, so this is just for metadata.
@@ -328,18 +326,12 @@ impl LlvmBackend {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, indent);
             }
             for s in &txn.body {
-                if self.terminated { break; }
+                if self.fun.terminated { break; }
                 self.emit_stmt(out, s, indent);
             }
 
-            // Restore state
-            self.terminated = prev_terminated;
-            self.let_bindings = saved_bindings;
-            self.let_binding_types = saved_types;
-            self.reg_float_cache = saved_floats;
-            self.reg_type_cache = saved_typecache;
-            self.ssa_old_int_regs = saved_old_int;
-            self.ssa_old_float_regs = saved_old_float;
+            // Restore all FunctionContext state to pre-body snapshot
+            guard.restore(&mut self.fun);
         }
     }
 
@@ -363,9 +355,9 @@ impl LlvmBackend {
     pub(crate) fn check_exit_condition_idents_inner(&self, expr: &Expr, errors: &mut Vec<String>) {
         match expr {
             Expr::Identifier(name) => {
-                if !self.field_index_map.contains_key(name)
-                    && !self.constants.contains_key(name)
-                    && !self.trigger_names.contains(name)
+                if !self.ctx.field_index_map.contains_key(name)
+                    && !self.ctx.constants.contains_key(name)
+                    && !self.ctx.trigger_names.contains(name)
                 {
                     errors.push(format!(
                         "error: #!exit references unknown variable '{}'\n  note: '{}' is not a state field, constant, or trigger",

@@ -402,6 +402,113 @@ tests.** No exceptions.
 
 Run `cargo test --lib` before every commit. **If a change has no test, it does not exist.**
 
+## Backend Architecture Rules (Post-Refactoring)
+
+### 1. Decoupled, Context-Driven Architecture
+
+The backend state must remain strictly stratified into three distinct lifetimes
+to prevent state leakage and the fragile "save/restore" anti-pattern:
+
+1. **CompilerContext (Global):** Read-only during code generation. Contains
+   AST-level definitions, FFI signatures, target specs, and layout properties.
+2. **FunctionContext (Per-Function):** Instantiated per-function/transaction.
+   Tracks local variables, types, and the SSA register counter. Must never
+   outlive the function it compiles.
+3. **LLVMBuilder (Instruction Builder):** The sole writer of LLVM IR instructions.
+   Direct `writeln!` formatting to raw strings is forbidden for standard instructions.
+
+**Rules:**
+- **No Global State Pollution:** Never add transient, function-scoped compilation
+  variables (temporary register caches, back-edge trackers) to the global backend
+  struct.
+- **Single-Source Registry:** All registers must be requested via
+  `builder.gen_reg()`. Manual string-based register arithmetic
+  (`format!("%t{}", counter)`) outside the builder is prohibited.
+
+### 2. Flat Code Layout (No-Nesting Rule)
+
+Deeply nested `match` and `if-let` structures degrade readability and make
+compiler logic difficult to audit.
+
+**Rules:**
+- **Guard Clauses First:** Prefer early returns or guard clauses
+  (`let Some(val) = opt else { return ... }` or `if !eligible { return; }`)
+  to handle fallback paths.
+- **Depth Limit:** Keep indentation levels to a maximum of 3 levels deep. If
+  an expression or statement handler requires deeper nesting, extract it into
+  a dedicated helper function in a sub-module.
+
+### 3. Strict Defensive Code Generation & Validation
+
+Textual code generation must not bypass the compiler's semantic type checks.
+
+**Rules:**
+- **No Untyped Casts:** Every type coercion (`trunc`, `zext`, `bitcast`,
+  `ptrtoint`) must be explicitly handled by a centralized type-conversion helper.
+  Never assume sizes or inject raw cast strings inline.
+- **Memory Safety & Thread Safety:**
+  - When generating temporary files for compiler-driven external tools (like
+    `llc`), always generate unique temporary filenames (e.g., using process/thread
+    IDs or UUIDs) to prevent parallel build collisions.
+  - Verify that any pointer-tagging assumptions (such as masking off the lower
+    2 bits of string pointers) are strictly validated against target platform
+    alignments.
+- **Explicit FFI Type Declarations:** Every foreign function called by the
+  compiler must have an explicit LLVM declaration. Mismatches between C-type
+  return sizes (like `bool` or `int32_t`) and the LLVM return declaration must
+  be explicitly resolved using truncation/extension to prevent ABI register
+  corruption.
+
+### 4. Mandatory Trade-Off Documentation
+
+We do not write code without documenting *why* a specific pattern was chosen
+over its alternatives.
+
+**Rules:**
+- Every significant optimization, structural file separation, or custom logic
+  block must begin with a comment block starting with:
+  ```rust
+  // ── [Feature Name] ──────────────────────────────────────────────────
+  //
+  // Why [Architectural Choice] over [Alternative]:
+  // [Detailed explanation of trade-offs, register pressure, memory, or CPU benefits]
+  //
+  ```
+- This comment must explicitly outline the trade-off (e.g., compile-time budget
+  vs. binary size, loop-unrolling factor vs. stack spilling, etc.).
+
+### 5. Dual-Path / Adaptive Optimizations (Dynamic Dispatch)
+
+We do not choose compiler design patterns dogmatically. If a feature can be
+implemented in two ways — where each excels under different workloads — **both
+must be supported**, and a static decision tree must select the optimal path at
+compile-time.
+
+**Rules:**
+When implementing or modifying a backend subsystem, evaluate if a hybrid model
+is required:
+
+- **Memory Allocations:**
+  - *Path A (Stack/Arena):* Short-lived, temporary collections must use scoped
+    bump arena allocation.
+  - *Path B (Heap):* Escape-analyzed, persistent collections must use safe,
+    tracking-enabled heap allocations.
+- **Loop Execution:**
+  - *Path A (Folded/O(1)):* Bounded loops with pure bodies and constant limits
+    must be collapsed into single-instruction compile-time updates.
+  - *Path B (Vectorized/Pipeline):* Bounded loops with side-effects or variable
+    limits must be compiled using pipeline-friendly SSA register phi nodes.
+- **Control-Flow Dispatch:**
+  - *Path A (Enum/Switch):* Triggers with value sets within the
+    `--optimize-budget` must be lowered to high-performance, switch-dispatched
+    case blocks.
+  - *Path B (Sequential Reactor):* Complex or unbounded trigger networks must
+    fall back to the sequential state-tick evaluation loop.
+
+For every hybrid subsystem, implement a clear, testable cost-model function
+(e.g., `optimal_unroll_factor` or `is_fully_precomputable`) to cleanly divide
+the execution paths.
+
 ## Key References
 
 | Resource | Location |

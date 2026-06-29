@@ -133,30 +133,30 @@ impl LlvmBackend {
         analysis: &AnalysisResults,
         txns: &[(String, &Transaction)],
     ) -> (bool, Option<Vec<(String, Option<u64>)>>, HashMap<String, Vec<i64>>, HashSet<String>) {
-        let has_wake_triggers = self.triggers.values().any(|t| t.is_wake);
+        let has_wake_triggers = self.ctx.triggers.values().any(|t| t.is_wake);
 
         let (enumerable, enum_keys): (Option<Vec<(String, Option<u64>)>>, HashMap<String, Vec<i64>>) = {
             let region = &analysis.region_analyzer;
-            if !self.trigger_names.is_empty() {
+            if !self.ctx.trigger_names.is_empty() {
                 let mut sizes = Vec::new();
                 let mut total: u64 = 1;
                 let mut ok = true;
                 let mut fallback_triggers = Vec::new();
-                for tn in &self.trigger_names {
+                for tn in &self.ctx.trigger_names {
                     let sz = region.value_set_size_of(tn);
                     if let Some(s) = sz {
                         total = total.saturating_mul(s);
-                        if total > self.optimize_budget { ok = false; break; }
+                        if total > self.ctx.optimize_budget { ok = false; break; }
                         sizes.push((tn.clone(), sz));
                     } else {
                         fallback_triggers.push(tn.clone());
                     }
                 }
-                if ok && sizes.len() == self.trigger_names.len() {
+                if ok && sizes.len() == self.ctx.trigger_names.len() {
                     (Some(sizes), HashMap::new())
                 } else if !fallback_triggers.is_empty() {
                     let trigger_set: HashSet<&str> =
-                        self.trigger_names.iter().map(|s| s.as_str()).collect();
+                        self.ctx.trigger_names.iter().map(|s| s.as_str()).collect();
                     let mut keys_map = HashMap::new();
                     for tn in &fallback_triggers {
                         for (_, txn) in txns {
@@ -173,12 +173,12 @@ impl LlvmBackend {
                         let mut combined_sizes = sizes;
                         let mut combined_total = total;
                         let mut all_ok = true;
-                        for tn in &self.trigger_names {
+                        for tn in &self.ctx.trigger_names {
                             if combined_sizes.iter().any(|(n, _)| n == tn) { continue; }
                             if let Some(keys) = keys_map.get(tn) {
                                 let s = keys.len() as u64;
                                 combined_total = combined_total.saturating_mul(s);
-                                if combined_total > self.optimize_budget { all_ok = false; break; }
+                                if combined_total > self.ctx.optimize_budget { all_ok = false; break; }
                                 combined_sizes.push((tn.clone(), Some(s)));
                             } else {
                                 all_ok = false; break;
@@ -246,10 +246,10 @@ impl LlvmBackend {
                         let is_pure = node.is_pure_body || node.is_effectively_pure;
                         if !is_pure { return false; }
                         if let Some(ref bp) = node.bounded_pre {
-                            let is_const = self.field_initializers.get(&bp.bound_var)
+                            let is_const = self.ctx.field_initializers.get(&bp.bound_var)
                                 .and_then(|e| e.as_ref())
                                 .map_or(false, |e| matches!(e, Expr::Integer(_)))
-                                || self.constants.get(&bp.bound_var)
+                                || self.ctx.constants.get(&bp.bound_var)
                                     .map_or(false, |(_, e)| matches!(e, Expr::Integer(_)));
                             !is_const
                         } else { false }

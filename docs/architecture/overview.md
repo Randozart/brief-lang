@@ -105,3 +105,16 @@ src/features/
 ## Pass Data Flow
 
 See `channel-map.md` for detailed per-pass data contracts.
+
+## Backend Architecture (LLVM)
+
+The LLVM backend (`src/backend/llvm/`) uses a three-tier context architecture
+to prevent state leakage between compiled functions:
+
+| Context | Scope | Mutability | Contents |
+|---------|-------|------------|----------|
+| `CompilerContext` | Global (entire compilation) | Immutable during codegen | AST definitions, FFI signatures, target spec, type info |
+| `FunctionContext` | Per-function/transaction | Mutable (scoped) | SSA counter, local bindings, phi state, arena |
+| `BlockContext` | Per-basic-block | Mutable (transient) | Current label |
+
+See `docs/architecture/backend-refactor.md` for the full architecture guide.

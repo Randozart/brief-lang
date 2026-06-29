@@ -40,7 +40,7 @@ impl StmtEval for ForeachStmt {
 impl StmtCodegenLLVM for ForeachStmt {
     fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &StmtDispatch, indent: &str) {
         let list_val = ctx.emit_expr(out, &self.list, indent);
-        let tc = ctx.txn_counter; ctx.txn_counter += 20;
+        let tc = ctx.fun.txn_counter; ctx.fun.txn_counter += 20;
         let hp = format!("%fe_hp_{}", tc);
         writeln!(out, "{0}{1} = inttoptr i64 {2} to i64*", indent, hp, list_val.name).ok();
         let dp_gep = format!("%fe_dp_gep_{}", tc);
@@ -71,17 +71,17 @@ impl StmtCodegenLLVM for ForeachStmt {
         writeln!(out, "{0}{1} = getelementptr i64, i64* {2}, i64 {3}", indent, elem_gep, ep, cur_idx).ok();
         let elem_val = format!("%fe_elem_{}", tc);
         writeln!(out, "{0}{1} = load i64, i64* {2}, align 8", indent, elem_val, elem_gep).ok();
-        let prev_item = ctx.let_bindings.insert(self.item.clone(), elem_val.clone());
-        let prev_item_ty = ctx.let_binding_types.insert(self.item.clone(), Type::Int);
+        let prev_item = ctx.fun.let_bindings.insert(self.item.clone(), elem_val.clone());
+        let prev_item_ty = ctx.fun.let_binding_types.insert(self.item.clone(), Type::Int);
         for s in &self.body {
             ctx.emit_stmt(out, s, &format!("{}  ", indent));
         }
         if let Some(prev) = prev_item {
-            ctx.let_bindings.insert(self.item.clone(), prev);
-            ctx.let_binding_types.insert(self.item.clone(), prev_item_ty.unwrap_or(Type::Int));
+            ctx.fun.let_bindings.insert(self.item.clone(), prev);
+            ctx.fun.let_binding_types.insert(self.item.clone(), prev_item_ty.unwrap_or(Type::Int));
         } else {
-            ctx.let_bindings.remove(self.item.as_str());
-            ctx.let_binding_types.remove(self.item.as_str());
+            ctx.fun.let_bindings.remove(self.item.as_str());
+            ctx.fun.let_binding_types.remove(self.item.as_str());
         }
         let next_idx = format!("%fe_next_{}", tc);
         writeln!(out, "{0}{1} = add i64 {2}, 1", indent, next_idx, cur_idx).ok();
@@ -128,7 +128,7 @@ impl StmtCodegenLLVM for ForeachStmt {
         let mut md_entries = Vec::new();
         for effect in &dir_effects {
             if let crate::backend::llvm::directive::DirectiveEffect::LoopMetadata(key, val) = effect {
-                let entry_md = ctx.metadata_counter + md_count;
+                let entry_md = ctx.fun.metadata_counter + md_count;
                 if val.is_empty() {
                     writeln!(out, "!{0} = !{{!\"{1}\"}}", entry_md, key).ok();
                 } else {
@@ -143,16 +143,16 @@ impl StmtCodegenLLVM for ForeachStmt {
             matches!(e, crate::backend::llvm::directive::DirectiveEffect::LoopMetadata(k, _) if k == "llvm.loop.vectorize.enable")
         });
         if !has_vectorize {
-            let vd_md = ctx.metadata_counter + md_count;
+            let vd_md = ctx.fun.metadata_counter + md_count;
             writeln!(out, "!{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}", vd_md).ok();
             md_entries.push(format!("!{}", vd_md));
             md_count += 1;
         }
-        let md_idx = ctx.metadata_counter;
+        let md_idx = ctx.fun.metadata_counter;
         let entries = md_entries.join(", ");
         writeln!(out, "!{0} = !{{!{0}, {1}}}", md_idx, entries).ok();
         writeln!(out, "{}br label %{} !llvm.loop !{}", indent, hdr_l, md_idx).ok();
-        ctx.metadata_counter += md_count;
+        ctx.fun.metadata_counter += md_count;
         writeln!(out, "{}{}:", indent, done_l).ok();
     }
 }

@@ -156,7 +156,7 @@ fn compute_peak_live_floats(body: &[Statement], float_names: &[String]) -> u32 {
 
 impl LlvmBackend {
     pub(super) fn slp_attr(&self, fn_name: &str, default: &str) -> String {
-        if self.slp_hazard_fns.contains(fn_name) {
+        if self.ctx.slp_hazard_fns.contains(fn_name) {
             match default {
                 "#0" => "#4".to_string(),
                 "#3" => "#5".to_string(),
@@ -200,10 +200,10 @@ impl LlvmBackend {
     //      filter taps) are counted and packed into the peak register demand.
 
     pub(super) fn is_float_field(&self, name: &str) -> bool {
-        self.field_index_map.get(name)
+        self.ctx.field_index_map.get(name)
             // 2026-06-29: Check for both "float" (Float) and "double" (Float64)
             .map(|&idx| {
-                let ll_ty = &self.field_types[idx];
+                let ll_ty = &self.ctx.field_types[idx];
                 ll_ty == "float" || ll_ty == "double"
             })
             .unwrap_or(false)
@@ -215,7 +215,7 @@ impl LlvmBackend {
             Expr::Identifier(name) | Expr::OwnedRef(name) => {
                 self.is_float_field(name)
                     || local_floats.contains(name.as_str())
-                    || self.constants.get(name.as_str()).map_or(false, |(t, _)| *t == Type::Float)
+                    || self.ctx.constants.get(name.as_str()).map_or(false, |(t, _)| *t == Type::Float)
             }
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
                 self.is_float_expr_pre_cg(l, local_floats) || self.is_float_expr_pre_cg(r, local_floats)
@@ -299,7 +299,7 @@ impl LlvmBackend {
     }
 
     pub(super) fn estimate_slp_hazard(&mut self, txns: &[(String, &crate::ast::Transaction)]) {
-        let (r, w) = match self.spec.as_ref() {
+        let (r, w) = match self.ctx.spec.as_ref() {
             Some(spec) => self.target_hardware(spec),
             None => (16, 4),
         };
@@ -333,7 +333,7 @@ impl LlvmBackend {
             }
 
             for f in reads.iter() {
-                if self.constants.get(f.as_str()).map_or(false, |(t, _)| *t == Type::Float) {
+                if self.ctx.constants.get(f.as_str()).map_or(false, |(t, _)| *t == Type::Float) {
                     accessed_constants.insert(f.clone());
                 }
             }
@@ -376,9 +376,9 @@ impl LlvmBackend {
         let peak = (packed_phis + shuffle_pressure + peak_live_floats as usize + const_packed + 2) as u32;
 
         if peak >= r {
-            self.slp_hazard_fns.insert("main".to_string());
+            self.ctx.slp_hazard_fns.insert("main".to_string());
             for (txn_name, _) in txns {
-                self.slp_hazard_fns.insert(txn_name.clone());
+                self.ctx.slp_hazard_fns.insert(txn_name.clone());
             }
         } else {
             if total_cross_ops > 0 {
@@ -386,9 +386,9 @@ impl LlvmBackend {
                 if total_float_ops > 0 && n > 0 {
                     let ops_per_field = total_float_ops as f64 / n as f64;
                     if ops_per_field < 1.5 {
-                        self.slp_hazard_fns.insert("main".to_string());
+                        self.ctx.slp_hazard_fns.insert("main".to_string());
                         for (txn_name, _) in txns {
-                            self.slp_hazard_fns.insert(txn_name.clone());
+                            self.ctx.slp_hazard_fns.insert(txn_name.clone());
                         }
                     }
                 }
@@ -476,7 +476,7 @@ impl LlvmBackend {
         }
         let float_names: Vec<String> = local_floats.into_iter().collect();
         let peak = if float_names.is_empty() { 0 } else { compute_peak_live_floats(body, &float_names) };
-        let (regs, _) = match self.spec.as_ref() {
+        let (regs, _) = match self.ctx.spec.as_ref() {
             Some(spec) => self.target_hardware(spec),
             None => (16, 4),
         };

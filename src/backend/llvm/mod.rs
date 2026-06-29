@@ -1,3 +1,4 @@
+pub mod context;
 pub mod directive;
 pub mod dispatch;
 pub mod emit_expr;
@@ -14,6 +15,8 @@ mod tests;
 
 #[cfg(all(kani, feature = "kani_full"))]
 mod kani;
+
+pub use context::{CompilerContext, FunctionContext, FunctionGuard};
 
 fn escape_llvm_string(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -632,102 +635,17 @@ fn find_perfect_hash(keys: &[i64]) -> Option<(u64, u32)> {
 }
 
 pub struct LlvmBackend {
-    // ── Target & Spec ──────────────────────────────────────
-    spec: Option<crate::target_spec::TargetSpec>,
-    explain: bool,
-    dump_layout: bool,
-    library_mode: bool,
-
-    // ── State Fields ───────────────────────────────────────
-    field_index_map: HashMap<String, usize>,
-    field_types: Vec<String>,
-    // 2026-06-29: Original Brief type per field, parallel to field_types.
-    // Needed because multiple Brief types map to the same LLVM type string
-    // (e.g. Char and Int32 both → "i32"), and we must restore the correct
-    // Brief type when reading fields back from the %State struct.
-    field_brief_types: Vec<Type>,
-    pub(crate) field_initializers: HashMap<String, Option<Expr>>,
-    range_bounds: HashMap<String, (i64, i64)>,
-    field_to_meta_idx: HashMap<String, usize>,
-    exit_condition: Option<Box<Expr>>,
-    has_natural_exit: bool,
-
-    // ── MMIO & Schema ──────────────────────────────────────
-    mmio_fields: HashMap<String, u64>,
-    mmio_initializers: HashMap<String, Option<Expr>>,
-    mmio_prepopulated: bool,
-    schema_aliases: HashMap<String, crate::dbrief::DbriefType>,
-
-    // ── Codegen State (per-function) ───────────────────────
-    pub(crate) txn_counter: usize,
-    pub(crate) within_counter: usize,    // dedicated counter for Expr::Within (avoids SSA collisions)
-    pub(crate) metadata_counter: usize,  // for !llvm.loop metadata nodes
-    /// 2026-06-28: Global register counter — never reset. Kept for reference;
-    /// not currently used for %t{N} names (txn_counter is per-function for
-    /// SSA dominance correctness). See docs/plan for unify discussion.
-    pub(crate) glob_counter: usize,
-    /// 2026-06-28: Monotonically increasing counter for emit_trg_event_epoll_wait
-    /// register names. Previously used txn_counter with a save/restore pattern
-    /// that rewound the counter, causing %t{N} collisions in @main().
-    /// This counter is NEVER reset, ensuring each call gets a unique ID.
-    pub(crate) dep_graph: crate::analysis::dependency_graph::DependencyGraph, // trg dependency graph
-    /// 2026-06-28: Set of all %t{N} register names emitted in the current function.
-    /// Used by emit_expr to detect and skip counter collisions when txn_counter
-    /// is restored to a previous value (e.g., by emit_trg_event_epoll_wait).
-    pending_cleanup: Vec<Statement>,
-    pub(crate) let_bindings: HashMap<String, String>,
-    pub(crate) let_binding_types: HashMap<String, Type>,
-    /// 2026-06-17: Original type before boxing (e.g. String→Int).
-    /// Used by is_string_chain to detect string parameters stored as Type::Int.
-    pub(crate) let_original_types: HashMap<String, Type>,
-    terminated: bool,
-    /// 2026-06-20: When true, `term`/`term!`/`escape` fallbacks emit `ret i32 0`
-    /// instead of `ret void`. Set by all `main()` emitters. Prevents `ret void`
-    /// from being emitted in `define i32 @main()` when a `Term`/`TermBang` inside
-    /// a `Guarded` block fires with complex swan-song arguments that bypass
-    /// the `loop_exit_label` mechanism.
-    main_body: bool,
-    returns_i64: bool,
-    fn_ret_ty: String,
-    callable_txn_result: Option<String>,
-    callable_txn_post_label: Option<String>,
-    in_callable_txn: bool,
-    loop_exit_label: Option<String>,
-    phi_induction_reg: Option<(String, String, String)>, // (counter_field, phi_reg, next_reg)
-    pending_post_hoist: Vec<(String, String)>, // post-loop prints saved for emission after canonical loop exit
-    // 2026-06-26: Per-field phi back-edge tracking. Populated by emit_stmt
-    // when an assignment to a state field occurs (field_name → stored_reg).
-    // Consumed by the phi latch at loop back-edge to feed updated values
-    // back into per-field phi nodes, eliminating GEP+load round-trips.
-    pending_phi_backedge: HashMap<String, String>,
-    /// Track per-field phi register names for the canonical loop phdr block.
-    /// Map from field name to the phi register (e.g. "%phi_seed"), used to
-    /// override ssa_old_int_regs in the body path and to emit back-edge
-    /// values in the latch path.
-    phi_field_regs: HashMap<String, String>,
-    /// Back-edge register names for the phi latch, one per field.
-    /// (e.g. "%be_seed") — holds either the updated value from the body or
-    /// a copy of the phi register itself for unchanged fields.
-    backedge_field_regs: HashMap<String, String>,
-    used_phi_loop: bool, // true = per-field phi mode; false = memory mode
-    param_slots: HashMap<String, String>,
-    state_reg_name: String,
-
-    // ── SSA State ──────────────────────────────────────────
-    ssa_state_reg: Option<String>,
-    ssa_old_float_regs: HashMap<String, String>,
-    ssa_old_int_regs: HashMap<String, String>,
-    pub(crate) reg_float_cache: HashMap<String, String>,
-    reg_type_cache: HashMap<String, Type>,
+    // ── Context Architecture (Phase 0) ─────────────────────
+    //
+    // 2026-06-29: Three-tier context separation. CompilerContext holds global
+    // read-only state; FunctionContext holds per-function mutable state; the
+    // remaining fields on LlvmBackend are orchestration/output accumulators.
+    // See context.rs for details.
+    pub ctx: CompilerContext,
+    pub fun: FunctionContext,
 
     // ── Optimization ───────────────────────────────────────
-    pub(crate) optimize_budget: u64,
-    optimize_report: bool,
-    optimize_size: Option<u64>,
-    pgo_profile: Option<crate::analysis::pgo::PgoProfile>,
     pgo_guard_idx: usize,
-    pub(crate) has_cycles: bool,
-    slp_hazard_fns: HashSet<String>,
 
     // ── Async / Thread Pool ────────────────────────────────
     pub(crate) has_async_txns: bool,
@@ -735,102 +653,23 @@ pub struct LlvmBackend {
     pub(crate) async_thread_pool_size: u32,
     pub(crate) is_lightweight_async: bool,
 
-    // ── FFI Registry ───────────────────────────────────────
-    pub(crate) triggers: HashMap<String, crate::ast::TriggerDeclaration>,
-    pub(crate) trigger_names: Vec<String>,
+    // ── Program Registry ───────────────────────────────────
     program_txns: Vec<String>,
-    frgn_map: HashMap<String, ForeignSignature>,
-    /// User-defined inop# declarations — name → declaration for LLVM codegen.
-    pub(crate) inop_decls: HashMap<String, crate::ast::InopDeclaration>,
-    defn_params: HashMap<String, Vec<Type>>,
-    defn_return_types: HashMap<String, Vec<Type>>,
-    fused_to_first: HashMap<String, String>,
-    sampled_triggers: HashMap<String, String>,
-    txn_write_masks: HashMap<String, u64>,
-
-    // ── Constants & Strings ────────────────────────────────
-    pub(crate) string_constants: Vec<String>,
-    pub(crate) constants: HashMap<String, (Type, Expr)>,
-    struct_types: HashMap<String, Vec<(String, Type)>>,
-    enum_types: HashMap<String, crate::ast::EnumDefinition>,
-    cell_defs: HashMap<String, CellDef>,
+    pub(crate) fused_to_first: HashMap<String, String>,
+    pub(crate) sampled_triggers: HashMap<String, String>,
+    pub(crate) txn_write_masks: HashMap<String, u64>,
     cell_thread_names: Vec<String>,
-    /// Per-cell state types: cell_name → (field_index_map, field_types_vec)
-    /// Used by emit_cell_thread to GEP into %CellState.<name> instead of %State.
-    cell_state_types: HashMap<String, (HashMap<String, usize>, Vec<String>)>,
-    /// Cell-to-cell wires: (from_cell, from_port, to_cell, to_param)
-    cell_wires: Vec<(String, String, String, String)>,
-    /// Trigger bindings from trg name @ CellName!.port: (trigger_name, cell_name, port)
-    cell_trigger_bindings: Vec<(String, String, String)>,
-    /// Accumulated `!N = !{...}` metadata definitions emitted at module level.
-    /// LLVM 18+ rejects metadata definitions inside function bodies, so they
-    /// are collected here and flushed by emit_module_end_metadata().
-    pending_metadata: String,
-    variant_disc: HashMap<String, (String, u64, usize)>,
 
-    // ── Reporting ──────────────────────────────────────────
-    report_lines: Vec<String>,
-    warnings: Vec<String>,
-    llvm_extra_flags: Vec<String>,
-    dead_info_disabled: bool,
-
-    // ── Optimization Remarks ───────────────────────────────
+    // ── Reporting & Diagnostics ────────────────────────────
+    pub(crate) report_lines: Vec<String>,
+    pub(crate) warnings: Vec<String>,
     pub(crate) remarks: Vec<crate::backend::llvm::directive::OptimizationRemark>,
-    emit_remarks: bool,
-
-    // ── Arena Allocator ─────────────────────────────────────
-    //
-    // arena_slots stores (ptr_name, end_name, base_name) for the per-scope
-    // bump allocator. When Some, all dynamic allocations within the scope
-    // use bump allocation from the arena instead of malloc/free. The arena
-    // is allocated once at scope entry and reset (pointer reset, not free)
-    // at scope exit.
-    //
-    // Split by use case:
-    //   Folded loops (A005a/b/c): arena init at loop entry, reset after loop exit
-    //   Reactive ticks (A006):   arena init at main entry, reset at tick end
-    //   Standalone fn calls:     arena = None, keep malloc/free (no loop to scope)
-    pub(crate) arena_slots: Option<(String, String, String)>,
-    pub(crate) arena_counter: usize,
-
-    // ── Collection Preallocation (Phase 2) ─────────────────
-    //
-    // Maps collection state field names to (capacity_register, base_register)
-    // when the loop has a known bound and the field receives <- push operations.
-    // The capacity register holds the preallocated array size; the base register
-    // holds the arena-allocated buffer pointer. Push checks this map: if capacity
-    // is present and len < capacity, it writes directly without alloc/memcpy.
-    pub(crate) field_prealloc_info: HashMap<String, (String, String)>,
-
-    // ── GPU Offloading ─────────────────────────────────────
-    gpu_offload: bool,
-    gpu_backend: String,
-    /// Collected SPIR-V kernel IR strings (one per extracted kernel).
-    pub(crate) spirv_kernels: Vec<String>,
-    /// Compiled SPIR-V binary blobs for embedding in the output.
-    pub(crate) spirv_blobs: Vec<Vec<u8>>,
-
-    // ── Embedded Mode ──────────────────────────────────────
-    pub(crate) is_embedded: bool,
+    llvm_extra_flags: Vec<String>,
     pub(crate) pending_async_await_count: usize,
 
-    // ── Type Universe (Phase 3.5) ──────────────────────────
-    pub(crate) type_universe: Option<crate::type_universe::TypeUniverse>,
-
-    // ── Adaptive Layout (Phase 1) ──────────────────────────
-    /// Field mode for each state field (Always / LazyCached / Never).
-    /// Never fields are removed from %State; LazyCached fields get cache + valid-flag slots.
-    pub(crate) field_modes: HashMap<String, crate::analysis::FieldMode>,
-    /// Cache slot indices for LazyCached fields. Maps field name → (cache_idx, valid_idx)
-    /// where cache_idx is the %State index for the cached value and valid_idx is the
-    /// %State index for the valid-flag (i8).
-    pub(crate) cache_slots: HashMap<String, HashMap<String, (usize, usize)>>,
-
-    // ── Chimera tracking (Phase 3) ─────────────────────────
-    /// Tracks which SSA registers contain chimera values and their backing type.
-    /// Key is the LLVM SSA register name (e.g., "%t42"), value is (is_chimera, backing_type_name).
-    /// Used by emit_decay() to determine if boundary materialization is needed.
-    pub(crate) chimera_map: HashMap<String, ChimeraInfo>,
+    // ── GPU Offloading ─────────────────────────────────────
+    pub(crate) spirv_kernels: Vec<String>,
+    pub(crate) spirv_blobs: Vec<Vec<u8>>,
 }
 
 #[derive(Debug, Clone)]
@@ -889,125 +728,40 @@ pub(crate) fn collect_push_targets(body: &[Statement], out: &mut Vec<String>) {
 impl LlvmBackend {
     pub fn new() -> Self {
         LlvmBackend {
-            spec: None,
-            field_index_map: HashMap::new(),
-            field_types: Vec::new(),
-            field_brief_types: Vec::new(),
-            field_initializers: HashMap::new(),
-            mmio_fields: HashMap::new(),
-            mmio_initializers: HashMap::new(),
-            mmio_prepopulated: false,
-            schema_aliases: HashMap::new(),
-            pgo_profile: None,
+            ctx: CompilerContext::new(),
+            fun: FunctionContext::new(),
             pgo_guard_idx: 0,
-            txn_counter: 0,
-            within_counter: 0,
-            glob_counter: 0,
-            metadata_counter: 100,
-            dep_graph: crate::analysis::dependency_graph::DependencyGraph {
-                topo_order: Vec::new(),
-                bit_index: std::collections::HashMap::new(),
-                dependencies: std::collections::HashMap::new(),
-                dependents: std::collections::HashMap::new(),
-                is_trg: std::collections::HashSet::new(),
-                all_vars: std::collections::HashSet::new(),
-            },  // start above likely conflict range
-            has_cycles: false,
-            pending_cleanup: Vec::new(),
-            let_bindings: HashMap::new(),
-            let_binding_types: HashMap::new(),
-            let_original_types: HashMap::new(),
-            terminated: false,
-            main_body: false,
-            returns_i64: false,
-            fn_ret_ty: "void".to_string(),
-            callable_txn_result: None,
-            callable_txn_post_label: None,
-            in_callable_txn: false,
-            loop_exit_label: None,
-            phi_induction_reg: None,
-            pending_post_hoist: Vec::new(),
-            pending_phi_backedge: HashMap::new(),
-            phi_field_regs: HashMap::new(),
-            backedge_field_regs: HashMap::new(),
-            used_phi_loop: false,
-            param_slots: HashMap::new(),
-            range_bounds: HashMap::new(),
-            field_to_meta_idx: HashMap::new(),
-            triggers: HashMap::new(),
-            trigger_names: Vec::new(),
-            program_txns: Vec::new(),
-            frgn_map: HashMap::new(),
-            inop_decls: HashMap::new(),
-            defn_params: HashMap::new(),
-            defn_return_types: HashMap::new(),
-            string_constants: Vec::new(),
-            constants: HashMap::new(),
-            fused_to_first: HashMap::new(),
-            sampled_triggers: HashMap::new(),
-            txn_write_masks: HashMap::new(),
-            optimize_budget: 256,
-            optimize_report: false,
-            optimize_size: None,
-            report_lines: Vec::new(),
             has_async_txns: false,
             async_txn_names: Vec::new(),
             async_thread_pool_size: 0,
             is_lightweight_async: false,
-            exit_condition: None,
-            has_natural_exit: false,
-            dead_info_disabled: false,
-            warnings: Vec::new(),
-            ssa_state_reg: None,
-            llvm_extra_flags: Vec::new(),
-            slp_hazard_fns: HashSet::new(),
-            reg_float_cache: HashMap::new(),
-            reg_type_cache: HashMap::new(),
-            state_reg_name: "%state".to_string(),
-            ssa_old_float_regs: HashMap::new(),
-            ssa_old_int_regs: HashMap::new(),
-            struct_types: HashMap::new(),
-            enum_types: HashMap::new(),
-            cell_defs: HashMap::new(),
+            program_txns: Vec::new(),
+            fused_to_first: HashMap::new(),
+            sampled_triggers: HashMap::new(),
+            txn_write_masks: HashMap::new(),
             cell_thread_names: Vec::new(),
-            cell_wires: Vec::new(),
-            cell_trigger_bindings: Vec::new(),
-            cell_state_types: HashMap::new(),
-            pending_metadata: String::new(),
-            variant_disc: HashMap::new(),
-            explain: false,
-            dump_layout: false,
-            library_mode: false,
+            report_lines: Vec::new(),
+            warnings: Vec::new(),
             remarks: Vec::new(),
-            emit_remarks: false,
-            arena_slots: None,
-            arena_counter: 0,
-            field_prealloc_info: HashMap::new(),
-            gpu_offload: false,
-            gpu_backend: "vulkan".to_string(),
+            llvm_extra_flags: Vec::new(),
+            pending_async_await_count: 0,
             spirv_kernels: Vec::new(),
             spirv_blobs: Vec::new(),
-            is_embedded: false,
-            pending_async_await_count: 0,
-            type_universe: None,
-            field_modes: HashMap::new(),
-            cache_slots: HashMap::new(),
-            chimera_map: HashMap::new(),
         }
     }
 
     pub fn with_spec(mut self, spec: crate::target_spec::TargetSpec) -> Self {
-        self.spec = Some(spec);
+        self.ctx.spec = Some(spec);
         self
     }
 
     pub fn with_optimize_budget(mut self, budget: u64) -> Self {
-        self.optimize_budget = budget;
+        self.ctx.optimize_budget = budget;
         self
     }
 
     pub fn with_optimize_report(mut self, report: bool) -> Self {
-        self.optimize_report = report;
+        self.ctx.optimize_report = report;
         self
     }
 
@@ -1017,76 +771,76 @@ impl LlvmBackend {
     // distinguish types that share the same LLVM representation (e.g. Char
     // and Int32 both → "i32", Bool and Int8 both → "i8").
     pub(super) fn push_field_type(&mut self, ty: &Type) {
-        self.field_types.push(self.llvm_type(ty).to_string());
-        self.field_brief_types.push(ty.clone());
+        self.ctx.field_types.push(self.llvm_type(ty).to_string());
+        self.ctx.field_brief_types.push(ty.clone());
     }
 
     pub fn with_optimize_size(mut self, byte_limit: u64) -> Self {
-        self.optimize_size = Some(byte_limit);
-        self.optimize_report = true;
+        self.ctx.optimize_size = Some(byte_limit);
+        self.ctx.optimize_report = true;
         self
     }
 
     pub fn with_dead_info_disabled(mut self, disabled: bool) -> Self {
-        self.dead_info_disabled = disabled;
+        self.ctx.dead_info_disabled = disabled;
         self
     }
 
     pub fn with_explain(mut self, explain: bool) -> Self {
-        self.explain = explain;
+        self.ctx.explain = explain;
         self
     }
 
     /// Pre-populate MMIO address map from a resolved DBV target binding.
     /// Each alias name maps to a physical u64 address for volatile MMIO access.
     pub fn with_mmio_addresses(mut self, addresses: HashMap<String, u64>) -> Self {
-        self.mmio_fields = addresses;
-        self.mmio_prepopulated = true;
+        self.ctx.mmio_fields = addresses;
+        self.ctx.mmio_prepopulated = true;
         self
     }
 
     pub fn with_schema_aliases(mut self, aliases: HashMap<String, crate::dbrief::DbriefType>) -> Self {
-        self.schema_aliases = aliases;
+        self.ctx.schema_aliases = aliases;
         self
     }
 
     pub fn with_pgo_profile(mut self, profile: crate::analysis::pgo::PgoProfile) -> Self {
-        self.pgo_profile = Some(profile);
+        self.ctx.pgo_profile = Some(profile);
         self
     }
 
     pub fn with_emit_remarks(mut self, emit: bool) -> Self {
-        self.emit_remarks = emit;
+        self.ctx.emit_remarks = emit;
         self
     }
 
     pub fn with_gpu_offload(mut self, offload: bool) -> Self {
-        self.gpu_offload = offload;
+        self.ctx.gpu_offload = offload;
         self
     }
 
     pub fn with_gpu_backend(mut self, backend: String) -> Self {
-        self.gpu_backend = backend;
+        self.ctx.gpu_backend = backend;
         self
     }
 
     pub fn with_embedded_mode(mut self, enabled: bool) -> Self {
-        self.is_embedded = enabled;
+        self.ctx.is_embedded = enabled;
         self
     }
 
     pub fn with_type_universe(mut self, tu: crate::type_universe::TypeUniverse) -> Self {
-        self.type_universe = Some(tu);
+        self.ctx.type_universe = Some(tu);
         self
     }
 
     pub fn with_dump_layout(mut self, v: bool) -> Self {
-        self.dump_layout = v;
+        self.ctx.dump_layout = v;
         self
     }
 
     pub fn with_library_mode(mut self, v: bool) -> Self {
-        self.library_mode = v;
+        self.ctx.library_mode = v;
         self
     }
 
@@ -1094,16 +848,16 @@ impl LlvmBackend {
     pub fn dump_layout_str(&self) -> String {
         let mut out = String::new();
         out.push_str("\n=== Field Layout ===\n");
-        let mut field_names: Vec<&String> = self.field_index_map.keys().collect();
+        let mut field_names: Vec<&String> = self.ctx.field_index_map.keys().collect();
         field_names.sort();
         for name in &field_names {
-            let idx = self.field_index_map.get(*name).copied().unwrap_or(0);
-            let ty = self.field_types.get(idx).map(|s| s.as_str()).unwrap_or("?");
-            let mode = self.field_modes.get(*name)
+            let idx = self.ctx.field_index_map.get(*name).copied().unwrap_or(0);
+            let ty = self.ctx.field_types.get(idx).map(|s| s.as_str()).unwrap_or("?");
+            let mode = self.ctx.field_modes.get(*name)
                 .map(|m| format!("{:?}", m))
                 .unwrap_or_else(|| "Always".to_string());
             out.push_str(&format!("  {} @[{}]: {} (mode: {})", name, idx, ty, mode));
-            if let Some(targets) = self.cache_slots.get(*name) {
+            if let Some(targets) = self.ctx.cache_slots.get(*name) {
                 for (target_name, &(cache_idx, valid_idx)) in targets {
                     out.push_str(&format!(" | cache[{}]: [{}](i64), [{}](i8)", target_name, cache_idx, valid_idx));
                 }
@@ -1115,7 +869,7 @@ impl LlvmBackend {
     }
 
     pub fn gpu_backend(&self) -> &str {
-        &self.gpu_backend
+        &self.ctx.gpu_backend
     }
 
     pub(crate) fn collect_gpu_kernel(
@@ -1135,8 +889,8 @@ impl LlvmBackend {
         }
 
         // Determine N for cost model: prefer PGO-derived bound, fall back to 0 (runtime).
-        let pgo_bound = if self.pgo_profile.is_some() {
-            let max_count = self.pgo_profile.as_ref().unwrap().branch_counts.values()
+        let pgo_bound = if self.ctx.pgo_profile.is_some() {
+            let max_count = self.ctx.pgo_profile.as_ref().unwrap().branch_counts.values()
                 .map(|(t, f)| *t.max(f)).max().unwrap_or(0);
             if max_count > 0 { Some(max_count) } else { None }
         } else { None };
@@ -1180,8 +934,8 @@ impl LlvmBackend {
         }
 
         // Build field type map from the backend's field_index_map + field_types
-        let field_types_map: std::collections::HashMap<String, String> = self.field_index_map.iter()
-            .map(|(name, idx)| (name.clone(), self.field_types[*idx].clone()))
+        let field_types_map: std::collections::HashMap<String, String> = self.ctx.field_index_map.iter()
+            .map(|(name, idx)| (name.clone(), self.ctx.field_types[*idx].clone()))
             .collect();
         let kernel = gpu::extract_kernel(txn_name, body, crate::ast::Expr::Integer(0), &[], field_types_map);
         let spirv_ir = gpu::emit_spirv_module(&kernel);
@@ -1189,7 +943,7 @@ impl LlvmBackend {
 
         if let Ok(binary) = gpu::compile_to_spirv(&spirv_ir) {
             self.spirv_blobs.push(binary);
-        } else if self.emit_remarks {
+        } else if self.ctx.emit_remarks {
             // llc not available — emit warning.
             self.warnings.push("info: GPU kernel SPIR-V compilation skipped — llc not found. Install LLVM tools or use --no-gpu to suppress.".to_string());
         }
@@ -1203,16 +957,16 @@ impl LlvmBackend {
     /// Emit preallocation for a single collection field within a bounded loop.
     /// Shared by both emit_prealloc_for_body and emit_prealloc_for_targets.
     fn emit_prealloc_one_field(&mut self, out: &mut String, indent: &str, field_name: &str, bound_reg: &str) {
-        if !self.field_index_map.contains_key(field_name) {
+        if !self.ctx.field_index_map.contains_key(field_name) {
             return;
         }
-        let idx = self.field_index_map[field_name];
-        if self.field_types[idx] != "i64" {
+        let idx = self.ctx.field_index_map[field_name];
+        if self.ctx.field_types[idx] != "i64" {
             return;
         }
 
-        let c = self.arena_counter;
-        self.arena_counter += 1;
+        let c = self.fun.arena_counter;
+        self.fun.arena_counter += 1;
         let cap = format!("%pcap_{}", c);
         writeln!(out, "{}{} = add i64 0, {}", indent, cap, bound_reg).ok();
         let slot_cnt = format!("%psc_{}", c);
@@ -1234,9 +988,9 @@ impl LlvmBackend {
         writeln!(out, "{}store i64 0, i64* {}, align 8, !tbaa !1", indent, s1).ok();
         let ap = format!("%pap_{}", c);
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-        let tn = crate::backend::llvm::tbaa_node(&self.field_types[idx]);
+        let tn = crate::backend::llvm::tbaa_node(&self.ctx.field_types[idx]);
         writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
-        self.field_prealloc_info.insert(field_name.to_string(), (cap, buf_i64));
+        self.fun.field_prealloc_info.insert(field_name.to_string(), (cap, buf_i64));
     }
 
     /// Emit preallocation for collection fields that receive `<- push` within
@@ -1274,9 +1028,9 @@ impl LlvmBackend {
     }
 
     pub(crate) fn emit_arena_alloc(&mut self, out: &mut String, indent: &str, size_reg: &str) -> String {
-        if let Some((ref ptr, ref end, ref base)) = self.arena_slots.clone() {
-            let c = self.arena_counter;
-            self.arena_counter += 1;
+        if let Some((ref ptr, ref end, ref base)) = self.fun.arena_slots.clone() {
+            let c = self.fun.arena_counter;
+            self.fun.arena_counter += 1;
             // 2026-06-26: emit br label %check_l before the check label to
             // terminate whatever block the caller left unterminated (callers
             // emit straight-line code before emit_arena_alloc). Without this,
@@ -1328,8 +1082,8 @@ impl LlvmBackend {
             writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_bump, ptr).ok();
             phi
         } else {
-            let c = self.arena_counter;
-            self.arena_counter += 1;
+            let c = self.fun.arena_counter;
+            self.fun.arena_counter += 1;
             let r = format!("%aam{}", c);
             writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, r, size_reg).ok();
             r
@@ -1339,8 +1093,8 @@ impl LlvmBackend {
     /// Emit arena initialization at scope entry. Allocates the initial
     /// 64KB arena buffer, sets up ptr/end/base alloca slots.
     pub(crate) fn emit_arena_init(&mut self, out: &mut String, indent: &str) {
-        let c = self.arena_counter;
-        self.arena_counter += 1;
+        let c = self.fun.arena_counter;
+        self.fun.arena_counter += 1;
         let ptr = format!("%arptr{}", c);
         let end = format!("%arend{}", c);
         let base = format!("%arbase{}", c);
@@ -1354,7 +1108,7 @@ impl LlvmBackend {
         let init_end = format!("%arieu{}", c);
         writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 65536", indent, init_end, init).ok();
         writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, init_end, end).ok();
-        self.arena_slots = Some((ptr, end, base));
+        self.fun.arena_slots = Some((ptr, end, base));
     }
 
     /// Emit arena reset: rewinds the bump pointer to the base, preserving
@@ -1362,9 +1116,9 @@ impl LlvmBackend {
     /// This is Phase 3 — cross-tick arena pool — keeps pages alive across
     /// loop ticks instead of free+malloc per cycle.
     pub(crate) fn emit_arena_reset(&mut self, out: &mut String, indent: &str) {
-        if let Some((ref ptr, _end, ref base)) = self.arena_slots.clone() {
-            let r = format!("%arr{}", self.arena_counter);
-            self.arena_counter += 1;
+        if let Some((ref ptr, _end, ref base)) = self.fun.arena_slots.clone() {
+            let r = format!("%arr{}", self.fun.arena_counter);
+            self.fun.arena_counter += 1;
             writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, r, base).ok();
             writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, r, ptr).ok();
             // Slots stay alive (arena is not freed). Memory is reused on next tick.
@@ -1375,12 +1129,12 @@ impl LlvmBackend {
     /// clears the arena_slots flag. After this, dynamic allocations
     /// fall back to @malloc.
     pub(crate) fn emit_arena_fini(&mut self, out: &mut String, indent: &str) {
-        if let Some((_ptr, _end, ref base)) = self.arena_slots.clone() {
-            let f = format!("%arf{}", self.arena_counter);
-            self.arena_counter += 1;
+        if let Some((_ptr, _end, ref base)) = self.fun.arena_slots.clone() {
+            let f = format!("%arf{}", self.fun.arena_counter);
+            self.fun.arena_counter += 1;
             writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, f, base).ok();
             writeln!(out, "{}call void @free(i8* {})", indent, f).ok();
-            self.arena_slots = None;
+            self.fun.arena_slots = None;
         }
     }
 
@@ -1398,7 +1152,7 @@ impl LlvmBackend {
     }
 
     pub(crate) fn push_remark(&mut self, remark: crate::backend::llvm::directive::OptimizationRemark) {
-        if self.emit_remarks {
+        if self.ctx.emit_remarks {
             self.remarks.push(remark);
         }
     }
@@ -1443,7 +1197,7 @@ impl LlvmBackend {
                 _ => {}
             }
         }
-        if self.has_cycles {
+        if self.ctx.has_cycles {
             self.warnings.push(
                 "TargetError: unbounded recursion detected — call graph has cycles, which are not supported on target 'Embedded'".to_string()
             );
@@ -1596,10 +1350,10 @@ impl LlvmBackend {
 
     pub fn generate(&mut self, program: &Program) -> String {
         let mut analysis = crate::backend::analyze_program(program, false);
-        self.dep_graph = analysis.dependency_graph.clone();
+        self.ctx.dep_graph = analysis.dependency_graph.clone();
 
         analysis.region_analyzer.compose_chains();
-        analysis.region_analyzer.build_budget_plan(self.optimize_budget);
+        analysis.region_analyzer.build_budget_plan(self.ctx.optimize_budget);
 
         // ── Precomputation check (A000) ──────────────────────────────
         //
@@ -1609,7 +1363,7 @@ impl LlvmBackend {
         // If budget is exceeded but no FFI exists, warn and fall through to
         // runtime loop. If FFI exists, warn that compile-time eval is blocked.
 
-        let precomputed_final_values = if analysis.region_analyzer.is_fully_precomputable(self.optimize_budget) {
+        let precomputed_final_values = if analysis.region_analyzer.is_fully_precomputable(self.ctx.optimize_budget) {
             analysis.region_analyzer.collect_final_values(program)
         } else if !analysis.region_analyzer.composed_chains.is_empty() {
             // A002 already covers empty-chains case: no precomputable program.
@@ -1621,7 +1375,7 @@ impl LlvmBackend {
             } else {
                 self.warnings.push(format!(
                     "info: program not fully precomputed — budget {} exceeded by composed chain product. Emitting runtime loop.",
-                    self.optimize_budget));
+                    self.ctx.optimize_budget));
             }
             None
         } else {
@@ -1629,16 +1383,16 @@ impl LlvmBackend {
         };
 
         let cg = &analysis.call_graph;
-        self.has_cycles = cg.has_cycle();
+        self.ctx.has_cycles = cg.has_cycle();
 
-        if self.is_embedded {
+        if self.ctx.is_embedded {
             self.check_embedded_restrictions(program);
         }
 
-        self.exit_condition = program.exit_condition.clone();
+        self.ctx.exit_condition = program.exit_condition.clone();
         // Normalize BinaryOp/UnaryOp exit conditions to old-style variants
         // so emit_exit_expr and check_exit_condition_idents can handle them.
-        if let Some(ref mut cond) = self.exit_condition {
+        if let Some(ref mut cond) = self.ctx.exit_condition {
             *cond = Box::new(cond.normalize_to_old_recursive());
         }
         self.build_field_index(program);
@@ -1652,35 +1406,35 @@ impl LlvmBackend {
                 matches!(t.address, crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_))
             } else { false }
         });
-        if has_builtin_trg && !self.field_index_map.contains_key("__trg_epfd") {
-            let idx = self.field_index_map.len();
-            self.field_index_map.insert("__trg_epfd".to_string(), idx);
-            self.field_types.push("i32".to_string());
-            self.field_brief_types.push(Type::Int);
-            self.field_initializers.insert("__trg_epfd".to_string(), None);
+        if has_builtin_trg && !self.ctx.field_index_map.contains_key("__trg_epfd") {
+            let idx = self.ctx.field_index_map.len();
+            self.ctx.field_index_map.insert("__trg_epfd".to_string(), idx);
+            self.ctx.field_types.push("i32".to_string());
+            self.ctx.field_brief_types.push(Type::Int);
+            self.ctx.field_initializers.insert("__trg_epfd".to_string(), None);
         }
         // Inject synthetic cycle_count field for watchdog timing
-        if !self.field_index_map.contains_key("cycle_count") {
-            let idx = self.field_index_map.len();
-            self.field_index_map.insert("cycle_count".to_string(), idx);
-            self.field_types.push("i64".to_string());
-            self.field_brief_types.push(Type::Int);
-            self.field_initializers.insert("cycle_count".to_string(), Some(Expr::Integer(0)));
+        if !self.ctx.field_index_map.contains_key("cycle_count") {
+            let idx = self.ctx.field_index_map.len();
+            self.ctx.field_index_map.insert("cycle_count".to_string(), idx);
+            self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(Type::Int);
+            self.ctx.field_initializers.insert("cycle_count".to_string(), Some(Expr::Integer(0)));
         }
         self.validate_schema_types();
-        self.triggers.clear();
-        self.trigger_names.clear();
+        self.ctx.triggers.clear();
+        self.ctx.trigger_names.clear();
         self.program_txns.clear();
-        self.defn_params.clear();
-        self.defn_return_types.clear();
-        self.constants.clear();
-        self.string_constants = collect_strings(program);
+        self.ctx.defn_params.clear();
+        self.ctx.defn_return_types.clear();
+        self.ctx.constants.clear();
+        self.ctx.string_constants = collect_strings(program);
 
         let mut txns: Vec<(String, &crate::ast::Transaction)> = Vec::new();
         for item in &program.items {
             match item {
                 TopLevel::Constant(c) => {
-                    self.constants.insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
+                    self.ctx.constants.insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
                 }
                 TopLevel::Transaction(t) => {
                     txns.push((t.name.clone(), t));
@@ -1689,53 +1443,53 @@ impl LlvmBackend {
                     let has_output = t.output_type.is_some() || !t.outputs.is_empty();
                     if !t.is_reactive && (!t.parameters.is_empty() || has_output) {
                         let tys: Vec<Type> = t.parameters.iter().map(|(_, ty)| ty.clone()).collect();
-                        self.defn_params.insert(t.name.clone(), tys);
-                        self.defn_return_types.insert(t.name.clone(), t.outputs.clone());
+                        self.ctx.defn_params.insert(t.name.clone(), tys);
+                        self.ctx.defn_return_types.insert(t.name.clone(), t.outputs.clone());
                     }
                 }
                 TopLevel::Trigger(t) => {
-                    self.triggers.insert(t.name.clone(), t.clone());
-                    self.trigger_names.push(t.name.clone());
+                    self.ctx.triggers.insert(t.name.clone(), t.clone());
+                    self.ctx.trigger_names.push(t.name.clone());
                 }
                 TopLevel::Definition(d) => {
                     let tys: Vec<Type> = d.parameters.iter().map(|(_, t)| t.clone()).collect();
-                    self.defn_params.insert(d.name.clone(), tys);
-                    self.defn_return_types.insert(d.name.clone(), d.outputs.clone());
+                    self.ctx.defn_params.insert(d.name.clone(), tys);
+                    self.ctx.defn_return_types.insert(d.name.clone(), d.outputs.clone());
                 }
                 TopLevel::ForeignBinding { name, signature, .. } => {
-                    self.frgn_map.insert(name.clone(), signature.clone());
+                    self.ctx.frgn_map.insert(name.clone(), signature.clone());
                 }
                 TopLevel::Inop(inop) => {
-                    self.inop_decls.insert(inop.name.clone(), inop.clone());
+                    self.ctx.inop_decls.insert(inop.name.clone(), inop.clone());
                 }
                 TopLevel::Struct(s) => {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect();
-                    self.struct_types.insert(s.name.clone(), fields);
+                    self.ctx.struct_types.insert(s.name.clone(), fields);
                 }
                 TopLevel::Enum(e) => {
-                    self.enum_types.insert(e.name.clone(), e.clone());
+                    self.ctx.enum_types.insert(e.name.clone(), e.clone());
                 }
                 TopLevel::Cell(c) => {
-                    self.cell_defs.insert(c.name.clone(), c.as_ref().clone());
+                    self.ctx.cell_defs.insert(c.name.clone(), c.as_ref().clone());
                 }
                 TopLevel::TriggerBinding { name, instance, port, ty, modifiers: _ } => {
                     // Register a cell binding trigger: trg name @ CellName!.port
                     if let Expr::Identifier(cell_name) = instance {
                         let resolved_port = if port.is_empty() {
                             // Auto-detect single output port: use the first named output
-                            if let Some(cell_def) = self.cell_defs.get(cell_name) {
+                            if let Some(cell_def) = self.ctx.cell_defs.get(cell_name) {
                                 "line".to_string() // Console's first output port
                             } else { String::new() }
                         } else { port.clone() };
                         if !resolved_port.is_empty() {
-                            self.cell_trigger_bindings.push((
+                            self.ctx.cell_trigger_bindings.push((
                                 name.clone(), cell_name.clone(), resolved_port.clone()
                             ));
                             // Register the trigger so its storage is allocated in %State
                             let trig_ty = ty.clone().unwrap_or(crate::ast::Type::String);
-                            self.trigger_names.push(name.clone());
+                            self.ctx.trigger_names.push(name.clone());
                             let trg_decl = crate::ast::TriggerDeclaration {
                                 name: name.clone(),
                                 ty: trig_ty,
@@ -1744,7 +1498,7 @@ impl LlvmBackend {
                                 is_wake: false, is_const: false, span: None,
                                 modifiers: vec![],
                             };
-                            self.triggers.insert(name.clone(), trg_decl);
+                            self.ctx.triggers.insert(name.clone(), trg_decl);
                         }
                     }
                 }
@@ -1754,7 +1508,7 @@ impl LlvmBackend {
 
         // Verify all #!exit identifiers exist as state fields or constants.
         // Run BEFORE field elimination so we see the full field set.
-        if let Some(ref cond) = self.exit_condition {
+        if let Some(ref cond) = self.ctx.exit_condition {
             let errors = self.check_exit_condition_idents(cond);
             if !errors.is_empty() {
                 for err in &errors {
@@ -1772,14 +1526,14 @@ impl LlvmBackend {
         }
 
         // W001: Detect dead cache slots — allocated but no loop context (one-shot program).
-        if !self.cache_slots.is_empty() {
+        if !self.ctx.cache_slots.is_empty() {
             // Check if ANY transaction has bounded convergence (loop context)
             let has_loop_context = analysis.transition_graph.nodes.iter().any(|n| {
                 n.bounded_pre.is_some()
                     && n.increments.as_ref().map_or(false, |i| i.delta > 0)
             });
             if !has_loop_context {
-                let field_list: Vec<String> = self.cache_slots.keys().cloned().collect();
+                let field_list: Vec<String> = self.ctx.cache_slots.keys().cloned().collect();
                 self.warnings.push(format!(
                     "W001: dead cache slot(s) — `{}` allocated cache slots but the program has no loop context.\n\
                       note: cache slots are only useful when a projection appears multiple times in a loop body.\n\
@@ -1790,7 +1544,7 @@ impl LlvmBackend {
         }
 
         // Build variant → (enum_name, discriminant, field_count) mapping.
-        for (enum_name, edef) in &self.enum_types {
+        for (enum_name, edef) in &self.ctx.enum_types {
             let mut next_disc: u64 = 0;
             for v in &edef.variants {
                 let (vname, field_count) = match v {
@@ -1800,21 +1554,21 @@ impl LlvmBackend {
                 };
                 let disc = next_disc;
                 next_disc += 1;
-                self.variant_disc.insert(vname, (enum_name.clone(), disc, field_count));
+                self.ctx.variant_disc.insert(vname, (enum_name.clone(), disc, field_count));
             }
         }
 
         // Fold complex float constant expressions (e.g. const m0: Float = 4.0 * pi * pi)
         // into simple Expr::Float(f64) literals so the global emission path
         // produces valid LLVM IR instead of `constant float 0`.
-        let consts_snapshot: Vec<(String, (Type, Expr))> = self.constants.iter()
+        let consts_snapshot: Vec<(String, (Type, Expr))> = self.ctx.constants.iter()
             .map(|(k, v)| (k.clone(), v.clone())).collect();
         for (name, (ty, expr)) in consts_snapshot {
             // 2026-06-29: Fold both Float and Float64 constant expressions
             if ty == Type::Float || ty == Type::Float64 {
-                if let Some(val) = try_eval_cfloat(&expr, &self.constants) {
+                if let Some(val) = try_eval_cfloat(&expr, &self.ctx.constants) {
                     let new_expr = if ty == Type::Float64 { Expr::Float64(val) } else { Expr::Float(val) };
-                    self.constants.insert(name, (ty.clone(), new_expr));
+                    self.ctx.constants.insert(name, (ty.clone(), new_expr));
                 }
             }
         }
@@ -1833,13 +1587,13 @@ self.emit_declares(&mut out);
 
         // Emit foreign declares inline (frgn_map is populated from the scan above)
         // Skip names that are also linked triggers — they'll be emitted as global variables below.
-        let trigger_linked_symbols: std::collections::HashSet<&str> = self.triggers.iter()
+        let trigger_linked_symbols: std::collections::HashSet<&str> = self.ctx.triggers.iter()
             .filter_map(|(_, t)| match &t.address {
                 crate::ast::LinkRef::Linked(sym) => Some(sym.as_str()),
                 _ => None,
             })
             .collect();
-        for (name, sig) in &self.frgn_map {
+        for (name, sig) in &self.ctx.frgn_map {
             if trigger_linked_symbols.contains(name.as_str()) { continue; }
             let ret_ty = match sig.result_type {
                 crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
@@ -1924,13 +1678,13 @@ self.emit_declares(&mut out);
         writeln!(out, "declare i32 @fclose(ptr) #1").ok();
 
         // Emit external global declarations for linked triggers (fixes bug 4B)
-        for (name, trg) in &self.triggers {
+        for (name, trg) in &self.ctx.triggers {
             if let crate::ast::LinkRef::Linked(sym) = &trg.address {
                 let store_ty = trg_llvm_storage_ty(&trg.ty);
                 let align = if store_ty == "i64" { 8 } else if store_ty == "i32" { 4 } else { 1 };
                 writeln!(out, "@{} = external global {}, align {}", sym, store_ty, align).ok();
                 // Warn if a linked trigger symbol is also declared as a frgn function
-                if self.frgn_map.contains_key(sym.as_str()) {
+                if self.ctx.frgn_map.contains_key(sym.as_str()) {
                     eprintln!("warning: '{}' is declared as a frgn function but used as a @ link trigger. \
                                Use a volatile C variable for triggers, or built-in sources like @stdin#.", sym);
                 }
@@ -1946,7 +1700,7 @@ self.emit_declares(&mut out);
                 }
             }
         }
-        if self.triggers.iter().any(|(_, t)| matches!(t.address, crate::ast::LinkRef::Linked(_))) {
+        if self.ctx.triggers.iter().any(|(_, t)| matches!(t.address, crate::ast::LinkRef::Linked(_))) {
             writeln!(out).ok();
         }
 
@@ -1956,7 +1710,7 @@ self.emit_declares(&mut out);
         // allocating separate storage.
         let mut dedup_map: HashMap<String, String> = HashMap::new(); // key → canonical_name
         let mut alias_map: HashMap<String, String> = HashMap::new(); // name → canonical_name
-        for (name, (ty, expr)) in &self.constants {
+        for (name, (ty, expr)) in &self.ctx.constants {
             let llvm_ty = match ty {
                 // 2026-06-29: Updated for fixed-width types
                 Type::Float64 => "double",
@@ -2006,7 +1760,7 @@ self.emit_declares(&mut out);
             }
         }
         // Emit declaration for canonical names only; emit alias for duplicates
-        for (name, (ty, expr)) in &self.constants {
+        for (name, (ty, expr)) in &self.ctx.constants {
             let canonical = alias_map.get(name).cloned().unwrap_or_else(|| name.clone());
             if canonical != *name {
                 let llvm_ty = match ty {
@@ -2070,7 +1824,7 @@ self.emit_declares(&mut out);
             };
             writeln!(out, "@{} = constant {} {}", name, llvm_ty, val_str).ok();
         }
-        if !self.constants.is_empty() { writeln!(out).ok(); }
+        if !self.ctx.constants.is_empty() { writeln!(out).ok(); }
 
         self.declare_state_type(&mut out);
         // %State no longer has a module-level global. Instead, main()
@@ -2083,7 +1837,7 @@ self.emit_declares(&mut out);
         // Emit string constants as global Brief headers
         // Each is a 2-slot header: { data_ptr (ptrtoint of slot 2), length, [chars] }
         // This makes ALL string values in the IR uniform — same format as heap-allocated strings.
-        for (si, s) in self.string_constants.iter().enumerate() {
+        for (si, s) in self.ctx.string_constants.iter().enumerate() {
             let escaped = escape_llvm_string(s);
             let len = s.len();
             writeln!(out, "@str.{} = private unnamed_addr constant <{{ i64, i64, [{} x i8] }}> <{{", si, len + 1).ok();
@@ -2092,7 +1846,7 @@ self.emit_declares(&mut out);
             writeln!(out, "  [{} x i8] c\"{}\\00\"", len + 1, escaped).ok();
             writeln!(out, "}}>, align 8").ok();
         }
-        if !self.string_constants.is_empty() { writeln!(out).ok(); }
+        if !self.ctx.string_constants.is_empty() { writeln!(out).ok(); }
 
         // 2026-06-29: Global sentinel for all empty list literals `[]`.
         // LLVM eliminates stack-allocated empty lists (dead alloca elimination)
@@ -2166,7 +1920,7 @@ self.emit_declares(&mut out);
             .filter(|cc| cc.all_internal)
             .filter_map(|cc| {
                 let cv = cc.counter_var.as_ref()?;
-                let ci = *self.field_index_map.get(cv)?;
+                let ci = *self.ctx.field_index_map.get(cv)?;
                 let bound = analysis.region_analyzer.iteration_bound_of(&cc.chain[0])? as i64;
                 let base = format!("{}_fused_txn", cc.chain.join("_"));
                 let fn_name = if let Some(ref tv) = cc.trigger_values {
@@ -2205,14 +1959,14 @@ self.emit_declares(&mut out);
             }
         }
         // Init
-        self.txn_counter = 0;
-        self.within_counter = 0;
+        self.fun.txn_counter = 0;
+        self.fun.within_counter = 0;
         self.emit_init_state(&mut out);
         self.emit_persistent_cell_ticks(&mut out);
         writeln!(out).ok();
 
         // Emit cell channel globals and persistent cell thread functions
-        let persistent_cells: Vec<crate::ast::CellDef> = self.cell_defs.values()
+        let persistent_cells: Vec<crate::ast::CellDef> = self.ctx.cell_defs.values()
             .filter(|c| c.is_persistent)
             .cloned()
             .collect();
@@ -2244,8 +1998,8 @@ self.emit_declares(&mut out);
         // We build a synthetic exit condition: for each foldable bounded-counter txn,
         // check `counter >= bound`. When ALL counters reach their bounds, no txn can
         // fire again, and main() returns 0.
-        self.has_natural_exit = false;
-        if self.exit_condition.is_none() && has_wake_triggers {
+        self.ctx.has_natural_exit = false;
+        if self.ctx.exit_condition.is_none() && has_wake_triggers {
             let has_persistent_txn = txns.iter().any(|(name, t)| {
                 t.is_reactive && !graph.nodes.iter()
                     .filter(|n| n.name == *name)
@@ -2272,8 +2026,8 @@ self.emit_declares(&mut out);
                     let combined = checks.into_iter()
                         .reduce(|a, b| Expr::And(Box::new(a), Box::new(b)))
                         .unwrap();
-                    self.exit_condition = Some(Box::new(combined));
-                    self.has_natural_exit = true;
+                    self.ctx.exit_condition = Some(Box::new(combined));
+                    self.ctx.has_natural_exit = true;
                 }
             }
         }
@@ -2312,23 +2066,23 @@ self.emit_declares(&mut out);
             let bp = node.bounded_pre.as_ref().unwrap();
             let inc = node.increments.as_ref().unwrap();
             if bp.var == inc.var {
-                if let Some(&counter_idx) = self.field_index_map.get(&bp.var) {
-                    let total_idx = self.field_index_map.get(&bp.bound_var).copied();
+                if let Some(&counter_idx) = self.ctx.field_index_map.get(&bp.var) {
+                    let total_idx = self.ctx.field_index_map.get(&bp.bound_var).copied();
                     let total_const_name: Option<&str> = if total_idx.is_none() {
-                        if self.constants.contains_key(&bp.bound_var) {
+                        if self.ctx.constants.contains_key(&bp.bound_var) {
                             Some(bp.bound_var.as_str())
                         } else { None }
                     } else { None };
                     if total_idx.is_some() || total_const_name.is_some() {
                         if node.is_pure_body || node.is_effectively_pure {
-                            let total_val = self.field_initializers
+                            let total_val = self.ctx.field_initializers
                                 .get(&bp.bound_var)
                                 .and_then(|e| e.as_ref())
                                 .and_then(|e| {
                                     if let Expr::Integer(n) = e { Some(*n) } else { None }
                                 })
                                 .or_else(|| {
-                                    self.constants.get(&bp.bound_var).and_then(|(_, e)| {
+                                    self.ctx.constants.get(&bp.bound_var).and_then(|(_, e)| {
                                         if let Expr::Integer(n) = e { Some(*n) } else { None }
                                     })
                                 });
@@ -2347,8 +2101,8 @@ self.emit_declares(&mut out);
                             }
                         } else {
                             let raw_body = &txns[0].1.body;
-                            let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.field_index_map);
-                            self.pending_post_hoist = post_hoist;
+                            let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.ctx.field_index_map);
+                            self.fun.pending_post_hoist = post_hoist;
                             let has_guards = body_stmts.iter().any(|s| matches!(s, crate::ast::Statement::Guarded { .. } | crate::ast::Statement::Escape(_) | crate::ast::Statement::SyncBlock { .. }));
                             if has_guards && !crate::proof_engine::prove_linear(&body_stmts) {
                                 // A005b: non-linear body with branching guards → memory path (no phi)
@@ -2370,8 +2124,8 @@ self.emit_declares(&mut out);
         // Emit the trg step() function if the program has trigger declarations.
         // The step() function recomputes dependent variables in topological order
         // when trigger inputs change. It is called from the event loop.
-        if !self.trigger_names.is_empty() {
-            let trg_names = self.trigger_names.clone();
+        if !self.ctx.trigger_names.is_empty() {
+            let trg_names = self.ctx.trigger_names.clone();
             self.emit_trg_step(&mut out, &analysis.dependency_graph, &trg_names);
         }
 
@@ -2413,10 +2167,10 @@ self.emit_declares(&mut out);
                     for txn_name in &self.async_txn_names {
                         if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
                             if let Some(ref bp) = node.bounded_pre {
-                                if let Some(&cidx) = self.field_index_map.get(&bp.var) {
-                                    let tidx = self.field_index_map.get(&bp.bound_var).copied();
+                                if let Some(&cidx) = self.ctx.field_index_map.get(&bp.var) {
+                                    let tidx = self.ctx.field_index_map.get(&bp.bound_var).copied();
                                     let tcname = if tidx.is_none() {
-                                        if self.constants.contains_key(&bp.bound_var) {
+                                        if self.ctx.constants.contains_key(&bp.bound_var) {
                                             Some(bp.bound_var.clone())
                                         } else { None }
                                     } else { None };
@@ -2465,10 +2219,10 @@ self.emit_declares(&mut out);
                     for txn_name in &enum_txn_names {
                         if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
                             if let Some(ref bp) = node.bounded_pre {
-                                if let Some(&cidx) = self.field_index_map.get(&bp.var) {
-                                    let tidx = self.field_index_map.get(&bp.bound_var).copied();
+                                if let Some(&cidx) = self.ctx.field_index_map.get(&bp.var) {
+                                    let tidx = self.ctx.field_index_map.get(&bp.bound_var).copied();
                                     let tcname = if tidx.is_none() {
-                                        if self.constants.contains_key(&bp.bound_var) {
+                                        if self.ctx.constants.contains_key(&bp.bound_var) {
                                             Some(bp.bound_var.clone())
                                         } else { None }
                                     } else { None };
@@ -2496,11 +2250,11 @@ self.emit_declares(&mut out);
                     for txn_name in &enum_txn_names {
                         if let Some(node) = graph.nodes.iter().find(|n| n.name == *txn_name) {
                             let total_val = node.bounded_pre.as_ref().and_then(|bp| {
-                                self.field_initializers.get(&bp.bound_var)
+                                self.ctx.field_initializers.get(&bp.bound_var)
                                     .and_then(|e| e.as_ref())
                                     .and_then(|e| if let Expr::Integer(n) = e { Some(*n) } else { None })
                                     .or_else(|| {
-                                        self.constants.get(&bp.bound_var).and_then(|(_, e)| {
+                                        self.ctx.constants.get(&bp.bound_var).and_then(|(_, e)| {
                                             if let Expr::Integer(n) = e { Some(*n) } else { None }
                                         })
                                     })
@@ -2513,10 +2267,10 @@ self.emit_declares(&mut out);
                 // Legacy single-txn params for chain composition (unchanged)
                 let (enum_ci, enum_ti, enum_tcn): (usize, Option<usize>, Option<String>) = if graph.nodes.len() == 1 && txns.len() == 1 {
                     if let Some(bp) = graph.nodes[0].bounded_pre.as_ref() {
-                        if let Some(&cidx) = self.field_index_map.get(&bp.var) {
-                            let tidx = self.field_index_map.get(&bp.bound_var).copied();
+                        if let Some(&cidx) = self.ctx.field_index_map.get(&bp.var) {
+                            let tidx = self.ctx.field_index_map.get(&bp.bound_var).copied();
                             let tcname = if tidx.is_none() {
-                                if self.constants.contains_key(&bp.bound_var) {
+                                if self.ctx.constants.contains_key(&bp.bound_var) {
                                     Some(bp.bound_var.clone())
                                 } else { None }
                             } else { None };
@@ -2576,11 +2330,11 @@ self.emit_declares(&mut out);
                     self.emit_wake_metadata(&mut out);
                 }
                 self.emit_thread_pool_metadata(&mut out);
-            } else if self.library_mode {
+            } else if self.ctx.library_mode {
                 self.emit_library_shim(&mut out, &txns);
             } else if !txns.is_empty()
                 && self.async_txn_names.is_empty()
-                && self.mmio_fields.is_empty()
+                && self.ctx.mmio_fields.is_empty()
             {
                 // A006: Direct phi-based loop — no async, no MMIO.
                 // Inline all txn bodies directly in main() instead of reactor_tick.
@@ -2592,8 +2346,8 @@ self.emit_declares(&mut out);
                 self.warnings.push(
                     "info: program dispatched via direct SSA loop".into()
                 );
-                self.txn_counter = 0;
-                self.within_counter = 0;
+                self.fun.txn_counter = 0;
+                self.fun.within_counter = 0;
                 self.emit_ssa_main(&mut out, &txns, has_wake_triggers);
             } else if !txns.is_empty() {
                 // reactor loop fallback — only reached for async dispatch or MMIO
@@ -2615,8 +2369,8 @@ self.emit_declares(&mut out);
                 if has_wake_triggers {
                     writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
                 }
-                self.txn_counter = 0;
-                self.within_counter = 0;
+                self.fun.txn_counter = 0;
+                self.fun.within_counter = 0;
                 self.emit_main(&mut out, has_wake_triggers);
                 // Wake trigger metadata
                 if has_wake_triggers {
@@ -2630,15 +2384,15 @@ self.emit_declares(&mut out);
                 writeln!(out, "}}").ok();
                 writeln!(out).ok();
                 // Main
-                self.txn_counter = 0;
-                self.within_counter = 0;
+                self.fun.txn_counter = 0;
+                self.fun.within_counter = 0;
                 self.emit_main(&mut out, false);
             }
             }
         }
 
         // ── DEAD-FIELD INFO DIAGNOSTICS (A002/A003) ─────────
-        if !self.dead_info_disabled {
+        if !self.ctx.dead_info_disabled {
             for node in &graph.nodes {
                 let dead_fields: Vec<&String> = node.write_set.iter()
                     .filter(|f| !graph.live_fields.contains(*f))
@@ -2671,9 +2425,9 @@ self.emit_declares(&mut out);
                 if node.is_effectively_pure {
                     let inc = node.increments.as_ref().unwrap();
                     let bp = node.bounded_pre.as_ref().unwrap();
-                    let total_str = self.constants.get(&bp.bound_var)
+                    let total_str = self.ctx.constants.get(&bp.bound_var)
                         .and_then(|(_, e)| if let Expr::Integer(n) = e { Some(n.to_string()) } else { None })
-                        .or_else(|| self.field_initializers.get(&bp.bound_var)
+                        .or_else(|| self.ctx.field_initializers.get(&bp.bound_var)
                             .and_then(|e| e.as_ref())
                             .and_then(|e| if let Expr::Integer(n) = e { Some(n.to_string()) } else { None }));
                     let iterations_msg = match &total_str {
@@ -2705,7 +2459,7 @@ self.emit_declares(&mut out);
         // Folded and precomputed paths exit without a tick loop; enum dispatch without
         // wake has no exit_check label. The standard reactor path (emit_main) always
         // checks, so we warn only when we know the check is unreachable.
-        if self.exit_condition.is_some() {
+        if self.ctx.exit_condition.is_some() {
             let is_one_shot = folded
                 || precomputed_final_values.is_some()
                 || (enumerable.is_some() && !has_wake_triggers);
@@ -2723,7 +2477,7 @@ self.emit_declares(&mut out);
         // reactive transactions converge. Natural death (auto-exit) is automatically
         // applied when all reactive txns have bounded convergence, so this warning
         // only fires for programs with persistent (non-foldable) reactive txns.
-        if has_wake_triggers && self.exit_condition.is_none() {
+        if has_wake_triggers && self.ctx.exit_condition.is_none() {
             self.warnings.push(format!(
                 "warning: program has wake triggers but no exit path\n\
                   note: after all transactions converge, the program will spin forever\n\
@@ -2732,9 +2486,9 @@ self.emit_declares(&mut out);
         }
 
         // Attributes
-        if !self.pending_metadata.is_empty() {
+        if !self.fun.pending_metadata.is_empty() {
             writeln!(out, "; Loop metadata").ok();
-            out.push_str(&self.pending_metadata);
+            out.push_str(&self.fun.pending_metadata);
         }
         writeln!(out).ok();
         writeln!(out, "attributes #0 = {{").ok();
@@ -2746,7 +2500,7 @@ self.emit_declares(&mut out);
         // SLP-safe attribute variants: #4 = #0 + disable-slp, #5 = #3 + disable-slp.
         // Dual attributes (disable-slp-vectorize + no-vectorize-slp) ensure LLVM
         // compatibility across versions 15–22+. Emitted only when needed.
-        if !self.slp_hazard_fns.is_empty() {
+        if !self.ctx.slp_hazard_fns.is_empty() {
             writeln!(out, "attributes #4 = {{").ok();
             writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn").ok();
             writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
@@ -2778,11 +2532,11 @@ self.emit_declares(&mut out);
         writeln!(out, "!5 = !{{!\"Float\", !0}}").ok();
 
         // Build optimization report if requested
-        if self.optimize_report {
+        if self.ctx.optimize_report {
             self.report_lines.push("=== Optimization Report ===".to_string());
-            self.report_lines.push(format!("Optimize budget: {}", self.optimize_budget));
+            self.report_lines.push(format!("Optimize budget: {}", self.ctx.optimize_budget));
             let enum_count = enumerable.as_ref().map(|e| e.len()).unwrap_or(0);
-            self.report_lines.push(format!("Triggers found: {} (enumerable: {})", self.trigger_names.len(), enum_count));
+            self.report_lines.push(format!("Triggers found: {} (enumerable: {})", self.ctx.trigger_names.len(), enum_count));
             if let Some(ref sizes) = enumerable {
                 let mut total_combos: u64 = 1;
                 self.report_lines.push("".to_string());
@@ -2793,16 +2547,16 @@ self.emit_declares(&mut out);
                     total_combos = total_combos.saturating_mul(s);
                 }
                 self.report_lines.push(format!("Total combinations: {}", total_combos));
-                if total_combos <= self.optimize_budget {
-                    self.report_lines.push(format!("  ✅ Within budget ({} ≤ {})", total_combos, self.optimize_budget));
+                if total_combos <= self.ctx.optimize_budget {
+                    self.report_lines.push(format!("  ✅ Within budget ({} ≤ {})", total_combos, self.ctx.optimize_budget));
                     self.report_lines.push("  → Switch-dispatch enumeration enabled".to_string());
                 } else {
-                    self.report_lines.push(format!("  ❌ Exceeds budget ({} > {})", total_combos, self.optimize_budget));
+                    self.report_lines.push(format!("  ❌ Exceeds budget ({} > {})", total_combos, self.ctx.optimize_budget));
                     self.report_lines.push("  → Standard reactor path used".to_string());
                 }
 
                 // Size estimation when --optimize-size is set
-                if let Some(byte_limit) = self.optimize_size {
+                if let Some(byte_limit) = self.ctx.optimize_size {
                     self.report_lines.push("".to_string());
                     self.report_lines.push("Size estimation:".to_string());
                     let bytes_per_combo: u64 = 80; // approximate bytes per switch case + folded loop
@@ -2929,12 +2683,12 @@ self.emit_declares(&mut out);
         }
 
         // Append any compiled SPIR-V kernel blobs to the output for embedding.
-        if self.gpu_offload || !self.spirv_blobs.is_empty() {
+        if self.ctx.gpu_offload || !self.spirv_blobs.is_empty() {
             out.push_str(&self.emit_spirv_embeds());
         }
 
         // Phase 4: --layout diagnostic flag — print field layout after generation
-        if self.dump_layout {
+        if self.ctx.dump_layout {
             eprintln!("{}", self.dump_layout_str());
         }
 
@@ -3001,7 +2755,7 @@ self.emit_declares(&mut out);
     /// works on LLVM 15-17 and 22+; the global flag covers LLVM 18-21.
     pub fn llvm_extra_flags(&self) -> Vec<String> {
         let mut flags = Vec::new();
-        if !self.slp_hazard_fns.is_empty() {
+        if !self.ctx.slp_hazard_fns.is_empty() {
             flags.push("-slp-vectorize-hor=false".to_string());
         }
         flags
@@ -3018,7 +2772,7 @@ self.emit_declares(&mut out);
         match ty {
             Type::Custom(name) => {
                 // Check type universe for type definition (alias like `type UserId = Int`)
-                if let Some(tu) = &self.type_universe {
+                if let Some(tu) = &self.ctx.type_universe {
                     if let Some(resolved) = tu.types.get(name) {
                         if let Some(primitive) = primitive_from_name(&resolved.base) {
                             return primitive;
@@ -3045,12 +2799,12 @@ self.emit_declares(&mut out);
         match expr {
             Expr::Projection { target, .. } => matches!(target, ProjectionTarget::Ptr),
             Expr::Identifier(name) => {
-                self.let_binding_types.get(name)
+                self.fun.let_binding_types.get(name)
                     .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr"))
                     .unwrap_or(false)
             }
             Expr::OwnedRef(name) => {
-                self.let_binding_types.get(name)
+                self.fun.let_binding_types.get(name)
                     .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr"))
                     .unwrap_or(false)
             }
@@ -3059,10 +2813,10 @@ self.emit_declares(&mut out);
     }
 
     fn validate_schema_types(&mut self) {
-        if self.schema_aliases.is_empty() {
+        if self.ctx.schema_aliases.is_empty() {
             return;
         }
-        for (name, schema_type) in &self.schema_aliases.clone() {
+        for (name, schema_type) in &self.ctx.schema_aliases.clone() {
             let brief_type = match schema_type.to_brief_type_name() {
                 Ok(t) => t,
                 Err(e) => {
@@ -3074,7 +2828,7 @@ self.emit_declares(&mut out);
                 }
             };
             let name_clone = name.clone();
-            for item_name in self.field_index_map.keys().chain(self.mmio_initializers.keys()) {
+            for item_name in self.ctx.field_index_map.keys().chain(self.ctx.mmio_initializers.keys()) {
                 if item_name == &name_clone {
                     if brief_type == "Int" {
                         if brief_type == "Int" && schema_type.is_unsigned_int() {
@@ -3092,51 +2846,51 @@ self.emit_declares(&mut out);
 
     // ── Field index ───────────────────────────────────────────
     fn build_field_index(&mut self, program: &Program) {
-        self.field_index_map.clear();
-        self.field_types.clear();
-        self.field_initializers.clear();
-        if !self.mmio_prepopulated {
-            self.mmio_fields.clear();
-            self.mmio_initializers.clear();
+        self.ctx.field_index_map.clear();
+        self.ctx.field_types.clear();
+        self.ctx.field_initializers.clear();
+        if !self.ctx.mmio_prepopulated {
+            self.ctx.mmio_fields.clear();
+            self.ctx.mmio_initializers.clear();
         }
         for item in &program.items {
             if let TopLevel::StateDecl(s) = item {
                 if let Some(addr) = s.address {
-                    self.mmio_fields.insert(s.name.clone(), addr);
-                    self.mmio_initializers.insert(s.name.clone(), s.expr.clone());
-                } else if self.mmio_prepopulated && self.mmio_fields.contains_key(&s.name) {
-                    if self.schema_aliases.is_empty() || self.schema_aliases.contains_key(&s.name) {
-                        self.mmio_initializers.insert(s.name.clone(), s.expr.clone());
+                    self.ctx.mmio_fields.insert(s.name.clone(), addr);
+                    self.ctx.mmio_initializers.insert(s.name.clone(), s.expr.clone());
+                } else if self.ctx.mmio_prepopulated && self.ctx.mmio_fields.contains_key(&s.name) {
+                    if self.ctx.schema_aliases.is_empty() || self.ctx.schema_aliases.contains_key(&s.name) {
+                        self.ctx.mmio_initializers.insert(s.name.clone(), s.expr.clone());
                     } else {
                         // Not in any imported schema — remove from mmio_fields to prevent
                         // accidental MMIO routing in reads/writes.
-                        self.mmio_fields.remove(&s.name);
-                        self.field_index_map
-                            .insert(s.name.clone(), self.field_types.len());
+                        self.ctx.mmio_fields.remove(&s.name);
+                        self.ctx.field_index_map
+                            .insert(s.name.clone(), self.ctx.field_types.len());
                         self.push_field_type(&s.ty);
-                        self.field_initializers.insert(s.name.clone(), s.expr.clone());
+                        self.ctx.field_initializers.insert(s.name.clone(), s.expr.clone());
                     }
                 } else {
-                    self.field_index_map
-                        .insert(s.name.clone(), self.field_types.len());
+                    self.ctx.field_index_map
+                        .insert(s.name.clone(), self.ctx.field_types.len());
                     self.push_field_type(&s.ty);
-                    self.field_initializers.insert(s.name.clone(), s.expr.clone());
+                    self.ctx.field_initializers.insert(s.name.clone(), s.expr.clone());
                 }
             } else if let TopLevel::Trigger(t) = item {
                 // Triggers get a slot in the state struct so the event loop
                 // can store their values and emit_expr can load them.
-                self.field_index_map
-                    .insert(t.name.clone(), self.field_types.len());
+                self.ctx.field_index_map
+                    .insert(t.name.clone(), self.ctx.field_types.len());
                 self.push_field_type(&t.ty);
-                self.field_initializers.insert(t.name.clone(), None);
+                self.ctx.field_initializers.insert(t.name.clone(), None);
             } else if let TopLevel::TriggerBinding { name, ty, .. } = item {
                 // Trigger bindings (trg name: Type @ Console!) get a state slot
                 // like regular triggers, so emit_expr can load their value.
                 let trig_ty = ty.clone().unwrap_or(crate::ast::Type::String);
-                self.field_index_map
-                    .insert(name.clone(), self.field_types.len());
+                self.ctx.field_index_map
+                    .insert(name.clone(), self.ctx.field_types.len());
                 self.push_field_type(&trig_ty);
-                self.field_initializers.insert(name.clone(), None);
+                self.ctx.field_initializers.insert(name.clone(), None);
             } else if let TopLevel::Cell(c) = item {
                 // Cell fields are handled differently depending on whether the
                 // cell is persistent (threaded) or sync (non-threaded).
@@ -3161,29 +2915,29 @@ self.emit_declares(&mut out);
                         cs_imap.insert(prefixed.clone(), cs_tys.len());
                         cs_tys.push(self.llvm_type(&field.ty).to_string());
                         // Also register in %State for cell_persistent_ticks access
-                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
                         self.push_field_type(&field.ty);
-                        self.field_initializers.insert(prefixed, field.default.clone());
+                        self.ctx.field_initializers.insert(prefixed, field.default.clone());
                     }
                     for (param_name, param_ty) in &c.parameters {
                         let prefixed = format!("cell${}${}", c.name, param_name);
                         cs_imap.insert(prefixed.clone(), cs_tys.len());
                         cs_tys.push(self.llvm_type(param_ty).to_string());
                         // Also register in %State
-                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
                         self.push_field_type(param_ty);
-                        self.field_initializers.insert(prefixed, None);
+                        self.ctx.field_initializers.insert(prefixed, None);
                     }
                     // Register internal trigger fields in %State and %CellState.*
                     for trg in &c.internal_triggers {
                         let prefixed = format!("cell${}${}", c.name, trg.name);
                         cs_imap.insert(prefixed.clone(), cs_tys.len());
                         cs_tys.push(self.llvm_type(&trg.ty).to_string());
-                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
                         self.push_field_type(&trg.ty);
-                        self.field_initializers.insert(prefixed, None);
+                        self.ctx.field_initializers.insert(prefixed, None);
                     }
-                    self.cell_state_types.insert(c.name.clone(), (cs_imap, cs_tys));
+                    self.ctx.cell_state_types.insert(c.name.clone(), (cs_imap, cs_tys));
                     // Only add to cell_thread_names if any transaction has @Hz
                     let has_thread_speed = c.transactions.iter().any(|t| t.reactor_speed.is_some());
                     if has_thread_speed {
@@ -3193,15 +2947,15 @@ self.emit_declares(&mut out);
                     // Non-persistent (sync) cell: add to %State as prefixed slots
                     for field in &c.fields {
                         let prefixed = format!("cell${}${}", c.name, field.name);
-                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
                         self.push_field_type(&field.ty);
-                        self.field_initializers.insert(prefixed, field.default.clone());
+                        self.ctx.field_initializers.insert(prefixed, field.default.clone());
                     }
                     for (param_name, param_ty) in &c.parameters {
                         let prefixed = format!("cell${}${}", c.name, param_name);
-                        self.field_index_map.insert(prefixed.clone(), self.field_types.len());
+                        self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
                         self.push_field_type(param_ty);
-                        self.field_initializers.insert(prefixed, None);
+                        self.ctx.field_initializers.insert(prefixed, None);
                     }
                 }
             }
@@ -3211,30 +2965,30 @@ self.emit_declares(&mut out);
     // ── Chimera tracking (Phase 3) ──────────────────────────
     /// Check if a register holds a chimera value.
     pub(crate) fn is_chimera(&self, reg_name: &str) -> bool {
-        self.chimera_map.get(reg_name).map_or(false, |c| c.is_chimera)
+        self.fun.chimera_map.get(reg_name).map_or(false, |c| c.is_chimera)
     }
 
     /// Get the backing type of a chimera value, if any.
     pub(crate) fn chimera_backing(&self, reg_name: &str) -> Option<&str> {
-        self.chimera_map.get(reg_name)
+        self.fun.chimera_map.get(reg_name)
             .filter(|c| c.is_chimera)
             .map(|c| c.backing_type.as_str())
     }
 
     /// Mark a register as a chimera value with the given backing type.
     pub(crate) fn mark_chimera(&mut self, reg_name: &str, backing_type: &str) {
-        if let Some(c) = self.chimera_map.get_mut(reg_name) {
+        if let Some(c) = self.fun.chimera_map.get_mut(reg_name) {
             c.is_chimera = true;
             c.backing_type = backing_type.to_string();
         } else {
-            self.chimera_map.insert(reg_name.to_string(), ChimeraInfo { is_chimera: true, backing_type: backing_type.to_string() });
+            self.fun.chimera_map.insert(reg_name.to_string(), ChimeraInfo { is_chimera: true, backing_type: backing_type.to_string() });
         }
     }
 
     /// Compute the total size of the %State struct in bytes from field_types.
     /// Used by the memcpy round-trip SROA optimization in emit_main.
     pub(crate) fn compute_state_size_bytes(&self) -> i64 {
-        self.field_types.iter().map(|t| llvm_type_byte_size(t)).sum()
+        self.ctx.field_types.iter().map(|t| llvm_type_byte_size(t)).sum()
     }
 
     // ── Adaptive Layout — apply field modes ──────────────────
@@ -3250,60 +3004,60 @@ self.emit_declares(&mut out);
         live_fields: &std::collections::HashSet<String>,
         projection_usage: &std::collections::HashMap<String, std::collections::HashSet<String>>)
     {
-        let all_state_fields: std::collections::HashSet<String> = self.field_index_map.keys().cloned().collect();
+        let all_state_fields: std::collections::HashSet<String> = self.ctx.field_index_map.keys().cloned().collect();
         let referenced_fields = crate::analysis::transition_graph::compute_referenced_fields(program);
         // Union with live_fields to prevent elimination of precondition-only,
         // postcondition-only, or exit-condition-only fields. live_fields includes
         // fields referenced in contracts and #!exit expressions.
         let referenced_fields: std::collections::HashSet<String> = referenced_fields.union(live_fields).cloned().collect();
-        self.field_modes = crate::analysis::transition_graph::assign_field_modes(
+        self.ctx.field_modes = crate::analysis::transition_graph::assign_field_modes(
             &all_state_fields, &referenced_fields, projection_usage);
         // Triggers must never be eliminated — they're accessed by the event loop,
         // not by txn body identifiers.
-        for name in &self.trigger_names {
-            self.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
+        for name in &self.ctx.trigger_names {
+            self.ctx.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
         }
         // Cell fields and parameters must never be eliminated — they're accessed
         // by Expr::CellCall codegen with cellular$name prefixed names.
-        for name in self.field_index_map.keys() {
+        for name in self.ctx.field_index_map.keys() {
             if name.starts_with("cell$") {
-                self.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
+                self.ctx.field_modes.insert(name.clone(), crate::analysis::FieldMode::Always);
             }
         }
         // Synthetic cycle_count field must never be eliminated — it's maintained
         // by the tick loop, not by txn body code.
-        if let Some(idx) = self.field_index_map.get("cycle_count") {
-            self.field_modes.insert("cycle_count".to_string(), crate::analysis::FieldMode::Always);
+        if let Some(idx) = self.ctx.field_index_map.get("cycle_count") {
+            self.ctx.field_modes.insert("cycle_count".to_string(), crate::analysis::FieldMode::Always);
         }
-        self.cache_slots.clear();
+        self.ctx.cache_slots.clear();
 
         // Phase 1: Remove Never fields from field_index_map and field_types.
         // Rebuild both from scratch to handle index shifting correctly.
         // IMPORTANT: sort by original index to preserve deterministic field ordering.
-        let mut old_pairs: Vec<(String, usize)> = self.field_index_map.drain().collect();
-        let old_types = std::mem::take(&mut self.field_types);
-        let old_brief_types = std::mem::take(&mut self.field_brief_types);
-        self.field_index_map.reserve(old_pairs.len());
-        self.field_types.reserve(old_types.len());
-        self.field_brief_types.reserve(old_brief_types.len());
+        let mut old_pairs: Vec<(String, usize)> = self.ctx.field_index_map.drain().collect();
+        let old_types = std::mem::take(&mut self.ctx.field_types);
+        let old_brief_types = std::mem::take(&mut self.ctx.field_brief_types);
+        self.ctx.field_index_map.reserve(old_pairs.len());
+        self.ctx.field_types.reserve(old_types.len());
+        self.ctx.field_brief_types.reserve(old_brief_types.len());
         old_pairs.sort_by_key(|(_, idx)| *idx);
 
         for (name, _old_idx) in &old_pairs {
-            let mode = self.field_modes.get(name).copied().unwrap_or(crate::analysis::FieldMode::Never);
+            let mode = self.ctx.field_modes.get(name).copied().unwrap_or(crate::analysis::FieldMode::Never);
             match mode {
                 crate::analysis::FieldMode::Never => {
                     // Eliminate this field from %State entirely
                 }
                 crate::analysis::FieldMode::Always | crate::analysis::FieldMode::LazyCached { .. } => {
-                    let new_idx = self.field_types.len();
+                    let new_idx = self.ctx.field_types.len();
                     let orig_type_idx = old_pairs.iter()
                         .find(|(n, _)| n == name)
                         .map(|(_, i)| *i)
                         .unwrap_or(0);
-                    self.field_index_map.insert(name.clone(), new_idx);
-                    self.field_types.push(old_types[orig_type_idx].clone());
+                    self.ctx.field_index_map.insert(name.clone(), new_idx);
+                    self.ctx.field_types.push(old_types[orig_type_idx].clone());
                     // 2026-06-29: Preserve the original Brief type alongside LLVM type
-                    self.field_brief_types.push(
+                    self.ctx.field_brief_types.push(
                         old_brief_types.get(orig_type_idx).cloned().unwrap_or(Type::Int)
                     );
                 }
@@ -3311,32 +3065,32 @@ self.emit_declares(&mut out);
         }
 
         // Phase 2: Append cache slots — one per (field, projection_target) pair.
-        for (name, mode) in &self.field_modes {
+        for (name, mode) in &self.ctx.field_modes {
             if let crate::analysis::FieldMode::LazyCached { cache_index: _ } = mode {
                 let targets = projection_usage.get(name);
                 let mut target_map: HashMap<String, (usize, usize)> = HashMap::new();
                 if let Some(targets) = targets {
                     for target_name in targets {
-                        let cache_idx = self.field_types.len();
-                        self.field_types.push("i64".to_string());
-            self.field_brief_types.push(Type::Int);
-                        let valid_idx = self.field_types.len();
-                        self.field_types.push("i8".to_string());
-                        self.field_brief_types.push(Type::Bool);
+                        let cache_idx = self.ctx.field_types.len();
+                        self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(Type::Int);
+                        let valid_idx = self.ctx.field_types.len();
+                        self.ctx.field_types.push("i8".to_string());
+                        self.ctx.field_brief_types.push(Type::Bool);
                         target_map.insert(target_name.clone(), (cache_idx, valid_idx));
                     }
                 }
                 // Fallback: at least one cache slot even if projection_usage is empty
                 if target_map.is_empty() {
-                    let cache_idx = self.field_types.len();
-                    self.field_types.push("i64".to_string());
-            self.field_brief_types.push(Type::Int);
-                    let valid_idx = self.field_types.len();
-                    self.field_types.push("i8".to_string());
-                        self.field_brief_types.push(Type::Bool);
+                    let cache_idx = self.ctx.field_types.len();
+                    self.ctx.field_types.push("i64".to_string());
+            self.ctx.field_brief_types.push(Type::Int);
+                    let valid_idx = self.ctx.field_types.len();
+                    self.ctx.field_types.push("i8".to_string());
+                        self.ctx.field_brief_types.push(Type::Bool);
                     target_map.insert("_".to_string(), (cache_idx, valid_idx));
                 }
-                self.cache_slots.insert(name.clone(), target_map);
+                self.ctx.cache_slots.insert(name.clone(), target_map);
             }
         }
     }
@@ -3357,14 +3111,14 @@ self.emit_declares(&mut out);
     fn scan_trg_stmt(&mut self, stmt: &Statement) {
         if let Statement::TrgBinding { instance, .. } = stmt {
             if let Expr::Call(callee, args) = instance {
-                if !self.cell_defs.contains_key(callee) { return; }
-                let cell = &self.cell_defs[callee];
+                if !self.ctx.cell_defs.contains_key(callee) { return; }
+                let cell = &self.ctx.cell_defs[callee];
                 for (i, arg) in args.iter().enumerate() {
                     if let Expr::FieldAccess(inner, port_name) = arg {
                         if let Expr::Identifier(src_cell) = inner.as_ref() {
-                            if self.cell_defs.contains_key(src_cell) {
+                            if self.ctx.cell_defs.contains_key(src_cell) {
                                 if let Some(param_name) = cell.parameters.get(i) {
-                                    self.cell_wires.push((
+                                    self.ctx.cell_wires.push((
                                         src_cell.clone(),
                                         port_name.clone(),
                                         callee.clone(),
