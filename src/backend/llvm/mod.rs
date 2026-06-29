@@ -513,18 +513,34 @@ pub(super) fn tbaa_node(ty_str: &str) -> i32 {
 
     /// Why a 6-node TBAA tree: Brief has exactly 5 scalar types that map to
 
-/// Map a Brief type to its TBAA metadata node index via universe lookup.
-/// 2026-06-29: Phase 7A replacement for string-based tbaa_node().
-/// Falls back to 1 (Int) for types without a universe entry.
-pub(super) fn tbaa_node_for_type(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> i32 {
-    match universe.get_by_type(ty).map(|r| r.tbaa_node.as_str()) {
-        Some("Int") | None => 1,
-        Some("Bool") => 2,
-        Some("Char") => 3,
-        Some("String") => 4,
-        Some("Float") => 5,
-        _ => 1, // fallback: Int
+/// Collect unique tbaa_node groups from the universe, sorted alphabetically
+/// with "Int" guaranteed to be first (index 1) since it's the fallback.
+/// 2026-06-29: Phase 7A — shared between TBAA tree builder and lookup function.
+fn sorted_tbaa_groups(universe: &crate::type_universe::TypeUniverse) -> Vec<&str> {
+    let mut groups: Vec<&str> = universe.types.values()
+        .map(|rt| rt.tbaa_node.as_str())
+        .collect();
+    groups.sort();
+    groups.dedup();
+    if let Some(pos) = groups.iter().position(|g| *g == "Int") {
+        groups.swap(0, pos);
     }
+    groups
+}
+
+/// Map a Brief type to its TBAA metadata node index via universe lookup.
+/// 2026-06-29: Phase 7A — dynamic TBAA tree generation. Uses the same
+/// sorted-group algorithm as the TBAA tree builder in generate().
+/// Falls back to 1 (Int) when the type is not in the universe.
+pub(super) fn tbaa_node_for_type(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> i32 {
+    let group = match universe.get_by_type(ty).map(|rt| rt.tbaa_node.as_str()) {
+        Some(g) => g,
+        None => return 1,
+    };
+    sorted_tbaa_groups(universe)
+        .iter().position(|g| *g == group)
+        .map(|i| i as i32 + 1)
+        .unwrap_or(1)
 }
     /// distinct LLVM storage types (i64, i8, i32, i8*, float). The root "Brief"
     /// node groups them under a single type tree so that LLVM's TBAA can
@@ -2538,16 +2554,23 @@ self.emit_declares(&mut out);
         }
 
         // TBAA metadata tree for type-based alias analysis
-        // Each TBAA node defines a type in the Brief type hierarchy.
-        // LLVM uses this to disambiguate loads/stores: accesses tagged
-        // with different type trees are assumed to never alias.
+        // 2026-06-29: Dynamic generation from TypeUniverse. Each unique
+        // tbaa_node group name gets its own TBAA node. "Int" is always
+        // first (index 1) since it's the fallback for unmatched types.
         writeln!(out).ok();
         writeln!(out, "!0 = !{{!\"Brief\"}}").ok();
-        writeln!(out, "!1 = !{{!\"Int\", !0}}").ok();
-        writeln!(out, "!2 = !{{!\"Bool\", !0}}").ok();
-        writeln!(out, "!3 = !{{!\"Char\", !0}}").ok();
-        writeln!(out, "!4 = !{{!\"String\", !0}}").ok();
-        writeln!(out, "!5 = !{{!\"Float\", !0}}").ok();
+        if let Some(ref universe) = self.ctx.type_universe {
+            for (i, group) in sorted_tbaa_groups(universe).iter().enumerate() {
+                writeln!(out, "!{} = !{{!\"{}\", !0}}", i + 1, group).ok();
+            }
+        } else {
+            // Fallback: hardcoded nodes for built-in types
+            writeln!(out, "!1 = !{{!\"Int\", !0}}").ok();
+            writeln!(out, "!2 = !{{!\"Bool\", !0}}").ok();
+            writeln!(out, "!3 = !{{!\"Char\", !0}}").ok();
+            writeln!(out, "!4 = !{{!\"String\", !0}}").ok();
+            writeln!(out, "!5 = !{{!\"Float\", !0}}").ok();
+        }
 
         // Build optimization report if requested
         if self.ctx.optimize_report {
