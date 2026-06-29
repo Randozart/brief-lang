@@ -2695,49 +2695,12 @@ self.emit_declares(&mut out);
             eprintln!("{}", self.dump_layout_str());
         }
 
-        // 2026-06-28: post-process IR to fix duplicate %t{N} registers and
-        // type mismatches. LLVM/llc rejects IR where %t{N} is defined more
-        // than once in a function, or defined with one type but used as another.
-        {
-            use std::collections::HashMap;
-            let mut deduped = String::with_capacity(out.len());
-            // Map from %t{N} name to its LLVM type string (e.g., "i64", "i1")
-            let mut defs: HashMap<String, String> = HashMap::new();
-            let mut dedup_counter = 0u64;
-            for line in out.lines() {
-                if line.starts_with("define ") || line.starts_with("}") {
-                    defs.clear(); // reset per function
-                }
-                // Track definitions: lines like "  %t{N} = <type> ..."
-                if let Some(eq_pos) = line.find(" =") {
-                    let lhs = line[..eq_pos].trim().to_string();
-                    if lhs.starts_with("%t") && lhs[2..].chars().all(|c| c.is_ascii_digit()) {
-                        // Extract the LLVM type from the RHS
-                        let rhs = line[eq_pos + 3..].trim();
-                        let rhs_type = rhs.split_whitespace().next().unwrap_or("i32").to_string();
-                        if let Some(_prev_type) = defs.get(&lhs) {
-                            // Duplicate definition — rename with unique suffix
-                            let new_lhs = format!("%tddup{}", dedup_counter);
-                            dedup_counter += 1;
-                            let deduped_line = line.replacen(&lhs, &new_lhs, 1);
-                            deduped.push_str(&deduped_line);
-                            deduped.push('\n');
-                        } else {
-                            defs.insert(lhs, rhs_type);
-                            deduped.push_str(line);
-                            deduped.push('\n');
-                        }
-                    } else {
-                        deduped.push_str(line);
-                        deduped.push('\n');
-                    }
-                } else {
-                    deduped.push_str(line);
-                    deduped.push('\n');
-                }
-            }
-            out = deduped;
-        }
+        // 2026-06-29: %tddup post-processing pass removed — all register
+        // allocation now goes through FunctionContext::next_reg() which
+        // guarantees unique %t{N} names by construction. The old pass
+        // redefined duplicate %t{N} registers as %tddup{N} but did NOT
+        // rename subsequent uses, creating SSA violations.
+        // See docs/plans/2026-06-29-llvm-backend-refactoring.md#p2.
 
         out
     }
