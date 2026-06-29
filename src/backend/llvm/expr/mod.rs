@@ -15,5 +15,7 @@
 //   intrinsics/  — TODO
 //   misc.rs      — TODO
 
+pub mod collections;
+pub mod compare;
 pub mod literal;
 pub mod math;
