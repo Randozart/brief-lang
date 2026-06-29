@@ -60,7 +60,15 @@ impl ExprCodegenLLVM for TypeDef {
         &self,
         ctx: &mut crate::backend::llvm::LlvmBackend,
         out: &mut String,
-        dispatch: &ExprDispatch,
+        builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
     ) -> crate::backend::llvm::TypedRegister {
         // DEFERRED: Emit layout/alloca from Bytes, Alignment, Endian
         crate::backend::llvm::TypedRegister {

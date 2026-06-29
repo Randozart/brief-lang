@@ -47,7 +47,19 @@ impl ExprEval for UnaryOpExpr {
 }
 
 impl ExprCodegenLLVM for UnaryOpExpr {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+    fn emit_llvm(&self, 
+        ctx: &mut crate::backend::llvm::LlvmBackend,
+        out: &mut String,
+        builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
         let old_expr = match self.kind {
             UnaryOpKind::Neg => Expr::Neg(self.operand.clone()),
             UnaryOpKind::Not => Expr::Not(self.operand.clone()),

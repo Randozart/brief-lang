@@ -49,12 +49,36 @@ impl ExprEval for TupleDestructureExpr {
 }
 
 impl ExprCodegenLLVM for TupleExpr {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+    fn emit_llvm(&self, 
+        ctx: &mut crate::backend::llvm::LlvmBackend,
+        out: &mut String,
+        builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
         ctx.emit_expr(out, &Expr::Tuple(self.exprs.clone()), "")
     }
 }
 impl ExprCodegenLLVM for TupleDestructureExpr {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+    fn emit_llvm(&self, 
+        ctx: &mut crate::backend::llvm::LlvmBackend,
+        out: &mut String,
+        builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
         ctx.emit_expr(out, &Expr::TupleDestructure(self.names.clone(), self.expr.clone()), "")
     }
 }

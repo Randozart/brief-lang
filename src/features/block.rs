@@ -28,7 +28,19 @@ impl ExprEval for BlockExpr {
 }
 
 impl ExprCodegenLLVM for BlockExpr {
-    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
+    fn emit_llvm(&self, 
+        ctx: &mut crate::backend::llvm::LlvmBackend,
+        out: &mut String,
+        builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
         crate::backend::llvm::TypedRegister { name: "%blk".into(), ty: Type::Void }
     }
 }

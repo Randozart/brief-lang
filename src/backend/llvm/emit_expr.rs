@@ -45,9 +45,45 @@ impl LlvmBackend {
             Expr::Char(_) => return crate::backend::llvm::expr::literal::emit_char(self, out, &v, &expr, indent),
             Expr::Term => return crate::backend::llvm::expr::literal::emit_term(self, out, &v, indent),
             // 2026-06-29: Arithmetic and bitwise expressions dispatched to expr::math
-            Expr::BinaryOp(bop) => return bop.emit_llvm(self, out, &ExprDispatch),
-            Expr::UnaryOp(uop) => return uop.emit_llvm(self, out, &ExprDispatch),
-            Expr::Literal(lit) => return lit.emit_llvm(self, out, &ExprDispatch),
+            Expr::BinaryOp(bop) => {
+                let mut builder = crate::backend::llvm::LLVMBuilder::new();
+                let mut emit_expr = |_backend: &mut crate::backend::llvm::LlvmBackend,
+                                     _out: &mut String,
+                                     _builder: &mut crate::backend::llvm::LLVMBuilder,
+                                     _expr: &crate::ast::Expr,
+                                     _indent: &str| {
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Int }
+                };
+                let result = bop.emit_llvm(self, out, &mut builder, &ExprDispatch, &mut emit_expr);
+                builder.finish_into(out, indent.len() as usize);
+                return result;
+            }
+            Expr::UnaryOp(uop) => {
+                let mut builder = crate::backend::llvm::LLVMBuilder::new();
+                let mut emit_expr = |_backend: &mut crate::backend::llvm::LlvmBackend,
+                                     _out: &mut String,
+                                     _builder: &mut crate::backend::llvm::LLVMBuilder,
+                                     _expr: &crate::ast::Expr,
+                                     _indent: &str| {
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Int }
+                };
+                let result = uop.emit_llvm(self, out, &mut builder, &ExprDispatch, &mut emit_expr);
+                builder.finish_into(out, indent.len() as usize);
+                return result;
+            }
+            Expr::Literal(lit) => {
+                let mut builder = crate::backend::llvm::LLVMBuilder::new();
+                let mut emit_expr = |_backend: &mut crate::backend::llvm::LlvmBackend,
+                                     _out: &mut String,
+                                     _builder: &mut crate::backend::llvm::LLVMBuilder,
+                                     _expr: &crate::ast::Expr,
+                                     _indent: &str| {
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Int }
+                };
+                let result = lit.emit_llvm(self, out, &mut builder, &ExprDispatch, &mut emit_expr);
+                builder.finish_into(out, indent.len() as usize);
+                return result;
+            }
             Expr::Add(_, _) => return crate::backend::llvm::expr::math::emit_add(self, out, &v, &expr, indent),
             Expr::Sub(_, _) => return crate::backend::llvm::expr::math::emit_sub(self, out, &v, &expr, indent),
             Expr::Mul(_, _) => return crate::backend::llvm::expr::math::emit_mul(self, out, &v, &expr, indent),

@@ -257,8 +257,38 @@ impl ExprEval for ArrowTransferExpr {
     }
 }
 
-impl ExprCodegenLLVM for ArrowMutExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%arr".into(), ty: Type::Void } } }
-impl ExprCodegenLLVM for ArrowDiscardExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%arr".into(), ty: Type::Void } } }
-impl ExprCodegenLLVM for ArrowTransferExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%arr".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for ArrowMutExpr { fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%arr".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for ArrowDiscardExpr { fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%arr".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for ArrowTransferExpr { fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%arr".into(), ty: Type::Void } } }
 impl ExprCodegenWebstack for ArrowDiscardExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }
 impl ExprCodegenWebstack for ArrowTransferExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

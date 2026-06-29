@@ -76,7 +76,15 @@ impl ExprCodegenLLVM for LiteralExpr {
         &self,
         ctx: &mut crate::backend::llvm::LlvmBackend,
         out: &mut String,
+        builder: &mut crate::backend::llvm::LLVMBuilder,
         _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
     ) -> crate::backend::llvm::TypedRegister {
         let v = format!("%t{}", ctx.fun.txn_counter);
         ctx.fun.txn_counter += 1;

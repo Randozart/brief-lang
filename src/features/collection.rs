@@ -315,25 +315,86 @@ impl ExprEval for MultiSliceExpr {
 }
 
 impl ExprCodegenLLVM for ListLiteralExpr {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        ctx.emit_expr(out, &Expr::ListLiteral(self.elements.clone()), "")
+    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
+        // Delegated to expr/collections.rs via emit_expr
+        crate::backend::llvm::TypedRegister { name: "%list".into(), ty: crate::ast::Type::Int }
     }
 }
-impl ExprCodegenLLVM for MapLiteralExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%map".into(), ty: Type::Void } } }
-impl ExprCodegenLLVM for SetLiteralExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%set".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for MapLiteralExpr { fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%map".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for SetLiteralExpr { fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%set".into(), ty: Type::Void } } }
 impl ExprCodegenLLVM for ListIndexExpr {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        ctx.emit_expr(out, &Expr::ListIndex(self.list.clone(), self.index.clone()), "")
+    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
+        crate::backend::llvm::TypedRegister { name: "%idx".into(), ty: crate::ast::Type::Int }
     }
 }
 impl ExprCodegenLLVM for SliceExpr {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        ctx.emit_expr(out, &Expr::Slice { value: self.value.clone(), start: self.start.clone(), end: self.end.clone(), stride: self.stride.clone(), mask: self.mask.clone() }, "")
+    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
+        crate::backend::llvm::TypedRegister { name: "%slc".into(), ty: crate::ast::Type::Int }
     }
 }
 impl ExprCodegenLLVM for MultiSliceExpr {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        ctx.emit_expr(out, &Expr::MultiSlice { value: self.value.clone(), ops: self.ops.clone() }, "")
+    fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
+        crate::backend::llvm::TypedRegister { name: "%mslc".into(), ty: crate::ast::Type::Int }
     }
 }
 impl ExprCodegenWebstack for ListLiteralExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

@@ -20,4 +20,14 @@ impl ExprEval for SubtypeProjectionExpr {
     }
 }
 
-impl ExprCodegenLLVM for SubtypeProjectionExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%sub".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for SubtypeProjectionExpr { fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%sub".into(), ty: Type::Void } } }

@@ -80,10 +80,33 @@ impl ExprEval for MatchExpr {
 }
 
 impl ExprCodegenLLVM for PatternMatchExpr {
-    fn emit_llvm(&self, ctx: &mut crate::backend::llvm::LlvmBackend, out: &mut String, _dispatch: &ExprDispatch) -> crate::backend::llvm::TypedRegister {
-        ctx.emit_expr(out, &Expr::PatternMatch { value: self.value.clone(), variant: self.variant.clone(), fields: self.fields.clone() }, "")
+    fn emit_llvm(
+        &self,
+        _ctx: &mut crate::backend::llvm::LlvmBackend,
+        _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister {
+        _ctx.emit_expr(_out, &Expr::PatternMatch { value: self.value.clone(), variant: self.variant.clone(), fields: self.fields.clone() }, "")
     }
 }
-impl ExprCodegenLLVM for MatchExpr { fn emit_llvm(&self, _: &mut crate::backend::llvm::LlvmBackend, _: &mut String, _: &ExprDispatch) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%mtc".into(), ty: Type::Void } } }
+impl ExprCodegenLLVM for MatchExpr { fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
+        _builder: &mut crate::backend::llvm::LLVMBuilder,
+        _dispatch: &ExprDispatch,
+        _emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
+    ) -> crate::backend::llvm::TypedRegister { crate::backend::llvm::TypedRegister { name: "%mtc".into(), ty: Type::Void } } }
 impl ExprCodegenWebstack for PatternMatchExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }
 impl ExprCodegenWebstack for MatchExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

@@ -65,14 +65,40 @@ pub trait ExprEval {
     ) -> Result<Value, RuntimeError>;
 }
 
-/// LLVM Codegen — feature structs reference &mut LlvmBackend directly.
+/// LLVM Codegen — feature structs receive the backend + builder.
+///
+/// 2026-06-29: Phase 4 — added `builder` and `emit_expr` parameters.
+/// Features should gradually migrate from `out` to `builder` for IR
+/// emission, and from direct `ctx.emit_expr(...)` calls to the
+/// `emit_expr` closure.
+///
+/// TODO Phase 5: Split `ctx` into CompilerContext + FunctionContext.
 pub trait ExprCodegenLLVM {
     fn emit_llvm(
         &self,
         ctx: &mut crate::backend::llvm::LlvmBackend,
         out: &mut String,
+        builder: &mut crate::backend::llvm::LLVMBuilder,
         dispatch: &ExprDispatch,
+        emit_expr: &mut dyn FnMut(
+            &mut crate::backend::llvm::LlvmBackend,
+            &mut String,
+            &mut crate::backend::llvm::LLVMBuilder,
+            &crate::ast::Expr,
+            &str,
+        ) -> crate::backend::llvm::TypedRegister,
     ) -> crate::backend::llvm::TypedRegister;
+}
+
+/// LLVM Codegen — statement features.
+pub trait StmtCodegenLLVM {
+    fn emit_llvm(
+        &self,
+        ctx: &mut crate::backend::llvm::LlvmBackend,
+        out: &mut String,
+        dispatch: &StmtDispatch,
+        indent: &str,
+    );
 }
 
 /// Webstack Codegen. Stateless string builder — takes `&WebstackGenerator`.
@@ -108,16 +134,6 @@ pub trait StmtEval {
 }
 
 /// LLVM Codegen — feature structs reference &mut LlvmBackend directly.
-pub trait StmtCodegenLLVM {
-    fn emit_llvm(
-        &self,
-        ctx: &mut crate::backend::llvm::LlvmBackend,
-        out: &mut String,
-        dispatch: &StmtDispatch,
-        indent: &str,
-    );
-}
-
 /// Webstack Codegen.
 pub trait StmtCodegenWebstack {
     fn emit_js(
