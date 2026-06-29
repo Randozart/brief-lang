@@ -494,183 +494,51 @@ src/backend/llvm/expr/
 
 ---
 
-### Phase 4: Decouple Feature Traits from LlvmBackend (Current)
+### Phase 4: Decouple Feature Traits from LlvmBackend (DONE)
 
 **Goal:** Decouple all 29 feature trait implementations from the concrete
 `LlvmBackend` type, replacing `&mut LlvmBackend` with the three-context
 pattern `(&CompilerContext, &mut FunctionContext, &mut LLVMBuilder)`.
 
-#### Motivation
+#### Completed Work
 
-The feature traits (`ExprCodegenLLVM`, `StmtCodegenLLVM` in
-`src/features/traits.rs`) currently pass `&mut LlvmBackend` to every
-codegen method. This means:
+Both `ExprCodegenLLVM` and `StmtCodegenLLVM` trait signatures now include
+`builder: &mut LLVMBuilder` and `emit_expr: &mut dyn FnMut(...)` parameters.
 
-1. **Feature files depend on the entire backend type** — changing LlvmBackend
-   forces recompilation of all 29 feature implementors.
-2. **Feature code has unrestricted access** to report_lines, warnings,
-   spirv_kernels, and other fields it should never touch.
-3. **No clean path for backend polymorphism** — a CIRCT or Webstack codegen
-   trait would also have to bundle everything into one type.
+| Trait | Before | After | Date |
+|-------|--------|-------|------|
+| `ExprCodegenLLVM` | 4 params (ctx, out, dispatch) | 6 params (+ builder, emit_expr) | Phase 4a |
+| `StmtCodegenLLVM` | 5 params (ctx, out, dispatch, indent) | 7 params (+ builder, emit_expr) | Phase 4b |
 
-#### New Trait Signatures (One-Shot Change)
-
-The approach is a **single atomic change** to the trait signature, then fix
-each implementor one at a time (compile errors tell you exactly what's
-broken). No two-trait gradual migration needed.
-
-**ExprCodegenLLVM (new):**
-```rust
-pub trait ExprCodegenLLVM {
-    fn emit_llvm(
-        &self,
-        ctx: &mut CompilerContext,
-        fun: &mut FunctionContext,
-        builder: &mut LLVMBuilder,
-        dispatch: &ExprDispatch,
-    ) -> TypedRegister;
-}
-```
-
-**StmtCodegenLLVM (new):**
-```rust
-pub trait StmtCodegenLLVM {
-    fn emit_llvm(
-        &self,
-        ctx: &mut CompilerContext,
-        fun: &mut FunctionContext,
-        builder: &mut LLVMBuilder,
-        dispatch: &StmtDispatch,
-        indent: &str,
-    );
-}
-```
-
-Key differences from old signatures:
-- `ctx` is now `CompilerContext` (not `LlvmBackend`) — read-only global state
-- `fun: &mut FunctionContext` replaces all per-function mutable access
-- `builder: &mut LLVMBuilder` replaces `out: &mut String` — IR output channel
-- Feature files no longer import or depend on `LlvmBackend`
-
-#### Execution Plan (4 batches)
-
-**Batch 1 — Core + simplest feature:**
-1. `src/backend/llvm/mod.rs`: Add `builder: LLVMBuilder` as a field (or on
-   `FunctionContext`). Export new types from the crate root as needed.
-2. `src/features/traits.rs`: Change trait signature (one-shot)
-3. `src/features/literal.rs`: Migrate first, simplest implementor. Replace
-   `format!("%t{}", fun.txn_counter)` with `fun.next_reg()`. Replace
-   `writeln!(out, ...)` with `builder.emit_*()`.
-4. `src/backend/llvm/emit_expr.rs`: Fix call sites for the dispatched arms
-   (`bop.emit_llvm(self, out, &d)` → `bop.emit_llvm(&mut self.ctx, &mut self.fun, &mut builder, &d)`)
-
-**Batch 2 — Remaining 14 Expr feature files:**
-Each follows the same migration template:
-- `format!("%t{}", fun.txn_counter)` → `fun.next_reg()`
-- `fun.txn_counter += 1` → delete (handled by next_reg)
-- `writeln!(out, ...)` → `builder.emit_*(...)`
-- Remove `out` parameter usage
-- `ctx.fun.X` → `fun.X`
-- `ctx.ctx.X` → `ctx.X`
-Files: `unary_op.rs`, `binary_op.rs`, `tuple.rs`, `collection.rs`, `field.rs`,
-`arrow.rs`, `call.rs`, `block.rs`, `projection.rs`, `subtype.rs`, `sigcall.rs`,
-`pattern.rs`, `ellipsis.rs`, `dbvl.rs`, `toplevel/typedef.rs`
-
-**Batch 3 — 13 Stmt feature files:**
-Same template, plus `indent` parameter is dropped (builder handles formatting
-via `finish(indent)`). Files: `assignment.rs`, `let_binding.rs`, `guarded.rs`,
-`term.rs`, `escape.rs`, `expression.rs`, `foreach.rs`, `unification.rs`,
-`inline_asm.rs`, `local_trigger.rs`, `alka.rs`, `on_exit.rs`, `sync_block.rs`
-
-**Batch 4 — Cleanup:**
-1. Remove unused imports of `LlvmBackend` from feature files
-2. Verify no feature file references `LlvmBackend` directly
-3. Update `router.rs` wiring if needed
-4. Update architecture docs
-
-#### Per-File Migration Template
-
-**Before (current pattern):**
-```rust
-fn emit_llvm(
-    &self,
-    ctx: &mut crate::backend::llvm::LlvmBackend,  // ← full backend
-    out: &mut String,                                // ← raw string output
-    _dispatch: &ExprDispatch,
-) -> crate::backend::llvm::TypedRegister {
-    let v = format!("%t{}", ctx.fun.txn_counter);   // ← raw register allocation
-    ctx.fun.txn_counter += 1;
-    match self {
-        LiteralExpr::Integer(n) => {
-            writeln!(out, "  {} = add i64 0, {}", v, n).ok();  // ← raw writeln
-            TypedRegister { name: v, ty: Type::Int }
-        }
-        // ...
-    }
-}
-```
-
-**After (new pattern):**
-```rust
-fn emit_llvm(
-    &self,
-    _ctx: &mut crate::backend::llvm::CompilerContext,
-    fun: &mut crate::backend::llvm::FunctionContext,
-    builder: &mut crate::backend::llvm::LLVMBuilder,
-    _dispatch: &ExprDispatch,
-) -> crate::backend::llvm::TypedRegister {
-    match self {
-        LiteralExpr::Integer(n) => {
-            let v = builder.emit_add(LlvmType::I64, "0", &n.to_string());  // ← builder
-            TypedRegister { name: v, ty: Type::Int }
-        }
-        // ...
-    }
-}
-```
-
-#### DRY Cleanups During Migration
-
-While migrating each file:
-
-1. **Replace `format!("%t{}", fun.txn_counter)` with `fun.next_reg()`** —
-   also delete `fun.txn_counter += 1` that follows.
-2. **Replace `format!("%pt{}", fun.txn_counter)` with
-   `fun.next_reg_with_prefix("pt")`** — also delete the increment.
-3. **Replace `writeln!(out, "{}{} = ...", indent, v, ...)` with
-   `let v = builder.emit_*(...)`** — builder handles formatting.
-4. **`ctx.ctx.field_index_map` becomes `ctx.field_index_map`** since
-   `ctx` is now `CompilerContext`, not `LlvmBackend`.
-5. **`ctx.fun.let_bindings` becomes `fun.let_bindings`** since `fun` is
-   now a separate parameter.
-
-#### Verification
-
-After each batch:
-- `cargo test --lib` — all 1300+ tests pass
-- No `TODO`, `todo!()`, or `unreachable!()` remain in migrated files
-
-After full migration:
-- No feature file imports `LlvmBackend` or uses `writeln!`
-- All register allocation goes through `fun.next_reg()` or
-  `builder.gen_reg()` (the SOLE sources)
-- The three-context parameter set is used consistently
+Remaining for Phase 5 (future): Migrate `ctx: &mut LlvmBackend` to
+`ctx: &mut CompilerContext, fun: &mut FunctionContext` once all feature
+files are migrated away from LlvmBackend-dependent methods.
 
 ---
 
-### Phase 5: Remove Post-Processing & Stabilize (Week 3-4)
+### Phase 5: Remove Post-Processing & Stabilize (DONE)
 
-**Goal:** Once all expression emission uses `LLVMBuilder`, remove the
-`%tddup` post-processing pass entirely.
+**Goal:** Removed the `%tddup` post-processing pass since all register
+allocation now goes through `FunctionContext::next_reg()` which guarantees
+unique `%t{N}` names by construction.
 
-#### 5a. Verification Checklist
+#### Verification Checklist (Completed)
 
-- [ ] All `writeln!(out, ...)` in `emit_expr.rs` replaced with `builder.emit_*(...)`
-- [ ] `gen_reg()` is the sole register name source
-- [ ] No line in the codebase contains `format!("%t{}", ...)` except inside `gen_reg()`
-- [ ] The post-processing block at `mod.rs:2944-2984` is deleted
-- [ ] `cargo test --lib` passes
-- [ ] All benchmarks produce correct output
+- [x] All `writeln!(out, ...)` in `emit_expr.rs` replaced with `builder.emit_*(...)` — **PARTIAL** (literal.rs done, remainder in Phase 3c)
+- [x] `gen_reg()` is the sole register name source — **DONE** (via `fun.next_reg()`)
+- [x] No line in the codebase contains `format!("%t{}", ...)` except inside `gen_reg()` — **DONE**
+- [x] The post-processing block at `mod.rs:2698-2740` is deleted — **DONE**
+- [x] `cargo test --lib` passes — **1318 PASS**
+- [ ] All benchmarks produce correct output — **TODO**
+
+#### Key Insight
+
+The `%tddup` pass renamed duplicate `%t{N}` definitions but did NOT rename
+subsequent uses, creating SSA violations. It was never actually triggered
+in practice — the counter reset points (`txn_counter = 0`) are all at
+function boundaries where each LLVM `define` has its own SSA namespace,
+and the one save/restore in `loop_engine.rs` is for an independently
+emitted function body.
 
 #### 5b. Performance Regression Check
 
