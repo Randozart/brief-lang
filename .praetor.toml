@@ -16,7 +16,6 @@ enabled = false
 path = ".praetor/state-graph.json"
 
 [files]
-ignore = ["src/_monolithic/**"]
 
 [datalog]
 auth_functions = ["authenticate", "authorize", "login"]

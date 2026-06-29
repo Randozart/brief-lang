@@ -129,7 +129,18 @@ impl ExprCodegenLLVM for BinaryOpExpr {
         // Emit the operands and select the correct operation directly,
         // avoiding a nested emit_expr call that would waste %tN registers.
         match self.kind {
-            BinaryOpKind::Add => ctx.emit_binop(out, "", &self.left, &self.right, "add", "fadd"),
+            BinaryOpKind::Add => {
+                // 2026-06-29: Check is_string_chain before emit_binop, matching
+                // the old-style Expr::Add handler at emit_expr.rs:404. Without this,
+                // string concatenation via new-style BinaryOp becomes integer addition
+                // of tagged pointer addresses, producing garbage runtime addresses.
+                if ctx.is_string_chain(&self.left) || ctx.is_string_chain(&self.right) {
+                    let a = ctx.emit_expr(out, &self.left, "");
+                    let b = ctx.emit_expr(out, &self.right, "");
+                    return ctx.emit_inline_concat(out, "", &a, &b);
+                }
+                ctx.emit_binop(out, "", &self.left, &self.right, "add", "fadd")
+            }
             BinaryOpKind::Sub => ctx.emit_binop(out, "", &self.left, &self.right, "sub", "fsub"),
             BinaryOpKind::Mul => ctx.emit_binop(out, "", &self.left, &self.right, "mul", "fmul"),
             BinaryOpKind::Div => ctx.emit_binop(out, "", &self.left, &self.right, "sdiv", "fdiv"),

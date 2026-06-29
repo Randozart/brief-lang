@@ -1396,8 +1396,14 @@ impl LlvmBackend {
                 let res_ff = format!("%ppl_e{}", self.txn_counter); self.txn_counter += 1;
                 writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
                 writeln!(out, "{}{} = getelementptr [4 x i8], [4 x i8]* @FMT_STR, i64 0, i64 0", indent, fmt_reg).ok();
+                // 2026-06-29: Strip tag bits before passing to fprintf (same rationale
+                // as Println/Print in emit_expr.rs).
+                let cln = format!("%ppl_cln{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = and i64 {}, -4", indent, cln, reg).ok();
+                let ptr_reg = format!("%ppl_ptr{}", self.txn_counter); self.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_reg, cln).ok();
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, ptr {})",
-                    indent, res, so, fmt_reg, reg).ok();
+                    indent, res, so, fmt_reg, ptr_reg).ok();
                 writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();
             }
             _ => {}

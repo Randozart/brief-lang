@@ -846,24 +846,30 @@ impl LlvmBackend {
                         // Print a Brief String followed by newline.
                         // Brief String value is i64 (ptrtoint of struct ptr).
                         // Load the first field (ptr_to_data) to get the data pointer.
+                        // 2026-06-29: Strip tag bits (bit 0=static, bit 1=temporary)
+                        // before loading data_ptr. Without this, concat results tagged
+                        // with OR 2 read from offset +2 instead of offset 0, producing
+                        // a garbage data_ptr that crashes in fprintf's strlen.
                         if !args.is_empty() {
                             let msg = self.emit_expr(out, &args[0], indent);
+                            let clean = format!("%pplc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = and i64 {}, -4", indent, clean, msg).ok();
                             let sptr = format!("%ppls{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, clean).ok();
                             let sp = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
-                            let data_ptr = format!("%ppld{}", self.txn_counter); self.txn_counter += 1;
-                            let str_ptr = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
-                            let so = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
-                            let so2 = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
-                            let fmt = format!("%pplf{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, msg).ok();
                             writeln!(out, "{}{} = bitcast ptr {} to i64*", indent, sp, sptr).ok();
+                            let data_ptr = format!("%ppld{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, data_ptr, sp).ok();
+                            let str_ptr = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
+                            let so = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                            let fmt = format!("%pplf{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = getelementptr [4 x i8], [4 x i8]* @FMT_STR, i64 0, i64 0", indent, fmt).ok();
                             let fr = format!("%ppfr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, ptr {})",
                                 indent, fr, so, fmt, str_ptr).ok();
+                            let so2 = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
                             writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
                         } else {
@@ -873,17 +879,21 @@ impl LlvmBackend {
                     Intrinsic::Print => {
                         // Print a Brief String WITHOUT newline.
                         // Load hdr[0] (data pointer) and call fprintf.
+                        // 2026-06-29: Strip tag bits before loading data_ptr (same
+                        // rationale as Println — see comment above).
                         if !args.is_empty() {
                             let msg = self.emit_expr(out, &args[0], indent);
+                            let clean = format!("%pplc{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = and i64 {}, -4", indent, clean, msg).ok();
                             let sptr = format!("%ppls{}", self.txn_counter); self.txn_counter += 1;
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, clean).ok();
                             let sp = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
-                            let data_ptr = format!("%ppld{}", self.txn_counter); self.txn_counter += 1;
-                            let str_ptr = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
-                            let so = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, msg).ok();
                             writeln!(out, "{}{} = bitcast ptr {} to i64*", indent, sp, sptr).ok();
+                            let data_ptr = format!("%ppld{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, data_ptr, sp).ok();
+                            let str_ptr = format!("%pplp{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
+                            let so = format!("%pplo{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
                             let fr = format!("%ppfr{}", self.txn_counter); self.txn_counter += 1;
                             writeln!(out, "{}{} = call i32 @fputs(ptr {}, ptr {})",
@@ -5258,7 +5268,7 @@ impl LlvmBackend {
     // bit 1 = temporary concat result (safe to free when consumed).
     // State-loaded strings have both bits clear. The tag convention avoids
     // separate tracking data structures.
-    fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &TypedRegister, b: &TypedRegister) -> TypedRegister {
+    pub(crate) fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &TypedRegister, b: &TypedRegister) -> TypedRegister {
         let a_boxed = self.adapt_to_i64(out, indent, a);
         let b_boxed = self.adapt_to_i64(out, indent, b);
         // Mask off tag bits (bit 0 = static, bit 1 = temp) before reading headers
@@ -5548,7 +5558,7 @@ impl LlvmBackend {
     /// Why this exists: a + b on Ints should emit `add i64`, but a + b on
     /// Strings should emit malloc+memcpy. The type tracker checks type
     /// bindings, defn return types, and cast targets.
-    fn is_string_chain(&self, e: &Expr) -> bool {
+    pub(crate) fn is_string_chain(&self, e: &Expr) -> bool {
         match e {
             Expr::String(_) => true,
             Expr::Literal(lit) => matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)),
