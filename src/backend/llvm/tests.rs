@@ -3100,10 +3100,94 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        // 2-slot header means 4 slots: [data_ptr, len, elem0, elem1]
-        assert!(output.contains("alloca i64, i64 4"), "2-elem list = 4 slots. Got: {}", output);
+        // 2026-06-29: Non-empty lists use malloc (not alloca) — see docs/plans/2026-06-29-list-allocation-fix.md
+        // 2-slot header means 4 slots: [data_ptr, len, elem0, elem1] = 32 bytes
+        assert!(output.contains("call i8* @malloc(i64 32)"), "2-elem list = 32 bytes (4 slots × 8). Got: {}", output);
+        assert!(output.contains("bitcast i8*"), "Should bitcast malloc result to i64*. Got: {}", output);
         assert!(output.contains("store i64 2, i64*"), "Length should be 2. Got: {}", output);
         assert!(output.contains("ptrtoint i64*"), "Should emit ptrtoint for data_ptr. Got: {}", output);
+    }
+
+    #[test]
+    fn test_empty_list_global_sentinel() {
+        // 2026-06-29: Empty list [] must use the global rodata sentinel, not alloca or malloc.
+        // See docs/plans/2026-06-29-list-allocation-fix.md.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "e".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                    constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "mkempty".to_string(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("e".to_string()),
+                            expr: Expr::ListLiteral(vec![]),
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("@ll_empty_list"), "Empty list should reference global sentinel. Got: {}", output);
+        assert!(!output.contains("alloca i64, i64 2"), "Empty list should NOT alloca 2 slots. Got: {}", output);
+        // Arena init in main() always calls malloc(i64 65536); verify no small-list malloc
+        assert!(!output.contains("call i8* @malloc(i64 16"), "Empty list should NOT call 16-byte malloc. Got: {}", output);
+    }
+
+    #[test]
+    fn test_nonempty_list_uses_malloc() {
+        // 2026-06-29: Non-empty list [1, 2, 3] must use malloc, not alloca.
+        // See docs/plans/2026-06-29-list-allocation-fix.md.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "v".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                    constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "mklist".to_string(), is_reactive: false, parameters: vec![],
+                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    body: vec![
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("v".to_string()),
+                            expr: Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)]),
+                            timeout: None, modifiers: vec![],
+                        },
+                    ],
+                    reactor_speed: None, span: None, is_lambda: false,
+                    dependencies: vec![], is_async: false,
+                    attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+                                 outputs: Vec::new(),
+                 output_type: None,
+             }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // 3 elements + 2 header slots = 5 slots × 8 = 40 bytes
+        assert!(output.contains("call i8* @malloc(i64 40)"), "3-elem list = 40 bytes (5 slots × 8). Got: {}", output);
+        assert!(output.contains("bitcast i8*"), "Should bitcast malloc result to i64*. Got: {}", output);
+        assert!(!output.contains("alloca i64, i64 5"), "Non-empty list should NOT use alloca. Got: {}", output);
+        // Elements are computed as `add i64 0, N` and stored via register; check the computation
+        assert!(output.contains("add i64 0, 1") && output.contains("add i64 0, 2") && output.contains("add i64 0, 3"),
+            "Should compute all 3 elements. Got: {}", output);
+        assert!(output.contains("store i64 3, i64*"), "Length should be 3. Got: {}", output);
     }
 
     #[test]
@@ -3294,7 +3378,8 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("alloca i64, i64 5"), "3-elem tuple = 5 slots. Got: {}", output);
+        // 2026-06-29: Tuple uses malloc instead of alloca — see docs/plans/2026-06-29-list-allocation-fix.md
+        assert!(output.contains("call i8* @malloc(i64 40)"), "3-elem tuple = 40 bytes (5 slots × 8). Got: {}", output);
         assert!(output.contains("store i64 3, i64*"), "Length should be 3. Got: {}", output);
     }
 

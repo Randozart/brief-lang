@@ -593,8 +593,16 @@ impl LlvmBackend {
                     }
                 }
                 None => {
-                    let default = if ty == "i8*" { "null".to_string() } else { "0".to_string() };
-                    writeln!(out, "  store {} {}, {}* {}, align {}", ty, default, ty, p, self.align_of(&ty)).ok();
+                    if ty == "i8*" {
+                        // 2026-06-29: Initialize uninitialized String fields to @str.0
+                        // (empty string sentinel) instead of null. Prevents crashes when
+                        // string-processing code compares against @str.0's address.
+                        let str_p = format!("%ip{}s", reg); reg += 1;
+                        writeln!(out, "  {} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to i8*", str_p).ok();
+                        writeln!(out, "  store i8* {}, i8** {}, align {}", str_p, p, self.align_of("i8*")).ok();
+                    } else {
+                        writeln!(out, "  store {} 0, {}* {}, align {}", ty, ty, p, self.align_of(&ty)).ok();
+                    }
                 }
             }
         }
@@ -787,8 +795,19 @@ impl LlvmBackend {
                     }
                 }
                 None => {
-                    let default = if ty == "i8*" { "null".to_string() } else { "0".to_string() };
-                    writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, default, ty, p, self.align_of(&ty)).ok();
+                    if ty == "i8*" {
+                        // 2026-06-29: Initialize uninitialized String fields to @str.0
+                        // (empty string sentinel, untagged) instead of null.
+                        // Must NOT add tag bit (OR 1) because all sentinel comparisons
+                        // in trim/submit_input/handle_action check against the untagged
+                        // @str.0 address. A tagged pointer would shift all struct
+                        // field accesses by 1 byte, causing garbage reads and crashes.
+                        let str_p = format!("%ip_{}s", idx);
+                        writeln!(out, "{}{} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to i8*", indent, str_p).ok();
+                        writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, p, self.align_of("i8*")).ok();
+                    } else {
+                        writeln!(out, "{}store {} 0, {}* {}, align {}", indent, ty, ty, p, self.align_of(&ty)).ok();
+                    }
                 }
             }
         }

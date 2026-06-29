@@ -597,9 +597,13 @@ impl LlvmBackend {
                             cur_init = iv;
                         }
                     }
-                    Some(Expr::String(_)) => {
+                    Some(Expr::String(s)) => {
+                        // 2026-06-29: Store actual string constant pointer, not i8* null.
+                        // Previously this arm always wrote null regardless of the string value.
+                        let si = self.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                        let g = format!("@str.{}", si);
                         let iv = format!("%siv{}_{}", label_prefix, self.txn_counter); self.txn_counter += 1;
-                        writeln!(out, "  {} = insertvalue %State {}, i8* null, {}", iv, cur_init, idx).ok();
+                        writeln!(out, "  {} = insertvalue %State {}, i8* bitcast (<{{ i64, i64, [{} x i8] }}>* {} to i8*), {}", iv, cur_init, s.len() + 1, g, idx).ok();
                         cur_init = iv;
                     }
                     Some(Expr::Char(c)) => {
