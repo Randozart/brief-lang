@@ -8,6 +8,7 @@ pub mod emit_toplevel;
 pub mod expr;
 pub mod gpu;
 pub mod hazard;
+pub mod helpers;
 pub mod loop_engine;
 pub mod optimizer;
 pub mod reorder;
