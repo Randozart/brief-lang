@@ -1,5 +1,5 @@
 use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, OutputType, Pattern, PipeChain, PipeStep, ProjectionTarget, SliceCoordinate, Statement, Type};
-use crate::backend::llvm::{float64_to_llvm_hex, float_to_llvm_hex, LlvmBackend, TypedRegister};
+use crate::backend::llvm::{LlvmBackend, TypedRegister};
 use crate::features::arrow::{ArrowMutExpr, ArrowDiscardExpr, ArrowTransferExpr};
 use crate::features::binary_op::BinaryOpExpr;
 use crate::features::block::BlockExpr;
@@ -34,47 +34,16 @@ impl LlvmBackend {
         // emission path that doesn't pass indent through correctly.
         let indent = if indent.is_empty() { "  " } else { indent };
         match &expr {
-            Expr::Integer(n) => { writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok(); return TypedRegister { name: v, ty: Type::Int }; }
-            // 2026-06-29: IntegerSuffixed carries type from parser (e.g. 42i8 → Type::Int8)
-            Expr::IntegerSuffixed(n, ty) => {
-                let llvm_ty = self.llvm_type(ty);
-                writeln!(out, "{}{} = add {} 0, {}", indent, v, llvm_ty, n).ok();
-                return TypedRegister { name: v, ty: ty.clone() };
-            }
-            Expr::Bool(b) => { if *b { writeln!(out, "{}{} = and i1 true, true", indent, v).ok(); } else { writeln!(out, "{}{} = xor i1 true, true", indent, v).ok(); } return TypedRegister { name: v, ty: Type::Bool }; }
-            // 2026-06-29: Float64 → double bitcast (f64→i64→double), Float → float bitcast (f64→f32→i32→float)
-            Expr::Float64(f) => {
-                let bits = float64_to_llvm_hex(*f);
-                writeln!(out, "{}{} = bitcast i64 {} to double", indent, v, bits).ok();
-                return TypedRegister { name: v, ty: Type::Float64 };
-            }
-            Expr::Float(f) => {
-                let bits = float_to_llvm_hex(*f);
-                writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, bits).ok();
-                self.fun.reg_float_cache.insert(v.clone(), v.clone());
-                return TypedRegister { name: v, ty: Type::Float };
-            }
-            Expr::String(s) | Expr::RegexLiteral(s) => {
-                let si = self.ctx.string_constants.iter().position(|x| x == s).unwrap_or(0);
-                let g = format!("@str.{}", si);
-                // 2026-06-28: Use txn_counter to prevent %t{N} collision with
-                // emit_expr's register allocation (which also uses txn_counter).
-                let bp = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, bp, s.len() + 1, g).ok();
-                // Tag static string pointers with bit 0 (=1) so concat can distinguish
-                // them from heap-allocated strings and avoid freeing static data.
-                let pi = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, pi, bp).ok();
-                let ori = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = or i64 {}, 1", indent, ori, pi).ok();
-                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, v, ori).ok();
-                return TypedRegister { name: v, ty: Type::String };
-            }
-            Expr::Char(c) => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, v, *c as i32).ok();
-                return TypedRegister { name: v, ty: Type::Char };
-            }
-            Expr::Term => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v, ty: Type::Int }; }
+            // 2026-06-29: Literal expressions dispatched to expr::literal submodule.
+            // Keeps emit_expr focused on dispatching rather than implementation.
+            Expr::Integer(_) => return crate::backend::llvm::expr::literal::emit_integer(self, out, &v, &expr, indent),
+            Expr::IntegerSuffixed(_, _) => return crate::backend::llvm::expr::literal::emit_integer_suffixed(self, out, &v, &expr, indent),
+            Expr::Bool(_) => return crate::backend::llvm::expr::literal::emit_bool(self, out, &v, &expr, indent),
+            Expr::Float64(_) => return crate::backend::llvm::expr::literal::emit_float64(self, out, &v, &expr, indent),
+            Expr::Float(_) => return crate::backend::llvm::expr::literal::emit_float(self, out, &v, &expr, indent),
+            Expr::String(_) | Expr::RegexLiteral(_) => return crate::backend::llvm::expr::literal::emit_string(self, out, &v, &expr, indent),
+            Expr::Char(_) => return crate::backend::llvm::expr::literal::emit_char(self, out, &v, &expr, indent),
+            Expr::Term => return crate::backend::llvm::expr::literal::emit_term(self, out, &v, indent),
             Expr::BinaryOp(bop) => return bop.emit_llvm(self, out, &ExprDispatch),
             Expr::UnaryOp(uop) => return uop.emit_llvm(self, out, &ExprDispatch),
             Expr::Literal(lit) => return lit.emit_llvm(self, out, &ExprDispatch),
