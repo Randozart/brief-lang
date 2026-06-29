@@ -83,6 +83,9 @@ impl LlvmBackend {
     pub(super) fn emit_header(&self, out: &mut String) {
         writeln!(out, "; ModuleID = 'program.ll'").ok();
         writeln!(out, "source_filename = \"program.bv\"").ok();
+        // 2026-06-29: Target triple is hardcoded to x86_64-unknown-linux-gnu for now.
+        // When TargetSpec gains target triple/data layout fields (TODO: add to
+        // target_spec/mod.rs), read them dynamically here instead.
         writeln!(out, "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"").ok();
         writeln!(out, "target triple = \"x86_64-unknown-linux-gnu\"").ok();
     }
@@ -176,6 +179,20 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__ttyname__(i64)").ok();
         // Some externally-linked functions called by intrinsics
         writeln!(out, "declare i32 @ioctl(i32, i64, ptr)").ok();
+        // 2026-06-29: Socket API declares — used by emit_socket_* in emit_expr.rs.
+        // Previously these were emitted without LLVM declare, causing LLVM 15+ to
+        // reject the IR (implicit function declarations no longer allowed).
+        writeln!(out, "declare i32 @socket(i32, i32, i32)").ok();
+        writeln!(out, "declare i32 @bind(i32, ptr, i32)").ok();
+        writeln!(out, "declare i32 @listen(i32, i32)").ok();
+        writeln!(out, "declare i32 @accept(i32, ptr, ptr)").ok();
+        writeln!(out, "declare i32 @connect(i32, ptr, i32)").ok();
+        writeln!(out, "declare i64 @send(i32, ptr, i64, i32)").ok();
+        writeln!(out, "declare i64 @recv(i32, ptr, i64, i32)").ok();
+        writeln!(out, "declare i64 @sendto(i32, ptr, i64, i32, ptr, i32)").ok();
+        writeln!(out, "declare i64 @recvfrom(i32, ptr, i64, i32, ptr, ptr)").ok();
+        writeln!(out, "declare i32 @setsockopt(i32, i32, i32, ptr, i32)").ok();
+        writeln!(out, "declare i32 @getsockopt(i32, i32, i32, ptr, ptr)").ok();
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {
