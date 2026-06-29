@@ -340,6 +340,7 @@ impl TypeUniverse {
                 bit_range: None,
                 body: crate::ast::TypeDefBody {
                     bindings: vec![],
+                    operators: vec![],
                     constraints: vec![],
                     span: None,
                 },
@@ -774,7 +775,7 @@ mod tests {
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
                     TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -792,7 +793,7 @@ mod tests {
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                     TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -843,7 +844,7 @@ mod tests {
                     TypeBinding { name: "ElementType".into(), params: vec![], value: Box::new(Expr::TypeRef("T".into())), span: None },
                     TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(true)), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -857,7 +858,7 @@ mod tests {
                 bindings: vec![
                     TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(false)), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -885,7 +886,7 @@ mod tests {
                 bindings: vec![
                     TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(false)), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -907,7 +908,7 @@ mod tests {
                 bindings: vec![
                     TypeBinding { name: "Volatile".into(), params: vec![], value: Box::new(Expr::Bool(true)), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -933,7 +934,7 @@ mod tests {
                 bindings: vec![
                     TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -956,7 +957,7 @@ mod tests {
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                     TypeBinding { name: "Endian".into(), params: vec![], value: Box::new(Expr::Identifier("Big".into())), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -977,7 +978,7 @@ mod tests {
                 bindings: vec![
                     TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -997,7 +998,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Int".into())),
             body: TypeDefBody {
                 bindings: vec![],
-                constraints: vec![Expr::Gt(
+                operators: vec![],
+            constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".into())),
                     Box::new(Expr::Integer(0)),
                 )],
@@ -1024,7 +1026,7 @@ mod tests {
                     TypeBinding { name: "InsertAt".into(), params: vec![], value: Box::new(Expr::Identifier("append".into())), span: None },
                     TypeBinding { name: "ExtractFrom".into(), params: vec![], value: Box::new(Expr::Identifier("shift".into())), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -1048,7 +1050,7 @@ mod tests {
                 bindings: vec![
                     TypeBinding { name: "InsertAt".into(), params: vec![], value: Box::new(Expr::Identifier("custom_strat".into())), span: None },
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,

@@ -5294,7 +5294,8 @@ let spec = crate::target_spec::TargetSpec {
             base: Box::new(Expr::TypeRef("Int".into())),
             body: TypeDefBody {
                 bindings: vec![],
-                constraints: vec![Expr::Gt(
+                operators: vec![],
+            constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
                     Box::new(Expr::Integer(0)),
                 )],
@@ -5675,7 +5676,7 @@ let spec = crate::target_spec::TargetSpec {
                     type_params: vec![],
                     base: Box::new(Expr::Identifier("Int".into())),
                     bit_range: None,
-                    body: TypeDefBody { bindings: vec![], constraints: vec![], span: None },
+                    body: TypeDefBody { bindings: vec![], operators: vec![], constraints: vec![], span: None },
                     span: None,
                 })),
             ],

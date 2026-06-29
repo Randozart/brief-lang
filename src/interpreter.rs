@@ -10392,7 +10392,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Int".into())),
             body: crate::ast::TypeDefBody {
                 bindings: vec![],
-                constraints: vec![Expr::Gt(
+                operators: vec![],
+            constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
                     Box::new(Expr::Integer(0)),
                 )],
@@ -10440,7 +10441,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Int".into())),
             body: crate::ast::TypeDefBody {
                 bindings: vec![],
-                constraints: vec![Expr::Gt(
+                operators: vec![],
+            constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
                     Box::new(Expr::Integer(0)),
                 )],
@@ -10659,7 +10661,7 @@ mod tests {
                     value: Box::new(Expr::Identifier("my_insert".into())),
                     span: None,
                 }],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -10739,7 +10741,7 @@ mod tests {
                     value: Box::new(Expr::Identifier("my_extract".into())),
                     span: None,
                 }],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -10822,7 +10824,7 @@ mod tests {
                     value: Box::new(Expr::Identifier("sl_insert_fn".into())),
                     span: None,
                 }],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,

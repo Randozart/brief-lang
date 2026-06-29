@@ -138,7 +138,7 @@ mod tests {
                 make_binding("Bytes", Expr::Integer(8)),
                 make_binding("Alignment", Expr::Integer(8)),
             ],
-            constraints: vec![],
+            operators: vec![], constraints: vec![],
             span: None,
         };
         assert_eq!(body.bindings.len(), 2);
@@ -157,7 +157,7 @@ mod tests {
                     make_binding("Bytes", Expr::Integer(8)),
                     make_binding("Alignment", Expr::Integer(8)),
                 ],
-                constraints: vec![],
+                operators: vec![], constraints: vec![],
                 span: None,
             },
             span: None,
@@ -233,7 +233,7 @@ mod kani_full_tests {
                 value: Box::new(Expr::Integer(8)),
                 span: None,
             }],
-            constraints: vec![],
+            operators: vec![], constraints: vec![],
             span: None,
         };
         assert_eq!(body.bindings.len(), 1);

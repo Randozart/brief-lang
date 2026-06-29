@@ -141,6 +141,9 @@ pub enum Token {
     #[token("registry")]
     #[token("REGISTRY")]
     Registry,
+    #[token("op")]
+    #[token("OP")]
+    Op,
     #[token("type")]
     #[token("TYPE")]
     Type,
@@ -611,6 +614,7 @@ impl std::fmt::Display for Token {
             Token::Resource => write!(f, "resource"),
             Token::Rsrc => write!(f, "rsrc"),
             Token::Registry => write!(f, "reg"),
+            Token::Op => write!(f, "op"),
             Token::Type => write!(f, "type"),
             Token::Cell => write!(f, "cell"),
             Token::Struct => write!(f, "struct"),

@@ -3296,6 +3296,7 @@ impl<'a> Parser<'a> {
 
         let mut bindings = Vec::new();
         let mut constraints = Vec::new();
+        let mut operators = Vec::new();
 
         // Parse properties and constraints until `}`
         loop {
@@ -3311,6 +3312,14 @@ impl<'a> Parser<'a> {
                 let constraint = self.parse_expression()?;
                 self.expect(Token::RBracket)?;
                 constraints.push(constraint);
+                continue;
+            }
+
+            // 2026-06-29: Phase 7B — operator declaration: op Rune(Param) -> Ret = intrinsic;
+            if let Some(Ok(Token::Op)) = self.current_token() {
+                self.advance(); // consume `op`
+                let op_decl = self.parse_operator_declaration()?;
+                operators.push(op_decl);
                 continue;
             }
 
@@ -3392,11 +3401,56 @@ impl<'a> Parser<'a> {
             bit_range,
             body: TypeDefBody {
                 bindings,
+                operators,
                 constraints,
                 span: self.current_span(),
             },
             span: self.current_span(),
         })
+    }
+
+    /// Parse an operator declaration inside a type body:
+    /// `op Rune(ParamType) -> ReturnType = intrinsic;`
+    /// 2026-06-29: Phase 7B.
+    fn parse_operator_declaration(&mut self) -> Result<OpDeclaration, SyntaxError> {
+        let rune_name = self.expect_identifier()?;
+        let rune = match rune_name.as_str() {
+            "Add" => OpRune::Add, "Sub" => OpRune::Sub,
+            "Mul" => OpRune::Mul, "Div" => OpRune::Div,
+            "Mod" => OpRune::Mod, "Neg" => OpRune::Neg,
+            "Eq" => OpRune::Eq, "Ne" => OpRune::Ne,
+            "Lt" => OpRune::Lt, "Le" => OpRune::Le,
+            "Gt" => OpRune::Gt, "Ge" => OpRune::Ge,
+            "And" => OpRune::And, "Or" => OpRune::Or, "Not" => OpRune::Not,
+            "Index" => OpRune::Index, "Slice" => OpRune::Slice,
+            "Cast" => OpRune::Cast,
+            "Box" => OpRune::Box, "Unbox" => OpRune::Unbox,
+            "ArrowPush" => OpRune::ArrowPush, "ArrowPop" => OpRune::ArrowPop,
+            _ => return self.spanned_err(format!(
+                "Unknown operator rune '{}'", rune_name)),
+        };
+
+        let param_type = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+            self.advance();
+            let pt = self.parse_type_expr_for_typedef()?;
+            self.expect(Token::RParen)?;
+            Some(pt)
+        } else {
+            None
+        };
+
+        self.expect(Token::Arrow)?;
+        let return_type = self.parse_type_expr_for_typedef()?;
+        self.expect(Token::Eq)?;
+        let implementation = self.parse_expression()?;
+
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        } else {
+            return self.spanned_err("Expected ';' after operator declaration".to_string());
+        }
+
+        Ok(OpDeclaration { rune, param_type, return_type, implementation: Box::new(implementation), span: self.current_span() })
     }
 
     /// Parse a type expression used as the base in `Type Name <: Base { ... }`.

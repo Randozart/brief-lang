@@ -517,9 +517,50 @@ pub struct TypeDefBody {
     /// Unified bindings: every `Name = Expr;` entry, including both metadata
     /// properties and user-defined projections.
     pub bindings: Vec<TypeBinding>,
+    /// Operator declarations: `op Rune(Param) -> Ret = intrinsic;`
+    /// 2026-06-29: Phase 7B — user-facing operator→intrinsic mappings.
+    pub operators: Vec<OpDeclaration>,
     /// Refinement constraints with implicit self: `[ > 0 ]`.
     pub constraints: Vec<Expr>,
     /// Source span for error reporting.
+    pub span: Option<Span>,
+}
+
+/// Operator rune — the symbolic operator being overloaded.
+/// 2026-06-29: Phase 7B.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OpRune {
+    Add, Sub, Mul, Div, Mod, Neg,
+    Eq, Ne, Lt, Le, Gt, Ge,
+    And, Or, Not,
+    Index, Slice,
+    ArrowPush, ArrowPop,
+    Cast, Box, Unbox,
+}
+
+impl OpRune {
+    pub fn is_infix(&self) -> bool {
+        matches!(self, OpRune::Add | OpRune::Sub | OpRune::Mul | OpRune::Div
+            | OpRune::Mod | OpRune::Eq | OpRune::Ne | OpRune::Lt
+            | OpRune::Le | OpRune::Gt | OpRune::Ge | OpRune::And
+            | OpRune::Or | OpRune::ArrowPush)
+    }
+    pub fn is_prefix(&self) -> bool {
+        matches!(self, OpRune::Neg | OpRune::Not | OpRune::Box | OpRune::Unbox)
+    }
+    pub fn is_postfix(&self) -> bool {
+        matches!(self, OpRune::Index | OpRune::Slice | OpRune::Cast)
+    }
+}
+
+/// An operator declaration inside a type body.
+/// 2026-06-29: Phase 7B.
+#[derive(Debug, Clone)]
+pub struct OpDeclaration {
+    pub rune: OpRune,
+    pub param_type: Option<Box<Expr>>,
+    pub return_type: Box<Expr>,
+    pub implementation: Box<Expr>,
     pub span: Option<Span>,
 }
 
