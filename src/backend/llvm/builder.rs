@@ -473,72 +473,117 @@ impl LLVMBuilder {
 // countless inline casts in emit_expr.rs. Every type coercion goes here.
 
 use crate::ast::Type as BriefType;
+use crate::type_universe::TypeUniverse;
 
 pub struct TypeConverter;
 
 impl TypeConverter {
     /// Box a native-typed value to i64 for uniform %State storage.
-    ///
-    /// Brief stores all non-float state fields as i64. This method handles
-    /// the appropriate cast: Bool→zext, Char→identity, String→ptrtoint,
-    /// Float→bitcast+zext, Float64→bitcast, fixed-width→sext/zext.
-    pub fn box_to_i64(builder: &mut LLVMBuilder, val: &str, ty: &BriefType) -> String {
+    /// Uses the type universe to determine the boxing strategy.
+    /// Falls back to identity (already i64) when universe lookup fails.
+    /// 2026-06-29: Phase 7A — universe-driven, replaces hardcoded match arms.
+    pub fn box_to_i64(builder: &mut LLVMBuilder, val: &str, ty: &BriefType, universe: Option<&TypeUniverse>) -> String {
+        let box_op = universe
+            .and_then(|u| u.get_by_type(ty))
+            .and_then(|rt| rt.box_op.as_deref());
+
+        match box_op {
+            None => Self::box_to_i64_fallback(builder, val, ty),
+
+            Some("zext.i1.to.i64#") => builder.emit_zext(LlvmType::I1, LlvmType::I64, val),
+
+            Some("ptrtoint#") => builder.emit_ptrtoint(val, LlvmType::I64),
+
+            Some("bitcast.f32.to.i64#") => {
+                let bi = builder.emit_bitcast(LlvmType::Float, LlvmType::I32, val);
+                builder.emit_zext(LlvmType::I32, LlvmType::I64, &bi)
+            }
+
+            Some("bitcast.f64.to.i64#") => builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val),
+
+            op if op.map_or(false, |o| o.starts_with("sext.")) => {
+                let w = if op == Some("sext.i8.to.i64#") { LlvmType::I8 }
+                        else if op == Some("sext.i16.to.i64#") { LlvmType::I16 }
+                        else { LlvmType::I32 };
+                builder.emit_sext(w, LlvmType::I64, val)
+            }
+
+            op if op.map_or(false, |o| o.starts_with("zext.") && o != "zext.i1.to.i64#") => {
+                let w = if op == Some("zext.i8.to.i64#") { LlvmType::I8 }
+                        else if op == Some("zext.i16.to.i64#") { LlvmType::I16 }
+                        else { LlvmType::I32 };
+                builder.emit_zext(w, LlvmType::I64, val)
+            }
+
+            _ => val.to_string(),
+        }
+    }
+
+    /// Fallback boxing when universe is not available.
+    /// 2026-06-29: Will be removed once all tests go through the full pipeline.
+    fn box_to_i64_fallback(builder: &mut LLVMBuilder, val: &str, ty: &BriefType) -> String {
         match ty {
             BriefType::Bool => builder.emit_zext(LlvmType::I1, LlvmType::I64, val),
-            BriefType::Char => val.to_string(), // already i64
-            BriefType::String | BriefType::Data => {
-                builder.emit_ptrtoint(val, LlvmType::I64)
-            }
+            BriefType::String | BriefType::Data => builder.emit_ptrtoint(val, LlvmType::I64),
             BriefType::Float => {
                 let bi = builder.emit_bitcast(LlvmType::Float, LlvmType::I32, val);
                 builder.emit_zext(LlvmType::I32, LlvmType::I64, &bi)
             }
-            BriefType::Float64 => {
-                builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val)
-            }
-            BriefType::Int8 | BriefType::Int16 => {
-                builder.emit_sext(LlvmType::I8, LlvmType::I64, val)
-            }
-            BriefType::UInt8 | BriefType::UInt16 => {
-                builder.emit_zext(LlvmType::I8, LlvmType::I64, val)
-            }
-            BriefType::Int32 => {
-                builder.emit_sext(LlvmType::I32, LlvmType::I64, val)
-            }
-            BriefType::UInt32 => {
-                builder.emit_zext(LlvmType::I32, LlvmType::I64, val)
-            }
-            _ => val.to_string(), // Int/UInt already i64
+            BriefType::Float64 => builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val),
+            BriefType::Int8 | BriefType::Int16 => builder.emit_sext(LlvmType::I8, LlvmType::I64, val),
+            BriefType::UInt8 | BriefType::UInt16 => builder.emit_zext(LlvmType::I8, LlvmType::I64, val),
+            BriefType::Int32 => builder.emit_sext(LlvmType::I32, LlvmType::I64, val),
+            BriefType::UInt32 => builder.emit_zext(LlvmType::I32, LlvmType::I64, val),
+            _ => val.to_string(),
         }
     }
 
     /// Unbox an i64 value from %State back to its native type.
-    pub fn unbox_from_i64(builder: &mut LLVMBuilder, val: &str, target_ty: &BriefType) -> String {
+    /// Uses the type universe to determine the unboxing strategy.
+    /// 2026-06-29: Phase 7A — universe-driven.
+    pub fn unbox_from_i64(builder: &mut LLVMBuilder, val: &str, target_ty: &BriefType, universe: Option<&TypeUniverse>) -> String {
+        let unbox_op = universe
+            .and_then(|u| u.get_by_type(target_ty))
+            .and_then(|rt| rt.unbox_op.as_deref());
+
+        match unbox_op {
+            None => Self::unbox_from_i64_fallback(builder, val, target_ty),
+
+            Some("trunc.i64.to.i1#") => builder.emit_trunc(LlvmType::I64, LlvmType::I1, val),
+
+            Some("inttoptr#") => builder.emit_inttoptr(val, LlvmType::I64),
+
+            Some("bitcast.i64.to.f32#") => {
+                let tr = builder.emit_trunc(LlvmType::I64, LlvmType::I32, val);
+                builder.emit_bitcast(LlvmType::I32, LlvmType::Float, &tr)
+            }
+
+            Some("bitcast.i64.to.f64#") => builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val),
+
+            op if op.map_or(false, |o| o.starts_with("trunc.")) => {
+                let w = if op == Some("trunc.i64.to.i8#") { LlvmType::I8 }
+                        else if op == Some("trunc.i64.to.i16#") { LlvmType::I16 }
+                        else { LlvmType::I32 };
+                builder.emit_trunc(LlvmType::I64, w, val)
+            }
+
+            _ => val.to_string(),
+        }
+    }
+
+    /// Fallback unboxing when universe is not available.
+    fn unbox_from_i64_fallback(builder: &mut LLVMBuilder, val: &str, target_ty: &BriefType) -> String {
         match target_ty {
-            BriefType::Bool => {
-                let r = builder.emit_trunc(LlvmType::I64, LlvmType::I1, val);
-                r
-            }
-            BriefType::Char => val.to_string(), // keep as i64
-            BriefType::String | BriefType::Data => {
-                builder.emit_inttoptr(val, LlvmType::Ptr)
-            }
+            BriefType::Bool => builder.emit_trunc(LlvmType::I64, LlvmType::I1, val),
+            BriefType::String | BriefType::Data => builder.emit_inttoptr(val, LlvmType::I64),
             BriefType::Float => {
                 let tr = builder.emit_trunc(LlvmType::I64, LlvmType::I32, val);
                 builder.emit_bitcast(LlvmType::I32, LlvmType::Float, &tr)
             }
-            BriefType::Float64 => {
-                builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val)
-            }
-            BriefType::Int8 | BriefType::UInt8 => {
-                builder.emit_trunc(LlvmType::I64, LlvmType::I8, val)
-            }
-            BriefType::Int16 | BriefType::UInt8 => {
-                builder.emit_trunc(LlvmType::I64, LlvmType::I16, val)
-            }
-            BriefType::Int32 | BriefType::UInt32 => {
-                builder.emit_trunc(LlvmType::I64, LlvmType::I32, val)
-            }
+            BriefType::Float64 => builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val),
+            BriefType::Int8 | BriefType::UInt8 => builder.emit_trunc(LlvmType::I64, LlvmType::I8, val),
+            BriefType::Int16 | BriefType::UInt16 => builder.emit_trunc(LlvmType::I64, LlvmType::I16, val),
+            BriefType::Int32 | BriefType::UInt32 => builder.emit_trunc(LlvmType::I64, LlvmType::I32, val),
             _ => val.to_string(),
         }
     }
@@ -632,7 +677,7 @@ mod tests {
     #[test]
     fn test_box_bool_to_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::box_to_i64(&mut b, "%b", &BriefType::Bool);
+        let r = TypeConverter::box_to_i64(&mut b, "%b", &BriefType::Bool, None);
         let ir = b.finish(2);
         assert!(ir.contains(&format!("{} = zext i1 %b to i64", r)));
     }
@@ -640,7 +685,7 @@ mod tests {
     #[test]
     fn test_box_float_to_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::box_to_i64(&mut b, "%f", &BriefType::Float);
+        let r = TypeConverter::box_to_i64(&mut b, "%f", &BriefType::Float, None);
         let ir = b.finish(2);
         // Float boxing: bitcast float→i32, then zext i32→i64
         assert!(ir.contains("bitcast float %f to i32"));
@@ -650,7 +695,7 @@ mod tests {
     #[test]
     fn test_unbox_bool_from_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::unbox_from_i64(&mut b, "%v", &BriefType::Bool);
+        let r = TypeConverter::unbox_from_i64(&mut b, "%v", &BriefType::Bool, None);
         let ir = b.finish(2);
         assert!(ir.contains(&format!("{} = trunc i64 %v to i1", r)));
     }

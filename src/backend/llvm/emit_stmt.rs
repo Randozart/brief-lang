@@ -27,52 +27,125 @@ impl LlvmBackend {
     /// see a float value stored in an i64 slot and produce invalid
     /// bitcast or pointer-to-int transforms during optimization.
     pub(super) fn adapt_to_i64(&mut self, out: &mut String, indent: &str, r: &TypedRegister) -> String {
+        // 2026-06-29: Phase 7A — query universe box_op instead of matching on Type.
+        // The universe stores the canonical boxing intrinsic for each type.
+        // Falls back to the old type match when universe is not available.
+        let box_op = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(&r.ty))
+            .and_then(|rt| rt.box_op.clone())  // clone to avoid borrow conflict
+            .unwrap_or_default();
+
+        if box_op.is_empty() {
+            // Universe not available — fallback to old type-based dispatch
+            self.adapt_to_i64_fallback(out, indent, r)
+        } else {
+            self.adapt_via_box_op(out, indent, r, &box_op)
+        }
+    }
+
+    /// Box a value via its universe-declared box_op intrinsic.
+    /// 2026-06-29: Phase 7A — replaces per-type match arms.
+    fn adapt_via_box_op(&mut self, out: &mut String, indent: &str, r: &TypedRegister, box_op: &str) -> String {
+        match box_op {
+            // Already i64 — no conversion needed
+            _ if r.ty == Type::Char => r.name.clone(),
+
+            // Bool: zext i1 to i64
+            "zext.i1.to.i64#" => {
+                let z = format!("%rz{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = zext i1 {} to i64", indent, z, r.name).ok();
+                z
+            }
+
+            // String/Data: ptrtoint i8* to i64 (but check if already boxed)
+            "ptrtoint#" => {
+                let is_boxed = r.name.starts_with("%t") || r.name.starts_with("%d");
+                if is_boxed {
+                    r.name.clone()
+                } else {
+                    let p = format!("%rp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
+                    p
+                }
+            }
+
+            // Float: bitcast float -> i32 -> zext -> i64 (with reg cache)
+            "bitcast.f32.to.i64#" => {
+                let cached = self.fun.reg_float_cache.get(&r.name);
+                let fl = if let Some(cached) = cached { cached.clone() } else { r.name.clone() };
+                let bi = format!("%rbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, fl).ok();
+                let ze = format!("%rze{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                ze
+            }
+
+            // Float64: bitcast double to i64 directly (same width)
+            "bitcast.f64.to.i64#" => {
+                let bi = format!("%rbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast double {} to i64", indent, bi, r.name).ok();
+                bi
+            }
+
+            // Signed fixed-width: sext i8/i16/i32 to i64
+            op if op.starts_with("sext.") => {
+                let llvm_ty = match op {
+                    "sext.i8.to.i64#" => "i8",
+                    "sext.i16.to.i64#" => "i16",
+                    "sext.i32.to.i64#" => "i32",
+                    _ => unreachable!(),
+                };
+                let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = sext {} {} to i64", indent, ex, llvm_ty, r.name).ok();
+                ex
+            }
+
+            // Unsigned fixed-width: zext i8/i16/i32 to i64
+            op if op.starts_with("zext.") => {
+                let llvm_ty = match op {
+                    "zext.i8.to.i64#" => "i8",
+                    "zext.i16.to.i64#" => "i16",
+                    "zext.i32.to.i64#" => "i32",
+                    _ => unreachable!(),
+                };
+                let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = zext {} {} to i64", indent, ex, llvm_ty, r.name).ok();
+                ex
+            }
+
+            // Fallback: treat as already i64
+            _ => r.name.clone(),
+        }
+    }
+
+    /// Fallback boxing when universe is not available (unit tests).
+    /// 2026-06-29: Will be removed once all tests go through the full pipeline.
+    fn adapt_to_i64_fallback(&mut self, out: &mut String, indent: &str, r: &TypedRegister) -> String {
         if r.ty == Type::Bool {
             let z = format!("%rz{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = zext i1 {} to i64", indent, z, r.name).ok();
             z
         } else if r.ty == Type::Char {
-            // All Char registers from emit_expr are already i64 (boxed).
-            // No zext needed — the register is already the right width.
             r.name.clone()
-        // 2026-06-28: String/Data registers can be either native i8* (from
-        // function params or arg slots) or boxed i64 (from emit_expr's %t{N}
-        // registers, ListIndex loads, or %State field loads). Check the
-        // register name prefix to decide: %t and %d prefixes are from
-        // emit_expr (always i64); other prefixes like %p_ are native i8*.
         } else if r.ty == Type::String || r.ty == Type::Data {
             let is_boxed = r.name.starts_with("%t") || r.name.starts_with("%d");
-            if is_boxed {
-                // Already i64 (boxed) — just use as-is
-                // This happens with ListIndex loads like rules[i] where the
-                // element type is String but the actual register is i64.
-                r.name.clone()
-            } else {
+            if is_boxed { r.name.clone() } else {
                 let p = format!("%rp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
                 p
             }
-        // 2026-06-20: Check reg_float_cache before bitcasting
         } else if r.ty == Type::Float {
-            if let Some(cached) = self.fun.reg_float_cache.get(&r.name) {
-                let bi = format!("%rbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, cached).ok();
-                let ze = format!("%rze{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
-                ze
-            } else {
-                let bi = format!("%rbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, r.name).ok();
-                let ze = format!("%rze{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
-                ze
-            }
-        // 2026-06-29: Float64 → bitcast double to i64 directly (same width, no zext)
+            let cached = self.fun.reg_float_cache.get(&r.name);
+            let fl = if let Some(cached) = cached { cached.clone() } else { r.name.clone() };
+            let bi = format!("%rbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, fl).ok();
+            let ze = format!("%rze{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+            ze
         } else if r.ty == Type::Float64 {
             let bi = format!("%rbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = bitcast double {} to i64", indent, bi, r.name).ok();
             bi
-        // 2026-06-29: Fixed-width integer types need sign/zero extension to i64
         } else if r.ty == Type::Int8 {
             let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = sext i8 {} to i64", indent, ex, r.name).ok();
@@ -101,6 +174,7 @@ impl LlvmBackend {
             r.name.clone()
         }
     }
+
 
     pub(crate) fn emit_stmt(&mut self, out: &mut String, stmt: &Statement, indent: &str) {
         match stmt {
