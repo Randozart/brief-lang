@@ -20,3 +20,4 @@ pub mod compare;
 pub mod intrinsics;
 pub mod literal;
 pub mod math;
+pub mod rest;
