@@ -374,6 +374,7 @@ mod tests {
             codec: None,
             on_exit: None,
             guards: vec![],
+            operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
             source: TypeDef {
                 name: name.to_string(),

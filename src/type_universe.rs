@@ -93,6 +93,9 @@ pub struct ResolvedType {
     /// Each guard is an Expr that must evaluate to true. If any guard
     /// fails at runtime, the program traps.
     pub guards: Vec<crate::ast::Expr>,
+    /// Operator→intrinsic mappings. Key is (rune, optional param type name).
+    /// 2026-06-29: Phase 7B — user-facing operator declarations.
+    pub operators: std::collections::HashMap<(crate::ast::OpRune, Option<String>), crate::ast::OpDeclaration>,
     /// Source TypeDef for reference.
     pub source: TypeDef,
 }
@@ -332,6 +335,7 @@ impl TypeUniverse {
             codec: None,
             on_exit: None,
             guards: vec![],
+            operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
             source: crate::ast::TypeDef {
                 name: String::new(),
@@ -478,6 +482,7 @@ impl TypeUniverse {
             codec: None,
             on_exit: None,
             guards: vec![],
+            operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
             source: td.clone(),
         };
@@ -499,6 +504,8 @@ impl TypeUniverse {
             rt.allow_slice = base.allow_slice;
             rt.allow_arrow = base.allow_arrow;
             rt.on_exit = base.on_exit.clone();
+            // Inherit operators from base type
+            rt.operators = base.operators.clone();
         }
 
         // Phase 4: Auto-compute Bytes from bit_range for `Bits @/lo..hi` syntax
@@ -526,6 +533,23 @@ impl TypeUniverse {
         // when a value of this type is constructed or assigned.
         for constraint in &td.body.constraints {
             rt.guards.push(constraint.clone());
+        }
+
+        // ── Phase 7B: Resolve operator declarations ────────────
+        //
+        // 2026-06-29: Each operator declaration maps a rune (+ param type)
+        // to an implementation expression (intrinsic call, defn, or inop).
+        // Operators are stored keyed by (OpRune, Option<param_type_name>)
+        // for quick lookup during type-checking.
+        for op_decl in &td.body.operators {
+            let param_name = op_decl.param_type.as_ref()
+                .and_then(|e| match e.as_ref() {
+                    crate::ast::Expr::TypeRef(name) => Some(name.clone()),
+                    crate::ast::Expr::Identifier(name) => Some(name.clone()),
+                    _ => None,
+                });
+            let key = (op_decl.rune, param_name);
+            rt.operators.insert(key, op_decl.clone());
         }
 
         Some(rt)
