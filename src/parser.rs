@@ -3432,9 +3432,15 @@ impl<'a> Parser<'a> {
 
         let param_type = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
             self.advance();
-            let pt = self.parse_type_expr_for_typedef()?;
-            self.expect(Token::RParen)?;
-            Some(pt)
+            // Allow empty parens for unary operators: op Neg() -> Ret = impl;
+            if matches!(self.current_token(), Some(Ok(Token::RParen))) {
+                self.advance();
+                None
+            } else {
+                let pt = self.parse_type_expr_for_typedef()?;
+                self.expect(Token::RParen)?;
+                Some(pt)
+            }
         } else {
             None
         };
@@ -10835,6 +10841,22 @@ defn fallback() -> Int { term 0; };
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_err(), "Unknown rune should fail");
+    }
+
+    #[test]
+    fn test_parse_example_float4() {
+        let source = include_str!("../examples/inop-float4.bv");
+        let mut parser = Parser::new(source);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Float4 example should parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_example_custom_types() {
+        let source = include_str!("../examples/inop-custom-types.bv");
+        let mut parser = Parser::new(source);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Custom types example should parse: {:?}", result.err());
     }
 }
 

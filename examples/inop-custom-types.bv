@@ -1,0 +1,17 @@
+// ── Custom Type Declarations Example ──────────────────────────
+//
+// Demonstrates Phase 7B: user-defined types with operator→intrinsic
+// mappings, from-Bits construction, and inheritance.
+
+// ── Fixed32: Q16.16 fixed-point number ──────────────────────
+// Represented as i64 with 16 fractional bits.
+type Fixed32 <: Bits {
+    Bytes = 4;
+    Alignment = 4;
+    LLVMType = i64;
+    Storage = Native;
+
+    op Add(Fixed32) -> Fixed32 = my_iadd;
+    op Sub(Fixed32) -> Fixed32 = my_isub;
+    op Neg() -> Fixed32 = my_ineg;
+};

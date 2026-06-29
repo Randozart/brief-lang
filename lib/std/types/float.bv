@@ -1,0 +1,34 @@
+// ── Floating Point Type Definitions ──────────────────────────
+//
+// Extended floating point types built on the Primitive type system.
+// These types use operator→intrinsic declarations to define their
+// behavior.
+//
+// Phase 7B: These files will compile once the operator→intrinsic
+// pipeline is fully wired through the typechecker.
+
+// 16-bit half-precision float (hardware on some GPUs)
+type Float16 <: Bits {
+    Bytes = 2;
+    Alignment = 2;
+    LLVMType = half;
+    Storage = Native;
+    TBAA = FloatNode;
+
+    op Add(Float16) -> Float16 = fadd16#;
+    op Sub(Float16) -> Float16 = fsub16#;
+    op Mul(Float16) -> Float16 = fmul16#;
+};
+
+// 4-lane SIMD float vector
+type Float4 <: Bits {
+    Bytes = 16;
+    Alignment = 16;
+    LLVMType = <4 x float>;
+    Storage = Native;
+    TBAA = FloatNode;
+
+    op Add(Float4) -> Float4 = fadd_v4f32#;
+    op Sub(Float4) -> Float4 = fsub_v4f32#;
+    op Mul(Float4) -> Float4 = fmul_v4f32#;
+};
