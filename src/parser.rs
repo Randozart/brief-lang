@@ -10791,6 +10791,51 @@ defn fallback() -> Int { term 0; };
         assert!(result.unwrap_err().contains("unknown cfg key"), "warning should mention unknown key");
     }
 
+    // ── Phase 7B: Operator Declaration Tests ─────────────────
+    #[test]
+    fn test_parse_operator_add_declaration() {
+        let s = "type MyFloat <: Bits { Bytes = 4; op Add(MyFloat) -> MyFloat = my_add; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse op declaration: {:?}", result.err());
+        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+            assert_eq!(td.body.operators.len(), 1);
+            assert_eq!(td.body.operators[0].rune, OpRune::Add);
+        } else { panic!("Expected TypeDef"); }
+    }
+
+    #[test]
+    fn test_parse_operator_unary_neg() {
+        let s = "type Fixed <: Bits { Bytes = 4; op Neg -> Fixed = my_neg; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse unary op: {:?}", result.err());
+        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+            assert_eq!(td.body.operators[0].rune, OpRune::Neg);
+            assert!(td.body.operators[0].param_type.is_none());
+        } else { panic!("Expected TypeDef"); }
+    }
+
+    #[test]
+    fn test_parse_multiple_operators() {
+        let s = "type Float4 <: Bits { Bytes = 16; op Add(Float4) -> Float4 = my_add; op Sub(Float4) -> Float4 = my_sub; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse multiple ops: {:?}", result.err());
+        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+            assert_eq!(td.body.operators.len(), 2);
+            assert_eq!(td.body.operators[0].rune, OpRune::Add);
+            assert_eq!(td.body.operators[1].rune, OpRune::Sub);
+        } else { panic!("Expected TypeDef"); }
+    }
+
+    #[test]
+    fn test_parse_operator_unknown_rune_fails() {
+        let s = "type Bad <: Bits { Bytes = 4; op Unknown() -> Int = identity; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_err(), "Unknown rune should fail");
+    }
 }
 
 enum BracketElement {
