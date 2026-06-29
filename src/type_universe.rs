@@ -35,6 +35,30 @@ pub struct ResolvedType {
     pub bytes: u64,
     /// Resolved alignment boundary.
     pub alignment: u64,
+
+    // ── Phase 7A: LLVM-specific codegen properties ─────────────
+    //
+    // 2026-06-29: These replace the hardcoded match arms in the LLVM
+    // backend. Populated for built-in types at universe-build time;
+    // inherited/overridden for user-defined types.
+    //
+    // See .opencode/plans/2026-06-29-type-system-refactoring.md
+
+    /// LLVM IR type string for register values (e.g. "float", "i64", "i8*").
+    pub llvm_type: String,
+    /// How this type is stored in %State: "Native" or "Boxed".
+    /// Native = lives in its own registers (e.g., float in float regs).
+    /// Boxed = stored as i64 (e.g., Int, Bool, Char).
+    pub storage: String,
+    /// TBAA type tree node name (e.g. "Int", "Float", "Bool", "Char", "String").
+    pub tbaa_node: String,
+    /// Intrinsic name for boxing native→i64 (None = identity, already i64).
+    pub box_op: Option<String>,
+    /// Intrinsic name for unboxing i64→native (None = identity, already i64).
+    pub unbox_op: Option<String>,
+
+    // ── End Phase 7A properties ─────────────────────────────────
+
     /// Byte order: 0 = Little, 1 = Big.
     pub endian: u8,
     /// Volatile flag.
@@ -134,12 +158,203 @@ impl TypeUniverse {
         }
     }
 
+    // ── Phase 7A: Built-in primitive type table ─────────────────
+    //
+    // 2026-06-29: Populates the universe with built-in primitive types
+    // (Int, Float, Float64, Bool, Char, String, Data, etc.). These types
+    // get their LLVM codegen properties from this table instead of from
+    // hardcoded match arms in the backend.
+    //
+    // When a user creates `type MyFloat <: Float { ... }`, the inheritance
+    // chain copies these properties, then applies overrides.
+    //
+    // See .opencode/plans/2026-06-29-type-system-refactoring.md
+
+    /// Register all built-in primitive types in the universe.
+    /// Called at the start of `build()` before processing user TypeDefs.
+    fn init_primitives(&mut self) {
+        let primitives: Vec<ResolvedType> = vec![
+            ResolvedType {
+                name: "Int".into(), base: "Bits".into(),
+                bytes: 8, alignment: 8,
+                llvm_type: "i64".into(), storage: "Boxed".into(),
+                tbaa_node: "Int".into(), box_op: None, unbox_op: None,
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "UInt".into(), base: "Bits".into(),
+                bytes: 8, alignment: 8,
+                llvm_type: "i64".into(), storage: "Boxed".into(),
+                tbaa_node: "Int".into(), box_op: None, unbox_op: None,
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "Int8".into(), base: "Bits".into(),
+                bytes: 1, alignment: 1,
+                llvm_type: "i8".into(), storage: "Boxed".into(),
+                tbaa_node: "Int".into(),
+                box_op: Some("sext.i8.to.i64#".into()),
+                unbox_op: Some("trunc.i64.to.i8#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "UInt8".into(), base: "Bits".into(),
+                bytes: 1, alignment: 1,
+                llvm_type: "i8".into(), storage: "Boxed".into(),
+                tbaa_node: "Int".into(),
+                box_op: Some("zext.i8.to.i64#".into()),
+                unbox_op: Some("trunc.i64.to.i8#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "Int16".into(), base: "Bits".into(),
+                bytes: 2, alignment: 2,
+                llvm_type: "i16".into(), storage: "Boxed".into(),
+                tbaa_node: "Int".into(),
+                box_op: Some("sext.i16.to.i64#".into()),
+                unbox_op: Some("trunc.i64.to.i16#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "UInt16".into(), base: "Bits".into(),
+                bytes: 2, alignment: 2,
+                llvm_type: "i16".into(), storage: "Boxed".into(),
+                tbaa_node: "Int".into(),
+                box_op: Some("zext.i16.to.i64#".into()),
+                unbox_op: Some("trunc.i64.to.i16#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "Int32".into(), base: "Bits".into(),
+                bytes: 4, alignment: 4,
+                llvm_type: "i32".into(), storage: "Boxed".into(),
+                tbaa_node: "Int".into(),
+                box_op: Some("sext.i32.to.i64#".into()),
+                unbox_op: Some("trunc.i64.to.i32#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "UInt32".into(), base: "Bits".into(),
+                bytes: 4, alignment: 4,
+                llvm_type: "i32".into(), storage: "Boxed".into(),
+                tbaa_node: "Int".into(),
+                box_op: Some("zext.i32.to.i64#".into()),
+                unbox_op: Some("trunc.i64.to.i32#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "Float".into(), base: "Bits".into(),
+                bytes: 4, alignment: 4,
+                llvm_type: "float".into(), storage: "Native".into(),
+                tbaa_node: "Float".into(),
+                box_op: Some("bitcast.f32.to.i64#".into()),
+                unbox_op: Some("bitcast.i64.to.f32#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "Float64".into(), base: "Bits".into(),
+                bytes: 8, alignment: 8,
+                llvm_type: "double".into(), storage: "Native".into(),
+                tbaa_node: "Float".into(),
+                box_op: Some("bitcast.f64.to.i64#".into()),
+                unbox_op: Some("bitcast.i64.to.f64#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "Bool".into(), base: "Bits".into(),
+                bytes: 1, alignment: 1,
+                llvm_type: "i8".into(), storage: "Boxed".into(),
+                tbaa_node: "Bool".into(),
+                box_op: Some("zext.i1.to.i64#".into()),
+                unbox_op: Some("trunc.i64.to.i1#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "Char".into(), base: "Bits".into(),
+                bytes: 4, alignment: 4,
+                llvm_type: "i32".into(), storage: "Boxed".into(),
+                tbaa_node: "Char".into(),
+                box_op: None,  // already i64 in state
+                unbox_op: None,
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "String".into(), base: "Bits".into(),
+                bytes: 8, alignment: 8,
+                llvm_type: "i8*".into(), storage: "Boxed".into(),
+                tbaa_node: "String".into(),
+                box_op: Some("ptrtoint#".into()),
+                unbox_op: Some("inttoptr#".into()),
+                ..Self::default_primitive()
+            },
+            ResolvedType {
+                name: "Data".into(), base: "Bits".into(),
+                bytes: 8, alignment: 8,
+                llvm_type: "i8*".into(), storage: "Boxed".into(),
+                tbaa_node: "String".into(),
+                box_op: Some("ptrtoint#".into()),
+                unbox_op: Some("inttoptr#".into()),
+                ..Self::default_primitive()
+            },
+        ];
+
+        for p in primitives {
+            let name = p.name.clone();
+            self.types.insert(name.clone(), p);
+            self.resolution_order.push(name);
+        }
+    }
+
+    /// Default values for primitive type initialization.
+    /// Uses the `..` struct update syntax for ResolvedType.
+    fn default_primitive() -> ResolvedType {
+        ResolvedType {
+            name: String::new(),
+            type_params: vec![],
+            base: String::new(),
+            bytes: 0,
+            alignment: 1,
+            llvm_type: "i64".into(),
+            storage: "Boxed".into(),
+            tbaa_node: "Int".into(),
+            box_op: None,
+            unbox_op: None,
+            endian: 0,
+            volatile: false,
+            atomic: false,
+            element_type: None,
+            fixed_size: None,
+            insert_at: None,
+            extract_from: None,
+            allow_index: true,
+            allow_slice: true,
+            allow_arrow: true,
+            codec: None,
+            on_exit: None,
+            guards: vec![],
+            projections: HashMap::new(),
+            source: crate::ast::TypeDef {
+                name: String::new(),
+                type_params: vec![],
+                base: Box::new(Expr::TypeRef("Bits".into())),
+                bit_range: None,
+                body: crate::ast::TypeDefBody {
+                    bindings: vec![],
+                    constraints: vec![],
+                    span: None,
+                },
+                span: None,
+            },
+        }
+    }
+
     /// Build the type universe from a program's TopLevel items.
     /// Collects TypeDef declarations, resolves derivation chains.
     pub fn build(program: &Program) -> Self {
         let mut universe = TypeUniverse::new();
 
-        // Phase 1: Collect all TypeDef declarations
+        // Phase 0: Register built-in primitive types
+        universe.init_primitives();
         let mut type_defs: Vec<&TypeDef> = Vec::new();
         for item in &program.items {
             if let TopLevel::TypeDef(td) = item {
@@ -244,6 +459,11 @@ impl TypeUniverse {
             base: base_name.clone(),
             bytes: 0,
             alignment: 1,
+            llvm_type: "i64".to_string(),
+            storage: "Boxed".to_string(),
+            tbaa_node: "Int".to_string(),
+            box_op: None,
+            unbox_op: None,
             endian: 0,
             volatile: false,
             atomic: false,
@@ -266,6 +486,11 @@ impl TypeUniverse {
         if let Some(base) = self.types.get(&base_name) {
             rt.bytes = base.bytes;
             rt.alignment = base.alignment;
+            rt.llvm_type = base.llvm_type.clone();
+            rt.storage = base.storage.clone();
+            rt.tbaa_node = base.tbaa_node.clone();
+            rt.box_op = base.box_op.clone();
+            rt.unbox_op = base.unbox_op.clone();
             rt.endian = base.endian;
             rt.volatile = base.volatile;
             rt.atomic = base.atomic;
@@ -588,7 +813,14 @@ mod tests {
         let u32 = universe.get("U32").unwrap();
         assert_eq!(u8.bytes, 1);
         assert_eq!(u32.bytes, 4);
-        assert_eq!(universe.resolution_order.len(), 2);
+        assert!(universe.resolution_order.len() >= 14,
+            "Should include built-in primitives + user types, got {}",
+            universe.resolution_order.len());
+        // Last two should be our user-defined types (registered after primitives)
+        assert!(universe.get("U8").is_some());
+        assert!(universe.get("U32").is_some());
+        assert!(universe.get("Int").is_some(), "Built-in Int should exist");
+        assert!(universe.get("Float").is_some(), "Built-in Float should exist");
     }
 
     #[test]

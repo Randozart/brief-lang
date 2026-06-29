@@ -17,9 +17,13 @@ pub fn emit_identifier(
     indent: &str,
 ) -> TypedRegister {
     // ── Expr::Identifier ──────────────────────────────────────
-    if let Expr::Identifier(name) = expr {
-        // SSA body mode: prefer pre-extracted old-value register
-        // for int fields so all body ops are independent.
+    let name = match expr {
+        Expr::Identifier(n) => n,
+        Expr::OwnedRef(n) | Expr::PriorState(n) => n,
+        _ => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v.to_string(), ty: Type::Int }; }
+    };
+    // SSA body mode: prefer pre-extracted old-value register
+    // for int fields so all body ops are independent.
     if let Some(old_reg) = backend.fun.ssa_old_int_regs.get(name) {
         // If the old register is a non-i64 type, cast to i64 first
         if let Some(&idx) = backend.ctx.field_index_map.get(name) {
@@ -58,7 +62,7 @@ pub fn emit_identifier(
         } else {
             Type::Float
         };
-        return TypedRegister { name: old_reg.clone(), ty: brief_ty };
+        return TypedRegister { name: old_reg.to_string(), ty: brief_ty };
     }
     if let Some(ref ssa_reg) = backend.fun.ssa_state_reg.clone() {
     if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
@@ -94,7 +98,7 @@ pub fn emit_identifier(
                 }
                 Type::Char => {
                     writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ev).ok();
-                    return TypedRegister { name: v.clone(), ty: Type::Char };
+                    return TypedRegister { name: v.to_string(), ty: Type::Char };
                 }
                 Type::String | Type::Data => {
                     writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
@@ -150,7 +154,7 @@ pub fn emit_identifier(
     if backend.ctx.trigger_names.contains(name) {
         if let Some(sampled) = backend.sampled_triggers.get(name) {
             writeln!(out, "{}{} = add i64 0, {}", indent, v, sampled).ok();
-            return TypedRegister { name: v.clone(), ty: Type::Int };
+            return TypedRegister { name: v.to_string(), ty: Type::Int };
         } else if let Some(t) = backend.ctx.triggers.get(name).cloned() {
             // For built-in triggers (@stdin#, @timer#, @signal#), load from
             // the state field (the event loop stored the value there).
@@ -166,10 +170,10 @@ pub fn emit_identifier(
                         _ => { writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ev, sge).ok(); }
                     }
                     backend.emit_trg_load_finish(out, indent, &v, ev, &t.ty);
-                    return TypedRegister { name: v.clone(), ty: t.ty.clone() };
+                    return TypedRegister { name: v.to_string(), ty: t.ty.clone() };
                 } else {
                     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-                    return TypedRegister { name: v.clone(), ty: Type::Int };
+                    return TypedRegister { name: v.to_string(), ty: Type::Int };
                 }
             } else if matches!(t.address, crate::ast::LinkRef::Explicit(0)) {
                 // Cell-binding triggers (trg name @ Console!) and other
@@ -193,18 +197,18 @@ pub fn emit_identifier(
                     } else {
                         backend.emit_trg_load_finish(out, indent, &v, ev, &t.ty);
                     }
-                    return TypedRegister { name: v.clone(), ty: t.ty.clone() };
+                    return TypedRegister { name: v.to_string(), ty: t.ty.clone() };
                 } else {
                     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-                    return TypedRegister { name: v.clone(), ty: Type::Int };
+                    return TypedRegister { name: v.to_string(), ty: Type::Int };
                 }
             } else {
                 backend.emit_trg_load(out, indent, &v, &t.address, &t.ty);
-                return TypedRegister { name: v.clone(), ty: t.ty.clone() };
+                return TypedRegister { name: v.to_string(), ty: t.ty.clone() };
             }
         } else {
             writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-            return TypedRegister { name: v.clone(), ty: Type::Int };
+            return TypedRegister { name: v.to_string(), ty: Type::Int };
         }
     } else if let Some((ty, expr)) = backend.ctx.constants.get(name) {
         // Inline literal integer/bool constants as immediates
@@ -226,8 +230,8 @@ pub fn emit_identifier(
                 // 2026-06-29: Handle Float64 constant loading (load as double, return native)
                 if *ty == Type::Float64 {
                     writeln!(out, "{}{} = load double, double* @{}, align 8", indent, v, name).ok();
-                    backend.fun.reg_float_cache.insert(v.clone(), v.clone());
-                    return TypedRegister { name: v.clone(), ty: Type::Float64 };
+                    backend.fun.reg_float_cache.insert(v.to_string(), v.to_string());
+                    return TypedRegister { name: v.to_string(), ty: Type::Float64 };
                 }
                 let ll_ty = match ty {
                     Type::Float => "float",
@@ -273,72 +277,68 @@ pub fn emit_identifier(
             }
             s if s == "float" => {
                 writeln!(out, "{}{} = load float, float* {}, align 4", indent, v, p).ok();
-                backend.fun.reg_float_cache.insert(v.clone(), v.clone());
-                return TypedRegister { name: v.clone(), ty: Type::Float };
+                backend.fun.reg_float_cache.insert(v.to_string(), v.to_string());
+                return TypedRegister { name: v.to_string(), ty: Type::Float };
             }
             s if s == "double" => {
                 // 2026-06-29: Float64 field reads — load double, return Float64
                 writeln!(out, "{}{} = load double, double* {}, align 8", indent, v, p).ok();
-                backend.fun.reg_float_cache.insert(v.clone(), v.clone());
-                return TypedRegister { name: v.clone(), ty: Type::Float64 };
+                backend.fun.reg_float_cache.insert(v.to_string(), v.to_string());
+                return TypedRegister { name: v.to_string(), ty: Type::Float64 };
             }
             s if s == "i8*" => {
                 let ld = format!("%ild{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, ld, p).ok();
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ld).ok();
-                return TypedRegister { name: v.clone(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             s if s == "i32" => {
                 let ld = format!("%il{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, ld, p).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ld).ok();
-                return TypedRegister { name: v.clone(), ty: Type::Char };
+                return TypedRegister { name: v.to_string(), ty: Type::Char };
             }
             _ => {
                 writeln!(out, "{}{} = load {}, {}* {}, align {}{}", indent, v, ty, ty, p, backend.align_of(ty), rng).ok();
-                return TypedRegister { name: v.clone(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
         }
     } else {
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     }
-    // OwnedRef → Identifier delegation
-    if let Expr::OwnedRef(name) = expr {
-        return backend.emit_expr(out, &Expr::Identifier(name.clone()), indent);
-    }
     // PriorState → state field load
-    if let Expr::PriorState(name) = expr {
-        // Load the value from state BEFORE this tick's modifications.
-        // The SSA state register holds the committed (pre-tick) value.
-    if let Some(&idx) = backend.ctx.field_index_map.get(name) {
-        let ll_ty = &backend.ctx.field_types[idx];
-        let ev = format!("%pev{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        if let Some(ref ssa_reg) = backend.fun.ssa_state_reg.clone() {
-            writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, idx).ok();
-            let field_ty = match ll_ty.as_str() {
-                "i8" => {
-                    let tr = format!("%ptr_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = trunc i8 {} to i1", indent, tr, ev).ok();
-                    return TypedRegister { name: tr, ty: Type::Bool };
-                }
-                "i32" => {
-                    let z = format!("%piz_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = zext i32 {} to i64", indent, z, ev).ok();
-                    writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
-                    return TypedRegister { name: v.to_string(), ty: Type::Char };
-                }
-                "float" => {
-                    return TypedRegister { name: ev, ty: Type::Float };
-                }
-                _ => {
-                    writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
-                    return TypedRegister { name: v.to_string(), ty: Type::Int };
-                }
-            };
+    if name != "" {
+        if let Some(&idx) = backend.ctx.field_index_map.get(name) {
+            let ll_ty = &backend.ctx.field_types[idx];
+            let ev = format!("%pev{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            if let Some(ref ssa_reg) = backend.fun.ssa_state_reg.clone() {
+                writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, idx).ok();
+                let field_ty = match ll_ty.as_str() {
+                    "i8" => {
+                        let tr = format!("%ptr_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i8 {} to i1", indent, tr, ev).ok();
+                        return TypedRegister { name: tr, ty: Type::Bool };
+                    }
+                    "i32" => {
+                        let z = format!("%piz_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, z, ev).ok();
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                        return TypedRegister { name: v.to_string(), ty: Type::Char };
+                    }
+                    "float" => {
+                        return TypedRegister { name: ev, ty: Type::Float };
+                    }
+                    _ => {
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
+                        return TypedRegister { name: v.to_string(), ty: Type::Int };
+                    }
+                };
+            }
         }
+        panic!("emit_expr: PriorState field '{}' not found in field_index_map", name);
     }
-    panic!("emit_expr: PriorState field '{}' not found in field_index_map", name);
-}
+    // Default fallthrough
+    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    TypedRegister { name: v.to_string(), ty: Type::Int }
 }
 
-}
