@@ -12,12 +12,18 @@
 //   collections.rs  — DONE (ListLiteral, Tuple)
 //   intrinsics.rs   — DONE (200+ intrinsic variants)
 //   identifier.rs   — DONE (Identifier, OwnedRef, PriorState)
-//   rest.rs         — All remaining (Call, FieldAccess, Arrow, Match, etc.)
+//   call.rs         — DONE (Call — FFI and internal)
+//   projection.rs   — DONE (Projection — all ProjectionTarget variants)
+//   arrow.rs        — DONE (ArrowMut Push/Pop, ArrowDiscard, ArrowTransfer)
+//   rest.rs         — All remaining (Struct, Field, Match, Slice, etc.)
 
+pub mod arrow;
+pub mod call;
 pub mod collections;
 pub mod compare;
 pub mod identifier;
 pub mod intrinsics;
 pub mod literal;
 pub mod math;
+pub mod projection;
 pub mod rest;

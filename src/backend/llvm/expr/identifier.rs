@@ -16,7 +16,43 @@ pub fn emit_identifier(
     expr: &Expr,
     indent: &str,
 ) -> TypedRegister {
-    // ── Expr::Identifier ──────────────────────────────────────
+    // ── Expr::PriorState ────────────────────────────────────
+    // 2026-06-30: PriorState MUST read from ssa_state_reg (pre-tick value),
+    // NOT from let_bindings, triggers, or constants (current-tick values).
+    // Early-return before the Identifier path.
+    if matches!(expr, Expr::PriorState(_)) {
+        let name = match expr { Expr::PriorState(n) => n, _ => "" };
+        if let Some(&idx) = backend.ctx.field_index_map.get(name) {
+            let ll_ty = &backend.ctx.field_types[idx];
+            let ev = format!("%pev{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            if let Some(ref ssa_reg) = backend.fun.ssa_state_reg.clone() {
+                writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, idx).ok();
+                let field_ty = match ll_ty.as_str() {
+                    "i8" => {
+                        let tr = format!("%ptr_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = trunc i8 {} to i1", indent, tr, ev).ok();
+                        return TypedRegister { name: tr, ty: Type::Bool };
+                    }
+                    "i32" => {
+                        let z = format!("%piz_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = zext i32 {} to i64", indent, z, ev).ok();
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
+                        return TypedRegister { name: v.to_string(), ty: Type::Char };
+                    }
+                    "float" => {
+                        return TypedRegister { name: ev, ty: Type::Float };
+                    }
+                    _ => {
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
+                        return TypedRegister { name: v.to_string(), ty: Type::Int };
+                    }
+                };
+            }
+        }
+        panic!("emit_expr: PriorState field '{}' not found in field_index_map", name);
+    }
+
+    // ── Expr::Identifier / Expr::OwnedRef ──────────────────────
     let name = match expr {
         Expr::Identifier(n) => n,
         Expr::OwnedRef(n) | Expr::PriorState(n) => n,
@@ -305,37 +341,6 @@ pub fn emit_identifier(
         }
     } else {
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-    }
-    // PriorState → state field load
-    if name != "" {
-        if let Some(&idx) = backend.ctx.field_index_map.get(name) {
-            let ll_ty = &backend.ctx.field_types[idx];
-            let ev = format!("%pev{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            if let Some(ref ssa_reg) = backend.fun.ssa_state_reg.clone() {
-                writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, idx).ok();
-                let field_ty = match ll_ty.as_str() {
-                    "i8" => {
-                        let tr = format!("%ptr_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = trunc i8 {} to i1", indent, tr, ev).ok();
-                        return TypedRegister { name: tr, ty: Type::Bool };
-                    }
-                    "i32" => {
-                        let z = format!("%piz_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = zext i32 {} to i64", indent, z, ev).ok();
-                        writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
-                        return TypedRegister { name: v.to_string(), ty: Type::Char };
-                    }
-                    "float" => {
-                        return TypedRegister { name: ev, ty: Type::Float };
-                    }
-                    _ => {
-                        writeln!(out, "{}{} = add i64 0, {}", indent, v, ev).ok();
-                        return TypedRegister { name: v.to_string(), ty: Type::Int };
-                    }
-                };
-            }
-        }
-        panic!("emit_expr: PriorState field '{}' not found in field_index_map", name);
     }
     // Default fallthrough
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
