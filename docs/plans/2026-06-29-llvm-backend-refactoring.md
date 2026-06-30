@@ -697,7 +697,16 @@ The following must never change:
 7. ✅ Type universe stores LLVM properties for 14 built-in types
 8. ✅ emit_expr.rs reduced from 6,145 to 43 lines (**99.3%**)
 9. ✅ Backend has zero type-specific match arms (all via universe_key())
-10. ➡️ **Phase 7B-2**: Operator→intrinsic resolution in universe builder (in progress)### Phase 7: Type System Refactoring (Planned)
+10. ✅ **Phase 7B complete**: operator→intrinsic declarations wired end-to-end
+    - Parser: `op Add(Float4) -> Float4 = my_fadd;`
+    - Universe builder: resolves operator→intrinsic mappings
+    - Type-checker: preserves custom types (via `resolve_operator`)
+    - Codegen: emits operator calls (`call i64 @my_fadd(i64, i64)`)
+    - Examples: `brief compile examples/inop-float4.bv` generates valid IR
+
+---
+
+### Phase 7: Type System Refactoring
 
 See `.opencode/plans/2026-06-29-type-system-refactoring.md` for the complete
 plan to make types first-class universe citizens. Key goals:
