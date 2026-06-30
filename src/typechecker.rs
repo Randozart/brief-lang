@@ -626,14 +626,15 @@ impl TypeChecker {
                     // Here in Pass 2 we just ensure the type name is registered
                     // for later resolution.
                 }
-                TopLevel::Test { item: inner, .. } => {
-                    // Unwrap Test items — process the inner item's declarations
+                TopLevel::Fuzzed { item: inner, .. }
+                | TopLevel::Test { item: inner, .. } => {
+                    // Unwrap Fuzzed/Test items — process the inner item's declarations
                     // in Pass 1 so signatures/definitions are registered.
                     match inner.as_ref() {
-                        TopLevel::Definition(defn) => {
+                            TopLevel::Definition(defn) => {
                             self.definitions.insert(defn.name.clone(), defn.clone());
-                        }
-                        _ => {}
+            }
+            _ => {}
                     }
                 }
                 TopLevel::Assertion { .. } => {
@@ -726,8 +727,9 @@ impl TypeChecker {
                         stored_sig.wasm_setup = signature.wasm_setup.clone();
                     }
                 }
-                TopLevel::Test { item: inner, .. } => {
-                    // Unwrap Test items — typecheck the inner item
+                TopLevel::Fuzzed { item: inner, .. }
+                | TopLevel::Test { item: inner, .. } => {
+                    // Unwrap Fuzzed/Test items — typecheck the inner item
                     match inner.as_ref() {
                         TopLevel::Definition(defn) => self.check_definition(defn),
                         TopLevel::Transaction(txn) => self.check_transaction(txn),
@@ -1988,6 +1990,25 @@ impl TypeChecker {
                     self.declare_variable(name, decl_ty.clone());
                 } else {
                     self.declare_variable(name, Type::Int);
+                }
+            }
+            Statement::Foreach { item, list, body, .. } => {
+                let list_ty = self.infer_expression(list);
+                match list_ty {
+                    Type::Applied(ref name, ref params) if name == "List" && params.len() == 1 => {
+                        let elem_ty = params[0].clone();
+                        self.declare_variable(item, elem_ty);
+                        for stmt in body {
+                            self.check_statement(stmt, is_async);
+                        }
+                    }
+                    _ => {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: "List<T>".to_string(),
+                            found: self.type_to_string(&list_ty),
+                            context: format!("foreach '{}' requires a list", item),
+                        });
+                    }
                 }
             }
             _ => {}
@@ -3597,6 +3618,7 @@ mod tests {
                 outputs: vec![Type::Int], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
+                annotations: vec![],
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -3612,6 +3634,7 @@ mod tests {
                 outputs: vec![Type::Bool], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
+                annotations: vec![],
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -3630,6 +3653,7 @@ mod tests {
                     Statement::Let { name: "x".into(), ty: Some(Type::Int), expr: Some(Expr::Identifier("y".into())), address: None, address_expr: None, bit_range: None, is_override: false, modifiers: vec![], constraint: None },
                     Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None },
                 ],
+                annotations: vec![],
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -3698,7 +3722,8 @@ mod tests {
                 contract: Contract { pre_condition: Expr::Gt(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(0))), post_condition: Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(0))), watchdog: None, span: None },
                 body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
                 reactor_speed: None, span: None, is_lambda: false,
-                dependencies: vec![], attrs: vec![], modifiers: vec![],
+                dependencies: vec![], modifiers: vec![],
+                annotations: vec![],
                 variant_bodies: vec![], outputs: vec![], output_type: None,
             }),
         ]);
@@ -3798,6 +3823,7 @@ mod tests {
                 body: vec![
                     Statement::Term { values: vec![Some(Expr::Identifier("x".into()))], modifiers: vec![], swan_song: None },
                 ],
+                annotations: vec![],
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -3819,6 +3845,7 @@ mod tests {
                 body: vec![
                     Statement::Term { values: vec![Some(Expr::Identifier("x".into()))], modifiers: vec![], swan_song: None },
                 ],
+                annotations: vec![],
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
             TopLevel::Definition(Definition {
@@ -3832,6 +3859,7 @@ mod tests {
                 body: vec![
                     Statement::Term { values: vec![Some(Expr::Call("needs_int".into(), vec![Expr::String("hello".into())]))], modifiers: vec![], swan_song: None },
                 ],
+                annotations: vec![],
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -3856,6 +3884,7 @@ mod tests {
                 body: vec![
                     Statement::Expression(Expr::Call("undefined_fn".into(), vec![Expr::Integer(42)])),
                 ],
+                annotations: vec![],
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);

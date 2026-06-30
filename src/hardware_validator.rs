@@ -717,7 +717,8 @@ mod tests {
             parameters: vec![],
             contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
             body, reactor_speed: None, span: None,
-            is_lambda: false, dependencies: vec![], attrs: vec![],
+            is_lambda: false, dependencies: vec![],
+            annotations: vec![],
             modifiers: vec![], variant_bodies: vec![], outputs: vec![], output_type: None,
         })
     }

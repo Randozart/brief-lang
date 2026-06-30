@@ -1,0 +1,142 @@
+// ── Bootstrap Type Universe ──────────────────────────────────
+//
+// 2026-06-30: Built-in primitive type declarations using the
+// Annotation Arrow (<~) syntax. These form the prelude — always
+// implicitly imported into every .bv compilation.
+//
+// The `:` bindings are runtime fields; `<~` annotations are
+// compile-time codegen properties.
+
+type Int <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+    llvm <~ "i64";
+    storage <~ "Boxed";
+    tbaa <~ "Int";
+};
+
+type UInt <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+    llvm <~ "i64";
+    storage <~ "Boxed";
+    tbaa <~ "Int";
+};
+
+type Int8 <: Bits {
+    bytes <~ 1;
+    alignment <~ 1;
+    llvm <~ "i8";
+    storage <~ "Boxed";
+    tbaa <~ "Int";
+    box <~ "sext.i8.to.i64#";
+    unbox <~ "trunc.i64.to.i8#";
+};
+
+type UInt8 <: Bits {
+    bytes <~ 1;
+    alignment <~ 1;
+    llvm <~ "i8";
+    storage <~ "Boxed";
+    tbaa <~ "Int";
+    box <~ "zext.i8.to.i64#";
+    unbox <~ "trunc.i64.to.i8#";
+};
+
+type Int16 <: Bits {
+    bytes <~ 2;
+    alignment <~ 2;
+    llvm <~ "i16";
+    storage <~ "Boxed";
+    tbaa <~ "Int";
+    box <~ "sext.i16.to.i64#";
+    unbox <~ "trunc.i64.to.i16#";
+};
+
+type UInt16 <: Bits {
+    bytes <~ 2;
+    alignment <~ 2;
+    llvm <~ "i16";
+    storage <~ "Boxed";
+    tbaa <~ "Int";
+    box <~ "zext.i16.to.i64#";
+    unbox <~ "trunc.i64.to.i16#";
+};
+
+type Int32 <: Bits {
+    bytes <~ 4;
+    alignment <~ 4;
+    llvm <~ "i32";
+    storage <~ "Boxed";
+    tbaa <~ "Int";
+    box <~ "sext.i32.to.i64#";
+    unbox <~ "trunc.i64.to.i32#";
+};
+
+type UInt32 <: Bits {
+    bytes <~ 4;
+    alignment <~ 4;
+    llvm <~ "i32";
+    storage <~ "Boxed";
+    tbaa <~ "Int";
+    box <~ "zext.i32.to.i64#";
+    unbox <~ "trunc.i64.to.i32#";
+};
+
+type Float <: Bits {
+    bytes <~ 4;
+    alignment <~ 4;
+    llvm <~ "float";
+    storage <~ "Native";
+    tbaa <~ "Float";
+    box <~ "bitcast.f32.to.i64#";
+    unbox <~ "bitcast.i64.to.f32#";
+};
+
+type Float64 <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+    llvm <~ "double";
+    storage <~ "Native";
+    tbaa <~ "Float";
+    box <~ "bitcast.f64.to.i64#";
+    unbox <~ "bitcast.i64.to.f64#";
+};
+
+type Bool <: Bits {
+    bytes <~ 1;
+    alignment <~ 1;
+    llvm <~ "i8";
+    storage <~ "Boxed";
+    tbaa <~ "Bool";
+    box <~ "zext.i1.to.i64#";
+    unbox <~ "trunc.i64.to.i1#";
+};
+
+type Char <: Bits {
+    bytes <~ 4;
+    alignment <~ 4;
+    llvm <~ "i32";
+    storage <~ "Boxed";
+    tbaa <~ "Char";
+};
+
+type String <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+    llvm <~ "i8*";
+    storage <~ "Boxed";
+    tbaa <~ "String";
+    box <~ "ptrtoint#";
+    unbox <~ "inttoptr#";
+};
+
+type Data <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+    llvm <~ "i8*";
+    storage <~ "Boxed";
+    tbaa <~ "String";
+    box <~ "ptrtoint#";
+    unbox <~ "inttoptr#";
+};

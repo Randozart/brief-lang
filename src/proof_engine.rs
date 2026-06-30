@@ -1694,7 +1694,8 @@ impl ProofEngine {
                 initial_definitions.insert(&defn.name, defn);
             } else if let TopLevel::Transaction(txn) = item {
                 initial_txns.insert(&txn.name, txn);
-            } else if let TopLevel::Test { item: inner, .. } = item {
+            } else if let TopLevel::Fuzzed { item: inner, .. }
+                     | TopLevel::Test { item: inner, .. } = item {
                 match inner.as_ref() {
                     TopLevel::Definition(defn) => { initial_definitions.insert(&defn.name, defn); }
                     TopLevel::Transaction(txn) => { initial_txns.insert(&txn.name, txn); }
@@ -1706,7 +1707,13 @@ impl ProofEngine {
         let mut sym_exec = SymbolicExecutor::new().with_volatile_vars(volatile_vars);
 
         for item in &program.items {
-            match item {
+            // Unwrap Fuzzed/Test items to access the inner item for verification
+            let inner_item = match item {
+                TopLevel::Fuzzed { item: inner, .. }
+                | TopLevel::Test { item: inner, .. } => inner.as_ref(),
+                other => other,
+            };
+            match inner_item {
                 TopLevel::Transaction(txn) => {
                     // For convergence contracts, skip symbolic execution entirely
                     // — the structural convergence proof is stronger than

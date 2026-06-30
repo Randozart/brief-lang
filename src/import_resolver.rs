@@ -162,6 +162,28 @@ impl ImportResolver {
         // files that parse correctly are included here.
         if self.use_stdlib && !self.core_imported {
             self.core_imported = true;
+
+            // Auto-import the bootstrap type universe (14 primitive types)
+            let has_bootstrap_import = items.iter().any(|item| {
+                if let TopLevel::Import(imp) = item {
+                    imp.is_magic
+                        && imp.path.len() >= 3
+                        && imp.path[0] == "std"
+                        && imp.path[1] == "types"
+                        && imp.path[2] == "bootstrap.bv"
+                } else {
+                    false
+                }
+            });
+            if !has_bootstrap_import {
+                items.insert(0, TopLevel::Import(Import {
+                    is_magic: true,
+                    path: vec!["std".to_string(), "types".to_string(), "bootstrap.bv".to_string()],
+                    items: vec![],
+                    target: crate::ast::ImportTarget::Native,
+                }));
+            }
+
             let has_core_imports = items.iter().any(|item| {
                 if let TopLevel::Import(imp) = item {
                     imp.is_magic
@@ -1165,9 +1187,13 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let stdlib_root = dir.path().join("lib");
         let core_dir = stdlib_root.join("std").join("core");
+        let types_dir = stdlib_root.join("std").join("types");
         fs::create_dir_all(&core_dir).unwrap();
+        fs::create_dir_all(&types_dir).unwrap();
         fs::write(core_dir.join("ptr.bv"), "defn p_fn -> Int { term 0; };").unwrap();
         fs::write(core_dir.join("string_builder.bv"), "defn s_fn -> Int { term 0; };").unwrap();
+        // Bootstrap types needed for auto-import of bootstrap.bv prelude
+        fs::write(types_dir.join("bootstrap.bv"), "type Int <: Bits { bytes <~ 8; }; type Float <: Bits { bytes <~ 4; };").unwrap();
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 

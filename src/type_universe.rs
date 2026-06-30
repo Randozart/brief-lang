@@ -173,138 +173,26 @@ impl TypeUniverse {
     //
     // See .opencode/plans/2026-06-29-type-system-refactoring.md
 
-    /// Register all built-in primitive types in the universe.
-    /// Called at the start of `build()` before processing user TypeDefs.
-    fn init_primitives(&mut self) {
-        let primitives: Vec<ResolvedType> = vec![
-            ResolvedType {
-                name: "Int".into(), base: "Bits".into(),
-                bytes: 8, alignment: 8,
-                llvm_type: "i64".into(), storage: "Boxed".into(),
-                tbaa_node: "Int".into(), box_op: None, unbox_op: None,
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "UInt".into(), base: "Bits".into(),
-                bytes: 8, alignment: 8,
-                llvm_type: "i64".into(), storage: "Boxed".into(),
-                tbaa_node: "Int".into(), box_op: None, unbox_op: None,
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "Int8".into(), base: "Bits".into(),
-                bytes: 1, alignment: 1,
-                llvm_type: "i8".into(), storage: "Boxed".into(),
-                tbaa_node: "Int".into(),
-                box_op: Some("sext.i8.to.i64#".into()),
-                unbox_op: Some("trunc.i64.to.i8#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "UInt8".into(), base: "Bits".into(),
-                bytes: 1, alignment: 1,
-                llvm_type: "i8".into(), storage: "Boxed".into(),
-                tbaa_node: "Int".into(),
-                box_op: Some("zext.i8.to.i64#".into()),
-                unbox_op: Some("trunc.i64.to.i8#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "Int16".into(), base: "Bits".into(),
-                bytes: 2, alignment: 2,
-                llvm_type: "i16".into(), storage: "Boxed".into(),
-                tbaa_node: "Int".into(),
-                box_op: Some("sext.i16.to.i64#".into()),
-                unbox_op: Some("trunc.i64.to.i16#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "UInt16".into(), base: "Bits".into(),
-                bytes: 2, alignment: 2,
-                llvm_type: "i16".into(), storage: "Boxed".into(),
-                tbaa_node: "Int".into(),
-                box_op: Some("zext.i16.to.i64#".into()),
-                unbox_op: Some("trunc.i64.to.i16#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "Int32".into(), base: "Bits".into(),
-                bytes: 4, alignment: 4,
-                llvm_type: "i32".into(), storage: "Boxed".into(),
-                tbaa_node: "Int".into(),
-                box_op: Some("sext.i32.to.i64#".into()),
-                unbox_op: Some("trunc.i64.to.i32#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "UInt32".into(), base: "Bits".into(),
-                bytes: 4, alignment: 4,
-                llvm_type: "i32".into(), storage: "Boxed".into(),
-                tbaa_node: "Int".into(),
-                box_op: Some("zext.i32.to.i64#".into()),
-                unbox_op: Some("trunc.i64.to.i32#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "Float".into(), base: "Bits".into(),
-                bytes: 4, alignment: 4,
-                llvm_type: "float".into(), storage: "Native".into(),
-                tbaa_node: "Float".into(),
-                box_op: Some("bitcast.f32.to.i64#".into()),
-                unbox_op: Some("bitcast.i64.to.f32#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "Float64".into(), base: "Bits".into(),
-                bytes: 8, alignment: 8,
-                llvm_type: "double".into(), storage: "Native".into(),
-                tbaa_node: "Float".into(),
-                box_op: Some("bitcast.f64.to.i64#".into()),
-                unbox_op: Some("bitcast.i64.to.f64#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "Bool".into(), base: "Bits".into(),
-                bytes: 1, alignment: 1,
-                llvm_type: "i8".into(), storage: "Boxed".into(),
-                tbaa_node: "Bool".into(),
-                box_op: Some("zext.i1.to.i64#".into()),
-                unbox_op: Some("trunc.i64.to.i1#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "Char".into(), base: "Bits".into(),
-                bytes: 4, alignment: 4,
-                llvm_type: "i32".into(), storage: "Boxed".into(),
-                tbaa_node: "Char".into(),
-                box_op: None,  // already i64 in state
-                unbox_op: None,
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "String".into(), base: "Bits".into(),
-                bytes: 8, alignment: 8,
-                llvm_type: "i8*".into(), storage: "Boxed".into(),
-                tbaa_node: "String".into(),
-                box_op: Some("ptrtoint#".into()),
-                unbox_op: Some("inttoptr#".into()),
-                ..Self::default_primitive()
-            },
-            ResolvedType {
-                name: "Data".into(), base: "Bits".into(),
-                bytes: 8, alignment: 8,
-                llvm_type: "i8*".into(), storage: "Boxed".into(),
-                tbaa_node: "String".into(),
-                box_op: Some("ptrtoint#".into()),
-                unbox_op: Some("inttoptr#".into()),
-                ..Self::default_primitive()
-            },
-        ];
-
-        for p in primitives {
-            let name = p.name.clone();
-            self.types.insert(name.clone(), p);
-            self.resolution_order.push(name);
+    /// Register built-in primitive types from the bootstrap file.
+    /// Uses Annotation Arrow (<~) syntax from lib/std/types/bootstrap.bv.
+    fn init_primitives_from_bootstrap(&mut self) {
+        let src = include_str!("../lib/std/types/bootstrap.bv");
+        let mut parser = crate::parser::Parser::new(src);
+        let program = match parser.parse() {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("Warning: failed to parse bootstrap type universe: {}", e);
+                return;
+            }
+        };
+        for item in &program.items {
+            if let crate::ast::TopLevel::TypeDef(td) = item {
+                if let Some(resolved) = self.resolve_type_def(td) {
+                    let name = resolved.name.clone();
+                    self.types.insert(name.clone(), resolved);
+                    self.resolution_order.push(name);
+                }
+            }
         }
     }
 
@@ -358,8 +246,8 @@ impl TypeUniverse {
     pub fn build(program: &Program) -> Self {
         let mut universe = TypeUniverse::new();
 
-        // Phase 0: Register built-in primitive types
-        universe.init_primitives();
+        // Phase 0: Register built-in primitive types from bootstrap file
+        universe.init_primitives_from_bootstrap();
         let mut type_defs: Vec<&TypeDef> = Vec::new();
         for item in &program.items {
             if let TopLevel::TypeDef(td) = item {
@@ -559,64 +447,65 @@ impl TypeUniverse {
     /// Known metadata property names override the corresponding field;
     /// unknown names are stored in the projections map.
     fn apply_binding(&self, rt: &mut ResolvedType, binding: &TypeBinding) {
-        match binding.name.as_str() {
-            "Bytes" => {
+        // Case-insensitive matching for uniform <~ annotation syntax
+        match binding.name.to_lowercase().as_str() {
+            "bytes" => {
                 if let Expr::Integer(n) = binding.value.as_ref() {
                     rt.bytes = *n as u64;
                 }
             }
-            "Alignment" => {
+            "alignment" => {
                 if let Expr::Integer(n) = binding.value.as_ref() {
                     rt.alignment = *n as u64;
                 }
             }
-            "Endian" => {
+            "endian" => {
                 if let Expr::Identifier(name) = binding.value.as_ref() {
                     rt.endian = if name == "Big" || name == "big" { 1 } else { 0 };
                 }
             }
-            "Volatile" => {
+            "volatile" => {
                 if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.volatile = *b;
                 }
             }
-            "Atomic" => {
+            "atomic" => {
                 if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.atomic = *b;
                 }
             }
-            "ElementType" => {
+            "elementtype" => {
                 if let Expr::TypeRef(name) = binding.value.as_ref() {
                     rt.element_type = Some(name.clone());
                 }
             }
-            "FixedSize" => {
+            "fixedsize" => {
                 if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.fixed_size = Some(*b);
                 }
             }
-            "InsertAt" => {
+            "insertat" => {
                 rt.insert_at = type_universe_expr_to_string(&binding.value);
             }
-            "ExtractFrom" => {
+            "extractfrom" => {
                 rt.extract_from = type_universe_expr_to_string(&binding.value);
             }
-            "AllowIndex" => {
+            "allowindex" => {
                 if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.allow_index = *b;
                 }
             }
-            "AllowSlice" => {
+            "allowslice" => {
                 if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.allow_slice = *b;
                 }
             }
-            "AllowArrow" => {
+            "allowarrow" => {
                 if let Expr::Bool(b) = binding.value.as_ref() {
                     rt.allow_arrow = *b;
                 }
             }
-            "Codec" => {
+            "codec" => {
                 match &binding.value.as_ref() {
                     Expr::String(s) => {
                         if !KNOWN_CODECS.contains(&s.as_str()) {
@@ -633,16 +522,44 @@ impl TypeUniverse {
                     _ => {}
                 }
             }
-            "OnExit" => {
-                // Foreign destructor function: OnExit = __rust_vec_drop#;
-                // The value is the function name (string or identifier).
+            "onexit" => {
+                // Foreign destructor function
                 match &binding.value.as_ref() {
                     Expr::String(s) => rt.on_exit = Some(s.clone()),
                     Expr::Identifier(id) => rt.on_exit = Some(id.clone()),
-                    // For Expr::IntrinsicCall like __rust_vec_drop#, extract name
                     Expr::IntrinsicCall { intrinsic, .. } => {
                         rt.on_exit = Some(intrinsic.name().to_string());
                     }
+                    _ => {}
+                }
+            }
+            // ── Codegen Property Handlers ───────────────────────
+            "llvm" => {
+                if let Expr::String(s) = binding.value.as_ref() {
+                    rt.llvm_type = s.clone();
+                }
+            }
+            "storage" => {
+                if let Expr::String(s) = binding.value.as_ref() {
+                    rt.storage = s.clone();
+                }
+            }
+            "tbaa" => {
+                if let Expr::String(s) = binding.value.as_ref() {
+                    rt.tbaa_node = s.clone();
+                }
+            }
+            "box" => {
+                match binding.value.as_ref() {
+                    Expr::String(s) => rt.box_op = Some(s.clone()),
+                    Expr::Identifier(id) => rt.box_op = Some(id.clone()),
+                    _ => {}
+                }
+            }
+            "unbox" => {
+                match binding.value.as_ref() {
+                    Expr::String(s) => rt.unbox_op = Some(s.clone()),
+                    Expr::Identifier(id) => rt.unbox_op = Some(id.clone()),
                     _ => {}
                 }
             }

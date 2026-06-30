@@ -2287,6 +2287,7 @@ pub struct Definition {
     pub body: Vec<Statement>,
     pub is_lambda: bool,
     pub modifiers: Vec<Hashtag>,
+    pub annotations: Vec<TypeBinding>,
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
 }
 
@@ -2302,7 +2303,7 @@ pub struct Transaction {
     pub span: Option<Span>,
     pub is_lambda: bool,
     pub dependencies: Vec<String>,
-    pub attrs: Vec<Attribute>,
+    pub annotations: Vec<TypeBinding>,
     pub modifiers: Vec<Hashtag>,
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
     pub outputs: Vec<Type>,
@@ -2350,6 +2351,7 @@ pub struct TriggerDeclaration {
     pub is_wake: bool,
     pub is_const: bool,
     pub span: Option<Span>,
+    pub annotations: Vec<TypeBinding>,
     pub modifiers: Vec<Hashtag>,
 }
 
@@ -2455,6 +2457,12 @@ pub enum TopLevel {
     Test {
         item: Box<TopLevel>,
         groups: Vec<String>,
+    },
+    /// `#fuzz(bindings...) -> expected` pragma — wraps an item with inline test cases.
+    /// Verified at compile time via interpreter (defn/txn) or BILD simulator (inop).
+    Fuzzed {
+        item: Box<TopLevel>,
+        cases: Vec<FuzzCase>,
     },
     /// `#!assert` directive — compile-time assertion chain.
     Assertion {
@@ -2695,6 +2703,14 @@ pub struct Comment {
     pub text: String,
 }
 
+/// A single fuzz test case: bind parameters/state to values, expect an output.
+#[derive(Debug, Clone)]
+pub struct FuzzCase {
+    pub bindings: Vec<(String, Expr)>,
+    pub expected: Expr,
+    pub span: Option<crate::errors::Span>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hashtag {
     pub name: String,
@@ -2860,7 +2876,7 @@ impl Program {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],

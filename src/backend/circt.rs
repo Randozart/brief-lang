@@ -592,6 +592,23 @@ impl CirctBackend {
                 Statement::Term { .. } => {
                     // Regular term (non-bang): no halt — commit action continues
                 }
+                Statement::Foreach { item, list, body, .. } => {
+                    // Hardware can't do dynamic iteration. Try compile-time unroll.
+                    let list_items = match list.as_ref() {
+                        Expr::ListLiteral(items) => Some(items),
+                        _ => None,
+                    };
+                    if let Some(items) = list_items {
+                        for (i, elem) in items.iter().enumerate() {
+                            writeln!(out, "  // foreach iteration {}: {} = {:?}", i, item, elem).ok();
+                            for stmt in body {
+                                self.emit_txn_body(ng, out, _name, &[stmt.clone()], contract, reg_names);
+                            }
+                        }
+                    } else {
+                        writeln!(out, "  // foreach skipped — non-constant list, unroll not possible").ok();
+                    }
+                }
                 _ => {}
             }
         }
@@ -843,6 +860,7 @@ mod tests {
             is_wake: true,
             is_const: false,
             span: None,
+            annotations: vec![],
             modifiers: vec![],
         })
     }
@@ -855,7 +873,8 @@ mod tests {
             contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
             body,
             reactor_speed: None, span: None, is_lambda: false,
-            dependencies: vec![], attrs: vec![],
+            dependencies: vec![],
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -970,6 +989,7 @@ mod tests {
                 address: LinkRef::Linked("button0".to_string()),
                 is_wake: true, is_const: false, span: None,
                 bit_range: None, stages: vec![], condition: None,
+                annotations: vec![],
                 modifiers: vec![],
             }),
         ]));
@@ -985,6 +1005,7 @@ mod tests {
                 name: "btn".to_string(), ty: Type::Bool,
                 address: LinkRef::Explicit(0),
                 is_wake: true, is_const: false, span: None,
+                annotations: vec![],
                 modifiers: vec![],
                 bit_range: None, stages: vec![], condition: None,
             }),

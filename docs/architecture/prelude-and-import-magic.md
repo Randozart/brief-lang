@@ -133,6 +133,20 @@ TypeChecker). The new `--no-std` flag:
 3. Does NOT remove built-in `Option`/`Result` (they're required for FFI)
 4. Does NOT prevent `import#` (compiler-relative imports still work)
 
+## Bootstrap Type Universe
+
+**Added 2026-06-30 (Phase C):** 14 primitive types (`Int`, `UInt`, `Int8`,
+`UInt8`, `Int16`, `UInt16`, `Int32`, `UInt32`, `Float`, `Float64`, `Bool`,
+`Char`, `String`, `Data`) are defined in `lib/std/types/bootstrap.bv` using
+the `<~` Annotation Arrow syntax.
+
+The compiler auto-injects `import# "std/types/bootstrap.bv"` for every `.bv`
+file, ensuring all built-in types are available without explicit imports.
+This happens alongside the `core/` auto-import and is also gated by `--no-std`.
+
+Previously these types were hardcoded as Rust `Vec<ResolvedType>` literals in
+`init_primitives()`. Now they are single-source-of-truth `.bv` declarations.
+
 ## Implementation Phases
 
 ### Phase 1: Directory Restructure

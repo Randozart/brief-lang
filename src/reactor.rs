@@ -477,7 +477,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -497,7 +498,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: deps,
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -536,13 +538,15 @@ mod tests {
                 name: "foo".into(), type_params: vec![], parameters: vec![], outputs: vec![],
                 output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+                annotations: vec![],
                 body: vec![], is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
             TopLevel::Transaction(Transaction {
                 name: "bar".into(), is_reactive: false, is_async: false, parameters: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)), body: vec![],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![], outputs: vec![],
+ modifiers: vec![], variant_bodies: vec![], outputs: vec![],
+                annotations: vec![],
                 output_type: None,
             }),
         ]);
@@ -649,6 +653,7 @@ mod tests {
             is_wake: true,
             is_const: false,
             span: None,
+            annotations: vec![],
             modifiers: vec![],
         });
         let reactor = build_reactor(&simple_program(vec![trg]));
@@ -669,7 +674,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -699,7 +705,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec!["x".into()],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -729,7 +736,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],

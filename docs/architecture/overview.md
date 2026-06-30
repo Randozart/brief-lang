@@ -39,7 +39,28 @@ flowchart LR
 | Backend | `backend/` | Code generation for target (LLVM, CIRCT, Webstack, etc.) |
 | Interpreter | `interpreter.rs` | Reference implementation — evaluates Brief directly |
 
-## Feature File Architecture (Pattern B)
+## Announcement Arrow (`<~`) — Compile-Time Metadata
+
+**Added 2026-06-30 (Phase C/D).** The `<~` token (TildeArrow) provides a
+uniform mechanism for compile-time annotations on declarations:
+
+- **Type body bindings**: `bytes <~ 8;` replaces `Bytes = 8;`
+- **Definition annotations**: `defn compute <~ priority: 2 (x: Int) -> Int`
+- **Transaction annotations**: `txn process <~ retry: 3, #atomic [pre][post]`
+- **Trigger annotations**: `trigger tick: Int <~ period: 100 @timer#(1000)`
+- **Hashtag shorthand**: `#volatile` inside a type body desugars to `volatile <~ true`
+
+Annotation values are arbitrary expressions (integers, strings, bools,
+identifiers). Unknown annotation names are preserved as user-defined
+projections on the `ResolvedType` in the TypeUniverse.
+
+## Bootstrap Type Universe
+
+**Added 2026-06-30 (Phase C).** The 14 built-in primitive types (`Int`,
+`Float`, `Bool`, etc.) are defined in `lib/std/types/bootstrap.bv` using the
+`<~` annotation syntax. Every `.bv` file auto-imports this file via the
+ImportResolver. Previously these were hardcoded Rust struct literals in
+`type_universe.rs`.
 
 The compiler uses **Pattern B**: each language construct has its own file
 in `src/features/` with co-located struct definition, parse helper,

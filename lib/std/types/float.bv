@@ -9,11 +9,11 @@
 
 // 16-bit half-precision float (hardware on some GPUs)
 type Float16 <: Bits {
-    Bytes = 2;
-    Alignment = 2;
-    LLVMType = half;
-    Storage = Native;
-    TBAA = FloatNode;
+    bytes <~ 2;
+    alignment <~ 2;
+    llvm <~ "half";
+    storage <~ "Native";
+    tbaa <~ "FloatNode";
 
     op Add(Float16) -> Float16 = fadd16#;
     op Sub(Float16) -> Float16 = fsub16#;
@@ -22,11 +22,11 @@ type Float16 <: Bits {
 
 // 4-lane SIMD float vector
 type Float4 <: Bits {
-    Bytes = 16;
-    Alignment = 16;
-    LLVMType = <4 x float>;
-    Storage = Native;
-    TBAA = FloatNode;
+    bytes <~ 16;
+    alignment <~ 16;
+    llvm <~ "<4 x float>";
+    storage <~ "Native";
+    tbaa <~ "FloatNode";
 
     op Add(Float4) -> Float4 = fadd_v4f32#;
     op Sub(Float4) -> Float4 = fsub_v4f32#;

@@ -431,6 +431,7 @@ mod tests {
             is_wake: true,
             is_const: false,
             span: None,
+            annotations: vec![],
             modifiers: vec![],
         })
     }
@@ -447,7 +448,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],

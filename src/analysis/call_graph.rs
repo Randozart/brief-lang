@@ -217,7 +217,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),

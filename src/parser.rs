@@ -476,6 +476,10 @@ impl<'a> Parser<'a> {
                     mods.push(Hashtag { name, value, mandatory: false, speculative: true, fallback: Vec::new(), scoped: None });
                 }
                 Some(Ok(Token::Hash)) => {
+                    // If this is #fuzz, stop — caller handles it specially
+                    if self.peek_identifier().as_deref() == Some("fuzz") {
+                        return Ok(mods);
+                    }
                     self.advance();
                     let name = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
                         let n = n.clone();
@@ -1185,12 +1189,23 @@ impl<'a> Parser<'a> {
             Vec::new()
         };
 
+        // Collect #fuzz cases before any modifier parsing
+        let mut fuzz_cases: Vec<crate::ast::FuzzCase> = Vec::new();
+        while self.lookahead_is_fuzz() {
+            fuzz_cases.push(self.parse_fuzz_case()?);
+        }
+
         // Parse hashtag modifiers (#assume_event, #assume_shape, etc.)
         let modifiers = if matches!(self.current_token(), Some(Ok(Token::Hash))) {
             self.parse_hashtag_modifiers()?
         } else {
             Vec::new()
         };
+
+        // Collect #fuzz cases that followed modifiers
+        while self.lookahead_is_fuzz() {
+            fuzz_cases.push(self.parse_fuzz_case()?);
+        }
 
         // Check for #test("group") modifiers
         let test_groups: Vec<String> = modifiers.iter()
@@ -1266,7 +1281,6 @@ impl<'a> Parser<'a> {
             }
             Some(Ok(Token::Txn)) | Some(Ok(Token::Rct)) | Some(Ok(Token::Async)) => {
                 let mut txn = self.parse_transaction()?;
-                txn.attrs = attrs;
                 txn.modifiers = modifiers;
                 Ok(wrap_test(TopLevel::Transaction(txn), &test_groups))
             }
@@ -1393,6 +1407,31 @@ impl<'a> Parser<'a> {
             }),
         };
 
+        // Wrap in TopLevel::Fuzzed if fuzz cases are present.
+        // If the item is already wrapped in Test (from wrap_test), insert
+        // Fuzzed inside Test so the ordering is Test { Fuzzed { Defn } }.
+        let result = result.map(|item| {
+            if fuzz_cases.is_empty() {
+                item
+            } else {
+                match item {
+                    TopLevel::Test { item: inner, groups } => {
+                        TopLevel::Test {
+                            item: Box::new(TopLevel::Fuzzed {
+                                item: inner,
+                                cases: fuzz_cases,
+                            }),
+                            groups,
+                        }
+                    }
+                    other => TopLevel::Fuzzed {
+                        item: Box::new(other),
+                        cases: fuzz_cases,
+                    },
+                }
+            }
+        });
+
         if is_sed {
             if let Ok(ref item) = result {
                 let name = match item {
@@ -1435,6 +1474,45 @@ impl<'a> Parser<'a> {
                 None
             }
         }
+    }
+
+    /// Check if the current token starts a `#fuzz(...)` declaration.
+    fn lookahead_is_fuzz(&mut self) -> bool {
+        if !matches!(self.current_token(), Some(Ok(Token::Hash))) {
+            return false;
+        }
+        self.peek_identifier().as_deref() == Some("fuzz")
+            && matches!(self.peek_token2(), Some(Ok(Token::LParen)))
+    }
+
+    /// Parse `#fuzz(param = expr, ...) -> expected_expr ;`
+    fn parse_fuzz_case(&mut self) -> Result<crate::ast::FuzzCase, SyntaxError> {
+        let span = self.current_span().unwrap_or_else(crate::errors::Span::dummy);
+        self.advance(); // consume #
+        self.advance(); // consume fuzz identifier
+        self.expect(Token::LParen)?;
+        let mut bindings = Vec::new();
+        loop {
+            let ident = self.expect_identifier()?;
+            self.expect(Token::Eq)?;
+            let expr = self.parse_expression()?;
+            bindings.push((ident, expr));
+            if let Some(Ok(Token::RParen)) = self.current_token() {
+                self.advance();
+                break;
+            }
+            self.expect(Token::Comma)?;
+        }
+        // parse -> expected
+        self.expect(Token::Arrow)?;
+        let expected = self.parse_expression()?;
+        // expect ; terminator
+        self.expect(Token::Semicolon)?;
+        Ok(crate::ast::FuzzCase {
+            bindings,
+            expected,
+            span: Some(span),
+        })
     }
 
     /// Try to parse a `(wasm) import` / `(circt) import` / etc. target-prefixed import.
@@ -2853,7 +2931,6 @@ impl<'a> Parser<'a> {
                     let expanded_txn = if !txn.name.contains('.') {
                             Transaction {
                                 name: format!("{}.{}", name, txn.name),
-                                attrs: Vec::new(),
                                 ..txn
                             }
                     } else {
@@ -3329,14 +3406,10 @@ impl<'a> Parser<'a> {
             if is_pragma {
                 self.advance();
                 let pragma_name = self.expect_identifier()?;
-                // Capitalize first letter to match TypeDef binding convention (Volatile, Atomic)
-                let capitalized = if let Some(c) = pragma_name.chars().next() {
-                    c.to_uppercase().collect::<String>() + &pragma_name[1..]
-                } else {
-                    pragma_name
-                };
+                // Normalize to lowercase for apply_binding() case-insensitive matching
+                let pragma_lower = pragma_name.to_lowercase();
                 bindings.push(TypeBinding {
-                    name: capitalized,
+                    name: pragma_lower,
                     params: vec![],
                     value: Box::new(Expr::Bool(true)),
                     span: self.current_span(),
@@ -3370,7 +3443,12 @@ impl<'a> Parser<'a> {
                 Vec::new()
             };
 
-            self.expect(Token::Eq)?;
+            // Accept `=` or `<~` (Annotation Arrow) as the binding separator
+            if matches!(self.current_token(), Some(Ok(Token::TildeArrow))) {
+                self.advance(); // consume <~
+            } else {
+                self.expect(Token::Eq)?;
+            }
             let value = self.parse_expression()?;
 
             // Create binding
@@ -4138,6 +4216,7 @@ let span = self.current_span();
         let ty = self.parse_type()?;
         let _trg_name = name.clone(); // saved for cell binding shorthand
         let _trg_ty = ty.clone();     // saved for cell binding shorthand
+        let trg_annotations = self.parse_annotations()?;
 
         let mut address: crate::ast::LinkRef = crate::ast::LinkRef::Explicit(0);
         let mut bit_range: Option<BitRange> = None;
@@ -4279,6 +4358,7 @@ let span = self.current_span();
             is_wake,
             is_const,
             span,
+            annotations: trg_annotations,
             modifiers: vec![],
         })
     }
@@ -4320,6 +4400,7 @@ let span = self.current_span();
         } else {
             name
         };
+        let txn_annotations = self.parse_annotations()?;
 
         // Parse optional parameters - NOT allowed for rct transactions
         let parameters = if let Some(Ok(Token::LParen)) = self.current_token() {
@@ -4493,7 +4574,7 @@ let span = self.current_span();
             span,
             is_lambda,
             dependencies,
-            attrs: Vec::new(),
+            annotations: txn_annotations,
             modifiers: Vec::new(),
             variant_bodies,
             outputs: txn_outputs,
@@ -4505,6 +4586,7 @@ let span = self.current_span();
         // def/defn/definition all map to Token::Defn via lexer aliases
         self.expect(Token::Defn)?;
         let name = self.expect_identifier()?;
+        let defn_annotations = self.parse_annotations()?;
 
         let type_params = if let Some(Ok(Token::Lt)) = self.current_token() {
             self.advance();
@@ -4638,6 +4720,7 @@ let span = self.current_span();
             contract,
             body,
             is_lambda,
+            annotations: defn_annotations,
             modifiers: Vec::new(),
             variant_bodies,
         })
@@ -5097,7 +5180,47 @@ let span = self.current_span();
         Ok(outputs)
     }
 
-fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
+    /// Parse optional annotations after a declaration name.
+    /// Syntax: `<~ name: expr, #shorthand, ...`
+    /// Returns empty vec if no `<~` token is present.
+    fn parse_annotations(&mut self) -> Result<Vec<TypeBinding>, SyntaxError> {
+        if !matches!(self.current_token(), Some(Ok(Token::TildeArrow))) {
+            return Ok(Vec::new());
+        }
+        self.advance(); // consume <~
+        let mut annotations = Vec::new();
+        loop {
+            // #shorthand desugars to name: true
+            if matches!(self.current_token(), Some(Ok(Token::Hash))) {
+                self.advance();
+                let name = self.expect_identifier()?;
+                annotations.push(TypeBinding {
+                    name,
+                    params: vec![],
+                    value: Box::new(Expr::Bool(true)),
+                    span: self.current_span(),
+                });
+            } else {
+                let name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let value = self.parse_expression()?;
+                annotations.push(TypeBinding {
+                    name,
+                    params: vec![],
+                    value: Box::new(value),
+                    span: self.current_span(),
+                });
+            }
+            if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        Ok(annotations)
+    }
+
+    fn parse_contract(&mut self) -> Result<Contract, SyntaxError> {
         let mut pre_condition = Expr::Bool(true);
         let mut post_condition = Expr::Bool(true);
         let mut watchdog: Option<WatchdogSpec> = None;
@@ -10738,6 +10861,7 @@ defn fallback() -> Int { term 0; };
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body: vec![],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         }
@@ -10858,7 +10982,227 @@ defn fallback() -> Int { term 0; };
         let result = parser.parse();
         assert!(result.is_ok(), "Custom types example should parse: {:?}", result.err());
     }
-}
+
+    // ── Phase D: Annotation Arrow Tests ───────────────────────
+    #[test]
+    fn test_parse_definition_with_annotations() {
+        let src = "defn compute <~ priority: 2, #cached (x: Int) -> Int { term x; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Definition(d) => {
+                assert_eq!(d.name, "compute");
+                assert_eq!(d.annotations.len(), 2);
+                assert_eq!(d.annotations[0].name, "priority");
+                assert_eq!(d.annotations[1].name, "cached");
+                assert_eq!(d.annotations[1].value.as_ref(), &Expr::Bool(true));
+            }
+            other => panic!("Expected Definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_transaction_with_annotations() {
+        let src = "txn process <~ retry: 3, #atomic (x: Int) [x > 0][x == 0] { term; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Transaction(t) => {
+                assert_eq!(t.name, "process");
+                assert_eq!(t.annotations.len(), 2);
+                assert_eq!(t.annotations[0].name, "retry");
+                assert_eq!(t.annotations[1].name, "atomic");
+                assert_eq!(t.annotations[1].value.as_ref(), &Expr::Bool(true));
+            }
+            other => panic!("Expected Transaction, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_trigger_with_annotations() {
+        let src = "trigger tick: Int <~ period: 100, #critical @timer#(1000);";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Trigger(t) => {
+                assert_eq!(t.name, "tick");
+                assert_eq!(t.annotations.len(), 2);
+                assert_eq!(t.annotations[0].name, "period");
+                assert_eq!(t.annotations[1].name, "critical");
+                assert_eq!(t.annotations[1].value.as_ref(), &Expr::Bool(true));
+            }
+            other => panic!("Expected Trigger, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_definition_without_annotations() {
+        let src = "defn add(x: Int, y: Int) -> Int { term x + y; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Definition(d) => {
+                assert_eq!(d.name, "add");
+                assert!(d.annotations.is_empty());
+            }
+            other => panic!("Expected Definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_typedef_bindings_with_tilde_arrow() {
+        let src = "type Foo <: Bits { bytes <~ 8; alignment <~ 4; };";
+        let mut parser = Parser::new(src);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse <~ bindings in type def: {:?}", result.err());
+        if let Ok(prog) = result {
+            match &prog.items[0] {
+                TopLevel::TypeDef(td) => {
+                    assert_eq!(td.name, "Foo");
+                    assert_eq!(td.body.bindings.len(), 2);
+                    assert_eq!(td.body.bindings[0].name, "bytes");
+                    assert_eq!(td.body.bindings[1].name, "alignment");
+                }
+                other => panic!("Expected TypeDef, got {:?}", other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_typedef_pragma_shorthand() {
+        // #volatile inside a type body should produce binding name "volatile" (lowercase)
+        let src = "type Bar <: Bits { #volatile; };";
+        let mut parser = Parser::new(src);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse #volatile in type def: {:?}", result.err());
+        if let Ok(prog) = result {
+            match &prog.items[0] {
+                TopLevel::TypeDef(td) => {
+                    assert_eq!(td.body.bindings.len(), 1);
+                    assert_eq!(td.body.bindings[0].name, "volatile");
+                    assert_eq!(td.body.bindings[0].value.as_ref(), &Expr::Bool(true));
+                }
+                other => panic!("Expected TypeDef, got {:?}", other),
+            }
+        }
+    }
+
+    // ── #fuzz pragma tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_parse_fuzz_single_case() {
+        let s = "#fuzz(x = 5) -> 25; defn sq(x: Int) -> Int { term x * x; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "fuzz + defn should parse: {:?}", result.err());
+        let program = result.unwrap();
+        assert_eq!(program.items.len(), 1);
+        match &program.items[0] {
+            TopLevel::Fuzzed { item: inner, cases } => {
+                assert_eq!(cases.len(), 1);
+                assert_eq!(cases[0].bindings.len(), 1);
+                assert_eq!(cases[0].bindings[0].0, "x");
+                match &inner.as_ref() {
+                    TopLevel::Definition(defn) => assert_eq!(defn.name, "sq"),
+                    _ => panic!("Expected Definition inside Fuzzed"),
+                }
+            }
+            other => panic!("Expected Fuzzed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_fuzz_multiple_cases() {
+        let s = "#fuzz(x = 0) -> 0; #fuzz(x = 1) -> 1; #fuzz(x = 2) -> 4; defn sq(x: Int) -> Int { term x * x; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "multiple fuzz should parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.items[0] {
+            TopLevel::Fuzzed { cases, .. } => {
+                assert_eq!(cases.len(), 3);
+                assert_eq!(cases[0].bindings[0].0, "x");
+                assert_eq!(cases[1].bindings[0].0, "x");
+                assert_eq!(cases[2].bindings[0].0, "x");
+            }
+            _ => panic!("Expected Fuzzed with 3 cases"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fuzz_named_params_out_of_order() {
+        let s = "#fuzz(b = 2, a = 1) -> 3; defn add(a: Int, b: Int) -> Int { term a + b; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "fuzz with out-of-order params should parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.items[0] {
+            TopLevel::Fuzzed { cases, .. } => {
+                assert_eq!(cases[0].bindings.len(), 2);
+                assert_eq!(cases[0].bindings[0].0, "b");
+                assert_eq!(cases[0].bindings[1].0, "a");
+            }
+            _ => panic!("Expected Fuzzed"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fuzz_on_txn() {
+        let s = "#fuzz(v = 10) -> 20; txn add(v: Int) -> Int { &result = result + v; term result; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "fuzz + txn should parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.items[0] {
+            TopLevel::Fuzzed { item: inner, .. } => {
+                match inner.as_ref() {
+                    TopLevel::Transaction(txn) => assert_eq!(txn.name, "add"),
+                    _ => panic!("Expected Transaction inside Fuzzed"),
+                }
+            }
+            _ => panic!("Expected Fuzzed"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fuzz_on_inop() {
+        let s = "#fuzz(a = 10, b = 2) -> 5; inop! div(a: Int, b: Int) -> Int [b != 0][true] (%state) { %r = sdiv i64 %a, %b; term %r; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "fuzz + inop should parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.items[0] {
+            TopLevel::Fuzzed { item: inner, .. } => {
+                match inner.as_ref() {
+                    TopLevel::Inop(inop) => assert_eq!(inop.name, "div"),
+                    _ => panic!("Expected Inop inside Fuzzed"),
+                }
+            }
+            _ => panic!("Expected Fuzzed"),
+        }
+    }
+
+    #[test]
+    fn test_parse_fuzz_with_test_modifier() {
+        let s = "#test(\"group1\") #fuzz(x = 5) -> 25; defn sq(x: Int) -> Int { term x * x; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "test + fuzz + defn should parse: {:?}", result.err());
+        let program = result.unwrap();
+        match &program.items[0] {
+            TopLevel::Test { item: inner, groups } => {
+                assert_eq!(groups, &vec!["group1".to_string()]);
+                match inner.as_ref() {
+                    TopLevel::Fuzzed { cases, .. } => {
+                        assert_eq!(cases.len(), 1);
+                    }
+                    other => panic!("Expected Fuzzed inside Test, got {:?}", std::mem::discriminant(other)),
+                }
+            }
+            other => panic!("Expected Test wrapping Fuzzed, got {:?}", std::mem::discriminant(other)),
+        }
+    }
+} // end parser_tests
 
 enum BracketElement {
     Start,
@@ -11347,4 +11691,4 @@ mod kani_full_tests {
         }
     }
 
-} // end of file (kani_full_tests module or file module)
+} // end parser_tests

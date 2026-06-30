@@ -140,3 +140,30 @@ New syntax (preferred):
 - Custom runtime symbols not in the IO registry
 - FPGA/bare-metal with hardware addresses
 - Maximum portability (the `@ link` form works on any target without registry support)
+
+---
+
+## Annotation Arrow (`<~`) and `#hashtag` Shorthand
+
+**Added 2026-06-30 (Phase C/D).** The `<~` token provides a uniform syntax for
+compile-time metadata on declarations:
+
+- **Type bodies**: `type Foo <: Bits { bytes <~ 8; alignment <~ 4; };`
+- **Definitions**: `defn compute <~ priority: 2, #cached (x: Int) -> Int`
+- **Transactions**: `txn process <~ retry: 3, #atomic [pre][post]`
+- **Triggers**: `trigger tick: Int <~ period: 100 @timer#(1000)`
+
+Inside a `<~` annotation list, `#name` is shorthand for `name <~ true`:
+
+```brief
+defn compute <~ priority: 2, #cached (x: Int) -> Int { ... }
+// #cached is equivalent to cached <~ true
+```
+
+Inside a type body, a bare `#name` also desugars to a binding:
+
+```brief
+type Bar <: Bits {
+    #volatile;  // → volatile <~ true  (stored as binding name "volatile")
+};
+```

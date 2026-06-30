@@ -507,6 +507,88 @@ impl fmt::Display for ProofError {
     }
 }
 
+/// Errors from fuzz case verification.
+#[derive(Debug, Clone)]
+pub enum FuzzError {
+    /// Expected output does not match actual.
+    Mismatch {
+        function: String,
+        case_index: usize,
+        inputs: String,
+        expected: String,
+        actual: String,
+        span: Span,
+    },
+    /// Fuzz inputs violate the item's precondition.
+    InvalidInput {
+        function: String,
+        case_index: usize,
+        detail: String,
+        span: Span,
+    },
+    /// BILD simulation encountered an unrecoverable opaque instruction.
+    Unverifiable {
+        function: String,
+        case_index: usize,
+        detail: String,
+        span: Span,
+    },
+    /// A required parameter was not bound in the fuzz case.
+    MissingBinding {
+        function: String,
+        case_index: usize,
+        param: String,
+        span: Span,
+    },
+    /// Cell fuzzing is not yet supported.
+    Skipped {
+        function: String,
+        reason: String,
+        span: Span,
+    },
+    /// The fuzz case could not be evaluated (runtime error).
+    EvaluationError {
+        function: String,
+        case_index: usize,
+        message: String,
+        span: Span,
+    },
+}
+
+impl fmt::Display for FuzzError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FuzzError::Mismatch { function, case_index, inputs, expected, actual, .. } => {
+                write!(f, "fuzz case {} of '{}' failed: expected {}, got {}",
+                    case_index, function, expected, actual)?;
+                if !inputs.is_empty() {
+                    write!(f, " (inputs: {})", inputs)?;
+                }
+                Ok(())
+            }
+            FuzzError::InvalidInput { function, case_index, detail, .. } => {
+                write!(f, "fuzz case {} of '{}': precondition not satisfied: {}",
+                    case_index, function, detail)
+            }
+            FuzzError::Unverifiable { function, case_index, detail, .. } => {
+                write!(f, "fuzz case {} of '{}': cannot verify — {}",
+                    case_index, function, detail)
+            }
+            FuzzError::MissingBinding { function, case_index, param, .. } => {
+                write!(f, "fuzz case {} of '{}': missing binding for parameter '{}'",
+                    case_index, function, param)
+            }
+            FuzzError::Skipped { function, reason, .. } => {
+                write!(f, "fuzz check skipped for '{}': {}", function, reason)
+            }
+            FuzzError::EvaluationError { function, case_index, message, .. } => {
+                write!(f, "fuzz case {} of '{}' raised error: {}",
+                    case_index, function, message)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum SyntaxError {
     UnexpectedToken {

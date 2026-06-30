@@ -223,6 +223,7 @@ mod tests {
             },
             body: vec![Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -256,6 +257,7 @@ mod tests {
             },
             body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -297,6 +299,7 @@ mod tests {
                 Statement::Term { values: vec![Some(Expr::Identifier("result".to_string()))], modifiers: vec![], swan_song: None },
             ],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -332,6 +335,7 @@ mod tests {
                 "not bool".to_string(),
             ))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -365,6 +369,7 @@ mod tests {
             },
             body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };

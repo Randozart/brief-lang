@@ -578,7 +578,7 @@ impl Desugarer {
             .collect();
 
         let new_txn = Transaction {
-                    attrs: Vec::new(),
+                    annotations: vec![],
             is_async: txn.is_async,
             is_reactive: txn.is_reactive,
             name: txn.name.clone(),
@@ -657,7 +657,6 @@ impl Desugarer {
     fn expand_implicit_terms_txn(&mut self, txn: &Transaction) -> Transaction {
         Transaction {
             body: txn.body.clone(),
-            attrs: Vec::new(),
             ..txn.clone()
         }
     }
@@ -1270,6 +1269,7 @@ mod tests {
             },
             body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -1302,7 +1302,7 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: Vec::new(),
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),
@@ -1336,6 +1336,7 @@ mod tests {
             },
             body: vec![Statement::Term { values: vec![Some(Expr::Integer(1))], modifiers: vec![], swan_song: None }],
             is_lambda: true,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };

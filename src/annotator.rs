@@ -646,6 +646,7 @@ use crate::ast::*;
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body,
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         })

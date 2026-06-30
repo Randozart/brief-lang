@@ -649,8 +649,16 @@ impl Interpreter {
         }
 
         for item in &program.items {
-            if let TopLevel::Definition(defn) = item {
+            let inner = match item {
+                TopLevel::Fuzzed { item: inner, .. } => inner.as_ref(),
+                other => other,
+            };
+            if let TopLevel::Definition(defn) = inner {
                 self.definitions.insert(defn.name.clone(), defn.clone());
+            } else if let TopLevel::Transaction(txn) = inner {
+                if !txn.is_reactive {
+                    self.callable_txns.insert(txn.name.clone(), txn.clone());
+                }
             } else if let TopLevel::Enum(enum_def) = item {
                 for variant in &enum_def.variants {
                     let (variant_name, field_names) = match variant {
@@ -1312,6 +1320,19 @@ impl Interpreter {
             } else if let TopLevel::Constant(const_decl) = item {
                 let value = self.eval_expr(&const_decl.expr)?;
                 self.state.insert(const_decl.name.clone(), value);
+            } else if let TopLevel::Fuzzed { item: inner, .. } = item {
+                // Unwrap Fuzzed items — register the inner item
+                match inner.as_ref() {
+                    TopLevel::Definition(defn) => {
+                        self.definitions.insert(defn.name.clone(), defn.clone());
+                    }
+                    TopLevel::Transaction(txn) => {
+                        if !txn.is_reactive {
+                            self.callable_txns.insert(txn.name.clone(), txn.clone());
+                        }
+                    }
+                    _ => {}
+                }
             } else if let TopLevel::Definition(defn) = item {
                 self.definitions.insert(defn.name.clone(), defn.clone());
             } else if let TopLevel::Transaction(txn) = item {
@@ -1374,9 +1395,10 @@ impl Interpreter {
             iterations += 1;
             executed = false;
             for item in &program.items {
-                // Unwrap Test items to access the inner transaction
+                // Unwrap Fuzzed/Test items to access the inner transaction
                 let inner_item = match item {
-                    TopLevel::Test { item: inner, .. } => inner.as_ref(),
+                    TopLevel::Fuzzed { item: inner, .. }
+                    | TopLevel::Test { item: inner, .. } => inner.as_ref(),
                     other => other,
                 };
                 if let TopLevel::Transaction(txn) = inner_item {
@@ -1418,8 +1440,9 @@ impl Interpreter {
             } else if let TopLevel::TypeDef(_) = item {
                 // TypeDefs are compile-time only — skip at runtime.
                 // Phase 1.5: type_universe.rs handles resolution in Pass 1.
-            } else if let TopLevel::Test { item: inner, groups: _ } = item {
-                // Test wrapper — unwrap and register the inner item's definitions
+            } else if let TopLevel::Fuzzed { item: inner, .. }
+                     | TopLevel::Test { item: inner, groups: _ } = item {
+                // Wrapper — unwrap and register the inner item's definitions
                 match inner.as_ref() {
                     TopLevel::Definition(defn) => {
                         self.definitions.insert(defn.name.clone(), defn.clone());
@@ -7794,6 +7817,7 @@ mod tests {
                 modifiers: vec![],
             }],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -8587,7 +8611,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -8640,7 +8665,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -8696,7 +8722,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -9867,7 +9894,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -9939,7 +9967,8 @@ mod tests {
             span: None,
             is_lambda: false,
             dependencies: vec![],
-            attrs: vec![],
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -10865,6 +10894,7 @@ mod tests {
                 },
             ],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -10941,7 +10971,8 @@ mod tests {
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![Type::Int], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
@@ -10973,7 +11004,8 @@ mod tests {
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
@@ -11005,7 +11037,8 @@ mod tests {
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
@@ -11036,7 +11069,8 @@ mod tests {
                     Statement::TermBang { values: vec![Some(Expr::Integer(99))], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
@@ -11070,7 +11104,8 @@ mod tests {
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![Type::Int], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
@@ -11131,7 +11166,8 @@ mod tests {
                     Statement::Assignment { lhs: Expr::Identifier("fired".to_string()), expr: Expr::Bool(true), timeout: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
@@ -11157,7 +11193,8 @@ mod tests {
                     Statement::Assignment { lhs: Expr::Identifier("fired".to_string()), expr: Expr::Bool(true), timeout: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
@@ -11227,7 +11264,8 @@ mod tests {
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![],
@@ -11241,6 +11279,7 @@ mod tests {
                 is_wake: false,
                 is_const: false,
                 span: None,
+                annotations: vec![],
                 modifiers: vec![],
             }],
             span: None, modifiers: vec![],
@@ -11342,7 +11381,8 @@ mod tests {
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
-                attrs: vec![], modifiers: vec![], variant_bodies: vec![],
+ modifiers: vec![], variant_bodies: vec![],
+                annotations: vec![],
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![],

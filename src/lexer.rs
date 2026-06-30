@@ -339,6 +339,9 @@ pub enum Token {
     Arrow,
     #[token("<-")]
     ArrowLeft,
+    /// `<~` — Annotation Arrow: compile-time metadata on declarations
+    #[token("<~")]
+    TildeArrow,
     #[token("_")]
     Underscore,
 
@@ -677,6 +680,7 @@ impl std::fmt::Display for Token {
             Token::BitXor => write!(f, "^"),
             Token::Arrow => write!(f, "->"),
             Token::ArrowLeft => write!(f, "<-"),
+            Token::TildeArrow => write!(f, "<~"),
             Token::Underscore => write!(f, "_"),
             Token::HashBracket => write!(f, "#["),
             Token::HashBangBracket => write!(f, "#!["),
@@ -869,6 +873,23 @@ mod tests {
         let mut lexer2 = Token::lexer("#volatile");
         assert_eq!(lexer2.next(), Some(Ok(Token::Hash)));
         assert_eq!(lexer2.next(), Some(Ok(Token::Identifier("volatile".to_string()))));
+        assert_eq!(lexer2.next(), None);
+    }
+
+    #[test]
+    fn test_tilde_arrow_as_single_token() {
+        // Verify <~ is lexed as a single TildeArrow token, not Lt + Tilde
+        let mut lexer = Token::lexer("x <~ 5");
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("x".to_string()))));
+        assert_eq!(lexer.next(), Some(Ok(Token::TildeArrow)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Integer(5))));
+        assert_eq!(lexer.next(), None);
+
+        // Verify < (Lt) still works independently
+        let mut lexer2 = Token::lexer("x < 5");
+        assert_eq!(lexer2.next(), Some(Ok(Token::Identifier("x".to_string()))));
+        assert_eq!(lexer2.next(), Some(Ok(Token::Lt)));
+        assert_eq!(lexer2.next(), Some(Ok(Token::Integer(5))));
         assert_eq!(lexer2.next(), None);
     }
 }

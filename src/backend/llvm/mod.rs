@@ -1530,6 +1530,7 @@ impl LlvmBackend {
                                 address: crate::ast::LinkRef::Explicit(0),
                                 bit_range: None, stages: vec![], condition: None,
                                 is_wake: false, is_const: false, span: None,
+                                annotations: vec![],
                                 modifiers: vec![],
                             };
                             self.ctx.triggers.insert(name.clone(), trg_decl);

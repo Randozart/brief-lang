@@ -12,7 +12,8 @@ pub struct ForeachStmt {
 }
 
 impl StmtTypecheck for ForeachStmt {
-    fn typecheck(&self, _ctx: &mut crate::typechecker::TypeChecker, _dispatch: &StmtDispatch) -> Result<(), TypeError> {
+    fn typecheck(&self, ctx: &mut crate::typechecker::TypeChecker, _dispatch: &StmtDispatch) -> Result<(), TypeError> {
+        // Type checking is handled by TypeChecker::check_statement's Foreach arm
         Ok(())
     }
 }
@@ -50,6 +51,11 @@ impl StmtCodegenLLVM for ForeachStmt {
         ) -> crate::backend::llvm::TypedRegister,
     ) {
         let list_val = ctx.emit_expr(out, &self.list, indent);
+        // Determine element type from the list expression's type
+        let elem_ty = match &list_val.ty {
+            Type::Applied(name, params) if name == "List" && params.len() == 1 => params[0].clone(),
+            _ => Type::Int,
+        };
         let tc = ctx.fun.txn_counter; ctx.fun.txn_counter += 20;
         let hp = format!("%fe_hp_{}", tc);
         writeln!(out, "{0}{1} = inttoptr i64 {2} to i64*", indent, hp, list_val.name).ok();
@@ -82,7 +88,7 @@ impl StmtCodegenLLVM for ForeachStmt {
         let elem_val = format!("%fe_elem_{}", tc);
         writeln!(out, "{0}{1} = load i64, i64* {2}, align 8", indent, elem_val, elem_gep).ok();
         let prev_item = ctx.fun.let_bindings.insert(self.item.clone(), elem_val.clone());
-        let prev_item_ty = ctx.fun.let_binding_types.insert(self.item.clone(), Type::Int);
+        let prev_item_ty = ctx.fun.let_binding_types.insert(self.item.clone(), elem_ty);
         for s in &self.body {
             ctx.emit_stmt(out, s, &format!("{}  ", indent));
         }

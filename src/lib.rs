@@ -34,6 +34,7 @@ pub mod dbrief;
 pub mod desugarer;
 pub mod errors;
 pub mod ffi;
+pub mod fuzz_checker;
 pub mod glue;
 #[cfg(test)]
 pub mod fuzzing;

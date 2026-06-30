@@ -101,6 +101,7 @@ pub fn arb_trigger_decl(_max_depth: usize) -> impl Strategy<Value = TopLevel> {
             is_wake: true,
             is_const: false,
             span: None,
+            annotations: vec![],
             modifiers: vec![],
         })
     })
@@ -126,7 +127,8 @@ pub fn arb_transaction(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             span: None,
             is_lambda: false,
             dependencies: Vec::new(),
-            attrs: Vec::new(),
+
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),
@@ -169,6 +171,7 @@ pub fn arb_definition(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body: vec![Statement::Term { values: vec![Some(body)], modifiers: vec![], swan_song: None }],
             is_lambda: false,
+            annotations: vec![],
             modifiers: vec![],
             variant_bodies: vec![],
         })

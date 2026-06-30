@@ -23,7 +23,7 @@
 // or embeds the Work.
 
 use brief_compiler::{
-    analysis, annotator, ast, backend, dbrief, desugarer, errors, hardware, hardware_validator, import_resolver, interpreter,
+    analysis, annotator, ast, backend, dbrief, desugarer, errors, fuzz_checker, hardware, hardware_validator, import_resolver, interpreter,
     linkage, lsp, manifest, memory_spec, parser, proof_engine, rbv, typechecker, type_universe, view_compiler,
     target_spec::{self, TargetSpec},
 };
@@ -784,6 +784,129 @@ fn is_circuit_extension(file_path: &PathBuf) -> bool {
     ext == "cbv"
 }
 
+/// Intent: run fuzz — parse, typecheck, and verify fuzz cases only.
+fn run_fuzz(
+    file_path: &PathBuf,
+    verbose: bool,
+    no_stdlib: bool,
+    stdlib_path: Option<PathBuf>,
+    codicil_mode: bool,
+    strict: bool,
+    safe_compile: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let source = std::fs::read_to_string(file_path)?;
+    let clean_source = if codicil_mode && detect_codicil_project(file_path) {
+        strip_codicil_blocks(&source)
+    } else {
+        source
+    };
+
+    let mut parser = parser::Parser::new(&clean_source)
+        .with_strict_mode(strict);
+    let program = match parser.parse() {
+        Ok(prog) => prog,
+        Err(e) => {
+            eprintln!("Parse error: {}", e);
+            return Err("Parse error".into());
+        }
+    };
+
+    let mut import_resolver = import_resolver::ImportResolver::new()
+        .with_strict_mode(strict)
+        .with_use_stdlib(!no_stdlib)
+        .with_stdlib_path(stdlib_path);
+    let mut program = match import_resolver.resolve_imports(&program, file_path) {
+        Ok(resolved) => resolved,
+        Err(e) => {
+            eprintln!("Import error: {}", e);
+            return Err("Import error".into());
+        }
+    };
+
+    program.synthesize_builtin_types();
+    program.synthesize_init_txn();
+
+    let mut desug = desugarer::Desugarer::new();
+    let mut program = desug.desugar(&program);
+
+    // Template/macro expansion
+    {
+        let mut macro_ctx = brief_compiler::features::macros::context::MacroContext::new();
+        macro_ctx.safe_mode = safe_compile;
+        if !safe_compile {
+            let _ = brief_compiler::features::macros::expand::expand_templates(&mut program, &mut macro_ctx);
+            let _ = brief_compiler::features::macros::expand::expand_macros(&mut program, &mut macro_ctx);
+        }
+        if let Err(e) = brief_compiler::features::macros::expand::validate_no_compile_time_intrinsics(&program) {
+            eprintln!("{}", e);
+            return Err("Macro expansion validation failed".into());
+        }
+    }
+
+    // Typecheck
+    let mut tc = typechecker::TypeChecker::new()
+        .with_stdlib_config(no_stdlib, None)
+        .with_target(typechecker::CompilationTarget::Interpreter);
+    let type_errors = tc.check_program(&mut program);
+    if !type_errors.is_empty() {
+        eprintln!("{}", format_type_errors(&type_errors, file_path.to_str().unwrap_or("main.bv")));
+        return Err("Type errors".into());
+    }
+
+    // Run fuzz checker
+    if has_fuzz_cases(&program) {
+        let mut interpreter = interpreter::Interpreter::new();
+        interpreter.load_program(&program);
+
+        let fuzz_errors = fuzz_checker::check_fuzz_cases(&program, &mut interpreter);
+        let file_path_str = file_path.to_str().unwrap_or("main.bv");
+        for err in &fuzz_errors {
+            match err {
+                errors::FuzzError::Mismatch { function, case_index, expected, actual, .. } => {
+                    eprintln!("  ✗ {} case {}: expected {}, got {}", function, case_index, expected, actual);
+                }
+                errors::FuzzError::MissingBinding { function, case_index, param, .. } => {
+                    eprintln!("  ✗ {} case {}: missing binding for '{}'", function, case_index, param);
+                }
+                errors::FuzzError::InvalidInput { function, case_index, detail, .. } => {
+                    eprintln!("  ✗ {} case {}: {}", function, case_index, detail);
+                }
+                errors::FuzzError::Unverifiable { function, case_index, detail, .. } => {
+                    eprintln!("  ⚠ {} case {}: unverifiable — {}", function, case_index, detail);
+                }
+                errors::FuzzError::Skipped { function, reason, .. } => {
+                    if verbose {
+                        eprintln!("  - {} (skipped: {})", function, reason);
+                    }
+                }
+                errors::FuzzError::EvaluationError { function, case_index, message, .. } => {
+                    eprintln!("  ✗ {} case {}: error — {}", function, case_index, message);
+                }
+            }
+        }
+
+        let has_failures = fuzz_errors.iter().any(|e| {
+            !matches!(e, errors::FuzzError::Skipped { .. })
+        });
+
+        if has_failures {
+            eprintln!("Fuzz verification failed for {}", file_path_str);
+            return Err("Fuzz errors".into());
+        } else if verbose {
+            eprintln!("All fuzz cases passed for {}", file_path_str);
+        }
+    } else if verbose {
+        eprintln!("No fuzz cases found in {}", file_path.to_str().unwrap_or("main.bv"));
+    }
+
+    Ok(())
+}
+
+/// Check whether a program has any fuzz cases.
+fn has_fuzz_cases(program: &ast::Program) -> bool {
+    program.items.iter().any(|item| matches!(item, ast::TopLevel::Fuzzed { .. }))
+}
+
 /// Intent: run check.
 fn run_check(
     file_path: &PathBuf,
@@ -908,6 +1031,36 @@ fn run_check(
     }
 if verbose {
         println!("[Analysis] All proofs verified");
+    }
+
+    // Fuzz checker — verify inline test cases.
+    if has_fuzz_cases(&program) {
+        if verbose {
+            println!("[FuzzChecker] Running fuzz verification...");
+        }
+        let mut interpreter = interpreter::Interpreter::new();
+        interpreter.load_program(&program);
+        let fuzz_errors = fuzz_checker::check_fuzz_cases(&program, &mut interpreter);
+        let file_path_str = file_path.to_str().unwrap_or("main.bv");
+        let has_real_errors = fuzz_errors.iter().any(|e| !matches!(e, errors::FuzzError::Skipped { .. }));
+        if !fuzz_errors.is_empty() {
+            for err in &fuzz_errors {
+                match err {
+                    errors::FuzzError::Mismatch { function, case_index, expected, actual, .. } => {
+                        eprintln!("  ✗ {} case {}: expected {}, got {}", function, case_index, expected, actual);
+                    }
+                    _ => {
+                        if !matches!(err, errors::FuzzError::Skipped { .. }) {
+                            eprintln!("  ✗ {}", err);
+                        }
+                    }
+                }
+            }
+        }
+        if has_real_errors {
+            eprintln!("Fuzz verification failed for {}", file_path_str);
+            return Err("Fuzz errors".into());
+        }
     }
 
     if verbose {
@@ -3548,6 +3701,38 @@ fn main() {
             } else {
                 eprintln!("Error: No .bv, .abv, .sbv, .rbv, .srbv, .ebv, or .sebv file specified");
                 eprintln!("Usage: {} check <file>", args[0]);
+                std::process::exit(1);
+            }
+        }
+
+        "fuzz" | "fz" => {
+            let file_path = args
+                .iter()
+                .skip(2)
+                .find(|a| {
+                    a.ends_with(".bv") || a.ends_with(".sbv") || a.ends_with(".ebv") || a.ends_with(".cbv")
+                        || a.ends_with(".sebv") || a.ends_with(".rbv") || a.ends_with(".srbv")
+                })
+                .map(PathBuf::from);
+
+            if let Some(path) = file_path {
+                let codicil_mode = detect_codicil_project(&path);
+                let strict = strict_flag || is_strict_extension(&path);
+                let safe_compile = args.contains(&"--safe-compile".to_string());
+                if let Err(_e) = run_fuzz(
+                    &path,
+                    verbose,
+                    no_stdlib,
+                    stdlib_path.clone(),
+                    codicil_mode,
+                    strict,
+                    safe_compile,
+                ) {
+                    std::process::exit(1);
+                }
+            } else {
+                eprintln!("Error: No .bv file specified for fuzz");
+                eprintln!("Usage: {} fuzz <file>", args[0]);
                 std::process::exit(1);
             }
         }
