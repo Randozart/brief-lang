@@ -1880,8 +1880,8 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_list, slot).ok();
                         }
                     }
-                    let popped = v.clone();
-                    return TypedRegister { name: popped.to_string(), ty: Type::Int };
+                    let popped = v.to_string();
+                    return TypedRegister { name: popped, ty: Type::Int };
                 }
                 // Determine pop index: Shift strategy removes from front (0), otherwise end (len-1)
                 let should_shift = matches!(pop_strategy, Some(crate::type_universe::ExtractStrategy::Shift));
@@ -1916,7 +1916,7 @@ pub fn emit_rest_expr(
                 let ep = format!("%pep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dp, pop_idx).ok();
                 writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
-                let popped = v.clone();
+                let popped = v.to_string();
                 // Free old buffer: arena-active skips per-op free; standalone frees
                 if backend.fun.arena_slots.is_none() {
                     let old_ptr = format!("%pop{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;

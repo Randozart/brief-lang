@@ -2793,6 +2793,16 @@ Expr::ObjectLiteral(fields) => {
                             let is_r_ptr = matches!(&r_ty, Type::Applied(n, _) if n == "Ptr");
                             if is_l_ptr { l_ty }
                             else if is_r_ptr { r_ty }
+                            // Phase 7B: Custom types in the universe preserve their type
+                            else if let Some(ref universe) = self.type_universe {
+                                let l_key = l_ty.universe_key();
+                                if universe.types.contains_key(l_key) { l_ty }
+                                else {
+                                    let r_key = r_ty.universe_key();
+                                    if universe.types.contains_key(r_key) { r_ty }
+                                    else { Type::Int }
+                                }
+                            }
                             else { Type::Int }
                         }
                     }
@@ -3041,7 +3051,22 @@ Expr::ObjectLiteral(fields) => {
                 });
                 Type::Custom("type_error".to_string())
             }
-            _ => Type::Custom("unknown".to_string()),
+            // Phase 7B: If either operand is a type registered in the universe,
+            // preserve its type through inference. The codegen resolves the
+            // operator→intrinsic mapping during emit_binop.
+            _ => {
+                if let Some(ref universe) = self.type_universe {
+                    let l_key = l_ty.universe_key();
+                    if universe.types.contains_key(l_key) {
+                        return l_ty.clone();
+                    }
+                    let r_key = r_ty.universe_key();
+                    if universe.types.contains_key(r_key) {
+                        return r_ty.clone();
+                    }
+                }
+                Type::Custom("unknown".to_string())
+            }
         }
     }
 

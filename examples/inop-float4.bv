@@ -14,3 +14,7 @@ type Float4 <: Bits {
     op Sub(Float4) -> Float4 = my_fsub;
     op Mul(Float4) -> Float4 = my_fmul;
 };
+
+defn add_two(a: Float4, b: Float4) -> Float4 {
+    term a + b;
+};

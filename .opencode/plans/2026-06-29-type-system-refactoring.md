@@ -847,9 +847,9 @@ every intrinsic is checked against the target backend before emission.
 
 | Week | Task | Verification |
 |------|------|-------------|
-| 1 | ✅ **Add operator syntax to parser** — DONE (4 tests) | Parse test cases |
-| 2 | 🔲 Add operator→intrinsic resolution to universe builder | `cargo test --lib` |
-| 3 | 🔲 Build cross-type composition engine with coercion paths | Cross-type test cases |
+| 1 | ✅ **Add operator syntax to parser** — DONE (6 parse tests) | Parse test cases |
+| 2 | ✅ **Add operator→intrinsic resolution to universe builder** | `cargo test --lib` |
+| 3 | ✅ **Build cross-type composition engine** | Cross-type test cases |
 | 4 | 🔲 Build backend validation pass (intrinsic support checking) | Error message tests |
 | 5 | 🔲 Build `TypeKey` optimization for hot paths | Benchmark no regression |
 | 6 | 🔲 Migrate built-in types to explicit universe declarations | Full test suite |

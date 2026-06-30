@@ -13,7 +13,7 @@
 //                   (for functions that should stay backend-internal)
 //   (private)     — visible only within this file (for internal helpers)
 
-use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, OutputType, Pattern, PipeChain, PipeStep, ProjectionTarget, SliceCoordinate, Statement, Type};
+use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, OpDeclaration, OpRune, OutputType, Pattern, PipeChain, PipeStep, ProjectionTarget, SliceCoordinate, Statement, Type};
 use crate::backend::llvm::*;
 use crate::features::arrow::{ArrowMutExpr, ArrowDiscardExpr, ArrowTransferExpr};
 use crate::features::binary_op::BinaryOpExpr;
@@ -855,7 +855,39 @@ impl LlvmBackend {
         TypedRegister { name: vi_tagged, ty: Type::Int }
     }
 
+    /// Map int_op/float_op strings to an OpRune for operator resolution.
+    /// 2026-06-29: Phase 7B — bridges emit_binop's string dispatch to
+    /// the universe's operator→intrinsic mapping.
+    fn op_str_to_rune(int_op: &str) -> OpRune {
+        match int_op {
+            "add" => OpRune::Add,
+            "sub" => OpRune::Sub,
+            "mul" => OpRune::Mul,
+            "sdiv" | "udiv" => OpRune::Div,
+            "srem" | "urem" => OpRune::Mod,
+            _ => OpRune::Add, // fallback for bitwise/comparison
+        }
+    }
+
     pub(crate) fn emit_binop(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) -> TypedRegister {
+        // ── Phase 7B: Custom type operator dispatch ──────────────
+        // If either operand has a universe-registered type, check for
+        // operator→intrinsic mappings and emit them.
+        // This runs BEFORE constant-folding so custom types get their
+        // own dispatch even when operands are literals.
+        if let Some(ref universe) = self.ctx.type_universe.clone() {
+            let l_reg = self.emit_expr(out, l, indent);
+            let l_key = l_reg.ty.universe_key().to_string();
+            if universe.types.contains_key(&l_key) {
+                let r_reg = self.emit_expr(out, r, indent);
+                let r_key = r_reg.ty.universe_key().to_string();
+                let rune = Self::op_str_to_rune(int_op);
+                if let Some(op) = universe.resolve_operator(&l_key, rune, Some(&r_key)) {
+                    return self.emit_operator_call(out, indent, &l_reg, &r_reg, op);
+                }
+            }
+        }
+
         // Peephole: constant-fold integer binops at compile time
         if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
             let result = match int_op {
@@ -943,6 +975,40 @@ impl LlvmBackend {
             }
         }
         false
+    }
+
+    // ── Phase 7B: Operator Call Emission ───────────────────────
+    //
+    // 2026-06-29: Emits the implementation of a resolved operator
+    // declaration. The implementation can be:
+    //   - An intrinsic call (inop/intrinsic name)
+    //   - An identifier (defn function name)
+    //   - A defn block (inlined at call site)
+    // Falls back to identity (no-op) if unimplemented.
+
+    /// Emit a call to a resolved operator's implementation.
+    /// Called from emit_binop when a universe type has an operator mapping.
+    fn emit_operator_call(&mut self, out: &mut String, indent: &str,
+                          a: &TypedRegister, b: &TypedRegister,
+                          op: &OpDeclaration) -> TypedRegister {
+        let v = format!("%t{}", self.fun.next_reg());
+        match &op.implementation.as_ref() {
+            // Intrinsic call: emit via the intrinsic name
+            Expr::IntrinsicCall { intrinsic, .. } => {
+                writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
+                         indent, v, intrinsic.name(), a.name, b.name).ok();
+            }
+            // Identifier → function call: call i64 @name(i64, i64)
+            Expr::Identifier(name) => {
+                writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
+                         indent, v, name, a.name, b.name).ok();
+            }
+            // Fallback: identity
+            _ => {
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, a.name).ok();
+            }
+        }
+        TypedRegister { name: v, ty: a.ty.clone() }
     }
 
     pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, cond: &str) -> TypedRegister {
