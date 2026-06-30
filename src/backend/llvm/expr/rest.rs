@@ -700,9 +700,11 @@ pub fn emit_rest_expr(
                         } else { None }
                     }
                 };
+                // 2026-06-30: If element type is unknown, fall back to Int.
                 if let Some(et) = el_ty {
                     return TypedRegister { name: v.to_string(), ty: et };
                 }
+                return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             // ── Projection ──────────────────────────────────────
             Expr::Projection { source, target } => {
@@ -913,6 +915,9 @@ pub fn emit_rest_expr(
                         writeln!(out, "{}{} = add i64 0, 0 ; projection catch-all", indent, v).ok();
                     }
                 }
+                // 2026-06-30: All projection targets that don't explicitly return
+                // produce a boxed i64 — return Type::Int.
+                return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             // ── StructInstance ──────────────────────────────────
              Expr::StructInstance(name, fields) => {
@@ -946,6 +951,10 @@ pub fn emit_rest_expr(
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
                 }
                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                // 2026-06-30: BUG FIX — missing return statement since initial Phase 6
+                // extraction. ObjectLiteral produces a boxed i64, same as StructInstance,
+                // but has no named type — return Type::Int.
+                return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             // ── FieldAccess ─────────────────────────────────────
             Expr::FieldAccess(obj, field) => {
@@ -1017,6 +1026,8 @@ pub fn emit_rest_expr(
                     if let Some(ft) = lookup_ty() {
                         return TypedRegister { name: v.to_string(), ty: ft };
                     }
+                    // 2026-06-30: Non-Float fields are stored as boxed i64 — return Int.
+                    return TypedRegister { name: v.to_string(), ty: Type::Int };
                 } else {
                     panic!("emit_expr: FieldAccess: field '{}' not found on object", field);
                     return TypedRegister { name: v.to_string(), ty: Type::Int };
@@ -1033,6 +1044,7 @@ pub fn emit_rest_expr(
                     .map(|(_, d, _)| *d as i64)
                     .unwrap_or(0);
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, v, disc, expected).ok();
+                return TypedRegister { name: v.to_string(), ty: Type::Bool };
             }
             // ── MultiSlice ──────────────────────────────────────
             Expr::MultiSlice { value, ops } => {
@@ -1310,6 +1322,8 @@ pub fn emit_rest_expr(
                 }
                 writeln!(out, "{}{} = add i64 0, {}", indent, v, result_reg.name).ok();
                 backend.fun.let_bindings = saved_bindings;
+                // 2026-06-30: Explicit return for normal path (was fallthrough).
+                return TypedRegister { name: v.to_string(), ty: result_reg.ty };
             }
             // ── Match ───────────────────────────────────────────
             Expr::Match { value, arms } => {
@@ -1565,6 +1579,8 @@ pub fn emit_rest_expr(
                 } else {
                     writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
                 }
+                // 2026-06-30: Explicit return for normal path (was fallthrough).
+                return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             // — Subtype projection (e.g. list :> Size) —
             Expr::SubtypeProjection { source, .. } => {
