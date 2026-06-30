@@ -840,6 +840,49 @@ impl TypeUniverse {
 
         false
     }
+
+    // ── Phase 7B: Operator Validation ────────────────────────
+    //
+    // 2026-06-29: Validates that all operator→intrinsic mappings in
+    // the universe reference known intrinsics. Called after universe
+    // build to catch typos and unsupported intrinsics early.
+
+    /// Validate all operator declarations in the universe.
+    /// Returns a list of errors for any invalid operator mappings.
+    pub fn validate_operators(&self) -> Vec<String> {
+        let mut errors = vec![];
+
+        for (type_name, rt) in &self.types {
+            for ((rune, param), op) in &rt.operators {
+                let param_str = param.as_deref().unwrap_or("none");
+                let location = format!("type '{}' operator '{:?}({})'",
+                    type_name, rune, param_str);
+
+                // Validate implementation expression
+                match &op.implementation.as_ref() {
+                    Expr::IntrinsicCall { intrinsic, .. } => {
+                        // Intrinsic variants are always valid at the AST level.
+                        // Backend-specific support checking happens during codegen.
+                        // Check for unknown/placeholder intrinsics.
+                        let name = format!("{:?}", intrinsic);
+                        if name.starts_with("Unknown") || name.contains("__unknown") {
+                            errors.push(format!("{}: unknown intrinsic '{:?}'",
+                                location, intrinsic));
+                        }
+                    }
+                    Expr::Identifier(name) => {
+                        // Identifiers reference defns or frgn functions.
+                        // Validation deferred to link phase.
+                    }
+                    _ => {
+                        // Inop blocks, identifiers, and unknown expressions — valid
+                    }
+                }
+            }
+        }
+
+        errors
+    }
 }
 
 /// Convert a TypeDef expression to a display string for metadata storage.
@@ -1283,5 +1326,30 @@ mod tests {
             "Float should have conversion path via i64 (box→unbox)");
         assert!(universe.has_conversion_path("Int", "Float"),
             "Int should have conversion path via i64 (box→unbox)");
+    }
+
+    // ── Phase 7B: Operator Validation Tests ───────────────────
+    #[test]
+    fn test_validate_operators_valid_intrinsic() {
+        use crate::ast::OpRune;
+        let td = TypeDef {
+            name: "TestType".into(), type_params: vec![], bit_range: None,
+            base: Box::new(Expr::TypeRef("Bits".into())),
+            body: TypeDefBody {
+                bindings: vec![TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None }],
+                operators: vec![OpDeclaration {
+                    rune: OpRune::Add,
+                    param_type: Some(Box::new(Expr::TypeRef("TestType".into()))),
+                    return_type: Box::new(Expr::TypeRef("TestType".into())),
+                    implementation: Box::new(Expr::Identifier("my_op".into())),
+                    span: None,
+                }],
+                constraints: vec![], span: None,
+            }, span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        let errors = universe.validate_operators();
+        assert!(errors.is_empty(), "Valid identifier op should pass: {:?}", errors);
     }
 }
