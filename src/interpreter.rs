@@ -561,7 +561,12 @@ impl Interpreter {
         self.inop_decls.clear();
 
         for item in &program.items {
-            if let TopLevel::Inop(inop) = item {
+            let inner = match item {
+                TopLevel::Fuzzed { item: inner, .. }
+                | TopLevel::Test { item: inner, .. } => inner.as_ref(),
+                other => other,
+            };
+            if let TopLevel::Inop(inop) = inner {
                 self.inop_decls.insert(inop.name.clone(), inop.clone());
             }
             if let TopLevel::ForeignBinding {
@@ -1330,6 +1335,9 @@ impl Interpreter {
                         if !txn.is_reactive {
                             self.callable_txns.insert(txn.name.clone(), txn.clone());
                         }
+                    }
+                    TopLevel::Cell(cell) => {
+                        self.cell_defs.insert(cell.name.clone(), cell.as_ref().clone());
                     }
                     _ => {}
                 }
