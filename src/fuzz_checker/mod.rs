@@ -67,7 +67,7 @@ fn verify_fuzz_case(
             }
         }
         TopLevel::Inop(inop) => {
-            verify_inop_fuzz(inop, fuzz_case, case_idx, span)
+            verify_inop_fuzz(inop, fuzz_case, case_idx, interpreter, span)
         }
         TopLevel::Cell(_) => {
             vec![FuzzError::Skipped {
@@ -213,38 +213,37 @@ fn verify_inop_fuzz(
     inop: &InopDeclaration,
     fuzz_case: &FuzzCase,
     case_idx: usize,
+    interpreter: &mut Interpreter,
     span: Span,
 ) -> Vec<FuzzError> {
     let function = inop.name.clone();
     let mut errors = Vec::new();
 
-    // Build evaluator for bindings/expected.
-    // For inops, we use the BILD simulator directly (no interpreter needed).
+    // Evaluate bindings using the interpreter (supports arbitrary expressions,
+    // including references to top-level lets and complex arithmetic).
     let mut bindings: HashMap<String, Value> = HashMap::new();
     for (name, expr) in &fuzz_case.bindings {
-        // For BILD simulation, we evaluate expressions as literals.
-        // Simple expression evaluation: integers, booleans, identifiers.
-        match try_eval_simple_expr(expr) {
-            Some(val) => { bindings.insert(name.clone(), val); }
-            None => {
+        match interpreter.eval_expr(expr) {
+            Ok(val) => { bindings.insert(name.clone(), val); }
+            Err(e) => {
                 return vec![FuzzError::EvaluationError {
                     function: function.clone(),
                     case_index: case_idx,
-                    message: format!("cannot evaluate binding '{}': non-literal expression", name),
+                    message: format!("cannot evaluate binding '{}': {:?}", name, e),
                     span,
                 }];
             }
         }
     }
 
-    // Evaluate expected.
-    let expected = match try_eval_simple_expr(&fuzz_case.expected) {
-        Some(v) => v,
-        None => {
+    // Evaluate expected using the interpreter.
+    let expected = match interpreter.eval_expr(&fuzz_case.expected) {
+        Ok(v) => v,
+        Err(e) => {
             return vec![FuzzError::EvaluationError {
                 function: function.clone(),
                 case_index: case_idx,
-                message: "cannot evaluate expected expression: non-literal".to_string(),
+                message: format!("cannot evaluate expected expression: {:?}", e),
                 span,
             }];
         }
@@ -257,7 +256,15 @@ fn verify_inop_fuzz(
         // has validated it. The BILD sim runs regardless.
     }
 
-    // Build state fields if the inop has state access.
+    // Defer stateful inop simulation — state field layout is not available
+    // without the cell/transaction struct definition.
+    if inop.has_state_access {
+        return vec![FuzzError::Skipped {
+            function: function.clone(),
+            reason: "stateful inop simulation is not yet supported".to_string(),
+            span,
+        }];
+    }
     let state_fields = HashMap::new();
 
     // Execute BILD body.
@@ -346,21 +353,6 @@ fn apply_state_overrides(
         }
     }
     Ok(())
-}
-
-/// Evaluate an expression to a Value for inop BILD simulation (literals only).
-fn try_eval_simple_expr(expr: &Expr) -> Option<Value> {
-    match expr {
-        Expr::Integer(n) => Some(Value::Int(*n)),
-        Expr::Bool(b) => Some(Value::Bool(*b)),
-        Expr::String(s) => Some(Value::String(s.clone())),
-        Expr::Float(f) => Some(Value::Float(*f as f64)),
-        Expr::Identifier(name) => {
-            // Cannot resolve identifiers without interpreter state.
-            None
-        }
-        _ => None,
-    }
 }
 
 fn format_bindings(fuzz_case: &FuzzCase) -> String {

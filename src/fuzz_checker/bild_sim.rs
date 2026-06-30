@@ -194,29 +194,35 @@ fn resolve_binop(
     let a = resolve_reg(operands.get(1).unwrap_or(&"0"), regs)?;
     let b = resolve_reg(operands.get(2).unwrap_or(&"0"), regs)?;
 
+    // Float operations — check type before int destructure to avoid
+    // returning Int(0) for float operands.
+    if ty == "float" || ty.starts_with("float") {
+        let fa = match &a {
+            Value::Float(f) => *f,
+            Value::Int(n) => *n as f64,
+            _ => 0.0,
+        };
+        let fb = match &b {
+            Value::Float(f) => *f,
+            Value::Int(n) => *n as f64,
+            _ => 0.0,
+        };
+        return Ok(match opcode {
+            "fadd" | "add" => Value::Float(fa + fb),
+            "fsub" | "sub" => Value::Float(fa - fb),
+            "fmul" | "mul" => Value::Float(fa * fb),
+            "fdiv" | "div" | "sdiv" | "udiv" => {
+                if fb == 0.0 { Value::Float(0.0) } else { Value::Float(fa / fb) }
+            }
+            _ => Value::Float(0.0),
+        });
+    }
+
     let (va, vb) = match (&a, &b) {
         (Value::Int(va), Value::Int(vb)) => (*va, *vb),
         (Value::Bool(va), Value::Bool(vb)) => (*va as i64, *vb as i64),
         _ => return Ok(Value::Int(0)),
     };
-
-    if ty == "float" || ty.starts_with("float") {
-        let fa = match &a {
-            Value::Float(f) => *f,
-            _ => 0.0,
-        };
-        let fb = match &b {
-            Value::Float(f) => *f,
-            _ => 0.0,
-        };
-        return Ok(match opcode {
-            "fadd" => Value::Float(fa + fb),
-            "fsub" => Value::Float(fa - fb),
-            "fmul" => Value::Float(fa * fb),
-            "fdiv" => Value::Float(fa / fb),
-            _ => Value::Float(0.0),
-        });
-    }
 
     Ok(Value::Int(match opcode {
         "add" => va.wrapping_add(vb),
@@ -228,13 +234,6 @@ fn resolve_binop(
         "srem" | "urem" => {
             if vb == 0 { 0 } else { va % vb }
         }
-        // Float ops with i64 — shouldn't happen but handle gracefully.
-        "fadd" => va + vb,
-        "fsub" => va - vb,
-        "fmul" => va * vb,
-        "fdiv" => {
-            if vb == 0 { 0 } else { va / vb }
-        }
         _ => 0,
     }))
 }
@@ -245,8 +244,9 @@ fn resolve_bitwise(
     regs: &HashMap<String, Value>,
     _line: usize,
 ) -> Result<Value, FuzzError> {
-    let a = resolve_reg(operands.get(0).unwrap_or(&"0"), regs)?;
-    let b = resolve_reg(operands.get(1).unwrap_or(&"0"), regs)?;
+    // Format: opcode type op1, op2 — skip type at operands[0]
+    let a = resolve_reg(operands.get(1).unwrap_or(&"0"), regs)?;
+    let b = resolve_reg(operands.get(2).unwrap_or(&"0"), regs)?;
     let va = match a { Value::Int(n) => n, Value::Bool(b) => b as i64, _ => 0 };
     let vb = match b { Value::Int(n) => n, Value::Bool(b) => b as i64, _ => 0 };
 
@@ -294,10 +294,11 @@ fn resolve_select(
     regs: &HashMap<String, Value>,
     _line: usize,
 ) -> Result<Value, FuzzError> {
-    // Format: select <cond-ty> <cond>, <type> <val1>, <val2>
+    // Format: select <cond-ty> <cond>, <type> <val1>, <type> <val2>
+    // operands: [cond-ty, cond, type1, val1, type2, val2]
     let cond = resolve_reg(operands.get(1).unwrap_or(&"false"), regs)?;
     let val1 = resolve_reg(operands.get(3).unwrap_or(&"0"), regs)?;
-    let val2 = resolve_reg(operands.get(4).unwrap_or(&"0"), regs)?;
+    let val2 = resolve_reg(operands.get(5).unwrap_or(&"0"), regs)?;
 
     match cond {
         Value::Bool(true) => Ok(val1),
@@ -307,15 +308,29 @@ fn resolve_select(
 }
 
 fn resolve_conversion(
-    _opcode: &str,
+    opcode: &str,
     operands: &[&str],
     regs: &HashMap<String, Value>,
     _line: usize,
 ) -> Result<Value, FuzzError> {
     // Format: opcode <src-ty> <value> to <dst-ty>
-    // For simulation: pass through the operand value (identity).
+    // For simulation: pass through the operand value (identity) or convert.
     let val = resolve_reg(operands.get(1).unwrap_or(&"0"), regs)?;
-    Ok(val)
+    match opcode {
+        "zext" | "sext" => match val {
+            Value::Bool(b) => Ok(Value::Int(b as i64)),
+            other => Ok(other),
+        },
+        "sitofp" | "uitofp" => match val {
+            Value::Int(n) => Ok(Value::Float(n as f64)),
+            other => Ok(other),
+        },
+        "fptosi" => match val {
+            Value::Float(f) => Ok(Value::Int(f as i64)),
+            other => Ok(other),
+        },
+        _ => Ok(val),
+    }
 }
 
 fn resolve_pass_through(
@@ -421,4 +436,152 @@ fn resolve_extractvalue(
     // Simplified: return the first value (cmpxchg result is { i64, i1 }).
     let val = resolve_reg(operands.get(1).unwrap_or(&"0"), regs)?;
     Ok(val)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::interpreter::Value;
+
+    fn run(body: &[&str], params: &[(&str, &str)], bindings: &[(&str, Value)]) -> Result<Vec<Value>, FuzzError> {
+        let body: Vec<String> = body.iter().map(|s| format!("{};", s)).collect();
+        let params: Vec<(String, crate::ast::Type)> = params.iter()
+            .map(|(n, _t)| (n.to_string(), crate::ast::Type::Int))
+            .collect();
+        let bindings: HashMap<String, Value> = bindings.iter()
+            .map(|(n, v)| (n.to_string(), v.clone()))
+            .collect();
+        execute_bild(&body, &params, &bindings, false, &HashMap::new())
+    }
+
+    fn i(n: i64) -> Value { Value::Int(n) }
+    fn b(v: bool) -> Value { Value::Bool(v) }
+    fn f(v: f64) -> Value { Value::Float(v) }
+    fn check(body: &[&str], params: &[(&str, &str)], bindings: &[(&str, Value)], expected: &[Value]) {
+        let result = run(body, params, bindings).unwrap();
+        assert_eq!(result, expected, "body: {:?}, bindings: {:?}", body, bindings);
+    }
+
+    #[test]
+    fn test_add() {
+        check(&["%r = add i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(3)), ("b", i(4))], &[i(7)]);
+    }
+
+    #[test]
+    fn test_sub() {
+        check(&["%r = sub i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(10)), ("b", i(3))], &[i(7)]);
+    }
+
+    #[test]
+    fn test_mul() {
+        check(&["%r = mul i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(6)), ("b", i(7))], &[i(42)]);
+    }
+
+    #[test]
+    fn test_sdiv() {
+        check(&["%r = sdiv i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(10)), ("b", i(3))], &[i(3)]);
+    }
+
+    #[test]
+    fn test_icmp_eq_true() {
+        check(&["%r = icmp eq i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(5)), ("b", i(5))], &[b(true)]);
+    }
+
+    #[test]
+    fn test_icmp_eq_false() {
+        check(&["%r = icmp eq i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(3)), ("b", i(5))], &[b(false)]);
+    }
+
+    #[test]
+    fn test_icmp_slt_true() {
+        check(&["%r = icmp slt i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(3)), ("b", i(5))], &[b(true)]);
+    }
+
+    #[test]
+    fn test_icmp_slt_false() {
+        check(&["%r = icmp slt i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(7)), ("b", i(5))], &[b(false)]);
+    }
+
+    #[test]
+    fn test_select() {
+        check(&[
+            "%flag = icmp slt i64 %a, %b",
+            "%r = select i1 %flag, i64 %a, i64 %b",
+            "term %r",
+        ], &[("a", ""), ("b", "")], &[("a", i(3)), ("b", i(5))], &[i(3)]);
+    }
+
+    #[test]
+    fn test_select_reverse() {
+        check(&[
+            "%flag = icmp slt i64 %a, %b",
+            "%r = select i1 %flag, i64 %a, i64 %b",
+            "term %r",
+        ], &[("a", ""), ("b", "")], &[("a", i(7)), ("b", i(5))], &[i(5)]);
+    }
+
+    #[test]
+    fn test_multi_step() {
+        check(&[
+            "%t1 = add i64 %a, %b",
+            "%t2 = mul i64 %t1, %c",
+            "term %t2",
+        ], &[("a", ""), ("b", ""), ("c", "")], &[("a", i(1)), ("b", i(2)), ("c", i(3))], &[i(9)]);
+    }
+
+    #[test]
+    fn test_and() {
+        check(&["%r = and i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(0b1100)), ("b", i(0b1010))], &[i(0b1000)]);
+    }
+
+    #[test]
+    fn test_or() {
+        check(&["%r = or i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(0b1100)), ("b", i(0b1010))], &[i(0b1110)]);
+    }
+
+    #[test]
+    fn test_shl() {
+        check(&["%r = shl i64 %a, %b", "term %r"], &[("a", ""), ("b", "")], &[("a", i(1)), ("b", i(3))], &[i(8)]);
+    }
+
+    #[test]
+    fn test_zext_bool_to_int() {
+        check(&["%r = zext i8 %a to i64", "term %r"], &[("a", ""), ("b", "")], &[("a", b(true))], &[i(1)]);
+    }
+
+    #[test]
+    fn test_float_add() {
+        let body: Vec<String> = vec!["%r = fadd float %a, %b;".to_string(), "term %r;".to_string()];
+        let params = vec![("a".to_string(), crate::ast::Type::Float), ("b".to_string(), crate::ast::Type::Float)];
+        let mut bindings = HashMap::new();
+        bindings.insert("a".to_string(), f(1.5));
+        bindings.insert("b".to_string(), f(2.5));
+        let result = execute_bild(&body, &params, &bindings, false, &HashMap::new()).unwrap();
+        assert_eq!(result, vec![f(4.0)]);
+    }
+
+    #[test]
+    fn test_void_term() {
+        check(&["term"], &[], &[], &[Value::Void]);
+    }
+
+    #[test]
+    fn test_empty_body() {
+        let result = execute_bild(&[], &[], &HashMap::new(), false, &HashMap::new()).unwrap();
+        assert_eq!(result, vec![Value::Void]);
+    }
+
+    #[test]
+    fn test_opaque_instruction_continues() {
+        check(&[
+            "%x = call i64 @some_func(i64 %a)",
+            "%r = add i64 %a, %b",
+            "term %r",
+        ], &[("a", ""), ("b", "")], &[("a", i(3)), ("b", i(4))], &[i(7)]);
+    }
+
+    #[test]
+    fn test_literal_operand() {
+        check(&["%r = add i64 %a, 5", "term %r"], &[("a", "")], &[("a", i(10))], &[i(15)]);
+    }
 }

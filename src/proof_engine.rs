@@ -1784,7 +1784,12 @@ impl ProofEngine {
         // Build a map of definitions by name for quick lookup
         let mut definitions: HashMap<String, &Definition> = HashMap::new();
         for item in &program.items {
-            if let TopLevel::Definition(defn) = item {
+            let inner = match item {
+                TopLevel::Fuzzed { item: inner, .. }
+                | TopLevel::Test { item: inner, .. } => inner.as_ref(),
+                other => other,
+            };
+            if let TopLevel::Definition(defn) = inner {
                 definitions.insert(defn.name.clone(), defn);
             }
         }
@@ -1853,7 +1858,12 @@ impl ProofEngine {
 
         // Check all definitions for proper FFI error handling
         for item in &program.items {
-            if let TopLevel::Definition(defn) = item {
+            let inner = match item {
+                TopLevel::Fuzzed { item: inner, .. }
+                | TopLevel::Test { item: inner, .. } => inner.as_ref(),
+                other => other,
+            };
+            if let TopLevel::Definition(defn) = inner {
                 self.verify_ffi_error_handling_in_definition(defn, &ffi_bindings);
             }
         }
