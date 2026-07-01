@@ -260,8 +260,15 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
 /// Without this check, `extract_bounded_pre` can pick an immutable
 /// bound variable (e.g., `bound > 0 && count < bound` picks `bound`)
 /// and produce a universal loop condition that never enters the body.
+///
+/// 2026-07-01: Normalize precondition to old-style variants before
+/// matching. The parser creates Expr::BinaryOp for comparisons, but
+/// extract_bounded_pre matches old-style Expr::Lt/Expr::Gt etc.
+/// Without normalization, [a < N] produces bounded_pre=None, which
+/// prevents the multi-txn pure fold at mod.rs:2224.
 fn extract_valid_bounded_pre(pre: &Expr, inc: &Option<IncrementInfo>) -> Option<BoundedPre> {
-    let bp = extract_bounded_pre(pre)?;
+    let normalized = pre.normalize_to_old_recursive();
+    let bp = extract_bounded_pre(&normalized)?;
     let is_mutated = inc.as_ref().map_or(false, |i| i.var == bp.var);
     if is_mutated { Some(bp) } else { None }
 }

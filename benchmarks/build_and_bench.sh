@@ -42,8 +42,9 @@ declare -A TAG
 TAG[iir_filter]=optimizer
 TAG[precompute_sum]=optimizer
 TAG[const_heavy]=optimizer
+TAG[async_counters_idio]=optimizer
 TAG[ring_buffer]=runtime
-TAG[async_counters]=runtime
+TAG[async_counters_sym]=runtime
 TAG[async_counters_runtime]=runtime
 TAG[float_math]=runtime
 TAG[float_math_nonzero]=runtime
@@ -74,12 +75,13 @@ TAG[meld-bridge-sym]=runtime
 BENCHMARKS=(
     "iir_filter"
     "precompute_sum"
+    "const_heavy"
+    "async_counters_idio"
     "ring_buffer"
-    "async_counters"
+    # "async_counters_sym"   # excluded from timing (40 min at 50M)
     "float_math"
     "float_math_nonzero"
     "sparse_dispatch"
-    "const_heavy"
     "print_loop"
     "nbody_newton"
     "nbody_sqrt"
@@ -150,14 +152,15 @@ build_c() {
 
     local extra_flags=""
     case "$name" in
-        iir_filter)      extra_flags="-lm" ;;
-        nbody_sqrt)      extra_flags="-lm" ;;
-        nbody_sqrt_idio)  extra_flags="-lm" ;;
-        fasta)           extra_flags="-lm" ;;
-        fannkuch_redux)  extra_flags="-lm" ;;
-        mandelbrot)      extra_flags="-lm" ;;
+        iir_filter)          extra_flags="-lm" ;;
+        nbody_sqrt)          extra_flags="-lm" ;;
+        nbody_sqrt_idio)     extra_flags="-lm" ;;
+        fasta)               extra_flags="-lm" ;;
+        fannkuch_redux)      extra_flags="-lm" ;;
+        mandelbrot)          extra_flags="-lm" ;;
         kalman_filter_runtime) extra_flags="-lm" ;;
-        knucleotide)      extra_flags="-lm" ;;
+        knucleotide)          extra_flags="-lm" ;;
+        async_counters_sym)  extra_flags="-lpthread" ;;
     esac
 
     clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "$src" ${extra_flags} 2>&1
@@ -289,6 +292,11 @@ bench_self_term() {
     fi
     if [ ! -f "$c_bin" ]; then
         echo "  SKIP — no C binary"
+        return
+    fi
+
+    if [ "$CORRECTNESS_ONLY" = true ]; then
+        check_correctness "$name"
         return
     fi
 

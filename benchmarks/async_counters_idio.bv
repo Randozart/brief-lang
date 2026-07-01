@@ -1,0 +1,40 @@
+// Async Parallel Counters — Idiomatic Optimizer Benchmark
+//
+// History:
+//   2026-07-01: Split from async_counters into sym (runtime) + idio (optimizer).
+//     The idio version has pure bodies (no print_int) and a const bound so
+//     the multi-txn pure fold path (mod.rs:2224) emits O(1) stores. clang -O3
+//     eliminates the corresponding dead stores in the C reference. Both produce
+//     empty output — this measures whether Brief folds pure async bounded-counter
+//     loops as aggressively as clang.
+//
+// Tests:
+//   - Multi-txn pure fold: two async bounded-contract txns with pure bodies
+//     and const bounds → two O(1) stores, no runtime loop
+//   - Brief's optimizer can collapse async transactions as aggressively as
+//     clang's dead-store elimination
+//
+// The contracts [a < N][a == N] + const N = 50000000 prove convergence in
+// exactly 50M iterations. The optimizer detects pure bodies + bounded
+// preconditions + increments + const bound → O(1) store per counter.
+//
+// Build:
+//   cargo run --bin brief-compiler -- llvm benchmarks/async_counters_idio.bv \
+//     --out benchmarks --optimize-budget 256
+
+#!exit a == N && b == N;
+
+const N: Int = 50000000;
+
+let a: Int = 0;
+let b: Int = 0;
+
+rct async txn inc_a [a < N][a == N] {
+    &a = a + 1;
+    term;
+};
+
+rct async txn inc_b [b < N][b == N] {
+    &b = b + 1;
+    term;
+};

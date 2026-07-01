@@ -1715,6 +1715,15 @@ impl LlvmBackend {
                 writeln!(out, "  br label %{}_residual_loop", tn).ok();
             }
             }
+        } else if !fold_params.is_empty() {
+            // All foldable txns handled in entry: via O(1) stores. The residual
+            // reactor_tick path would duplicate entry-block GEPs (same %ip_N
+            // names, LLVM verifier error) AND overwrite the folded values with
+            // zero init stores. Skip it entirely — the folded values are final.
+            // 2026-07-01: Without this guard, async_counters_idio triggered the
+            // multi-txn pure fold but produced an LLVM binary that failed at opt.
+            self.emit_arena_fini(out, "  ");
+            writeln!(out, "  ret i32 0").ok();
         } else {
             // Multi-trigger case: just fall through to standard reactor
             if has_wake {
