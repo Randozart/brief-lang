@@ -516,16 +516,17 @@ impl LlvmBackend {
         ).ok();
     }
 
-    /// Emit the async phase calls in main: release workers, run sequential
-    /// reactor, wait for workers. Used by emit_main and emit_enum_main.
+    /// Emit the async phase calls in main: set state for workers, release
+    /// workers, wait for workers. Used by emit_main and emit_enum_main.
+    ///
+    /// 2026-07-01: reactor_tick is now a no-op when the thread pool is active.
+    /// The worker threads execute async bodies on the correct state snapshot
+    /// (set via __set_async_state__), synchronized by the dual barriers.
     pub(crate) fn emit_async_phase(&self, out: &mut String, state_var: &str) {
         if !self.has_async_txns || self.is_lightweight_async { return; }
+        writeln!(out, "  call void @__set_async_state__(ptr {})", state_var).ok();
         writeln!(out, "  call void @__barrier_release__()").ok();
-        // Sequential reactor runs in main thread concurrently with workers
-        // 2026-06-27: Use state_var parameter instead of hardcoded %state.
-        // The tick-loop path passes %state_copy so reactor_tick modifies the
-        // local copy, and the subsequent memcpy from %state_copy → %state
-        // carries the post-tick values into exit-condition checks (async_counters).
+        // reactor_tick is a no-op (workers handle the work).
         writeln!(out, "  call void @reactor_tick(ptr noalias nocapture {})", state_var).ok();
         writeln!(out, "  call void @__barrier_wait__()").ok();
     }

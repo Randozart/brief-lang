@@ -221,6 +221,40 @@ impl LlvmBackend {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#3")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
+        // ── %state_copy: Persistent stack slot for the memcpy SROA round-trip ──
+        //
+        // Why entry block instead of tick body (the critical fix):
+        // LLVM's codegen lowers alloca instructions in non-entry blocks as
+        // dynamic stack allocations — emitting `sub rsp, N` at the instruction
+        // site rather than in the function prologue. When %state_copy was
+        // emitted inside the `tick:` block, each iteration lowered rsp by
+        // sizeof(%State) ≈ 32 bytes with no matching restore on the backedge.
+        // After 2^18 ticks (262144), 32 × 262144 = 8 MiB = ulimit -s, the
+        // stack hit the guard page, and the next function-call push caused
+        // SIGSEGV with si_addr = rsp - 8.
+        //
+        // Moving the alloca to the entry block (a canonical, once-per-call
+        // allocation) eliminates the stack leak entirely. LLVM's codegen
+        // collects all entry-block allocas into a single `sub rsp, total`
+        // in the function prologue — executed exactly once.
+        //
+        // Trade-off note on SROA:
+        // The intent of the local copy pattern is to help LLVM's SROA pass
+        // scalarize %State field accesses into SSA phi nodes. The enabling
+        // mechanism is the memcpy round-trip (copy-in → operate → copy-out)
+        // which stays in the tick loop. The alloca's position (entry vs loop)
+        // is irrelevant to SROA — entry-block allocas are actually the form
+        // SROA is designed for and canonicalizes toward. No regression risk.
+        //
+        // Why not eliminate %state_copy entirely for async?
+        // In the async path, reactor_tick is a no-op and workers operate on
+        // %state_copy via g_async_state. Using a single %state buffer would
+        // work, but the memcpy round-trip is kept for consistency across the
+        // sync and async paths, and to preserve the SROA optimization for
+        // the sync path where reactor_tick is real. Eliminating it for only
+        // one path would risk divergent codegen bugs.
+        // 2026-07-01: Root cause of the ~256K-tick async_counters segfault.
+        writeln!(out, "  %state_copy = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
@@ -244,18 +278,27 @@ impl LlvmBackend {
             writeln!(out, "  call i32 @pthread_create(ptr %ct_{}, ptr null, ptr @cell_thread_{}, ptr %cell_state_{})", name, name, name).ok();
         }
         writeln!(out, "  br label %tick").ok();
-        // Memcpy round-trip SROA: alloca a local copy of %State and operate
-        // on the copy. LLVM's SROA can scalarize the local alloca, promoting
-        // field accesses to phi nodes. Without this, the pointer argument to
-        // @reactor_tick prevents SROA from seeing the field access pattern.
+        // ── Tick loop: memcpy round-trip for SROA ───────────────────────────
         //
-        // The memcpy at entry copies state in, @reactor_tick operates on the
-        // local copy, then memcpy copies back. LLVM inlines the memcpy calls
-        // at -O2/-O3, SROA scalarizes the alloca, and the result is that
-        // field loads become phi reads instead of memory operations.
+        // The memcpy round-trip (copy-in → operate → copy-out) is the actual
+        // mechanism that enables LLVM's SROA pass. When SROA sees:
+        //   %state_copy = alloca %State          (in entry block — allocated once)
+        //   memcpy(%state_copy, %state)           (in loop — copy in)
+        //   @reactor_tick(%state_copy)            (operate on local copy)
+        //   memcpy(%state, %state_copy)           (in loop — copy out)
+        // It recognizes that %state_copy's fields are written before any read
+        // inside each iteration, so it can promote them to phi nodes whose
+        // initial values come from the copy-in and whose backedge values come
+        // from the copy-out. LLVM inlines the memcpy calls at -O2/-O3.
+        //
+        // CRITICAL: The %state_copy ALLOCA MUST be in the ENTRY block, NOT in
+        // the tick body. LLVM codegen lowers non-entry allocas as dynamic
+        // stack allocations (`sub rsp, N` at the instruction site), causing
+        // the stack to grow by 32 bytes per tick with no matching restore.
+        // The alloca was moved to the entry block in 2026-07-01 to fix the
+        // ~262K-tick stack overflow (32 × 262144 = 8 MiB = ulimit -s).
         let state_size = self.compute_state_size_bytes();
         writeln!(out, "  tick:").ok();
-        writeln!(out, "  %state_copy = alloca %State, align 8").ok();
         writeln!(out, "  call void @llvm.memcpy.p0.p0.i64(ptr %state_copy, ptr %state, i64 {}, i1 false)", state_size).ok();
         // Increment cycle_count on every tick
         emit_cycle_count_increment(self, out);

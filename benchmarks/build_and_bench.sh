@@ -348,9 +348,11 @@ filter_name() {
 
 # ── MAIN ──────────────────────────────────────────────────────────────
 
-echo "=== Building Brief compiler (release) ==="
-cargo build --release --bin brief-compiler 2>&1
-echo ""
+# 2026-07-01: Pre-build disabled — run `cargo build --release --bin brief-compiler`
+# manually before executing this script to avoid the long build hiding benchmark output.
+#echo "=== Building Brief compiler (release) ==="
+#cargo build --release --bin brief-compiler 2>&1
+#echo ""
 
 for name in "${BENCHMARKS[@]}"; do
     filter_name "$name" || continue

@@ -210,6 +210,16 @@ impl LlvmBackend {
 
         writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
         writeln!(out, "  entry:").ok();
+        // 2026-07-01: When the thread pool is active (async txns), the worker
+        // threads execute the bodies in parallel on the correct state snapshot.
+        // The main thread's reactor_tick must be a no-op — the workers handle
+        // everything, synchronized via __barrier_release__/__barrier_wait__.
+        if self.has_async_txns && !self.is_lightweight_async {
+            writeln!(out, "  ret void").ok();
+            writeln!(out, "}}").ok();
+            writeln!(out).ok();
+            return;
+        }
         // 2026-06-27: Clear ssa_old regs at reactor_tick entry (same
         // rationale as the sequential reactor counterpart).
         self.fun.ssa_old_int_regs.clear();

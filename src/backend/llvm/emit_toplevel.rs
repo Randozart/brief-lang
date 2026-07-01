@@ -115,6 +115,10 @@ impl LlvmBackend {
         writeln!(out, "declare void @__barrier_release__()").ok();
         writeln!(out, "declare void @__barrier_wait__()").ok();
         writeln!(out, "declare void @__thread_pool_init__(i32, i8**)").ok();
+        // 2026-07-01: Stores the current state snapshot pointer for worker threads.
+        // Called by main before __barrier_release__ so async body functions receive
+        // the correct state argument instead of a garbage pointer.
+        writeln!(out, "declare void @__set_async_state__(ptr)").ok();
         writeln!(out, "declare i64 @time(i64*) nounwind").ok();
         writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
         writeln!(out, "declare void @free(i8*) nounwind").ok();
@@ -931,18 +935,20 @@ impl LlvmBackend {
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();
-        // 2026-06-30: Use TypeUniverse for return type instead of hardcoded float/i64.
-        // Previously was `if t == Float -> "float" else "i64"` which broke Char/Int8/Int32 returns.
+        // 2026-07-01: Use "i64" for all non-float returns instead of llvm_type().
+        // The body always produces i64 values (via adapt_to_i64) and call.rs expects
+        // i64 at the call site. Using llvm_type() gave "i8*" for String/Bool returns,
+        // creating a type mismatch (ret i64 in a define i8* function) that broke opt/llc.
         let is_float_fn = d.outputs.iter().any(|t| matches!(t, Type::Float));
         let ll_ret_ty = if d.outputs.is_empty() {
             "void".to_string()
         } else if is_float_fn {
             "float".to_string()
         } else {
-            self.llvm_type(&d.outputs[0]).to_string()
+            "i64".to_string()
         };
         self.fun.fn_ret_ty = ll_ret_ty.clone();
-        self.fun.returns_i64 = ll_ret_ty == "i64";
+        self.fun.returns_i64 = !d.outputs.is_empty() && !is_float_fn;
         // Rename user `main` to `brief_main` to avoid collision with
         // the runtime entry point `define i32 @main()` in loop_engine.rs.
         let ll_name: &str = if d.name == "main" { "brief_main" } else { &d.name };
@@ -1038,6 +1044,8 @@ impl LlvmBackend {
         if !self.fun.terminated {
             if is_float_fn {
                 writeln!(out, "  ret float 0.0").ok();
+            } else if d.outputs.is_empty() {
+                writeln!(out, "  ret void").ok();
             } else {
                 writeln!(out, "  ret i64 0").ok();
             }

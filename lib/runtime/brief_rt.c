@@ -344,7 +344,11 @@ static void brief_barrier_wait_impl(brief_barrier_t *b) {
 }
 
 /* Per-worker state */
-typedef void (*brief_work_fn)(void);
+// 2026-07-01: brief_work_fn now takes void* state pointer. Workers receive the
+// current state snapshot through g_async_state, which the main thread sets via
+// __set_async_state__ before each tick. This fixes the ABI mismatch where async
+// body functions expected a state pointer but were called with no arguments.
+typedef void (*brief_work_fn)(void*);
 
 static int              g_thread_pool_active = 0;
 static unsigned         g_num_workers = 0;
@@ -354,6 +358,14 @@ static brief_work_fn    *g_work_fns_base = NULL;  /* pointer to first slot */
 static int              g_shutdown = 0;
 static brief_barrier_t  g_barrier_enter;  /* main releases → workers start */
 static brief_barrier_t  g_barrier_exit;   /* workers finish → main continues */
+static void*            g_async_state = NULL;  /* state ptr for current tick */
+
+// 2026-07-01: Stored by main thread before barrier_release, read by workers
+// during tick execution. This lets workers run async bodies on the correct
+// state snapshot instead of receiving a garbage pointer.
+void __set_async_state__(void* state) {
+    g_async_state = state;
+}
 
 static void* brief_worker_main(void* arg) {
     unsigned idx = (unsigned)(uintptr_t)arg;
@@ -361,7 +373,7 @@ static void* brief_worker_main(void* arg) {
         brief_barrier_wait_impl(&g_barrier_enter);  /* wait for tick start */
         if (g_shutdown) return NULL;
         if (idx < g_num_workers && g_work_fns[idx]) {
-            g_work_fns[idx]();
+            g_work_fns[idx](g_async_state);
         }
         brief_barrier_wait_impl(&g_barrier_exit);   /* signal tick done */
     }
