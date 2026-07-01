@@ -18,10 +18,26 @@ pub fn emit_call(
 ) -> TypedRegister {
     // 2026-06-17: Inline negated (stdlib projection, not defined as a function)
     // 2026-06-30: Extracted from rest.rs to expr/call.rs.
+    // 2026-07-01: Handle Float/Float64 types — emit fneg instead of sub i64 0.
+    // The negated intrinsic is called from stdlib when T::neg() is invoked on
+    // a generic type that resolves to Float or Float64. Previously all types
+    // got `sub i64 0, %val` which was a type error for float types.
     if name == "negated" && args.len() >= 1 {
         let val = backend.emit_expr(out, &args[0], indent);
-        writeln!(out, "{}{} = sub i64 0, {}", indent, v, val.name).ok();
-        return TypedRegister { name: v.to_string(), ty: Type::Int };
+        match val.ty {
+            Type::Float => {
+                writeln!(out, "{}{} = fneg float {}", indent, v, val.name).ok();
+                return TypedRegister { name: v.to_string(), ty: Type::Float };
+            }
+            Type::Float64 => {
+                writeln!(out, "{}{} = fneg double {}", indent, v, val.name).ok();
+                return TypedRegister { name: v.to_string(), ty: Type::Float64 };
+            }
+            _ => {
+                writeln!(out, "{}{} = sub i64 0, {}", indent, v, val.name).ok();
+                return TypedRegister { name: v.to_string(), ty: val.ty };
+            }
+        }
     }
     // Clone foreign info upfront to avoid borrow conflict with emit_expr
     let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType, bool, Option<crate::ast::Expr>, Vec<(String, Type)>)> =

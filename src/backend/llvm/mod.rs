@@ -2235,8 +2235,10 @@ self.emit_declares(&mut out);
                             .map_or(false, |n| n.bounded_pre.is_some() && n.increments.is_some())
                     })
                 {
-                    // A005: SSA register pipeline
-                    self.warnings.push("info: program dispatched via SSA register pipeline (sequential, bounded txns)".into());
+                    // A005: SSA register pipeline (or modulo-switch dispatch)
+                    // 2026-07-01: emit_ssa_main internally checks for modulo dispatch
+                    // pattern and emits switch-based dispatch if detected. The specific
+                    // path taken is reported in the function's own warning message.
                     self.emit_ssa_main(&mut out, &txns, false);
                 } else if let Some(ref enum_sizes) = enumerable {
                 // Enumerable triggers — emit switch-dispatch main

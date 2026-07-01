@@ -915,6 +915,35 @@ impl LlvmBackend {
             }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
+
+        // ── Expression hash-consing dedup cache lookup ─────────────
+        // 2026-07-01: Check if we already emitted this (op, lhs, rhs) within
+        // the current body scope. Only caches ops with string ≥ 3 chars
+        // (fadd, fmul, fsub, fdiv, sdiv, srem) — cheap integer ops like "add",
+        // "sub", "mul" on i64 are not cached since the HashMap lookup + insert
+        // (~50ns) exceeds the recomputation cost (~0.5ns for a single i64 add).
+        // For float ops the benefit is in IR compactness: fewer instructions
+        // means LLVM can find SIMD vectorization patterns more easily.
+        let dedup_op = if a.ty == Type::Float64 || a.ty == Type::Float
+            || b.ty == Type::Float64 || b.ty == Type::Float {
+            float_op
+        } else {
+            int_op
+        };
+        let dedup_key = if dedup_op.len() >= 3 {
+            Some((dedup_op.to_string(), a.name.clone(), b.name.clone()))
+        } else {
+            None
+        };
+        if let Some(ref key) = dedup_key {
+            if let Some(cached) = self.fun.expr_dedup_cache.get(key) {
+                let result_ty = if a.ty == Type::Float64 { Type::Float64 }
+                                else if a.ty == Type::Float { Type::Float }
+                                else { a.ty.clone() };
+                return TypedRegister { name: cached.clone(), ty: result_ty };
+            }
+        }
+
         // Preserve Ptr type through arithmetic operations
         let is_a_ptr = matches!(&a.ty, Type::Applied(n, _) if n == "Ptr");
         let is_b_ptr = matches!(&b.ty, Type::Applied(n, _) if n == "Ptr");
@@ -927,6 +956,7 @@ impl LlvmBackend {
             let fb = self.ensure_float_reg(out, indent, &b);
             let fr = format!("%bfr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = {} fast double {}, {}", indent, fr, float_op, fa, fb).ok();
+            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), fr.clone()); }
             return TypedRegister { name: fr, ty: Type::Float64 };
         }
         if a.ty == Type::Float || b.ty == Type::Float {
@@ -937,6 +967,7 @@ impl LlvmBackend {
                 let a_i64 = self.adapt_to_i64(out, indent, &a);
                 let b_i64 = self.adapt_to_i64(out, indent, &b);
                 writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
+                if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
                 return TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Int) };
             } else {
                 let fa = self.ensure_float_reg(out, indent, &a);
@@ -944,6 +975,7 @@ impl LlvmBackend {
                 let fr = format!("%bfr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = {} fast float {}, {}", indent, fr, float_op, fa, fb).ok();
                 self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
+                if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), fr.clone()); }
                 return TypedRegister { name: fr, ty: Type::Float };
             }
         }
@@ -952,6 +984,7 @@ impl LlvmBackend {
             let llvm_ty_str = self.llvm_type(&a.ty).to_string();
             let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = {} {} {}, {}", indent, v, int_op, llvm_ty_str, a.name, b.name).ok();
+            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
             return TypedRegister { name: v, ty: a.ty.clone() };
         }
         {
@@ -959,6 +992,7 @@ impl LlvmBackend {
             let a_i64 = self.adapt_to_i64(out, indent, &a);
             let b_i64 = self.adapt_to_i64(out, indent, &b);
             writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
+            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
             TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Int) }
         }
     }

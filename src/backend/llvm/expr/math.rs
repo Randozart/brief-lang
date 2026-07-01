@@ -51,16 +51,36 @@ pub fn emit_mod(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Ex
     }
 }
 
+// 2026-07-01: Added Type::Float64 check to emit fneg double instead of
+// sub i64 0, <double> (type error). Previously only Type::Float was checked,
+// causing all Float64 negations to produce invalid LLVM IR (sub i64 with
+// double operand). The fneg instruction works for both float and double —
+// the LLVM type string selects the correct encoding.
+//
+// 2026-07-01: Added expression hash-consing dedup cache check.
+// When -x appears in multiple places (e.g., epp and ek computation both
+// reference the same negated intermediate), we reuse the already-emitted
+// fneg/sub register instead of emitting a duplicate instruction.
 pub fn emit_neg(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Expr, indent: &str) -> TypedRegister {
     match expr {
         Expr::Neg(e) => {
             let inner = backend.emit_expr(out, e, indent);
-            let v = alloc_reg(backend, out, indent);
-            if inner.ty == Type::Float {
-                writeln!(out, "{}{} = fneg float {}", indent, v, inner.name).ok();
-            } else {
-                writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner.name).ok();
+            let inner_op = match inner.ty {
+                Type::Float => "fneg_float",
+                Type::Float64 => "fneg_double",
+                _ => "neg_i64",
+            };
+            let dedup_key = (inner_op.to_string(), inner.name.clone(), String::new());
+            if let Some(cached) = backend.fun.expr_dedup_cache.get(&dedup_key) {
+                return TypedRegister { name: cached.clone(), ty: inner.ty.clone() };
             }
+            let v = alloc_reg(backend, out, indent);
+            match inner.ty {
+                Type::Float => { writeln!(out, "{}{} = fneg float {}", indent, v, inner.name).ok(); }
+                Type::Float64 => { writeln!(out, "{}{} = fneg double {}", indent, v, inner.name).ok(); }
+                _ => { writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner.name).ok(); }
+            }
+            backend.fun.expr_dedup_cache.insert(dedup_key, v.clone());
             TypedRegister { name: v, ty: inner.ty }
         }
         _ => emit_zero(backend, out, indent),

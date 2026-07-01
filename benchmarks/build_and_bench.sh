@@ -131,7 +131,7 @@ build_bench() {
         if [ -f "benchmarks/${name}.o" ]; then
             cc -O2 -no-pie -o "$bin" "benchmarks/${name}.o" -lm 2>&1 || echo "  (link failed — try manual link)"
         else
-            clang -O3 -march=native -ffast-math "benchmarks/${name}.ll" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
+            clang -O3 -march=native -ffast-math -fdata-sections -ffunction-sections -Wl,--gc-sections "benchmarks/${name}.ll" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
         fi
     fi
     if [ -f "$bin" ]; then

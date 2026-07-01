@@ -230,6 +230,16 @@ pub struct FunctionContext {
 
     // Chimera tracking
     pub chimera_map: HashMap<String, ChimeraInfo>,
+
+    // Expression hash-consing dedup cache.
+    // 2026-07-01: Maps (op_string, lhs_reg, rhs_reg) → result_reg.
+    // Prevents emitting the same instruction twice within a body emission scope.
+    // Persists across let-bindings (not cleared between body statements) so that
+    // sub-expressions like `dxe23*dxe23` that appear in multiple statements
+    // (e.g., energy computation) reuse the emitted register.
+    // Only caches "expensive" ops (fp ops, division) — not cheap integer add/sub.
+    // Cleared at function entry alongside other caches.
+    pub expr_dedup_cache: HashMap<(String, String, String), String>,
 }
 
 impl FunctionContext {
@@ -268,6 +278,7 @@ impl FunctionContext {
             pending_post_hoist: Vec::new(),
             pending_cleanup: Vec::new(),
             chimera_map: HashMap::new(),
+            expr_dedup_cache: HashMap::new(),
         }
     }
 

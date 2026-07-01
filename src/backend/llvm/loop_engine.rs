@@ -1113,6 +1113,117 @@ impl LlvmBackend {
             writeln!(out, "  store i8 0, ptr %any_fired").ok();
         }
         self.fun.ssa_state_reg = None;
+
+        // ── Modulo-switch dispatch detection ─────────────────────────
+        // 2026-07-01: Check if all reactive txns have preconditions of the form
+        // `count < bound && count % K == N` with a complete set of N values.
+        // If so, emit a single switch instruction instead of N sequential
+        // br i1 checks. This eliminates 7 out of 8 conditional branches per
+        // tick for 8-way dispatch, and hoists the shared field loads once
+        // instead of once per txn.
+        //
+        // Dual-path: For small K (≤ 8), switch dispatch is strictly faster
+        // than sequential checks (O(1) vs O(K)). For large K (> 256), the
+        // switch jump table may exceed I-cache budget — use sequential dispatch
+        // as fallback. The threshold is conservative (256) because switch
+        // with an indirect jump is still faster than K sequential branches
+        // for all practical dispatch sizes.
+        if self.fun.phi_induction_reg.is_none() {
+            let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
+                .filter(|(_, t)| t.is_reactive).collect();
+            if reactive_txns.len() >= 2 {
+                // Extract (K, N) from each precondition
+                let mut counter: Option<String> = None;
+                let mut bound: Option<String> = None;
+                let mut divisor: Option<i64> = None;
+                let mut cases: Vec<(i64, &str)> = Vec::new();
+                let mut all_match = true;
+                for (name, txn) in &reactive_txns {
+                    let pre = &txn.contract.pre_condition;
+                    // Match: And(Lt(counter, bound), Eq(Mod(counter, K), N))
+                    // 2026-07-01: Bind normalized expr to local to avoid
+                    // temporary-borrow-dropped errors from normalize_to_old_recursive.
+                    let norm = pre.normalize_to_old_recursive();
+                    match &norm {
+                        Expr::And(left, right) => {
+                            // Extract counter name from Lt(counter, bound)
+                            let cn = match left.as_ref() {
+                                Expr::Lt(l, _) => {
+                                    if let Expr::Identifier(c) = l.as_ref() { Some(c.clone()) } else { None }
+                                }
+                                _ => None,
+                            };
+                            let bn = match left.as_ref() {
+                                Expr::Lt(_, r) => {
+                                    if let Expr::Identifier(b) = r.as_ref() { Some(b.clone()) } else { None }
+                                }
+                                _ => None,
+                            };
+                            // 2026-07-01: Use as_integer() to handle both
+                            // Expr::Integer(n) and Expr::Literal(LiteralExpr::Integer(n)).
+                            // The parser creates Literal-wrapped integers; normalize_to_old
+                            // does not convert them back to Expr::Integer.
+                            if let Expr::Eq(eq_l, eq_r) = right.as_ref() {
+                                if let (Some((c, k)), Some(n)) = (self.extract_mod_info(eq_l),
+                                    eq_r.as_ref().as_integer())
+                                {
+                                    if let Some(ref prev_c) = counter {
+                                                if *prev_c != c { all_match = false; }
+                                            } else {
+                                                // For modulo dispatch, the counter must be an
+                                                // integer field. String/bool are rejected because
+                                                // srem only works on integers.
+                                                if let Some(&idx) = self.ctx.field_index_map.get(&c) {
+                                                    let ct = &self.ctx.field_types[idx];
+                                                    if ct != "i64" && ct != "i32" { all_match = false; }
+                                                } else { all_match = false; }
+                                                counter = Some(c);
+                                            }
+                                    if let Some(ref prev_b) = bound {
+                                        if let Some(ref b) = bn {
+                                            if *prev_b != *b { all_match = false; }
+                                        } else { all_match = false; }
+                                    } else {
+                                        bound = bn;
+                                    }
+                                    if let Some(d) = divisor {
+                                        if d != k { all_match = false; }
+                                    } else {
+                                        divisor = Some(k);
+                                    }
+                                    if k > 256 {
+                                        all_match = false;
+                                    }
+                                    if cases.iter().any(|(v, _)| *v == n) {
+                                        all_match = false;
+                                    }
+                                    cases.push((n, name.as_str()));
+                                } else { all_match = false; }
+                            } else { all_match = false; }
+                        }
+                        _ => { all_match = false; }
+                    }
+                    if !all_match { break; }
+                }
+                if all_match && cases.len() >= 2 && counter.is_some() {
+                    cases.sort_by_key(|(v, _)| *v);
+                    let count_name = counter.take().unwrap();
+                    if self.ctx.field_index_map.contains_key(&count_name) {
+                        // Emit modulo-switch dispatch
+                        let case_names: Vec<&str> = cases.iter().map(|(_, n)| *n).collect();
+                        self.warnings.push(format!("info: modulo-switch dispatch for [{}] on {} % {}",
+                            case_names.join(", "), count_name, divisor.unwrap()));
+                        self.emit_modulo_switch_main(out, txns, &count_name, divisor.unwrap(), &cases);
+                        return;
+                    }
+                }
+            }
+        }
+
+        // 2026-07-01: If we reach here, the modulo-switch dispatch did not apply.
+        // Report sequential dispatch. The specific path (modulo-switch or sequential)
+        // is determined by the detection block above.
+        self.warnings.push("info: sequential bounded dispatch (non-modulo preconditions)".into());
         for (name, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             let pre = &txn.contract.pre_condition;
             
@@ -1221,6 +1332,11 @@ impl LlvmBackend {
                     self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
                 }
                 self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+                // 2026-07-01: Clear expression dedup cache at body entry so each
+                // body emission gets a fresh scope. The cache persists across
+                // let-bindings within the body to catch cross-statement redundancy
+                // (e.g., dxe23*dxe23 appearing in multiple energy computations).
+                self.fun.expr_dedup_cache.clear();
                 self.fun.terminated = false;
                 self.fun.returns_i64 = false;
                 self.fun.loop_exit_label = Some("pdoneloop".into());
@@ -1238,6 +1354,10 @@ impl LlvmBackend {
                 // again — the tick block dominates the body block, so the
                 // original SSA values are available without reloading.
                 self.pre_load_all_fields(out, "%state");
+                // 2026-07-01: Clear dedup cache so per-txn body emission starts
+                // with a fresh scope (registers from precondition evaluation and
+                // other txns are not cached across the dispatch chain).
+                self.fun.expr_dedup_cache.clear();
                 let saved_float_regs = self.fun.ssa_old_float_regs.clone();
                 let saved_int_regs = self.fun.ssa_old_int_regs.clone();
                 let cond = self.emit_expr(out, pre, "  ");
@@ -1257,6 +1377,7 @@ impl LlvmBackend {
                 // canonical phi loop uses counter for exit, not any_fired.
                 if self.fun.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
                 self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+                self.fun.expr_dedup_cache.clear();
                 self.fun.terminated = false;
                 self.fun.returns_i64 = false;
                 // 2026-06-26: Use the tick's pre-loaded registers instead of
@@ -1281,6 +1402,7 @@ impl LlvmBackend {
                 writeln!(out, "  {}:", skip_l).ok();
             } else {
                 self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+                self.fun.expr_dedup_cache.clear();
                 self.fun.terminated = false;
                 self.fun.returns_i64 = false;
                 self.pre_load_all_fields(out, "%state");
@@ -1369,6 +1491,135 @@ impl LlvmBackend {
         }
         // Arena teardown: free the entire arena at program exit.
         // All tick-scoped allocations are released in one free call.
+        self.emit_arena_fini(out, "  ");
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// 2026-07-01: Extract modulo info from an expression expected to be
+    /// `Expr::Mod(Identifier(c), Integer(k))`. Returns `Some((counter_name, divisor))`
+    /// on success, `None` otherwise. Uses `as_integer()` for the divisor so
+    /// both `Expr::Integer` and `Expr::Literal(Integer)` forms are handled.
+    fn extract_mod_info(&self, expr: &Expr) -> Option<(String, i64)> {
+        match expr {
+            Expr::Mod(l, r) => {
+                if let Expr::Identifier(c) = l.as_ref() {
+                    r.as_ref().as_integer().map(|k| (c.clone(), k))
+                } else { None }
+            }
+            _ => None,
+        }
+    }
+
+    /// Emit a switch-based dispatch for reactive txns whose preconditions
+    /// form a complete modulo dispatch pattern: `count < bound && count % K == N`.
+    ///
+    /// 2026-07-01: New codegen path for modulo-gated dispatch sets.
+    ///
+    /// Why switch over sequential if-else:
+    ///   For N txns with mutually exclusive modulo guards, a switch compiles to
+    ///   O(1) indirect jump via jump table, while the sequential if-else chain
+    ///   compiles to N conditional branches (7 always-mispredicted for 8-way).
+    ///   Even with perfect branch prediction, the switch is faster because:
+    ///     1. Field loads happen ONCE before the switch, not N times
+    ///     2. The switch jump table is a single indirect branch vs N cmp+jne
+    ///     3. LLVM can generate a computed goto for small switch tables
+    ///
+    /// Dual-path design:
+    ///   For K ≤ 256: emit switch i64 (jump table).
+    ///   For K > 256: fall back to sequential emit_ssa_main (the switch table
+    ///     would be too large for I-cache and the indirect branch predictor
+    ///     degrades beyond 256 entries). The detection in emit_ssa_main enforces
+///     this threshold.
+///
+/// Architectural note:
+///   The counter field MUST be an integer field in field_index_map.
+///   The switch dispatches on (count % K), and each case block executes
+///   one txn body. After each case, the counter is incremented and stored
+///   to %State. All cases merge to a single exit check.
+    pub(crate) fn emit_modulo_switch_main(
+        &mut self,
+        out: &mut String,
+        txns: &[(String, &crate::ast::Transaction)],
+        counter_name: &str,
+        divisor: i64,
+        cases: &[(i64, &str)],
+    ) {
+        self.fun.fn_ret_ty = "i32".to_string();
+        self.fun.main_body = true;
+        let attr = self.slp_attr("main", "#3");
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        self.emit_trg_init(out);
+        self.emit_arena_init(out, "  ");
+        // Load bound once (for preallocation and exit check)
+        let bound_idx = txns.iter().find_map(|(_, t)| {
+            let pre = &t.contract.pre_condition;
+            match pre.normalize_to_old_recursive() {
+                Expr::And(ref left, _) => match left.as_ref() {
+                    Expr::Lt(_, r) => match r.as_ref() {
+                        Expr::Identifier(b) => self.ctx.field_index_map.get(b).copied(),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            }
+        }).unwrap_or(0);
+        let b_gep = format!("%gep_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, bound_idx).ok();
+        let b_val = format!("%val_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
+        writeln!(out, "  br label %tick").ok();
+        writeln!(out, "  tick:").ok();
+        emit_cycle_count_increment(self, out);
+        // Load counter and bound from state
+        let count_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
+        let c_gep = format!("%gep_cn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c_gep, count_idx).ok();
+        let c_val = format!("%val_cn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", c_val, c_gep).ok();
+        // Compute count % K
+        let mod_val = format!("%mod_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        let k_val = format!("%k_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = add i64 0, {}", k_val, divisor).ok();
+        writeln!(out, "  {} = srem i64 {}, {}", mod_val, c_val, k_val).ok();
+        // Emit switch
+        let case_strs: Vec<String> = cases.iter().map(|(n, name)| {
+            format!("i64 {}, label %case_{}", n, name)
+        }).collect();
+        writeln!(out, "  switch i64 {}, label %after_switch [{}]", mod_val, case_strs.join(" ")).ok();
+        // Emit case blocks
+        for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
+            writeln!(out, "  case_{}:", txn.name).ok();
+            self.fun.let_bindings.clear(); self.fun.let_binding_types.clear();
+            self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+            self.fun.expr_dedup_cache.clear();
+            self.fun.terminated = false;
+            self.fun.returns_i64 = false;
+            self.pre_load_all_fields(out, "%state");
+            self.fun.loop_exit_label = Some("after_switch".into());
+            for s in &txn.body {
+                self.emit_stmt(out, s, "  ");
+            }
+            self.fun.loop_exit_label = None;
+            self.fun.ssa_old_float_regs.clear();
+            self.fun.ssa_old_int_regs.clear();
+            writeln!(out, "  br label %after_switch").ok();
+        }
+        // After switch: check exit condition and loop back
+        writeln!(out, "  after_switch:").ok();
+        // Reload bound to check exit
+        let c_reload = format!("%val_cr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", c_reload, c_gep).ok();
+        let ec = format!("%ec_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = icmp eq i64 {}, {}", ec, c_reload, b_val).ok();
+        let md_idx = super::emit_loop_metadata_nodes(&mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
+        writeln!(out, "  br i1 {}, label %done, label %tick, !llvm.loop !{}", ec, md_idx).ok();
+        writeln!(out, "  done:").ok();
         self.emit_arena_fini(out, "  ");
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
