@@ -11,6 +11,9 @@ pub struct MacroContext {
     pub warnings: Vec<String>,
     pub templates: HashMap<String, TemplateDef>,
     pub macros: HashMap<String, MacroDef>,
+    // 2026-07-01: Convergence max iterations for interpreters created during
+    // macro/template expansion. Passed through from --txn-convergence-max-iterations.
+    pub txn_convergence_max_iterations: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +42,7 @@ impl MacroContext {
             warnings: Vec::new(),
             templates: HashMap::new(),
             macros: HashMap::new(),
+            txn_convergence_max_iterations: 10_000,
         }
     }
 

@@ -855,16 +855,94 @@ impl LlvmBackend {
         }
     }
 
+    // ── Parameter Boxing ──────────────────────────────────────────
+    //
+    // 2026-07-01: Box a function parameter from its native LLVM type to i64
+    // using the universe-declared box_op intrinsic. This is called at function
+    // entry for parameters whose declared LLVM type differs from i64.
+    //
+    // Why this exists: Function parameters arrive in their native LLVM type
+    // (e.g., i32 for Char, i8 for Bool). We widen them to i64 for uniform SSA
+    // register storage. The boxing intrinsic (box_op) from the TypeUniverse
+    // tells us exactly which LLVM operation to emit — no more hardcoded
+    // Type::Char/Bool/String/Float match arms.
+    //
+    // This mirrors adapt_via_box_op in emit_stmt.rs but operates on raw
+    // parameter registers rather than TypedRegister SSA values. The key
+    // difference: adapt_via_box_op handles already-boxed SSA values (no-op
+    // for Char since Char SSA values are always i64), while this method
+    // handles native-type parameters that need the initial boxing.
+    //
+    fn emit_box_param(&mut self, out: &mut String, indent: &str, result: &str, raw: &str, box_op: &str) {
+        match box_op {
+            // Bool: zext i8 → i64 (Bool parameters arrive as i8)
+            "zext.i1.to.i64#" => {
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, result, raw).ok();
+            }
+            // Char / UInt32: zext i32 → i64 (native i32 widened to boxed i64)
+            "zext.i32.to.i64#" => {
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, result, raw).ok();
+            }
+            // String/Data: ptrtoint i8* → i64 (native pointer to boxed integer)
+            "ptrtoint#" => {
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, result, raw).ok();
+            }
+            // Float: bitcast f32→i32 then zext i32→i64.
+            // Also cache the native float register so ensure_float_reg can
+            // recover the native float from the boxed i64 later.
+            "bitcast.f32.to.i64#" => {
+                let m = format!("%ai{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast float {} to i32", indent, m, raw).ok();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, result, m).ok();
+                self.fun.reg_float_cache.insert(result.to_string(), raw.to_string());
+            }
+            // Float64: bitcast double→i64 (same width, direct bitcast).
+            // Cache the native double register for downstream unboxing.
+            "bitcast.f64.to.i64#" => {
+                writeln!(out, "{}{} = bitcast double {} to i64", indent, result, raw).ok();
+                self.fun.reg_float_cache.insert(result.to_string(), raw.to_string());
+            }
+            // Signed fixed-width: sext i8/i16/i32 to i64
+            op if op.starts_with("sext.") => {
+                let llvm_ty = match op {
+                    "sext.i8.to.i64#" => "i8",
+                    "sext.i16.to.i64#" => "i16",
+                    _ => "i32",
+                };
+                writeln!(out, "{}{} = sext {} {} to i64", indent, result, llvm_ty, raw).ok();
+            }
+            // Unsigned fixed-width: zext i8/i16 to i64
+            op if op.starts_with("zext.") && op != "zext.i1.to.i64#" && op != "zext.i32.to.i64#" => {
+                let llvm_ty = match op {
+                    "zext.i8.to.i64#" => "i8",
+                    "zext.i16.to.i64#" => "i16",
+                    _ => "i32",
+                };
+                writeln!(out, "{}{} = zext {} {} to i64", indent, result, llvm_ty, raw).ok();
+            }
+            // Unknown box_op — the parameter stays in its native LLVM type
+            // (e.g., Native storage types like raw structs). No conversion.
+            _ => {}
+        }
+    }
+
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.fun.pending_cleanup.clear();
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();
-        // 2026-06-17: Use correct LLVM return type (float for Float, otherwise i64)
+        // 2026-06-30: Use TypeUniverse for return type instead of hardcoded float/i64.
+        // Previously was `if t == Float -> "float" else "i64"` which broke Char/Int8/Int32 returns.
         let is_float_fn = d.outputs.iter().any(|t| matches!(t, Type::Float));
-        let ll_ret_ty = if is_float_fn { "float" } else { "i64" };
-        self.fun.fn_ret_ty = ll_ret_ty.to_string();
-        self.fun.returns_i64 = !is_float_fn;
+        let ll_ret_ty = if d.outputs.is_empty() {
+            "void".to_string()
+        } else if is_float_fn {
+            "float".to_string()
+        } else {
+            self.llvm_type(&d.outputs[0]).to_string()
+        };
+        self.fun.fn_ret_ty = ll_ret_ty.clone();
+        self.fun.returns_i64 = ll_ret_ty == "i64";
         // Rename user `main` to `brief_main` to avoid collision with
         // the runtime entry point `define i32 @main()` in loop_engine.rs.
         let ll_name: &str = if d.name == "main" { "brief_main" } else { &d.name };
@@ -879,37 +957,69 @@ impl LlvmBackend {
         self.fun.ssa_old_float_regs.clear();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
-            let conv = format!("%ac{}", i);
             let reg: String;
-            if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data | Type::Float) {
-                match t {
-                    Type::Bool => { writeln!(out, "  {} = zext i8 {} to i64", conv, raw).ok(); }
-                    Type::Char => { writeln!(out, "  {} = zext i32 {} to i64", conv, raw).ok(); }
-                    Type::String | Type::Data => { writeln!(out, "  {} = ptrtoint i8* {} to i64", conv, raw).ok(); }
-                    Type::Float => {
-                        let m = format!("%ai{}", i);
-                        writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
-                        writeln!(out, "  {} = zext i32 {} to i64", conv, m).ok();
-                        self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
+            // 2026-07-01: Use universe-declared box_op for parameter boxing.
+            // If llvm_type is already i64, no boxing is needed (Int, UInt).
+            // If a box_op exists, use the universe-driven emit_box_param to
+            // widen from native type to i64. Otherwise, leave the parameter
+            // in its native LLVM type (fixed-width integers like Int32, Native
+            // storage types like Float64).
+            //
+            // This replaces the old pattern of matching on Type::Char/Bool/etc.
+            // The WHETHER-to-box decision is still type-category based (the
+            // matches! check below), but the HOW-to-box decision now comes from
+            // the universe's box_op field rather than hardcoded LLVM IR.
+            let param_llvm_ty = self.llvm_type(t);
+            if param_llvm_ty == "i64" {
+                reg = raw;
+            } else if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data | Type::Float) {
+                // 2026-07-01: Query universe for box_op. If available, use
+                // emit_box_param for universe-driven boxing. Falls back to
+                // hardcoded conversion when universe is unavailable (tests).
+                let conv = format!("%ac{}", i);
+                let box_op: Option<String> = self.ctx.type_universe.as_ref()
+                    .and_then(|u| u.get_by_type(t))
+                    .and_then(|rt| rt.box_op.clone());
+                if let Some(ref op) = box_op {
+                    if !op.is_empty() {
+                        self.emit_box_param(out, "  ", &conv, &raw, op);
                     }
-                    _ => {}
+                } else {
+                    // No box_op in universe — use hardcoded fallback for tests
+                    match t {
+                        Type::Bool => { writeln!(out, "  {} = zext i8 {} to i64", conv, raw).ok(); }
+                        Type::Char => { writeln!(out, "  {} = zext i32 {} to i64", conv, raw).ok(); }
+                        Type::String | Type::Data => { writeln!(out, "  {} = ptrtoint i8* {} to i64", conv, raw).ok(); }
+                        Type::Float => {
+                            let m = format!("%ai{}", i);
+                            writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
+                            writeln!(out, "  {} = zext i32 {} to i64", conv, m).ok();
+                            self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
+                        }
+                        _ => {}
+                    }
                 }
                 reg = conv;
             } else {
                 reg = raw;
             }
             self.fun.let_bindings.insert(n.clone(), reg.clone());
-            // Boxed params (Bool/Char/String/Data) are stored as i64,
-            // so mark them as Type::Int so downstream doesn't treat them
-            // as native i1/i32/i8*. Float stays Type::Float (handled specially).
-                if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data) {
-                    self.fun.let_binding_types.insert(n.clone(), Type::Int);
-                    // 2026-06-17: Save original type for String/Data params so
-                    // is_string_chain can detect string variables by original type.
-                    self.fun.let_original_types.insert(n.clone(), t.clone());
-                } else {
-                    self.fun.let_binding_types.insert(n.clone(), t.clone());
-                }
+            // Boxed params (Bool/Char/String/Data) are stored as i64 in
+            // let_bindings after boxing. Register as Type::Int so downstream
+            // doesn't treat them as native i1/i32/i8*. Float stays Type::Float
+            // (handled specially by ensure_float_reg via the cache).
+            // 2026-07-01: This decision is type-category based (Bool/Char/
+            // String/Data are semantically boxed types) and cannot be derived
+            // from universe data alone — Int32 also has storage="Boxed" but
+            // stays native in SSA.
+            if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data) {
+                self.fun.let_binding_types.insert(n.clone(), Type::Int);
+                // 2026-06-17: Save original type for String/Data params so
+                // is_string_chain can detect string variables by original type.
+                self.fun.let_original_types.insert(n.clone(), t.clone());
+            } else {
+                self.fun.let_binding_types.insert(n.clone(), t.clone());
+            }
         }
         self.fun.txn_counter = 0;
         self.fun.terminated = false;
@@ -1175,18 +1285,34 @@ impl LlvmBackend {
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
             let conv: String;
-            if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data | Type::Float) {
+            // 2026-07-01: Use universe-declared box_op for parameter boxing.
+            // Same approach as emit_definition — keeps signature and boxing
+            // consistent through universe data.
+            let param_llvm_ty = self.llvm_type(t);
+            if param_llvm_ty == "i64" {
+                conv = raw;
+            } else if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data | Type::Float) {
                 let ac = format!("%ac{}", i);
-                match t {
-                    Type::Bool => { writeln!(out, "  {} = zext i8 {} to i64", ac, raw).ok(); }
-                    Type::Char => { writeln!(out, "  {} = zext i32 {} to i64", ac, raw).ok(); }
-                    Type::String | Type::Data => { writeln!(out, "  {} = ptrtoint i8* {} to i64", ac, raw).ok(); }
-                    Type::Float => {
-                        let m = format!("%ai{}", i);
-                        writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
-                        writeln!(out, "  {} = zext i32 {} to i64", ac, m).ok();
+                let box_op: Option<String> = self.ctx.type_universe.as_ref()
+                    .and_then(|u| u.get_by_type(t))
+                    .and_then(|rt| rt.box_op.clone());
+                if let Some(ref op) = box_op {
+                    if !op.is_empty() {
+                        self.emit_box_param(out, "  ", &ac, &raw, op);
                     }
-                    _ => {}
+                } else {
+                    // Fallback: universe not available (unit tests)
+                    match t {
+                        Type::Bool => { writeln!(out, "  {} = zext i8 {} to i64", ac, raw).ok(); }
+                        Type::Char => { writeln!(out, "  {} = zext i32 {} to i64", ac, raw).ok(); }
+                        Type::String | Type::Data => { writeln!(out, "  {} = ptrtoint i8* {} to i64", ac, raw).ok(); }
+                        Type::Float => {
+                            let m = format!("%ai{}", i);
+                            writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
+                            writeln!(out, "  {} = zext i32 {} to i64", ac, m).ok();
+                        }
+                        _ => {}
+                    }
                 }
                 conv = ac;
             } else {

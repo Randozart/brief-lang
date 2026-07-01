@@ -119,6 +119,8 @@ type Char <: Bits {
     llvm <~ "i32";
     storage <~ "Boxed";
     tbaa <~ "Char";
+    box <~ "zext.i32.to.i64#";
+    unbox <~ "trunc.i64.to.i32#";
 };
 
 type String <: Bits {

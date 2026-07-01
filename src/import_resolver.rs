@@ -46,6 +46,9 @@ pub struct ImportResolver {
     core_imported: bool,
     /// Board name for `import "target"` resolution (e.g., "stm32f407").
     board_name: Option<String>,
+    // 2026-07-01: Cycle detection for import resolution.
+    // Tracks path strings currently being resolved to detect A→B→A cycles.
+    in_progress: HashSet<String>,
 }
 
 impl ImportResolver {
@@ -59,6 +62,7 @@ impl ImportResolver {
             use_stdlib: true,
             core_imported: false,
             board_name: None,
+            in_progress: HashSet::new(),
         }
     }
 
@@ -687,6 +691,16 @@ impl ImportResolver {
             )
         })?;
 
+        // 2026-07-01: Cycle detection — if path_str is already in in_progress,
+        // we have a circular import (A imports B, B imports A).
+        if !self.in_progress.insert(path_str.clone()) {
+            return Err(format!(
+                "Circular import detected: '{}' is already being resolved \
+                 (direct or transitive self-import).",
+                path_str
+            ));
+        }
+
         let source = std::fs::read_to_string(&resolved_path)
             .map_err(|e| format!("Failed to read '{}': {}", resolved_path.display(), e))?;
 
@@ -704,7 +718,11 @@ impl ImportResolver {
         self.loaded_modules
             .insert(path_str.clone(), (resolved.clone(), sed_names.clone()));
 
-        self.filter_items(&resolved, &sed_names, &import.items)
+        // Remove from in_progress now that resolution is complete.
+        // Must do this before returning, since filter_items is the return expr.
+        let result = self.filter_items(&resolved, &sed_names, &import.items);
+        self.in_progress.remove(&path_str);
+        result
     }
 
     /// Resolve a magic import (import#) — resolves the path relative to the stdlib root.

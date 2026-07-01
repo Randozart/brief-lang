@@ -338,6 +338,10 @@ pub struct Interpreter {
     cycle_counter: u64,
     /// Watchdog cycle budget — the maximum number of statements before timeout.
     cycle_budget: u64,
+    // 2026-07-01: Max iterations for callable txn convergence loop.
+    // When exceeded, the loop returns an error instead of hanging.
+    // Default 10_000 — a non-converging txn should be caught in milliseconds.
+    pub txn_convergence_max_iterations: u64,
     pub type_universe: Option<crate::type_universe::TypeUniverse>,
     /// Maps variable names to their declared type annotations.
     /// Used by lookup_insert_strategy / lookup_extract_strategy to resolve
@@ -381,6 +385,7 @@ impl Clone for Interpreter {
             oracle_fuel: None,
             cycle_counter: 0,
             cycle_budget: u64::MAX,
+            txn_convergence_max_iterations: self.txn_convergence_max_iterations,
             type_universe: self.type_universe.clone(),
             let_types: HashMap::new(),
             frgn_watchdogs: self.frgn_watchdogs.clone(),
@@ -541,6 +546,7 @@ impl Interpreter {
             oracle_fuel: None,
             cycle_counter: 0,
             cycle_budget: u64::MAX,
+            txn_convergence_max_iterations: 10_000,
             type_universe: None,
             let_types: HashMap::new(),
             frgn_watchdogs: std::collections::HashMap::new(),
@@ -552,6 +558,14 @@ impl Interpreter {
             cell_wires: Vec::new(),
             cell_thread_handle: None,
         }
+    }
+
+    // 2026-07-01: Builder method for txn convergence max iterations.
+    // Allows the CLI flag --txn-convergence-max-iterations to tune this at
+    // compile time without modifying the struct default.
+    pub fn with_txn_convergence_max_iterations(mut self, n: u64) -> Self {
+        self.txn_convergence_max_iterations = n;
+        self
     }
 
     pub fn load_program(&mut self, program: &Program) {
@@ -914,11 +928,14 @@ impl Interpreter {
         let old_return = self.return_value.take();
 
         let mut iterations = 0;
-        let max_iterations = 10_000_000;
+        let max_iterations = self.txn_convergence_max_iterations;
         let mut result = Value::Void;
 
         // Convergence loop: execute body while precondition holds.
         // The precondition becoming false is the convergence signal.
+        // 2026-07-01: When max_iterations is exceeded, return an error instead
+        // of silently breaking — non-convergence is a compile-time error, not
+        // something to accept silently.
         loop {
             let pre_val = self.eval_expr(&txn.contract.pre_condition)?;
             if pre_val != Value::Bool(true) {
@@ -926,7 +943,12 @@ impl Interpreter {
             }
 
             if iterations >= max_iterations {
-                break;
+                return Err(RuntimeError::ContractViolation(format!(
+                    "txn '{}' did not converge after {} iterations \
+                     (precondition remained true, state kept changing). \
+                     Increase --txn-convergence-max-iterations or fix the txn.",
+                    name, max_iterations
+                )));
             }
             iterations += 1;
 

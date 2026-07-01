@@ -94,7 +94,8 @@ fn expand_template_in_stmt(
             None => return Err(format!("undefined template '{}'", name)),
         };
         ctx.call_site_span = span.clone();
-        let mut interpreter = crate::interpreter::Interpreter::new();
+        let mut interpreter = crate::interpreter::Interpreter::new()
+            .with_txn_convergence_max_iterations(ctx.txn_convergence_max_iterations);
         let value = template::expand_template(ctx, &mut interpreter, &def, args, block.clone());
         ctx.call_site_span = None;
         let value = value?;
@@ -234,7 +235,8 @@ fn expand_template_in_expr(
         _ => return Ok(None),
     };
     if let Some(def) = ctx.templates.get(&name).cloned() {
-        let mut interpreter = crate::interpreter::Interpreter::new();
+        let mut interpreter = crate::interpreter::Interpreter::new()
+            .with_txn_convergence_max_iterations(ctx.txn_convergence_max_iterations);
         ctx.call_site_span = span;
         let value = template::expand_template(ctx, &mut interpreter, &def, &args, block);
         ctx.call_site_span = None;
@@ -261,7 +263,8 @@ pub(crate) fn expand_macro_calls_in_items(
             if let Statement::Expression(Expr::MacroCall { name, args, block, span: _ }) = stmt.as_ref() {                let def = ctx.macros.get(name)
                     .ok_or_else(|| format!("undefined macro '{}'", name))?
                     .clone();
-                let mut interpreter = crate::interpreter::Interpreter::new();
+                let mut interpreter = crate::interpreter::Interpreter::new()
+                    .with_txn_convergence_max_iterations(ctx.txn_convergence_max_iterations);
                 let value = template::expand_macro(ctx, &mut interpreter, &def, args, block.clone())?;                match &value {
                     crate::interpreter::Value::Items(new_items) => {
                         items.remove(i);
@@ -325,7 +328,8 @@ fn expand_macro_in_stmt(
             .ok_or_else(|| format!("undefined macro '{}'", name))?
             .clone();
         ctx.call_site_span = span.clone();
-        let mut interpreter = crate::interpreter::Interpreter::new();
+        let mut interpreter = crate::interpreter::Interpreter::new()
+            .with_txn_convergence_max_iterations(ctx.txn_convergence_max_iterations);
         let value = template::expand_macro(ctx, &mut interpreter, &def, args, block.clone());
         ctx.call_site_span = None;
         let value = value?;
@@ -437,7 +441,8 @@ fn expand_macro_in_expr(
         _ => return Ok(None),
     };
     if let Some(def) = ctx.macros.get(&name).cloned() {
-        let mut interpreter = crate::interpreter::Interpreter::new();
+        let mut interpreter = crate::interpreter::Interpreter::new()
+            .with_txn_convergence_max_iterations(ctx.txn_convergence_max_iterations);
         ctx.call_site_span = span;
         let value = template::expand_macro(ctx, &mut interpreter, &def, &args, block);
         ctx.call_site_span = None;

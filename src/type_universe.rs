@@ -196,6 +196,112 @@ impl TypeUniverse {
         }
     }
 
+    // ── Post-Bootstrap Validation ─────────────────────────────────
+    //
+    // 2026-07-01: After loading the bootstrap type universe, validate
+    // that all built-in types have correct properties. This catches
+    // silent binding failures (e.g., apply_binding using old-style Expr
+    // patterns while the parser produces new-style Literal-packed Expr)
+    // that would otherwise produce wrong LLVM types in the compiled IR.
+    //
+    // Each check verifies that the bootstrap file's annotations were
+    // correctly applied. If a binding silently failed, the type would
+    // retain its default value (e.g., llvm_type="i64" instead of "i32"
+    // for Char), causing invalid LLVM IR in the backend.
+    //
+    fn validate_primitives(&self) {
+        // Known built-in type names and their expected properties after
+        // bootstrap loading. Each entry: (type_name, property, expected_value).
+        let checks: &[(&str, &str, &str)] = &[
+            ("Int",     "llvm",    "i64"),
+            ("Int",     "storage", "Boxed"),
+            ("Int",     "bytes",   "8"),
+            ("Int",     "tbaa",    "Int"),
+            ("UInt",    "llvm",    "i64"),
+            ("UInt",    "storage", "Boxed"),
+            ("Int8",    "llvm",    "i8"),
+            ("Int8",    "storage", "Boxed"),
+            ("Int8",    "bytes",   "1"),
+            ("Int8",    "box",     "sext.i8.to.i64#"),
+            ("Int8",    "unbox",   "trunc.i64.to.i8#"),
+            ("UInt8",   "llvm",    "i8"),
+            ("UInt8",   "box",     "zext.i8.to.i64#"),
+            ("UInt8",   "unbox",   "trunc.i64.to.i8#"),
+            ("Int16",   "llvm",    "i16"),
+            ("Int16",   "box",     "sext.i16.to.i64#"),
+            ("Int16",   "unbox",   "trunc.i64.to.i16#"),
+            ("UInt16",  "llvm",    "i16"),
+            ("UInt16",  "box",     "zext.i16.to.i64#"),
+            ("UInt16",  "unbox",   "trunc.i64.to.i16#"),
+            ("Int32",   "llvm",    "i32"),
+            ("Int32",   "box",     "sext.i32.to.i64#"),
+            ("Int32",   "unbox",   "trunc.i64.to.i32#"),
+            ("UInt32",  "llvm",    "i32"),
+            ("UInt32",  "box",     "zext.i32.to.i64#"),
+            ("UInt32",  "unbox",   "trunc.i64.to.i32#"),
+            ("Float",   "llvm",    "float"),
+            ("Float",   "storage", "Native"),
+            ("Float",   "bytes",   "4"),
+            ("Float",   "box",     "bitcast.f32.to.i64#"),
+            ("Float",   "unbox",   "bitcast.i64.to.f32#"),
+            ("Float64", "llvm",    "double"),
+            ("Float64", "storage", "Native"),
+            ("Float64", "bytes",   "8"),
+            ("Float64", "box",     "bitcast.f64.to.i64#"),
+            ("Float64", "unbox",   "bitcast.i64.to.f64#"),
+            ("Bool",    "llvm",    "i8"),
+            ("Bool",    "storage", "Boxed"),
+            ("Bool",    "bytes",   "1"),
+            ("Bool",    "box",     "zext.i1.to.i64#"),
+            ("Bool",    "unbox",   "trunc.i64.to.i1#"),
+            ("Char",    "llvm",    "i32"),
+            ("Char",    "storage", "Boxed"),
+            ("Char",    "bytes",   "4"),
+            ("Char",    "box",     "zext.i32.to.i64#"),
+            ("Char",    "unbox",   "trunc.i64.to.i32#"),
+            ("String",  "llvm",    "i8*"),
+            ("String",  "storage", "Boxed"),
+            ("String",  "bytes",   "8"),
+            ("String",  "box",     "ptrtoint#"),
+            ("String",  "unbox",   "inttoptr#"),
+            ("Data",    "llvm",    "i8*"),
+            ("Data",    "storage", "Boxed"),
+            ("Data",    "bytes",   "8"),
+            ("Data",    "box",     "ptrtoint#"),
+            ("Data",    "unbox",   "inttoptr#"),
+        ];
+        for &(type_name, property, expected) in checks {
+            let rt = self.types.get(type_name).unwrap_or_else(|| {
+                panic!(
+                    "TypeUniverse validation FAILED: built-in type '{}' not found. \
+                     Bootstrap loading failed silently.",
+                    type_name
+                )
+            });
+            let actual: &str = match property {
+                "llvm" => &rt.llvm_type,
+                "storage" => &rt.storage,
+                "tbaa" => &rt.tbaa_node,
+                "bytes" => {
+                    // bytes is a u64 — convert to string for comparison
+                    let s = rt.bytes.to_string();
+                    // Leak the string for &str comparison (validation only, called once)
+                    let leaked: &'static str = Box::leak(s.into_boxed_str());
+                    leaked
+                }
+                "box" => rt.box_op.as_deref().unwrap_or("(missing)"),
+                "unbox" => rt.unbox_op.as_deref().unwrap_or("(missing)"),
+                _ => panic!("Unknown validation property '{}'", property),
+            };
+            assert_eq!(
+                actual, expected,
+                "TypeUniverse validation FAILED: {} {} = '{}', expected '{}'. \
+                 This means a bootstrap binding silently failed to apply.",
+                type_name, property, actual, expected
+            );
+        }
+    }
+
     /// Default values for primitive type initialization.
     /// Uses the `..` struct update syntax for ResolvedType.
     fn default_primitive() -> ResolvedType {
@@ -248,6 +354,11 @@ impl TypeUniverse {
 
         // Phase 0: Register built-in primitive types from bootstrap file
         universe.init_primitives_from_bootstrap();
+        // 2026-07-01: Validate that all built-in types have correct properties.
+        // If a bootstrap binding silently failed (e.g., apply_binding using
+        // wrong Expr variant), this assertion catches it at compiler startup
+        // rather than producing invalid LLVM IR.
+        universe.validate_primitives();
         let mut type_defs: Vec<&TypeDef> = Vec::new();
         for item in &program.items {
             if let TopLevel::TypeDef(td) = item {
@@ -447,16 +558,20 @@ impl TypeUniverse {
     /// Known metadata property names override the corresponding field;
     /// unknown names are stored in the projections map.
     fn apply_binding(&self, rt: &mut ResolvedType, binding: &TypeBinding) {
-        // Case-insensitive matching for uniform <~ annotation syntax
+        // 2026-06-30: Use Expr helper methods (as_integer, as_bool, as_string) that
+        // handle BOTH old-style direct variants (Expr::Integer, Expr::String, Expr::Bool)
+        // AND new-style Literal-packed variants (Expr::Literal(LiteralExpr::Integer(...))).
+        // Without this, bindings from parsed source (bootstrap file, user code) silently
+        // fail to apply, leaving default values (llvm_type="i64", storage="Boxed", etc.).
         match binding.name.to_lowercase().as_str() {
             "bytes" => {
-                if let Expr::Integer(n) = binding.value.as_ref() {
-                    rt.bytes = *n as u64;
+                if let Some(n) = binding.value.as_integer() {
+                    rt.bytes = n as u64;
                 }
             }
             "alignment" => {
-                if let Expr::Integer(n) = binding.value.as_ref() {
-                    rt.alignment = *n as u64;
+                if let Some(n) = binding.value.as_integer() {
+                    rt.alignment = n as u64;
                 }
             }
             "endian" => {
@@ -465,13 +580,13 @@ impl TypeUniverse {
                 }
             }
             "volatile" => {
-                if let Expr::Bool(b) = binding.value.as_ref() {
-                    rt.volatile = *b;
+                if let Some(b) = binding.value.as_bool() {
+                    rt.volatile = b;
                 }
             }
             "atomic" => {
-                if let Expr::Bool(b) = binding.value.as_ref() {
-                    rt.atomic = *b;
+                if let Some(b) = binding.value.as_bool() {
+                    rt.atomic = b;
                 }
             }
             "elementtype" => {
@@ -480,8 +595,8 @@ impl TypeUniverse {
                 }
             }
             "fixedsize" => {
-                if let Expr::Bool(b) = binding.value.as_ref() {
-                    rt.fixed_size = Some(*b);
+                if let Some(b) = binding.value.as_bool() {
+                    rt.fixed_size = Some(b);
                 }
             }
             "insertat" => {
@@ -491,76 +606,71 @@ impl TypeUniverse {
                 rt.extract_from = type_universe_expr_to_string(&binding.value);
             }
             "allowindex" => {
-                if let Expr::Bool(b) = binding.value.as_ref() {
-                    rt.allow_index = *b;
+                if let Some(b) = binding.value.as_bool() {
+                    rt.allow_index = b;
                 }
             }
             "allowslice" => {
-                if let Expr::Bool(b) = binding.value.as_ref() {
-                    rt.allow_slice = *b;
+                if let Some(b) = binding.value.as_bool() {
+                    rt.allow_slice = b;
                 }
             }
             "allowarrow" => {
-                if let Expr::Bool(b) = binding.value.as_ref() {
-                    rt.allow_arrow = *b;
+                if let Some(b) = binding.value.as_bool() {
+                    rt.allow_arrow = b;
                 }
             }
             "codec" => {
-                match &binding.value.as_ref() {
-                    Expr::String(s) => {
-                        if !KNOWN_CODECS.contains(&s.as_str()) {
-                            // Unknown codec — warn but accept (forward compat)
-                        }
-                        rt.codec = Some(s.clone());
+                if let Some(s) = binding.value.as_string() {
+                    if !KNOWN_CODECS.contains(&s) {
+                        // Unknown codec — warn but accept (forward compat)
                     }
-                    Expr::Identifier(id) => {
-                        if !KNOWN_CODECS.contains(&id.as_str()) {
-                            // Unknown codec identifier — warn but accept
-                        }
-                        rt.codec = Some(id.clone());
+                    rt.codec = Some(s.to_string());
+                } else if let Expr::Identifier(id) = binding.value.as_ref() {
+                    if !KNOWN_CODECS.contains(&id.as_str()) {
+                        // Unknown codec identifier — warn but accept
                     }
-                    _ => {}
+                    rt.codec = Some(id.clone());
                 }
             }
             "onexit" => {
                 // Foreign destructor function
-                match &binding.value.as_ref() {
-                    Expr::String(s) => rt.on_exit = Some(s.clone()),
-                    Expr::Identifier(id) => rt.on_exit = Some(id.clone()),
-                    Expr::IntrinsicCall { intrinsic, .. } => {
-                        rt.on_exit = Some(intrinsic.name().to_string());
-                    }
-                    _ => {}
+                if let Some(s) = binding.value.as_string() {
+                    rt.on_exit = Some(s.to_string());
+                } else if let Expr::Identifier(id) = binding.value.as_ref() {
+                    rt.on_exit = Some(id.clone());
+                } else if let Expr::IntrinsicCall { intrinsic, .. } = binding.value.as_ref() {
+                    rt.on_exit = Some(intrinsic.name().to_string());
                 }
             }
             // ── Codegen Property Handlers ───────────────────────
             "llvm" => {
-                if let Expr::String(s) = binding.value.as_ref() {
-                    rt.llvm_type = s.clone();
+                if let Some(s) = binding.value.as_string() {
+                    rt.llvm_type = s.to_string();
                 }
             }
             "storage" => {
-                if let Expr::String(s) = binding.value.as_ref() {
-                    rt.storage = s.clone();
+                if let Some(s) = binding.value.as_string() {
+                    rt.storage = s.to_string();
                 }
             }
             "tbaa" => {
-                if let Expr::String(s) = binding.value.as_ref() {
-                    rt.tbaa_node = s.clone();
+                if let Some(s) = binding.value.as_string() {
+                    rt.tbaa_node = s.to_string();
                 }
             }
             "box" => {
-                match binding.value.as_ref() {
-                    Expr::String(s) => rt.box_op = Some(s.clone()),
-                    Expr::Identifier(id) => rt.box_op = Some(id.clone()),
-                    _ => {}
+                if let Some(s) = binding.value.as_string() {
+                    rt.box_op = Some(s.to_string());
+                } else if let Expr::Identifier(id) = binding.value.as_ref() {
+                    rt.box_op = Some(id.clone());
                 }
             }
             "unbox" => {
-                match binding.value.as_ref() {
-                    Expr::String(s) => rt.unbox_op = Some(s.clone()),
-                    Expr::Identifier(id) => rt.unbox_op = Some(id.clone()),
-                    _ => {}
+                if let Some(s) = binding.value.as_string() {
+                    rt.unbox_op = Some(s.to_string());
+                } else if let Expr::Identifier(id) = binding.value.as_ref() {
+                    rt.unbox_op = Some(id.clone());
                 }
             }
             // Unknown name → user-defined projection

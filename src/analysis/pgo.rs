@@ -20,8 +20,9 @@ pub fn has_pgo_candidate(profile: &PgoProfile, min_skew_ratio: u64) -> bool {
     })
 }
 
-pub fn run_profile(program: &Program, max_ticks: u64) -> PgoProfile {
-    let mut interpreter = Interpreter::new();
+pub fn run_profile(program: &Program, max_ticks: u64, txn_convergence_max_iterations: u64) -> PgoProfile {
+    let mut interpreter = Interpreter::new()
+        .with_txn_convergence_max_iterations(txn_convergence_max_iterations);
     interpreter.profile_mode = true;
     interpreter.load_program(program);
 

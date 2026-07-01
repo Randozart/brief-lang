@@ -1172,7 +1172,7 @@ fn run_build(
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1195,7 +1195,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1224,7 +1224,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend, None, None);
+            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend, None, None, 10_000);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1872,7 +1872,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
     let result: Option<PathBuf> = match backend.as_str() {
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, false, None, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan", None, emit_bindings_dir.clone()) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, false, None, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan", None, emit_bindings_dir.clone(), 10_000) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -2342,6 +2342,7 @@ fn link_and_optimize(
       gpu_backend: &str,
       embedded_config: Option<EmbeddedConfig>,
       emit_bindings_dir: Option<String>,
+      txn_convergence_max_iterations: u64,
   ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let is_gpu = is_gpu_extension(file_path);
     let is_embedded = is_embedded_extension(file_path);
@@ -2495,6 +2496,7 @@ fn link_and_optimize(
     {
         let mut macro_ctx = brief_compiler::features::macros::context::MacroContext::new();
         macro_ctx.safe_mode = safe_compile;
+        macro_ctx.txn_convergence_max_iterations = txn_convergence_max_iterations;
         if let Some(budget) = macro_budget {
             macro_ctx.budget = budget;
         }
@@ -2612,7 +2614,7 @@ fn link_and_optimize(
             }
         });
         if has_guarded {
-            let profile = brief_compiler::analysis::pgo::run_profile(&program, 10);
+            let profile = brief_compiler::analysis::pgo::run_profile(&program, 10, txn_convergence_max_iterations);
             if brief_compiler::analysis::pgo::has_pgo_candidate(&profile, 100) {
                 let skewed = profile.branch_counts.iter()
                     .filter(|(_, (t, f))| *t > 0 || *f > 0)
@@ -3088,9 +3090,20 @@ fn run_rbv(
     }
 
     // Expand component tags in view HTML
+    // 2026-07-01: Added MAX_TAG_PASSES to prevent infinite loop from
+    // circular <Component /> references (e.g., A includes B includes A).
+    const MAX_TAG_PASSES: u32 = 100;
     let mut expanded_view = rbv_file.view_html.clone();
     let mut changed = true;
+    let mut tag_passes = 0u32;
     while changed {
+        tag_passes += 1;
+        if tag_passes > MAX_TAG_PASSES {
+            return Err(format!(
+                "Component tag expansion exceeded {} passes — possible circular <Component /> reference in view HTML",
+                MAX_TAG_PASSES
+            ).into());
+        }
         changed = false;
         for (name, html) in &render_blocks {
             let tag = format!("<{} />", name);
@@ -3796,7 +3809,7 @@ fn main() {
                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                     match ext {
                         "bv" | "sbv" | "ebv" | "sebv" | "abv" => {
-                            let result = run_llvm_compile(&path, out, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None);
+                            let result = run_llvm_compile(&path, out, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None, 10_000);
                             match result {
                                 Ok(ll_path) => {
                                     println!("  LLVM IR emitted: {}", ll_path.display());
@@ -3866,6 +3879,7 @@ fn main() {
             let mut emit_remarks = false;
             let mut gpu_offload = false;
             let mut gpu_backend = "vulkan".to_string();
+            let mut txn_convergence_max_iterations: Option<u64> = None;
             while i < args.len() {
                 let arg = &args[i];
                 if arg == "--out" && i + 1 < args.len() {
@@ -3929,6 +3943,9 @@ fn main() {
                 } else if arg == "--simplify-budget" && i + 1 < args.len() {
                     simplify_budget = Some(args[i + 1].parse::<u64>().unwrap_or(0));
                     i += 2;
+                } else if arg == "--txn-convergence-max-iterations" && i + 1 < args.len() {
+                    txn_convergence_max_iterations = Some(args[i + 1].parse::<u64>().unwrap_or(10_000));
+                    i += 2;
                 } else if !arg.starts_with('-') {
                     file_path = Some(PathBuf::from(arg));
                     i += 1;
@@ -3962,8 +3979,9 @@ fn main() {
                 if args.contains(&"--unlimited-macros".to_string()) {
                     macro_budget = Some(u64::MAX);
                 }
+                let txn_max_iter = txn_convergence_max_iterations.unwrap_or(10_000);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, dump_layout, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget, emit_remarks, gpu_offload, &gpu_backend, None, None);
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, dump_layout, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget, emit_remarks, gpu_offload, &gpu_backend, None, None, txn_max_iter);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);

@@ -1406,3 +1406,86 @@ patterns and emits a re-load of the field with `!range !{ 0, N }` metadata.
 **Root cause**: Three `fprintf` call sites omit the explicit variadic function type.
 
 **Fix**: Added `(ptr, ptr, ...)` to all three call sites.
+
+---
+
+## 2026-06-30: Phase C/D/E — Bootstrap Type Universe, Annotation Arrow, Foreach Completion
+
+### Phase C — Bootstrap Type Universe
+
+**Lexer**: Added `TildeArrow` (`<~`) token (`#[token("<~")]`) — lexed as single token
+via Logos longest-match. `src/lexer.rs:344`.
+
+**Parser**: `parse_type_def` now accepts `<~` alongside `=` as a binding separator
+in type bodies. Added `parse_annotations()` method that parses `<~ key: expr, #shorthand`
+lists. Wired into `parse_definition`, `parse_transaction`, and `parse_trigger_body`.
+`src/parser.rs:3370, 5110`.
+
+**Type Universe**: `apply_binding()` is now case-insensitive via `.to_lowercase()`
+so both `bytes <~ 8` and `Bytes = 8` dispatch to the same handler. Added handlers
+for `llvm`, `storage`, `tbaa`, `box`, `unbox` annotations. `src/type_universe.rs:561`.
+
+**Bootstrap file**: `lib/std/types/bootstrap.bv` defines 14 primitive types (`Int`,
+`UInt`, `Int8`, `UInt8`, `Int16`, `UInt16`, `Int32`, `UInt32`, `Float`, `Float64`,
+`Bool`, `Char`, `String`, `Data`) using `<~` annotation syntax.
+
+**Auto-import**: ImportResolver auto-injects `import# std/types/bootstrap.bv`
+for all `.bv` files (gated by `--no-std`). `src/import_resolver.rs:163`.
+
+**Old code removed**: 163-line hardcoded `init_primitives()` with `Vec<ResolvedType>`
+struct literals replaced by `init_primitives_from_bootstrap()` which parses the
+`.bv` file via `include_str!`. `src/type_universe.rs:180`.
+
+**Type body bindings**: Both `float.bv` and `from-bits.bv` updated from
+`Name = value;` to `name <~ value;` for compile-time metadata. Runtime projection
+bindings remain as `Name = expr;`.
+
+### Phase D — Annotation Arrow on Declarations
+
+**AST**: Added `annotations: Vec<TypeBinding>` field to `Definition`, `Transaction`,
+and `TriggerDeclaration` structs. `src/ast.rs:2290, 2308, 2355`.
+
+**Parser**: `parse_annotations()` supports `<~ key: expr, #shorthand` on defn/txn/trg.
+`#shorthand` in annotations desugars to `key <~ true`. `#pragma` in type bodies
+normalizes to lowercase (was uppercase), fixing a mismatch with case-insensitive
+`apply_binding()`. `src/parser.rs:3339, 5110`.
+
+**164 construction sites** updated across 18 files to add `annotations: vec![],`.
+
+**Transaction.attrs removed**: Dead field `attrs: Vec<Attribute>` removed from
+`Transaction` struct. 117 `attrs:` lines removed from test code.
+`src/ast.rs:2306` (removed), `src/parser.rs:1272` (write site removed).
+
+### Foreach Completion
+
+**Type checker**: Added `Statement::Foreach` arm in `check_statement` — validates
+list expression is `Applied("List", [elem_ty])`, declares iteration variable with
+correct element type in scope, recursively checks body statements.
+`src/typechecker.rs:2007`.
+
+**LLVM codegen**: Item type generalized from hardcoded `Type::Int` to dynamic
+extraction from `TypedRegister.ty` — supports `List<Float>`, `List<String>`, etc.
+`src/features/stmt/foreach.rs:54-56, 85`.
+
+**CIRCT backend**: Compile-time unroll for `Expr::ListLiteral` lists; emits warning
+comment for dynamic (non-constant) lists. `src/backend/circt.rs:595`.
+
+**Projection parser**: `parse_projection_target` now handles intrinsic call targets:
+`fadd#(rhs)` → `UserDefinedWithArg("fadd#", ...)`, bare `fneg#` → `UserDefined("fneg#")`.
+This enables `from-bits.bv` to parse up to its `$` template syntax section.
+`src/parser.rs:7332`.
+
+### Tests
+
+- **6 new tests**: 1 lexer (`test_tilde_arrow_as_single_token`), 5 parser
+  (definition/transaction/trigger with annotations, `<~` type body bindings,
+  `#volatile` pragma shorthand, `from-bits.bv` best-effort parse)
+- **Final count**: 1363 passed, 0 failed
+- All existing tests pass with zero regressions
+
+### Documentation
+
+- `docs/architecture/overview.md` — Annotation Arrow + Bootstrap Type Universe sections
+- `docs/architecture/prelude-and-import-magic.md` — Bootstrap Type Universe auto-import
+- `learn-brief/12-pragmas.md` — Annotation Arrow + `#hashtag` shorthand
+- `.opencode/plans/2026-06-30-foreach-completion.md` — Foreach completion plan

@@ -7331,7 +7331,23 @@ let span = self.current_span();
             "FnSpan" => Ok(ProjectionTarget::FnSpan),
             _ => {
                 // User-defined projection — check for parameterized form
-                if matches!(self.current_token(), Some(Ok(Token::LParen))) {
+                // Handle intrinsic call targets: `fadd#(rhs)` → name# with arg
+                if matches!(self.current_token(), Some(Ok(Token::Hash)))
+                    && matches!(self.peek_token(), Some(Ok(Token::LParen)))
+                {
+                    self.advance(); // consume #
+                    self.advance(); // consume (
+                    let expr = self.parse_expression()?;
+                    self.expect(Token::RParen)?;
+                    Ok(ProjectionTarget::UserDefinedWithArg(
+                        format!("{}#", name),
+                        Box::new(expr),
+                    ))
+                } else if matches!(self.current_token(), Some(Ok(Token::Hash))) {
+                    // Bare intrinsic reference: `fneg#` or `ptrtoint#`
+                    self.advance(); // consume #
+                    Ok(ProjectionTarget::UserDefined(format!("{}#", name)))
+                } else if matches!(self.current_token(), Some(Ok(Token::LParen))) {
                     self.advance();
                     let expr = self.parse_expression()?;
                     self.expect(Token::RParen)?;
@@ -10981,6 +10997,23 @@ defn fallback() -> Int { term 0; };
         let mut parser = Parser::new(source);
         let result = parser.parse();
         assert!(result.is_ok(), "Custom types example should parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_from_bits_dot_bv() {
+        let source = include_str!("../lib/std/from-bits.bv");
+        let mut parser = Parser::new(source);
+        let result = parser.parse();
+        // from-bits.bv is an educational file with conceptual syntax.
+        // It should parse up to the `$ slot(n) { ... }` template macro
+        // which is not supported as a top-level construct.
+        match &result {
+            Ok(prog) => assert!(prog.items.len() > 5, "should have parsed many type defs"),
+            Err(e) => {
+                let msg = format!("{}", e);
+                assert!(msg.contains("$"), "expected failure on $ template syntax, got: {}", msg);
+            }
+        }
     }
 
     // ── Phase D: Annotation Arrow Tests ───────────────────────
