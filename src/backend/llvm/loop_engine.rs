@@ -1607,6 +1607,97 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-02: Rotated loop for small modulo dispatch (K ≤ 8).
+    /// Instead of srem + switch, emit K straight-line bodies and increment
+    /// the counter by K per round. No modulus, no indirect branch.
+    fn emit_modulo_rotated(
+        &mut self,
+        out: &mut String,
+        txns: &[(String, &crate::ast::Transaction)],
+        counter_name: &str,
+        divisor: i64,
+        cases: &[(i64, &str)],
+    ) {
+        self.fun.fn_ret_ty = "i32".to_string();
+        self.fun.main_body = true;
+        let attr = self.slp_attr("main", "#3");
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        self.emit_trg_init(out);
+        self.emit_arena_init(out, "  ");
+        // Load bound from the first txn's precondition
+        let bound_idx = txns.iter().find_map(|(_, t)| {
+            let pre = &t.contract.pre_condition;
+            match pre.normalize_to_old_recursive() {
+                Expr::And(ref left, _) => match left.as_ref() {
+                    Expr::Lt(_, r) => match r.as_ref() {
+                        Expr::Identifier(b) => self.ctx.field_index_map.get(b).copied(),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                _ => None,
+            }
+        }).unwrap_or(0);
+        let b_gep = format!("%gep_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, bound_idx).ok();
+        let b_val = format!("%val_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
+        let count_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
+        let c_base = format!("%cgep_base{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c_base, count_idx).ok();
+        // ── _body4: loop body with K sequential txns ──
+        // Memory-based counter: load from %State, the body increments it,
+        // after K bodies we've advanced by K. No phi needed (avoids
+        // predecessor issues with init blocks branching to the header).
+        writeln!(out, "  br label %_body4").ok();
+        writeln!(out, "_body4:").ok();
+        // Load the base counter for this round from %State
+        let round_base = format!("%rbase{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", round_base, c_base).ok();
+        // Sort cases by their modulo value (0, 1, 2, ... K-1)
+        let mut sorted_cases = cases.to_vec();
+        sorted_cases.sort_by_key(|(v, _)| *v);
+        let mut iter_count = round_base;
+        for (case_val, case_name) in &sorted_cases {
+            if *case_val > 0 {
+                // Previous iteration incremented the counter. Use the latest.
+                let ci = format!("%cit_{}_{}", case_val, self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "  {} = add i64 {}, 1", ci, iter_count).ok();
+                writeln!(out, "  store i64 {}, i64* {}, align 8", ci, c_base).ok();
+                iter_count = ci;
+            }
+            // Emit the txn body for this case
+            if let Some((_, txn)) = txns.iter().find(|(n, _)| *n == *case_name) {
+                self.fun.let_bindings.clear(); self.fun.let_binding_types.clear();
+                self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+                self.fun.terminated = false;
+                self.fun.returns_i64 = false;
+                for stmt in &txn.body {
+                    if !matches!(stmt, Statement::Term { .. } | Statement::TermBang { .. }) {
+                        self.emit_stmt(out, stmt, "  ");
+                    }
+                }
+            }
+        }
+        // Load current counter (after K bodies, this is old_base + K)
+        let cnt_check = format!("%cnt_check{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", cnt_check, c_base).ok();
+        let cont = format!("%cont{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = icmp slt i64 {}, {}", cont, cnt_check, b_val).ok();
+        writeln!(out, "  br i1 {}, label %_body4, label %_done", cont).ok();
+        // ── _done ──
+        writeln!(out, "_done:").ok();
+        self.emit_arena_reset(out, "  ");
+        let saved = std::mem::take(&mut self.fun.pending_post_hoist);
+        self.emit_hoisted_post_loop_prints(out, &saved);
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
     /// Emit a switch-based dispatch for reactive txns whose preconditions
     /// form a complete modulo dispatch pattern: `count < bound && count % K == N`.
     ///
@@ -1641,6 +1732,12 @@ impl LlvmBackend {
         divisor: i64,
         cases: &[(i64, &str)],
     ) {
+        // 2026-07-02: For small K ≤ 8, emit a rotated loop instead of srem+switch.
+        // The rotated loop executes all K bodies in sequence, incrementing the
+        // counter by K per round — no modulus, no indirect branch, no merge phi.
+        if divisor <= 8 {
+            return self.emit_modulo_rotated(out, txns, counter_name, divisor, cases);
+        }
         self.fun.fn_ret_ty = "i32".to_string();
         self.fun.main_body = true;
         let attr = self.slp_attr("main", "#3");
