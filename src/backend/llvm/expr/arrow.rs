@@ -32,6 +32,44 @@ pub fn emit_arrow_push(
     val: &Box<Expr>,
     indent: &str,
 ) -> TypedRegister {
+    // 2026-07-02: Check if the target is an inline RingBuffer field.
+    // Inline fields store data_ptr/head/tail/mask directly in %State,
+    // bypassing the inttoptr handle. We emit the ring buffer operations
+    // inline here rather than using IntrinsicCall, which would try to
+    // emit_expr the target as an i64 handle (which no longer exists).
+    if let Expr::OwnedRef(field_name) = target.as_ref() {
+        if let Some(rb_info) = backend.ctx.ringbuf_inline.get(field_name).cloned() {
+            let elem_val = backend.emit_expr(out, val, indent);
+            let elem_boxed = backend.adapt_to_i64(out, indent, &elem_val);
+            // Load tail, mask from inline %State fields
+            let tg = format!("%rbtg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, tg, rb_info.tail_idx).ok();
+            let tv = format!("%rbtv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, tv, tg).ok();
+            let mg = format!("%rbmk{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, mg, rb_info.mask_idx).ok();
+            let mk = format!("%rbmv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, mk, mg).ok();
+            let dg = format!("%rbdg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, dg, rb_info.data_idx).ok();
+            let dv = format!("%rbdv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dv, dg).ok();
+            let dp = format!("%rbdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, dp, dv).ok();
+            let sl = format!("%rbsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, sl, dp, tv).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, elem_boxed, sl).ok();
+            let tn = format!("%rbtn{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = add i64 {}, 1", indent, tn, tv).ok();
+            let nt = format!("%rbnt{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = and i64 {}, {}", indent, nt, tn, mk).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, nt, tg).ok();
+            return TypedRegister { name: elem_boxed.to_string(), ty: Type::Int };
+        }
+    }
     let list_val = backend.emit_expr(out, target, indent);
     let elem_val = backend.emit_expr(out, val, indent);
     let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
@@ -57,8 +95,8 @@ pub fn emit_arrow_push(
                 if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
                     let ap = format!("%aap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-                    let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, result.name, ap, tn).ok();
+                    let tn_tag = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, result.name, ap, tn_tag).ok();
                 } else if let Some(slot) = backend.fun.param_slots.get(field_name).cloned() {
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, result.name, slot).ok();
                 }
@@ -405,6 +443,57 @@ pub fn emit_arrow_discard(
     index: &Box<Expr>,
     indent: &str,
 ) -> TypedRegister {
+    // 2026-07-02: Inline RingBuffer pop path — use GEP on %State fields
+    // instead of IntrinsicCall (which would fail for inline fields).
+    if let Expr::OwnedRef(field_name) = target.as_ref() {
+        if let Some(rb_info) = backend.ctx.ringbuf_inline.get(field_name).cloned() {
+            // Load head, tail from inline %State fields
+            let hg = format!("%rbhg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, hg, rb_info.head_idx).ok();
+            let hv = format!("%rbhv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, hv, hg).ok();
+            let tg = format!("%rbtg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, tg, rb_info.tail_idx).ok();
+            let tv = format!("%rbtv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, tv, tg).ok();
+            let mg = format!("%rbmk{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, mg, rb_info.mask_idx).ok();
+            let mk = format!("%rbmv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, mk, mg).ok();
+            let dg = format!("%rbdg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, dg, rb_info.data_idx).ok();
+            let dv = format!("%rbdv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dv, dg).ok();
+            let dp = format!("%rbdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, dp, dv).ok();
+            // Check empty: head == tail → return 0 (and don't advance head)
+            let rem = format!("%rbem{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, rem, hv, tv).ok();
+            let sl = format!("%rbsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, sl, dp, hv).ok();
+            let rv = format!("%rbvr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, rv, sl).ok();
+            // Advance head with wrap (or keep old head if empty)
+            let hn = format!("%rbhn{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = add i64 {}, 1", indent, hn, hv).ok();
+            let hw = format!("%rbhw{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = and i64 {}, {}", indent, hw, hn, mk).ok();
+            let nh = format!("%rbnw{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, nh, rem, hv, hw).ok();
+            // Always store new head (select keeps old if empty)
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, nh, hg).ok();
+            // Return popped value (or 0 if empty)
+            let zv = format!("%rbz{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = add i64 0, 0", indent, zv).ok();
+            let po = format!("%rbpo{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, po, rem, zv, rv).ok();
+            return TypedRegister { name: po.to_string(), ty: Type::Int };
+        }
+    }
     // 2026-07-01: Check for custom discard strategy (e.g., ring_pop for RingBuffer).
     // If the target has a custom ExtractFrom strategy that maps to an intrinsic,
     // emit it inline — no arena alloc, no memcpy, just head/tail pointer arithmetic.

@@ -532,6 +532,7 @@ impl LlvmBackend {
         out: &mut String,
         items: &[Expr],
         field_idx: usize,
+        field_name: &str,
         state_gep: &str,
         indent: &str,
     ) {
@@ -591,6 +592,29 @@ impl LlvmBackend {
         let handle = format!("{}_h", rb);
         writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, handle, rbc).ok();
         writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, handle, state_gep).ok();
+
+        // 2026-07-02: If this RingBuffer has inline fields (registered by
+        // build_field_index), also store data_ptr/head/tail/mask directly into
+        // %State. This lets LLVM's SROA promote them to SSA registers in the
+        // hot loop body, bypassing the inttoptr handle indirection.
+        if let Some(inline) = self.ctx.ringbuf_inline.get(field_name) {
+            let data_gep = format!("{}_idg", rb);
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, data_gep, inline.data_idx).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp, data_gep).ok();
+            let head_gep = format!("{}_ihg", rb);
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, head_gep, inline.head_idx).ok();
+            writeln!(out, "{}store i64 0, i64* {}, align 8", indent, head_gep).ok();
+            let tail_gep = format!("{}_itg", rb);
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, tail_gep, inline.tail_idx).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, tail_gep).ok();
+            let mask_gep = format!("{}_img", rb);
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                indent, mask_gep, inline.mask_idx).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, mask, mask_gep).ok();
+        }
     }
 
     pub(super) fn emit_init_state(&mut self, out: &mut String) {
@@ -612,7 +636,7 @@ impl LlvmBackend {
             if let Some(Expr::ListLiteral(ref items)) = init_clone {
                 if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[idx] {
                     if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
-                        self.emit_ringbuf_init(out, items, idx, &p, "  ");
+                        self.emit_ringbuf_init(out, items, idx, &name, &p, "  ");
                         continue;
                     }
                 }
@@ -806,7 +830,7 @@ impl LlvmBackend {
             if let Some(Expr::ListLiteral(ref items)) = init_clone {
                 if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[*idx] {
                     if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
-                        self.emit_ringbuf_init(out, items, *idx, &p, indent);
+                        self.emit_ringbuf_init(out, items, *idx, name, &p, indent);
                         continue;
                     }
                 }

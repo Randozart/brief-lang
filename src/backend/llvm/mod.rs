@@ -2882,6 +2882,41 @@ self.emit_declares(&mut out);
                         .insert(s.name.clone(), self.ctx.field_types.len());
                     self.push_field_type(&s.ty);
                     self.ctx.field_initializers.insert(s.name.clone(), s.expr.clone());
+                    if let Some(tu) = &self.ctx.type_universe {
+                        let type_name = match &s.ty {
+                            crate::ast::Type::Custom(n) => n.as_str(),
+                            crate::ast::Type::Applied(n, _) => n.as_str(),
+                            _ => "",
+                        };
+                        if tu.get(type_name).and_then(|rt| rt.insert_at.as_ref())
+                            .map_or(false, |strat| strat == "ring_push")
+                        {
+                            let data_idx = self.ctx.field_types.len();
+                            self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
+                            self.ctx.field_types.push("i64".to_string());
+                            self.ctx.field_brief_types.push(Type::Int);
+                            self.ctx.field_initializers.insert(format!("{}_data", s.name), None);
+                            let head_idx = self.ctx.field_types.len();
+                            self.ctx.field_index_map.insert(format!("{}_head", s.name), head_idx);
+                            self.ctx.field_types.push("i64".to_string());
+                            self.ctx.field_brief_types.push(Type::Int);
+                            self.ctx.field_initializers.insert(format!("{}_head", s.name), None);
+                            let tail_idx = self.ctx.field_types.len();
+                            self.ctx.field_index_map.insert(format!("{}_tail", s.name), tail_idx);
+                            self.ctx.field_types.push("i64".to_string());
+                            self.ctx.field_brief_types.push(Type::Int);
+                            self.ctx.field_initializers.insert(format!("{}_tail", s.name), None);
+                            let mask_idx = self.ctx.field_types.len();
+                            self.ctx.field_index_map.insert(format!("{}_mask", s.name), mask_idx);
+                            self.ctx.field_types.push("i64".to_string());
+                            self.ctx.field_brief_types.push(Type::Int);
+                            self.ctx.field_initializers.insert(format!("{}_mask", s.name), None);
+                            self.ctx.ringbuf_inline.insert(s.name.clone(),
+                                crate::backend::llvm::context::RingbufInlineFields {
+                                    data_idx, head_idx, tail_idx, mask_idx,
+                                });
+                        }
+                    }
                 }
             } else if let TopLevel::Trigger(t) = item {
                 // Triggers get a slot in the state struct so the event loop
@@ -3035,6 +3070,19 @@ self.emit_declares(&mut out);
         // by the tick loop, not by txn body code.
         if let Some(idx) = self.ctx.field_index_map.get("cycle_count") {
             self.ctx.field_modes.insert("cycle_count".to_string(), crate::analysis::FieldMode::Always);
+        }
+        // 2026-07-02: RingBuffer inline fields must never be eliminated.
+        // Even though they appear dead (not in exit condition), they're used
+        // by the arrow dispatch (emit_arrow_push/discard) for inline RingBuffer
+        // operations. Without them, LLVM can't SROA the RingBuf struct into
+        // registers, and the inttoptr bottleneck remains.
+        for (base, rbf) in &self.ctx.ringbuf_inline {
+            for (suffix, idx) in &[("_data", rbf.data_idx), ("_head", rbf.head_idx),
+                ("_tail", rbf.tail_idx), ("_mask", rbf.mask_idx)]
+            {
+                let name = format!("{}{}", base, suffix);
+                self.ctx.field_modes.insert(name, crate::analysis::FieldMode::Always);
+            }
         }
         self.ctx.cache_slots.clear();
 
