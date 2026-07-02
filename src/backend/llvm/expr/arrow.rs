@@ -405,6 +405,21 @@ pub fn emit_arrow_discard(
     index: &Box<Expr>,
     indent: &str,
 ) -> TypedRegister {
+    // 2026-07-01: Check for custom discard strategy (e.g., ring_pop for RingBuffer).
+    // If the target has a custom ExtractFrom strategy that maps to an intrinsic,
+    // emit it inline — no arena alloc, no memcpy, just head/tail pointer arithmetic.
+    let pop_strategy = backend.check_extract_strategy(target);
+    if let Some(crate::type_universe::ExtractStrategy::Custom(fn_name)) = &pop_strategy {
+        if let Some(intrinsic) = crate::ast::Intrinsic::from_name(fn_name) {
+            let call_expr = crate::ast::Expr::IntrinsicCall {
+                intrinsic,
+                args: vec![target.as_ref().clone()],
+            };
+            let _result = backend.emit_expr(out, &call_expr, indent);
+            // Discard: result is not needed, ring buffer handle is unchanged.
+            return TypedRegister { name: v.to_string(), ty: Type::Int };
+        }
+    }
     let list_val = backend.emit_expr(out, target, indent);
     let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
     // Unbox list header, read length

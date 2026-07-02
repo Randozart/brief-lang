@@ -556,6 +556,7 @@ impl LlvmBackend {
                 let mut cur = phi_reg.clone();
                 for _ in 0..unroll {
                     self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+                    self.fun.expr_dedup_cache.clear();
                     self.fun.terminated = false;
                     self.fun.returns_i64 = false;
                     self.fun.ssa_state_reg = Some(cur);
@@ -580,6 +581,7 @@ impl LlvmBackend {
             let mut body1_buf = String::new();
             writeln!(body1_buf, "{}_body1:", label_prefix).ok();
             self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+            self.fun.expr_dedup_cache.clear();
             self.fun.terminated = false;
             self.fun.returns_i64 = false;
             self.fun.ssa_state_reg = Some(phi_reg.clone());
@@ -754,6 +756,13 @@ impl LlvmBackend {
         use_phi: bool,
         body: Option<&[Statement]>,
     ) {
+        // 2026-07-01: Clear expression dedup cache before emitting @main.
+        // emit_definition for txn functions (@simulate, etc.) populates the
+        // cache with register names from that function's scope. If stale
+        // entries persist into @main, the loop body may reference registers
+        // that are defined in @simulate but not in @main, causing LLVM
+        // "use of undefined value" errors (nbody %bfr).
+        self.fun.expr_dedup_cache.clear();
         self.fun.fn_ret_ty = "i32".to_string();
         self.fun.main_body = true;
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
@@ -828,6 +837,10 @@ impl LlvmBackend {
         total_const_name: Option<&str>,
         body: &[Statement],
     ) {
+        // 2026-07-01: Clear expr_dedup_cache — same rationale as emit_folded_main:
+        // stale register names from txn function definitions (@simulate) would
+        // cause "use of undefined value" errors in @main's loop body.
+        self.fun.expr_dedup_cache.clear();
         self.fun.fn_ret_ty = "i32".to_string();
         self.fun.main_body = true;
         let attr = self.slp_attr("main", "#0");

@@ -1890,3 +1890,52 @@ while avoiding double-emission for standard types.
 before the actual codegen path. If the pre-check can fall through, save its
 results and reuse them. The same pattern applies to any early-return + fallthrough
 pattern in codegen — save emitted registers, don't discard and re-emit.
+
+## 2026-07-01 — `expr_dedup_cache` leaks register names across function boundaries
+
+**Issue**: nbody benchmarks (`nbody_newton`, `nbody_sqrt`, `nbody_sqrt_idio`)
+fail with "use of undefined value '%bfr{N}'" during `opt -O2`. The `%bfr{N}`
+register is used in `@main` but was defined in `@simulate` (a separate function).
+
+**Root Cause**: The `expr_dedup_cache` on `FunctionContext` is shared across all
+function emissions (`emit_definition` for txn functions and `emit_folded_main`
+for `@main`). When `emit_definition` emits `@simulate`, it populates the dedup
+cache with register names like `%bfr2150`. When `emit_folded_main` later emits
+`@main`, the loop body's `emit_binop` checks the dedup cache, finds a match
+from `@simulate`, and returns `%bfr2150` — a register defined in `@simulate`.
+But `@main` is a separate function, so `%bfr2150` is not defined there.
+LLVM's verifier in `opt` catches the violation.
+
+**Fix**: Clear `self.fun.expr_dedup_cache.clear()` at the start of
+`emit_folded_main`, `emit_folded_memory_main`, and at each body4/body1
+iteration boundary in `emit_folded_loop`. This ensures cached register names
+from one function don't leak into another.
+
+**Lesson**: Register names are only unique within a single LLVM function.
+Any cache that stores register names (dedup, float, etc.) must be scoped
+per-function or cleared at function boundaries. The `reg_float_cache` and
+`reg_type_cache` were already scoped correctly; `expr_dedup_cache` was the
+missed one.
+
+## 2026-07-01 — `let_original_types` not populated for custom types
+
+**Issue**: queue_drain (RingBuffer path) crashes with `realloc(): invalid pointer`
+during benchmark runtime. The `<-` / discard operations fall through to the
+default List arena path instead of using RingBuffer intrinsics.
+
+**Root Cause**: `emit_toplevel.rs:1130-1134` only populates
+`let_original_types` for boxed types (`Bool/Char/String/Data`). For custom
+types like `RingBuffer<Int>`, the original type is not stored. When
+`check_insert_strategy` / `check_extract_strategy` looks up the variable's
+type in `let_original_types`, it finds nothing and returns `None`. The arrow
+dispatch falls through to the default List arena path, which calls `realloc`
+on memory allocated by the RingBuffer init — producing `realloc(): invalid
+pointer`.
+
+**Fix**: Populate `let_original_types` for ALL types, not just boxed ones.
+Move the insertion before the type match and keep the existing let_binding_types
+logic unchanged.
+
+**Lesson**: `let_original_types` should not be treated as a boxed-type-specific
+cache. Any code that needs to look up the declared type of a variable must
+find it there — especially strategy dispatch for custom collection types.

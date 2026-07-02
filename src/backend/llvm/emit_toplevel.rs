@@ -45,6 +45,31 @@ impl LlvmBackend {
 
     /// Check the target expression for an InsertAt strategy by looking up
     /// the variable's type in the TypeUniverse.
+    fn lookup_strategy_type_name(&self, var_name: &str) -> Option<String> {
+        // 2026-07-01: First check let_original_types (populated for function params).
+        // If not found, fall back to ctx.field_brief_types (populated for state vars).
+        // State variables like `queue: RingBuffer<Int>` are NOT in let_original_types
+        // (only function params go there). Without this fallback, strategy dispatch
+        // returns None and custom types like RingBuffer fall through to the default
+        // List arena path, causing realloc on non-heap memory.
+        if let Some(ty) = self.fun.let_original_types.get(var_name) {
+            return match ty {
+                crate::ast::Type::Custom(n) => Some(n.clone()),
+                crate::ast::Type::Applied(n, _) => Some(n.clone()),
+                _ => None,
+            };
+        }
+        if let Some(&idx) = self.ctx.field_index_map.get(var_name) {
+            let ty = self.ctx.field_brief_types.get(idx)?;
+            return match ty {
+                crate::ast::Type::Custom(n) => Some(n.clone()),
+                crate::ast::Type::Applied(n, _) => Some(n.clone()),
+                _ => None,
+            };
+        }
+        None
+    }
+
     pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::InsertStrategy> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
@@ -52,14 +77,8 @@ impl LlvmBackend {
             crate::ast::Expr::Identifier(n) => n,
             _ => return None,
         };
-        // Look up the variable's declared type
-        let ty = self.fun.let_original_types.get(var_name)?;
-        let type_name = match ty {
-            crate::ast::Type::Custom(n) => n,
-            crate::ast::Type::Applied(n, _) => n,
-            _ => return None,
-        };
-        tu.insert_strategy(type_name)
+        let type_name = self.lookup_strategy_type_name(var_name)?;
+        tu.insert_strategy(&type_name)
     }
 
     /// Check the target expression for an ExtractFrom strategy by looking up
@@ -71,13 +90,8 @@ impl LlvmBackend {
             crate::ast::Expr::Identifier(n) => n,
             _ => return None,
         };
-        let ty = self.fun.let_original_types.get(var_name)?;
-        let type_name = match ty {
-            crate::ast::Type::Custom(n) => n,
-            crate::ast::Type::Applied(n, _) => n,
-            _ => return None,
-        };
-        tu.extract_strategy(type_name)
+        let type_name = self.lookup_strategy_type_name(var_name)?;
+        tu.extract_strategy(&type_name)
     }
 
     pub(super) fn emit_header(&self, out: &mut String) {
@@ -1127,11 +1141,16 @@ impl LlvmBackend {
             // String/Data are semantically boxed types) and cannot be derived
             // from universe data alone — Int32 also has storage="Boxed" but
             // stays native in SSA.
+            // 2026-07-01: Always store original type for ALL variable types,
+            // not just boxed types. Custom types like RingBuffer<Int> need
+            // their original type in let_original_types so that arrow strategy
+            // dispatch (check_insert_strategy / check_extract_strategy) can
+            // look up the type's InsertAt/ExtractFrom in the TypeUniverse.
+            // Without this, <- and discard on RingBuffer would fall through
+            // to the default List arena path, causing realloc on non-heap memory.
+            self.fun.let_original_types.insert(n.clone(), t.clone());
             if matches!(t, Type::Bool | Type::Char | Type::String | Type::Data) {
                 self.fun.let_binding_types.insert(n.clone(), Type::Int);
-                // 2026-06-17: Save original type for String/Data params so
-                // is_string_chain can detect string variables by original type.
-                self.fun.let_original_types.insert(n.clone(), t.clone());
             } else {
                 self.fun.let_binding_types.insert(n.clone(), t.clone());
             }
