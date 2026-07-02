@@ -889,11 +889,23 @@ impl LlvmBackend {
         if let Some(ref universe) = self.ctx.type_universe.clone() {
             let l_reg = self.emit_expr(out, l, indent);
             let l_key = l_reg.ty.universe_key().to_string();
-            phase7b_l = Some(l_reg.clone());
+            // 2026-07-01: Only save/reuse for non-float types.
+            // Float/Float64 registers depend on reg_float_cache for
+            // ensure_float_reg lookups. A Phase 7B-emitted float register
+            // may be defined in a scope that doesn't dominate its use
+            // in the normal codegen path, causing "use of undefined value"
+            // SSA violations (nbody %bfr errors). Integer types have no
+            // such cache dependency — saving and reusing their registers
+            // avoids the O(2^depth) double-emission (const_heavy fix).
+            if l_reg.ty != Type::Float && l_reg.ty != Type::Float64 {
+                phase7b_l = Some(l_reg.clone());
+            }
             if universe.types.contains_key(&l_key) {
                 let r_reg = self.emit_expr(out, r, indent);
                 let r_key = r_reg.ty.universe_key().to_string();
-                phase7b_r = Some(r_reg.clone());
+                if r_reg.ty != Type::Float && r_reg.ty != Type::Float64 {
+                    phase7b_r = Some(r_reg.clone());
+                }
                 let rune = Self::op_str_to_rune(int_op);
                 if let Some(op) = universe.resolve_operator(&l_key, rune, Some(&r_key)) {
                     return self.emit_operator_call(out, indent, &l_reg, &r_reg, op);
