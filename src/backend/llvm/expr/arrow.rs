@@ -40,6 +40,31 @@ pub fn emit_arrow_push(
     // built-in strategies determine prepend vs append behavior.
     let push_strategy = backend.check_insert_strategy(target);
     if let Some(crate::type_universe::InsertStrategy::Custom(fn_name)) = &push_strategy {
+        // 2026-07-01: Check if the custom strategy is an intrinsic.
+        // If so, emit the intrinsic inline via Expr::IntrinsicCall, avoiding a
+        // function call wrapper. This is used by ring_push for RingBuffer<T>.
+        if let Some(intrinsic) = crate::ast::Intrinsic::from_name(fn_name) {
+            let call_expr = crate::ast::Expr::IntrinsicCall {
+                intrinsic,
+                args: vec![
+                    target.as_ref().clone(),
+                    val.as_ref().clone(),
+                ],
+            };
+            let result = backend.emit_expr(out, &call_expr, indent);
+            // Store result back to state field (intrinsic may return updated handle)
+            if let Expr::OwnedRef(field_name) = target.as_ref() {
+                if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
+                    let ap = format!("%aap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
+                    let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, result.name, ap, tn).ok();
+                } else if let Some(slot) = backend.fun.param_slots.get(field_name).cloned() {
+                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, result.name, slot).ok();
+                }
+            }
+            return TypedRegister { name: result.name.clone(), ty: Type::Int };
+        }
         // Custom push: emit call @fn_name(i64, i64) -> i64
         writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})", indent, v, fn_name, list_boxed, elem_boxed).ok();
         // Store new list handle back to state field if target is OwnedRef
@@ -230,6 +255,20 @@ pub fn emit_arrow_pop(
 ) -> TypedRegister {
     let pop_strategy = backend.check_extract_strategy(target);
     if let Some(crate::type_universe::ExtractStrategy::Custom(fn_name)) = &pop_strategy {
+        // 2026-07-01: Check if the custom strategy is an intrinsic (name ends with #).
+        // If so, emit the intrinsic inline. RingPop returns the popped value directly
+        // (i64), and the handle is NOT updated (ring buffer mutates in place).
+        if let Some(intrinsic) = crate::ast::Intrinsic::from_name(fn_name) {
+            let call_expr = crate::ast::Expr::IntrinsicCall {
+                intrinsic,
+                args: vec![target.as_ref().clone()],
+            };
+            let result = backend.emit_expr(out, &call_expr, indent);
+            // Ring buffer handle is immutable (mutates in-place in heap).
+            // The handle in %State does NOT change — no store or backedge
+            // tracking needed. The phi will pass through the same handle.
+            return TypedRegister { name: result.name.clone(), ty: Type::Int };
+        }
         // Custom extract: call @fn_name(i64) -> { i64, i64 }
         let list_val = backend.emit_expr(out, target, indent);
         let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
@@ -427,7 +466,10 @@ pub fn emit_arrow_discard(
     writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, aft_dst, ndp, discard_idx).ok();
     let aft_cnt = format!("%dac{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = sub i64 {}, {}", indent, aft_cnt, new_len, discard_idx).ok();
-    let aft_bytes = format!("%dab2{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    // 2026-07-01: Use %dabcp (dab-copy) prefix — NOT %dab2 — to prevent
+    // register name collision with %dab{N}. Prefix %dab2 + counter 63
+    // produces "dab263" which is identical to %dab + counter 263.
+    let aft_bytes = format!("%dabcp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = mul i64 {}, 8", indent, aft_bytes, aft_cnt).ok();
     writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
         indent, aft_dst, aft_src, aft_bytes).ok();

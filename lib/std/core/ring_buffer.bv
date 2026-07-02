@@ -1,0 +1,16 @@
+// RingBuffer<T> — fixed-capacity circular buffer backed by a contiguous
+// memory block (malloc'd once at init). Insert (push) and extract (pop) are
+// O(1) via head/tail pointer arithmetic — no alloc, no memcpy, no free.
+//
+// RingBuffer<T> <: List<T> — same interface as List: <- for push, <- for pop.
+// The InsertAt/ExtractFrom strategy bindings redirect these operations to
+// the ring_push#/ring_pop# intrinsics, which the LLVM backend inlines as
+// head/tail arithmetic (~10-15 instructions vs ~40+ for arena List).
+//
+// Capacity is fixed at init time (power of 2). The mask = capacity - 1
+// enables bitwise wrap: (ptr + 1) & mask.
+
+type RingBuffer<T> <: List<T> {
+    InsertAt = ring_push;
+    ExtractFrom = ring_pop;
+};

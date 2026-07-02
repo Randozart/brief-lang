@@ -223,6 +223,12 @@ pub struct FunctionContext {
     pub arena_slots: Option<(String, String, String)>,
     pub field_prealloc_info: HashMap<String, (String, String)>,
 
+    // Whether the canonical loop bound is a compile-time constant
+    // 2026-07-01: Enables post-inc comparison (counting-down loop) for
+    // static bounds — LLVM can emit `add + jne` instead of `cmp + add + jl`.
+    // For dynamic (runtime-determined) bounds, pre-inc comparison is used.
+    pub is_static_bound: bool,
+
     // Accumulators flushed per-function
     pub pending_metadata: String,
     pub pending_post_hoist: Vec<(String, String)>,
@@ -274,6 +280,7 @@ impl FunctionContext {
             state_reg_name: "%state".to_string(),
             arena_slots: None,
             field_prealloc_info: HashMap::new(),
+            is_static_bound: false,
             pending_metadata: String::new(),
             pending_post_hoist: Vec::new(),
             pending_cleanup: Vec::new(),
@@ -392,5 +399,33 @@ impl FunctionGuard {
     /// Call this after the inline body has been emitted.
     pub fn restore(self, fun: &mut FunctionContext) {
         *fun = self.saved;
+    }
+
+    // 2026-07-01: Restore all state EXCEPT SSA register counters.
+    //
+    // When inlining multiple txn bodies into the same function (e.g., in
+    // emit_reactor's emit_inline_txn_body), restore() rewinds txn_counter
+    // and arena_counter to the pre-body snapshot value. The second body then
+    // emits identical register names (%dab263, %t7, etc.), causing "multiple
+    // definition of local value" errors from opt.
+    //
+    // This variant preserves the monotonic counter invariants documented on
+    // txn_counter ("NEVER rewound — prevents %t{N} collisions") and
+    // arena_counter, while still restoring all other state (local bindings,
+    // caches, phi state, flags).
+    //
+    // Trade-off: Register numbers grow monotonically across the full function
+    // (~0.1% longer names at scale). No functional impact — LLVM normalizes
+    // register names in its own passes.
+    pub fn restore_preserve_counters(self, fun: &mut FunctionContext) {
+        let txn_ct = fun.txn_counter;
+        let arena_ct = fun.arena_counter;
+        let within_ct = fun.within_counter;
+        let md_ct = fun.metadata_counter;
+        *fun = self.saved;
+        fun.txn_counter = txn_ct;
+        fun.arena_counter = arena_ct;
+        fun.within_counter = within_ct;
+        fun.metadata_counter = md_ct;
     }
 }

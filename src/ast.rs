@@ -943,6 +943,19 @@ pub enum Intrinsic {
     /// Used by GLUE adapters to generate native language wrapper source files.
     /// The file is written to the compiler's output directory.
     EmitFile,
+    // ===== Ring Buffer intrinsics (2026-07-01) =====
+    /// ring_push#(handle: i64, val: i64) -> i64 — push value into ring buffer.
+    /// Returns updated handle (handle is unchanged for ring buffers).
+    /// Unboxes the handle, performs head/tail pointer arithmetic (~5 insns),
+    /// stores new head/tail, returns handle.
+    /// Used by RingBuffer<T> stdlib type: InsertAt = ring_push#.
+    RingPush,
+    /// ring_pop#(handle: i64) -> i64 — pop value from ring buffer.
+    /// Returns the popped value, or 0 if empty.
+    /// Does NOT modify %State — pure function of handle.
+    /// Used by RingBuffer<T> stdlib type: ExtractFrom = ring_pop#.
+    RingPop,
+
     /// User-defined intrinsic via `inop#` / `inop!#` declaration.
     /// The String stores the name for display/lookup; validation happens
     /// in the typechecker against the program's `inop_decls` map.
@@ -1173,6 +1186,9 @@ impl Intrinsic {
             "warn" => Some(Intrinsic::MacroWarn),
             "gensym" => Some(Intrinsic::MacroGenSym),
             "emit_file" => Some(Intrinsic::EmitFile),
+            // Ring buffer intrinsics
+            "ring_push" => Some(Intrinsic::RingPush),
+            "ring_pop" => Some(Intrinsic::RingPop),
             _ => None,
         }
     }
@@ -1371,6 +1387,9 @@ impl Intrinsic {
             Intrinsic::MacroWarn => "warn",
             Intrinsic::MacroGenSym => "gensym",
             Intrinsic::EmitFile => "emit_file",
+            // Ring buffer intrinsics
+            Intrinsic::RingPush => "ring_push",
+            Intrinsic::RingPop => "ring_pop",
             Intrinsic::UserDefined(_) => "__user__",
         }
     }

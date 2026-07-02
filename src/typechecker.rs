@@ -2256,6 +2256,9 @@ impl TypeChecker {
                     Intrinsic::MkStemp | Intrinsic::DlOpen
                     | Intrinsic::DlSym | Intrinsic::DlClose => Type::Int,
                     Intrinsic::MkDtemp | Intrinsic::TtyName => Type::String,
+                    // Ring buffer intrinsics (2026-07-01)
+                    Intrinsic::RingPush => Type::Int,
+                    Intrinsic::RingPop => Type::Int,
                     // Macro/template intrinsics (compile-time only)
                     Intrinsic::Compile | Intrinsic::MacroError
                     | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Data,
@@ -3309,7 +3312,20 @@ Expr::ObjectLiteral(fields) => {
                 }) && self.types_compatible(ia, ib)
             }
             (Type::Applied(an, aa), Type::Applied(bn, ba)) => {
-                an == bn && aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b))
+                // 2026-07-01: Direct name match — exact type equality.
+                // OR TypeDef inheritance: if `an` is a TypeDef whose base type is `bn`,
+                // the assignment is valid (e.g., RingBuffer<Int> ← List<Int>).
+                // This enables bracket syntax `[0]` to initialize RingBuffer fields.
+                (an == bn && aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b)))
+                || self.type_universe.as_ref().map_or(false, |tu| {
+                    tu.get(an).map_or(false, |rt| {
+                        // Check base type match: an's resolved base == bn
+                        rt.base == *bn
+                        // Also verify type parameters are compatible
+                        && aa.len() == ba.len()
+                        && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b))
+                    })
+                })
             }
             (Type::Sig(an), Type::Sig(bn)) => an == bn,
             (Type::Union(types), t) | (t, Type::Union(types)) => {

@@ -495,6 +495,90 @@ impl LlvmBackend {
     //   to inline into, so they need @init_state as a named function. Both share
     //   the same store logic; the tradeoff is SROA opportunity (inline) vs callable
     //   interface (function).
+    // ── emit_ringbuf_init ──────────────────────────────────────────────
+    //
+    // 2026-07-01: Emit LLVM IR for a RingBuffer initialized from a bracket
+    // expression [e0, e1, ..., e_{n-1}]. Called from emit_init_state and
+    // emit_inline_init_stores when the target field type is RingBuffer<T>.
+    //
+    // Generates:
+    //   malloc(32) for RingBuf struct (data_ptr, head, tail, mask = 4 × i64)
+    //   malloc(capacity * 8) for element buffer (capacity = power-of-2 ≥ max(4, n))
+    //   stores each element into buffer slots 0..n-1
+    //   writes struct fields: data_ptr = ptrtoint(buffer), head = 0, tail = n, mask = cap-1
+    //   stores ptrtoint(struct) to %State field
+    //
+    // RingBuf struct layout (matches intrinsics.rs expectations):
+    //   slot 0: data_ptr (i64) — ptrtoint of element buffer base
+    //   slot 1: head    (i64) — read index (next element to pop)
+    //   slot 2: tail    (i64) — write index (next empty slot)
+    //   slot 3: mask    (i64) — capacity - 1 (bitwise wrap)
+    fn emit_ringbuf_init(
+        &mut self,
+        out: &mut String,
+        items: &[Expr],
+        field_idx: usize,
+        state_gep: &str,
+        indent: &str,
+    ) {
+        let n = items.len() as i64;
+        let raw_cap = std::cmp::max(4u64, n as u64);
+        let cap = raw_cap.next_power_of_two();
+        let mask = cap - 1;
+
+        // Register prefix scoped to this field — unique within each function
+        let rb = format!("%rb{}", field_idx);
+
+        // Allocate RingBuf struct: 4 × i64 = 32 bytes
+        let rm = format!("{}_m", rb);
+        writeln!(out, "{}{} = call i8* @malloc(i64 32)", indent, rm).ok();
+        let rbc = format!("{}_bc", rb);
+        writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, rbc, rm).ok();
+
+        // Allocate element buffer
+        let eb_m = format!("{}_eb", rb);
+        let eb_size = cap * 8;
+        writeln!(out, "{}{} = call i8* @malloc(i64 {})", indent, eb_m, eb_size).ok();
+        let ebc = format!("{}_ebc", rb);
+        writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, ebc, eb_m).ok();
+
+        // Struct slot 0: data_ptr = ptrtoint(element_buffer)
+        let dp = format!("{}_dp", rb);
+        writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp, ebc).ok();
+        let dg = format!("{}_dg", rb);
+        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, dg, rbc).ok();
+        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp, dg).ok();
+
+        // Struct slot 1: head = 0
+        let hg = format!("{}_hg", rb);
+        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, hg, rbc).ok();
+        writeln!(out, "{}store i64 0, i64* {}, align 8", indent, hg).ok();
+
+        // Struct slot 2: tail = n
+        let tg = format!("{}_tg", rb);
+        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, tg, rbc).ok();
+        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, tg).ok();
+
+        // Struct slot 3: mask = cap - 1
+        let mg = format!("{}_mg", rb);
+        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 3", indent, mg, rbc).ok();
+        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, mask, mg).ok();
+
+        // Store each element into buffer slots 0..n-1
+        for (i, item) in items.iter().enumerate() {
+            let val = self.emit_expr(out, item, indent);
+            let boxed = self.adapt_to_i64(out, indent, &val);
+            let ep = format!("{}_e{}", rb, i);
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, ebc, i).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, boxed, ep).ok();
+        }
+
+        // Store handle = ptrtoint(struct) into state field
+        let handle = format!("{}_h", rb);
+        writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, handle, rbc).ok();
+        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, handle, state_gep).ok();
+    }
+
     pub(super) fn emit_init_state(&mut self, out: &mut String) {
         writeln!(out, "define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
@@ -507,6 +591,18 @@ impl LlvmBackend {
             let p = format!("%ip{}", reg); reg += 1;
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", p, idx).ok();
             let init_clone = self.ctx.field_initializers.get(&name).and_then(|e| e.clone());
+            // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
+            // Check if this field's Brief type is RingBuffer<T> and the initializer is
+            // a ListLiteral. If so, emit RingBuf heap allocation + element stores instead
+            // of the generic emit_expr path (which would produce a List heap layout).
+            if let Some(Expr::ListLiteral(ref items)) = init_clone {
+                if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[idx] {
+                    if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
+                        self.emit_ringbuf_init(out, items, idx, &p, "  ");
+                        continue;
+                    }
+                }
+            }
             match init_clone {
                 Some(Expr::Integer(n)) => {
                     writeln!(out, "  store i64 {}, i64* {}, align {}", n, p, self.align_of("i64")).ok();
@@ -690,6 +786,17 @@ impl LlvmBackend {
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, state_ptr, idx).ok();
             let init_clone = self.ctx.field_initializers.get(name).and_then(|e| e.clone());
             let ty = self.ctx.field_types[*idx].clone();
+            // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
+            // Same detection as emit_init_state: check field's Brief type for RingBuffer.
+            // Emits RingBuf heap allocation + element stores instead of generic emit_expr.
+            if let Some(Expr::ListLiteral(ref items)) = init_clone {
+                if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[*idx] {
+                    if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
+                        self.emit_ringbuf_init(out, items, *idx, &p, indent);
+                        continue;
+                    }
+                }
+            }
             match init_clone {
                 Some(Expr::Integer(n)) => {
                     writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, n, p, self.align_of("i64")).ok();
@@ -933,6 +1040,8 @@ impl LlvmBackend {
     pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
         self.fun.pending_cleanup.clear();
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.expr_dedup_cache.clear();
+        self.fun.is_static_bound = false;
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();
         // 2026-07-01: Use "i64" for all non-float returns instead of llvm_type().
@@ -1248,6 +1357,8 @@ impl LlvmBackend {
         self.fun.let_binding_types.clear();
         self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear();
         self.fun.reg_type_cache.clear();
+        self.fun.expr_dedup_cache.clear();
+        self.fun.is_static_bound = false;
         self.fun.param_slots.clear();
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();

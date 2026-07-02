@@ -1822,3 +1822,32 @@ should choose via explicit `frgn setvbuf` calls.
   for `Expr::Add` in match arms and verify `BinaryOp` is handled. This is the
   same pattern as `eval_const_expr` in the proof engine — the integer path was
   fixed but the float path was missed.
+
+## 2026-07-01 — `%dab2` prefix collides with `%dab` at counter offset 200
+
+**Issue**: `opt -O2` on `queue_drain.ll` errors: "multiple definition of local
+value named 'dab263'". The `@main` function has `%dab263 = mul i64 ...` defined
+twice — once at line 873 (in the body4 unrolled block) and once at line 1208
+(in the body1 remainder block).
+
+**Root Cause**: `arrow.rs:469` uses `format!("%dab2{}", txn_counter)` for the
+copy-bytes register. When `txn_counter = 63`, this produces `"%dab263"` which
+is textually identical to `format!("%dab{}", txn_counter)` at `txn_counter = 263`
+(line 435, alloc-bytes register). Since both are in the same function (`@main`),
+LLVM rejects the duplicate definition. The collision occurs because the `dab2`
+prefix lacks a separator — `"dab2" + "63"` = `"dab" + "263"`.
+
+Any program where the first `emit_arrow_discard` (pop) uses a `dab2{txn_counter}`
+register with counter N, and the second `emit_arrow_discard` (push) uses a
+`dab{txn_counter}` register with counter N+200, will produce this collision.
+
+**Fix**: Changed the copy-bytes prefix from `%dab2` to `%dabcp` (dab-copy).
+`"dabcp" + "63"` = `"dabcp63"` which can never collide with `"dab" + N` for
+any N. The fix was applied to `src/backend/llvm/expr/arrow.rs:469-472`.
+
+**Lesson**: When generating multi-prefix register names that share a common
+substring, use separators (underscore) or choose prefixes with sufficient
+edit distance. `prefix2{N}` is always dangerous because it's equivalent to
+`prefix{2*10^d + N}` where d is the number of digits in N. The safe pattern
+is `prefix` + `_` + `suffix` + `{N}` (e.g., `%dab_al{N}` for alloc,
+`%dab_cp{N}` for copy).

@@ -340,8 +340,11 @@ impl LlvmBackend {
                 self.emit_stmt(out, s, indent);
             }
 
-            // Restore all FunctionContext state to pre-body snapshot
-            guard.restore(&mut self.fun);
+            // 2026-07-01: Use restore_preserve_counters — SSA register counters
+            // (txn_counter, arena_counter) must stay monotonically increasing
+            // across inlined bodies to prevent duplicate %t{N}/%dab{N}/%aa{N}
+            // registers. Full restore() would rewind counters.
+            guard.restore_preserve_counters(&mut self.fun);
         }
     }
 

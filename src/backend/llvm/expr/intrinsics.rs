@@ -1961,6 +1961,97 @@ pub fn emit_intrinsic_call(
             writeln!(out, "{}{} = add i64 0, 1 ; volatile_store success", indent, v).ok();
             return TypedRegister { name: v.to_string(), ty: Type::Bool };
         }
+        // ── Ring Buffer intrinsics (2026-07-01) ──────────────────────
+        //
+        // Ring buffer layout (boxed as i64 handle → inttoptr → i64*):
+        //   offset 0: data  (i64 — ptrtoint of the element buffer)
+        //   offset 1: head  (i64 — read index)
+        //   offset 2: tail  (i64 — write index)
+        //   offset 3: mask  (i64 — capacity-1, power of 2)
+        //
+        // RingPush(handle, value): writes value at buf[tail], increments
+        //   tail with wrap (tail = (tail+1) & mask), returns handle unchanged.
+        //   ~10 instructions, no alloc, no memcpy.
+        //
+        // RingPop(handle): reads buf[head] if head != tail, increments
+        //   head with wrap, returns value (or 0 if empty).
+        //   ~15 instructions, single empty check branch.
+        //
+        // Compared to arena-based List push/pop: ~40+ instructions,
+        // 2 memcpy calls, 1 arena alloc.
+        //
+        Intrinsic::RingPush => {
+            let handle = backend.emit_expr(out, &args[0], indent);
+            let value = if args.len() > 1 { backend.emit_expr(out, &args[1], indent) } else { return TypedRegister { name: handle.name.clone(), ty: Type::Int }; };
+            let h_ptr = format!("%rhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, h_ptr, handle.name).ok();
+            let tail_gep = format!("%rtg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, tail_gep, h_ptr).ok();
+            let tail = format!("%rtl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, tail, tail_gep).ok();
+            let mask_gep = format!("%rmg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 3", indent, mask_gep, h_ptr).ok();
+            let mask = format!("%rmk{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, mask, mask_gep).ok();
+            let buf_gep = format!("%rbg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, buf_gep, h_ptr).ok();
+            let buf_raw = format!("%rbr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, buf_raw, buf_gep).ok();
+            let buf_ptr = format!("%rbp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, buf_ptr, buf_raw).ok();
+            let slot = format!("%rsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, slot, buf_ptr, tail).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, value.name, slot).ok();
+            let tail_next = format!("%rtn{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = add i64 {}, 1", indent, tail_next, tail).ok();
+            let new_tail = format!("%rnt{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = and i64 {}, {}", indent, new_tail, tail_next, mask).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_tail, tail_gep).ok();
+            return TypedRegister { name: handle.name.clone(), ty: Type::Int };
+        }
+        Intrinsic::RingPop => {
+            // Unbox handle → load head, tail, mask, buf → load value at head
+            // → select result (0 if empty, loaded value otherwise)
+            // → advance head with wrap (store head if not empty)
+            // No explicit branch needed — select handles both paths.
+            let handle = backend.emit_expr(out, &args[0], indent);
+            let h_ptr = format!("%rhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, h_ptr, handle.name).ok();
+            let head_gep = format!("%rhg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, head_gep, h_ptr).ok();
+            let head = format!("%rhd{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, head, head_gep).ok();
+            let tail_gep = format!("%rtg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, tail_gep, h_ptr).ok();
+            let tail = format!("%rtl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, tail, tail_gep).ok();
+            let mask_gep = format!("%rmg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 3", indent, mask_gep, h_ptr).ok();
+            let mask = format!("%rmk{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, mask, mask_gep).ok();
+            let buf_gep = format!("%rbg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, buf_gep, h_ptr).ok();
+            let buf_raw = format!("%rbr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, buf_raw, buf_gep).ok();
+            let buf_ptr = format!("%rbp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, buf_ptr, buf_raw).ok();
+            let slot = format!("%rsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, slot, buf_ptr, head).ok();
+            let val = format!("%rva{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, val, slot).ok();
+            let empty = format!("%rem{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, empty, head, tail).ok();
+            let result = format!("%rrr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = select i1 {}, i64 0, i64 {}", indent, result, empty, val).ok();
+            let head_next = format!("%rhn{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = add i64 {}, 1", indent, head_next, head).ok();
+            let wrapped = format!("%rwrapped{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = and i64 {}, {}", indent, wrapped, head_next, mask).ok();
+            let new_head = format!("%rnh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, new_head, empty, head, wrapped).ok();
+            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_head, head_gep).ok();
+            return TypedRegister { name: result, ty: Type::Int };
+        }
         Intrinsic::UserDefined(name) => {
             // Extract return and param type info before any mutable borrows.
             // Clone the inop declaration to avoid borrow conflicts with emit_expr.

@@ -3348,6 +3348,20 @@ impl Interpreter {
                             Err(e) => Err(RuntimeError::TypeMismatch(format!("{}", e))),
                         }
                     }
+                    Intrinsic::RingPush => {
+                        // RingPush(handle, value) -> handle (unchanged for fixed-capacity ring)
+                        // Interpreter stub: returns handle unchanged.
+                        // LLVM codegen does actual head/tail pointer arithmetic.
+                        // Full interpreter support requires VecDeque in Value system.
+                        let handle = values.get(0).cloned().unwrap_or(Value::Int(0));
+                        Ok(handle)
+                    }
+                    Intrinsic::RingPop => {
+                        // RingPop(handle) -> value (0 if empty)
+                        // Interpreter stub: always returns 0 (empty ring).
+                        // LLVM codegen does actual head/tail arithmetic.
+                        Ok(Value::Int(0))
+                    }
                     Intrinsic::Sleep => {
                         let ms = match values.remove(0) {
                             Value::Int(n) => n as u64,

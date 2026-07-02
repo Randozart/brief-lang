@@ -113,7 +113,7 @@ build_bench() {
     echo "================================================"
 
     local bin="benchmarks/${name}"
-    rm -f "$bin"
+    rm -f "$bin" "benchmarks/${name}.o" "benchmarks/${name}.ll"
 
     local budget=256
     local gpu_flag=""

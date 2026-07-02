@@ -910,6 +910,7 @@ impl ImportResolver {
                     TopLevel::Cell(c) => Some(c.name.as_str()),
                     TopLevel::StateDecl(s) => Some(s.name.as_str()),
                     TopLevel::Inop(i) => Some(i.name.as_str()),
+                    TopLevel::TypeDef(t) => Some(t.name.as_str()),
                     _ => None,
                 };
                 let name = match name {
