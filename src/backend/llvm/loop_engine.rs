@@ -879,26 +879,30 @@ impl LlvmBackend {
         }
         // Phase 2: preallocate collection buffers using known loop bound.
         self.emit_prealloc_for_body(out, "  ", body, &bound_reg);
+        // 2026-07-02: Use memory-based counter (GEP+load) instead of a phi.
+        // Phi-based counters create SSA predecessor issues when the body code
+        // generates additional basic blocks (guards, getenv) that also branch
+        // to _hdr (e.g., nbody_newton's print guard creates g16539_e as an
+        // extra predecessor). Memory-based loads avoid this entirely: the
+        // counter is loaded from %State at tick entry, compared against the
+        // bound, and the loop test is just icmp+br. The body increments the
+        // counter and stores it back via GEP+store at the end of the tick.
         writeln!(out, "  br label %_hdr").ok();
         writeln!(out, "_hdr:").ok();
-        // Counter phi: initial value is 0 (first tick); subsequent values
-        // come from the latch (counter_next). The counter is stored back to
-        // %state at the end of the body via the body's GEP+store, but the
-        // phi-driven induction variable is what LLVM sees as the loop counter.
-        let phi_reg = format!("%phi{}", c0);
-        let next_reg = format!("%cnt_next{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {0} = phi i64 [ 0, %entry ], [ {1}, %_body ]", phi_reg, next_reg).ok();
+        // Load counter from state (memory-based — no phi, no predecessor issues)
         let cmp_reg = format!("%cp{}", c0 + 2);
-        writeln!(out, "  {0} = icmp slt i64 {1}, %lt{2}_{3}", cmp_reg, phi_reg, c0, bound_suffix).ok();
+        let c_gep = format!("%cgep_{}", c0);
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c_gep, counter_idx).ok();
+        let c_val = format!("%cval_{}", c0);
+        writeln!(out, "  {} = load i64, i64* {}, align 8", c_val, c_gep).ok();
+        writeln!(out, "  {0} = icmp slt i64 {1}, %lt{2}_{3}", cmp_reg, c_val, c0, bound_suffix).ok();
         writeln!(out, "  br i1 {}, label %_body, label %_done", cmp_reg).ok();
         writeln!(out, "_body:").ok();
         self.fun.ssa_state_reg = None; // memory mode: writes go through GEP+store
         self.fun.returns_i64 = false;
-        // Override counter field with phi register so body reads use the
-        // pre-tick value rather than a stale GEP load from %state.
-        if let Some(ref cname) = counter_name {
-            self.fun.ssa_old_int_regs.insert(cname.clone(), phi_reg.clone());
-        }
+        // Memory mode: body reads the counter via GEP+load from %State.
+        // No phi override needed — the body always reads the pre-tick value.
+        // (The body starts with GEP+load of each field, including the counter.)
         self.pre_load_all_fields(out, "%state");
         for s in body {
             if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
@@ -907,10 +911,13 @@ impl LlvmBackend {
         }
         self.fun.ssa_old_float_regs.clear();
         self.fun.ssa_old_int_regs.clear();
-        // Phi latch: increment phi counter.
-        // The body's GEP+store for the counter field stores the same value
-        // (via ssa_old_int_regs → body sees phi, writes back phi+1).
-        writeln!(out, "  {0} = add i64 {1}, 1", next_reg, phi_reg).ok();
+        // Memory-mode latch: increment counter via GEP+load+add+store.
+        // The body writes computed values to %State fields via GEP.
+        // The counter increment is done here (after the body) so the body
+        // sees the pre-increment value. LLVM will hoist/store this.
+        let cnt_inc = format!("%cnt_inc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {0} = add i64 {1}, 1", cnt_inc, c_val).ok();
+        writeln!(out, "  store i64 {0}, ptr {1}, align 8", cnt_inc, c_gep).ok();
         super::emit_loop_metadata(out, "  ", "_hdr", &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
         writeln!(out, "_done:").ok();
         // Arena reset: rewinds pointer for next scope. Memory stays live
@@ -935,6 +942,60 @@ impl LlvmBackend {
         txns: &[(String, &crate::ast::Transaction)],
         has_wake_triggers: bool,
     ) {
+        // 2026-07-02: Check modulo-switch dispatch EARLY, before emitting
+        // @main() header. emit_modulo_switch_main emits its OWN @main()
+        // function with setup. If we emit @main() here and then delegate,
+        // the first @main() is left unterminated (sparse_dispatch bug).
+        let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
+            .filter(|(_, t)| t.is_reactive).collect();
+        if reactive_txns.len() >= 2 {
+            // Extract counter, divisor, and cases for modulo-switch dispatch.
+            // Replicates the detection logic from the sequential fallthrough
+            // below, but runs BEFORE the @main() header is emitted.
+            let mut counter: Option<String> = None;
+            let mut divisor: Option<i64> = None;
+            let mut cases: Vec<(i64, &str)> = Vec::new();
+            let mut all_match = true;
+            for (name, txn) in &reactive_txns {
+                let pre = &txn.contract.pre_condition;
+                let norm = pre.normalize_to_old_recursive();
+                match &norm {
+                    Expr::And(left, right) => {
+                        let cn = match left.as_ref() {
+                            Expr::Lt(l, _) => if let Expr::Identifier(c) = l.as_ref() { Some(c.clone()) } else { None },
+                            _ => None,
+                        };
+                        if let (Some(c), _) = (cn, &left) {
+                            if let Expr::Eq(eq_l, eq_r) = right.as_ref() {
+                                if let (Some((ck, k)), Some(n)) = (self.extract_mod_info(eq_l),
+                                    eq_r.as_ref().as_integer())
+                                {
+                                    if let Some(ref prev_c) = counter { if *prev_c != c { all_match = false; } }
+                                    else { counter = Some(c); }
+                                    if let Some(d) = divisor { if d != k { all_match = false; } }
+                                    else { divisor = Some(k); }
+                                    if k > 256 { all_match = false; }
+                                    if cases.iter().any(|(v, _)| *v == n) { all_match = false; }
+                                    cases.push((n, name.as_str()));
+                                } else { all_match = false; }
+                            } else { all_match = false; }
+                        } else { all_match = false; }
+                    }
+                    _ => { all_match = false; }
+                }
+                if !all_match { break; }
+            }
+            if all_match && cases.len() >= 2 && counter.is_some() && divisor.is_some() {
+                cases.sort_by_key(|(v, _)| *v);
+                let count_name = counter.take().unwrap();
+                let d = divisor.unwrap();
+                let case_names: Vec<&str> = cases.iter().map(|(_, n)| *n).collect();
+                self.warnings.push(format!("info: modulo-switch dispatch for [{}] on {} % {}",
+                    case_names.join(", "), count_name, d));
+                self.emit_modulo_switch_main(out, txns, &count_name, d, &cases);
+                return;
+            }
+        }
         self.fun.fn_ret_ty = "i32".to_string();
         self.fun.main_body = true;
         let attr = self.slp_attr("main", "#3");
