@@ -876,12 +876,24 @@ impl LlvmBackend {
         // operator→intrinsic mappings and emit them.
         // This runs BEFORE constant-folding so custom types get their
         // own dispatch even when operands are literals.
+        //
+        // 2026-07-01: Save emitted registers to prevent O(2^depth) fallthrough.
+        // emit_expr emits IR for the operand subtrees. If the operator IS found,
+        // we return early. If NOT (standard types like Int), we fall through to
+        // the normal codegen which also calls emit_expr — re-emitting the whole
+        // subtree. For deeply nested Add chains like acc + C00 + ... + C19, this
+        // is O(2^depth). Saving the emitted registers and reusing them in the
+        // normal path avoids the double emission. See BUGS.md.
+        let mut phase7b_l: Option<TypedRegister> = None;
+        let mut phase7b_r: Option<TypedRegister> = None;
         if let Some(ref universe) = self.ctx.type_universe.clone() {
             let l_reg = self.emit_expr(out, l, indent);
             let l_key = l_reg.ty.universe_key().to_string();
+            phase7b_l = Some(l_reg.clone());
             if universe.types.contains_key(&l_key) {
                 let r_reg = self.emit_expr(out, r, indent);
                 let r_key = r_reg.ty.universe_key().to_string();
+                phase7b_r = Some(r_reg.clone());
                 let rune = Self::op_str_to_rune(int_op);
                 if let Some(op) = universe.resolve_operator(&l_key, rune, Some(&r_key)) {
                     return self.emit_operator_call(out, indent, &l_reg, &r_reg, op);
@@ -914,7 +926,13 @@ impl LlvmBackend {
                 return TypedRegister { name: v, ty: Type::Int };
             }
         }
-        let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
+        // 2026-07-01: Use Phase 7B-emitted registers if available (avoids
+        // O(2^depth) re-emission of deeply nested addition chains).
+        // See comment at the Phase 7B block above and BUGS.md.
+        let (a, b) = (
+            phase7b_l.unwrap_or_else(|| self.emit_expr(out, l, indent)),
+            phase7b_r.unwrap_or_else(|| self.emit_expr(out, r, indent)),
+        );
 
         // ── Expression hash-consing dedup cache lookup ─────────────
         // 2026-07-01: Check if we already emitted this (op, lhs, rhs) within

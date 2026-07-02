@@ -1851,3 +1851,42 @@ edit distance. `prefix2{N}` is always dangerous because it's equivalent to
 `prefix{2*10^d + N}` where d is the number of digits in N. The safe pattern
 is `prefix` + `_` + `suffix` + `{N}` (e.g., `%dab_al{N}` for alloc,
 `%dab_cp{N}` for copy).
+
+## 2026-07-01 — `emit_binop` Phase 7B double-emission O(2^depth) blowup
+
+**Issue**: `benchmarks/const_heavy.bv` takes >60s to compile (20 constants in
+an addition chain). n=12 constants takes 11s, n=13 takes 37s — exponential
+scaling. The benchmark was previously unusable despite being a core test.
+
+**Root Cause**: Commit 16345bc (`Phase 7B-5: Wire operator resolution into
+type-checker and codegen`) added a Phase 7B operator dispatch block at the
+top of `emit_binop` in `helpers.rs:873-890`. This block calls
+`self.emit_expr(out, l, indent)` to check if the left operand's type needs
+custom operator resolution. For standard types like `Int`, no custom operator
+exists, so the block falls through to the normal codegen path at line 917,
+which ALSO calls `self.emit_expr(out, l, indent)` — re-emitting the entire
+left subtree.
+
+For a deeply nested left-associative addition chain:
+```
+Add(Add(Add(Add(acc, x/100), C00), C01), ...)
+```
+each level of `emit_binop` emits its left subtree TWICE (once in Phase 7B,
+once in normal codegen). The inner levels also double-emit their subtrees,
+producing **O(2^depth)** total IR. At depth 20, this is ~1M× the expected
+work.
+
+The `emit_binop` peephole for `Expr::Integer` pairs at the innermost level
+saves it from being truly infinite, but the intermediate Add nodes (where
+one operand is non-integer) still pay the double-emission cost.
+
+**Fix**: Save the `TypedRegister` from the Phase 7B emit calls into local
+`Option<TypedRegister>` variables. In the normal codegen path, use
+`phase7b_l.unwrap_or_else(|| self.emit_expr(out, l, indent))` instead of
+always re-emitting. This preserves the Phase 7B dispatch for custom types
+while avoiding double-emission for standard types.
+
+**Lesson**: Always check whether a pre-check block emits side effects (IR)
+before the actual codegen path. If the pre-check can fall through, save its
+results and reuse them. The same pattern applies to any early-return + fallthrough
+pattern in codegen — save emitted registers, don't discard and re-emit.
