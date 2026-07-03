@@ -4166,6 +4166,49 @@ mod tests {
         let e002 = diags.iter().find(|d| d.code == "E002");
         assert!(e002.is_some(), "E002 should be emitted for cycle: {:?}", diags);
     }
+
+    // ── LayoutPtr cast and compatibility tests ─────────────────
+
+    #[test]
+    fn test_layout_ptr_to_int_cast() {
+        let ctx = super::TypeChecker::new();
+        let layout_ptr = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
+        assert!(ctx.is_cast_valid(&layout_ptr, &Type::Int),
+            "LayoutPtr -> Int should be valid");
+        assert!(ctx.is_cast_valid(&Type::Int, &layout_ptr),
+            "Int -> LayoutPtr should be valid");
+    }
+
+    #[test]
+    fn test_layout_ptr_types_compatible() {
+        let ctx = super::TypeChecker::new();
+        let a = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
+        let b = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
+        assert!(ctx.types_compatible(&a, &b),
+            "Same LayoutPtr constraints should be compatible");
+        let c = Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 });
+        assert!(!ctx.types_compatible(&a, &c),
+            "Different LayoutPtr constraints should NOT be compatible");
+    }
+
+    #[test]
+    fn test_layout_ptr_arithmetic_preserves_type() {
+        let layout_ptr = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
+        let result = super::TypeChecker::new().binary_op_type_scalar(
+            &layout_ptr, &Type::Int, Type::Int, Type::Float
+        );
+        assert_eq!(result, layout_ptr,
+            "LayoutPtr + Int should preserve LayoutPtr");
+    }
+
+    #[test]
+    fn test_layout_ptr_not_compatible_with_typed_ptr() {
+        let ctx = super::TypeChecker::new();
+        let layout_ptr = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
+        let typed_ptr = Type::Applied("Ptr".into(), vec![Type::Int]);
+        assert!(!ctx.types_compatible(&layout_ptr, &typed_ptr),
+            "LayoutPtr should NOT be compatible with Ptr<Int> without explicit cast");
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
@@ -5345,5 +5388,4 @@ mod kani_full_tests {
         assert!(!ctx.is_cast_valid(&Type::Custom("String".into()), &Type::Custom("Int".into())),
             "no meld String <:> Int, cast should be invalid");
     }
-
 }

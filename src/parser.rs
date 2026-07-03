@@ -8957,6 +8957,84 @@ struct MultiSliceResult {
 #[cfg(test)]
 mod parser_tests {
     use super::*;
+    use crate::ast::LayoutConstraint;
+
+    // ── Ptr/PtrN LayoutPtr parsing tests ──────────────────────────
+
+    #[test]
+    fn test_parse_ptr_bare_as_layout_ptr() {
+        let src = "let x: Ptr = 0;";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::StateDecl(s) = &prog.items[0] {
+            assert_eq!(s.ty, Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 }));
+        } else {
+            panic!("Expected StateDecl, got {:?}", prog.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_parse_ptr64_as_layout_ptr() {
+        let src = "let x: Ptr64 = 0;";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::StateDecl(s) = &prog.items[0] {
+            assert_eq!(s.ty, Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 }));
+        } else {
+            panic!("Expected StateDecl, got {:?}", prog.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_parse_ptr32_as_layout_ptr() {
+        let src = "let x: Ptr32 = 0;";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::StateDecl(s) = &prog.items[0] {
+            assert_eq!(s.ty, Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }));
+        } else {
+            panic!("Expected StateDecl, got {:?}", prog.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_parse_ptr8_as_layout_ptr() {
+        let src = "let x: Ptr8 = 0;";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::StateDecl(s) = &prog.items[0] {
+            assert_eq!(s.ty, Type::LayoutPtr(LayoutConstraint { bytes: 1, alignment: 1 }));
+        } else {
+            panic!("Expected StateDecl, got {:?}", prog.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_parse_ptr_typed_stays_applied() {
+        let src = "let x: Ptr<Int> = 0;";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::StateDecl(s) = &prog.items[0] {
+            assert!(matches!(&s.ty, Type::Applied(n, _) if n == "Ptr"),
+                "Expected Ptr<Int>, got {:?}", s.ty);
+        } else {
+            panic!("Expected StateDecl, got {:?}", prog.items[0]);
+        }
+    }
+
+    #[test]
+    fn test_parse_ptr128_as_layout_ptr() {
+        let src = "let x: Ptr128 = 0;";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        if let TopLevel::StateDecl(s) = &prog.items[0] {
+            assert_eq!(s.ty, Type::LayoutPtr(LayoutConstraint { bytes: 16, alignment: 16 }));
+        } else {
+            panic!("Expected StateDecl, got {:?}", prog.items[0]);
+        }
+    }
+
+    // ── Existing tests ─────────────────────────────────────────
 
     #[test]
     fn test_parse_struct_public_field_default() {

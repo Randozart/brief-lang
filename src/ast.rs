@@ -3995,4 +3995,55 @@ mod tests {
     fn test_intrinsic_from_name_unknown() {
         assert_eq!(Intrinsic::from_name("nonexistent"), None);
     }
+
+    // ── LayoutPtr normalization tests ──────────────────────────
+
+    #[test]
+    fn test_normalize_layout_ptr_bits_range() {
+        let ty = Type::Applied("Ptr".into(), vec![
+            Type::Constrained(Box::new(Type::Data), BitRange::Range(0, 63))
+        ]);
+        let result = ty.normalize_layout_ptr();
+        assert_eq!(result, Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 }));
+    }
+
+    #[test]
+    fn test_normalize_layout_ptr_bits_any() {
+        let ty = Type::Applied("Ptr".into(), vec![
+            Type::Constrained(Box::new(Type::Data), BitRange::Any(32))
+        ]);
+        let result = ty.normalize_layout_ptr();
+        assert_eq!(result, Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }));
+    }
+
+    #[test]
+    fn test_normalize_layout_ptr_typed_stays_applied() {
+        // Ptr<Int> should stay as Applied("Ptr", [Int])
+        let ty = Type::Applied("Ptr".into(), vec![Type::Int]);
+        let result = ty.normalize_layout_ptr();
+        assert_eq!(result, Type::Applied("Ptr".into(), vec![Type::Int]));
+    }
+
+    #[test]
+    fn test_normalize_layout_ptr_already_layout_ptr() {
+        // Already a LayoutPtr — should stay unchanged
+        let ty = Type::LayoutPtr(LayoutConstraint { bytes: 16, alignment: 16 });
+        let result = ty.normalize_layout_ptr();
+        assert_eq!(result, Type::LayoutPtr(LayoutConstraint { bytes: 16, alignment: 16 }));
+    }
+
+    #[test]
+    fn test_normalize_layout_ptr_in_union() {
+        let ty = Type::Union(vec![
+            Type::Int,
+            Type::Applied("Ptr".into(), vec![
+                Type::Constrained(Box::new(Type::Data), BitRange::Range(0, 31))
+            ]),
+        ]);
+        let result = ty.normalize_layout_ptr();
+        assert_eq!(result, Type::Union(vec![
+            Type::Int,
+            Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }),
+        ]));
+    }
 }
