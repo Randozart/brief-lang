@@ -1988,11 +1988,30 @@ impl LlvmBackend {
     /// pre_load_all_fields so field reads see fresh memory values (not stale phis).
     fn emit_hoisted_post_loop_prints(&mut self, out: &mut String, hoisted: &[Vec<Statement>]) {
         if hoisted.is_empty() { return; }
-        // Load all state fields from %State into old-value caches so emit_stmt
-        // reads see the final field values (post-loop, from memory, not from phis).
-        // The phi registers are stale — they reflect the pre-latch state, not the
-        // final body stores.  GEP+load from %State gets the correct final values.
-        self.pre_load_all_fields(out, "%state");
+        // 2026-07-03: Use phi registers instead of GEP+load from %State.
+        // The phi registers at loop_hdr are available in done: (loop_hdr
+        // dominates done in SSA).  The latch reloads modified fields from
+        // %State before the backedge, so phi values equal the final stored
+        // values.  Using phis eliminates %State GEP references from the
+        // done: block, letting SROA decompose the struct into scalar
+        // float phis — the loop vectorizer can then analyze each field.
+        //
+        // Key invariant: clear the expr_dedup_cache before re-emitting the
+        // hoisted body.  The original body populated the cache with register
+        // names defined in body: — reusing them in done: would create illegal
+        // SSA use-before-def across blocks (body: does not dominate done:).
+        self.fun.expr_dedup_cache.clear();
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        for (name, phi_reg) in &self.fun.phi_field_regs {
+            let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
+            let ll_ty = &self.ctx.field_types[idx];
+            if ll_ty == "float" || ll_ty == "double" {
+                self.fun.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
+            } else {
+                self.fun.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
+            }
+        }
         for body_stmts in hoisted {
             for s in body_stmts {
                 self.emit_stmt(out, s, "  ");
