@@ -1513,23 +1513,7 @@ impl LlvmBackend {
                 // pending_phi_backedge is populated by emit_stmt when it
                 // processes &field = expr assignments.
                 self.fun.pending_phi_backedge.clear();
-                // 2026-06-27: Classify phi regs by field type — float fields
-                // go into ssa_old_float_regs so body lookups find the correct
-                // register. Previously all phi regs went to ssa_old_int_regs,
-                // causing float field reads to fall back to "0.0" (nbody bug).
-                // 2026-06-29: Also check for "double" (Float64) fields.
-                for (name, phi_reg) in &self.fun.phi_field_regs {
-                    if let Some(&idx) = self.ctx.field_index_map.get(name) {
-                        let ll_ty = &self.ctx.field_types[idx];
-                        if ll_ty == "float" || ll_ty == "double" {
-                            self.fun.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
-                        } else {
-                            self.fun.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
-                        }
-                    } else {
-                        self.fun.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
-                    }
-                }
+                self.phi_regs_to_ssa_old();
                 if let Some((ref cname, ref pi_reg, _)) = self.fun.phi_induction_reg {
                     self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
                 }
