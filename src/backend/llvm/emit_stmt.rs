@@ -38,6 +38,18 @@ impl LlvmBackend {
             _ => val.to_string(),
         }
     }
+    /// 2026-07-03: Emit a GEP into %State for a given field index.
+    /// Returns the register name holding the field pointer.
+    /// pub(super): shared across the llvm backend.
+    pub(super) fn emit_state_gep(&mut self, out: &mut String, indent: &str,
+        prefix: &str, state_ptr: &str, idx: usize) -> String
+    {
+        let p = format!("%{}_{}", prefix, self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, state_ptr, idx).ok();
+        p
+    }
+
     /// Store a native-typed value to the i64 result slot, boxing if needed.
     fn store_i64_result(&mut self, out: &mut String, indent: &str, r: &TypedRegister, rs: &str) {
         let adapted = self.adapt_to_i64(out, indent, r);
@@ -463,8 +475,8 @@ impl LlvmBackend {
                             } else if let Some(reg) = self.fun.let_bindings.get(&list_name).cloned() {
                                 Some(reg)
                             } else if let Some(&field_idx) = self.ctx.field_index_map.get(&list_name) {
-                                let p = format!("%lgp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, self.fun.state_reg_name, field_idx).ok();
+                                let sr = self.fun.state_reg_name.clone();
+                                let p = self.emit_state_gep(out, indent, "lgp", &sr, field_idx);
                                 let ld = format!("%lld{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                                 writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
                                 Some(ld)
@@ -516,8 +528,8 @@ impl LlvmBackend {
                             }
                             if let Some(&idx) = self.ctx.field_index_map.get(name) {
                                 let ty = self.ctx.field_types[idx].clone();
-                                let p = format!("%ap{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, self.fun.state_reg_name, idx).ok();
+                                let sr = self.fun.state_reg_name.clone();
+                                let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
                                 let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &elem.to_string());
                                 writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, tv, ty, p, self.align_of(&ty)).ok();
                             } else if let Some(slot) = self.fun.param_slots.get(name) {
@@ -605,8 +617,8 @@ impl LlvmBackend {
                 }
                 if let Some(&idx) = self.ctx.field_index_map.get(&fname) {
                     let ty = self.ctx.field_types[idx].clone();
-                    let p = format!("%ap{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, self.fun.state_reg_name, idx).ok();
+                    let sr = self.fun.state_reg_name.clone();
+                    let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
                     let vol_str = if is_volatile { " volatile" } else { "" };
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
                     let tn = crate::backend::llvm::tbaa_node(&ty);

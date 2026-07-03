@@ -70,9 +70,7 @@ impl LlvmBackend {
             }
             Expr::Identifier(name) => {
                 if let Some(&idx) = self.ctx.field_index_map.get(name) {
-                    let p = format!("%gep_exit_{}", self.fun.txn_counter);
-                    self.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, p, idx).ok();
+                    let p = self.emit_state_gep(out, indent, "gep_exit", "%state", idx);
                     let ft = &self.ctx.field_types[idx];
                     match ft.as_str() {
                         "i64" => { writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok(); }
