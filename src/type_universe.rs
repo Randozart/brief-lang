@@ -692,6 +692,106 @@ impl TypeUniverse {
         self.get(ty.universe_key())
     }
 
+    // 2026-07-03: Return the byte size of a type. Handles primitives,
+    // LayoutPtr, compound types, and universe-resolved custom types.
+    pub fn byte_size(&self, ty: &crate::ast::Type) -> Option<u64> {
+        match ty {
+            crate::ast::Type::LayoutPtr(lc) => Some(lc.bytes),
+            crate::ast::Type::Int | crate::ast::Type::UInt => Some(8),
+            crate::ast::Type::Int8 | crate::ast::Type::UInt8 => Some(1),
+            crate::ast::Type::Int16 | crate::ast::Type::UInt16 => Some(2),
+            crate::ast::Type::Int32 | crate::ast::Type::UInt32 => Some(4),
+            crate::ast::Type::Float => Some(4),
+            crate::ast::Type::Float64 => Some(8),
+            crate::ast::Type::Bool | crate::ast::Type::Char => Some(1),
+            crate::ast::Type::Void => Some(0),
+            crate::ast::Type::String | crate::ast::Type::Data => Some(8),
+            crate::ast::Type::Custom(name) => {
+                self.get(name).map(|rt| rt.bytes)
+            }
+            crate::ast::Type::Applied(name, _) => {
+                // Ptr<T> is always pointer-width (8 bytes on 64-bit)
+                if name == "Ptr" {
+                    return Some(8);
+                }
+                // For custom generic types like List<T>, look up the base type
+                self.get(name).map(|rt| rt.bytes)
+            }
+            crate::ast::Type::Enum(name) => {
+                self.get(name).map(|rt| rt.bytes)
+            }
+            // Compound types — default to 8 as safe fallback
+            _ => Some(8),
+        }
+    }
+
+    // 2026-07-03: Return the alignment requirement of a type.
+    // Handles primitives, LayoutPtr, compound types, and universe-resolved types.
+    pub fn alignment(&self, ty: &crate::ast::Type) -> Option<u64> {
+        match ty {
+            crate::ast::Type::LayoutPtr(lc) => Some(lc.alignment),
+            crate::ast::Type::Int | crate::ast::Type::UInt => Some(8),
+            crate::ast::Type::Int8 | crate::ast::Type::UInt8 => Some(1),
+            crate::ast::Type::Int16 | crate::ast::Type::UInt16 => Some(2),
+            crate::ast::Type::Int32 | crate::ast::Type::UInt32 => Some(4),
+            crate::ast::Type::Float => Some(4),
+            crate::ast::Type::Float64 => Some(8),
+            crate::ast::Type::Bool => Some(1),
+            crate::ast::Type::Char => Some(4),
+            crate::ast::Type::Void => Some(1),
+            crate::ast::Type::String | crate::ast::Type::Data => Some(8),
+            crate::ast::Type::Custom(name) => {
+                self.get(name).map(|rt| rt.alignment)
+            }
+            crate::ast::Type::Applied(name, _) => {
+                if name == "Ptr" {
+                    return Some(8);
+                }
+                self.get(name).map(|rt| rt.alignment)
+            }
+            crate::ast::Type::Enum(name) => {
+                self.get(name).map(|rt| rt.alignment)
+            }
+            _ => Some(8),
+        }
+    }
+
+    // 2026-07-03: Extract the pointee layout (bytes, alignment) from a pointer type.
+    // For Ptr<T>, returns the layout of T. For LayoutPtr(lc), returns (lc.bytes, lc.alignment).
+    // For non-pointer types, returns None. Used by layout-compatible cast checking.
+    pub fn pointer_pointee_layout(&self, ty: &crate::ast::Type) -> Option<(u64, u64)> {
+        match ty {
+            crate::ast::Type::LayoutPtr(lc) => Some((lc.bytes, lc.alignment)),
+            crate::ast::Type::Applied(name, args) if name == "Ptr" && args.len() == 1 => {
+                let inner = &args[0];
+                // For Ptr<Bits @/range>, compute from the bit range
+                if let crate::ast::Type::Constrained(inner, br) = inner {
+                    if **inner == crate::ast::Type::Data {
+                        let bits = match br {
+                            crate::ast::BitRange::Range(start, end) => end - start + 1,
+                            crate::ast::BitRange::Single(_) => 1,
+                            crate::ast::BitRange::Any(n) => *n,
+                        };
+                        let bytes = (bits + 7) / 8;
+                        return Some((bytes as u64, bytes as u64));
+                    }
+                }
+                // For Ptr<CustomType>, look up the type's layout from the universe
+                if let crate::ast::Type::Custom(name) = inner {
+                    if let Some(rt) = self.get(name) {
+                        return Some((rt.bytes, rt.alignment));
+                    }
+                }
+                // For Ptr<PrimitiveType>, use byte_size/alignment
+                let bytes = self.byte_size(inner)?;
+                let align = self.alignment(inner)?;
+                Some((bytes, align))
+            }
+            // Not a pointer type
+            _ => None,
+        }
+    }
+
     /// Check if a direct meld exists between types `a` and `b`.
     /// Transitive melds are NOT resolved — only explicit `meld A <:> B` declarations.
     /// Returns the MeldDeclaration if found.

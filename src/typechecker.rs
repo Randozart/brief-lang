@@ -3268,6 +3268,24 @@ Expr::ObjectLiteral(fields) => {
         // 2026-07-03: LayoutPtr ↔ Int cast: same as Ptr ↔ Int
         if matches!(src, Type::LayoutPtr(_)) && *dst == Type::Int { return true; }
         if matches!(dst, Type::LayoutPtr(_)) && *src == Type::Int { return true; }
+        // 2026-07-03: Layout-compatible pointer casts.
+        // Ptr<A> as Ptr<B>, Ptr<A> as LayoutPtr, LayoutPtr as Ptr<T>
+        // when byte sizes and alignment requirements match.
+        if let Some(ref universe) = self.type_universe {
+            let is_src_ptr = matches!(src, Type::Applied(n, _) if n == "Ptr")
+                || matches!(src, Type::LayoutPtr(_));
+            let is_dst_ptr = matches!(dst, Type::Applied(n, _) if n == "Ptr")
+                || matches!(dst, Type::LayoutPtr(_));
+            if is_src_ptr && is_dst_ptr {
+                let src_layout = universe.pointer_pointee_layout(src);
+                let dst_layout = universe.pointer_pointee_layout(dst);
+                if let (Some((sb, sa)), Some((db, da))) = (src_layout, dst_layout) {
+                    if sb == db && sa >= da {
+                        return true;
+                    }
+                }
+            }
+        }
         // Check meld-backed cast between custom types
         if let (Type::Custom(src_name), Type::Custom(dst_name)) = (src, dst) {
             if let Some(ref universe) = self.type_universe {
@@ -4208,6 +4226,77 @@ mod tests {
         let typed_ptr = Type::Applied("Ptr".into(), vec![Type::Int]);
         assert!(!ctx.types_compatible(&layout_ptr, &typed_ptr),
             "LayoutPtr should NOT be compatible with Ptr<Int> without explicit cast");
+    }
+
+    // ── Phase 2: Layout-compatible pointer cast tests ────────
+
+    #[test]
+    fn test_ptr_float_to_ptr_int32_layout_match() {
+        // Float (4 bytes, align 4) and Int32 (4 bytes, align 4) should be castable
+        let ctx = super::TypeChecker::new().with_type_universe(
+            crate::type_universe::TypeUniverse::build(&make_program(vec![]))
+        );
+        let src = Type::Applied("Ptr".into(), vec![Type::Float]);
+        let dst = Type::Applied("Ptr".into(), vec![Type::Int32]);
+        assert!(ctx.is_cast_valid(&src, &dst),
+            "Ptr<Float> -> Ptr<Int32> should be valid (same layout)");
+    }
+
+    #[test]
+    fn test_ptr_int64_to_ptr_float64_layout_match() {
+        // Int (8 bytes, align 8) and Float64 (8 bytes, align 8) should be castable
+        let ctx = super::TypeChecker::new().with_type_universe(
+            crate::type_universe::TypeUniverse::build(&make_program(vec![]))
+        );
+        let src = Type::Applied("Ptr".into(), vec![Type::Int]);
+        let dst = Type::Applied("Ptr".into(), vec![Type::Float64]);
+        assert!(ctx.is_cast_valid(&src, &dst),
+            "Ptr<Int> -> Ptr<Float64> should be valid (same layout)");
+    }
+
+    #[test]
+    fn test_ptr_int_to_ptr_int32_layout_mismatch() {
+        // Int (8 bytes) vs Int32 (4 bytes) — should NOT be castable
+        let ctx = super::TypeChecker::new().with_type_universe(
+            crate::type_universe::TypeUniverse::build(&make_program(vec![]))
+        );
+        let src = Type::Applied("Ptr".into(), vec![Type::Int]);
+        let dst = Type::Applied("Ptr".into(), vec![Type::Int32]);
+        assert!(!ctx.is_cast_valid(&src, &dst),
+            "Ptr<Int> -> Ptr<Int32> should be invalid (different sizes)");
+    }
+
+    #[test]
+    fn test_ptr_float_to_layout_ptr_match() {
+        let ctx = super::TypeChecker::new().with_type_universe(
+            crate::type_universe::TypeUniverse::build(&make_program(vec![]))
+        );
+        let src = Type::Applied("Ptr".into(), vec![Type::Float]);
+        let dst = Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 });
+        assert!(ctx.is_cast_valid(&src, &dst),
+            "Ptr<Float> -> LayoutPtr(4,4) should be valid");
+    }
+
+    #[test]
+    fn test_layout_ptr_to_ptr_float64_match() {
+        let ctx = super::TypeChecker::new().with_type_universe(
+            crate::type_universe::TypeUniverse::build(&make_program(vec![]))
+        );
+        let src = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
+        let dst = Type::Applied("Ptr".into(), vec![Type::Float64]);
+        assert!(ctx.is_cast_valid(&src, &dst),
+            "LayoutPtr(8,8) -> Ptr<Float64> should be valid");
+    }
+
+    #[test]
+    fn test_layout_ptr_mismatch_not_castable() {
+        let ctx = super::TypeChecker::new().with_type_universe(
+            crate::type_universe::TypeUniverse::build(&make_program(vec![]))
+        );
+        let src = Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 });
+        let dst = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
+        assert!(!ctx.is_cast_valid(&src, &dst),
+            "LayoutPtr(4,4) -> LayoutPtr(8,8) should be invalid (different sizes)");
     }
 }
 
