@@ -68,14 +68,6 @@ int main(void) {
     while (count < total) {
         float dx, dy, dz, dsq, dist, mag;
 
-        // Save OLD velocities before force computation.
-        // This matches Brief's prior-state semantics: within a transaction,
-        // all field reads see the pre-tick value (before any &=-updates).
-        float old_vx[5], old_vy[5], old_vz[5];
-        for (int i = 0; i < 5; i++) {
-            old_vx[i] = vx[i]; old_vy[i] = vy[i]; old_vz[i] = vz[i];
-        }
-
         #define PAIR(ia, ib) \
             dx = bx[ia] - bx[ib]; dy = by[ia] - by[ib]; dz = bz[ia] - bz[ib]; \
             dsq = dx*dx + dy*dy + dz*dz; \
@@ -91,14 +83,13 @@ int main(void) {
 
         #undef PAIR
 
-        // Position update uses OLD velocities (prior-state semantics)
+        // Position update uses UPDATED velocities (matches Brief's
+        // store-and-forward semantics within a txn body).
         for (int i = 0; i < 5; i++) {
-            bx[i] += dt * old_vx[i];
-            by[i] += dt * old_vy[i];
-            bz[i] += dt * old_vz[i];
+            bx[i] += dt * vx[i];
+            by[i] += dt * vy[i];
+            bz[i] += dt * vz[i];
         }
-
-        count++;
 
         // Energy periodic print
         {
@@ -126,6 +117,8 @@ int main(void) {
             if (count % 5000000 == 0)
                 fprintf(stdout, "%.9f\n", energy);
         }
+
+        count++;
     }
 
     // Final energy print

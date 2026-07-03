@@ -247,11 +247,51 @@ check_correctness() {
 
     if [ "$brief_out" = "$c_out" ]; then
         echo "  correctness: MATCH (output: \"${brief_out:0:40}\")"
-    else
+        return
+    fi
+
+    # 2026-07-03: Epsilon-based float comparison. C auto-vectorizes,
+    # changing f32 association order. Strict string compare produces
+    # false MISMATCH for values differing by ~1e-7.
+    # Compare each line numerically if all lines are floats.
+    local brief_lines c_lines
+    mapfile -t brief_lines <<< "$brief_out"
+    mapfile -t c_lines <<< "$c_out"
+    local n_brief=${#brief_lines[@]}
+    local n_c=${#c_lines[@]}
+    if [ "$n_brief" -ne "$n_c" ]; then
+        echo "  correctness: MISMATCH (line count $n_brief vs $n_c)"
+        return
+    fi
+    local all_float=true
+    local i
+    local re='^-?[0-9]+\.[0-9]+$'
+    for ((i=0; i<n_brief; i++)); do
+        if ! [[ "${brief_lines[$i]}" =~ $re ]] || ! [[ "${c_lines[$i]}" =~ $re ]]; then
+            all_float=false
+            break
+        fi
+    done
+    if [ "$all_float" = false ]; then
         echo "  correctness: MISMATCH"
         echo "    brief: \"${brief_out:0:60}\""
         echo "    c:     \"${c_out:0:60}\""
+        return
     fi
+    # All lines are floats — compare with epsilon
+    local eps=0.00001
+    for ((i=0; i<n_brief; i++)); do
+        local diff
+        diff=$(LC_ALL=C python3 -c "b=${brief_lines[$i]}; c=${c_lines[$i]}; print('{:.15e}'.format(abs(b - c)))" 2>/dev/null)
+        in_range=$(LC_ALL=C python3 -c "d=${diff}; print('yes' if d < $eps else 'no')" 2>/dev/null)
+        if [ -z "$diff" ] || [ "$in_range" != "yes" ]; then
+            echo "  correctness: MISMATCH (float diff $diff > $eps)"
+            echo "    brief: \"${brief_out:0:60}\""
+            echo "    c:     \"${c_out:0:60}\""
+            return
+        fi
+    done
+    echo "  correctness: MATCH (output: \"${brief_out:0:40}\")"
 }
 
 # ── BENCHMARK RUNNER ─────────────────────────────────────────────────

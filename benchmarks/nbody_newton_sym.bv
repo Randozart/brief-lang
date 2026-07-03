@@ -257,8 +257,6 @@ rct txn simulate [
     &by4 = by4 + dt * vy4;
     &bz4 = bz4 + dt * vz4;
 
-    &count = count + 1;
-
     // Energy computation (same as original)
     let dxe01: Float32 = bx0 - bx1;
     let dye01: Float32 = by0 - by1;
@@ -391,6 +389,7 @@ rct txn simulate [
     [count % 5000000 == 0] {
         let __printed: Bool = print_float#(energy);
     };
+    &count = count + 1;
     [count == bound] {
         term! -> print_float#(energy);
     };

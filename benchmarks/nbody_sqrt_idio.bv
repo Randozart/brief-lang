@@ -165,8 +165,6 @@ rct txn simulate [
     &bx4 = bx4 + dt * nvx4;
     &by4 = by4 + dt * nvy4;
     &bz4 = bz4 + dt * nvz4;
-    &count = count + 1;
-
     let edist01: Float32 = sqrt#((bx0 - bx1) * (bx0 - bx1) + (by0 - by1) * (by0 - by1) + (bz0 - bz1) * (bz0 - bz1));
     let edist02: Float32 = sqrt#((bx0 - bx2) * (bx0 - bx2) + (by0 - by2) * (by0 - by2) + (bz0 - bz2) * (bz0 - bz2));
     let edist03: Float32 = sqrt#((bx0 - bx3) * (bx0 - bx3) + (by0 - by3) * (by0 - by3) + (bz0 - bz3) * (bz0 - bz3));
@@ -199,5 +197,6 @@ rct txn simulate [
     [count % 5000000 == 0] {
         let __printed: Bool = print_float#(energy);
     };
+    &count = count + 1;
     term;
 };
