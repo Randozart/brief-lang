@@ -95,7 +95,7 @@ pub fn emit_arrow_push(
                 if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
                     let ap = format!("%aap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-                    let tn_tag = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+                    let tn_tag = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
                     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, result.name, ap, tn_tag).ok();
                 } else if let Some(slot) = backend.fun.param_slots.get(field_name).cloned() {
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, result.name, slot).ok();
@@ -110,7 +110,7 @@ pub fn emit_arrow_push(
             if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
                 let ap = format!("%aap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-                let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+                let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, v, ap, tn).ok();
             } else if let Some(slot) = backend.fun.param_slots.get(field_name).cloned() {
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, v, slot).ok();
@@ -173,7 +173,7 @@ pub fn emit_arrow_push(
             let ap = format!("%aapf{}", backend.fun.txn_counter);
             backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, store_idx).ok();
-            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[store_idx]);
+            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[store_idx], backend.ctx.type_universe.as_ref());
             let base_fast = format!("%apfb{}", backend.fun.txn_counter);
             backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base_fast, buf_i64).ok();
@@ -261,7 +261,7 @@ pub fn emit_arrow_push(
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%aap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
             // 2026-06-27: Record field as modified for per-field phi
             // back-edge reload. Without this, the phi back-edge for
@@ -321,7 +321,7 @@ pub fn emit_arrow_pop(
             if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
                 let ap = format!("%pap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-                let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+                let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, new_list, ap, tn).ok();
                 // 2026-06-27: Record field as modified for per-field
                 // phi back-edge reload (same rationale as push).
@@ -417,7 +417,7 @@ pub fn emit_arrow_pop(
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%pap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
             // 2026-06-27: Record field as modified for per-field
             // phi back-edge reload (same rationale as push).
@@ -582,7 +582,7 @@ pub fn emit_arrow_discard(
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%dap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
         } else if let Some(slot) = backend.fun.param_slots.get(field_name).cloned() {
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
@@ -676,7 +676,7 @@ pub fn emit_arrow_transfer(
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%tap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, dbase, ap, tn).ok();
         }
     }
@@ -685,7 +685,7 @@ pub fn emit_arrow_transfer(
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%sap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx]);
+            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
             // Allocate new empty list for source
             let ebuf = backend.emit_arena_alloc(out, indent, "16");
             let ehp = format!("%seh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;

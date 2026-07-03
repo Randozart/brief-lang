@@ -1470,7 +1470,7 @@ impl LlvmBackend {
                         let ty = &self.ctx.field_types[idx];
                         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
                         let rl = format!("%prl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        let tn = crate::backend::llvm::tbaa_node(ty);
+                        let tn = crate::backend::llvm::tbaa_node(ty, self.ctx.type_universe.as_ref());
                         writeln!(out, "{}{} = load {}, {}* {}, align {}, !tbaa !{}, !range !{{{}, {}}}",
                             indent, rl, ty, ty, gep, self.align_of(ty), tn, 0i64, bound).ok();
                     } else {

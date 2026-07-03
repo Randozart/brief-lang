@@ -253,6 +253,12 @@ pub struct FunctionContext {
     // `energy` in nbody) by re-emitting the entire guard body post-loop.
     pub pending_post_hoist: Vec<Vec<Statement>>,
     pub pending_cleanup: Vec<Statement>,
+    // 2026-07-03: Native-typed backedge values for per-field phi loops.
+    // Populated by emit_memory_field_store when it computes the typed value
+    // (after ensure_typed_value).  Used by emit_countable_latch to avoid
+    // reloading from %State — the typed register name is substituted directly
+    // as the phi backedge operand, eliminating the store→GEP→load roundtrip.
+    pub pending_phi_native_backedge: HashMap<String, String>,
 
     // Chimera tracking
     pub chimera_map: HashMap<String, ChimeraInfo>,
@@ -304,6 +310,7 @@ impl FunctionContext {
             pending_metadata: String::new(),
             pending_post_hoist: Vec::new(),
             pending_cleanup: Vec::new(),
+            pending_phi_native_backedge: HashMap::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
         }

@@ -476,14 +476,36 @@ pub(super) fn trg_llvm_storage_ty(ty: &Type) -> &str {
 
 /// Map a field's LLVM storage type string to its TBAA metadata node index.
 /// Returns the !N index into the TBAA tree emitted at end of module.
-pub(super) fn tbaa_node(ty_str: &str) -> i32 {
-    match ty_str {
-        "i64" => 1,  // Int / UInt / boxed list/counter
-        "i8"  => 2,  // Bool
-        "i32" => 3,  // Char
-        "i8*" | "ptr" => 4,  // String / Data
-        "float" | "double" => 5, // Float / Float64
-        _ => 1,  // fallback: Int
+/// universe is optional: when available, uses the dynamically-generated
+/// TBAA tree (sorted alphabetically, Int first).  When None, falls back
+/// to the original hardcoded indices for the 5 built-in types.
+pub(super) fn tbaa_node(ty_str: &str, universe: Option<&crate::type_universe::TypeUniverse>) -> i32 {
+    // Map string to TBAA group name
+    let group = match ty_str {
+        "i64" => "Int",
+        "i8"  => "Bool",
+        "i32" => "Char",
+        "i8*" | "ptr" => "String",
+        "float" | "double" => "Float",
+        _ => "Int",  // fallback
+    };
+    if let Some(u) = universe {
+        // Dynamic TBAA tree: find the group's position in sorted order.
+        // sorted_tbaa_groups ensures "Int" is at index 0 (→ !1).
+        sorted_tbaa_groups(u)
+            .iter().position(|g| *g == group)
+            .map(|i| i as i32 + 1)
+            .unwrap_or(1)
+    } else {
+        // Fallback: hardcoded indices
+        match group {
+            "Int"    => 1,
+            "Bool"   => 2,
+            "Char"   => 3,
+            "String" => 4,
+            "Float"  => 5,
+            _ => 1,
+        }
     }
 }
 
@@ -998,7 +1020,7 @@ impl LlvmBackend {
         writeln!(out, "{}store i64 0, ptr {}, align 8, !tbaa !1", indent, s1).ok();
         let ap = format!("%pap_{}", c);
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
-        let tn = crate::backend::llvm::tbaa_node(&self.ctx.field_types[idx]);
+        let tn = crate::backend::llvm::tbaa_node(&self.ctx.field_types[idx], self.ctx.type_universe.as_ref());
         writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
         self.fun.field_prealloc_info.insert(field_name.to_string(), (cap, buf_i64));
     }

@@ -434,7 +434,7 @@ impl LlvmBackend {
             writeln!(out, "  {} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", gep, state_ptr, field_idx).ok();
             let old_reg = format!("%{}_old_{}", field_name, self.fun.txn_counter);
             self.fun.txn_counter += 1;
-            let tn = crate::backend::llvm::tbaa_node(ty_str);
+            let tn = crate::backend::llvm::tbaa_node(ty_str, self.ctx.type_universe.as_ref());
             writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", old_reg, ty_str, ty_str, gep, self.align_of(ty_str), tn).ok();
             // 2026-06-29: Track both "float" (Float) and "double" (Float64) as float regs
             if ty_str == "float" || ty_str == "double" {
@@ -977,7 +977,7 @@ impl LlvmBackend {
             let gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", *idx);
             let init_load = format!("%init_{}_{}", name, self.fun.txn_counter);
             self.fun.txn_counter += 1;
-            let tn = crate::backend::llvm::tbaa_node(ty);
+            let tn = crate::backend::llvm::tbaa_node(ty, self.ctx.type_universe.as_ref());
             writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", init_load, ty, ty, gep, self.align_of(ty), tn).ok();
             init_regs.insert(name.clone(), init_load);
             let phi_reg = format!("%phi_{}", name);
@@ -1086,10 +1086,24 @@ impl LlvmBackend {
         for (name, be_reg) in &backedge_entries {
             if *name == counter_name { continue; }
             if pending_mod.contains(name) {
-                let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
-                let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
-                writeln!(out, "  {} = load {}, {}* {}, align {}",
-                    be_reg, ty, ty, gep_reload, self.align_of(ty)).ok();
+                // 2026-07-03: If the body stored a native-typed value, use it
+                // directly as the phi backedge instead of reloading from %State.
+                // This eliminates the store→GEP→load roundtrip per field.
+                // For float/double use fadd 0.0 (identity), for ints use add 0.
+                if let Some(typed_reg) = self.fun.pending_phi_native_backedge.get(name) {
+                    let Some(&(_, ref ty)) = field_map.get(name) else { continue; };
+                    let _ = match ty.as_str() {
+                        "float" => writeln!(out, "  {} = fadd float {}, 0.0", be_reg, typed_reg),
+                        "double" => writeln!(out, "  {} = fadd double {}, 0.0", be_reg, typed_reg),
+                        _ => writeln!(out, "  {} = add i64 0, {}", be_reg, typed_reg),
+                    };
+                } else {
+                    // Fallback: reload from %State
+                    let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
+                    let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
+                    writeln!(out, "  {} = load {}, {}* {}, align {}",
+                        be_reg, ty, ty, gep_reload, self.align_of(ty)).ok();
+                }
             } else {
                 let phi_reg = phi_entries.get(name).cloned().unwrap_or_default();
                 writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg).ok();
@@ -1152,6 +1166,7 @@ impl LlvmBackend {
         writeln!(out, "body:").ok();
         self.fun.ssa_state_reg = None; // memory mode: writes go through GEP+store
         self.fun.pending_phi_backedge.clear();
+        self.fun.pending_phi_native_backedge.clear();
         self.fun.returns_i64 = false;
         self.emit_countable_body(out, body);
         // ── Latch: increment counter, reload modified fields ─────────

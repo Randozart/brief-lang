@@ -36,21 +36,26 @@ impl LlvmBackend {
         let vol_str = if is_volatile { " volatile" } else { "" };
         let val_boxed = self.adapt_to_i64(out, indent, val);
         if !is_volatile {
-            let tn = crate::backend::llvm::tbaa_node(&ty);
+            let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
             let typed_val = self.ensure_typed_value(out, indent, &ty.as_str(), &val_boxed);
             writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}",
                 indent, vol_str, ty, typed_val, ty, p, self.align_of(&ty), tn).ok();
             let ty_str = ty.as_str();
             if ty_str == "float" || ty_str == "double" {
-                self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val);
+                self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val.clone());
             }
             self.fun.pending_phi_backedge.insert(fname.to_string(), val_boxed.clone());
+            // 2026-07-03: Store the native-typed register for the latch to use
+            // directly as the phi backedge, avoiding a GEP+load from %State.
+            self.fun.pending_phi_native_backedge.insert(fname.to_string(), typed_val);
             if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
                 self.fun.ssa_old_int_regs.insert(fname.to_string(), val_boxed.clone());
             }
         } else {
             writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty)).ok();
             self.fun.pending_phi_backedge.insert(fname.to_string(), val_boxed.clone());
+            // Volatile stores also feed the native backedge (identity pass-through).
+            self.fun.pending_phi_native_backedge.insert(fname.to_string(), val_boxed.clone());
         }
         if let Some(targets) = self.ctx.cache_slots.get(fname) {
             for (_target, &(_cache_idx, valid_idx)) in targets {
