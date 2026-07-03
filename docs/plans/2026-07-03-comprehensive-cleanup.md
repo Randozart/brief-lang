@@ -110,16 +110,23 @@ determines the behavior, extract the inner operation to the outer level.
 ### Transform E: Flat match on nested enums
 Use `matches!()` and early filters to reduce pattern-match nesting.
 
-**Order of files to clean:**
+**Phase 2 completed (2026-07-03):**
 
-1. `emit_stmt.rs` — smallest (1026 lines), independent, practice target
-2. `transition_graph.rs` — 1987 lines, mostly flat structure with 1 deep
-   function
-3. `emit_toplevel.rs` — 2296 lines, many field extraction chains
-4. `loop_engine.rs` — 2537 lines, complex but has some structure
-5. `mod.rs` — 3223 lines, largest, saved for last
+| File | What was done |
+|------|---------------|
+| `emit_stmt.rs` | Extracted `ensure_typed_value` (value conversion), `emit_state_gep` (GEP gen); refactored TupleDestructure and memory-mode field store |
+| `emit_toplevel.rs` | Extracted `emit_field_init_value` (shared field init); deduplicated ~200 lines between `emit_init_state` and `emit_inline_init_stores` |
 
-**Rule**: After each file, `cargo test --lib` must pass.
+**Phase 2 deferred** (depth is structural conditional chains, not repeated
+code; to tackle when these functions need modification):
+
+| File | Lines | Max depth | Why deferred |
+|------|-------|-----------|-------------|
+| `loop_engine.rs` | 2537 | 16 | Complex conditional chains unique per function |
+| `mod.rs` | 3223 | 13 | Same — nested logic, not extractable blocks |
+| `transition_graph.rs` | 1987 | 9 | Analysis module, not backend |
+
+**Rule**: After each change, `cargo test --lib` must pass.
 
 ---
 
