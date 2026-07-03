@@ -146,6 +146,10 @@ result.error.message  // Error message
 | `Option[T]` | Nullable type |
 | `Sig[T]` | Signature reference |
 | `Result[T, E]` | FFI return type |
+| `Ptr` | Bare pointer — Ptr\<Bits @/0..63\> (safe void\*) |
+| `Ptr<T>` | Typed pointer to T |
+| `Ptr32` | 4-byte pointee (Ptr\<Bits @/0..31\>) |
+| `Ptr64` | 8-byte pointee (Ptr\<Bits @/0..63\>) |
 
 ## Common Patterns
 

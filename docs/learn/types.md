@@ -162,3 +162,50 @@ Any other string becomes `Custom(fn_name)`.
 ### The Brief philosophy
 
 Most languages hardcode type rules inside the compiler's Rust/C++ source. Brief hardcodes about 13 properties. **That's it.** Everything — `String`, `Stack`, `Queue`, `HashMap`, even `Int` — is defined in Brief source files, using the same syntax you use to define your own types.
+
+### Pointers (2026-07-03)
+
+Brief has four forms of pointer, all sharing the same machine representation
+(`i64`/`u64` in the backend):
+
+| Form | Example | What it says |
+|------|---------|--------------|
+| Typed | `Ptr<Int>` | Points to an Int (full nominal type) |
+| Bare | `Ptr` | Points to 8 bytes (safe void\*) |
+| Fixed | `Ptr32` / `Ptr64` / `Ptr128` | Points to N bytes (known layout) |
+| Bits | `Ptr<Bits @/0..63>` | Points to exact bit range |
+
+`Ptr<T>` **cannot be dereferenced directly** — use `volatile_load#` / `volatile_store#`:
+
+```brief
+let reg: Ptr<Int> = 0x40011000 as Ptr<Int>;
+let val = volatile_load#(reg);
+volatile_store#(reg, val + 1);
+```
+
+Layout-compatible casts between pointer types are allowed when the pointee
+types have the same bytes and compatible alignment:
+
+```brief
+let f: Ptr<Float> = 0x4000 as Ptr<Float>;
+let i: Ptr<Int32> = f as Ptr<Int32>;  // both 4 bytes, align 4
+```
+
+Spatial operations use `lib/std/spatial.bv`:
+
+```brief
+import { block_copy } from "std/spatial.bv";
+let dst: Ptr64 = malloc(8);
+block_copy(dst, src, 8);
+```
+
+Function pointers via `:> Ptr`:
+
+```brief
+defn cmp(a: Int, b: Int) -> Bool { term a == b; };
+let fn_ptr = cmp :> Ptr;
+let eq = fn_ptr(3, 5);
+```
+
+No `reinterpret_cast` exists. If the compiler can't prove layout compatibility,
+use explicit byte-level operations or a `meld` declaration.

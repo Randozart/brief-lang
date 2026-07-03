@@ -1,0 +1,28 @@
+// ─────────────────────────────────────────────────────────────
+// eor-demo.bv — Extract-Operate-Repack optimization
+// (Phase 6: meld-backed zero-cost arithmetic on wrappers)
+// ─────────────────────────────────────────────────────────────
+
+// Define a unit-of-measure wrapper
+type Meters <: Bits @/0..63 {
+    bytes <~ 8;
+    alignment <~ 8;
+};
+
+meld Meters <:> Int;  // bidirectional cast compatibility
+
+defn scale(val: Meters, factor: Int) -> Meters {
+    // EOR pattern: (val as Int) * factor as Meters
+    // The backend detects Cast(BinaryOp(Cast(a, Int), Cast(b, Int)), Meters)
+    // where Meters <:> Int, and emits a single mul i64 — no redundant casts.
+    term (val as Int) * factor as Meters;
+};
+
+defn add_meters(a: Meters, b: Meters) -> Meters {
+    // Same EOR pattern for addition
+    term (a as Int) + (b as Int) as Meters;
+};
+
+let dist: Meters = 100;
+let doubled: Meters = scale(dist, 2);   // 200 — single mul i64
+let total: Meters = add_meters(dist, doubled); // 300 — single add i64

@@ -1,0 +1,29 @@
+// ─────────────────────────────────────────────────────────────
+// layout-ptr-demo.bv — Demonstrates layout-constrained pointers
+// (Phase 1-2: Type::LayoutPtr, PtrN syntax, compatible casts)
+// ─────────────────────────────────────────────────────────────
+
+// PtrN shorthand — fixed-width pointee
+let byte_ptr: Ptr8  = 0x4000 as Ptr8;    // points to 1 byte
+let word_ptr: Ptr16 = 0x4000 as Ptr16;   // points to 2 bytes
+let dword_ptr: Ptr32 = 0x4000 as Ptr32;  // points to 4 bytes
+let qword_ptr: Ptr64 = 0x4000 as Ptr64;  // points to 8 bytes
+
+// Bare Ptr — same as Ptr64 (safe void* equivalent)
+let raw: Ptr = 0x4000 as Ptr;
+
+// Layout-compatible cast: Float ↔ Int32 (same layout: 4 bytes, align 4)
+let f: Ptr<Float> = 0x40010000 as Ptr<Float>;
+let i: Ptr<Int32> = f as Ptr<Int32>;
+
+// Address arithmetic preserves the pointer type
+let next: Ptr64 = qword_ptr + 8;
+let aligned: Ptr64 = qword_ptr & !7;
+
+// Contract-verified bounds safety
+defn read_register(reg: Ptr<Int>) -> Int
+    [reg as Int >= 0x40000000]
+    [reg as Int <  0x40001000]
+{
+    term volatile_load#(reg);
+};

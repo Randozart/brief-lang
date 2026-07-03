@@ -8,6 +8,13 @@ The Brief compiler transforms Brief source code into executable output
 across multiple backends (LLVM IR, VHDL, Webstack, C, etc.). The pipeline
 follows a layered pass architecture:
 
+**Phases 1-6 (2026-07-03):** The pointer system was extended with
+layout-constrained pointers (`Type::LayoutPtr`), layout-compatible casts,
+spatial intrinsics (`__memcpy#`/`__memcmp#`/`__memset#`/`__hash#`),
+function pointers via `:> Ptr`, opaque handles, and EOR optimization.
+The architecture was renamed per this feature set. All code follows the
+max-2-levels flat control flow rule.
+
 ```mermaid
 flowchart LR
     Source --> Lexer

@@ -1,0 +1,30 @@
+// ─────────────────────────────────────────────────────────────
+// opaque-handle-demo.bv — Opaque handles via Ptr<Bits @/N>
+// (Phase 4: library returns LayoutPtr, user passes it around)
+// ─────────────────────────────────────────────────────────────
+
+// Library defines an internal struct
+type DbConnection <: Bits @/0..191 {
+    fd:     _ @/0..63;
+    buffer: _ @/64..127;
+    state:  _ @/128..191;
+};
+
+// Library returns opaque handle — user cannot inspect fields
+defn open_db(path: String) -> Ptr128 {
+    let conn = malloc(24);
+    // ... initialize connection fields ...
+    term conn;
+};
+
+// User passes handle back — only spatial ops on the handle
+defn query_db(db: Ptr128, sql: String) -> Result {
+    term __db_query#(db, sql);
+};
+
+// Library internals: re-lens to concrete type (internal only)
+inop __db_query#(db: Ptr128, sql: String) -> Result {
+    let conn = db as Ptr<DbConnection>;  // internal cast — layout-compatible
+    // ... use conn fields ...
+    term Ok("query result");
+};

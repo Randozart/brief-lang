@@ -1,7 +1,8 @@
 # `Ptr<T>` — Typed Memory Addresses
 
-**Date added:** 2026-06-25
-**Status:** Active (Phase 1+2 complete, see `docs/plans/2026-06-25-native-brief-io.md`)
+**Date added:** 2026-06-25  
+**Last updated:** 2026-07-03  
+**Status:** Active (Phases 1-6 complete)
 
 ## Purpose
 
@@ -10,50 +11,164 @@ the address value at runtime and the pointee type `T` at the type level, enablin
 contract-proven safe MMIO and memory access without a borrow checker or GC.
 
 A `Ptr<T>` **cannot be dereferenced directly** — reading or writing through a
-pointer requires the `volatile_load#`/`volatile_store#` intrinsics (Phase 2).
-This ensures all memory access is explicit and contract-verified.
+pointer requires the `volatile_load#`/`volatile_store#` intrinsics. This
+ensures all memory access is explicit and contract-verified.
 
 ## Type representation
 
-```brief
-// Ptr<T> is Type::Applied("Ptr", vec![T]) in the AST — no dedicated variant.
-let p: Ptr<Int> = 0x40011000 as Ptr<Int>;
-```
+### Four pointer forms (2026-07-03)
+
+Brief has four forms of pointer, each differing in how much information the
+type system has about the pointee:
+
+| Form | Example | Pointee info | Use case |
+|------|---------|--------------|----------|
+| Typed pointer | `Ptr<Int>` | Full nominal type | MMIO, typed access |
+| Layout-constrained | `Ptr64` / `Ptr32` / `Ptr8` / `Ptr128` | Bytes + alignment only | Raw buffers, space |
+| Generic | `Ptr` (bare) | Target-pointer-width bytes | Safe void* equivalent |
+| Explicit bits | `Ptr<Bits @/0..63>` | Exact bit range | When you need precision |
+
+### PtrN shorthand (Phase 1, 2026-07-03)
+
+All pointer forms map to the same machine representation (`i64` / `u64` in
+the backend). The pointee type only affects which operations are permitted:
+
+| Sugar | Desugars to | Pointee bytes | Typed operations |
+|-------|-------------|---------------|-----------------|
+| `Ptr` | `Ptr<Bits @/0..63>` | 8 | Spatial only (no dereference) |
+| `Ptr<T>` | `Ptr<Bits @/0..(T.bytes*8-1)>` | T.bytes | Full T semantics |
+| `Ptr8` | `Ptr<Bits @/0..7>` | 1 | Spatial only |
+| `Ptr16` | `Ptr<Bits @/0..15>` | 2 | Spatial only |
+| `Ptr32` | `Ptr<Bits @/0..31>` | 4 | Spatial only |
+| `Ptr64` | `Ptr<Bits @/0..63>` | 8 | Spatial only |
+| `Ptr128` | `Ptr<Bits @/0..127>` | 16 | Spatial only |
+| `Ptr256` | `Ptr<Bits @/0..255>` | 32 | Spatial only |
+
+A bare `Ptr` without angle brackets is always 8 bytes of pointee (target-pointer
+width on 64-bit targets), consistent with `Int` always being 64 bits.
 
 ## Operations
 
-All arithmetic operations preserve `T` — `ptr + 4` is still `Ptr<Int>`.
-Use explicit `as Ptr<U>` cast for type reinterpretation (type punning).
+### Pointer arithmetic
+
+All arithmetic operations preserve the pointer type:
 
 | Expression | Result | Notes |
 |---|---|---|
-| `ptr + n` | `Ptr<T>` | Wrapping byte offset |
-| `ptr - n` | `Ptr<T>` | Wrapping negative offset |
-| `ptr ^ n` | `Ptr<T>` | Bitwise XOR address with mask |
-| `ptr & n` | `Ptr<T>` | Bitwise AND address with mask |
-| `ptr \| n` | `Ptr<T>` | Bitwise OR address with mask |
-| `ptr << n` | `Ptr<T>` | Left shift address |
-| `ptr >> n` | `Ptr<T>` | Logical right shift address |
-| `ptr as Int` | `Int` | Extract raw address (explicit cast) |
-| `addr as Ptr<T>` | `Ptr<T>` | Reinterpret Int as typed pointer |
-| `ptr as Ptr<U>` | `Ptr<U>` | Type punning — same address, new pointee type |
+| `ptr + n` | Same ptr type | Wrapping byte offset |
+| `ptr - n` | Same ptr type | Wrapping negative offset |
+| `ptr ^ n` | Same ptr type | Bitwise XOR address with mask |
+| `ptr & n` | Same ptr type | Bitwise AND address with mask |
+| `ptr \| n` | Same ptr type | Bitwise OR address with mask |
+| `ptr << n` | Same ptr type | Left shift address |
+| `ptr >> n` | Same ptr type | Logical right shift address |
 | `ptr_a == ptr_b` | `Bool` | Address equality |
-| `ptr_a != ptr_b` | `Bool` | Address inequality |
 | `ptr_a < ptr_b` | `Bool` | Address less-than |
-| `ptr_a <= ptr_b` | `Bool` | Address less-or-equal |
-| `ptr_a > ptr_b` | `Bool` | Address greater-than |
-| `ptr_a >= ptr_b` | `Bool` | Address greater-or-equal |
+
+### Pointer-to-pointer casts (Phase 2, 2026-07-03)
+
+`Ptr<A> as Ptr<B>` is valid when the compiler can verify:
+1. `bytes(A) == bytes(B)` — total width match
+2. `alignment(A) >= alignment(B)` — source at least as aligned as dest
+
+This means `Ptr<Float> as Ptr<Int32>` is valid (both 4 bytes, align 4),
+but `Ptr<Int> as Ptr<Int32>` is NOT valid (different sizes).
+
+```brief
+let f: Ptr<Float> = 0x4000 as Ptr<Float>;
+let i: Ptr<Int32> = f as Ptr<Int32>;      // ✅ Float.bytes == Int32.bytes
+let raw: Ptr32 = f as Ptr32;               // ✅ Layout-compatible
+```
+
+No `reinterpret_cast` exists. If the compiler can't prove layout compatibility,
+you must go through `Ptr<Bits @/N>` explicitly or use a `meld` declaration.
+
+### Spatial intrinsics (Phase 3, 2026-07-03)
+
+`Ptr<Bits @/N>` supports spatial operations that are valid for ANY type
+matching that layout:
+
+| Intrinsic | Signature | LLVM emission | Description |
+|-----------|-----------|---------------|-------------|
+| `__memcpy#` | `(Ptr, Ptr, Int) -> Bool` | `@llvm.memcpy.p0i8.p0i8.i64` | Non-overlapping copy |
+| `__memcmp#` | `(Ptr, Ptr, Int) -> Int` | `@memcmp` (sext i32 to i64) | Byte comparison; 0 = equal |
+| `__memset#` | `(Ptr, Int, Int) -> Bool` | `@llvm.memset.p0i8.i64` | Fill with byte value |
+| `__hash#` | `(Ptr, Int) -> Int` | Inline FNV-1a loop | 64-bit hash |
+
+These are available via `lib/std/spatial.bv`:
+
+```brief
+import { block_copy, block_compare, block_fill, block_hash } from "std/spatial.bv";
+
+let dst: Ptr64 = malloc(8);
+let src: Ptr64 = malloc(8);
+block_copy(dst, src, 8);
+let eq = block_compare(dst, src, 8);
+```
+
+### Opaque handles (Phase 4, 2026-07-03)
+
+A library can return `Ptr<Bits @/N>` as an opaque handle. The caller cannot
+inspect internals because `Ptr<Bits @/N>` only supports spatial operations:
+
+```brief
+// Library: returns opaque 24-byte handle
+defn open_db(path: String) -> Ptr128 { ... };
+
+// User: passes handle back, cannot inspect fields
+defn query(db: Ptr128, sql: String) -> Result { ... };
+
+// Library internals: re-lens to concrete type (compile-time checked)
+inop __db_query#(db: Ptr128, sql: String) -> Result {
+    let conn = db as Ptr<DbConnection>;  // internal cast
+};
+```
+
+The `defining_module` field on `ResolvedType` tracks which module defined
+each type. Full boundary enforcement (blocking cross-module `as` casts) is
+available for compiler plugins to opt into.
+
+### Function pointers (Phase 5, 2026-07-03)
+
+Functions can be referenced via `:> Ptr` and called indirectly:
+
+```brief
+defn my_cmp(a: Int, b: Int) -> Bool { term a == b; };
+
+let cmp_fn = my_cmp :> Ptr;        // function pointer via :> Ptr
+let result = cmp_fn(3, 5);          // indirect call through fn pointer
+```
+
+The type of `cmp_fn` is `Applied("Fn", vec![Type::Tuple(params), ret])`.
+The LLVM backend emits `inttoptr` → `call %fn_ptr()` with proper argument
+marshalling (passes `%state`, handles Bool/Float/String types).
+
+### Extract-Operate-Repack (EOR) optimization (Phase 6, 2026-07-03)
+
+When `meld T <:> Int` exists, `(val as Int) * factor as T` is recognized as
+an EOR pattern. The backend emits native arithmetic without redundant casts:
+
+```brief
+meld Meters <:> Int;
+defn scale(val: Meters, factor: Int) -> Meters {
+    term (val as Int) * factor as Meters;  // compiled as a single mul i64
+};
+```
+
+The EOR detection (`try_emit_eor` in `helpers.rs`) checks:
+1. Expression is `Cast(BinaryOp(Cast(a, T), Cast(b, T)), U)`
+2. `U` has a meld with `T` (e.g., `Meters <:> Int`)
+3. If both hold, emits `add`/`sub`/`mul`/`div` directly
 
 ## Safety via contracts
 
 Safety is proven by the existing contract system, not by a borrow checker.
-A pointer is just an integer with a *provenance* — the contract proves it
-points to valid memory:
+A pointer is just an integer with a *provenance*:
 
 ```brief
 defn read_device(reg: Ptr<Int>) -> Int
     [reg as Int >= UART0_BASE]
-    [reg as Int <  UART0_END]
+    [reg as Int <  UART_END]
 {
     term volatile_load#(reg);
 };
@@ -62,77 +177,13 @@ defn read_device(reg: Ptr<Int>) -> Int
 The expression `reg as Int` converts the pointer to its raw address for use
 in contract comparisons. The proof engine handles `>=` and `<` natively.
 
-## Explicit casts only — no implicit coercions
+## Runtime representation
 
-There is no implicit coercion between `Ptr<T>` and `Int`. All conversions
-require explicit `as`:
-
-```brief
-let addr: Int = ptr as Int;              // Ptr<T> → Int
-let ptr: Ptr<Int> = addr as Ptr<Int>;   // Int → Ptr<T>
-let punned: Ptr<Char> = ptr as Ptr<Char>; // Ptr<Int> → Ptr<Char> (type punning)
-```
-
-## Low-level trickery
-
-Ptr<T> supports all the operations you'd expect from a C pointer, without
-the implicit coercion foot-guns:
-
-### MMIO register block navigation
-
-```brief
-const UART_DR:   Ptr<Int> = 0x40011000 as Ptr<Int>;
-const UART_FR:   Ptr<Int> = 0x40011004 as Ptr<Int>;   // DR + 4
-const UART_LCRH: Ptr<Int> = 0x40011010 as Ptr<Int>;   // DR + 16
-
-// Computed navigation:
-let fr: Ptr<Int> = UART_DR + 4;   // arithmetic, preserves Ptr<Int>
-```
-
-### Type punning (reinterpretation)
-
-Cast a `Ptr<Int>` to `Ptr<Char>` to access the same memory with different
-semantics. The address stays the same — only the type-level pointee changes:
-
-```brief
-let reg: Ptr<Int> = 0x40011000 as Ptr<Int>;
-let as_chars: Ptr<Char> = reg as Ptr<Char>;  // same address, Char semantics
-```
-
-This is a zero-cost reinterpretation — no runtime conversion. The LLVM
-backend emits the same `i64` address register; only the `TypedRegister.ty`
-changes, which affects downstream `volatile_load#` codegen.
-
-### Address alignment and bit manipulation
-
-```brief
-let misaligned: Ptr<Int> = 0x40011007 as Ptr<Int>;
-let aligned: Ptr<Int> = misaligned & !7;   // align down to 8-byte boundary
-let masked: Ptr<Int> = misaligned ^ 0xFFF; // toggle low 12 bits
-```
-
-### Runtime representation
-
-A `Ptr<T>` value is `u64`/`i64` in both the interpreter and LLVM backend —
-identical in size to `Int`. The pointee type `T` exists only at the type
-level (`TypedRegister.ty` in the backend).
-
-## Type definitions with Bits
-
-For fine-grained control over pointer semantics, use the type universe
-to define custom integer types from `Bits`:
-
-```brief
-type Byte <: Bits {
-    Bytes = 1;
-    Alignment = 1;
-};
-```
-
-Then use `Ptr<Byte>` as a pointer to byte-addressed memory. Note: the
-LLVM backend currently maps all custom types to `i64` for load/store width;
-`Bytes = 1` is tracked for contract and alignment reasoning but does not
-(yet) change the LLVM IR type for `volatile_load#`/`volatile_store#`.
+All pointer forms are `u64`/`i64` in both the interpreter and LLVM backend —
+identical in size to `Int`. The pointee type exists only at the type level
+(`TypedRegister.ty` in the backend). The `inttoptr`/`ptrtoint` LLVM
+instructions are used at the MMIO boundary; pointer values in registers
+are plain `i64`.
 
 ## Intrinsics
 
@@ -140,39 +191,29 @@ LLVM backend currently maps all custom types to `i64` for load/store width;
 |---|---|---|
 | `volatile_load#` | `(Ptr<T>) -> T` | Volatile read from MMIO register |
 | `volatile_store#` | `(Ptr<T>, T) -> Bool` | Volatile write to MMIO register |
+| `__memcpy#` | `(Ptr, Ptr, Int) -> Bool` | Copy N bytes (non-overlapping) |
+| `__memcmp#` | `(Ptr, Ptr, Int) -> Int` | Compare N bytes; 0 = equal |
+| `__memset#` | `(Ptr, Int, Int) -> Bool` | Fill N bytes with value |
+| `__hash#` | `(Ptr, Int) -> Int` | FNV-1a hash of N bytes |
 
-Both are `inop!` (side-effecting, not foldable). Contracts prove pointer
-validity at compile time. Without a proven contract, the compiler emits a
-compile error — Brief is not a "blame the programmer" language for MMIO.
+## Flat control flow mandate
 
-## BILD asm target with Ptr<T>
+All pointer-related code added in 2026-07-03 follows the max-2-levels nesting
+rule. Helper functions use `?` and `else { return None; }` guard clauses.
+See `docs/plans/2026-07-03-safe-void-star.md` for the full design.
 
-Inline assembly in BILD bodies can take `Ptr<T>` values as arguments.
-The address is passed as an `i64` to the asm block:
+## Implementation status
 
-```bild
-inop! dma_transfer(src: Ptr<Int>, dst: Ptr<Int>, len: Int) -> Int {
-    %res = asm target {
-        [arch("x86_64")]:
-            "mov %2, %%rcx; rep movsb"
-            : "={rax},{rsi},{rdi},{rcx}"
-            : (i64 %src, i64 %dst, i64 %len);
-        default:
-            "ud2"
-            : "={rax}"
-            : (i64 %src);
-    };
-    term %res;
-} fallback -1;
-```
-
-## Relationship to other features
-
-| Feature | Relationship |
-|---|---|
-| `volatile_load#`/`volatile_store#` | Phase 2 — the only way to dereference a Ptr<T> |
-| `import "target"` (Phase 5) | Board DBL files populate typed Ptr<T> constants |
-| `as` casts | Ptr ↔ Int, Ptr<T> ↔ Ptr<U> use `Expr::Cast` |
-| Contracts | `ptr as Int` enables contract bounds checking |
-| BILD `asm target { }` | Syscall stubs use Ptr<T> for buffer addresses |
-| Type universe (`Bits`) | Define custom types with `Bytes = N` for Ptr<T> semantics |
+| Component | Phase | Status |
+|-----------|-------|--------|
+| `Type::LayoutPtr(Constraint)` | 1 | ✅ |
+| PtrN parser sugar | 1 | ✅ |
+| `Ptr<Bits @/N>` normalization | 1 | ✅ |
+| Spatial intrinsics | 3 | ✅ |
+| `lib/std/spatial.bv` | 3 | ✅ |
+| Layout-compatible `Ptr<A> as Ptr<B>` | 2 | ✅ |
+| Opaque handle pattern | 4 | ✅ |
+| Function pointers (`:> Ptr`) | 5 | ✅ |
+| EOR optimization | 6 | ✅ |
+| Module boundary enforcement | 4 | ✅ (`defining_module` field) |
+| Layout shape caching | 3 | 🚧 (deferred; spatial intrinsics are direct) |

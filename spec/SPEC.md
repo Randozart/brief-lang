@@ -206,8 +206,10 @@ type ::= "Int" | "UInt" | "Float" | "String" | "Bool" | "Void" | "Data" | "Char"
        | "Option" "[" type "]"  // Optional type
        | "Result" "[" type "," type "]"  // Result type (for FFI)
        | "List" "[" type "]"  // Dynamic list
-       | "Ptr" "[" type "]"  // Verified pointer
-       | "Sig" "[" identifier "]"  // Signature type
+        | "Ptr" "[" type "]"  // Verified typed pointer
+        | "Ptr"               // Bare: Ptr<Bits @/0..63> (safe void*)
+        | "Ptr8" | "Ptr16" | "Ptr32" | "Ptr64" | "Ptr128" | "Ptr256"  // Fixed-width
+        | "Sig" "[" identifier "]"  // Signature type
        | type "Union" "[" type ("," type)* "]"  // Union type
        | "(" type ("," type)* ")"  // Tuple type
        | "const" type  // Const-qualified type
@@ -1315,6 +1317,97 @@ verification, no safety envelope, full programmer control.
 
 **Standard library:** `std/ptr.bv` provides `read_i64`, `write_i64`,
 `address`, `read_byte`, and `copy` with contract-proven safety. See §6.9.
+
+#### 3.16.1 Layout-Constrained Pointers (2026-07-03)
+
+`Ptr<T>` with a `Bits @/` inner type is a **layout-constrained pointer** that
+carries spatial information (bytes + alignment) without nominal type semantics.
+This is the safe `void*` equivalent.
+
+| Sugar | Desugars to | Byte width |
+|-------|-------------|------------|
+| `Ptr` | `Ptr<Bits @/0..63>` | 8 |
+| `Ptr8` | `Ptr<Bits @/0..7>` | 1 |
+| `Ptr16` | `Ptr<Bits @/0..15>` | 2 |
+| `Ptr32` | `Ptr<Bits @/0..31>` | 4 |
+| `Ptr64` | `Ptr<Bits @/0..63>` | 8 |
+| `Ptr128` | `Ptr<Bits @/0..127>` | 16 |
+| `Ptr256` | `Ptr<Bits @/0..255>` | 32 |
+
+Operations on layout-constrained pointers are spatial-only:
+memcpy, memcmp, memset, hash, address arithmetic, volatile load/store.
+Semantic operations (arithmetic on pointee, field access) are rejected.
+
+```brief
+let p: Ptr64 = 0x4000 as Ptr64;
+let raw: Ptr = p as Ptr;          // cast between layout-constrained ptrs
+let i: Ptr<Int32> = p as Ptr<Int32>;  // if bytes match (4 == 4)
+```
+
+#### 3.16.2 Layout-Compatible `as` Casts (2026-07-03)
+
+`Ptr<A> as Ptr<B>` is valid when `bytes(A) == bytes(B)` and `alignment(A) >=
+alignment(B)`. No explicit `meld` required for simple layout compatibility.
+
+```brief
+// Float (4 bytes, align 4) and Int32 (4 bytes, align 4)
+let f: Ptr<Float> = 0x40010000 as Ptr<Float>;
+let i: Ptr<Int32> = f as Ptr<Int32>;         // ✅ same layout
+
+// Int (8 bytes) vs Int32 (4 bytes) — different sizes
+let i64: Ptr<Int> = 0x4000 as Ptr<Int>;
+let i32: Ptr<Int32> = i64 as Ptr<Int32>;    // ❌ compile error
+```
+
+Layout-compatible casts are zero-cost — the backend merely changes the
+`TypedRegister.ty` metadata; no LLVM instructions are emitted.
+
+#### 3.16.3 Spatial Intrinsics (2026-07-03)
+
+Raw memory operations on layout-constrained pointers:
+
+| Intrinsic | Syntax | Description |
+|-----------|--------|-------------|
+| `__memcpy#` | `__memcpy#(dst, src, n) -> Bool` | Copy n non-overlapping bytes |
+| `__memcmp#` | `__memcmp#(a, b, n) -> Int` | Compare n bytes (0 = equal) |
+| `__memset#` | `__memset#(ptr, val, n) -> Bool` | Fill n bytes with val |
+| `__hash#` | `__hash#(ptr, n) -> Int` | FNV-1a hash of n bytes |
+
+These emit direct `@llvm.memcpy` / `@memcmp` / `@llvm.memset` calls with
+no intermediate wrappers. Available via `lib/std/spatial.bv`:
+`block_copy`, `block_compare`, `block_fill`, `block_hash`.
+
+#### 3.16.4 Function Pointers via `:> Ptr` (2026-07-03)
+
+A function reference can be converted to a function pointer:
+
+```brief
+defn my_cmp(a: Int, b: Int) -> Bool { term a == b; };
+let cmp_fn = my_cmp :> Ptr;   // fn pointer type: Fn(Int, Int) -> Bool
+let eq = cmp_fn(3, 5);        // indirect call through fn pointer
+```
+
+The type `Fn(Params...) -> Return` is represented as
+`Applied("Fn", vec![Type::Tuple(params), return_type])` in the AST.
+The LLVM backend marshals arguments per the internal calling convention
+(passes `%state`, handles Bool/Float/String types) and emits indirect
+`call %fn_ptr()`. Float returns are bitcast through i32 → zext to i64.
+
+#### 3.16.5 Extract-Operate-Repack (EOR) Optimization (2026-07-03)
+
+When `meld T <:> Int`, the pattern `(x as Int) op (y as Int) as T` is
+detected and compiled as a single native operation without redundant casts:
+
+```brief
+meld Meters <:> Int;
+defn scale(val: Meters, factor: Int) -> Meters {
+    term (val as Int) * factor as Meters;  // single mul i64
+};
+```
+
+The backend detects `Cast(BinaryOp(Cast(a, T), Cast(b, T)), U)` where
+`U <:> T` and emits the inner operation directly. Both integer and float
+arithmetic are supported.
 
 ---
 
