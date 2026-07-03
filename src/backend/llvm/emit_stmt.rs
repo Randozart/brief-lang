@@ -5,6 +5,37 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 impl LlvmBackend {
+    /// 2026-07-03: Ensure a value has the right LLVM type for storage.
+    /// Returns the register name usable as the typed value (trunc, bitcast,
+    /// or identity). Callers are responsible for the store instruction.
+    fn ensure_typed_value(&mut self, out: &mut String, indent: &str,
+        ty: &str, val: &str) -> String
+    {
+        match ty {
+            "i8" => {
+                let tr = format!("%tr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val).ok();
+                tr
+            }
+            "i32" => {
+                let tr = format!("%tri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val).ok();
+                tr
+            }
+            "float" => self.native_float_or_box(out, indent, val),
+            "double" => {
+                let fl = format!("%nffl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = bitcast i64 {} to double", indent, fl, val).ok();
+                fl
+            }
+            s if s == "i8*" || s == "ptr" => {
+                let fp = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, fp, val).ok();
+                fp
+            }
+            _ => val.to_string(),
+        }
+    }
     /// Store a native-typed value to the i64 result slot, boxing if needed.
     fn store_i64_result(&mut self, out: &mut String, indent: &str, r: &TypedRegister, rs: &str) {
         let adapted = self.adapt_to_i64(out, indent, r);
@@ -485,20 +516,8 @@ impl LlvmBackend {
                                 let ty = self.ctx.field_types[idx].clone();
                                 let p = format!("%ap{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                                 writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, self.fun.state_reg_name, idx).ok();
-                                match ty.as_str() {
-                                    "i8" => {
-                                        let tr = format!("%tr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                        writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, elem).ok();
-                                        writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, tr, p, self.align_of(&ty)).ok();
-                                    }
-                                    "float" => {
-                                        let fl = self.native_float_or_box(out, indent, &elem.to_string());
-                                        writeln!(out, "{}store float {}, float* {}, align {}", indent, fl, p, self.align_of(&ty)).ok();
-                                    }
-                                    _ => {
-                                        writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, elem, ty, p, self.align_of(&ty)).ok();
-                                    }
-                                }
+                                let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &elem.to_string());
+                                writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, tv, ty, p, self.align_of(&ty)).ok();
                             } else if let Some(slot) = self.fun.param_slots.get(name) {
                                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, elem, slot).ok();
                                 self.fun.let_bindings.insert(name.clone(), elem.clone());
@@ -589,56 +608,27 @@ impl LlvmBackend {
                     let vol_str = if is_volatile { " volatile" } else { "" };
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
                     let tn = crate::backend::llvm::tbaa_node(&ty);
-                    match ty.as_str() {
-                        "i8" => {
-                            let tr = format!("%tr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, val_boxed).ok();
-                            writeln!(out, "{}store{} i8 {}, i8* {}, align {}, !tbaa !{}", indent, vol_str, tr, p, self.align_of(&ty), tn).ok();
-                        }
-                        "i32" => {
-                            let tr = format!("%tri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val_boxed).ok();
-                            writeln!(out, "{}store{} i32 {}, i32* {}, align {}, !tbaa !{}", indent, vol_str, tr, p, self.align_of(&ty), tn).ok();
-                        }
-                        "float" => {
-                            let fl = self.native_float_or_box(out, indent, &val.to_string());
-                            writeln!(out, "{}store{} float {}, float* {}, align {}, !tbaa !{}", indent, vol_str, fl, p, self.align_of(&ty), tn).ok();
-                            // 2026-06-27: Update ssa_old_float_regs so subsequent
-                            // body reads see the stored float value.
-                            self.fun.ssa_old_float_regs.insert(fname.clone(), fl);
-                        }
-                        "double" => {
-                            // 2026-06-29: Float64 field store — bitcast i64 back to double
-                            let fl = format!("%nffl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, fl, val_boxed).ok();
-                            writeln!(out, "{}store{} double {}, double* {}, align {}, !tbaa !{}", indent, vol_str, fl, p, self.align_of(&ty), tn).ok();
-                            self.fun.ssa_old_float_regs.insert(fname.clone(), fl);
-                        }
-                        s if s == "i8*" || s == "ptr" => {
-                            let fp = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, fp, val_boxed).ok();
-                            writeln!(out, "{}store{} i8* {}, i8** {}, align {}, !tbaa !{}", indent, vol_str, fp, p, self.align_of(&ty), tn).ok();
-                        }
-                        _ => {
-                            writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty), tn).ok();
-                        }
+                    let typed_val = self.ensure_typed_value(out, indent, &ty.as_str(), &val_boxed);
+                    writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}", indent, vol_str, ty, typed_val, ty, p, self.align_of(&ty), tn).ok();
+                    // 2026-06-27: Update ssa_old_float_regs so subsequent
+                    // body reads see the stored float value.
+                    // (Precomputed float reg is returned by ensure_typed_value)
+                    let ty_str = ty.as_str();
+                    if ty_str == "float" || ty_str == "double" {
+                        self.fun.ssa_old_float_regs.insert(fname.clone(), typed_val);
                     }
-                    // 2026-06-26: Track the stored value for per-field phi
-                    // back-edge. When the canonical loop uses phi nodes for
-                    // state fields, the latch needs the updated register value
-                    // to feed back into the phi (instead of reloading from
-                    // %State, which would add a GEP+load round-trip).
+                    // 2026-06-26: Track the stored value for per-field phi back-edge.
+                    // When the canonical loop uses phi nodes for state fields, the latch
+                    // needs the updated register value to feed back into the phi (instead
+                    // of reloading from %State, which would add a GEP+load round-trip).
                     self.fun.pending_phi_backedge.insert(fname.clone(), val_boxed.clone());
-                    // 2026-06-27: Update ssa_old registers so subsequent body
-                    // reads (guards, let-bindings) see the stored value. In the
-                    // per-field phi path, ssa_old_int_regs starts with phi regs
-                    // (pre-tick values). Without this update, a guard after a
-                    // field write reads the pre-write value (ring_buffer bug).
-                    // Note: float and double cases update ssa_old_float_regs inside their
-                    // match arms above (fl is local to those arms).
-                    if ty != "float" && ty != "double" && ty != "i8*" && ty != "ptr" {
-                        self.fun.ssa_old_int_regs.insert(fname.clone(), val_boxed.clone());
-                    } else if ty == "i8*" || ty == "ptr" {
+                    // 2026-06-27: Update ssa_old_registers so subsequent body reads
+                    // (guards, let-bindings) see the stored value. In the per-field phi
+                    // path, ssa_old_int_regs starts with phi regs (pre-tick values).
+                    // Without this update, a guard after a field write reads the
+                    // pre-write value (ring_buffer bug). Float/double update
+                    // ssa_old_float_regs above instead.
+                    if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
                         self.fun.ssa_old_int_regs.insert(fname.clone(), val_boxed.clone());
                     }
                     // Phase 2: Invalidate ALL cache targets on field store

@@ -134,6 +134,8 @@ D
 - Write concise commit messages that state what and why (reference plan file if applicable)
 - Never amend commits — create new ones
 - The repo must always be in a state you can roll back to a working checkpoint
+- **The user explicitly requires auto-committing between checkpoints.** Do not ask
+  "shall I commit?" — just commit when a logical step is complete and tests pass.
 
 ### 6. Need-to-Know Dependency Injection
 
@@ -449,6 +451,15 @@ it. The more LLVM knows, the more aggressively it can optimize.
     requires removing `Copy` and adjusting comparison code.
 
 ## Commenting Mandate (Backend Updates)
+
+**Never delete rationale comments when refactoring.** When consolidating
+repeated code (match arms, type dispatch, etc.) into a shared helper, every
+rationale comment from the original sites must be preserved — they are the
+project's institutional memory. Rewrite them at the helper's definition or at
+each call site. If a comment no longer applies after refactoring, rewrite it
+to explain the new structure. Comments explaining why specific types are
+handled, what edge cases exist, and what bugs were fixed are precious —
+never delete them silently.
 
 **Every backend code change must include a comment explaining why it was made
 and what it fixes or enables.** The comment format is:
