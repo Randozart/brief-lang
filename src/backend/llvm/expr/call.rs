@@ -40,6 +40,10 @@ pub fn emit_call(
         }
     }
     // Clone foreign info upfront to avoid borrow conflict with emit_expr
+    // 2026-07-03: Check if this is an indirect call through a function pointer variable.
+    if let Some(tr) = try_fn_ptr_call(backend, out, v, name, args, indent) {
+        return tr;
+    }
     let frgn_sig: Option<(Vec<(String, Type)>, crate::ast::ResultType, bool, Option<crate::ast::Expr>, Vec<(String, Type)>)> =
         backend.ctx.frgn_map.get(name).map(|s| (s.inputs.clone(), s.result_type.clone(), s.is_pipe, s.fallback.clone(), s.success_output.clone()));
     if let Some((inputs, ret_type, is_pipe, fallback, success_output)) = frgn_sig {
@@ -260,4 +264,34 @@ pub fn emit_call(
             return TypedRegister { name: v.to_string(), ty: Type::Int };
         }
     }
+}
+
+// 2026-07-03: Try to emit an indirect call through a function pointer variable.
+// Returns Some if name is a local variable of fn-pointer type, None otherwise.
+fn try_fn_ptr_call(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    v: &str,
+    name: &str,
+    args: &[Expr],
+    indent: &str,
+) -> Option<TypedRegister> {
+    let var_ty = backend.fun.let_binding_types.get(name)?;
+    let Type::Applied(fn_name, inner) = var_ty else { return None; };
+    if fn_name != "Fn" || inner.len() != 2 {
+        return None;
+    }
+    let fn_reg = backend.fun.let_bindings.get(name)
+        .cloned()
+        .unwrap_or_else(|| "0".to_string());
+    let fn_ptr = format!("%ic_ptr{}", backend.fun.txn_counter);
+    backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, fn_ptr, fn_reg).ok();
+    let mut arg_strs: Vec<String> = Vec::new();
+    for arg in args {
+        let val = backend.emit_expr(out, arg, indent);
+        arg_strs.push(format!("i64 {}", val));
+    }
+    writeln!(out, "{}{} = call i64 {}({})", indent, v, fn_ptr, arg_strs.join(", ")).ok();
+    Some(TypedRegister { name: v.to_string(), ty: Type::Int })
 }

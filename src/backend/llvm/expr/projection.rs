@@ -16,6 +16,17 @@ pub fn emit_projection(
     target: &ProjectionTarget,
     indent: &str,
 ) -> TypedRegister {
+    // 2026-07-03: Ptr projection on a function reference emits ptrtoint @fn_name.
+    // Must come before try_emit_fn_projection (which handles Address/Name/etc.)
+    // because Ptr is not in the Fn* metadata set — it's a runtime pointer value.
+    if let ProjectionTarget::Ptr = target {
+        if let Expr::Identifier(fn_name) = source {
+            if backend.ctx.defn_params.contains_key(fn_name) || backend.ctx.defn_return_types.contains_key(fn_name) {
+                writeln!(out, "{}{} = ptrtoint @{} to i64", indent, v, fn_name).ok();
+                return TypedRegister { name: v.to_string(), ty: Type::Int };
+            }
+        }
+    }
     // Function metadata projections — source is a function name, not a runtime value.
     // 2026-06-30: Extracted from rest.rs to expr/projection.rs.
     if let Some(result) = backend.try_emit_fn_projection(out, source, target, indent) {
