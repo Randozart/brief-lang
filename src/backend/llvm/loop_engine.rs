@@ -1240,6 +1240,77 @@ impl LlvmBackend {
         true
     }
 
+    /// 2026-07-03: Emit per-field phi setup and loop header for a canonical
+    /// single-txn loop.  Called from emit_ssa_main when has_canonical_loop
+    /// is true.  Loads the bound, preallocates buffers, sets up per-field
+    /// phi nodes, and emits the phdr block with exit check.
+    fn emit_ssa_canonical_loop_setup(
+        &mut self,
+        out: &mut String,
+        txn: &crate::ast::Transaction,
+        bound_name: &str,
+        b_idx: usize,
+        cname: &str,
+    ) {
+        let b_gep = format!("%gep_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, b_idx).ok();
+        let b_val = format!("%val_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
+        let is_static_bound_val = bound_name.parse::<i64>().is_ok();
+        self.fun.is_static_bound = is_static_bound_val;
+        let bound_imm = if is_static_bound_val { bound_name.to_string() } else { b_val.clone() };
+        let bound_reg = if is_static_bound_val {
+            let br = format!("%bound_reg_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = add i64 0, {}", br, bound_name).ok(); br
+        } else { b_val.clone() };
+        self.emit_prealloc_for_body(out, "  ", &txn.body, &bound_reg);
+        let init_blk = format!("loop_init_{}", self.fun.txn_counter);
+        writeln!(out, "  br label %{}", init_blk).ok();
+        writeln!(out, "  {}:", init_blk).ok();
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        let mut init_regs: HashMap<String, String> = HashMap::new();
+        for (name, &field_idx) in &self.ctx.field_index_map {
+            if name == bound_name { continue; }
+            let ty = &self.ctx.field_types[field_idx];
+            let gep_init = format!("%gep_init_{}", self.fun.txn_counter);
+            let init_load = format!("%init_field_{}", self.fun.txn_counter);
+            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gep_init, field_idx).ok();
+            writeln!(out, "  {} = load {}, {}* {}, align {}", init_load, ty, ty, gep_init, self.align_of(ty)).ok();
+            init_regs.insert(name.clone(), init_load);
+            let phi_reg = format!("%phi_{}", name);
+            let be_reg = format!("%be_{}", name);
+            self.fun.phi_field_regs.insert(name.clone(), phi_reg);
+            self.fun.backedge_field_regs.insert(name.clone(), be_reg);
+            self.fun.txn_counter += 1;
+        }
+        let pi_name = format!("%pi_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  br label %phdr").ok();
+        writeln!(out, "  phdr:").ok();
+        let pn_name = format!("%pn_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = phi i64 [ 0, %{} ], [ {}, %platch ]", pi_name, init_blk, pn_name).ok();
+        for (name, phi_reg) in &self.fun.phi_field_regs {
+            let init_reg = &init_regs[name];
+            let be_reg = &self.fun.backedge_field_regs[name];
+            let Some(&field_idx) = self.ctx.field_index_map.get(name) else { continue; };
+            let ty = &self.ctx.field_types[field_idx];
+            writeln!(out, "  {} = phi {} [ {}, %{} ], [ {}, %platch ]",
+                phi_reg, ty, init_reg, init_blk, be_reg).ok();
+        }
+        let pc_name = format!("%pc_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        if self.fun.is_static_bound {
+            let pn_name_hdr = format!("%pn_hdr_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = add i64 {}, 1", pn_name_hdr, pi_name).ok();
+            writeln!(out, "  {} = icmp slt i64 {}, {}", pc_name, pn_name_hdr, bound_imm).ok();
+        } else {
+            writeln!(out, "  {} = icmp slt i64 {}, {}", pc_name, pi_name, bound_imm).ok();
+        }
+        writeln!(out, "  br i1 {}, label %ptick, label %pdoneloop", pc_name).ok();
+        writeln!(out, "  ptick:").ok();
+        emit_cycle_count_increment(self, out);
+        self.fun.phi_induction_reg = Some((cname.to_string(), pi_name.clone(), pn_name.clone()));
+    }
+
     pub(crate) fn emit_ssa_main(
         &mut self,
         out: &mut String,
@@ -1291,125 +1362,25 @@ impl LlvmBackend {
         };
         if has_canonical_loop {
             let txn = &txns[0].1;
-            let counter_name = {
-                let pre = &txn.contract.pre_condition;
-                let lhs = match pre {
-                    Expr::Lt(l, _) => l.as_ref(),
-                    Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => bop.left.as_ref(),
-                    _ => return,
-                };
-                if let Expr::Identifier(name) = lhs { Some(name.clone()) } else { None }
+            let pre = &txn.contract.pre_condition;
+            let lhs = match pre {
+                Expr::Lt(l, _) => l.as_ref(),
+                Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => bop.left.as_ref(),
+                _ => return,
             };
-            if let Some(ref cname) = counter_name {
-                let bound_name = {
-                    let pre = &txn.contract.pre_condition;
-                    let rhs = match pre {
-                        Expr::Lt(_, r) => r.as_ref(),
-                        Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => bop.right.as_ref(),
-                        _ => return,
-                    };
-                    match rhs {
-                        Expr::Identifier(name) => Some(name.clone()),
-                        Expr::Integer(n) => Some(n.to_string()),
-                        _ => None,
-                    }
-                };
-                // Load bound once before loop
-                if let Some(ref bname) = bound_name {
-                    if let Some(&b_idx) = self.ctx.field_index_map.get(bname) {
-                        let b_gep = format!("%gep_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, b_idx).ok();
-                        let b_val = format!("%val_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
-                        // Check if bound is compile-time or runtime
-                        let is_static_bound_val = bname.parse::<i64>().is_ok();
-                        self.fun.is_static_bound = is_static_bound_val;
-                        let bound_imm = if is_static_bound_val { bname.clone() } else { b_val.clone() };
-                        // Phase 2: preallocate collection buffers using the loop bound.
-                        // The bound is either a literal (already a string like "100")
-                        // or a loaded register (b_val). For the literal case we need
-                        // a register; for the register case we pass it directly.
-                        let bound_reg = if bname.parse::<i64>().is_ok() {
-                            let br = format!("%bound_reg_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "  {} = add i64 0, {}", br, bname).ok();
-                            br
-                        } else {
-                            b_val.clone()
-                        };
-                        self.emit_prealloc_for_body(out, "  ", &txn.body, &bound_reg);
-                        // 2026-06-26: Emit a named block before the per-field
-                        // init loads so we have a stable predecessor label for
-                        // the phi nodes at phdr. The `br label` terminates the
-                        // preceding init block (genv_af32 / etc.) which has no
-                        // native terminator.
-                        let init_blk = format!("loop_init_{}", self.fun.txn_counter);
-                        writeln!(out, "  br label %{}", init_blk).ok();
-                        writeln!(out, "  {}:", init_blk).ok();
-                        // Per-field phi nodes for ALL scalar state fields so
-                        // values flow through SSA registers, not GEP+load/store
-                        // round-trips. Load initial values from %State in this
-                        // block, then phi at phdr.
-                        self.fun.phi_field_regs.clear();
-                        self.fun.backedge_field_regs.clear();
-                        let mut init_regs: HashMap<String, String> = HashMap::new();
-                        for (name, &idx) in &self.ctx.field_index_map {
-                            if let Some(ref bname) = bound_name {
-                                if name == bname || *name == *bname { continue; }
-                            }
-                            let ty = &self.ctx.field_types[idx];
-                            let gep_init = format!("%gep_init_{}", self.fun.txn_counter);
-                            let init_load = format!("%init_field_{}", self.fun.txn_counter);
-                            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                                gep_init, idx).ok();
-                            writeln!(out, "  {} = load {}, {}* {}, align {}",
-                                init_load, ty, ty, gep_init, self.align_of(ty)).ok();
-                            init_regs.insert(name.clone(), init_load);
-                            let phi_reg = format!("%phi_{}", name);
-                            let be_reg = format!("%be_{}", name);
-                            self.fun.phi_field_regs.insert(name.clone(), phi_reg);
-                            self.fun.backedge_field_regs.insert(name.clone(), be_reg);
-                            self.fun.txn_counter += 1;
-                        }
-                        let pi_name = format!("%pi_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "  br label %phdr").ok();
-                        writeln!(out, "  phdr:").ok();
-                        let pn_name = format!("%pn_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "  {} = phi i64 [ 0, %{} ], [ {}, %platch ]", pi_name, init_blk, pn_name).ok();
-                        // 2026-06-26: Per-field phis for all scalar state fields.
-                        // Each phi selects between the init-block initial load
-                        // and the latch back-edge value (reloaded from %State for
-                        // modified fields, identity for unchanged).
-                        for (name, phi_reg) in &self.fun.phi_field_regs {
-                            let init_reg = &init_regs[name];
-                            let be_reg = &self.fun.backedge_field_regs[name];
-                            let ty = &self.ctx.field_types[*self.ctx.field_index_map.get(name).unwrap()];
-                            writeln!(out, "  {} = phi {} [ {}, %{} ], [ {}, %platch ]",
-                                phi_reg, ty, init_reg, init_blk, be_reg).ok();
-                        }
-                        // 2026-07-01: Counting-down loop optimization.
-                        // For static (compile-time known) bounds, emit the
-                        // increment before the comparison and compare the
-                        // post-inc value. This lets LLVM emit `add + jne`
-                        // instead of `cmp + add + jl` — saving 1 instruction
-                        // per iteration (~5-7% for tight loops).
-                        // For dynamic (runtime) bounds, keep pre-inc comparison
-                        // since the bound may change between iterations.
-                        let pc_name = format!("%pc_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        if self.fun.is_static_bound {
-                            let pn_name_hdr = format!("%pn_hdr_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "  {} = add i64 {}, 1", pn_name_hdr, pi_name).ok();
-                            writeln!(out, "  {} = icmp slt i64 {}, {}", pc_name, pn_name_hdr, bound_imm).ok();
-                        } else {
-                            writeln!(out, "  {} = icmp slt i64 {}, {}", pc_name, pi_name, bound_imm).ok();
-                        }
-                        writeln!(out, "  br i1 {}, label %ptick, label %pdoneloop", pc_name).ok();
-                        writeln!(out, "  ptick:").ok();
-                        emit_cycle_count_increment(self, out);
-                        // The old tick label is skipped — we use ptick instead
-                        self.fun.phi_induction_reg = Some((cname.clone(), pi_name.clone(), pn_name.clone()));
-                    }
-                }
-            }
+            let Some(ref cname) = (if let Expr::Identifier(name) = lhs { Some(name.clone()) } else { None }) else { return; };
+            let rhs = match pre {
+                Expr::Lt(_, r) => r.as_ref(),
+                Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => bop.right.as_ref(),
+                _ => return,
+            };
+            let bound_name = match rhs {
+                Expr::Identifier(name) => name.clone(),
+                Expr::Integer(n) => n.to_string(),
+                _ => return,
+            };
+            let Some(&b_idx) = self.ctx.field_index_map.get(&bound_name) else { return; };
+            self.emit_ssa_canonical_loop_setup(out, txn, &bound_name, b_idx, cname);
         }
         // 2026-06-27: Use phi_induction_reg.is_none() instead of
         // !has_canonical_loop because has_canonical_loop can be true while
