@@ -2109,7 +2109,22 @@ self.emit_declares(&mut out);
                         } else { None }
                     } else { None };
                     if total_idx.is_some() || total_const_name.is_some() {
-                        if node.is_pure_body || node.is_effectively_pure {
+                        // 2026-07-03: Swan song check prevents pure counter fold
+                        // precompute_sum's term! -> print_int# was invisible to purity
+                        // analysis because transition_graph.rs strips terminating guards
+                        // before checking is_pure_body. If a swan song exists, treat as
+                        // non-pure and use the proper path (hoist_terminating_guard +
+                        // emit_hoisted_post_loop_prints) which handles it correctly.
+                        let has_swan_song = txns[0].1.body.iter().any(|s| {
+                            match s {
+                                Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => swan_song.is_some(),
+                                Statement::Guarded { statements, .. } => {
+                                    statements.iter().any(|gs| matches!(gs, Statement::TermBang { swan_song, .. } if swan_song.is_some()))
+                                }
+                                _ => false,
+                            }
+                        });
+                        if !has_swan_song && (node.is_pure_body || node.is_effectively_pure) {
                             let total_val = self.ctx.field_initializers
                                 .get(&bp.bound_var)
                                 .and_then(|e| e.as_ref())
