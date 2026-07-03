@@ -1095,6 +1095,51 @@ Brief compiled with `opt -O3 -ffast-math -mtriple=x86_64-pc-linux-gnu; llc -O3 -
 | **Fannkuch loads/stores** | 1 (stderr) | 36 loads + 38 stores | ~74× |
 | **Fannkuch phi nodes** | 29 | 0 | 29× |
 
+### 2026-07-03: "value that could not be identified as reduction" blocks vectorization
+
+After the opaque pointer migration and per-field phi loop, SROA is no longer
+blocked. The vectorizer now evaluates the loop body and reports:
+
+```
+loop not vectorized: value that could not be identified as reduction is used outside the loop
+```
+
+**Root cause**: The per-field phi registers (`%phi_bx0`, `%phi_vx0`, etc.) are
+defined at `loop_hdr` which dominates `done:`. Even though no instruction in
+`done:` directly uses these phi registers (the hoisted guard body reads from
+fresh %State GEP+loads), LLVM's vectorizer conservatively assumes they might
+be used after the loop. It can't prove that the phis are dead after `done:`.
+
+**Why C doesn't have this problem**: Clang's IR for the same loop has each
+array element as a standalone SSA value that truly IS a reduction. The C code
+`for (int i = 0; i < N; i++) { sum += a[i]; }` has `sum` as a phi that is
+only used after the loop — LLVM recognizes it as a reduction and vectorizes
+around it. Brief's per-field phis are NOT reductions (each field is
+independently computed, not accumulated).
+
+**Effect**: `opt -O3 -ffast-math -Rpass=loop-vectorize` produces 0
+vectorized loops for nbody benchmarks. Brief emits scalar `fadd`/`fmul`/`sqrt`
+only. C emits `<4 x float>` vector ops with `vector.reduce.fadd`.
+
+**Status**: This is the last remaining vectorization blocker. Previous blockers
+have been resolved:
+- ✅ %slot_case alloca round-trip → per-field phi loop
+- ✅ Terminating guard in loop body → hoisted to post-loop block
+- ✅ Mixed typed/opaque pointers confusing SROA → all-opaque migration
+- ❌ Phi registers "used outside" → no fix yet
+
+**Possible approaches**:
+1. Make the per-field phis not dominate `done:` — restructure the loop so
+   `done:` is in a different dominance frontier. This is architecturally
+   complex (natural loops always have the header dominating the exit).
+2. Teach the vectorizer that phi values in `done:` are dead — insert
+   `llvm.assume` or use metadata to mark them as unused. Fragile.
+3. Store final phi values back to %State before `done:` and load from
+   %State in `done:` — undoes the SROA benefit from Phase 0.
+4. Accept scalar code generation and focus optimization elsewhere.
+   nbody_sqrt is at 1.23× of C even without vectorization — competitive
+   for a safe language with no manual optimization.
+
 ### Root Cause
 
 Clang keeps ALL state in **SSA phi nodes** across the loop back-edge. Zero memory traffic
