@@ -1,78 +1,40 @@
 // ── Loop emission architecture overview ──────────────────────────────────
 //
-// There are three main loop emission strategies, chosen by the frontend
-// based on the program's structure (see optimizer.rs classification):
+// There are four loop emission strategies, chosen by the frontend:
 //
-// 1. FOLDED LOOP (emit_folded_loop + emit_folded_main):
-//    For single-txn programs where the body is pure (no branches, no
-//    reactive triggers). The counter is either a phi node (use_phi=true,
-//    A005a — pure counter-only) or has the body emitted inline with
-//    struct-SSA (use_phi=false, A005b — body with provably linear guards).
+// 1. PURE COUNTER FOLD (emit_folded_pure_counter):
+//    For pure bodies with a compile-time constant bound. O(1) — single
+//    store instruction. No runtime loop emitted.
 //
-// 2. MEMORY LOOP (emit_folded_memory_main, A005b):
-//    For bodies with branching control flow (Guarded statements) where
-//    linearity cannot be proven. Uses per-field GEP loads/stores instead
-//    of the %State insertvalue chain to avoid phi %State dominance issues.
+// 2. PURE COUNTER PHI (emit_folded_loop, use_phi=true):
+//    For pure bodies with a runtime-variable bound. Counter-only phi
+//    node, no body emission (body was precomputed).
 //
-// 3. SSA REGISTER PIPELINE (emit_ssa_main):
-//    For multi-txn reactive programs (rct txn). Precondition checked per-
-//    iteration; body runs inline with per-field GEP loads/stores. Supports
-//    canonical loop detection for phi induction variable optimization.
+// 3. PER-FIELD PHI LOOP (emit_countable_main, A005c):
+//    For all non-pure foldable single-txn programs. Creates per-field
+//    phi nodes at the loop header, with GEP loads/stores for field
+//    access. The latch reloads modified fields from %State; GVN
+//    eliminates redundant load-via-store round trips. This replaces
+//    the old A005a (inline SSA with %slot_case alloca) and A005b
+//    (memory-based counter) paths entirely.
 //
-// Why three separate strategies instead of one:
-//   - Each eliminates a different category of LLVM IR bloat.
-//   - The folded phi loop (A005a) is O(1) — single store, no iteration.
-//   - The memory path (A005b) avoids phi %State dominance failures.
-//   - The SSA pipeline handles reactive trigger sampling inline.
+// 4. SSA REGISTER PIPELINE (emit_ssa_main):
+//    For multi-txn reactive programs (rct txn). Precondition checked
+//    per-iteration; body runs inline with per-field GEP loads/stores.
+//    Supports canonical loop detection for phi induction variable
+//    optimization.
+//
+// Why per-field phis as default: LLVM needs a canonical loop structure
+// (phi + icmp slt + add) to apply induction variable analysis, SROA,
+// and loop vectorization. The per-field phi loop provides this, while
+// the old A005a path used a %State alloca round-trip and A005b kept
+// the counter in memory — both hiding the loop structure from LLVM.
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{float_to_llvm_hex, find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
 use crate::analysis::dependency_graph::DependencyGraph;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt::Write;
-
-/// 2026-07-03: Check if a statement recursively references FFI functions.
-/// Used by is_countable_txn to detect side-effecting guards.
-fn has_ffi_reference(s: &Statement) -> bool {
-    match s {
-        Statement::Expression(e) | Statement::Assignment { expr: e, .. } => {
-            expr_has_ffi(e)
-        }
-        Statement::Let { expr, .. } => {
-            if let Some(e) = expr { expr_has_ffi(e) } else { false }
-        }
-        Statement::Guarded { condition, statements, .. } => {
-            expr_has_ffi(condition) || statements.iter().any(|s| has_ffi_reference(s))
-        }
-        Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => {
-            swan_song.as_ref().map_or(false, |sw| has_ffi_reference(sw))
-        }
-        _ => false,
-    }
-}
-
-/// Recursively check if an expression references FFI functions.
-fn expr_has_ffi(e: &Expr) -> bool {
-    match e {
-        Expr::Call(name, args) => {
-            name.starts_with("__") || name.contains('#') || args.iter().any(|a| expr_has_ffi(a))
-        }
-        Expr::IntrinsicCall { args, .. } => args.iter().any(|a| expr_has_ffi(a)),
-        Expr::Block(_, last) => expr_has_ffi(last),
-        Expr::BinaryOp(b) => expr_has_ffi(&b.left) || expr_has_ffi(&b.right),
-        Expr::UnaryOp(u) => expr_has_ffi(&u.operand),
-        // Old-style binary ops
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
-        | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
-        | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r)
-        | Expr::Or(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-        | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) | Expr::Like(l, r) => {
-            expr_has_ffi(l) || expr_has_ffi(r)
-        }
-        Expr::Neg(e) | Expr::Not(e) | Expr::BitNot(e) => expr_has_ffi(e),
-        _ => false,
-    }
-}
 
 impl LlvmBackend {
     /// Recursively evaluate a boolean expression for the exit condition check.
@@ -972,52 +934,6 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
-    /// 2026-07-03: Check if a transaction is eligible for the per-field phi
-    /// loop (A005c — countable loop). A countable txn has:
-    ///   - Single counter with increasing increment
-    ///   - Bounded precondition of the form `counter < bound`
-    ///   - No non-terminating side-effecting guards in the body
-    ///   - No reactive triggers
-    /// Returns true if the body can be emitted as a countable phi loop.
-    /// Standalone function (not inside impl LlvmBackend) so it can be called
-    /// from mod.rs without visibility conflicts.
-    pub(crate) fn is_countable_txn(
-        bounded_pre: &crate::analysis::transition_graph::BoundedPre,
-        increments: &crate::analysis::transition_graph::IncrementInfo,
-        body: &[Statement],
-    ) -> bool {
-        // Must be single-counter-increasing
-        if bounded_pre.var != increments.var || increments.delta <= 0 {
-            return false;
-        }
-        // Body must not have non-terminating side-effecting guards.
-        // A terminating guard (term! with swan song) is fine — the swan
-        // song is hoisted to the post-loop block. A non-terminating guard
-        // with FFI calls (e.g. periodic print) prevents vectorization.
-        for stmt in body {
-            match stmt {
-                Statement::Guarded { statements, .. } => {
-                    let has_term = statements.iter().any(|s| {
-                        matches!(s, Statement::TermBang { .. })
-                    });
-                    if !has_term {
-                        // Non-terminating guard: check for FFI references
-                        for s in statements {
-                            if has_ffi_reference(s) {
-                                return false;
-                            }
-                        }
-                    }
-                }
-                Statement::Escape(_) | Statement::SyncBlock { .. } => {
-                    return false; // Non-linear control flow
-                }
-                _ => {}
-            }
-        }
-        true
-    }
-
     /// 2026-07-03: Emit a main() with per-field phi nodes (A005c — countable
     /// loop). Creates one phi per state field at the loop header so LLVM sees
     /// canonical induction variables and can vectorize the body.
@@ -1069,6 +985,13 @@ impl LlvmBackend {
             writeln!(out, "  {} = add i64 0, 0", bound_reg).ok();
         }
         self.emit_prealloc_for_body(out, "  ", body, &bound_reg);
+        // 2026-07-03: Use pre_phi block as the sole entry predecessor for
+        // loop_hdr. init-time intrinsics (getenv, etc.) may generate additional
+        // basic blocks; if they all flow through pre_phi, the phi nodes at
+        // loop_hdr have exactly two predecessors regardless of how many blocks
+        // the init code generates (pre_phi on the entry side, latch on backedge).
+        writeln!(out, "  br label %pre_phi").ok();
+        writeln!(out, "pre_phi:").ok();
         // ── Initial field loads + phi/backedge register setup ────────
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
@@ -1110,17 +1033,17 @@ impl LlvmBackend {
         writeln!(out, "  br label %loop_hdr").ok();
         // ── Loop header: phi nodes + exit check ──────────────────────
         writeln!(out, "loop_hdr:").ok();
-        writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %latch ]", pi_name, init_count, pn_name).ok();
+        writeln!(out, "  {} = phi i64 [ {}, %pre_phi ], [ {}, %latch ]", pi_name, init_count, pn_name).ok();
         for (name, phi_reg) in &self.fun.phi_field_regs {
             if *name == counter_name { continue; } // counter done above
             let init_reg = &init_regs[name];
             let be_reg = &self.fun.backedge_field_regs[name];
             let ty = &self.ctx.field_types[*self.ctx.field_index_map.get(name).unwrap()];
-            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %latch ]", phi_reg, ty, init_reg, be_reg).ok();
+            writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", phi_reg, ty, init_reg, be_reg).ok();
         }
         // Counter phi (stored as field for emit_stmt compatibility)
         let ty_counter = &self.ctx.field_types[counter_idx];
-        writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %latch ]", count_phi_reg, ty_counter, init_count, count_be_reg).ok();
+        writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", count_phi_reg, ty_counter, init_count, count_be_reg).ok();
         // Exit check
         let cmp_reg = format!("%cmp_hdr_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
@@ -1191,8 +1114,9 @@ impl LlvmBackend {
                 writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg).ok();
             }
         }
-        // Counter backedge: phi increment is the backedge value
-        writeln!(out, "  {} = add i64 0, {}", count_be_reg, pi_name).ok();
+        // Counter backedge: use the incremented phi value so the field phi
+        // for count matches the induction variable after every iteration.
+        writeln!(out, "  {} = add i64 0, {}", count_be_reg, pn_name).ok();
         super::emit_loop_metadata(out, "  ", "loop_hdr", &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
         // ── Done: emit post-loop prints + exit ──────────────────────
         writeln!(out, "done:").ok();

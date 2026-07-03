@@ -2109,12 +2109,9 @@ self.emit_declares(&mut out);
                         } else { None }
                     } else { None };
                     if total_idx.is_some() || total_const_name.is_some() {
-                        // 2026-07-03: Swan song check prevents pure counter fold
-                        // precompute_sum's term! -> print_int# was invisible to purity
-                        // analysis because transition_graph.rs strips terminating guards
-                        // before checking is_pure_body. If a swan song exists, treat as
-                        // non-pure and use the proper path (hoist_terminating_guard +
-                        // emit_hoisted_post_loop_prints) which handles it correctly.
+                        // 2026-07-03: Swan song check — terminating guards with FFI
+                        // (e.g. term! -> print_int#) are hoisted by hoist_terminating_guard.
+                        // If a swan song exists, the body is treated as non-pure.
                         let has_swan_song = txns[0].1.body.iter().any(|s| {
                             match s {
                                 Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => swan_song.is_some(),
@@ -2126,6 +2123,27 @@ self.emit_declares(&mut out);
                         });
                         let raw_body = &txns[0].1.body;
                         let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.ctx.field_index_map);
+                        // ── Dispatch: pure counter vs per-field phi loop ───────
+                        //
+                        // For bodies proven pure (or effectively pure), the compiler
+                        // can emit an O(1) counter-only fold or a runtime phi pipeline.
+                        // For ALL other bodies, emit a per-field phi loop (A005c).
+                        //
+                        // Why per-field phis instead of the old A005a/A005b paths:
+                        //   A005a (inline SSA) used a %slot_case alloca round-trip:
+                        //     load %State → extractvalue×N → insertvalue×N → store
+                        //     — 33-field struct load/store per iteration hid fields
+                        //       from LLVM's induction variable analysis.
+                        //   A005b (memory) kept the counter in %State via GEP+load+store:
+                        //     — 3 extra memory uops per tick for the counter alone.
+                        //
+                        //   A005c creates per-field phi nodes at the loop header
+                        //   so LLVM sees a canonical loop structure (phi + icmp slt
+                        //   + add) that enables induction variable analysis, SROA,
+                        //   and loop vectorization. Guard branches in the body are
+                        //   handled naturally: every path stores to the same GEP
+                        //   addresses, and the latch reloads from them (GVN eliminates
+                        //   the redundant load-via-store round trip).
                         if !has_swan_song && (node.is_pure_body || node.is_effectively_pure) {
                             let total_val = self.ctx.field_initializers
                                 .get(&bp.bound_var)
@@ -2139,37 +2157,28 @@ self.emit_declares(&mut out);
                                     })
                                 });
                             if let Some(tv) = total_val {
-                                // A005: pure counter fold (O(1))
+                                // A005: pure counter fold (O(1) — single store, no loop)
                                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
                                 self.emit_folded_pure_counter(&mut out, counter_idx, tv);
                                 true
                             } else {
-                                // A005: folded SSA (phi pipeline, runtime bound)
+                                // A005: pure body with runtime-variable bound — phi pipeline
+                                // (counter-only phi, no body emission needed — body was precomputed)
                                 self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (runtime-variable bound)", node.name));
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, true, None);
                                 true
                             }
-                        } else if LlvmBackend::is_countable_txn(bp, inc, &body_stmts) {
-                            // 2026-07-03: Countable loop (A005c) — per-field phi nodes.
-                            // Replaces %slot_case round-trip with per-field phis so LLVM
-                            // can recognize the loop as countable and apply vectorization.
-                            self.fun.pending_post_hoist = post_hoist;
-                            self.warnings.push(format!("info: txn '{}' dispatched via countable loop (A005c, per-field phis)", &node.name));
-                            self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
-                            true
                         } else {
+                            // A005c: per-field phi loop for all non-pure foldable txns.
+                            // Replaces the old A005a (inline SSA, %slot_case alloca) and
+                            // A005b (memory-based counter, GEP+load+add+store). Emits one
+                            // phi per state field at the loop header. The latch reloads
+                            // modified field values from %State; GVN eliminates the
+                            // redundant load-via-store round trip since the GEP addresses
+                            // match. Unmodified fields use identity (phi value itself).
                             self.fun.pending_post_hoist = post_hoist;
-                            let has_guards = body_stmts.iter().any(|s| matches!(s, crate::ast::Statement::Guarded { .. } | crate::ast::Statement::Escape(_) | crate::ast::Statement::SyncBlock { .. }));
-                            if has_guards && !crate::proof_engine::prove_linear(&body_stmts) {
-                                // A005b: non-linear body with branching guards → memory path (no phi)
-                                self.warnings.push(format!("info: txn '{}' dispatched via folded (memory, no phi — not provably linear)", &node.name));
-                                self.emit_folded_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts);
-                            } else {
-                                // A005a: straight-line or provably linear body → SSA insertvalue path
-                                self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (inline, {})", &node.name,
-                                    if has_guards { "proven linear" } else { "straight-line" }));
-                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
-                            }
+                            self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c)", &node.name));
+                            self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
                             true
                         }
                     } else { false }
