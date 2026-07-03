@@ -1796,17 +1796,24 @@ impl LlvmBackend {
         }
         let a = self.emit_expr(out, &lhs, indent);
         let b = self.emit_expr(out, &rhs, indent);
+        let fl_op = match inner {
+            Expr::Add(_, _) => "fadd",
+            Expr::Sub(_, _) => "fsub",
+            Expr::Mul(_, _) => "fmul",
+            Expr::Div(_, _) => "fdiv",
+            _ => return None,
+        };
+        let i_op = match inner {
+            Expr::Add(_, _) => "add",
+            Expr::Sub(_, _) => "sub",
+            Expr::Mul(_, _) => "mul",
+            Expr::Div(_, _) => "sdiv",
+            _ => return None,
+        };
         match cast_ty {
             crate::ast::Type::Float | crate::ast::Type::Float64 => {
                 let fl_a = self.ensure_float_reg(out, indent, &a);
                 let fl_b = self.ensure_float_reg(out, indent, &b);
-                let fl_op = match inner {
-                    Expr::Add(_, _) => "fadd",
-                    Expr::Sub(_, _) => "fsub",
-                    Expr::Mul(_, _) => "fmul",
-                    Expr::Div(_, _) => "fdiv",
-                    _ => return None,
-                };
                 writeln!(out, "{}{} = {} float {}, {}", indent, v, fl_op, fl_a, fl_b).ok();
                 let bi = format!("%eor_bi{}", self.fun.txn_counter);
                 self.fun.txn_counter += 1;
@@ -1815,17 +1822,10 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
                 self.fun.reg_float_cache.insert(ze.clone(), v.to_string());
                 let ret_ty = if cast_ty == Type::Float64 { Type::Float64 } else { Type::Float };
-                return Some(TypedRegister { name: ze, ty: ret_ty });
+                Some(TypedRegister { name: ze, ty: ret_ty })
             }
             _ => {
-                let op = match inner {
-                    Expr::Add(_, _) => "add",
-                    Expr::Sub(_, _) => "sub",
-                    Expr::Mul(_, _) => "mul",
-                    Expr::Div(_, _) => "sdiv",
-                    _ => return None,
-                };
-                writeln!(out, "{}{} = {} i64 {}, {}", indent, v, op, a, b).ok();
+                writeln!(out, "{}{} = {} i64 {}, {}", indent, v, i_op, a, b).ok();
                 Some(TypedRegister { name: v.to_string(), ty: Type::Int })
             }
         }
