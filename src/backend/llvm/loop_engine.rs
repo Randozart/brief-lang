@@ -1311,6 +1311,146 @@ impl LlvmBackend {
         self.fun.phi_induction_reg = Some((cname.to_string(), pi_name.clone(), pn_name.clone()));
     }
 
+    /// 2026-07-03: Emit body for a canonical phi-loop txn.
+    /// The phi induction variable already guarantees the precondition,
+    /// so no precondition check is emitted.  Body reads from phi registers.
+    fn emit_ssa_txn_canonical_body(
+        &mut self,
+        out: &mut String,
+        body_stmts: &[&Statement],
+        post_hoist: &[Vec<Statement>],
+    ) {
+        self.fun.pending_phi_backedge.clear();
+        self.phi_regs_to_ssa_old();
+        if let Some((ref cname, ref pi_reg, _)) = self.fun.phi_induction_reg {
+            self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
+        }
+        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear();
+        self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.expr_dedup_cache.clear();
+        self.fun.terminated = false;
+        self.fun.returns_i64 = false;
+        self.fun.loop_exit_label = Some("pdoneloop".into());
+        for s in body_stmts { self.emit_stmt(out, s, "  "); }
+        self.fun.loop_exit_label = None;
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.fun.pending_post_hoist = post_hoist.to_vec();
+    }
+
+    /// 2026-07-03: Emit body for a txn with a precondition check.
+    /// Evaluates the precondition, branches to body or skip, emits body
+    /// with pre-loaded field values from the tick block.
+    fn emit_ssa_txn_with_precond(
+        &mut self,
+        out: &mut String,
+        pre: &Expr,
+        name: &str,
+        body_stmts: &[&Statement],
+        post_hoist: &[Vec<Statement>],
+    ) {
+        self.pre_load_all_fields(out, "%state");
+        self.fun.expr_dedup_cache.clear();
+        let saved_float_regs = self.fun.ssa_old_float_regs.clone();
+        let saved_int_regs = self.fun.ssa_old_int_regs.clone();
+        let cond = self.emit_expr(out, pre, "  ");
+        let i1 = if cond.ty == Type::Bool {
+            cond.name.clone()
+        } else {
+            let i1 = format!("%pi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
+            i1
+        };
+        let body_l = format!("b_{}", name);
+        let skip_l = format!("s_{}", name);
+        let done_l = format!("done_{}", name);
+        writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, done_l).ok();
+        writeln!(out, "  {}:", body_l).ok();
+        if self.fun.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
+        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear();
+        self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.expr_dedup_cache.clear();
+        self.fun.terminated = false;
+        self.fun.returns_i64 = false;
+        self.fun.ssa_old_float_regs = saved_float_regs;
+        self.fun.ssa_old_int_regs = saved_int_regs;
+        self.fun.loop_exit_label = Some("done".into());
+        for s in body_stmts { self.emit_stmt(out, s, "  "); }
+        self.fun.loop_exit_label = None;
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        writeln!(out, "  br label %{}", skip_l).ok();
+        writeln!(out, "  {}:", done_l).ok();
+        self.emit_hoisted_post_loop_prints(out, post_hoist);
+        if self.fun.phi_induction_reg.is_some() {
+            writeln!(out, "  br label %platch").ok();
+        } else {
+            writeln!(out, "  br label %{}", skip_l).ok();
+        }
+        writeln!(out, "  {}:", skip_l).ok();
+    }
+
+    /// 2026-07-03: Emit body for a txn with no precondition (Bool(true)).
+    /// Body reads from %State via pre_load_all_fields.
+    fn emit_ssa_txn_no_precond(
+        &mut self,
+        out: &mut String,
+        body_stmts: &[&Statement],
+        post_hoist: &[Vec<Statement>],
+    ) {
+        self.fun.let_bindings.clear(); self.fun.let_binding_types.clear();
+        self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+        self.fun.expr_dedup_cache.clear();
+        self.fun.terminated = false;
+        self.fun.returns_i64 = false;
+        self.pre_load_all_fields(out, "%state");
+        if let Some((ref cname, ref pi_reg, _)) = self.fun.phi_induction_reg {
+            self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
+        }
+        self.fun.loop_exit_label = Some("done".into());
+        if self.fun.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
+        for s in body_stmts { self.emit_stmt(out, s, "  "); }
+        self.fun.loop_exit_label = None;
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        self.emit_hoisted_post_loop_prints(out, post_hoist);
+    }
+
+    /// 2026-07-03: Preallocate collection buffers for multi-txn programs
+    /// by scanning reactive txn bodies for push targets and using the
+    /// first txn's bound (from its precondition) for allocation size.
+    fn emit_ssa_mt_prealloc(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
+        let mut all_push_targets: Vec<String> = Vec::new();
+        for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
+            crate::backend::llvm::collect_push_targets(&txn.body, &mut all_push_targets);
+        }
+        if all_push_targets.is_empty() { return; }
+        let Some((_, first_txn)) = txns.iter().find(|(_, t)| t.is_reactive) else { return; };
+        let rhs = match &first_txn.contract.pre_condition {
+            Expr::Lt(_, r) => Some(r.as_ref()),
+            Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => Some(bop.right.as_ref()),
+            _ => None,
+        };
+        let Some(rhs) = rhs else { return; };
+        let bound_reg = format!("%bound_mt{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        match rhs {
+            Expr::Integer(n) => {
+                writeln!(out, "  {} = add i64 0, {}", bound_reg, n).ok();
+                self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
+            }
+            Expr::Identifier(bname) => {
+                if let Some(&b_idx) = self.ctx.field_index_map.get(bname) {
+                    let b_gep = format!("%gep_bmt{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, b_idx).ok();
+                    writeln!(out, "  {} = load i64, i64* {}, align 8", bound_reg, b_gep).ok();
+                    self.fun.txn_counter += 1;
+                    self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn emit_ssa_main(
         &mut self,
         out: &mut String,
@@ -1392,39 +1532,7 @@ impl LlvmBackend {
             // Phase 2 preallocation for multi-txn SSA: scan all txn bodies
             // for push targets and preallocate if a bound is available from
             // any txn's contract (e.g., shared [count < N] across txns).
-            let mut all_push_targets: Vec<String> = Vec::new();
-            for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
-                crate::backend::llvm::collect_push_targets(&txn.body, &mut all_push_targets);
-            }
-            if !all_push_targets.is_empty() {
-                // Try to extract bound from the first txn's precondition
-                if let Some((_, first_txn)) = txns.iter().find(|(_, t)| t.is_reactive) {
-                    let rhs = match &first_txn.contract.pre_condition {
-                        Expr::Lt(_, r) => Some(r.as_ref()),
-                        Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => Some(bop.right.as_ref()),
-                        _ => None,
-                    };
-                    if let Some(rhs) = rhs {
-                        let bound_reg = format!("%bound_mt{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        match rhs {
-                            Expr::Integer(n) => {
-                                writeln!(out, "  {} = add i64 0, {}", bound_reg, n).ok();
-                                self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
-                            }
-                            Expr::Identifier(bname) => {
-                                if let Some(&b_idx) = self.ctx.field_index_map.get(bname) {
-                                    let b_gep = format!("%gep_bmt{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                    writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, b_idx).ok();
-                                    writeln!(out, "  {} = load i64, i64* {}, align 8", bound_reg, b_gep).ok();
-                                    self.fun.txn_counter += 1;
-                                    self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-            }
+            self.emit_ssa_mt_prealloc(out, txns);
             writeln!(out, "  %any_fired = alloca i8, align 1").ok();
             writeln!(out, "  store i8 0, ptr %any_fired").ok();
             writeln!(out, "  br label %tick").ok();
@@ -1504,108 +1612,11 @@ impl LlvmBackend {
             };
             
             if self.fun.phi_induction_reg.is_some() {
-                // Canonical loop: phi induction variable already guarantees precondition.
-                // Skip precondition check — body runs unconditionally.
-                // 2026-06-26: Use per-field phi registers instead of
-                // pre_load_all_fields (GEP+load). The phi registers are defined
-                // at the phdr block and dominate the ptick body block. This
-                // eliminates a load+store round-trip per field per iteration.
-                // pending_phi_backedge is populated by emit_stmt when it
-                // processes &field = expr assignments.
-                self.fun.pending_phi_backedge.clear();
-                self.phi_regs_to_ssa_old();
-                if let Some((ref cname, ref pi_reg, _)) = self.fun.phi_induction_reg {
-                    self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
-                }
-                self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
-                // 2026-07-01: Clear expression dedup cache at body entry so each
-                // body emission gets a fresh scope. The cache persists across
-                // let-bindings within the body to catch cross-statement redundancy
-                // (e.g., dxe23*dxe23 appearing in multiple energy computations).
-                self.fun.expr_dedup_cache.clear();
-                self.fun.terminated = false;
-                self.fun.returns_i64 = false;
-                self.fun.loop_exit_label = Some("pdoneloop".into());
-                for s in body_stmts { self.emit_stmt(out, s, "  "); }
-                self.fun.loop_exit_label = None;
-                self.fun.ssa_old_float_regs.clear();
-                self.fun.ssa_old_int_regs.clear();
-                // Store post_hoist for emission after loop exit (in pdoneloop)
-                self.fun.pending_post_hoist = post_hoist.clone();
+                self.emit_ssa_txn_canonical_body(out, &body_stmts, &post_hoist);
             } else if !matches!(pre, Expr::Bool(true)) {
-                // 2026-06-26: pre_load_all_fields loads ALL state fields into
-                // ssa_old_float_regs / ssa_old_int_regs so the precondition
-                // check can reference them.  Save these registers and restore
-                // them in the body block instead of calling pre_load_all_fields
-                // again — the tick block dominates the body block, so the
-                // original SSA values are available without reloading.
-                self.pre_load_all_fields(out, "%state");
-                // 2026-07-01: Clear dedup cache so per-txn body emission starts
-                // with a fresh scope (registers from precondition evaluation and
-                // other txns are not cached across the dispatch chain).
-                self.fun.expr_dedup_cache.clear();
-                let saved_float_regs = self.fun.ssa_old_float_regs.clone();
-                let saved_int_regs = self.fun.ssa_old_int_regs.clone();
-                let cond = self.emit_expr(out, pre, "  ");
-                let i1 = if cond.ty == Type::Bool {
-                    cond.name.clone()
-                } else {
-                    let i1 = format!("%pi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                    writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
-                    i1
-                };
-                let body_l = format!("b_{}", name);
-                let skip_l = format!("s_{}", name);
-                let done_l = format!("done_{}", name);
-                writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, done_l).ok();
-                writeln!(out, "  {}:", body_l).ok();
-                // 2026-06-27: Only emit any_fired when no phi induction reg;
-                // canonical phi loop uses counter for exit, not any_fired.
-                if self.fun.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
-                self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
-                self.fun.expr_dedup_cache.clear();
-                self.fun.terminated = false;
-                self.fun.returns_i64 = false;
-                // 2026-06-26: Use the tick's pre-loaded registers instead of
-                // reloading — the tick block dominates b_body, so the original
-                // GEP+load SSA values are available without memory traffic.
-                self.fun.ssa_old_float_regs = saved_float_regs;
-                self.fun.ssa_old_int_regs = saved_int_regs;
-                self.fun.loop_exit_label = Some("done".into());
-                for s in body_stmts { self.emit_stmt(out, s, "  "); }
-                self.fun.loop_exit_label = None;
-                self.fun.ssa_old_float_regs.clear();
-                self.fun.ssa_old_int_regs.clear();
-                writeln!(out, "  br label %{}", skip_l).ok();
-                writeln!(out, "  {}:", done_l).ok();
-                // Post-loop: emit hoisted field-based prints, then chain to next txn
-                self.emit_hoisted_post_loop_prints(out, &post_hoist);
-                if self.fun.phi_induction_reg.is_some() {
-                    writeln!(out, "  br label %platch").ok();
-                } else {
-                    writeln!(out, "  br label %{}", skip_l).ok();
-                }
-                writeln!(out, "  {}:", skip_l).ok();
+                self.emit_ssa_txn_with_precond(out, pre, name, &body_stmts, &post_hoist);
             } else {
-                self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
-                self.fun.expr_dedup_cache.clear();
-                self.fun.terminated = false;
-                self.fun.returns_i64 = false;
-                self.pre_load_all_fields(out, "%state");
-                // Override counter field with phi induction register if available
-                if let Some((ref cname, ref pi_reg, _)) = self.fun.phi_induction_reg {
-                    self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
-                }
-                self.fun.loop_exit_label = Some("done".into());
-                // 2026-06-27: Only emit any_fired when no phi induction reg
-                // (same rationale as the precondition body branch above).
-                if self.fun.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
-                for s in body_stmts { self.emit_stmt(out, s, "  "); }
-                self.fun.loop_exit_label = None;
-                self.fun.ssa_old_float_regs.clear();
-                self.fun.ssa_old_int_regs.clear();
-                // Post-loop: emit hoisted field-based prints
-                self.emit_hoisted_post_loop_prints(out, &post_hoist);
+                self.emit_ssa_txn_no_precond(out, &body_stmts, &post_hoist);
             }
         }
         if let Some((_, ref pi_reg, ref pn_reg)) = self.fun.phi_induction_reg.clone() {
