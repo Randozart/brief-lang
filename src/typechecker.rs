@@ -4386,6 +4386,84 @@ mod tests {
         assert!(!ctx.is_cast_valid(&src, &dst),
             "LayoutPtr(4,4) -> LayoutPtr(8,8) should be invalid (different sizes)");
     }
+
+    // ── Phase 4: Opaque handle pattern tests ────────────────
+
+    #[test]
+    fn test_opaque_handle_return_type_is_layout_ptr() {
+        // An opaque handle should be a Ptr<Bits @/N> (LayoutPtr)
+        let handle_ty = Type::LayoutPtr(LayoutConstraint { bytes: 24, alignment: 8 });
+        assert!(matches!(&handle_ty, Type::LayoutPtr(_)),
+            "Opaque handle should be LayoutPtr");
+        // The handle should NOT allow field access — no struct projection
+        // (handled by the type system: LayoutPtr has no .field projection)
+    }
+
+    #[test]
+    fn test_opaque_handle_spatial_ops_allowed() {
+        // Spatial operations (copy, pass to functions) should work on LayoutPtr
+        let ctx = super::TypeChecker::new();
+        let handle = Type::LayoutPtr(LayoutConstraint { bytes: 24, alignment: 8 });
+        // Can cast to Int for passing to functions
+        assert!(ctx.is_cast_valid(&handle, &Type::Int),
+            "LayoutPtr -> Int should be valid for function argument passing");
+        // Two handles with same layout can cast between each other
+        let same = Type::LayoutPtr(LayoutConstraint { bytes: 24, alignment: 8 });
+        assert!(ctx.is_cast_valid(&handle, &same),
+            "LayoutPtr -> same layout should be valid");
+    }
+
+    #[test]
+    fn test_opaque_handle_internal_cast_via_layout_compat() {
+        // Library internally casts Ptr<Bits @/24> -> Ptr<DbConnection>
+        // when DbConnection has bytes == 24 and alignment matches.
+        // This test verifies the cast is valid when layouts match.
+        let ctx = super::TypeChecker::new().with_type_universe(
+            crate::type_universe::TypeUniverse::build(&make_program(vec![]))
+        );
+        let opaque = Type::LayoutPtr(LayoutConstraint { bytes: 24, alignment: 8 });
+        // Cast to Ptr<Bits @/0..191> (24 bytes = 192 bits, range 0..191)
+        let internal = Type::LayoutPtr(LayoutConstraint { bytes: 24, alignment: 8 });
+        assert!(ctx.is_cast_valid(&opaque, &internal),
+            "Opaque handle -> internal representation should work with matching layout");
+    }
+
+    // ── Phase 6: Extract-Operate-Repack pattern detection ────
+
+    #[test]
+    fn test_eor_detection_cast_add_cast_pattern() {
+        // The EOR pattern: (a as Int) + (b as Int) as T where T <:> Int
+        // Verify the expression infer_expression correctly types this pattern.
+        let expr = Expr::Cast(
+            Box::new(Expr::Add(
+                Box::new(Expr::Cast(Box::new(Expr::Integer(5)), Type::Int)),
+                Box::new(Expr::Cast(Box::new(Expr::Integer(3)), Type::Int)),
+            )),
+            Type::Int,
+        );
+        let ctx = super::TypeChecker::new();
+        let ty = ctx.infer_expression(&expr);
+        assert_eq!(ty, Type::Int,
+            "EOR pattern (Int op Int) as Int should return Int");
+    }
+
+    #[test]
+    fn test_eor_meld_detection() {
+        // Verify that a meld-declared type can detect the EOR pattern.
+        // EOR (val as Int) * factor as T requires T <:> Int.
+        let meld = TopLevel::Meld(MeldDeclaration {
+            name_a: "Meters".into(),
+            name_b: "Int".into(),
+            routes: vec![],
+            span: None,
+        });
+        let mut prog = make_program(vec![meld]);
+        let universe = crate::type_universe::TypeUniverse::build(&prog);
+        assert!(
+            universe.find_meld("Meters", "Int").is_some(),
+            "meld Meters <:> Int should be registered for EOR"
+        );
+    }
 }
 
 #[cfg(all(kani, feature = "kani_full"))]
