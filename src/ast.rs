@@ -1025,6 +1025,20 @@ pub enum Intrinsic {
     /// Used by RingBuffer<T> stdlib type: ExtractFrom = ring_pop#.
     RingPop,
 
+    // ===== Spatial memory intrinsics (2026-07-03) =====
+    /// __memcpy#(dst: Ptr<Bits @/N>, src: Ptr<Bits @/N>, n: Int) -> Bool
+    /// Copy N bytes from src to dst. Non-overlapping regions. Emits @llvm.memcpy.
+    Memcpy,
+    /// __memcmp#(a: Ptr<Bits @/N>, b: Ptr<Bits @/N>, n: Int) -> Int
+    /// Compare N bytes. Returns 0 if equal. Emits @llvm.memcmp.
+    Memcmp,
+    /// __memset#(ptr: Ptr<Bits @/N>, val: Int, n: Int) -> Bool
+    /// Set N bytes to val. Emits @llvm.memset.
+    Memset,
+    /// __hash#(ptr: Ptr<Bits @/N>, n: Int) -> Int
+    /// Hash N bytes. Returns a 64-bit hash.
+    Hash,
+
     /// User-defined intrinsic via `inop#` / `inop!#` declaration.
     /// The String stores the name for display/lookup; validation happens
     /// in the typechecker against the program's `inop_decls` map.
@@ -1053,6 +1067,8 @@ impl Intrinsic {
             // OS queries that are constant for process lifetime
             | Intrinsic::PageSize | Intrinsic::CpuCount
             | Intrinsic::Argv
+            // 2026-07-03: Spatial read intrinsics — pure (no observable side effects)
+            | Intrinsic::Memcmp | Intrinsic::Hash
             => false,
             // Everything else is observable — cannot fold
             _ => true,
@@ -1258,6 +1274,11 @@ impl Intrinsic {
             // Ring buffer intrinsics
             "ring_push" => Some(Intrinsic::RingPush),
             "ring_pop" => Some(Intrinsic::RingPop),
+            // 2026-07-03: Spatial memory intrinsics
+            "__memcpy" => Some(Intrinsic::Memcpy),
+            "__memcmp" => Some(Intrinsic::Memcmp),
+            "__memset" => Some(Intrinsic::Memset),
+            "__hash" => Some(Intrinsic::Hash),
             _ => None,
         }
     }
@@ -1459,6 +1480,11 @@ impl Intrinsic {
             // Ring buffer intrinsics
             Intrinsic::RingPush => "ring_push",
             Intrinsic::RingPop => "ring_pop",
+            // 2026-07-03: Spatial memory intrinsics
+            Intrinsic::Memcpy => "__memcpy",
+            Intrinsic::Memcmp => "__memcmp",
+            Intrinsic::Memset => "__memset",
+            Intrinsic::Hash => "__hash",
             Intrinsic::UserDefined(_) => "__user__",
         }
     }
@@ -4045,5 +4071,25 @@ mod tests {
             Type::Int,
             Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }),
         ]));
+    }
+
+    // ── Spatial intrinsic tests ───────────────────────────────
+
+    #[test]
+    fn test_intrinsic_from_name_memcpy() {
+        assert_eq!(Intrinsic::from_name("__memcpy"), Some(Intrinsic::Memcpy));
+        assert_eq!(Intrinsic::Memcpy.name(), "__memcpy");
+    }
+
+    #[test]
+    fn test_intrinsic_has_side_effects_memcpy() {
+        assert!(Intrinsic::Memcpy.has_side_effects(),
+            "__memcpy# has observable side effects (writes memory)");
+        assert!(Intrinsic::Memset.has_side_effects(),
+            "__memset# has observable side effects (writes memory)");
+        assert!(!Intrinsic::Memcmp.has_side_effects(),
+            "__memcmp# is pure (read-only)");
+        assert!(!Intrinsic::Hash.has_side_effects(),
+            "__hash# is pure (read-only)");
     }
 }

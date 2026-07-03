@@ -5955,6 +5955,90 @@ impl Interpreter {
                             Ok(Value::String(String::new()))
                         }
                     }
+                    // 2026-07-03: Spatial memory intrinsics (interpreter uses libc)
+                    Intrinsic::Memcpy => {
+                        let dst = values.remove(0);
+                        let src = values.remove(0);
+                        let n = values.remove(0);
+                        match (dst, src, n) {
+                            (Value::Ptr(dst_addr), Value::Ptr(src_addr), Value::Int(count)) => {
+                                let count = count as usize;
+                                if count == 0 { return Ok(Value::Bool(true)); }
+                                unsafe {
+                                    let src_slice = std::slice::from_raw_parts(src_addr as *const u8, count);
+                                    let dst_slice = std::slice::from_raw_parts_mut(dst_addr as *mut u8, count);
+                                    dst_slice.copy_from_slice(src_slice);
+                                }
+                                Ok(Value::Bool(true))
+                            }
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "__memcpy# requires (Ptr, Ptr, Int)".into()
+                            )),
+                        }
+                    }
+                    Intrinsic::Memcmp => {
+                        let a = values.remove(0);
+                        let b = values.remove(0);
+                        let n = values.remove(0);
+                        match (a, b, n) {
+                            (Value::Ptr(a_addr), Value::Ptr(b_addr), Value::Int(count)) => {
+                                let count = count as usize;
+                                if count == 0 { return Ok(Value::Int(0)); }
+                                let result = unsafe {
+                                    let a_slice = std::slice::from_raw_parts(a_addr as *const u8, count);
+                                    let b_slice = std::slice::from_raw_parts(b_addr as *const u8, count);
+                                    a_slice.iter().zip(b_slice.iter())
+                                        .map(|(x, y)| (*x as i64) - (*y as i64))
+                                        .find(|&d| d != 0)
+                                        .unwrap_or(0)
+                                };
+                                Ok(Value::Int(result))
+                            }
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "__memcmp# requires (Ptr, Ptr, Int)".into()
+                            )),
+                        }
+                    }
+                    Intrinsic::Memset => {
+                        let ptr = values.remove(0);
+                        let val = values.remove(0);
+                        let n = values.remove(0);
+                        match (ptr, val, n) {
+                            (Value::Ptr(addr), Value::Int(byte_val), Value::Int(count)) => {
+                                let count = count as usize;
+                                if count == 0 { return Ok(Value::Bool(true)); }
+                                unsafe {
+                                    std::ptr::write_bytes(addr as *mut u8, byte_val as u8, count);
+                                }
+                                Ok(Value::Bool(true))
+                            }
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "__memset# requires (Ptr, Int, Int)".into()
+                            )),
+                        }
+                    }
+                    Intrinsic::Hash => {
+                        let ptr = values.remove(0);
+                        let n = values.remove(0);
+                        match (ptr, n) {
+                            (Value::Ptr(addr), Value::Int(count)) => {
+                                let count = count as usize;
+                                if count == 0 { return Ok(Value::Int(0)); }
+                                let mut hash: u64 = 0xcbf29ce484222325;
+                                let bytes = unsafe {
+                                    std::slice::from_raw_parts(addr as *const u8, count)
+                                };
+                                for &b in bytes {
+                                    hash ^= b as u64;
+                                    hash = hash.wrapping_mul(0x100000001b3);
+                                }
+                                Ok(Value::Int(hash as i64))
+                            }
+                            _ => Err(RuntimeError::TypeMismatch(
+                                "__hash# requires (Ptr, Int)".into()
+                            )),
+                        }
+                    }
                     Intrinsic::UserDefined(name) => {
                         let inop = self.inop_decls.get(name).cloned();
                         if let Some(inop) = inop {

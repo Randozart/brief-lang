@@ -2060,6 +2060,90 @@ pub fn emit_intrinsic_call(
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_head, head_gep).ok();
             return TypedRegister { name: result, ty: Type::Int };
         }
+        // 2026-07-03: Spatial memory intrinsics
+        Intrinsic::Memcpy => {
+            let dst = backend.emit_expr(out, &args[0], indent);
+            let src = backend.emit_expr(out, &args[1], indent);
+            let n = backend.emit_expr(out, &args[2], indent);
+            // Emit: call void @llvm.memcpy.p0i8.p0i8.i64(ptr %dst, ptr %src, i64 %n, i1 false)
+            let dst_ptr = format!("%mc_dst{}", backend.fun.txn_counter);
+            let src_ptr = format!("%mc_src{}", backend.fun.txn_counter);
+            backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, dst_ptr, dst.name).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, src_ptr, src.name).ok();
+            writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(ptr {}, ptr {}, i64 {}, i1 false)", indent, dst_ptr, src_ptr, n.name).ok();
+            writeln!(out, "{}{} = add i64 0, 1 ; memcpy success", indent, v).ok();
+            return TypedRegister { name: v.to_string(), ty: Type::Bool };
+        }
+        Intrinsic::Memcmp => {
+            let a = backend.emit_expr(out, &args[0], indent);
+            let b = backend.emit_expr(out, &args[1], indent);
+            let n = backend.emit_expr(out, &args[2], indent);
+            let a_ptr = format!("%mc_a{}", backend.fun.txn_counter);
+            let b_ptr = format!("%mc_b{}", backend.fun.txn_counter);
+            backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, a_ptr, a.name).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, b_ptr, b.name).ok();
+            writeln!(out, "{}{} = call i32 @memcmp(ptr {}, ptr {}, i64 {})", indent, v, a_ptr, b_ptr, n.name).ok();
+            // sign-extend i32 to i64 for Brief's Int representation
+            let ext = format!("%mc_ext{}", backend.fun.txn_counter);
+            writeln!(out, "{}{} = sext i32 {} to i64", indent, ext, v).ok();
+            return TypedRegister { name: ext, ty: Type::Int };
+        }
+        Intrinsic::Memset => {
+            let ptr = backend.emit_expr(out, &args[0], indent);
+            let val = backend.emit_expr(out, &args[1], indent);
+            let n = backend.emit_expr(out, &args[2], indent);
+            let ptr_cast = format!("%ms_ptr{}", backend.fun.txn_counter);
+            let val_trunc = format!("%ms_val{}", backend.fun.txn_counter);
+            backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_cast, ptr.name).ok();
+            writeln!(out, "{}{} = trunc i64 {} to i8", indent, val_trunc, val.name).ok();
+            writeln!(out, "{}call void @llvm.memset.p0i8.i64(ptr {}, i8 {}, i64 {}, i1 false)", indent, ptr_cast, val_trunc, n.name).ok();
+            writeln!(out, "{}{} = add i64 0, 1 ; memset success", indent, v).ok();
+            return TypedRegister { name: v.to_string(), ty: Type::Bool };
+        }
+        Intrinsic::Hash => {
+            let ptr = backend.emit_expr(out, &args[0], indent);
+            let n = backend.emit_expr(out, &args[1], indent);
+            // Hash via FNV-1a loop using alloca for phi-free state
+            let hash_slot = format!("%h_s{}", backend.fun.txn_counter);
+            let ptr_cast = format!("%h_p{}", backend.fun.txn_counter);
+            let end_ptr = format!("%h_e{}", backend.fun.txn_counter);
+            let loop_lbl = format!("%h_l{}", backend.fun.txn_counter);
+            let cur = format!("%h_c{}", backend.fun.txn_counter);
+            let byte = format!("%h_b{}", backend.fun.txn_counter);
+            let loaded = format!("%h_ld{}", backend.fun.txn_counter);
+            let xored = format!("%h_x{}", backend.fun.txn_counter);
+            let mult = format!("%h_m{}", backend.fun.txn_counter);
+            let next = format!("%h_n{}", backend.fun.txn_counter);
+            let done = format!("%h_d{}", backend.fun.txn_counter);
+            let done_cond = format!("%h_dc{}", backend.fun.txn_counter);
+            let result = format!("%h_r{}", backend.fun.txn_counter);
+            backend.fun.txn_counter += 1;
+            // Initialize: hash = FNV offset basis, compute end pointer
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_cast, ptr.name).ok();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, end_ptr, ptr_cast, n.name).ok();
+            writeln!(out, "{}{} = alloca i64", indent, hash_slot).ok();
+            writeln!(out, "store i64 0xcbf29ce484222325, ptr {}", hash_slot).ok();
+            writeln!(out, "br label %{}", loop_lbl).ok();
+            // Loop: load byte, xor, multiply, advance
+            writeln!(out, "{}:", loop_lbl).ok();
+            writeln!(out, "{}{} = phi ptr [ {}, %entry ], [ {}, %{} ]", indent, cur, ptr_cast, next, loop_lbl).ok();
+            writeln!(out, "{}{} = load i8, ptr {}", indent, byte, cur).ok();
+            writeln!(out, "{}{} = load i64, ptr {}", indent, loaded, hash_slot).ok();
+            writeln!(out, "{}{} = xor i64 {}, zext i8 {} to i64", indent, xored, loaded, byte).ok();
+            writeln!(out, "{}{} = mul i64 {}, 0x100000001b3", indent, mult, xored).ok();
+            writeln!(out, "store i64 {}, ptr {}", mult, hash_slot).ok();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i32 1", indent, next, cur).ok();
+            writeln!(out, "{}{} = icmp eq ptr {}, {}", indent, done_cond, next, end_ptr).ok();
+            writeln!(out, "br i1 {}, label %{}, label %{}", done_cond, done, loop_lbl).ok();
+            // Done: load final hash value
+            writeln!(out, "{}:", done).ok();
+            writeln!(out, "{}{} = phi i64 [ {}, %{} ]", indent, result, mult, loop_lbl).ok();
+            writeln!(out, "{}{} = add i64 0, {}", indent, v, result).ok();
+            return TypedRegister { name: v.to_string(), ty: Type::Int };
+        }
         Intrinsic::UserDefined(name) => {
             // Extract return and param type info before any mutable borrows.
             // Clone the inop declaration to avoid borrow conflicts with emit_expr.

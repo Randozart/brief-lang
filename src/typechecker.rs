@@ -2167,6 +2167,9 @@ impl TypeChecker {
                         }
                     }
                     Intrinsic::Time | Intrinsic::Socket | Intrinsic::Accept => Type::Int,
+                    // 2026-07-03: Spatial memory intrinsics
+                    Intrinsic::Memcpy | Intrinsic::Memset => Type::Bool,
+                    Intrinsic::Memcmp | Intrinsic::Hash => Type::Int,
                     Intrinsic::Sort | Intrinsic::Reverse => Type::Bool,
                     Intrinsic::Range => Type::Custom("List".to_string()),
                     // String intrinsics (2026-06-18)
