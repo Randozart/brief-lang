@@ -6231,3 +6231,105 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("store atomic"),
             "atomic_store should emit store atomic");
     }
+
+    #[test]
+    fn test_countable_loop_per_field_phis() {
+        // A countable txn: bounded counter, non-pure body (writes to x),
+        // no side-effecting guards, no reactive triggers.
+        // x is live because it's referenced in the exit condition.
+        // Should emit per-field phi nodes instead of %slot_case alloca.
+        let program = {
+            let mut items: Vec<TopLevel> = vec![
+                TopLevel::Constant(Constant {
+                    name: "total".to_string(), ty: Type::Int,
+                    expr: Expr::Integer(100),
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "count".to_string(), ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                    constraint: None,
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "x".to_string(), ty: Type::Int,
+                    expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false,
+                    os_mode: false, span: None, attrs: vec![],
+                    constraint: None,
+                }),
+                TopLevel::Transaction(Transaction {
+                    name: "compute".to_string(), parameters: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Lt(
+                            Box::new(Expr::Identifier("count".to_string())),
+                            Box::new(Expr::Identifier("total".to_string())),
+                        ),
+                        post_condition: Expr::Bool(true),
+                        span: None, watchdog: None,
+                    },
+                    body: vec![
+                        // count increment first so detect_increments sees it
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("count".to_string()),
+                            expr: Expr::Add(
+                                Box::new(Expr::Identifier("count".to_string())),
+                                Box::new(Expr::Integer(1)),
+                            ),
+                            timeout: None, modifiers: vec![],
+                        },
+                        // non-pure field write: makes the body non-pure
+                        Statement::Assignment {
+                            lhs: Expr::Identifier("x".to_string()),
+                            expr: Expr::Add(
+                                Box::new(Expr::Identifier("x".to_string())),
+                                Box::new(Expr::Integer(1)),
+                            ),
+                            timeout: None, modifiers: vec![],
+                        },
+                        Statement::Term {
+                            values: vec![], modifiers: vec![], swan_song: None,
+                        },
+                    ],
+                    is_async: false, is_reactive: true, reactor_speed: None,
+                    span: None, is_lambda: false, dependencies: vec![],
+                    modifiers: vec![], variant_bodies: vec![],
+                    annotations: vec![],
+                    outputs: Vec::new(),
+                    output_type: None,
+                }),
+            ];
+            Program {
+                items,
+                comments: vec![],
+                reactor_speed: None,
+                attrs: Vec::new(),
+                ffi: None,
+                strict_mode: StrictMode::Off,
+                dispatch_mode: Default::default(),
+                exit_condition: Some(Box::new(Expr::Eq(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(100)),
+                ))),
+                out_pragmas: vec!["x".to_string()],
+                default_sig_modifier: None,
+                watchdog_defaults: (None, None),
+            }
+        };
+        let output = LlvmBackend::new().generate(&program);
+        // Should emit main function
+        assert!(output.contains("@main"),
+            "Should emit @main function");
+        // Should NOT have %slot_case (the old alloca round-trip pattern)
+        assert!(!output.contains("%slot_"),
+            "Countable loop should not use %slot_ alloca. Output: {}", output);
+        // Should have phi nodes for the induction variable
+        assert!(output.contains("phi i64"),
+            "Countable loop should have phi i64 induction variable. Output: {}", output);
+        // Should have icmp slt for loop exit
+        assert!(output.contains("icmp slt"),
+            "Countable loop should use icmp slt for exit check. Output: {}", output);
+        // Should not have %any_fired (characteristic of tick-loop path)
+        assert!(!output.contains("%any_fired"),
+            "Countable loop should not use %any_fired. Output: {}", output);
+    }
