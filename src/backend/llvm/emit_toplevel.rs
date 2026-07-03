@@ -730,37 +730,9 @@ impl LlvmBackend {
                 Some(expr) => {
                     let val_reg = self.emit_expr(out, &expr, "  ");
                     let boxed = self.adapt_to_i64(out, "  ", &val_reg);
-                    match ty.as_str() {
-                        "i8" => {
-                            let t = format!("%ip{}t", reg); reg += 1;
-                            writeln!(out, "  {} = trunc i64 {} to i8", t, boxed).ok();
-                            writeln!(out, "  store i8 {}, i8* {}, align {}", t, p, self.align_of("i8")).ok();
-                        }
-                        "i32" => {
-                            let t = format!("%ip{}t", reg); reg += 1;
-                            writeln!(out, "  {} = trunc i64 {} to i32", t, boxed).ok();
-                            writeln!(out, "  store i32 {}, i32* {}, align {}", t, p, self.align_of("i32")).ok();
-                        }
-                        "float" => {
-                            // 2026-07-03: Same fix as above — pass boxed to native_float_or_box
-                            let fl = self.native_float_or_box(out, "  ", &boxed);
-                            writeln!(out, "  store float {}, float* {}, align {}", fl, p, self.align_of("float")).ok();
-                        }
-                        // 2026-06-29: Float64 init store — bitcast i64 back to double
-                        "double" => {
-                            let fl = format!("%ip{}d", reg); reg += 1;
-                            writeln!(out, "  {} = bitcast i64 {} to double", fl, boxed).ok();
-                            writeln!(out, "  store double {}, double* {}, align {}", fl, p, self.align_of("double")).ok();
-                        }
-                        "i8*" => {
-                            let t = format!("%ip{}t", reg); reg += 1;
-                            writeln!(out, "  {} = inttoptr i64 {} to i8*", t, boxed).ok();
-                            writeln!(out, "  store i8* {}, i8** {}, align {}", t, p, self.align_of("i8*")).ok();
-                        }
-                        _ => {
-                            writeln!(out, "  store {} {}, {}* {}, align {}", ty, boxed, ty, p, self.align_of(&ty)).ok();
-                        }
-                    }
+                    // 2026-07-03: Use shared helper for type dispatch (trunc/bitcast/inttoptr)
+                    let tv = self.ensure_typed_value(out, "  ", &ty.as_str(), &boxed);
+                    writeln!(out, "  store {} {}, {}* {}, align {}", ty, tv, ty, p, self.align_of(&ty)).ok();
                 }
                 None => {
                     if ty == "i8*" {
@@ -944,42 +916,12 @@ impl LlvmBackend {
                 Some(expr) => {
                     let val_reg = self.emit_expr(out, &expr, indent);
                     let boxed = self.adapt_to_i64(out, indent, &val_reg);
-                    match ty.as_str() {
-                        "i8" => {
-                            let t = format!("%ip_{}t", idx);
-                            writeln!(out, "{}{} = trunc i64 {} to i8", indent, t, boxed).ok();
-                            writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, t, p, self.align_of("i8")).ok();
-                        }
-                        "i32" => {
-                            let t = format!("%ip_{}t", idx);
-                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, t, boxed).ok();
-                            writeln!(out, "{}store i32 {}, i32* {}, align {}", indent, t, p, self.align_of("i32")).ok();
-                        }
-                        "float" => {
-                            // 2026-07-03: Pass boxed (adapt_to_i64 result) instead of raw
-                            // val_reg. native_float_or_box expects an i64 register, but
-                            // val_reg may be float-typed (e.g. fneg of a float literal).
-                            // Using boxed fixes the type mismatch that only appears with
-                            // Float32 (i32) — the trunc i64→i32 was applied to a float
-                            // register, producing "defined with type 'float' but expected 'i64'".
-                            let fl = self.native_float_or_box(out, indent, &boxed);
-                            writeln!(out, "{}store float {}, float* {}, align {}", indent, fl, p, self.align_of("float")).ok();
-                        }
-                        "double" => {
-                            // 2026-06-29: Float64 init store — bitcast i64 back to double
-                            let fl = format!("%ip_{}d", idx);
-                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, fl, boxed).ok();
-                            writeln!(out, "{}store double {}, double* {}, align {}", indent, fl, p, self.align_of("double")).ok();
-                        }
-                        "i8*" => {
-                            let t = format!("%ip_{}t", idx);
-                            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, t, boxed).ok();
-                            writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, t, p, self.align_of("i8*")).ok();
-                        }
-                        _ => {
-                            writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, boxed, ty, p, self.align_of(&ty)).ok();
-                        }
-                    }
+                    // 2026-07-03: Use shared helper for type dispatch.
+                    // ensure_typed_value handles trunc/bitcast/inttoptr for the field type.
+                    // The 2026-07-03 fix (pass boxed to native_float_or_box, not raw val_reg)
+                    // is now inside ensure_typed_value.
+                    let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &boxed);
+                    writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, tv, ty, p, self.align_of(&ty)).ok();
                 }
                 None => {
                     if ty == "i8*" {

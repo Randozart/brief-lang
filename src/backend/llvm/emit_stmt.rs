@@ -8,7 +8,9 @@ impl LlvmBackend {
     /// 2026-07-03: Ensure a value has the right LLVM type for storage.
     /// Returns the register name usable as the typed value (trunc, bitcast,
     /// or identity). Callers are responsible for the store instruction.
-    fn ensure_typed_value(&mut self, out: &mut String, indent: &str,
+    /// pub(super): shared across emit_stmt, emit_toplevel, and other
+    /// sibling modules in the llvm backend.
+    pub(super) fn ensure_typed_value(&mut self, out: &mut String, indent: &str,
         ty: &str, val: &str) -> String
     {
         match ty {
