@@ -248,7 +248,10 @@ pub struct FunctionContext {
 
     // Accumulators flushed per-function
     pub pending_metadata: String,
-    pub pending_post_hoist: Vec<(String, String)>,
+    // 2026-07-03: Full Statement blocks hoisted from body, not just field+intrinsic
+    // pairs. Allows hoisting guards whose swan song references let-bindings (e.g.
+    // `energy` in nbody) by re-emitting the entire guard body post-loop.
+    pub pending_post_hoist: Vec<Vec<Statement>>,
     pub pending_cleanup: Vec<Statement>,
 
     // Chimera tracking

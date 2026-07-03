@@ -129,61 +129,37 @@ fn primitive_from_name(name: &str) -> Option<Type> {
 pub(crate) fn hoist_terminating_guard(
     body: &[Statement],
     field_index_map: &std::collections::HashMap<String, usize>,
-) -> (Vec<Statement>, Vec<(String, String)>) {
+) -> (Vec<Statement>, Vec<Vec<Statement>>) {
     let mut stmts: Vec<&Statement> = body.iter()
         .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
         .collect();
-    let mut hoist: Vec<(String, String)> = Vec::new();
-    let mut let_to_field: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for stmt in body {
-        if let Statement::Assignment { lhs: Expr::OwnedRef(fname), expr, .. } = stmt {
-            if field_index_map.contains_key(fname) {
-                let s = format!("{:?}", expr);
-                if let Some(let_name) = s.strip_prefix("Identifier(\"").and_then(|s| s.split('"').next()) {
-                    let_to_field.insert(let_name.to_string(), fname.clone());
-                }
-            }
-        }
-    }
+    let mut hoist: Vec<Vec<Statement>> = Vec::new();
     while let Some(last_idx) = stmts.len().checked_sub(1) {
         if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
             let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang { .. }));
             if !is_terminating { break; }
-            for s in statements {
-                if let Statement::Expression(Expr::IntrinsicCall { intrinsic, args }) = s {
-                    let intrinsic_name = intrinsic.name();
-                    if let Some(Expr::Identifier(fname)) = args.first() {
-                        if field_index_map.contains_key(fname) {
-                            hoist.push((fname.clone(), intrinsic_name.to_string()));
-                        }
-                    }
+            // Hoist the entire guard body (all statements before the term!)
+            // into a Vec<Statement> that the post-loop block can re-emit.
+            // This handles both simple field-print patterns (original hoisting)
+            // and let-binding-based patterns (nbody: energy computation + print).
+            let body_stmts: Vec<Statement> = statements.iter()
+                .filter(|s| !matches!(s, Statement::TermBang { .. }))
+                .cloned()
+                .collect();
+            if !body_stmts.is_empty() {
+                // Also extract the swan_song from the TermBang (e.g. print_float).
+                // The swan_song lives inside TermBang, not as a separate statement
+                // in the guard body — filtering out TermBang would lose it.
+                let swan_song_stmt = statements.iter().find_map(|s| {
+                    if let Statement::TermBang { swan_song: Some(ss), .. } = s {
+                        Some(ss.as_ref().clone())
+                    } else { None }
+                });
+                let mut full_body = body_stmts;
+                if let Some(sw) = swan_song_stmt {
+                    full_body.push(sw);
                 }
-                if let Statement::TermBang { values, swan_song, .. } = s {
-                    for v in values {
-                        if let Some(Expr::IntrinsicCall { intrinsic, args }) = v {
-                            let intrinsic_name = intrinsic.name();
-                            if let Some(Expr::Identifier(fname)) = args.first() {
-                                if field_index_map.contains_key(fname) {
-                                    hoist.push((fname.clone(), intrinsic_name.to_string()));
-                                }
-                            }
-                        }
-                    }
-                    if let Some(ss) = swan_song {
-                        if let Statement::Expression(Expr::IntrinsicCall { intrinsic, args }) = ss.as_ref() {
-                            let intrinsic_name = intrinsic.name();
-                            if let Some(Expr::Identifier(fname)) = args.first() {
-                                if field_index_map.contains_key(fname) {
-                                    hoist.push((fname.clone(), intrinsic_name.to_string()));
-                                } else if let Some(mapped_field) = let_to_field.get(fname) {
-                                    hoist.push((mapped_field.clone(), intrinsic_name.to_string()));
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if !hoist.is_empty() {
+                hoist.push(full_body);
                 stmts.pop();
             }
             break;

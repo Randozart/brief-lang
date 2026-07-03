@@ -1517,74 +1517,40 @@ impl LlvmBackend {
             
             // Detect terminating final guards and replace them with
             // post-loop field-based prints. A "terminating final guard" is a
-            // Guarded statement whose body ends with term! (program exit).
-            // Replacing it with a post-loop field load removes the per-iteration
-            // branch, enabling LLVM to identify reductions and vectorize.
-            let (body_stmts, post_hoist): (Vec<&Statement>, Vec<(String, String)>) = {
+            // 2026-07-03: Hoist terminating guard (the last Guarded with term!)
+            // to post-loop. Extract the full guard body (statements before term!)
+            // so let-bindings like `energy` in nbody are re-emitted post-loop
+            // with fresh field loads from %State.
+            let (body_stmts, post_hoist): (Vec<&Statement>, Vec<Vec<Statement>>) = {
                 let mut stmts: Vec<&Statement> = txn.body.iter()
                     .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
                     .collect();
-                let mut hoist: Vec<(String, String)> = Vec::new(); // (field_name, intrinsic_name)
-                // Build mapping from let-binding names to field names (e.g., nchecksum -> checksum)
-                // by scanning assignment statements like &checksum = nchecksum;
-                let mut let_to_field: HashMap<String, String> = HashMap::new();
-                for stmt in &txn.body {
-                    if let Statement::Assignment { lhs: Expr::OwnedRef(fname), expr, .. } = stmt {
-                        if self.ctx.field_index_map.contains_key(fname) {
-                            // Try to extract identifier from expr Box<Expr> using string hack
-                            let s = format!("{:?}", expr);
-                            if let Some(let_name) = s.strip_prefix("Identifier(\"").and_then(|s| s.split('"').next()) {
-                                let_to_field.insert(let_name.to_string(), fname.clone());
+                let mut hoist: Vec<Vec<Statement>> = Vec::new();
+                if let Some(last_idx) = stmts.len().checked_sub(1) {
+                    if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
+                        let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang { .. }));
+                        if is_terminating {
+                            let body_stmts: Vec<Statement> = statements.iter()
+                                .filter(|s| !matches!(s, Statement::TermBang { .. }))
+                                .cloned()
+                                .collect();
+                            if !body_stmts.is_empty() {
+                                // Also extract the swan_song from the TermBang
+                                // (e.g. print_float#) which would otherwise be lost.
+                                let swan_song_stmt = statements.iter().find_map(|s| {
+                                    if let Statement::TermBang { swan_song: Some(ss), .. } = s {
+                                        Some(ss.as_ref().clone())
+                                    } else { None }
+                                });
+                                let mut full_body = body_stmts;
+                                if let Some(sw) = swan_song_stmt {
+                                    full_body.push(sw);
+                                }
+                                hoist.push(full_body);
+                                stmts.pop();
                             }
                         }
                     }
-                }
-                'outer: while let Some(last_idx) = stmts.len().checked_sub(1) {
-                    if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
-                        let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang { .. }));
-                        if !is_terminating { break; }
-                        // Extract the print intrinsic from the guard body
-                        for s in statements {
-                            if let Statement::Expression(Expr::IntrinsicCall { intrinsic, args }) = s {
-                                let intrinsic_name = intrinsic.name();
-                                if let Some(Expr::Identifier(fname)) = args.first() {
-                                    if self.ctx.field_index_map.contains_key(fname) {
-                                        hoist.push((fname.clone(), intrinsic_name.to_string()));
-                                    }
-                                }
-                            }
-                            if let Statement::TermBang { values, swan_song, .. } = s {
-                                // Check values (outputs before ->)
-                                for v in values {
-                                    if let Some(Expr::IntrinsicCall { intrinsic, args }) = v {
-                                        let intrinsic_name = intrinsic.name();
-                                        if let Some(Expr::Identifier(fname)) = args.first() {
-                                            if self.ctx.field_index_map.contains_key(fname) {
-                                                hoist.push((fname.clone(), intrinsic_name.to_string()));
-                                            }
-                                        }
-                                    }
-                                }
-                                // Check swan_song (the expression after ->)
-                                if let Some(ss) = swan_song {
-                                    if let Statement::Expression(Expr::IntrinsicCall { intrinsic, args }) = ss.as_ref() {
-                                        let intrinsic_name = intrinsic.name();
-                                        if let Some(Expr::Identifier(fname)) = args.first() {
-                                            if self.ctx.field_index_map.contains_key(fname) {
-                                                hoist.push((fname.clone(), intrinsic_name.to_string()));
-                                            } else if let Some(mapped_field) = let_to_field.get(fname) {
-                                                hoist.push((mapped_field.clone(), intrinsic_name.to_string()));
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        if !hoist.is_empty() {
-                            stmts.pop();
-                        }
-                        break 'outer;
-                    } else { break; }
                 }
                 (stmts, hoist)
             };
@@ -2016,31 +1982,20 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
-    /// Emit post-loop field-based prints for hoisted terminating guards.
-    /// After the loop exits, load fields from %state and print their final values.
-    fn emit_hoisted_post_loop_prints(&mut self, out: &mut String, hoisted: &[(String, String)]) {
-        for (fname, intrinsic_name) in hoisted {
-            if let Some(&idx) = self.ctx.field_index_map.get(fname) {
-                let ty = self.ctx.field_types[idx].clone();
-                let gep = format!("%gep_pl_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let val = format!("%val_pl_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                    gep, idx).ok();
-                match ty.as_str() {
-                    "float" => {
-                        writeln!(out, "  {} = load float, float* {}, align 4", val, gep).ok();
-                        self.emit_post_print(out, intrinsic_name, &val, "float", "  ");
-                    }
-                    // 2026-06-29: Float64 → load double, print as double (skip fpext)
-                    "double" => {
-                        writeln!(out, "  {} = load double, double* {}, align 8", val, gep).ok();
-                        self.emit_post_print(out, intrinsic_name, &val, "double", "  ");
-                    }
-                    _ => {
-                        writeln!(out, "  {} = load i64, i64* {}, align 8", val, gep).ok();
-                        self.emit_post_print(out, intrinsic_name, &val, "i64", "  ");
-                    }
-                }
+    /// 2026-07-03: Emit hoisted terminating guard bodies in the post-loop block.
+    /// The guard body (energy computation + print intrinsic) is re-emitted after
+    /// the loop exits. Before emitting, load all state fields from %State via
+    /// pre_load_all_fields so field reads see fresh memory values (not stale phis).
+    fn emit_hoisted_post_loop_prints(&mut self, out: &mut String, hoisted: &[Vec<Statement>]) {
+        if hoisted.is_empty() { return; }
+        // Load all state fields from %State into old-value caches so emit_stmt
+        // reads see the final field values (post-loop, from memory, not from phis).
+        // The phi registers are stale — they reflect the pre-latch state, not the
+        // final body stores.  GEP+load from %State gets the correct final values.
+        self.pre_load_all_fields(out, "%state");
+        for body_stmts in hoisted {
+            for s in body_stmts {
+                self.emit_stmt(out, s, "  ");
             }
         }
     }
