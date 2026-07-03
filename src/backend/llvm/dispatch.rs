@@ -272,7 +272,7 @@ impl LlvmBackend {
                         let fm = format!("%fm{}", i);
                         let ca = format!("%ca{}", i);
                         let nc = format!("%nc{}", i);
-                        writeln!(out, "  {} = load i64, i64* %fired_mask", fm).ok();
+                        writeln!(out, "  {} = load i64, ptr %fired_mask", fm).ok();
                         writeln!(out, "  {} = and i64 {}, {}", ca, fm, wm).ok();
                         writeln!(out, "  {} = icmp eq i64 {}, 0", nc, ca).ok();
                         writeln!(out, "  %can{} = and i1 %pr{}, {}", i, i, nc).ok();
@@ -292,7 +292,7 @@ impl LlvmBackend {
                 if wm != 0 {
                     let fm = format!("%fm{}a", i);
                     let fmu = format!("%fm{}b", i);
-                    writeln!(out, "  {} = load i64, i64* %fired_mask", fm).ok();
+                    writeln!(out, "  {} = load i64, ptr %fired_mask", fm).ok();
                     writeln!(out, "  {} = or i64 {}, {}", fmu, fm, wm).ok();
                     writeln!(out, "  store i64 {}, i64* %fired_mask", fmu).ok();
                 }

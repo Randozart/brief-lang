@@ -128,17 +128,17 @@ impl LlvmBackend {
         // Runtime support functions
         writeln!(out, "declare void @__barrier_release__()").ok();
         writeln!(out, "declare void @__barrier_wait__()").ok();
-        writeln!(out, "declare void @__thread_pool_init__(i32, i8**)").ok();
+        writeln!(out, "declare void @__thread_pool_init__(i32, ptr)").ok();
         // 2026-07-01: Stores the current state snapshot pointer for worker threads.
         // Called by main before __barrier_release__ so async body functions receive
         // the correct state argument instead of a garbage pointer.
         writeln!(out, "declare void @__set_async_state__(ptr)").ok();
-        writeln!(out, "declare i64 @time(i64*) nounwind").ok();
-        writeln!(out, "declare noalias i8* @malloc(i64) nounwind").ok();
-        writeln!(out, "declare void @free(i8*) nounwind").ok();
+        writeln!(out, "declare i64 @time(ptr) nounwind").ok();
+        writeln!(out, "declare noalias ptr @malloc(i64) nounwind").ok();
+        writeln!(out, "declare void @free(ptr) nounwind").ok();
         // 2026-06-26: realloc used by the arena allocator grow path when
         // the bump-allocated buffer is exhausted (emit_arena_alloc in mod.rs).
-        writeln!(out, "declare i8* @realloc(i8*, i64) nounwind").ok();
+        writeln!(out, "declare ptr @realloc(ptr, i64) nounwind").ok();
         writeln!(out, "declare i64 @__read_file__(i64)").ok();
         writeln!(out, "declare i64 @__write_file__(i64, i64)").ok();
         writeln!(out, "declare i64 @__readln__()").ok();
@@ -304,7 +304,7 @@ impl LlvmBackend {
         let sge = format!("%sge{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         if let Some(epfd_idx) = self.ctx.field_index_map.get("__trg_epfd") {
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, epfd_idx).ok();
-            writeln!(out, "  store i32 {}, i32* {}, align 4", epfd, sge).ok();
+            writeln!(out, "  store i32 {}, ptr {}, align 4", epfd, sge).ok();
         }
 
         // Per-trigger setup
@@ -318,18 +318,18 @@ impl LlvmBackend {
                     let ev_slot = format!("%ev_{}", name);
                     writeln!(out, "  {} = alloca i8, i64 16, align 8", ev_slot).ok();
                     let ev_events = format!("%eve_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 0", ev_events, ev_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 0", ev_events, ev_slot).ok();
                     let ev_events_i32 = format!("%evei_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i32*", ev_events_i32, ev_events).ok();
-                    writeln!(out, "  store i32 {}, i32* {}, align 4", epoin, ev_events_i32).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", ev_events_i32, ev_events).ok();
+                    writeln!(out, "  store i32 {}, ptr {}, align 4", epoin, ev_events_i32).ok();
                     let ev_data = format!("%evd_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", ev_data, ev_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 8", ev_data, ev_slot).ok();
                     let ev_data_u64 = format!("%evdu_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i64*", ev_data_u64, ev_data).ok();
-                    writeln!(out, "  store i64 {}, i64* {}, align 8", bit, ev_data_u64).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", ev_data_u64, ev_data).ok();
+                    writeln!(out, "  store i64 {}, ptr {}, align 8", bit, ev_data_u64).ok();
                     // epoll_ctl(epfd, EPOLL_CTL_ADD, 0, &ev)
                     let ctl = format!("%ectl_{}", name);
-                    writeln!(out, "  {} = call i32 @epoll_ctl(i32 {}, i32 1, i32 0, i8* {})", ctl, epfd, ev_slot).ok();
+                    writeln!(out, "  {} = call i32 @epoll_ctl(i32 {}, i32 1, i32 0, ptr {})", ctl, epfd, ev_slot).ok();
                 }
                 crate::ast::LinkRef::Timer(hz) => {
                     // timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK)
@@ -344,68 +344,68 @@ impl LlvmBackend {
                     // itimerspec.it_value.tv_sec = 0
                     // itimerspec.it_value.tv_nsec = interval_nsec (fire immediately, then at interval)
                     let its_val_sec = format!("%its_vs_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 0", its_val_sec, its_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 0", its_val_sec, its_slot).ok();
                     let its_val_sec_i64 = format!("%itsvsi_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i64*", its_val_sec_i64, its_val_sec).ok();
-                    writeln!(out, "  store i64 0, i64* {}, align 8", its_val_sec_i64).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", its_val_sec_i64, its_val_sec).ok();
+                    writeln!(out, "  store i64 0, ptr {}, align 8", its_val_sec_i64).ok();
                     let its_val_nsec = format!("%its_vn_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", its_val_nsec, its_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 8", its_val_nsec, its_slot).ok();
                     let its_val_nsec_i64 = format!("%itsvni_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i64*", its_val_nsec_i64, its_val_nsec).ok();
-                    writeln!(out, "  store i64 {}, i64* {}, align 8", interval_nsec, its_val_nsec_i64).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", its_val_nsec_i64, its_val_nsec).ok();
+                    writeln!(out, "  store i64 {}, ptr {}, align 8", interval_nsec, its_val_nsec_i64).ok();
                     let its_int_sec = format!("%its_is_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 16", its_int_sec, its_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 16", its_int_sec, its_slot).ok();
                     let its_int_sec_i64 = format!("%itsisi_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i64*", its_int_sec_i64, its_int_sec).ok();
-                    writeln!(out, "  store i64 0, i64* {}, align 8", its_int_sec_i64).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", its_int_sec_i64, its_int_sec).ok();
+                    writeln!(out, "  store i64 0, ptr {}, align 8", its_int_sec_i64).ok();
                     let its_int_nsec = format!("%its_in_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 24", its_int_nsec, its_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 24", its_int_nsec, its_slot).ok();
                     let its_int_nsec_i64 = format!("%itsini_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i64*", its_int_nsec_i64, its_int_nsec).ok();
-                    writeln!(out, "  store i64 {}, i64* {}, align 8", interval_nsec, its_int_nsec_i64).ok();
-                    writeln!(out, "  %tfd_settime_{} = call i32 @timerfd_settime(i32 {}, i32 0, i8* {}, i8* null)", name, tfd, its_slot).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", its_int_nsec_i64, its_int_nsec).ok();
+                    writeln!(out, "  store i64 {}, ptr {}, align 8", interval_nsec, its_int_nsec_i64).ok();
+                    writeln!(out, "  %tfd_settime_{} = call i32 @timerfd_settime(i32 {}, i32 0, ptr {}, ptr null)", name, tfd, its_slot).ok();
                     // epoll_ctl(epfd, EPOLL_CTL_ADD, tfd, &ev)
                     let ev_slot = format!("%ev_{}", name);
                     writeln!(out, "  {} = alloca i8, i64 16, align 8", ev_slot).ok();
                     let ev_events = format!("%eve_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 0", ev_events, ev_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 0", ev_events, ev_slot).ok();
                     let ev_events_i32 = format!("%evei_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i32*", ev_events_i32, ev_events).ok();
-                    writeln!(out, "  store i32 {}, i32* {}, align 4", epoin, ev_events_i32).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", ev_events_i32, ev_events).ok();
+                    writeln!(out, "  store i32 {}, ptr {}, align 4", epoin, ev_events_i32).ok();
                     let ev_data = format!("%evd_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", ev_data, ev_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 8", ev_data, ev_slot).ok();
                     let ev_data_u64 = format!("%evdu_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i64*", ev_data_u64, ev_data).ok();
-                    writeln!(out, "  store i64 {}, i64* {}, align 8", bit, ev_data_u64).ok();
-                    writeln!(out, "  %ectl_{} = call i32 @epoll_ctl(i32 {}, i32 1, i32 {}, i8* {})", name, epfd, tfd, ev_slot).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", ev_data_u64, ev_data).ok();
+                    writeln!(out, "  store i64 {}, ptr {}, align 8", bit, ev_data_u64).ok();
+                    writeln!(out, "  %ectl_{} = call i32 @epoll_ctl(i32 {}, i32 1, i32 {}, ptr {})", name, epfd, tfd, ev_slot).ok();
                 }
                 crate::ast::LinkRef::Signal(sig) => {
                     // sigemptyset(&mask)
                     let mask_slot = format!("%mask_{}", name);
                     writeln!(out, "  {} = alloca i8, i64 128, align 8", mask_slot).ok();
-                    writeln!(out, "  %sigemptyset_{} = call i32 @sigemptyset(i8* {})", name, mask_slot).ok();
+                    writeln!(out, "  %sigemptyset_{} = call i32 @sigemptyset(ptr {})", name, mask_slot).ok();
                     // sigaddset(&mask, SIG)
                     let sig_num = sig_number(sig);
-                    writeln!(out, "  %sigadd_{} = call i32 @sigaddset(i8* {}, i32 {})", name, mask_slot, sig_num).ok();
+                    writeln!(out, "  %sigadd_{} = call i32 @sigaddset(ptr {}, i32 {})", name, mask_slot, sig_num).ok();
                     // sigprocmask(SIG_BLOCK, &mask, null)
-                    writeln!(out, "  %sigprocmask_{} = call i32 @sigprocmask(i32 {}, i8* {}, i8* null)", name, sig_block, mask_slot).ok();
+                    writeln!(out, "  %sigprocmask_{} = call i32 @sigprocmask(i32 {}, ptr {}, ptr null)", name, sig_block, mask_slot).ok();
                     // signalfd(-1, &mask, SFD_NONBLOCK)
                     let sfd = format!("%sfd_{}", name);
-                    writeln!(out, "  {} = call i32 @signalfd(i32 -1, i8* {}, i32 {})", sfd, mask_slot, sfd_nonblock).ok();
+                    writeln!(out, "  {} = call i32 @signalfd(i32 -1, ptr {}, i32 {})", sfd, mask_slot, sfd_nonblock).ok();
                     // epoll_ctl(epfd, EPOLL_CTL_ADD, sfd, &ev)
                     let ev_slot = format!("%ev_{}", name);
                     writeln!(out, "  {} = alloca i8, i64 16, align 8", ev_slot).ok();
                     let ev_events = format!("%eve_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 0", ev_events, ev_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 0", ev_events, ev_slot).ok();
                     let ev_events_i32 = format!("%evei_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i32*", ev_events_i32, ev_events).ok();
-                    writeln!(out, "  store i32 {}, i32* {}, align 4", epoin, ev_events_i32).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", ev_events_i32, ev_events).ok();
+                    writeln!(out, "  store i32 {}, ptr {}, align 4", epoin, ev_events_i32).ok();
                     let ev_data = format!("%evd_{}", name);
-                    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", ev_data, ev_slot).ok();
+                    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 8", ev_data, ev_slot).ok();
                     let ev_data_u64 = format!("%evdu_{}", name);
-                    writeln!(out, "  {} = bitcast i8* {} to i64*", ev_data_u64, ev_data).ok();
-                    writeln!(out, "  store i64 {}, i64* {}, align 8", bit, ev_data_u64).ok();
-                    writeln!(out, "  %ectl_{} = call i32 @epoll_ctl(i32 {}, i32 1, i32 {}, i8* {})", name, epfd, sfd, ev_slot).ok();
+                    writeln!(out, "  {} = bitcast ptr {} to ptr", ev_data_u64, ev_data).ok();
+                    writeln!(out, "  store i64 {}, ptr {}, align 8", bit, ev_data_u64).ok();
+                    writeln!(out, "  %ectl_{} = call i32 @epoll_ctl(i32 {}, i32 1, i32 {}, ptr {})", name, epfd, sfd, ev_slot).ok();
                 }
                 _ => {} // Explicit(addr), Linked(sym) — handled by emit_trg_load in step()
             }
@@ -458,7 +458,7 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, raw).ok();
             }
             Type::String | Type::Data => {
-                writeln!(out, "{}{} = bitcast i8* {} to i8*", indent, dst, raw).ok();
+                writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, dst, raw).ok();
             }
             _ => {
                 writeln!(out, "{}{} = add i64 0, {}", indent, dst, raw).ok();
@@ -505,7 +505,7 @@ impl LlvmBackend {
     //   Two callers need init logic. The main reactor loop uses the inline path
     //   (emit_inline_init_stores) so SROA can scalarize %State. But library-mode
     //   and external-C callers (via __brief_init_state) need a callable function
-    //   that returns an initialized %State* — those callers don't have an alloca
+    //   that returns an initialized ptr — those callers don't have an alloca
     //   to inline into, so they need @init_state as a named function. Both share
     //   the same store logic; the tradeoff is SROA opportunity (inline) vs callable
     //   interface (function).
@@ -546,52 +546,52 @@ impl LlvmBackend {
 
         // Allocate RingBuf struct: 4 × i64 = 32 bytes
         let rm = format!("{}_m", rb);
-        writeln!(out, "{}{} = call i8* @malloc(i64 32)", indent, rm).ok();
+        writeln!(out, "{}{} = call ptr @malloc(i64 32)", indent, rm).ok();
         let rbc = format!("{}_bc", rb);
-        writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, rbc, rm).ok();
+        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, rbc, rm).ok();
 
         // Allocate element buffer
         let eb_m = format!("{}_eb", rb);
         let eb_size = cap * 8;
-        writeln!(out, "{}{} = call i8* @malloc(i64 {})", indent, eb_m, eb_size).ok();
+        writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, eb_m, eb_size).ok();
         let ebc = format!("{}_ebc", rb);
-        writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, ebc, eb_m).ok();
+        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, ebc, eb_m).ok();
 
         // Struct slot 0: data_ptr = ptrtoint(element_buffer)
         let dp = format!("{}_dp", rb);
-        writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp, ebc).ok();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dp, ebc).ok();
         let dg = format!("{}_dg", rb);
-        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, dg, rbc).ok();
-        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp, dg).ok();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, dg, rbc).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, dg).ok();
 
         // Struct slot 1: head = 0
         let hg = format!("{}_hg", rb);
-        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, hg, rbc).ok();
-        writeln!(out, "{}store i64 0, i64* {}, align 8", indent, hg).ok();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, hg, rbc).ok();
+        writeln!(out, "{}store i64 0, ptr {}, align 8", indent, hg).ok();
 
         // Struct slot 2: tail = n
         let tg = format!("{}_tg", rb);
-        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, tg, rbc).ok();
-        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, tg).ok();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, tg, rbc).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, n, tg).ok();
 
         // Struct slot 3: mask = cap - 1
         let mg = format!("{}_mg", rb);
-        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 3", indent, mg, rbc).ok();
-        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, mask, mg).ok();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 3", indent, mg, rbc).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, mask, mg).ok();
 
         // Store each element into buffer slots 0..n-1
         for (i, item) in items.iter().enumerate() {
             let val = self.emit_expr(out, item, indent);
             let boxed = self.adapt_to_i64(out, indent, &val);
             let ep = format!("{}_e{}", rb, i);
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, ebc, i).ok();
-            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, boxed, ep).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, ebc, i).ok();
+            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, boxed, ep).ok();
         }
 
         // Store handle = ptrtoint(struct) into state field
         let handle = format!("{}_h", rb);
-        writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, handle, rbc).ok();
-        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, handle, state_gep).ok();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, handle, rbc).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, handle, state_gep).ok();
 
         // 2026-07-02: If this RingBuffer has inline fields (registered by
         // build_field_index), also store data_ptr/head/tail/mask directly into
@@ -601,19 +601,19 @@ impl LlvmBackend {
             let data_gep = format!("{}_idg", rb);
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                 indent, data_gep, inline.data_idx).ok();
-            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp, data_gep).ok();
+            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, data_gep).ok();
             let head_gep = format!("{}_ihg", rb);
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                 indent, head_gep, inline.head_idx).ok();
-            writeln!(out, "{}store i64 0, i64* {}, align 8", indent, head_gep).ok();
+            writeln!(out, "{}store i64 0, ptr {}, align 8", indent, head_gep).ok();
             let tail_gep = format!("{}_itg", rb);
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                 indent, tail_gep, inline.tail_idx).ok();
-            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, tail_gep).ok();
+            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, n, tail_gep).ok();
             let mask_gep = format!("{}_img", rb);
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                 indent, mask_gep, inline.mask_idx).ok();
-            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, mask, mask_gep).ok();
+            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, mask, mask_gep).ok();
         }
     }
 
@@ -635,20 +635,20 @@ impl LlvmBackend {
                 // verifier errors if they cross adapt_to_i64 before DCE runs.
         match init_clone {
             Some(Expr::Integer(n)) => {
-                writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, n, gep, self.align_of("i64")).ok();
+                writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, n, gep, self.align_of("i64")).ok();
             }
             Some(Expr::Float(f)) => {
                 let h = float_to_llvm_hex(f);
                 let bits_reg = field_reg("b");
                 writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
+                writeln!(out, "{}store float {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
             }
             // 2026-06-29: Float64 initializer — bitcast i64 hex to double
             Some(Expr::Float64(f)) => {
                 let h = float64_to_llvm_hex(f);
                 let bits_reg = field_reg("b");
                 writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
-                writeln!(out, "{}store double {}, double* {}, align {}", indent, bits_reg, gep, self.align_of("double")).ok();
+                writeln!(out, "{}store double {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("double")).ok();
             }
             Some(Expr::Neg(ref inner)) => {
                 match inner.as_ref() {
@@ -656,40 +656,40 @@ impl LlvmBackend {
                         let h = float_to_llvm_hex(-*f);
                         let bits_reg = field_reg("b");
                         writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                        writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
+                        writeln!(out, "{}store float {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
                     }
                     // 2026-06-29: Negative Float64 initializer
                     Expr::Float64(f) => {
                         let h = float64_to_llvm_hex(-*f);
                         let bits_reg = field_reg("b");
                         writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
-                        writeln!(out, "{}store double {}, double* {}, align {}", indent, bits_reg, gep, self.align_of("double")).ok();
+                        writeln!(out, "{}store double {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("double")).ok();
                     }
                     Expr::Literal(lit) => {
                         if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                             let h = float_to_llvm_hex(-*f);
                             let bits_reg = field_reg("b");
                             writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                            writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
+                            writeln!(out, "{}store float {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
                         } else {
-                            writeln!(out, "{}store i64 0, i64* {}, align {}", indent, gep, self.align_of("i64")).ok();
+                            writeln!(out, "{}store i64 0, ptr {}, align {}", indent, gep, self.align_of("i64")).ok();
                         }
                     }
                     Expr::Integer(n) => {
-                        writeln!(out, "{}store i64 -{}, i64* {}, align {}", indent, n, gep, self.align_of("i64")).ok();
+                        writeln!(out, "{}store i64 -{}, ptr {}, align {}", indent, n, gep, self.align_of("i64")).ok();
                     }
                     _ => {
-                        writeln!(out, "{}store i64 0, i64* {}, align {}", indent, gep, self.align_of("i64")).ok();
+                        writeln!(out, "{}store i64 0, ptr {}, align {}", indent, gep, self.align_of("i64")).ok();
                     }
                 }
             }
             Some(Expr::Bool(b)) => {
                 let v = if b { "1" } else { "0" };
-                writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, v, gep, self.align_of("i8")).ok();
+                writeln!(out, "{}store i8 {}, ptr {}, align {}", indent, v, gep, self.align_of("i8")).ok();
             }
             Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
                 // 2026-06-17: Store string constant pointer for LiteralExpr::String.
-                // The string is stored as a bitcast of @str.N to i8*, matching
+                // The string is stored as a bitcast of @str.N to ptr, matching
                 // what Expr::String emits in emit_expr.rs:32.
                 let s = match lit.as_ref() {
                     crate::features::literal::LiteralExpr::String(s) => s,
@@ -698,53 +698,53 @@ impl LlvmBackend {
                 let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
-                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
+                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
                 if tag_strings {
                     // Tag with bit 0 = 1 to mark as static (not heap-allocated)
                     let tag_p = field_reg("t");
-                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tag_p, str_p).ok();
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, tag_p, str_p).ok();
                     let tag_o = field_reg("o");
                     writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
                     let tag_b = field_reg("b");
-                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, tag_b, tag_o).ok();
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, tag_b, tag_o).ok();
+                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
                 } else {
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
+                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
                 }
             }
             Some(Expr::String(s)) => {
                 // 2026-06-17: Store actual string constant pointer, not null.
-                // The string is stored as a bitcast of @str.N to i8*.
+                // The string is stored as a bitcast of @str.N to ptr.
                 let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
-                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
+                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
                 if tag_strings {
                     // Tag with bit 0 = 1 to mark as static (not heap-allocated)
                     let tag_p = field_reg("t");
-                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tag_p, str_p).ok();
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, tag_p, str_p).ok();
                     let tag_o = field_reg("o");
                     writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
                     let tag_b = field_reg("b");
-                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, tag_b, tag_o).ok();
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, tag_b, tag_o).ok();
+                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
                 } else {
                     // 2026-06-29: No tagging for @init_state path — the init_state
                     // function runs at first field access, before heap is live.
                     // String constants in init_state are stored as raw untagged i8*.
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
+                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
                 }
             }
             Some(Expr::Char(c)) => {
                 let v = c as i32;
-                writeln!(out, "{}store i32 {}, i32* {}, align {}", indent, v, gep, self.align_of("i32")).ok();
+                writeln!(out, "{}store i32 {}, ptr {}, align {}", indent, v, gep, self.align_of("i32")).ok();
             }
             Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Float(_)) => {
                 if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                     let h = crate::backend::llvm::float_to_llvm_hex(*f);
                     let bits_reg = field_reg("b");
                     writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                    writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
+                    writeln!(out, "{}store float {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
                 }
             }
             Some(expr) => {
@@ -763,8 +763,8 @@ impl LlvmBackend {
                     // @str.0 address. A tagged pointer would shift all struct
                     // field accesses by 1 byte, causing garbage reads and crashes.
                     let str_p = field_reg("s");
-                    writeln!(out, "{}{} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to i8*", indent, str_p).ok();
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
+                    writeln!(out, "{}{} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to ptr", indent, str_p).ok();
+                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
                 } else {
                     writeln!(out, "{}store {} 0, {}* {}, align {}", indent, ty, ty, gep, self.align_of(&ty)).ok();
                 }
@@ -805,9 +805,9 @@ impl LlvmBackend {
         };
         for (addr, expr) in mmio_inits {
             let p = format!("%mio{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "  {} = inttoptr i64 {} to i64*", p, addr).ok();
+            writeln!(out, "  {} = inttoptr i64 {} to ptr", p, addr).ok();
             let val_reg = self.emit_expr(out, &expr, "  ");
-            writeln!(out, "  store volatile i64 {}, i64* {}, align 1", val_reg, p).ok();
+            writeln!(out, "  store volatile i64 {}, ptr {}, align 1", val_reg, p).ok();
         }
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
@@ -858,11 +858,11 @@ impl LlvmBackend {
         for (_field_name, targets) in &self.ctx.cache_slots {
             for (_target_name, &(cache_idx, valid_idx)) in targets {
                 let cp = format!("%icp_{}", cache_idx);
-                writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
-                writeln!(out, "{}store i64 0, i64* {}, align {}", indent, cp, self.align_of("i64")).ok();
+                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, cp, state_ptr, cache_idx).ok();
+                writeln!(out, "{}store i64 0, ptr {}, align {}", indent, cp, self.align_of("i64")).ok();
                 let vp = format!("%ivp_{}", valid_idx);
-                writeln!(out, "{}{} = getelementptr inbounds %State, %State* {}, i32 0, i32 {}", indent, vp, state_ptr, valid_idx).ok();
-                writeln!(out, "{}store i8 0, i8* {}, align {}", indent, vp, self.align_of("i8")).ok();
+                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, vp, state_ptr, valid_idx).ok();
+                writeln!(out, "{}store i8 0, ptr {}, align {}", indent, vp, self.align_of("i8")).ok();
             }
         }
     }
@@ -895,9 +895,9 @@ impl LlvmBackend {
             "zext.i32.to.i64#" => {
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, result, raw).ok();
             }
-            // String/Data: ptrtoint i8* → i64 (native pointer to boxed integer)
+            // String/Data: ptrtoint ptr → i64 (native pointer to boxed integer)
             "ptrtoint#" => {
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, result, raw).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, result, raw).ok();
             }
             // Float: bitcast f32→i32 then zext i32→i64.
             // Also cache the native float register so ensure_float_reg can
@@ -1005,7 +1005,7 @@ impl LlvmBackend {
                     match t {
                         Type::Bool => { writeln!(out, "  {} = zext i8 {} to i64", conv, raw).ok(); }
                         Type::Char => { writeln!(out, "  {} = zext i32 {} to i64", conv, raw).ok(); }
-                        Type::String | Type::Data => { writeln!(out, "  {} = ptrtoint i8* {} to i64", conv, raw).ok(); }
+                        Type::String | Type::Data => { writeln!(out, "  {} = ptrtoint ptr {} to i64", conv, raw).ok(); }
                         Type::Float => {
                             let m = format!("%ai{}", i);
                             writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
@@ -1084,7 +1084,7 @@ impl LlvmBackend {
             writeln!(out, "}}").ok();
         }
     }
-    // 2026-06-13: Added %State* %state param — definitions can access global state.
+    // 2026-06-13: Added ptr %state param — definitions can access global state.
     // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).
 
     pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
@@ -1305,7 +1305,7 @@ impl LlvmBackend {
         writeln!(out, "  entry:").ok();
 
         writeln!(out, "  %result = alloca i64, align 8").ok();
-        writeln!(out, "  store i64 0, i64* %result, align 8").ok();
+        writeln!(out, "  store i64 0, ptr %result, align 8").ok();
 
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             let raw = format!("%arg{}", i);
@@ -1330,7 +1330,7 @@ impl LlvmBackend {
                     match t {
                         Type::Bool => { writeln!(out, "  {} = zext i8 {} to i64", ac, raw).ok(); }
                         Type::Char => { writeln!(out, "  {} = zext i32 {} to i64", ac, raw).ok(); }
-                        Type::String | Type::Data => { writeln!(out, "  {} = ptrtoint i8* {} to i64", ac, raw).ok(); }
+                        Type::String | Type::Data => { writeln!(out, "  {} = ptrtoint ptr {} to i64", ac, raw).ok(); }
                         Type::Float => {
                             let m = format!("%ai{}", i);
                             writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
@@ -1345,7 +1345,7 @@ impl LlvmBackend {
             }
             let slot = format!("%p{}_s", i);
             writeln!(out, "  {} = alloca i64, align 8", slot).ok();
-            writeln!(out, "  store i64 {}, i64* {}, align 8", conv, slot).ok();
+            writeln!(out, "  store i64 {}, ptr {}, align 8", conv, slot).ok();
             self.fun.param_slots.insert(n.clone(), slot);
         }
 
@@ -1356,7 +1356,7 @@ impl LlvmBackend {
             let slot = format!("%p{}_s", i);
             let loaded = format!("%p{}_l{}", i, self.fun.txn_counter);
             self.fun.txn_counter += 1;
-            writeln!(out, "  {} = load i64, i64* {}, align 8", loaded, slot).ok();
+            writeln!(out, "  {} = load i64, ptr {}, align 8", loaded, slot).ok();
             self.fun.let_bindings.insert(n.clone(), loaded);
             // loaded is i64 (boxed value from param slot). Store Type::Int
             // for boxed types so downstream doesn't treat them as native.
@@ -1406,7 +1406,7 @@ impl LlvmBackend {
         writeln!(out, "done:").ok();
         if has_return {
             let ret = format!("%ret{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "  {} = load i64, i64* %result, align 8", ret).ok();
+            writeln!(out, "  {} = load i64, ptr %result, align 8", ret).ok();
             writeln!(out, "  ret i64 {}", ret).ok();
         } else {
             writeln!(out, "  ret void").ok();
@@ -1490,13 +1490,13 @@ impl LlvmBackend {
     // WHY preconditions are extracted into separate @pre_* functions:
     //   The fast-path registry (try_projection_fast_path) and the main dispatch
     //   loop both need to check the same precondition before deciding whether to
-    //   fire a txn. Extracting it into @pre_*(%State*) avoids duplicating the
+    //   fire a txn. Extracting it into @pre_*(ptr) avoids duplicating the
     //   check IR across 7+ dispatch paths (folded, SSA, reactor, parallel, etc.).
     //   LLVM will inline @pre_* into its single caller (alwaysinline), so there
     //   is zero runtime cost — the extraction is purely an IR-size optimization
     //   during codegen, not a runtime abstraction.
     //
-    // WHY ptr noalias nocapture on %State*:
+    // WHY ptr noalias nocapture on ptr:
     //   noalias tells LLVM that no other pointer aliases %state during @pre_*'s
     //   execution — enables load/store reordering and redundant load elimination
     //   across the call boundary. nocapture means @pre_* does not store %state
@@ -1533,9 +1533,9 @@ impl LlvmBackend {
     }
 
     //
-    // WHY async bodies have their own function with noalias nocapture %State*:
+    // WHY async bodies have their own function with noalias nocapture ptr:
     //   Async dispatch spawns concurrent evaluation of multiple txns. Each async
-    //   task operates on the same %State* but with thread-level interleaving
+    //   task operates on the same ptr but with thread-level interleaving
     //   guarantees (barriers between reads and writes). Giving each async body
     //   its own LLVM function with noalias nocapture per-task allows ThreadSanitizer
     //   and LLVM's alias analysis to reason about independent regions within %State.
@@ -1600,7 +1600,7 @@ impl LlvmBackend {
     //   fused context. Filtering it avoids emitting unreachable IR that would
     //   confuse LLVM's control-flow analysis (specifically the structurizercfg pass).
     //
-    // WHY a single %State* is shared:
+    // WHY a single ptr is shared:
     //   A and B operate on the same %State struct. Creating separate %State allocas
     //   would require merging them after both bodies execute, which would need
     //   explicit memcpy — defeating the purpose of fusion by doubling memory
@@ -1659,7 +1659,7 @@ impl LlvmBackend {
     //   to the binary case — the only difference is that the composed variant
     //   takes a pre-built body slice (the fusion pass constructed the concatenated
     //   body) instead of stitching two txns at emit time. Both produce the same
-    //   straight-line IR and both share the %State* rationale above.
+    //   straight-line IR and both share the ptr rationale above.
     pub(super) fn emit_fused_composed(&mut self, out: &mut String, body: &[Statement], name: &str) {
         let fused_attr = self.slp_attr(name, "#0");
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
@@ -1839,7 +1839,7 @@ impl LlvmBackend {
         writeln!(out, "define dso_local i64 @__brief_init_state() local_unnamed_addr #0 {{").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
-        writeln!(out, "  %ptr = ptrtoint %State* %state to i64").ok();
+        writeln!(out, "  %ptr = ptrtoint ptr %state to i64").ok();
         writeln!(out, "  ret i64 %ptr").ok();
         writeln!(out, "}}").ok();
         // Also emit a __glue_release placeholder (no-op for arena-free bridge)
@@ -1873,7 +1873,7 @@ impl LlvmBackend {
         // Why a separate function instead of inlining in each dispatch path?
         // The LLVM backend has 7+ dispatch strategies (folded, SSA, reactor,
         // parallel, etc.). A single tick function avoids duplicating the cell
-        // evaluation logic across all of them. The function takes %State* so
+        // evaluation logic across all of them. The function takes ptr so
         // it reads/writes the same %State struct as the rest of the program,
         // using the cell$name$field prefixed slots registered in
         // build_field_index.
@@ -2054,7 +2054,7 @@ impl LlvmBackend {
             self.ctx.field_index_map = cs_imap.clone();
             self.ctx.field_types = cs_tys.clone();
         }
-        writeln!(out, "define i8* @cell_thread_{}(ptr %state) local_unnamed_addr #0 {{", cell_name).ok();
+        writeln!(out, "define ptr @cell_thread_{}(ptr %state) local_unnamed_addr #0 {{", cell_name).ok();
         writeln!(out, "  entry:").ok();
         self.fun.state_reg_name = "%state".to_string();
 

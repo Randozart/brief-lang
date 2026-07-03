@@ -50,10 +50,10 @@ pub fn emit_projection(
                 writeln!(out, "{}{} = add i64 0, 1", indent, v).ok();
             } else {
                 let hp = format!("%php{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
                 let lp = format!("%plp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
-                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, lp).ok();
             }
         }
         ProjectionTarget::Bytes => {
@@ -122,21 +122,21 @@ pub fn emit_projection(
         }
         ProjectionTarget::PtrBang => {
             let hp = format!("%pbhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
-            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, hp).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, hp).ok();
         }
         ProjectionTarget::Contains(expr) => {
             // Linear search over list elements
             let search_val = backend.emit_expr(out, expr, indent);
             let search_boxed = backend.adapt_to_i64(out, indent, &search_val);
             let hp = format!("%pchp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
             let lp = format!("%pclp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
             let len = format!("%pcln{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, len, lp).ok();
             let dp = format!("%pcdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp, hp).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, dp, hp).ok();
             // Emit a linear search loop
             let e_l = format!("pc_entry{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             let h_l = format!("pc_hdr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -156,8 +156,8 @@ pub fn emit_projection(
             writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, c_r, i_r, len).ok();
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, c_r, b_l, d_l).ok();
             writeln!(out, "{}{}:", indent, b_l).ok();
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, el_r, dp, i_r).ok();
-            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, eq_r, el_r).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, el_r, dp, i_r).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, eq_r, el_r).ok();
             writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, eq_r, eq_r, search_boxed).ok();
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, eq_r, f_l, h_l).ok();
             writeln!(out, "{}{} = add i64 {}, 1", indent, n_r, i_r).ok();
@@ -171,10 +171,10 @@ pub fn emit_projection(
         ProjectionTarget::Range => {
             // Return list length (same as Size) — Range = [0, len)
             let hp = format!("%prhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
             let lp = format!("%prlp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
-            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, lp).ok();
         }
         ProjectionTarget::Top => {
             writeln!(out, "{}{} = call i64 @__stack_top__(i64 {})", indent, v, src_val.name).ok();
@@ -192,11 +192,11 @@ pub fn emit_projection(
         }
         ProjectionTarget::IsEmpty => {
             let hp = format!("%ieh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
             let lp = format!("%iel{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
             let len = format!("%ien{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, len, lp).ok();
             writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, v, len).ok();
             writeln!(out, "{}{} = zext i1 {} to i64", indent, v, v).ok();
         }

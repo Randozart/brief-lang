@@ -131,14 +131,14 @@ pub fn emit_rest_expr(
                 let list_val = backend.emit_expr(out, list, indent);
                 let idx_val = backend.emit_expr(out, index, indent);
                 let hp = format!("%xhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_val.name).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_val.name).ok();
                 let dp = format!("%xdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                 let de = format!("%xde{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
                 let ep = format!("%xep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, idx_val.name).ok();
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, ep).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, de, idx_val.name).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, v, ep).ok();
                 // 2026-06-27: propagate element type from List<T> so downstream
                 // FieldAccess can resolve struct fields (e.g., rules[i].slot_count).
                 // The list_val.ty may be transformed to Ptr by the backend, so we
@@ -174,13 +174,13 @@ pub fn emit_rest_expr(
                 for (i, (fname, fval)) in fields.iter().enumerate() {
                     let fv = backend.emit_expr(out, fval, indent);
                     let fp = format!("%sfp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, ai, i as i64).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, fp, ai, i as i64).ok();
                      let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float || fv.ty == Type::String {
                          backend.adapt_to_i64(out, indent, &fv)
                      } else { fv.name.clone() };
                      writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
                  }
-                 writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                 writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
                  return TypedRegister { name: v.to_string(), ty: Type::Custom(name.clone()) };
              }
              // ── ObjectLiteral ───────────────────────────────────
@@ -191,13 +191,13 @@ pub fn emit_rest_expr(
                 for (i, (fname, fval)) in fields.iter().enumerate() {
                     let fv = backend.emit_expr(out, fval, indent);
                     let fp = format!("%ofp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, ai, i as i64).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, fp, ai, i as i64).ok();
                     let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float || fv.ty == Type::String {
                         backend.adapt_to_i64(out, indent, &fv)
                     } else { fv.name.clone() };
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
                 }
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
                 // 2026-06-30: BUG FIX — missing return statement since initial Phase 6
                 // extraction. ObjectLiteral produces a boxed i64, same as StructInstance,
                 // but has no named type — return Type::Int.
@@ -207,7 +207,7 @@ pub fn emit_rest_expr(
             Expr::FieldAccess(obj, field) => {
                 let obj_val = backend.emit_expr(out, obj, indent);
                 let hp = format!("%fahp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, obj_val.name).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, obj_val.name).ok();
                 let mut found_offset = false;
                 let mut offset = 0i64;
                 if let Expr::Identifier(name) = obj.as_ref() {
@@ -238,8 +238,8 @@ pub fn emit_rest_expr(
                 }
                 if found_offset {
                     let fp = format!("%fafp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, fp, hp, offset).ok();
-                    writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, fp).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, fp, hp, offset).ok();
+                    writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, fp).ok();
                     // 2026-06-17: Return Float type for float fields so downstream
                     // code (emit_binop) correctly identifies them. String/Data fields
                     // remain Type::Int (stored boxed as i64 in struct).
@@ -284,9 +284,9 @@ pub fn emit_rest_expr(
             Expr::PatternMatch { value, variant, fields } => {
                 let src_val = backend.emit_expr(out, value, indent);
                 let hp = format!("%php{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
                 let disc = format!("%pdisc{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, disc, hp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, disc, hp).ok();
                 let expected = backend.ctx.variant_disc.get(variant)
                     .map(|(_, d, _)| *d as i64)
                     .unwrap_or(0);
@@ -323,37 +323,37 @@ pub fn emit_rest_expr(
                             // original source), unbox it to get the data pointer.
                             let hp = if reboxed {
                                 let rhp = format!("%mrhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, rhp, result_reg.name).ok();
+                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, rhp, result_reg.name).ok();
                                 rhp
                             } else {
                                 let ihp = format!("%mihp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, ihp, result_reg.name).ok();
+                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ihp, result_reg.name).ok();
                                 ihp
                             };
                             let dp = format!("%mdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                             let de = format!("%mde{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
                             let cv = backend.emit_expr(out, idx_expr, indent);
                             let ep = format!("%mep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, cv.name).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, de, cv.name).ok();
                             let lv = format!("%mlv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, lv, ep).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, lv, ep).ok();
                             result_reg = TypedRegister { name: lv, ty: Type::Int };
                             reboxed = false;
                         }
                         BracketOp::Coord(SliceCoordinate::Range { start, end }) => {
                             // Extract sub-range [start, end) into a new list
                             let hp = format!("%mrhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, result_reg.name).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, result_reg.name).ok();
                             let dp = format!("%mrdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                             let de = format!("%mrde{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
                             let slp = format!("%mrlp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, slp, hp).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, slp, hp).ok();
                             let src_len = format!("%mrsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, src_len, slp).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, src_len, slp).ok();
                             // Start bound
                             let start_reg = start.as_ref().map(|s| backend.emit_expr(out, s, indent));
                             let end_reg = end.as_ref().map(|e| backend.emit_expr(out, e, indent));
@@ -376,7 +376,7 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}{} = mul i64 {}, 8", indent, rab, rcnt).ok();
                             let rrm = backend.emit_arena_alloc(out, indent, &rab);
                             let rai = format!("%mrai{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, rai, rrm).ok();
+                            writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, rai, rrm).ok();
                             // Copy loop
                             let r_entry = format!("mr_entry{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             let r_hdr = format!("mr_hdr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -396,28 +396,28 @@ pub fn emit_rest_expr(
                             let r_src = format!("%mrsrc{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = add i64 {}, {}", indent, r_src, lo, ri).ok();
                             let r_gep = format!("%mrgep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, r_gep, de, r_src).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, r_gep, de, r_src).ok();
                             let r_el = format!("%mrel{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, r_el, r_gep).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, r_el, r_gep).ok();
                             let r_dst = format!("%mrdst{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, r_dst, rai, ri).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, r_dst, rai, ri).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, r_el, r_dst).ok();
                             writeln!(out, "{}{} = add i64 {}, 1", indent, rn, ri).ok();
                             writeln!(out, "{}br label %{}", indent, r_hdr).ok();
                             writeln!(out, "{}{}:", indent, r_done).ok();
                             // Store header (data_ptr, length)
                             let r_dpp = format!("%mrdpp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, r_dpp, rai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, r_dpp, rai).ok();
                             let r_dpv = format!("%mrdpv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, r_dpv, r_dpp).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, r_dpv, r_dpp).ok();
                             let rs0 = format!("%mrs0{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, rs0, rai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, rs0, rai).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, r_dpv, rs0).ok();
                             let rs1 = format!("%mrs1{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, rs1, rai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, rs1, rai).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, rcnt, rs1).ok();
                             let rv = format!("%mrv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, rv, rai).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, rv, rai).ok();
                             result_reg = TypedRegister { name: rv, ty: Type::Int };
                             reboxed = true;
                         }
@@ -430,21 +430,21 @@ pub fn emit_rest_expr(
                             let sv = backend.emit_expr(out, stride_expr, indent);
                             // Unbox current list
                             let hp = format!("%mshp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, result_reg.name).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, result_reg.name).ok();
                             let dp = format!("%msdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                             let de = format!("%msde{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
                             let lp = format!("%mslp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
                             let len = format!("%mslen{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, len, lp).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, len, lp).ok();
                             // Allocate stride-filtered buffer
                             let sab = format!("%msab{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = mul i64 {}, 8", indent, sab, len).ok();
                             let srm = backend.emit_arena_alloc(out, indent, &sab);
                             let sai = format!("%msai{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, sai, srm).ok();
+                            writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, sai, srm).ok();
                             // Loop: j = 0; k = 0; while j < len { copy[j]; j += stride; k++ }
                             let s_entry = format!("ms_entry{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             let s_hdr = format!("ms_hdr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -465,11 +465,11 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, sc, s_body, s_done).ok();
                             writeln!(out, "{}{}:", indent, s_body).ok();
                             let s_gep = format!("%msgep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, s_gep, de, sj).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, s_gep, de, sj).ok();
                             let s_el = format!("%msel{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, s_el, s_gep).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, s_el, s_gep).ok();
                             let s_dst = format!("%msdst{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, s_dst, sai, sk).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, s_dst, sai, sk).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, s_el, s_dst).ok();
                             writeln!(out, "{}{} = add i64 {}, {}", indent, sn, sj, sv.name).ok();
                             writeln!(out, "{}{} = add i64 {}, 1", indent, snk, sk).ok();
@@ -477,38 +477,38 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}{}:", indent, s_done).ok();
                             // Store header
                             let s_dpp = format!("%msdpp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, s_dpp, sai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, s_dpp, sai).ok();
                             let s_dpv = format!("%msdpv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, s_dpv, s_dpp).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, s_dpv, s_dpp).ok();
                             let ss0 = format!("%mss0{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, ss0, sai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, ss0, sai).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, s_dpv, ss0).ok();
                             let ss1 = format!("%mss1{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ss1, sai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ss1, sai).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, sk, ss1).ok();
                             let sv_reg = format!("%msv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, sv_reg, sai).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, sv_reg, sai).ok();
                             result_reg = TypedRegister { name: sv_reg, ty: Type::Int };
                             reboxed = true;
                         }
                         BracketOp::Mask(mask_expr) => {
                             // Element-wise filter: evaluate mask for each element
                             let hp = format!("%mmhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, result_reg.name).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, result_reg.name).ok();
                             let dp = format!("%mmdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                             let de = format!("%mmde{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
                             let lp = format!("%mmlp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
                             let len = format!("%mmlen{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, len, lp).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, len, lp).ok();
                             // Allocate mask-filtered buffer (max size = len)
                             let mab = format!("%mmab{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = mul i64 {}, 8", indent, mab, len).ok();
                             let mrm = backend.emit_arena_alloc(out, indent, &mab);
                             let mai = format!("%mmai{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, mai, mrm).ok();
+                            writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, mai, mrm).ok();
                             // Loop: j = 0; k = 0; while j < len
                             let m_entry = format!("mm_entry{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             let m_hdr = format!("mm_hdr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -529,9 +529,9 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, mc, m_body, m_done).ok();
                             writeln!(out, "{}{}:", indent, m_body).ok();
                             let m_gep = format!("%mmgep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, m_gep, de, mj).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, m_gep, de, mj).ok();
                             let m_el = format!("%mmel{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, m_el, m_gep).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, m_el, m_gep).ok();
                             // Bind _ to element, evaluate mask
                             backend.fun.let_bindings.insert("_".to_string(), m_el.clone());
                             let mask_r = backend.emit_expr(out, mask_expr, indent);
@@ -541,7 +541,7 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, mask_b, m_store_l, m_skip_l).ok();
                             writeln!(out, "{}{}:", indent, m_store_l).ok();
                             let m_dst = format!("%mmdst{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, m_dst, mai, mk).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, m_dst, mai, mk).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_el, m_dst).ok();
                             writeln!(out, "{}{} = add i64 {}, 1", indent, mnk, mk).ok();
                             writeln!(out, "{}br label %{}", indent, m_skip_l).ok();
@@ -551,17 +551,17 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}{}:", indent, m_done).ok();
                             // Store header
                             let m_dpp = format!("%mmdpp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, m_dpp, mai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, m_dpp, mai).ok();
                             let m_dpv = format!("%mmdpv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, m_dpv, m_dpp).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, m_dpv, m_dpp).ok();
                             let ms0 = format!("%mms0{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, ms0, mai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, ms0, mai).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_dpv, ms0).ok();
                             let ms1 = format!("%mms1{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ms1, mai).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ms1, mai).ok();
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, mk, ms1).ok();
                             let mv_reg = format!("%mmv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, mv_reg, mai).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, mv_reg, mai).ok();
                             result_reg = TypedRegister { name: mv_reg, ty: Type::Int };
                             reboxed = true;
                         }
@@ -578,9 +578,9 @@ pub fn emit_rest_expr(
                 let saved_types = backend.fun.let_binding_types.clone();
                 let val = backend.emit_expr(out, value, indent);
                 let hp = format!("%mhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, val.name).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, val.name).ok();
                 let disc_reg = format!("%mdisc{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, disc_reg, hp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, disc_reg, hp).ok();
 
                 let mut variant_arms: Vec<(u64, &MatchArm)> = Vec::new();
                 let mut wildcard_arm: Option<&MatchArm> = None;
@@ -609,9 +609,9 @@ pub fn emit_rest_expr(
                         for (j, field) in fields.iter().enumerate() {
                             if let Pattern::Var(var_name) = field {
                                 let gep = format!("%mgep{}_{}", i, j);
-                                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, gep, hp, (j as i64) + 1).ok();
+                                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, hp, (j as i64) + 1).ok();
                                 let fv = format!("%mfv{}_{}", i, j);
-                                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, fv, gep).ok();
+                                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, fv, gep).ok();
                                 backend.fun.let_bindings.insert(var_name.clone(), fv);
                             }
                         }
@@ -650,15 +650,15 @@ pub fn emit_rest_expr(
                 }
                 // List: pointer-based list access
                 let hp = format!("%shp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src_val.name).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
                 let dp = format!("%sdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                 let de = format!("%sde{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
                 let src_len_reg = format!("%sln{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 let slp = format!("%slp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, slp, hp).ok();
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, src_len_reg, slp).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, slp, hp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, src_len_reg, slp).ok();
 
                 let start_reg = start.as_ref().map(|s| backend.emit_expr(out, s, indent));
                 let end_reg = end.as_ref().map(|e| backend.emit_expr(out, e, indent));
@@ -690,7 +690,7 @@ pub fn emit_rest_expr(
                 writeln!(out, "{}{} = mul i64 {}, 8", indent, ab, count_reg).ok();
                 let rm = backend.emit_arena_alloc(out, indent, &ab);
                 let ai = format!("%sai{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, ai, rm).ok();
+                writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, ai, rm).ok();
 
                 let entry_label = format!("s_entry{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 let header_label = format!("s_hdr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -728,28 +728,28 @@ pub fn emit_rest_expr(
                     }
                 }
                 let src_ep = format!("%ssep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, src_ep, de, src_idx).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, src_ep, de, src_idx).ok();
                 let elem = format!("%selem{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, elem, src_ep).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, elem, src_ep).ok();
                 // Store to dest[2 + i]
                 let dst_idx = format!("%sdi{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 2", indent, dst_idx, i_reg).ok();
                 let dst_ep = format!("%sdep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, dst_ep, ai, dst_idx).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, dst_ep, ai, dst_idx).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, elem, dst_ep).ok();
                 writeln!(out, "{}{} = add i64 {}, 1", indent, next_reg, i_reg).ok();
                 writeln!(out, "{}br label %{}", indent, header_label).ok();
                 writeln!(out, "{}{}:", indent, done_label).ok();
                 // Store data_ptr and length in the strided-result header
                 let dp_ptr = format!("%sdp2{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, ai).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, dp_ptr, ai).ok();
                 let dp_val = format!("%sdv2{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dp_val, dp_ptr).ok();
                 let s0 = format!("%ss0{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, ai).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, s0, ai).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, dp_val, s0).ok();
                 let s1 = format!("%ss1{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, ai).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, s1, ai).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, count_reg, s1).ok();
 
                 // ── Mask filter (second pass) ──
@@ -772,7 +772,7 @@ pub fn emit_rest_expr(
                     writeln!(out, "{}{} = mul i64 {}, 8", indent, m_ab, old_count).ok();
                     let m_rm = backend.emit_arena_alloc(out, indent, &m_ab);
                     let m_ai = format!("%smai{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, m_ai, m_rm).ok();
+                    writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, m_ai, m_rm).ok();
                     let zero_reg = format!("%smz{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = add i64 0, 0", indent, zero_reg).ok();
 
@@ -787,9 +787,9 @@ pub fn emit_rest_expr(
                     writeln!(out, "{}{}:", indent, m_body).ok();
                     // Load element from strided result
                     let m_gep = format!("%smgep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, m_gep, old_ai, m_j).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, m_gep, old_ai, m_j).ok();
                     let m_elem = format!("%smelem{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, m_elem, m_gep).ok();
+                    writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, m_elem, m_gep).ok();
                     // Bind _ to element, evaluate mask
                     backend.fun.let_bindings.insert("_".to_string(), m_elem.clone());
                     let mask_reg = backend.emit_expr(out, mask_expr, indent);
@@ -801,7 +801,7 @@ pub fn emit_rest_expr(
                     let m_next_label = format!("sm_next{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{}:", indent, m_store).ok();
                     let m_dst = format!("%smdst{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, m_dst, m_ai, m_k).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, m_dst, m_ai, m_k).ok();
                     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_elem, m_dst).ok();
                     writeln!(out, "{}{} = add i64 {}, 1", indent, m_next, m_k).ok();
                     writeln!(out, "{}br label %{}", indent, m_next_label).ok();
@@ -812,19 +812,19 @@ pub fn emit_rest_expr(
                     writeln!(out, "{}{}:", indent, m_done).ok();
                     // Store filtered header
                     let m_dp_ptr = format!("%smdp2{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, m_dp_ptr, m_ai).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, m_dp_ptr, m_ai).ok();
                     let m_dp_val = format!("%smdv2{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, m_dp_val, m_dp_ptr).ok();
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, m_dp_val, m_dp_ptr).ok();
                     let ms0 = format!("%sms0{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, ms0, m_ai).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, ms0, m_ai).ok();
                     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_dp_val, ms0).ok();
                     let ms1 = format!("%sms1{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ms1, m_ai).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ms1, m_ai).ok();
                     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, m_k, ms1).ok();
-                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, m_ai).ok();
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, m_ai).ok();
                     backend.fun.let_bindings = saved_bindings;
                 } else {
-                    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
                 }
                 // 2026-06-30: Explicit return for normal path (was fallthrough).
                 return TypedRegister { name: v.to_string(), ty: Type::Int };
@@ -833,10 +833,10 @@ pub fn emit_rest_expr(
             Expr::SubtypeProjection { source, .. } => {
                 let src = backend.emit_expr(out, source, indent);
                 let hp = format!("%shp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, src.name).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src.name).ok();
                 let slp = format!("%slp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, slp, hp).ok();
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, slp).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, slp, hp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, v, slp).ok();
                 return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             Expr::SubtypeProjectionExpr(e) => {
@@ -881,24 +881,24 @@ pub fn emit_rest_expr(
                 writeln!(out, "{}{} = add i64 0, {}", indent, map_alloc_size, (alloc_slots * 8 + 8)).ok();
                 let ai = backend.emit_arena_alloc(out, indent, &map_alloc_size);
                 let hp = format!("%mhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, ai).ok();
+                writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hp, ai).ok();
                 let base = format!("%mba{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, ai).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base, ai).ok();
                 let dp = format!("%mdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, dp, hp).ok();
                 let ml1 = format!("%mml1{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, ml1, hp).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ml1, hp).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, n, ml1).ok();
                 // Store values (keys are compile-time in the source map literal)
                 for (i, (_key, val)) in items.iter().enumerate() {
                     let kv = backend.emit_expr(out, val, indent);
                     let kvs = backend.adapt_to_i64(out, indent, &kv);
                     let ep = format!("%mep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
                     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, kvs, ep).ok();
                 }
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ai).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
                 return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             Expr::SetLiteral(items) => {
@@ -907,23 +907,23 @@ pub fn emit_rest_expr(
                 writeln!(out, "{}{} = add i64 0, {}", indent, set_alloc_size, (n + 2) * 8 + 8).ok();
                 let ai = backend.emit_arena_alloc(out, indent, &set_alloc_size);
                 let hp = format!("%shp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, hp, ai).ok();
+                writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hp, ai).ok();
                 let base = format!("%sba{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, ai).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base, ai).ok();
                 let dp = format!("%sdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, dp, hp).ok();
                 let sl1 = format!("%ssl1{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, sl1, hp).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, sl1, hp).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, n, sl1).ok();
                 for (i, item) in items.iter().enumerate() {
                     let iv = backend.emit_expr(out, item, indent);
                     let ivs = backend.adapt_to_i64(out, indent, &iv);
                     let ep = format!("%sep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
                     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, ivs, ep).ok();
                 }
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ai).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
                 return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             // Why free+malloc+memcpy instead of realloc: Brief collections have
@@ -1013,7 +1013,7 @@ pub fn emit_rest_expr(
                                 }
                                 "i8*" => {
                                     let t = format!("%cstp_{}_{}", &callee_name, &param_name);
-                                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, t, adapted).ok();
+                                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, t, adapted).ok();
                                     t
                                 }
                                 _ => adapted,
@@ -1111,7 +1111,7 @@ pub fn emit_rest_expr(
                         if ret_ty == Type::String {
                             // 2026-06-28: Use txn_counter to prevent %t{N} collision
                             let boxed = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, boxed, v).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, boxed, v).ok();
                             return TypedRegister { name: boxed, ty: Type::Int };
                         }
                         return TypedRegister { name: v.to_string(), ty: ret_ty };
@@ -1149,7 +1149,7 @@ pub fn emit_rest_expr(
                             let gep = format!("%wgp_{}_{}", wid, idx);
                             let ld = format!("%wld_{}_{}", wid, idx);
                             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, gep).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ld, gep).ok();
                             ld
                         } else {
                             // Identifier not in state — try emit_expr, fallback to 0
@@ -1189,7 +1189,7 @@ pub fn emit_rest_expr(
 
                 // Done: load result
                 writeln!(out, "{}  {}:", indent, l_done).ok();
-                writeln!(out, "{}    {} = load i64, i64* {}, align 8", indent, v_result, v_save).ok();
+                writeln!(out, "{}    {} = load i64, ptr {}, align 8", indent, v_result, v_save).ok();
                 return TypedRegister { name: v_result.clone(), ty: Type::Int };
             }
             _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }

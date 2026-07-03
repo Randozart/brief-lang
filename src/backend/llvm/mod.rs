@@ -441,7 +441,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// LLVM IR backend — the definitive compiler from Brief AST to `.ll`.
 ///
 /// Every lesson from phases 0–5.5 integrated into one coherent pass:
-/// - \`noalias nocapture\` on all \`%State*\` — LLVM sees no pointer aliasing
+/// - \`noalias nocapture\` on all \`ptr\` — LLVM sees no pointer aliasing
 /// - i64-centric expression system — strings/lists become `i64` via `ptrtoint`/`inttoptr`
 /// - Bool (i8) fields trunc on store, zext on load; floats via bitcast+zext; char via zext
 /// - Unique guard labels, `returns_i64` flag, fused txn terminator filtering
@@ -518,7 +518,7 @@ pub(super) fn tbaa_node_for_type(ty: &Type, universe: &crate::type_universe::Typ
         .map(|i| i as i32 + 1)
         .unwrap_or(1)
 }
-    /// distinct LLVM storage types (i64, i8, i32, i8*, float). The root "Brief"
+    /// distinct LLVM storage types (i64, i8, i32, ptr, float). The root "Brief"
     /// node groups them under a single type tree so that LLVM's TBAA can
     /// distinguish Int stores from Float stores even though both may be i64
     /// at the IR level. Without TBAA, all i64 accesses within %State are
@@ -985,21 +985,21 @@ impl LlvmBackend {
         writeln!(out, "{}{} = mul i64 {}, 8", indent, alloc_sz, slot_cnt).ok();
         let buf_reg = self.emit_arena_alloc(out, indent, &alloc_sz);
         let buf_i64 = format!("%pbp_{}", c);
-        writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, buf_i64, buf_reg).ok();
+        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, buf_i64, buf_reg).ok();
         let base = format!("%pba_{}", c);
-        writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, base, buf_reg).ok();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base, buf_reg).ok();
         let data_ptr = format!("%pdv_{}", c);
         writeln!(out, "{}{} = add i64 {}, 16", indent, data_ptr, base).ok();
         let s0 = format!("%ps0_{}", c);
-        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, buf_i64).ok();
-        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, data_ptr, s0).ok();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, s0, buf_i64).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, data_ptr, s0).ok();
         let s1 = format!("%ps1_{}", c);
-        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, buf_i64).ok();
-        writeln!(out, "{}store i64 0, i64* {}, align 8, !tbaa !1", indent, s1).ok();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, s1, buf_i64).ok();
+        writeln!(out, "{}store i64 0, ptr {}, align 8, !tbaa !1", indent, s1).ok();
         let ap = format!("%pap_{}", c);
         writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
         let tn = crate::backend::llvm::tbaa_node(&self.ctx.field_types[idx]);
-        writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
         self.fun.field_prealloc_info.insert(field_name.to_string(), (cap, buf_i64));
     }
 
@@ -1053,11 +1053,11 @@ impl LlvmBackend {
             writeln!(out, "{}br label %{}", indent, check_l).ok();
             writeln!(out, "{}{}:", indent, check_l).ok();
             let cur = format!("%aacur{}", c);
-            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, cur, ptr).ok();
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, cur, ptr).ok();
             let new_ptr = format!("%aanew{}", c);
-            writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, new_ptr, cur, size_reg).ok();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_ptr, cur, size_reg).ok();
             let end_val = format!("%aaend{}", c);
-            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, end_val, end).ok();
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, end_val, end).ok();
             let ok = format!("%aaok{}", c);
             writeln!(out, "{}{} = icmp ule i8* {}, {}", indent, ok, new_ptr, end_val).ok();
             let grow_l = format!("aagrow_{}", c);
@@ -1065,18 +1065,18 @@ impl LlvmBackend {
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, ok, ok_l, grow_l).ok();
             writeln!(out, "{}{}:", indent, grow_l).ok();
             let old_base = format!("%aaob{}", c);
-            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, old_base, base).ok();
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, old_base, base).ok();
             let grow_sz = format!("%aags{}", c);
             writeln!(out, "{}{} = shl i64 {}, 1", indent, grow_sz, size_reg).ok();
             let min_sz = format!("%aams{}", c);
             writeln!(out, "{}{} = add i64 {}, 65536", indent, min_sz, grow_sz).ok();
             let new_base = format!("%aanb{}", c);
-            writeln!(out, "{}{} = call i8* @realloc(i8* {}, i64 {})", indent, new_base, old_base, min_sz).ok();
-            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_base, ptr).ok();
-            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_base, base).ok();
+            writeln!(out, "{}{} = call ptr @realloc(i8* {}, i64 {})", indent, new_base, old_base, min_sz).ok();
+            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, new_base, ptr).ok();
+            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, new_base, base).ok();
             let new_end = format!("%aane{}", c);
-            writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, new_end, new_base, min_sz).ok();
-            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_end, end).ok();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_end, new_base, min_sz).ok();
+            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, new_end, end).ok();
             writeln!(out, "{}br label %{}", indent, ok_l).ok();
             writeln!(out, "{}{}:", indent, ok_l).ok();
             let phi = format!("%aaphi{}", c);
@@ -1088,14 +1088,14 @@ impl LlvmBackend {
             // realloc frees the old buffer but the bump update still points
             // into freed memory — catastrophic corruption on next allocation.
             let new_bump = format!("%aanbp{}", c);
-            writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 {}", indent, new_bump, phi, size_reg).ok();
-            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, new_bump, ptr).ok();
+            writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, new_bump, phi, size_reg).ok();
+            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, new_bump, ptr).ok();
             phi
         } else {
             let c = self.fun.arena_counter;
             self.fun.arena_counter += 1;
             let r = format!("%aam{}", c);
-            writeln!(out, "{}{} = call noalias i8* @malloc(i64 {})", indent, r, size_reg).ok();
+            writeln!(out, "{}{} = call noalias ptr @malloc(i64 {})", indent, r, size_reg).ok();
             r
         }
     }
@@ -1112,12 +1112,12 @@ impl LlvmBackend {
         writeln!(out, "{}{} = alloca i8*, align 8", indent, end).ok();
         writeln!(out, "{}{} = alloca i8*, align 8", indent, base).ok();
         let init = format!("%arinit{}", c);
-        writeln!(out, "{}{} = call i8* @malloc(i64 65536)", indent, init).ok();
-        writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, init, ptr).ok();
-        writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, init, base).ok();
+        writeln!(out, "{}{} = call ptr @malloc(i64 65536)", indent, init).ok();
+        writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, init, ptr).ok();
+        writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, init, base).ok();
         let init_end = format!("%arieu{}", c);
-        writeln!(out, "{}{} = getelementptr i8, i8* {}, i64 65536", indent, init_end, init).ok();
-        writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, init_end, end).ok();
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 65536", indent, init_end, init).ok();
+        writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, init_end, end).ok();
         self.fun.arena_slots = Some((ptr, end, base));
     }
 
@@ -1129,8 +1129,8 @@ impl LlvmBackend {
         if let Some((ref ptr, _end, ref base)) = self.fun.arena_slots.clone() {
             let r = format!("%arr{}", self.fun.arena_counter);
             self.fun.arena_counter += 1;
-            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, r, base).ok();
-            writeln!(out, "{}store i8* {}, i8** {}, align 8", indent, r, ptr).ok();
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, r, base).ok();
+            writeln!(out, "{}store i8* {}, ptr {}, align 8", indent, r, ptr).ok();
             // Slots stay alive (arena is not freed). Memory is reused on next tick.
         }
     }
@@ -1142,8 +1142,8 @@ impl LlvmBackend {
         if let Some((_ptr, _end, ref base)) = self.fun.arena_slots.clone() {
             let f = format!("%arf{}", self.fun.arena_counter);
             self.fun.arena_counter += 1;
-            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, f, base).ok();
-            writeln!(out, "{}call void @free(i8* {})", indent, f).ok();
+            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, f, base).ok();
+            writeln!(out, "{}call void @free(ptr {})", indent, f).ok();
             self.fun.arena_slots = None;
         }
     }
@@ -1636,18 +1636,18 @@ self.emit_declares(&mut out);
 
         // Declare epoll + libc functions for the trg reactive event loop
         writeln!(out, "declare i32 @epoll_create1(i32) #1").ok();
-        writeln!(out, "declare i32 @epoll_ctl(i32, i32, i32, i8*) #1").ok();
-        writeln!(out, "declare i32 @epoll_wait(i32, i8*, i32, i32) #1").ok();
-        writeln!(out, "declare i64 @read(i32, i8*, i64) #1").ok();
+        writeln!(out, "declare i32 @epoll_ctl(i32, i32, i32, ptr) #1").ok();
+        writeln!(out, "declare i32 @epoll_wait(i32, ptr, i32, i32) #1").ok();
+        writeln!(out, "declare i64 @read(i32, ptr, i64) #1").ok();
         writeln!(out, "declare i32 @fcntl(i32, i32, i32) #1").ok();
         writeln!(out, "declare i32 @timerfd_create(i32, i32) #1").ok();
-        writeln!(out, "declare i32 @timerfd_settime(i32, i32, i8*, i8*) #1").ok();
-        writeln!(out, "declare i32 @signalfd(i32, i8*, i32) #1").ok();
+        writeln!(out, "declare i32 @timerfd_settime(i32, i32, ptr, ptr) #1").ok();
+        writeln!(out, "declare i32 @signalfd(i32, ptr, i32) #1").ok();
         writeln!(out, "declare i32 @sigemptyset(i8*) #1").ok();
         writeln!(out, "declare i32 @sigaddset(i8*, i32) #1").ok();
-        writeln!(out, "declare i32 @sigprocmask(i32, i8*, i8*) #1").ok();
+        writeln!(out, "declare i32 @sigprocmask(i32, ptr, ptr) #1").ok();
         // The step() function is defined in the same module — no declare needed.
-        // writeln!(out, "declare void @step(%State*, i64) #1").ok();
+        // writeln!(out, "declare void @step(ptr, i64) #1").ok();
 
         // Declare cast helper functions
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
@@ -1893,7 +1893,7 @@ self.emit_declares(&mut out);
             self.emit_transaction(&mut out, txn, name, &mut range_meta);
             writeln!(out).ok();
         }
-        // Precondition functions (skip callable txns — no %State*)
+        // Precondition functions (skip callable txns — no ptr)
         for (name, txn) in &txns {
             let has_output = txn.output_type.is_some() || !txn.outputs.is_empty();
             if !txn.is_reactive && (!txn.parameters.is_empty() || has_output) { continue; }

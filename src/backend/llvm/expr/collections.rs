@@ -35,26 +35,26 @@ fn emit_list_or_tuple_body(backend: &mut LlvmBackend, out: &mut String, v: &str,
     let n = items.len() as i64;
     let total = n + 2;
     let ai = format!("%{}ai{}", prefix, backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = call i8* @malloc(i64 {})", indent, ai, total * 8).ok();
+    writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, ai, total * 8).ok();
     let cast = format!("%{}ac{}", prefix, backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, cast, ai).ok();
+    writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, cast, ai).ok();
     let dp_ptr = format!("%{}dp{}", prefix, backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, cast).ok();
+    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, dp_ptr, cast).ok();
     let dp_val = format!("%{}dv{}", prefix, backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dp_val, dp_ptr).ok();
     let s0 = format!("%{}s0{}", prefix, backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, cast).ok();
-    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp_val, s0).ok();
+    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, s0, cast).ok();
+    writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp_val, s0).ok();
     let s1 = format!("%{}s1{}", prefix, backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, cast).ok();
-    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, n, s1).ok();
+    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, s1, cast).ok();
+    writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, n, s1).ok();
     for (i, item) in items.iter().enumerate() {
         let iv = backend.emit_expr(out, item, indent);
         let adapted = backend.adapt_to_i64(out, indent, &iv);
         let ep = format!("%{}ep{}", prefix, backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, cast, (i as i64) + 2).ok();
-        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, adapted, ep).ok();
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, cast, (i as i64) + 2).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, adapted, ep).ok();
     }
-    writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, cast).ok();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, cast).ok();
     TypedRegister { name: v.to_string(), ty: Type::Int }
 }

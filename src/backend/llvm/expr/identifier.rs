@@ -80,7 +80,7 @@ pub fn emit_identifier(
             if ft == "i8*" || ft == "ptr" {
                 // old_reg is i8* from extractvalue on state (state stores
                 // native i8* for String fields, not boxed i64). ptrtoint to box.
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, old_reg).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, old_reg).ok();
                 return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
         }
@@ -104,8 +104,8 @@ pub fn emit_identifier(
     if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
         let p = format!("%gep_exit_{}", backend.fun.txn_counter);
         backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
-        writeln!(out, "{}{} = load volatile i64, i64* {}, align 1", indent, v, p).ok();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+        writeln!(out, "{}{} = load volatile i64, ptr {}, align 1", indent, v, p).ok();
     } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
             let ll_ty = &backend.ctx.field_types[idx];
             let brief_ty = backend.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::Int);
@@ -137,7 +137,7 @@ pub fn emit_identifier(
                     return TypedRegister { name: v.to_string(), ty: Type::Char };
                 }
                 Type::String | Type::Data => {
-                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ev).ok();
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ev).ok();
                     return TypedRegister { name: v.to_string(), ty: Type::Int };
                 }
                 // 2026-06-29: Fixed-width integer types — retain Brief type
@@ -201,9 +201,9 @@ pub fn emit_identifier(
                     writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, sge, idx).ok();
                     let ev = format!("%ev_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     match ll_ty.as_str() {
-                        "i8" => { writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, ev, sge).ok(); }
-                        "i32" => { writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, ev, sge).ok(); }
-                        _ => { writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ev, sge).ok(); }
+                        "i8" => { writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, ev, sge).ok(); }
+                        "i32" => { writeln!(out, "{}{} = load i32, ptr {}, align 4", indent, ev, sge).ok(); }
+                        _ => { writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ev, sge).ok(); }
                     }
                     backend.emit_trg_load_finish(out, indent, &v, ev, &t.ty);
                     return TypedRegister { name: v.to_string(), ty: t.ty.clone() };
@@ -220,16 +220,16 @@ pub fn emit_identifier(
                     writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, sge, idx).ok();
                     let ev = format!("%ev_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     match ll_ty.as_str() {
-                        "i8" => { writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, ev, sge).ok(); }
-                        "i32" => { writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, ev, sge).ok(); }
-                        _ => { writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ev, sge).ok(); }
+                        "i8" => { writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, ev, sge).ok(); }
+                        "i32" => { writeln!(out, "{}{} = load i32, ptr {}, align 4", indent, ev, sge).ok(); }
+                        _ => { writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ev, sge).ok(); }
                     }
                     // 2026-06-28: String/Data types are boxed as i64 in %State.
                     // emit_trg_load_finish expects i8* for String; convert here.
                     if matches!(t.ty, Type::String | Type::Data) {
                         let ip = format!("%tip_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ip, ev).ok();
-                        writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ip).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, ev).ok();
+                        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ip).ok();
                     } else {
                         backend.emit_trg_load_finish(out, indent, &v, ev, &t.ty);
                     }
@@ -265,7 +265,7 @@ pub fn emit_identifier(
             _ => {
                 // 2026-06-29: Handle Float64 constant loading (load as double, return native)
                 if *ty == Type::Float64 {
-                    writeln!(out, "{}{} = load double, double* @{}, align 8", indent, v, name).ok();
+                    writeln!(out, "{}{} = load double, ptr @{}, align 8", indent, v, name).ok();
                     backend.fun.reg_float_cache.insert(v.to_string(), v.to_string());
                     return TypedRegister { name: v.to_string(), ty: Type::Float64 };
                 }
@@ -297,8 +297,8 @@ pub fn emit_identifier(
         }
     } else if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
         let p = format!("%mio{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
-        writeln!(out, "{}{} = load volatile i64, i64* {}, align 1", indent, v, p).ok();
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+        writeln!(out, "{}{} = load volatile i64, ptr {}, align 1", indent, v, p).ok();
     } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
         let ty = &backend.ctx.field_types[idx];
         let p = format!("%fdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -306,31 +306,31 @@ pub fn emit_identifier(
         let rng = backend.ctx.field_to_meta_idx.get(name).map(|m| format!(", !range !{}", m)).unwrap_or_default();
         match ty {
             s if s == "i8" => {
-                writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, v, p, backend.align_of("i8")).ok();
+                writeln!(out, "{}{} = load i8, ptr {}, align {}", indent, v, p, backend.align_of("i8")).ok();
                 let tr = format!("%tr_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = trunc i8 {} to i1", indent, tr, v).ok();
                 return TypedRegister { name: tr, ty: Type::Bool };
             }
             s if s == "float" => {
-                writeln!(out, "{}{} = load float, float* {}, align 4", indent, v, p).ok();
+                writeln!(out, "{}{} = load float, ptr {}, align 4", indent, v, p).ok();
                 backend.fun.reg_float_cache.insert(v.to_string(), v.to_string());
                 return TypedRegister { name: v.to_string(), ty: Type::Float };
             }
             s if s == "double" => {
                 // 2026-06-29: Float64 field reads — load double, return Float64
-                writeln!(out, "{}{} = load double, double* {}, align 8", indent, v, p).ok();
+                writeln!(out, "{}{} = load double, ptr {}, align 8", indent, v, p).ok();
                 backend.fun.reg_float_cache.insert(v.to_string(), v.to_string());
                 return TypedRegister { name: v.to_string(), ty: Type::Float64 };
             }
             s if s == "i8*" => {
                 let ld = format!("%ild{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, ld, p).ok();
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, ld).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ld).ok();
                 return TypedRegister { name: v.to_string(), ty: Type::Int };
             }
             s if s == "i32" => {
                 let ld = format!("%il{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, ld, p).ok();
+                writeln!(out, "{}{} = load i32, ptr {}, align 4", indent, ld, p).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, ld).ok();
                 return TypedRegister { name: v.to_string(), ty: Type::Char };
             }

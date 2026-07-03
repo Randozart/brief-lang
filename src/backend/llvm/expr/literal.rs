@@ -79,14 +79,14 @@ pub fn emit_string(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &
     let si = backend.ctx.string_constants.iter().position(|x| x == s).unwrap_or(0);
     let g = format!("@str.{}", si);
     let bp = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, bp, s.len() + 1, g).ok();
+    writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", indent, bp, s.len() + 1, g).ok();
     // Tag static string pointers with bit 0 (=1) so concat can distinguish
     // them from heap-allocated strings and avoid freeing static data.
     let pi = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, pi, bp).ok();
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, pi, bp).ok();
     let ori = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = or i64 {}, 1", indent, ori, pi).ok();
-    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, v, ori).ok();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, ori).ok();
     TypedRegister { name: v.to_string(), ty: Type::String }
 }
 

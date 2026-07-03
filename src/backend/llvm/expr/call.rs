@@ -74,8 +74,8 @@ pub fn emit_call(
                     Type::String | Type::Data => {
                         let boxed = backend.adapt_to_i64(out, indent, &raw);
                         let p = format!("%fp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, boxed).ok();
-                        marshaled.push(format!("i8* {}", p));
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
+                        marshaled.push(format!("ptr {}", p));
                     }
                     _ => marshaled.push(format!("i64 {}", raw)),
                 }
@@ -107,10 +107,10 @@ pub fn emit_call(
                 (Type::String | Type::Data, _) => {
                     // Null pointer check for i8* returns
                     let is_null = format!("%pipe_null{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    // call_result is i64 (boxed ptr). Convert to i8* for null check.
+                    // call_result is i64 (boxed ptr). Convert to ptr for null check.
                     let ptr = format!("%pipe_ptr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, ptr, call_result).ok();
-                    writeln!(out, "{}{} = icmp eq i8* {}, null", indent, is_null, ptr).ok();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, call_result).ok();
+                    writeln!(out, "{}{} = icmp eq ptr {}, null", indent, is_null, ptr).ok();
                     // 2026-06-28: Use txn_counter to prevent %t{N} collision
                     let select_reg = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     let fbr = fallback_reg.as_ref().map(|r| r.name.as_str()).unwrap_or("null");
@@ -177,8 +177,8 @@ pub fn emit_call(
                         Type::String | Type::Data => {
                             let boxed = backend.adapt_to_i64(out, indent, &raw);
                             let p = format!("%cip{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, boxed).ok();
-                            a_strs.push(format!("i8* {}", p));
+                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
+                            a_strs.push(format!("ptr {}", p));
                         }
                         Type::Float => {
                             let fl = backend.ensure_float_reg(out, indent, &raw);
@@ -222,28 +222,28 @@ pub fn emit_call(
             // Arena handles this with bump alloc when in a loop context.
             let pm = backend.emit_arena_alloc(out, indent, &sz);
             let p = format!("%cop{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = bitcast i8* {} to i64*", indent, p, pm).ok();
+            writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, p, pm).ok();
             let disc_gep = format!("%cdg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, disc_gep, p).ok();
-            writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, disc_val, disc_gep).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, disc_gep, p).ok();
+            writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, disc_val, disc_gep).ok();
             for (ai, arg_reg) in a_strs.iter().enumerate() {
                 let pay_gep = format!("%cpg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 let parts: Vec<&str> = arg_reg.splitn(2, ' ').collect();
                 let rn = if parts.len() == 2 { parts[1] } else { arg_reg };
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, pay_gep, p, ai + 1).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, pay_gep, p, ai + 1).ok();
                 // 2026-06-17: Box float to i64 for enum storage
                 if parts.len() == 2 && (parts[0] == "float" || parts[0] == "float,") {
                     let bi = format!("%fbe{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, rn).ok();
                     let ze = format!("%fze{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, ze, pay_gep).ok();
+                    writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, ze, pay_gep).ok();
                 } else {
                     eprintln!("DBG_store: arg_reg={:?}, parts={:?}, rn={:?}", arg_reg, parts, rn);
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, rn, pay_gep).ok();
+                    writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, rn, pay_gep).ok();
                 }
             }
-            writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, p).ok();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, p).ok();
             return TypedRegister { name: v.to_string(), ty: Type::Int };
         } else {
             // 2026-06-13: Pass %state to defns/callable txns — functions need

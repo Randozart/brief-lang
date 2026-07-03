@@ -1017,7 +1017,7 @@ fn empty_program() -> Program {
     fn test_single_wake_trigger_metadata() {
         let program = make_wake_trg_program("sig", "__sigint_flag", Type::Bool, true);
         let output = LlvmBackend::new().generate(&program);
-        assert!(output.contains("@llvm.wake_triggers = constant [1 x i8*] [i8* @__sigint_flag]"),
+        assert!(output.contains("@llvm.wake_triggers = constant [1 x ptr] [ptr @__sigint_flag]"),
             "Single wake trigger → constant global with one symbol");
         assert!(output.contains("!llvm.wake_triggers = !{!6}"),
             "Expected wake trigger metadata to reference !6 (avoid TBAA !0..!5)");
@@ -1042,7 +1042,7 @@ fn empty_program() -> Program {
             span: None,
         }));
         let output = LlvmBackend::new().generate(&p1);
-        assert!(output.contains("[2 x i8*]"),
+        assert!(output.contains("[2 x ptr]"),
             "Multiple wake triggers → array size 2");
         assert!(output.contains("__sigint_flag"),
             "First symbol present");
@@ -1269,11 +1269,11 @@ fn empty_program() -> Program {
                 watchdog_defaults: (None, None),
         };
         let output = backend.generate(&program);
-        // The string literal "hello" should be stored as a bitcast of @str.0 to i8*,
+        // The string literal "hello" should be stored as a bitcast of @str.0 to ptr,
         // not as i8* null.
-        assert!(output.contains("bitcast <{ i64, i64, [6 x i8] }>* @str.0 to i8*"),
+        assert!(output.contains("bitcast <{ i64, i64, [6 x i8] }>* @str.0 to ptr"),
             "String state field should init with constant pointer, not null. Got: {}", output);
-        assert!(!output.contains("store i8* null, i8**"),
+        assert!(!output.contains("store ptr null, ptr"),
             "String state field should NOT be null. Got: {}", output);
     }
 
@@ -1677,7 +1677,7 @@ fn empty_program() -> Program {
             &[("count", 0), ("x", 0), ("y", 0)],
         );
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
-        assert!(output.contains("store i64 0, i64* %ip_0, align"),
+        assert!(output.contains("store i64 0, ptr %ip_0, align"),
             "Should init fields inline");
         assert!(!output.contains("switch i64"),
             "No enum dispatch for precomputed path");
@@ -2735,7 +2735,7 @@ let spec = crate::target_spec::TargetSpec {
             "StructInstance should load field value 10. Got: {}", output);
         assert!(output.contains("add i64 0, 20"),
             "StructInstance should load field value 20. Got: {}", output);
-        assert!(output.contains("ptrtoint i64*"),
+        assert!(output.contains("ptrtoint ptr"),
             "StructInstance should return ptrtoint. Got: {}", output);
     }
 
@@ -2764,7 +2764,7 @@ let spec = crate::target_spec::TargetSpec {
             },
         ];
         let output = backend.generate(&make_point_program(body));
-        assert!(output.contains("getelementptr i64, i64*"),
+        assert!(output.contains("getelementptr i64, ptr"),
             "FieldAccess should emit GEP. Got: {}", output);
     }
 
@@ -2860,7 +2860,7 @@ let spec = crate::target_spec::TargetSpec {
         let output = backend.generate(&program);
         assert!(output.contains("alloca i64, i64 2"),
             "ObjectLiteral should alloca for fields. Got: {}", output);
-        assert!(output.contains("ptrtoint i64*"),
+        assert!(output.contains("ptrtoint ptr"),
             "ObjectLiteral should return ptrtoint. Got: {}", output);
     }
 
@@ -3077,7 +3077,7 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         assert!(output.contains("switch i64"), "Match should emit switch. Got: {}", output);
-        assert!(output.contains("getelementptr i64, i64*"), "Field binding should GEP. Got: {}", output);
+        assert!(output.contains("getelementptr i64, ptr"), "Field binding should GEP. Got: {}", output);
     }
 
     #[test]
@@ -3139,10 +3139,10 @@ let spec = crate::target_spec::TargetSpec {
         let output = backend.generate(&program);
         // 2026-06-29: Non-empty lists use malloc (not alloca) — see docs/plans/2026-06-29-list-allocation-fix.md
         // 2-slot header means 4 slots: [data_ptr, len, elem0, elem1] = 32 bytes
-        assert!(output.contains("call i8* @malloc(i64 32)"), "2-elem list = 32 bytes (4 slots × 8). Got: {}", output);
-        assert!(output.contains("bitcast i8*"), "Should bitcast malloc result to i64*. Got: {}", output);
-        assert!(output.contains("store i64 2, i64*"), "Length should be 2. Got: {}", output);
-        assert!(output.contains("ptrtoint i64*"), "Should emit ptrtoint for data_ptr. Got: {}", output);
+        assert!(output.contains("call ptr @malloc(i64 32)"), "2-elem list = 32 bytes (4 slots × 8). Got: {}", output);
+        assert!(output.contains("bitcast ptr"), "Should bitcast malloc result to ptr. Got: {}", output);
+        assert!(output.contains("store i64 2, ptr"), "Length should be 2. Got: {}", output);
+        assert!(output.contains("ptrtoint ptr"), "Should emit ptrtoint for data_ptr. Got: {}", output);
     }
 
     #[test]
@@ -3182,7 +3182,7 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("@ll_empty_list"), "Empty list should reference global sentinel. Got: {}", output);
         assert!(!output.contains("alloca i64, i64 2"), "Empty list should NOT alloca 2 slots. Got: {}", output);
         // Arena init in main() always calls malloc(i64 65536); verify no small-list malloc
-        assert!(!output.contains("call i8* @malloc(i64 16"), "Empty list should NOT call 16-byte malloc. Got: {}", output);
+        assert!(!output.contains("call ptr @malloc(i64 16"), "Empty list should NOT call 16-byte malloc. Got: {}", output);
     }
 
     #[test]
@@ -3220,13 +3220,13 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         // 3 elements + 2 header slots = 5 slots × 8 = 40 bytes
-        assert!(output.contains("call i8* @malloc(i64 40)"), "3-elem list = 40 bytes (5 slots × 8). Got: {}", output);
-        assert!(output.contains("bitcast i8*"), "Should bitcast malloc result to i64*. Got: {}", output);
+        assert!(output.contains("call ptr @malloc(i64 40)"), "3-elem list = 40 bytes (5 slots × 8). Got: {}", output);
+        assert!(output.contains("bitcast ptr"), "Should bitcast malloc result to ptr. Got: {}", output);
         assert!(!output.contains("alloca i64, i64 5"), "Non-empty list should NOT use alloca. Got: {}", output);
         // Elements are computed as `add i64 0, N` and stored via register; check the computation
         assert!(output.contains("add i64 0, 1") && output.contains("add i64 0, 2") && output.contains("add i64 0, 3"),
             "Should compute all 3 elements. Got: {}", output);
-        assert!(output.contains("store i64 3, i64*"), "Length should be 3. Got: {}", output);
+        assert!(output.contains("store i64 3, ptr"), "Length should be 3. Got: {}", output);
     }
 
     #[test]
@@ -3265,8 +3265,8 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         // ListIndex must load data_ptr from slot 0 before GEP
-        assert!(output.contains("load i64, i64*"), "Should load data_ptr. Got: {}", output);
-        assert!(output.contains("getelementptr i64, i64*"), "Should GEP from data. Got: {}", output);
+        assert!(output.contains("load i64, ptr"), "Should load data_ptr. Got: {}", output);
+        assert!(output.contains("getelementptr i64, ptr"), "Should GEP from data. Got: {}", output);
     }
 
     #[test]
@@ -3302,7 +3302,7 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         // Size projection must load length from slot 1, NOT return constant 0
-        assert!(output.contains("load i64, i64*"), "Size projection should load from memory. Got: {}", output);
+        assert!(output.contains("load i64, ptr"), "Size projection should load from memory. Got: {}", output);
     }
 
     #[test]
@@ -3385,7 +3385,7 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         // MultiSlice with single Index should load data_ptr and GEP
-        assert!(output.contains("getelementptr i64, i64*"), "Should GEP. Got: {}", output);
+        assert!(output.contains("getelementptr i64, ptr"), "Should GEP. Got: {}", output);
     }
 
     // ── Tuple tests ────────────────────────────────────────────
@@ -3423,8 +3423,8 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         // 2026-06-29: Tuple uses malloc instead of alloca — see docs/plans/2026-06-29-list-allocation-fix.md
-        assert!(output.contains("call i8* @malloc(i64 40)"), "3-elem tuple = 40 bytes (5 slots × 8). Got: {}", output);
-        assert!(output.contains("store i64 3, i64*"), "Length should be 3. Got: {}", output);
+        assert!(output.contains("call ptr @malloc(i64 40)"), "3-elem tuple = 40 bytes (5 slots × 8). Got: {}", output);
+        assert!(output.contains("store i64 3, ptr"), "Length should be 3. Got: {}", output);
     }
 
     #[test]
@@ -4394,9 +4394,9 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("call i8* @malloc(i64 24)"),
+        assert!(output.contains("call ptr @malloc(i64 24)"),
             "Cast Char -> String should allocate cap/len/data struct. Got:\n{}", output);
-        assert!(output.contains("store i64 1, i64*"),
+        assert!(output.contains("store i64 1, ptr"),
             "Cast Char -> String should store len=1. Got:\n{}", output);
     }
 
@@ -4589,8 +4589,8 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("ptrtoint i8*"),
-            "String field should ptrtoint i8* to i64. Got:\n{}", output);
+        assert!(output.contains("ptrtoint ptr"),
+            "String field should ptrtoint ptr to i64. Got:\n{}", output);
     }
 
     #[test]
@@ -4748,10 +4748,10 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         assert!(output.contains("add i64 0, 0 ; push void")
-            || (output.contains("call noalias i8* @malloc")
+            || (output.contains("call noalias ptr @malloc")
                 && output.contains("llvm.memcpy.p0i8.p0i8.i64")
                 && output.contains("!tbaa !1"))
-            || (output.contains("load i8*, i8**")
+            || (output.contains("load ptr, ptr")
                 && output.contains("getelementptr i8")
                 && output.contains("llvm.memcpy.p0i8.p0i8.i64")
                 && output.contains("!tbaa !1")),
@@ -4795,7 +4795,7 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!((output.contains("call noalias i8* @malloc") || output.contains("load i8*, i8**"))
+        assert!((output.contains("call noalias ptr @malloc") || output.contains("load ptr, ptr"))
             && output.contains("!tbaa !1"),
             "Arrow pop should emit malloc or arena bump with TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }
@@ -4835,7 +4835,7 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!((output.contains("call noalias i8* @malloc") || output.contains("load i8*, i8**"))
+        assert!((output.contains("call noalias ptr @malloc") || output.contains("load ptr, ptr"))
             && output.contains("llvm.memcpy.p0i8.p0i8.i64"),
             "Arrow discard should emit malloc or arena bump with memcpy. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }
@@ -4882,7 +4882,7 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("call noalias i8* @malloc") || output.contains("load i8*, i8**"),
+        assert!(output.contains("call noalias ptr @malloc") || output.contains("load ptr, ptr"),
             "Arrow transfer should emit malloc or arena bump for combined buffer. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
         assert!(output.contains("; transfer"),
             "Arrow transfer should contain transfer marker. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
@@ -5000,7 +5000,7 @@ let spec = crate::target_spec::TargetSpec {
         };
         let output = backend.generate(&program);
         // The pipe frgn for String should have a null-pointer check
-        assert!(output.contains("icmp eq i8*"),
+        assert!(output.contains("icmp eq ptr"),
             "Pipe frgn should emit null pointer check. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
         // Should use select with the fallback
         assert!(output.contains("select i1"),
@@ -5118,7 +5118,7 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        // Int returns should NOT have icmp eq i8* (no null check for ints)
+        // Int returns should NOT have icmp eq ptr (no null check for ints)
         assert!(!output.contains("pipe_null"),
             "Int pipe frgn should not emit null check. Got:\n{}", &output[..std::cmp::min(2000, output.len())]);
         // Should just have a raw call
@@ -5329,7 +5329,7 @@ let spec = crate::target_spec::TargetSpec {
         assert!(has_temp_tag,
             "Concat result must be tagged with bit 1. Output:\n{}", output);
         // Verify free calls are emitted for temporary operands
-        assert!(output.contains("call void @free(i8*"),
+        assert!(output.contains("call void @free(ptr"),
             "Free must be emitted for temporary string operands. Output:\n{}", output);
         // Verify concat header lines use -4 not -2
         for line in output.lines() {
@@ -5540,13 +5540,13 @@ let spec = crate::target_spec::TargetSpec {
         let output = backend.generate(&program);
         assert!(output.contains("define i64 @sadd("),
             "inop# function should have correct LLVM signature.\nGot:\n{}", output);
-        // Extract the define line for @sadd and verify %State* is NOT in it
+        // Extract the define line for @sadd and verify ptr is NOT in it
         let sadd_line: Vec<&str> = output.lines()
             .filter(|l| l.contains("define i64 @sadd("))
             .collect();
         assert!(!sadd_line.is_empty(), "should find @sadd definition");
         assert!(!sadd_line[0].contains("%State"),
-            "@sadd should NOT receive ptr (was %State*).\nLine: {}", sadd_line[0]);
+            "@sadd should NOT receive ptr (was ptr).\nLine: {}", sadd_line[0]);
 
     }
 

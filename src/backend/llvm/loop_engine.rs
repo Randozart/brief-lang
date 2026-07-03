@@ -79,21 +79,21 @@ impl LlvmBackend {
                     let p = self.emit_state_gep(out, indent, "gep_exit", "%state", idx);
                     let ft = &self.ctx.field_types[idx];
                     match ft.as_str() {
-                        "i64" => { writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, v, p).ok(); }
+                        "i64" => { writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, v, p).ok(); }
                         "i32" => {
                             let l = format!("%exit_l{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i32, i32* {}, align 4", indent, l, p).ok();
+                            writeln!(out, "{}{} = load i32, ptr {}, align 4", indent, l, p).ok();
                             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, l).ok();
                         }
                         "i8" => {
                             let l = format!("%exit_l{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i8, i8* {}, align 1", indent, l, p).ok();
+                            writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, l, p).ok();
                             writeln!(out, "{}{} = zext i8 {} to i64", indent, v, l).ok();
                         }
                         s if s == "i8*" || s == "ptr" => {
                             let l = format!("%exit_l{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i8*, i8** {}, align 8", indent, l, p).ok();
-                            writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, v, l).ok();
+                            writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, l, p).ok();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, l).ok();
                         }
                         // 2026-06-26: float -> i32 bitcast (same size), then
                         // zext to i64 so comparison operators see i64 on both sides.
@@ -104,7 +104,7 @@ impl LlvmBackend {
                         "float" => {
                             let l = format!("%exit_l{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                             let i = format!("%exit_i{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load float, float* {}, align 4", indent, l, p).ok();
+                            writeln!(out, "{}{} = load float, ptr {}, align 4", indent, l, p).ok();
                             writeln!(out, "{}{} = bitcast float {} to i32", indent, i, l).ok();
                             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, i).ok();
                         }
@@ -113,7 +113,7 @@ impl LlvmBackend {
                         }
                     }
                 } else if self.ctx.constants.contains_key(name) {
-                    writeln!(out, "{}{} = load i64, i64* @{}, align 8", indent, v, name).ok();
+                    writeln!(out, "{}{} = load i64, ptr @{}, align 8", indent, v, name).ok();
                 } else if self.ctx.trigger_names.contains(name) {
                     if let Some(t) = self.ctx.triggers.get(name).cloned() {
                         self.emit_trg_load(out, indent, &v, &t.address, &t.ty);
@@ -262,8 +262,8 @@ impl LlvmBackend {
         self.emit_inline_init_stores(out, "%state");
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
-            writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (ptr)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
-            writeln!(out, "  call void @__thread_pool_init__(i32 {}, i8** %tp_fn_ptr)", count).ok();
+            writeln!(out, "  %tp_fn_ptr = bitcast [{} x ptr]* @thread_pool_fns to ptr", self.async_txn_names.len()).ok();
+            writeln!(out, "  call void @__thread_pool_init__(i32 {}, ptr %tp_fn_ptr)", count).ok();
         }
         // 2026-06-26: Removed setvbuf(stdout, NULL, _IOLBF, 0). The
         // _IOLBF (line-buffered) mode makes fputc ~2.1× slower on glibc
@@ -513,15 +513,15 @@ impl LlvmBackend {
             // Load bound once
             if let Some(ti) = total_idx {
                 writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", label_prefix, c_once, ti).ok();
-                writeln!(out, "  %lt_{}_{} = load i64, i64* %gt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
+                writeln!(out, "  %lt_{}_{} = load i64, ptr %gt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
             } else if let Some(cn) = total_const_name {
-                writeln!(out, "  %lt_{}_{} = load i64, i64* @{}, align 8", label_prefix, c_once, cn).ok();
+                writeln!(out, "  %lt_{}_{} = load i64, ptr @{}, align 8", label_prefix, c_once, cn).ok();
             } else {
                 writeln!(out, "  %lt_{}_{} = add i64 0, 0", label_prefix, c_once).ok();
             }
             // Load counter once, precompute remaining iterations
             writeln!(out, "  %gcnt_{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", label_prefix, c_once, counter_idx).ok();
-            writeln!(out, "  %init_{}_{} = load i64, i64* %gcnt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
+            writeln!(out, "  %init_{}_{} = load i64, ptr %gcnt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
             // Counted-down loop: remaining = bound - initial, count down to 0.
             // This eliminates the cmp instruction (sub sets ZF for jne) and
             // matches what clang emits for C for-loops.
@@ -536,16 +536,16 @@ impl LlvmBackend {
             super::emit_loop_metadata(out, "  ", &hdr_label, &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
             writeln!(out, "{}:", done_label).ok();
             // Final counter value is always the bound after counted-down loop
-            writeln!(out, "  store i64 %lt_{}_{}, i64* %gcnt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
+            writeln!(out, "  store i64 %lt_{}_{}, ptr %gcnt_{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
         } else if let Some(stmts) = body {
             // SSA mode: load once, phi in header, inline unrolled body with extract/insert, store once
             if let Some(bl) = bound_literal {
                 writeln!(out, "  %lt{}_{} = add i64 0, {}", label_prefix, c_once, bl).ok();
             } else if let Some(ti) = total_idx {
                 writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", label_prefix, c_once, ti).ok();
-                writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
+                writeln!(out, "  %lt{}_{} = load i64, ptr %gt{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
             } else if let Some(cn) = total_const_name {
-                writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c_once, cn).ok();
+                writeln!(out, "  %lt{}_{} = load i64, ptr @{}, align 8", label_prefix, c_once, cn).ok();
             } else {
                 writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c_once).ok();
             }
@@ -652,7 +652,7 @@ impl LlvmBackend {
                         let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
                         let g = format!("@str.{}", si);
                         let iv = format!("%siv{}_{}", label_prefix, self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "  {} = insertvalue %State {}, i8* bitcast (<{{ i64, i64, [{} x i8] }}>* {} to i8*), {}", iv, cur_init, s.len() + 1, g, idx).ok();
+                        writeln!(out, "  {} = insertvalue %State {}, ptr bitcast (<{{ i64, i64, [{} x i8] }}>* {} to ptr), {}", iv, cur_init, s.len() + 1, g, idx).ok();
                         cur_init = iv;
                     }
                     Some(Expr::Char(c)) => {
@@ -721,16 +721,16 @@ impl LlvmBackend {
                 writeln!(out, "  %lt{}_{} = add i64 0, {}", label_prefix, c_once, bl).ok();
             } else if let Some(ti) = total_idx {
                 writeln!(out, "  %gt{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", label_prefix, c_once, ti).ok();
-                writeln!(out, "  %lt{}_{} = load i64, i64* %gt{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
+                writeln!(out, "  %lt{}_{} = load i64, ptr %gt{}_{}, align 8", label_prefix, c_once, label_prefix, c_once).ok();
             } else if let Some(cn) = total_const_name {
-                writeln!(out, "  %lt{}_{} = load i64, i64* @{}, align 8", label_prefix, c_once, cn).ok();
+                writeln!(out, "  %lt{}_{} = load i64, ptr @{}, align 8", label_prefix, c_once, cn).ok();
             } else {
                 writeln!(out, "  %lt{}_{} = add i64 0, 0", label_prefix, c_once).ok();
             }
             writeln!(out, "  br label %{}_hdr", label_prefix).ok();
             writeln!(out, "{}_hdr:", label_prefix).ok();
             writeln!(out, "  %gp{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", label_prefix, c_once + 1, counter_idx).ok();
-            writeln!(out, "  %lp{}_{} = load i64, i64* %gp{}_{}, align 8", label_prefix, c_once + 1, label_prefix, c_once + 1).ok();
+            writeln!(out, "  %lp{}_{} = load i64, ptr %gp{}_{}, align 8", label_prefix, c_once + 1, label_prefix, c_once + 1).ok();
             let cmp_reg = format!("%cp{}_{}", label_prefix, c_once + 2);
             if is_decreasing {
                 writeln!(out, "  {} = icmp sgt i64 %lp{}_{}, %lt{}_{}", cmp_reg, label_prefix, c_once + 1, label_prefix, c_once).ok();
@@ -784,11 +784,11 @@ impl LlvmBackend {
                 let bound_reg = format!("%bound_pre{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 if let Some(ti) = total_idx {
                     writeln!(out, "  %gt{0} = getelementptr inbounds %State, ptr %state, i32 0, i32 {1}", self.fun.txn_counter, ti).ok();
-                    writeln!(out, "  {0} = load i64, i64* %gt{1}, align 8", bound_reg, self.fun.txn_counter).ok();
+                    writeln!(out, "  {0} = load i64, ptr %gt{1}, align 8", bound_reg, self.fun.txn_counter).ok();
                     self.fun.txn_counter += 1;
                     self.emit_prealloc_for_body(out, "  ", body_stmts, &bound_reg);
                 } else if let Some(ref cn) = total_const_name {
-                    writeln!(out, "  {} = load i64, i64* @{}, align 8", bound_reg, cn).ok();
+                    writeln!(out, "  {} = load i64, ptr @{}, align 8", bound_reg, cn).ok();
                     self.fun.txn_counter += 1;
                     self.emit_prealloc_for_body(out, "  ", body_stmts, &bound_reg);
                 }
@@ -875,9 +875,9 @@ impl LlvmBackend {
         let bound_reg = format!("%lt{}_{}", c0, if total_idx.is_some() { bound_suffix } else { c0 });
         if let Some(ti) = total_idx {
             writeln!(out, "  %gt{0}_{1} = getelementptr inbounds %State, ptr %state, i32 0, i32 {1}", c0, ti).ok();
-            writeln!(out, "  {0} = load i64, i64* %gt{1}_{2}, align 8", bound_reg, c0, bound_suffix).ok();
+            writeln!(out, "  {0} = load i64, ptr %gt{1}_{2}, align 8", bound_reg, c0, bound_suffix).ok();
         } else if let Some(cn) = total_const_name {
-            writeln!(out, "  {} = load i64, i64* @{}, align 8", bound_reg, cn).ok();
+            writeln!(out, "  {} = load i64, ptr @{}, align 8", bound_reg, cn).ok();
         } else {
             writeln!(out, "  {0} = add i64 0, 0", bound_reg).ok();
         }
@@ -898,7 +898,7 @@ impl LlvmBackend {
         let c_gep = format!("%cgep_{}", c0);
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c_gep, counter_idx).ok();
         let c_val = format!("%cval_{}", c0);
-        writeln!(out, "  {} = load i64, i64* {}, align 8", c_val, c_gep).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", c_val, c_gep).ok();
         writeln!(out, "  {0} = icmp slt i64 {1}, %lt{2}_{3}", cmp_reg, c_val, c0, bound_suffix).ok();
         writeln!(out, "  br i1 {}, label %_body, label %_done", cmp_reg).ok();
         writeln!(out, "_body:").ok();
@@ -948,11 +948,11 @@ impl LlvmBackend {
                 writeln!(out, "  {} = add i64 0, 0", bound_reg).ok();
                 return;
             };
-            writeln!(out, "  {} = load i64, i64* @{}, align 8", bound_reg, cn).ok();
+            writeln!(out, "  {} = load i64, ptr @{}, align 8", bound_reg, cn).ok();
             return;
         };
         writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c0, c0, ti).ok();
-        writeln!(out, "  {} = load i64, i64* %gt_{}_{}, align 8", bound_reg, c0, c0).ok();
+        writeln!(out, "  {} = load i64, ptr %gt_{}_{}, align 8", bound_reg, c0, c0).ok();
     }
 
     /// 2026-07-03: Set up per-field phi and backedge registers, load
@@ -989,7 +989,7 @@ impl LlvmBackend {
         let c_gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", counter_idx);
         let init_count = format!("%init_count_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", init_count, c_gep).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", init_count, c_gep).ok();
         // Counter phi+backedge
         let count_phi_reg = format!("%phi_{}", counter_name);
         let count_be_reg = format!("%be_{}", counter_name);
@@ -1255,7 +1255,7 @@ impl LlvmBackend {
         let b_gep = format!("%gep_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, b_idx).ok();
         let b_val = format!("%val_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", b_val, b_gep).ok();
         let is_static_bound_val = bound_name.parse::<i64>().is_ok();
         self.fun.is_static_bound = is_static_bound_val;
         let bound_imm = if is_static_bound_val { bound_name.to_string() } else { b_val.clone() };
@@ -1442,7 +1442,7 @@ impl LlvmBackend {
                 if let Some(&b_idx) = self.ctx.field_index_map.get(bname) {
                     let b_gep = format!("%gep_bmt{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, b_idx).ok();
-                    writeln!(out, "  {} = load i64, i64* {}, align 8", bound_reg, b_gep).ok();
+                    writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, b_gep).ok();
                     self.fun.txn_counter += 1;
                     self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
                 }
@@ -1751,7 +1751,7 @@ impl LlvmBackend {
         let b_gep = format!("%gep_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, bound_idx).ok();
         let b_val = format!("%val_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", b_val, b_gep).ok();
         let count_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
         let c_base = format!("%cgep_base{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c_base, count_idx).ok();
@@ -1763,7 +1763,7 @@ impl LlvmBackend {
         writeln!(out, "_body4:").ok();
         // Load the base counter for this round from %State
         let round_base = format!("%rbase{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", round_base, c_base).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", round_base, c_base).ok();
         // Sort cases by their modulo value (0, 1, 2, ... K-1)
         let mut sorted_cases = cases.to_vec();
         sorted_cases.sort_by_key(|(v, _)| *v);
@@ -1773,7 +1773,7 @@ impl LlvmBackend {
                 // Previous iteration incremented the counter. Use the latest.
                 let ci = format!("%cit_{}_{}", case_val, self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "  {} = add i64 {}, 1", ci, iter_count).ok();
-                writeln!(out, "  store i64 {}, i64* {}, align 8", ci, c_base).ok();
+                writeln!(out, "  store i64 {}, ptr {}, align 8", ci, c_base).ok();
                 iter_count = ci;
             }
             // Emit the txn body for this case
@@ -1791,7 +1791,7 @@ impl LlvmBackend {
         }
         // Load current counter (after K bodies, this is old_base + K)
         let cnt_check = format!("%cnt_check{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", cnt_check, c_base).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", cnt_check, c_base).ok();
         let cont = format!("%cont{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "  {} = icmp slt i64 {}, {}", cont, cnt_check, b_val).ok();
         writeln!(out, "  br i1 {}, label %_body4, label %_done", cont).ok();
@@ -1871,7 +1871,7 @@ impl LlvmBackend {
         let b_gep = format!("%gep_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", b_gep, bound_idx).ok();
         let b_val = format!("%val_bn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", b_val, b_gep).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", b_val, b_gep).ok();
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "  tick:").ok();
         emit_cycle_count_increment(self, out);
@@ -1880,7 +1880,7 @@ impl LlvmBackend {
         let c_gep = format!("%gep_cn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c_gep, count_idx).ok();
         let c_val = format!("%val_cn{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", c_val, c_gep).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", c_val, c_gep).ok();
         // Compute count % K
         let mod_val = format!("%mod_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         let k_val = format!("%k_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -1913,7 +1913,7 @@ impl LlvmBackend {
         writeln!(out, "  after_switch:").ok();
         // Reload bound to check exit
         let c_reload = format!("%val_cr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", c_reload, c_gep).ok();
+        writeln!(out, "  {} = load i64, ptr {}, align 8", c_reload, c_gep).ok();
         let ec = format!("%ec_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "  {} = icmp eq i64 {}, {}", ec, c_reload, b_val).ok();
         let md_idx = super::emit_loop_metadata_nodes(&mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
@@ -2049,8 +2049,8 @@ impl LlvmBackend {
         self.emit_arena_init(out, "  ");
         if self.has_async_txns && !self.is_lightweight_async {
             let count = self.async_txn_names.len() as i32;
-            writeln!(out, "  %tp_fn_ptr = bitcast [{} x void (ptr)*]* @thread_pool_fns to i8**", self.async_txn_names.len()).ok();
-            writeln!(out, "  call void @__thread_pool_init__(i32 {}, i8** %tp_fn_ptr)", count).ok();
+            writeln!(out, "  %tp_fn_ptr = bitcast [{} x ptr]* @thread_pool_fns to ptr", self.async_txn_names.len()).ok();
+            writeln!(out, "  call void @__thread_pool_init__(i32 {}, ptr %tp_fn_ptr)", count).ok();
         }
         writeln!(out, "  br label %tick").ok();
         writeln!(out, "tick:").ok();
@@ -2125,7 +2125,7 @@ impl LlvmBackend {
                         if pure {
                             if let Some(tv) = tv {
                                 writeln!(out, "  %pc_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sub_prefix, fp.counter_idx).ok();
-                                writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, sub_prefix).ok();
+                                writeln!(out, "  store i64 {}, ptr %pc_{}, align 8", tv, sub_prefix).ok();
                                 continue;
                             } else {
                                 let ptcn_ref = fp.bound_const_name.as_deref();
@@ -2149,7 +2149,7 @@ impl LlvmBackend {
             let fn_name = trig_to_fn.get(&0).map(|s| s.as_str()).unwrap_or(txn_name);
             if let Some((ci, tv)) = all_internal_lookup(fn_name) {
                 writeln!(out, "  %pc_sc = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", ci).ok();
-                writeln!(out, "  store i64 {}, i64* %pc_sc, align 8", tv).ok();
+                writeln!(out, "  store i64 {}, ptr %pc_sc, align 8", tv).ok();
             } else {
                 emit_case_folded_loops(self, out, "sc", fn_name, counter_idx, total_idx, total_const_name);
             }
@@ -2184,7 +2184,7 @@ impl LlvmBackend {
                 let fn_name = trig_to_fn.get(&keys[0]).map(|s| s.as_str()).unwrap_or(&native_name);
                 if let Some((ci, tv)) = all_internal_lookup(fn_name) {
                     writeln!(out, "  %pc_uni = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", ci).ok();
-                    writeln!(out, "  store i64 {}, i64* %pc_uni, align 8", tv).ok();
+                    writeln!(out, "  store i64 {}, ptr %pc_uni, align 8", tv).ok();
                 } else {
                     emit_case_folded_loops(self, out, "uni", fn_name, counter_idx, total_idx, total_const_name);
                 }
@@ -2241,7 +2241,7 @@ impl LlvmBackend {
                 let fn_name = trig_to_fn.get(key).map(|s| s.as_str()).unwrap_or(&native_name);
                 if let Some((ci, tv)) = all_internal_lookup(fn_name) {
                     writeln!(out, "  %pc_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", prefix, ci).ok();
-                    writeln!(out, "  store i64 {}, i64* %pc_{}, align 8", tv, prefix).ok();
+                    writeln!(out, "  store i64 {}, ptr %pc_{}, align 8", tv, prefix).ok();
                 } else {
                     emit_case_folded_loops(self, out, &prefix, fn_name, counter_idx, total_idx, total_const_name);
                 }
@@ -2341,7 +2341,7 @@ impl LlvmBackend {
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         writeln!(out, "  %gp = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", counter_idx).ok();
-        writeln!(out, "  store i64 {}, i64* %gp, align 8", total_value).ok();
+        writeln!(out, "  store i64 {}, ptr %gp, align 8", total_value).ok();
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -2363,10 +2363,10 @@ impl LlvmBackend {
         // Load dirty flags into a mutable alloca
         let dirty_slot = format!("%dirty_{}", tc); tc += 1;
         writeln!(out, "  {} = alloca i64, align 8", dirty_slot).ok();
-        writeln!(out, "  store i64 %dirty_in, i64* {}, align 8", dirty_slot).ok();
+        writeln!(out, "  store i64 %dirty_in, ptr {}, align 8", dirty_slot).ok();
         // Volatile-load all trigger variables (liveness anchor + value observation)
         // Use the correct LLVM type for each trigger field to avoid reading/writing
-        // adjacent struct bytes (i32 for Char, i8 for Bool, i8* for String).
+        // adjacent struct bytes (i32 for Char, i8 for Bool, ptr for String).
         for trg_name in trigger_names {
             if let Some(&idx) = self.ctx.field_index_map.get(trg_name) {
                 let ty_str = &self.ctx.field_types[idx];
@@ -2375,24 +2375,24 @@ impl LlvmBackend {
                 let ld = format!("%ltrg_{}", tc); tc += 1;
                 match ty_str.as_str() {
                     "i32" => {
-                        writeln!(out, "  {} = load volatile i32, i32* {}, align 4", ld, gep).ok();
-                        writeln!(out, "  store volatile i32 {}, i32* {}, align 4", ld, gep).ok();
+                        writeln!(out, "  {} = load volatile i32, ptr {}, align 4", ld, gep).ok();
+                        writeln!(out, "  store volatile i32 {}, ptr {}, align 4", ld, gep).ok();
                     }
                     "i8" => {
-                        writeln!(out, "  {} = load volatile i8, i8* {}, align 1", ld, gep).ok();
-                        writeln!(out, "  store volatile i8 {}, i8* {}, align 1", ld, gep).ok();
+                        writeln!(out, "  {} = load volatile i8, ptr {}, align 1", ld, gep).ok();
+                        writeln!(out, "  store volatile i8 {}, ptr {}, align 1", ld, gep).ok();
                     }
                     "i8*" | "ptr" => {
-                        writeln!(out, "  {} = load volatile i8*, i8** {}, align 8", ld, gep).ok();
-                        writeln!(out, "  store volatile i8* {}, i8** {}, align 8", ld, gep).ok();
+                        writeln!(out, "  {} = load volatile ptr, ptr {}, align 8", ld, gep).ok();
+                        writeln!(out, "  store volatile ptr {}, ptr {}, align 8", ld, gep).ok();
                     }
                     "float" => {
-                        writeln!(out, "  {} = load volatile float, float* {}, align 4", ld, gep).ok();
-                        writeln!(out, "  store volatile float {}, float* {}, align 4", ld, gep).ok();
+                        writeln!(out, "  {} = load volatile float, ptr {}, align 4", ld, gep).ok();
+                        writeln!(out, "  store volatile float {}, ptr {}, align 4", ld, gep).ok();
                     }
                     _ => {
-                        writeln!(out, "  {} = load volatile i64, i64* {}, align 8", ld, gep).ok();
-                        writeln!(out, "  store volatile i64 {}, i64* {}, align 8", ld, gep).ok();
+                        writeln!(out, "  {} = load volatile i64, ptr {}, align 8", ld, gep).ok();
+                        writeln!(out, "  store volatile i64 {}, ptr {}, align 8", ld, gep).ok();
                     }
                 }
             }
@@ -2415,7 +2415,7 @@ impl LlvmBackend {
                 if let Some(&bit) = dep_graph.bit_index.get(dep_name) {
                     let mask = 1u64 << bit;
                     let ld = format!("%ld_{}", tc); tc += 1;
-                    writeln!(out, "  {} = load i64, i64* {}, align 8", ld, dirty_slot).ok();
+                    writeln!(out, "  {} = load i64, ptr {}, align 8", ld, dirty_slot).ok();
                     let and = format!("%and_{}", tc); tc += 1;
                     writeln!(out, "  {} = and i64 {}, {}", and, ld, mask).ok();
                     let cmp = format!("%cmp_{}", tc); tc += 1;
@@ -2449,11 +2449,11 @@ impl LlvmBackend {
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gdep, dep_idx).ok();
                     let ldep = format!("%ldep_{}", tc); tc += 1;
                     match dep_ty.as_str() {
-                        "i32" => { writeln!(out, "  {} = load i32, i32* {}, align 4", ldep, gdep).ok(); }
-                        "i8" => { writeln!(out, "  {} = load i8, i8* {}, align 1", ldep, gdep).ok(); }
-                        "i8*" | "ptr" => { writeln!(out, "  {} = load i8*, i8** {}, align 8", ldep, gdep).ok(); }
-                        "float" => { writeln!(out, "  {} = load float, float* {}, align 4", ldep, gdep).ok(); }
-                        _ => { writeln!(out, "  {} = load i64, i64* {}, align 8", ldep, gdep).ok(); }
+                        "i32" => { writeln!(out, "  {} = load i32, ptr {}, align 4", ldep, gdep).ok(); }
+                        "i8" => { writeln!(out, "  {} = load i8, ptr {}, align 1", ldep, gdep).ok(); }
+                        "i8*" | "ptr" => { writeln!(out, "  {} = load ptr, ptr {}, align 8", ldep, gdep).ok(); }
+                        "float" => { writeln!(out, "  {} = load float, ptr {}, align 4", ldep, gdep).ok(); }
+                        _ => { writeln!(out, "  {} = load i64, ptr {}, align 8", ldep, gdep).ok(); }
                     }
                     let _ = ldep; // consumed by future recompute expr
                 }
@@ -2468,20 +2468,20 @@ impl LlvmBackend {
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gsrc, first_idx).ok();
                     let lsrc = format!("%lsrc_{}", tc); tc += 1;
                     match dst_ty.as_str() {
-                        "i32" => { writeln!(out, "  {} = load i32, i32* {}, align 4", lsrc, gsrc).ok(); }
-                        "i8" => { writeln!(out, "  {} = load i8, i8* {}, align 1", lsrc, gsrc).ok(); }
-                        "i8*" | "ptr" => { writeln!(out, "  {} = load i8*, i8** {}, align 8", lsrc, gsrc).ok(); }
-                        "float" => { writeln!(out, "  {} = load float, float* {}, align 4", lsrc, gsrc).ok(); }
-                        _ => { writeln!(out, "  {} = load i64, i64* {}, align 8", lsrc, gsrc).ok(); }
+                        "i32" => { writeln!(out, "  {} = load i32, ptr {}, align 4", lsrc, gsrc).ok(); }
+                        "i8" => { writeln!(out, "  {} = load i8, ptr {}, align 1", lsrc, gsrc).ok(); }
+                        "i8*" | "ptr" => { writeln!(out, "  {} = load ptr, ptr {}, align 8", lsrc, gsrc).ok(); }
+                        "float" => { writeln!(out, "  {} = load float, ptr {}, align 4", lsrc, gsrc).ok(); }
+                        _ => { writeln!(out, "  {} = load i64, ptr {}, align 8", lsrc, gsrc).ok(); }
                     }
                     let gdst = format!("%gdst_{}", tc); tc += 1;
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gdst, idx).ok();
                     match dst_ty.as_str() {
-                        "i32" => { writeln!(out, "  store i32 {}, i32* {}, align 4 ; recompute {}", lsrc, gdst, var_name).ok(); }
-                        "i8" => { writeln!(out, "  store i8 {}, i8* {}, align 1 ; recompute {}", lsrc, gdst, var_name).ok(); }
-                        "i8*" | "ptr" => { writeln!(out, "  store i8* {}, i8** {}, align 8 ; recompute {}", lsrc, gdst, var_name).ok(); }
-                        "float" => { writeln!(out, "  store float {}, float* {}, align 4 ; recompute {}", lsrc, gdst, var_name).ok(); }
-                        _ => { writeln!(out, "  store i64 {}, i64* {}, align 8 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        "i32" => { writeln!(out, "  store i32 {}, ptr {}, align 4 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        "i8" => { writeln!(out, "  store i8 {}, ptr {}, align 1 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        "i8*" | "ptr" => { writeln!(out, "  store i8* {}, ptr {}, align 8 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        "float" => { writeln!(out, "  store float {}, ptr {}, align 4 ; recompute {}", lsrc, gdst, var_name).ok(); }
+                        _ => { writeln!(out, "  store i64 {}, ptr {}, align 8 ; recompute {}", lsrc, gdst, var_name).ok(); }
                     }
                 }
             }
@@ -2489,7 +2489,7 @@ impl LlvmBackend {
             writeln!(out, "{}:", skip_label).ok();
         }
         // Clear all dirty flags
-        writeln!(out, "  store i64 0, i64* {}, align 8", dirty_slot).ok();
+        writeln!(out, "  store i64 0, ptr {}, align 8", dirty_slot).ok();
         writeln!(out, "  ret void").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
@@ -2525,9 +2525,9 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
     let ep_gep = format!("%epg_{}", tc);
     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", ep_gep, epfd_idx).ok();
     let ep_ld = format!("%epl_{}", tc);
-    writeln!(out, "  {} = load i32, i32* {}, align 4", ep_ld, ep_gep).ok();
+    writeln!(out, "  {} = load i32, ptr {}, align 4", ep_ld, ep_gep).ok();
     let n_ev = format!("%nev_{}", tc);
-    writeln!(out, "  {} = call i32 @epoll_wait(i32 {}, i8* {}, i32 1, i32 -1)", n_ev, ep_ld, evt).ok();
+    writeln!(out, "  {} = call i32 @epoll_wait(i32 {}, ptr {}, i32 1, i32 -1)", n_ev, ep_ld, evt).ok();
     let ev_cmp = format!("%evc_{}", tc);
     writeln!(out, "  {} = icmp sgt i32 {}, 0", ev_cmp, n_ev).ok();
     let ev_body = format!("ev_body_{}", tc);
@@ -2535,11 +2535,11 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
     writeln!(out, "  br i1 {}, label %{}, label %{}", ev_cmp, ev_body, ev_done).ok();
     writeln!(out, "{}:", ev_body).ok();
     let ev_data = format!("%evd_{}", tc);
-    writeln!(out, "  {} = getelementptr i8, i8* {}, i64 8", ev_data, evt).ok();
+    writeln!(out, "  {} = getelementptr i8, ptr {}, i64 8", ev_data, evt).ok();
     let ev_data_u64 = format!("%evdu_{}", tc);
-    writeln!(out, "  {} = bitcast i8* {} to i64*", ev_data_u64, ev_data).ok();
+    writeln!(out, "  {} = bitcast ptr {} to ptr", ev_data_u64, ev_data).ok();
     let ev_bit = format!("%evb_{}", tc);
-    writeln!(out, "  {} = load i64, i64* {}, align 8", ev_bit, ev_data_u64).ok();
+    writeln!(out, "  {} = load i64, ptr {}, align 8", ev_bit, ev_data_u64).ok();
     for (name, trg) in &backend.ctx.triggers {
         let bit = backend.ctx.dep_graph.bit_index.get(name).copied().unwrap_or(0);
         let bit_check = format!("%bc_{}_{}", tc, name);
@@ -2553,7 +2553,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 let ch_slot = format!("%ch_{}_{}", tc, name);
                 writeln!(out, "  {} = alloca i8, i64 1, align 1", ch_slot).ok();
                 let rd_res = format!("%rd_{}_{}", tc, name);
-                writeln!(out, "  {} = call i64 @read(i32 0, i8* {}, i64 1)", rd_res, ch_slot).ok();
+                writeln!(out, "  {} = call i64 @read(i32 0, ptr {}, i64 1)", rd_res, ch_slot).ok();
                 let rd_ok = format!("%rdok_{}_{}", tc, name);
                 writeln!(out, "  {} = icmp sgt i64 {}, 0", rd_ok, rd_res).ok();
                 let store_lbl = format!("rds_{}_{}", tc, name);
@@ -2563,21 +2563,21 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                     let sge = format!("%sge_{}_{}", tc, name);
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, idx).ok();
                     let ch_ld = format!("%chld_{}_{}", tc, name);
-                    writeln!(out, "  {} = load i8, i8* {}, align 1", ch_ld, ch_slot).ok();
+                    writeln!(out, "  {} = load i8, ptr {}, align 1", ch_ld, ch_slot).ok();
                     let ft = backend.ctx.field_types[idx].clone();
                     match ft.as_str() {
                         "i32" => {
                             let ch_z = format!("%chz_{}_{}", tc, name);
                             writeln!(out, "  {} = zext i8 {} to i32", ch_z, ch_ld).ok();
-                            writeln!(out, "  store i32 {}, i32* {}, align 4", ch_z, sge).ok();
+                            writeln!(out, "  store i32 {}, ptr {}, align 4", ch_z, sge).ok();
                         }
                         "i8" => {
-                            writeln!(out, "  store i8 {}, i8* {}, align 1", ch_ld, sge).ok();
+                            writeln!(out, "  store i8 {}, ptr {}, align 1", ch_ld, sge).ok();
                         }
                         _ => {
                             let ch_z = format!("%chz_{}_{}", tc, name);
                             writeln!(out, "  {} = zext i8 {} to i64", ch_z, ch_ld).ok();
-                            writeln!(out, "  store i64 {}, i64* {}, align 8", ch_z, sge).ok();
+                            writeln!(out, "  store i64 {}, ptr {}, align 8", ch_z, sge).ok();
                         }
                     }
                 }
@@ -2591,10 +2591,10 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                     let sge = format!("%sge_{}_{}", tc, name);
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, idx).ok();
                     let cur = format!("%cur_{}_{}", tc, name);
-                    writeln!(out, "  {} = load i64, i64* {}, align 8", cur, sge).ok();
+                    writeln!(out, "  {} = load i64, ptr {}, align 8", cur, sge).ok();
                     let inc = format!("%inc_{}_{}", tc, name);
                     writeln!(out, "  {} = add i64 {}, 1", inc, cur).ok();
-                    writeln!(out, "  store i64 {}, i64* {}, align 8", inc, sge).ok();
+                    writeln!(out, "  store i64 {}, ptr {}, align 8", inc, sge).ok();
                 }
                 let drx = format!("%drx_{}_{}", tc, name);
                 writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
@@ -2605,7 +2605,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                     let sge = format!("%sge_{}_{}", tc, name);
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, idx).ok();
-                    writeln!(out, "  store i64 1, i64* {}, align 8", sge).ok();
+                    writeln!(out, "  store i64 1, ptr {}, align 8", sge).ok();
                 }
                 let drx = format!("%drx_{}_{}", tc, name);
                 writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();

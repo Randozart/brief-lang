@@ -105,10 +105,10 @@ pub fn emit_intrinsic_call(
                 let list_val = backend.emit_expr(out, first, indent);
                 let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
                 let hp = format!("%ishp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_boxed).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_boxed).ok();
                 let lp = format!("%islp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
-                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, lp).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, lp).ok();
             } else {
                 panic!("emit_expr: intrinsic called without required arguments");
             }
@@ -118,18 +118,18 @@ pub fn emit_intrinsic_call(
                 let list_val = backend.emit_expr(out, first, indent);
                 let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
                 let hp = format!("%ipphp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_boxed).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_boxed).ok();
                 let lp = format!("%ipplp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, lp, hp).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
                 let len = format!("%ippln{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, len, lp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, len, lp).ok();
                 let dpp = format!("%ippdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dpp, hp).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, dpp, hp).ok();
                 let pi = format!("%ippi{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 {}, -1", indent, pi, len).ok();
                 let ep = format!("%ippep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, dpp, pi).ok();
-                writeln!(out, "{}{} = load i64, i64* {}, align 8, !tbaa !1", indent, v, ep).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, dpp, pi).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, ep).ok();
             } else {
                 panic!("emit_expr: intrinsic called without required arguments");
             }
@@ -173,9 +173,9 @@ pub fn emit_intrinsic_call(
                 let sptr = format!("%ppls{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, clean).ok();
                 let sp = format!("%pplp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast ptr {} to i64*", indent, sp, sptr).ok();
+                writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, sp, sptr).ok();
                 let data_ptr = format!("%ppld{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, data_ptr, sp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, data_ptr, sp).ok();
                 let str_ptr = format!("%pplp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
                 let so = format!("%pplo{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -204,9 +204,9 @@ pub fn emit_intrinsic_call(
                 let sptr = format!("%ppls{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, clean).ok();
                 let sp = format!("%pplp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = bitcast ptr {} to i64*", indent, sp, sptr).ok();
+                writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, sp, sptr).ok();
                 let data_ptr = format!("%ppld{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, data_ptr, sp).ok();
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, data_ptr, sp).ok();
                 let str_ptr = format!("%pplp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
                 let so = format!("%pplo{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -257,7 +257,7 @@ pub fn emit_intrinsic_call(
                 let e_gp = format!("%rgep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr [15 x i8], [15 x i8]* @STR_READFILE_ERR, i64 0, i64 0", indent, e_gp).ok();
                 let e_pa = format!("%rfpa{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, e_pa, e_gp).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, e_pa, e_gp).ok();
                 let e_sh = format!("%rfsh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = shl i64 {}, 8", indent, e_sh, e_pa).ok();
                 let e_re = format!("%rfer{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -1614,8 +1614,8 @@ pub fn emit_intrinsic_call(
             let ok_l = format!("genv_ok{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             let after_l = format!("genv_af{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, name).ok();
-            writeln!(out, "{}{} = bitcast ptr {} to i64*", indent, sp, sptr).ok();
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, data_ptr, sp).ok();
+            writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, sp, sptr).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, data_ptr, sp).ok();
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
             writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, gv, str_ptr).ok();
             writeln!(out, "{}{} = icmp eq ptr {}, null", indent, isnull, gv).ok();
@@ -1992,23 +1992,23 @@ pub fn emit_intrinsic_call(
             let handle = backend.emit_expr(out, &args[0], indent);
             let value = if args.len() > 1 { backend.emit_expr(out, &args[1], indent) } else { return TypedRegister { name: handle.name.clone(), ty: Type::Int }; };
             let h_ptr = format!("%rhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, h_ptr, handle.name).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, h_ptr, handle.name).ok();
             let tail_gep = format!("%rtg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, tail_gep, h_ptr).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, tail_gep, h_ptr).ok();
             let tail = format!("%rtl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, tail, tail_gep).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, tail, tail_gep).ok();
             let mask_gep = format!("%rmg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 3", indent, mask_gep, h_ptr).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 3", indent, mask_gep, h_ptr).ok();
             let mask = format!("%rmk{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, mask, mask_gep).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, mask, mask_gep).ok();
             let buf_gep = format!("%rbg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, buf_gep, h_ptr).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, buf_gep, h_ptr).ok();
             let buf_raw = format!("%rbr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, buf_raw, buf_gep).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, buf_raw, buf_gep).ok();
             let buf_ptr = format!("%rbp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, buf_ptr, buf_raw).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, buf_ptr, buf_raw).ok();
             let slot = format!("%rsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, slot, buf_ptr, tail).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, slot, buf_ptr, tail).ok();
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, value.name, slot).ok();
             let tail_next = format!("%rtn{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = add i64 {}, 1", indent, tail_next, tail).ok();
@@ -2024,29 +2024,29 @@ pub fn emit_intrinsic_call(
             // No explicit branch needed — select handles both paths.
             let handle = backend.emit_expr(out, &args[0], indent);
             let h_ptr = format!("%rhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, h_ptr, handle.name).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, h_ptr, handle.name).ok();
             let head_gep = format!("%rhg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, head_gep, h_ptr).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, head_gep, h_ptr).ok();
             let head = format!("%rhd{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, head, head_gep).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, head, head_gep).ok();
             let tail_gep = format!("%rtg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, tail_gep, h_ptr).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, tail_gep, h_ptr).ok();
             let tail = format!("%rtl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, tail, tail_gep).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, tail, tail_gep).ok();
             let mask_gep = format!("%rmg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 3", indent, mask_gep, h_ptr).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 3", indent, mask_gep, h_ptr).ok();
             let mask = format!("%rmk{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, mask, mask_gep).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, mask, mask_gep).ok();
             let buf_gep = format!("%rbg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, buf_gep, h_ptr).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, buf_gep, h_ptr).ok();
             let buf_raw = format!("%rbr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, buf_raw, buf_gep).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, buf_raw, buf_gep).ok();
             let buf_ptr = format!("%rbp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, buf_ptr, buf_raw).ok();
+            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, buf_ptr, buf_raw).ok();
             let slot = format!("%rsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, slot, buf_ptr, head).ok();
+            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, slot, buf_ptr, head).ok();
             let val = format!("%rva{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, val, slot).ok();
+            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, val, slot).ok();
             let empty = format!("%rem{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, empty, head, tail).ok();
             let result = format!("%rrr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -2205,25 +2205,25 @@ pub fn emit_intrinsic_call(
                 let ai = format!("%mai{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = alloca i64, i64 {}", indent, ai, total).ok();
                 let dp_ptr = format!("%mdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 2", indent, dp_ptr, ai).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 2", indent, dp_ptr, ai).ok();
                 let dp_val = format!("%mdv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, dp_val, dp_ptr).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dp_val, dp_ptr).ok();
                 let s0 = format!("%ms0{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 0", indent, s0, ai).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 0", indent, s0, ai).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, dp_val, s0).ok();
                 let s1 = format!("%ms1{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 1", indent, s1, ai).ok();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, s1, ai).ok();
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, count as i64, s1).ok();
 
                 for i in 0..count {
                     let ev = format!("%mev{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = extractvalue {} {}, {}", indent, ev, struct_ty, call_reg, i).ok();
                     let ep = format!("%mep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, ai, (i as i64) + 2).ok();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, ai, (i as i64) + 2).ok();
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, ev, ep).ok();
                 }
 
-                writeln!(out, "{}{} = ptrtoint i64* {} to i64", indent, v, ai).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
             } else {
                 // Emit the call with native types for each parameter
                 write!(out, "{}{} = call {} @{}(", indent, v, ret_ty, name).ok();

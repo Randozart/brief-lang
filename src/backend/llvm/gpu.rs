@@ -450,10 +450,10 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str(&format!("{}:\n", body_label));
 
     // Compute base pointers: in_buf for reads, out_buf for writes, print_buf for I/O
-    ir.push_str("  %base_in = getelementptr i8, i8* %in_buf, i64 %gtid\n");
-    ir.push_str("  %base_out = getelementptr i8, i8* %out_buf, i64 %gtid\n");
+    ir.push_str("  %base_in = getelementptr i8, ptr %in_buf, i64 %gtid\n");
+    ir.push_str("  %base_out = getelementptr i8, ptr %out_buf, i64 %gtid\n");
     if has_print {
-        ir.push_str("  %base_print = getelementptr i8, i8* %print_buf, i64 %gtid\n");
+        ir.push_str("  %base_print = getelementptr i8, ptr %print_buf, i64 %gtid\n");
     }
 
     let mut loaded_regs: HashMap<String, String> = HashMap::new();
@@ -630,12 +630,12 @@ fn ensure_field_loaded(
 
     let is_float = field_types.get(field).map(|t| t == "float").unwrap_or(false);
     if is_float {
-        ir.push_str(&format!("{}{} = getelementptr i8, i8* {}, i64 {}\n", indent, gep, base, offset));
+        ir.push_str(&format!("{}{} = getelementptr i8, ptr {}, i64 {}\n", indent, gep, base, offset));
         let bc = format!("%bc_{}", loaded_regs.len());
-        ir.push_str(&format!("{}{} = bitcast i8* {} to float*\n", indent, bc, gep));
-        ir.push_str(&format!("{}{} = load float, float* {}, align 4\n", indent, reg, bc));
+        ir.push_str(&format!("{}{} = bitcast ptr {} to float*\n", indent, bc, gep));
+        ir.push_str(&format!("{}{} = load float, ptr {}, align 4\n", indent, reg, bc));
     } else {
-        ir.push_str(&format!("{}{} = getelementptr i8, i8* {}, i64 {}\n", indent, gep, base, offset));
+        ir.push_str(&format!("{}{} = getelementptr i8, ptr {}, i64 {}\n", indent, gep, base, offset));
         ir.push_str(&format!("{}{} = load i64, i8* {}, align 8\n", indent, reg, gep));
     }
     loaded_regs.insert(field.to_string(), reg.clone());
@@ -662,11 +662,11 @@ fn emit_spirv_stmt(
             // Store result to LHS field at output buffer offset
             let lhs_offset = field_offsets.get(&lhs_name).copied().unwrap_or(0);
             let gep = format!("%st_{}", loaded_regs.len());
-            ir.push_str(&format!("{}{} = getelementptr i8, i8* %base_out, i64 {}\n", indent, gep, lhs_offset));
+            ir.push_str(&format!("{}{} = getelementptr i8, ptr %base_out, i64 {}\n", indent, gep, lhs_offset));
             let is_float = field_types.get(&lhs_name).map(|t| t == "float").unwrap_or(false);
             if is_float {
                 let bc = format!("%stbc_{}", loaded_regs.len());
-                ir.push_str(&format!("{}{} = bitcast i8* {} to float*\n", indent, bc, gep));
+                ir.push_str(&format!("{}{} = bitcast ptr {} to float*\n", indent, bc, gep));
                 ir.push_str(&format!("{}store float {}, float* {}, align 4\n", indent, val, bc));
             } else {
                 ir.push_str(&format!("{}store i64 {}, i8* {}, align 8\n", indent, val, gep));
@@ -912,10 +912,10 @@ fn emit_spirv_expr(
             let sh_idx = loaded_regs.len();
             let gv_name = format!("@shared_buf_{}", sh_idx);
             ir.push_str(&format!("{}; shared memory: {} x i64\n", indent, n));
-            ir.push_str(&format!("{}%sh_base = addrspacecast [{} x i64] addrspace(3)* {} to i8*\n",
+            ir.push_str(&format!("{}%sh_base = addrspacecast [{} x i64] addrspace(3)* {} to ptr\n",
                 indent, n, gv_name));
             let reg = format!("%sh_ptr{}", sh_idx);
-            ir.push_str(&format!("{}{} = ptrtoint i8* %sh_base to i64\n", indent, reg));
+            ir.push_str(&format!("{}{} = ptrtoint ptr %sh_base to i64\n", indent, reg));
             reg
         }
         // GPU intrinsics
@@ -1044,7 +1044,7 @@ fn emit_spirv_intrinsic(
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let bc = format!("%prbc{}", ir.len());
             let reg = format!("%pr{}", ir.len());
-            ir.push_str(&format!("{}{} = bitcast i8* %base_print to float*\n", indent, bc));
+            ir.push_str(&format!("{}{} = bitcast ptr %base_print to float*\n", indent, bc));
             ir.push_str(&format!("{}store float {}, float* {}, align 4\n", indent, v, bc));
             reg
         }
@@ -1777,7 +1777,7 @@ mod tests {
         let kernel = extract_kernel("rw_test", &body, Expr::Integer(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
         // x is read-only → load from in_buf
-        assert!(ir.contains("getelementptr i8, i8* %base_in"),
+        assert!(ir.contains("getelementptr i8, ptr %base_in"),
             "read-only field x should load from in_buf");
         // y is written → store to out_buf
         assert!(ir.contains("store i64"),

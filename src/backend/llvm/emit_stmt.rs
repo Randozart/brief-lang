@@ -55,9 +55,9 @@ impl LlvmBackend {
         if let Some(targets) = self.ctx.cache_slots.get(fname) {
             for (_target, &(_cache_idx, valid_idx)) in targets {
                 let inv_gep = format!("%civ{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                     indent, inv_gep, valid_idx).ok();
-                writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
+                writeln!(out, "{}store i8 0, ptr {}, align 1", indent, inv_gep).ok();
             }
         }
     }
@@ -89,7 +89,7 @@ impl LlvmBackend {
             }
             s if s == "i8*" || s == "ptr" => {
                 let fp = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, fp, val).ok();
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, fp, val).ok();
                 fp
             }
             _ => val.to_string(),
@@ -110,7 +110,7 @@ impl LlvmBackend {
     /// Store a native-typed value to the i64 result slot, boxing if needed.
     fn store_i64_result(&mut self, out: &mut String, indent: &str, r: &TypedRegister, rs: &str) {
         let adapted = self.adapt_to_i64(out, indent, r);
-        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, adapted, rs).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, adapted, rs).ok();
     }
 
     /// Box a native-typed value to i64 for return/store, returning the adapted SSA name.
@@ -159,14 +159,14 @@ impl LlvmBackend {
                 z
             }
 
-            // String/Data: ptrtoint i8* to i64 (but check if already boxed)
+            // String/Data: ptrtoint ptr to i64 (but check if already boxed)
             "ptrtoint#" => {
                 let is_boxed = r.name.starts_with("%t") || r.name.starts_with("%d");
                 if is_boxed {
                     r.name.clone()
                 } else {
                     let p = format!("%rp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, r.name).ok();
                     p
                 }
             }
@@ -233,7 +233,7 @@ impl LlvmBackend {
             let is_boxed = r.name.starts_with("%t") || r.name.starts_with("%d");
             if is_boxed { r.name.clone() } else {
                 let p = format!("%rp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, p, r.name).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, r.name).ok();
                 p
             }
         } else if r.ty == Type::Float {
@@ -447,12 +447,12 @@ impl LlvmBackend {
                 if let Some(Expr::TupleDestructure(names, tuple_expr)) = expr {
                     let tuple_val = self.emit_expr(out, tuple_expr, indent);
                     let hp = format!("%tdh{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, tuple_val.name).ok();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, tuple_val.name).ok();
                     for (i, n) in names.iter().enumerate() {
                         let ep = format!("%tde{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
+                        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
                         let val = format!("%tdr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, val, ep).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, val, ep).ok();
                         self.fun.let_bindings.insert(n.clone(), val.clone());
                     }
                     return;
@@ -535,7 +535,7 @@ impl LlvmBackend {
                                 let sr = self.fun.state_reg_name.clone();
                                 let p = self.emit_state_gep(out, indent, "lgp", &sr, field_idx);
                                 let ld = format!("%lld{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
+                                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ld, p).ok();
                                 Some(ld)
                             } else {
                                 None
@@ -545,24 +545,24 @@ impl LlvmBackend {
                             return;
                         };
                         let hp = format!("%lhp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, list_ptr).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_ptr).ok();
                         let dp = format!("%ldp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, dp, hp).ok();
+                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                         let de = format!("%lde{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, de, dp).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
                         let ep = format!("%lep{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, de, idx_val.name).ok();
-                        writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val_reg, ep).ok();
+                        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, de, idx_val.name).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, val_reg, ep).ok();
                         return;
                     }
                     Expr::TupleDestructure(names, _) => {
                         let hp = format!("%tdh{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, hp, val).ok();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, val).ok();
                         for (i, name) in names.iter().enumerate() {
                             let ep = format!("%tde{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr i64, i64* {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
+                            writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
                             let elem = format!("%tdr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, elem, ep).ok();
+                            writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, elem, ep).ok();
                             if let Some(ref ssa_reg) = self.fun.ssa_state_reg.clone() {
                                 if let Some(&idx) = self.ctx.field_index_map.get(name) {
                                     let new_reg = format!("%in{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -573,8 +573,8 @@ impl LlvmBackend {
                             }
                             if let Some(&addr) = self.ctx.mmio_fields.get(name) {
                                 let p = format!("%mio{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
-                                writeln!(out, "{}store volatile i64 {}, i64* {}, align 1", indent, elem, p).ok();
+                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+                                writeln!(out, "{}store volatile i64 {}, ptr {}, align 1", indent, elem, p).ok();
                                 continue;
                             }
                             if let Some(trg) = self.ctx.triggers.get(name) {
@@ -590,7 +590,7 @@ impl LlvmBackend {
                                 let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &elem.to_string());
                                 writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, tv, ty, p, self.align_of(&ty)).ok();
                             } else if let Some(slot) = self.fun.param_slots.get(name) {
-                                writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, elem, slot).ok();
+                                writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, elem, slot).ok();
                                 self.fun.let_bindings.insert(name.clone(), elem.clone());
                             } else {
                                 self.fun.let_bindings.insert(name.clone(), elem.clone());
@@ -636,8 +636,8 @@ impl LlvmBackend {
                                 }
                                 "i8*" => {
                                     let p = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, p, val_boxed).ok();
-                                    writeln!(out, "{}{} = insertvalue %State {}, i8* {}, {}", indent, new_reg, ssa_reg, p, idx).ok();
+                                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, val_boxed).ok();
+                                    writeln!(out, "{}{} = insertvalue %State {}, ptr {}, {}", indent, new_reg, ssa_reg, p, idx).ok();
                                 }
                                 _ => {
                                     writeln!(out, "{}{} = insertvalue %State {}, i64 {}, {}", indent, new_reg, ssa_reg, val_boxed, idx).ok();
@@ -658,15 +658,15 @@ impl LlvmBackend {
                 }
                 if let Some(&addr) = self.ctx.mmio_fields.get(&fname) {
                     let p = format!("%mio{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = inttoptr i64 {} to i64*", indent, p, addr).ok();
-                    writeln!(out, "{}store volatile i64 {}, i64* {}, align 1", indent, val, p).ok();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+                    writeln!(out, "{}store volatile i64 {}, ptr {}, align 1", indent, val, p).ok();
                     return;
                 }
                 if let Some(&idx) = self.ctx.field_index_map.get(&fname) {
                     self.emit_memory_field_store(out, indent, &fname, idx, &val, is_volatile);
                 } else if let Some(slot) = self.fun.param_slots.get(&fname).cloned() {
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
-                    writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val_boxed, slot).ok();
+                    writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, val_boxed, slot).ok();
                     self.fun.let_bindings.insert(fname.clone(), val_boxed.clone());
                     self.fun.let_binding_types.insert(fname.clone(), Type::Int);
                 } else {
@@ -716,23 +716,23 @@ impl LlvmBackend {
                                 match ty.as_str() {
                                     "i8" => {
                                         let ld = format!("%gl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                        writeln!(out, "{}{} = load i8, i8* {}, align {}", indent, ld, p, self.align_of(&ty)).ok();
+                                        writeln!(out, "{}{} = load i8, ptr {}, align {}", indent, ld, p, self.align_of(&ty)).ok();
                                         let av_boxed = self.adapt_to_i64(out, indent, &av);
                                         let av_tr = format!("%gatr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                                         writeln!(out, "{}{} = trunc i64 {} to i8", indent, av_tr, av_boxed).ok();
                                         writeln!(out, "{}{} = select i1 {}, i8 {}, i8 {}", indent, se, i1, av_tr, ld).ok();
-                                        writeln!(out, "{}store{} i8 {}, i8* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
+                                        writeln!(out, "{}store{} i8 {}, ptr {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }
                                     "float" => {
                                         let ld = format!("%gl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                        writeln!(out, "{}{} = load float, float* {}, align {}", indent, ld, p, self.align_of(&ty)).ok();
+                                        writeln!(out, "{}{} = load float, ptr {}, align {}", indent, ld, p, self.align_of(&ty)).ok();
                                         let av_fl = self.native_float_or_box(out, indent, &av.to_string());
                                         writeln!(out, "{}{} = select i1 {}, float {}, float {}", indent, se, i1, av_fl, ld).ok();
-                                        writeln!(out, "{}store{} float {}, float* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
+                                        writeln!(out, "{}store{} float {}, ptr {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }
                                     _ => {
                                         let ld = format!("%gl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                        writeln!(out, "{}{} = load i64, i64* {}, align 8", indent, ld, p).ok();
+                                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ld, p).ok();
                                         // 2026-06-17: Box float to i64 for uniform i64 store
                                         let av_i64 = if av.ty == Type::Float {
                                             self.adapt_to_i64(out, indent, &av)
@@ -740,16 +740,16 @@ impl LlvmBackend {
                                             av.name.clone()
                                         };
                                         writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, se, i1, av_i64, ld).ok();
-                                        writeln!(out, "{}store{} i64 {}, i64* {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
+                                        writeln!(out, "{}store{} i64 {}, ptr {}, align {}", indent, gvol, se, p, self.align_of(&ty)).ok();
                                     }
                                 }
                                 // Phase 2: Invalidate ALL cache targets on select store
                                 if let Some(targets) = self.ctx.cache_slots.get(n) {
                                     for (_target, &(_cache_idx, valid_idx)) in targets {
                                         let inv_gep = format!("%civs{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                        writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+                                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                                             indent, inv_gep, valid_idx).ok();
-                                        writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
+                                        writeln!(out, "{}store i8 0, ptr {}, align 1", indent, inv_gep).ok();
                                     }
                                 }
                                 return;
