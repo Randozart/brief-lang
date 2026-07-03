@@ -2124,6 +2124,8 @@ self.emit_declares(&mut out);
                                 _ => false,
                             }
                         });
+                        let raw_body = &txns[0].1.body;
+                        let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.ctx.field_index_map);
                         if !has_swan_song && (node.is_pure_body || node.is_effectively_pure) {
                             let total_val = self.ctx.field_initializers
                                 .get(&bp.bound_var)
@@ -2137,21 +2139,25 @@ self.emit_declares(&mut out);
                                     })
                                 });
                             if let Some(tv) = total_val {
-                                // A005: pure counter fold
+                                // A005: pure counter fold (O(1))
                                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
-                                // Compile-time constant total — emit O(1) store
                                 self.emit_folded_pure_counter(&mut out, counter_idx, tv);
                                 true
                             } else {
-                                // A005: folded SSA (phi pipeline)
+                                // A005: folded SSA (phi pipeline, runtime bound)
                                 self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (runtime-variable bound)", node.name));
-                                // Pure body + runtime-variable bound → phi-node register pipeline
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, true, None);
                                 true
                             }
+                        } else if LlvmBackend::is_countable_txn(bp, inc, &body_stmts) {
+                            // 2026-07-03: Countable loop (A005c) — per-field phi nodes.
+                            // Replaces %slot_case round-trip with per-field phis so LLVM
+                            // can recognize the loop as countable and apply vectorization.
+                            self.fun.pending_post_hoist = post_hoist;
+                            self.warnings.push(format!("info: txn '{}' dispatched via countable loop (A005c, per-field phis)", &node.name));
+                            self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                            true
                         } else {
-                            let raw_body = &txns[0].1.body;
-                            let (body_stmts, post_hoist) = hoist_terminating_guard(raw_body, &self.ctx.field_index_map);
                             self.fun.pending_post_hoist = post_hoist;
                             let has_guards = body_stmts.iter().any(|s| matches!(s, crate::ast::Statement::Guarded { .. } | crate::ast::Statement::Escape(_) | crate::ast::Statement::SyncBlock { .. }));
                             if has_guards && !crate::proof_engine::prove_linear(&body_stmts) {

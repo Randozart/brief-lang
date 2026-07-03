@@ -28,7 +28,51 @@ use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{float_to_llvm_hex, find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
 use crate::analysis::dependency_graph::DependencyGraph;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Write;
+
+/// 2026-07-03: Check if a statement recursively references FFI functions.
+/// Used by is_countable_txn to detect side-effecting guards.
+fn has_ffi_reference(s: &Statement) -> bool {
+    match s {
+        Statement::Expression(e) | Statement::Assignment { expr: e, .. } => {
+            expr_has_ffi(e)
+        }
+        Statement::Let { expr, .. } => {
+            if let Some(e) = expr { expr_has_ffi(e) } else { false }
+        }
+        Statement::Guarded { condition, statements, .. } => {
+            expr_has_ffi(condition) || statements.iter().any(|s| has_ffi_reference(s))
+        }
+        Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => {
+            swan_song.as_ref().map_or(false, |sw| has_ffi_reference(sw))
+        }
+        _ => false,
+    }
+}
+
+/// Recursively check if an expression references FFI functions.
+fn expr_has_ffi(e: &Expr) -> bool {
+    match e {
+        Expr::Call(name, args) => {
+            name.starts_with("__") || name.contains('#') || args.iter().any(|a| expr_has_ffi(a))
+        }
+        Expr::IntrinsicCall { args, .. } => args.iter().any(|a| expr_has_ffi(a)),
+        Expr::Block(_, last) => expr_has_ffi(last),
+        Expr::BinaryOp(b) => expr_has_ffi(&b.left) || expr_has_ffi(&b.right),
+        Expr::UnaryOp(u) => expr_has_ffi(&u.operand),
+        // Old-style binary ops
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+        | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
+        | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r)
+        | Expr::Or(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
+        | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) | Expr::Like(l, r) => {
+            expr_has_ffi(l) || expr_has_ffi(r)
+        }
+        Expr::Neg(e) | Expr::Not(e) | Expr::BitNot(e) => expr_has_ffi(e),
+        _ => false,
+    }
+}
 
 impl LlvmBackend {
     /// Recursively evaluate a boolean expression for the exit condition check.
@@ -920,6 +964,238 @@ impl LlvmBackend {
         writeln!(out, "_done:").ok();
         // Arena reset: rewinds pointer for next scope. Memory stays live
         // across loops (Phase 3 cross-tick pool). Only freed at program exit.
+        self.emit_arena_reset(out, "  ");
+        let saved = std::mem::take(&mut self.fun.pending_post_hoist);
+        self.emit_hoisted_post_loop_prints(out, &saved);
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// 2026-07-03: Check if a transaction is eligible for the per-field phi
+    /// loop (A005c — countable loop). A countable txn has:
+    ///   - Single counter with increasing increment
+    ///   - Bounded precondition of the form `counter < bound`
+    ///   - No non-terminating side-effecting guards in the body
+    ///   - No reactive triggers
+    /// Returns true if the body can be emitted as a countable phi loop.
+    /// Standalone function (not inside impl LlvmBackend) so it can be called
+    /// from mod.rs without visibility conflicts.
+    pub(crate) fn is_countable_txn(
+        bounded_pre: &crate::analysis::transition_graph::BoundedPre,
+        increments: &crate::analysis::transition_graph::IncrementInfo,
+        body: &[Statement],
+    ) -> bool {
+        // Must be single-counter-increasing
+        if bounded_pre.var != increments.var || increments.delta <= 0 {
+            return false;
+        }
+        // Body must not have non-terminating side-effecting guards.
+        // A terminating guard (term! with swan song) is fine — the swan
+        // song is hoisted to the post-loop block. A non-terminating guard
+        // with FFI calls (e.g. periodic print) prevents vectorization.
+        for stmt in body {
+            match stmt {
+                Statement::Guarded { statements, .. } => {
+                    let has_term = statements.iter().any(|s| {
+                        matches!(s, Statement::TermBang { .. })
+                    });
+                    if !has_term {
+                        // Non-terminating guard: check for FFI references
+                        for s in statements {
+                            if has_ffi_reference(s) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+                Statement::Escape(_) | Statement::SyncBlock { .. } => {
+                    return false; // Non-linear control flow
+                }
+                _ => {}
+            }
+        }
+        true
+    }
+
+    /// 2026-07-03: Emit a main() with per-field phi nodes (A005c — countable
+    /// loop). Creates one phi per state field at the loop header so LLVM sees
+    /// canonical induction variables and can vectorize the body.
+    ///
+    /// Why per-field phis: the existing paths use either a %slot_case alloca
+    /// round-trip (A005a inline SSA) or GEP+load-store per iteration (A005b
+    /// memory). Both hide the fields from LLVM's induction variable analysis.
+    /// By promoting each field to an SSA phi, LLVM sees individual values
+    /// flowing through the loop body and can apply SROA, GVN, and
+    /// vectorization.
+    ///
+    /// Why memory still appears in the latch: modified field values are
+    /// reloaded from %State at the latch (not identity). GVN eliminates the
+    /// redundant load since it uses the same GEP address as the body store.
+    /// This keeps the pattern compatible with the existing emit_stmt memory
+    /// mode (which asserts ssa_state_reg is None for GEP stores).
+    ///
+    /// Why identity backedge for unmodified fields: fields not written by the
+    /// body keep their phi value unchanged. GVN copy-propagates the phi
+    /// register, producing zero instructions for the backedge.
+    pub(super) fn emit_countable_main(
+        &mut self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        body: &[Statement],
+        write_set: &HashSet<String>,
+    ) {
+        let c0 = self.fun.txn_counter;
+        self.fun.expr_dedup_cache.clear();
+        self.fun.fn_ret_ty = "i32".to_string();
+        self.fun.main_body = true;
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "  entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        self.emit_trg_init(out);
+        self.emit_arena_init(out, "  ");
+        // ── Load bound ────────────────────────────────────────────────
+        let bound_reg = format!("%cnt_bound_{}", c0);
+        if let Some(ti) = total_idx {
+            writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c0, c0, ti).ok();
+            writeln!(out, "  {} = load i64, i64* %gt_{}_{}, align 8", bound_reg, c0, c0).ok();
+        } else if let Some(cn) = total_const_name {
+            writeln!(out, "  {} = load i64, i64* @{}, align 8", bound_reg, cn).ok();
+        } else {
+            writeln!(out, "  {} = add i64 0, 0", bound_reg).ok();
+        }
+        self.emit_prealloc_for_body(out, "  ", body, &bound_reg);
+        // ── Initial field loads + phi/backedge register setup ────────
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        // Clone field map to avoid borrow conflicts with emit_state_gep
+        let all_fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
+            .map(|(n, &i)| (n.clone(), i, self.ctx.field_types[i].clone()))
+            .collect();
+        let mut init_regs: HashMap<String, String> = HashMap::new();
+        let mut counter_name = String::new();
+        for (name, idx, ty) in &all_fields {
+            if *idx == counter_idx {
+                counter_name = name.clone();
+                continue; // loaded separately via phi below
+            }
+            let gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", *idx);
+            let init_load = format!("%init_{}_{}", name, self.fun.txn_counter);
+            self.fun.txn_counter += 1;
+            let tn = crate::backend::llvm::tbaa_node(ty);
+            writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", init_load, ty, ty, gep, self.align_of(ty), tn).ok();
+            init_regs.insert(name.clone(), init_load);
+            let phi_reg = format!("%phi_{}", name);
+            let be_reg = format!("%be_{}", name);
+            self.fun.phi_field_regs.insert(name.clone(), phi_reg);
+            self.fun.backedge_field_regs.insert(name.clone(), be_reg);
+        }
+        // Load counter initial value for the induction phi
+        let c_gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", counter_idx);
+        let init_count = format!("%init_count_{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", init_count, c_gep).ok();
+        // Counter field also gets a phi+backedge for completeness
+        let count_phi_reg = format!("%phi_{}", counter_name);
+        let count_be_reg = format!("%be_{}", counter_name);
+        self.fun.phi_field_regs.insert(counter_name.clone(), count_phi_reg.clone());
+        self.fun.backedge_field_regs.insert(counter_name.clone(), count_be_reg.clone());
+        let pi_name = format!("%pi_cnt_{}", self.fun.txn_counter);
+        let pn_name = format!("%pn_cnt_{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "  br label %loop_hdr").ok();
+        // ── Loop header: phi nodes + exit check ──────────────────────
+        writeln!(out, "loop_hdr:").ok();
+        writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %latch ]", pi_name, init_count, pn_name).ok();
+        for (name, phi_reg) in &self.fun.phi_field_regs {
+            if *name == counter_name { continue; } // counter done above
+            let init_reg = &init_regs[name];
+            let be_reg = &self.fun.backedge_field_regs[name];
+            let ty = &self.ctx.field_types[*self.ctx.field_index_map.get(name).unwrap()];
+            writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %latch ]", phi_reg, ty, init_reg, be_reg).ok();
+        }
+        // Counter phi (stored as field for emit_stmt compatibility)
+        let ty_counter = &self.ctx.field_types[counter_idx];
+        writeln!(out, "  {} = phi {} [ {}, %entry ], [ {}, %latch ]", count_phi_reg, ty_counter, init_count, count_be_reg).ok();
+        // Exit check
+        let cmp_reg = format!("%cmp_hdr_{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "  {} = icmp slt i64 {}, {}", cmp_reg, pi_name, bound_reg).ok();
+        writeln!(out, "  br i1 {}, label %body, label %done", cmp_reg).ok();
+        // ── Body: load phi regs into ssa_old, emit_stmt ──────────────
+        writeln!(out, "body:").ok();
+        self.fun.ssa_state_reg = None; // memory mode: writes go through GEP+store
+        self.fun.pending_phi_backedge.clear();
+        self.fun.returns_i64 = false;
+        // Load phi regs into old-value caches so emit_stmt reads see phi values
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        for (name, phi_reg) in &self.fun.phi_field_regs {
+            let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
+            let ll_ty = &self.ctx.field_types[idx];
+            if ll_ty == "float" || ll_ty == "double" {
+                self.fun.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
+            } else {
+                self.fun.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
+            }
+        }
+        self.fun.let_bindings.clear();
+        self.fun.let_binding_types.clear();
+        self.fun.reg_float_cache.clear();
+        self.fun.reg_type_cache.clear();
+        self.fun.expr_dedup_cache.clear();
+        self.fun.terminated = false;
+        self.fun.loop_exit_label = Some("done".into());
+        for s in body {
+            if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+                self.emit_stmt(out, s, "  ");
+            }
+        }
+        self.fun.loop_exit_label = None;
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        // ── Latch: increment counter, reload modified fields ─────────
+        writeln!(out, "  br label %latch").ok();
+        writeln!(out, "latch:").ok();
+        // Counter increment
+        writeln!(out, "  {} = add i64 {}, 1", pn_name, pi_name).ok();
+        // Per-field backedge: reload modified fields from %State, identity for unchanged
+        let backedge_entries: Vec<(String, String)> = self.fun.backedge_field_regs.iter()
+            .map(|(n, r)| (n.clone(), r.clone()))
+            .collect();
+        let phi_entries: HashMap<String, String> = self.fun.phi_field_regs.iter()
+            .map(|(n, r)| (n.clone(), r.clone()))
+            .collect();
+        let field_map: HashMap<String, (usize, String)> = self.ctx.field_index_map.iter()
+            .map(|(n, &i)| (n.clone(), (i, self.ctx.field_types[i].clone())))
+            .collect();
+        let pending_mod: HashSet<String> = self.fun.pending_phi_backedge.keys().cloned().collect();
+        for (name, be_reg) in &backedge_entries {
+            if *name == counter_name {
+                // Counter backedge is the phi increment, not a reload
+                continue;
+            }
+            if pending_mod.contains(name) {
+                // Field was modified; reload from %State for the phi backedge
+                let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
+                let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
+                writeln!(out, "  {} = load {}, {}* {}, align {}",
+                    be_reg, ty, ty, gep_reload, self.align_of(ty)).ok();
+            } else {
+                // Field was not modified; use identity (phi value)
+                let phi_reg = phi_entries.get(name).cloned().unwrap_or_default();
+                writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg).ok();
+            }
+        }
+        // Counter backedge: phi increment is the backedge value
+        writeln!(out, "  {} = add i64 0, {}", count_be_reg, pi_name).ok();
+        super::emit_loop_metadata(out, "  ", "loop_hdr", &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
+        // ── Done: emit post-loop prints + exit ──────────────────────
+        writeln!(out, "done:").ok();
         self.emit_arena_reset(out, "  ");
         let saved = std::mem::take(&mut self.fun.pending_post_hoist);
         self.emit_hoisted_post_loop_prints(out, &saved);
