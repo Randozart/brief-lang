@@ -5,6 +5,63 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 impl LlvmBackend {
+    /// 2026-07-03: Invalidate cache slots for a field by writing i8 0 to
+    /// each valid-bit slot.  Used after both SSA insertvalue and memory stores.
+    fn invalidate_field_caches(&mut self, out: &mut String, indent: &str, fname: &str, mut ssa_reg: String) -> String {
+        if let Some(targets) = self.ctx.cache_slots.get(fname) {
+            for (_target, &(_cache_idx, valid_idx)) in targets {
+                let inv = format!("%civ{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = insertvalue %State {}, i8 0, {}", indent, inv, ssa_reg, valid_idx).ok();
+                ssa_reg = inv;
+            }
+        }
+        ssa_reg
+    }
+
+    /// 2026-07-03: Emit a memory-mode field store: GEP + typed store +
+    /// ssa_old tracking + pending_phi_backedge + cache invalidation.
+    /// Used by emit_stmt when ssa_state_reg is None (memory mode).
+    fn emit_memory_field_store(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        fname: &str,
+        idx: usize,
+        val: &TypedRegister,
+        is_volatile: bool,
+    ) {
+        let ty = self.ctx.field_types[idx].clone();
+        let sr = self.fun.state_reg_name.clone();
+        let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
+        let vol_str = if is_volatile { " volatile" } else { "" };
+        let val_boxed = self.adapt_to_i64(out, indent, val);
+        if !is_volatile {
+            let tn = crate::backend::llvm::tbaa_node(&ty);
+            let typed_val = self.ensure_typed_value(out, indent, &ty.as_str(), &val_boxed);
+            writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}",
+                indent, vol_str, ty, typed_val, ty, p, self.align_of(&ty), tn).ok();
+            let ty_str = ty.as_str();
+            if ty_str == "float" || ty_str == "double" {
+                self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val);
+            }
+            self.fun.pending_phi_backedge.insert(fname.to_string(), val_boxed.clone());
+            if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
+                self.fun.ssa_old_int_regs.insert(fname.to_string(), val_boxed.clone());
+            }
+        } else {
+            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty)).ok();
+            self.fun.pending_phi_backedge.insert(fname.to_string(), val_boxed.clone());
+        }
+        if let Some(targets) = self.ctx.cache_slots.get(fname) {
+            for (_target, &(_cache_idx, valid_idx)) in targets {
+                let inv_gep = format!("%civ{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
+                    indent, inv_gep, valid_idx).ok();
+                writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
+            }
+        }
+    }
+
     /// 2026-07-03: Ensure a value has the right LLVM type for storage.
     /// Returns the register name usable as the typed value (trunc, bitcast,
     /// or identity). Callers are responsible for the store instruction.
@@ -593,17 +650,7 @@ impl LlvmBackend {
                             self.fun.ssa_old_int_regs.insert(fname.clone(), re);
                             }
                             // Phase 2: Invalidate ALL cache targets on SSA field store
-                            let ssa_result = if let Some(targets) = self.ctx.cache_slots.get(&fname) {
-                                let mut reg = new_reg.clone();
-                                for (_target, &(_cache_idx, valid_idx)) in targets {
-                                    let inv = format!("%civssa{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                    writeln!(out, "{}{} = insertvalue %State {}, i8 0, {}", indent, inv, reg, valid_idx).ok();
-                                    reg = inv;
-                                }
-                                reg
-                            } else {
-                                new_reg.clone()
-                            };
+                            let ssa_result = self.invalidate_field_caches(out, indent, &fname, new_reg.clone());
                             self.fun.ssa_state_reg = Some(ssa_result);
                             return;
                         }
@@ -616,44 +663,7 @@ impl LlvmBackend {
                     return;
                 }
                 if let Some(&idx) = self.ctx.field_index_map.get(&fname) {
-                    let ty = self.ctx.field_types[idx].clone();
-                    let sr = self.fun.state_reg_name.clone();
-                    let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
-                    let vol_str = if is_volatile { " volatile" } else { "" };
-                    let val_boxed = self.adapt_to_i64(out, indent, &val);
-                    let tn = crate::backend::llvm::tbaa_node(&ty);
-                    let typed_val = self.ensure_typed_value(out, indent, &ty.as_str(), &val_boxed);
-                    writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}", indent, vol_str, ty, typed_val, ty, p, self.align_of(&ty), tn).ok();
-                    // 2026-06-27: Update ssa_old_float_regs so subsequent
-                    // body reads see the stored float value.
-                    // (Precomputed float reg is returned by ensure_typed_value)
-                    let ty_str = ty.as_str();
-                    if ty_str == "float" || ty_str == "double" {
-                        self.fun.ssa_old_float_regs.insert(fname.clone(), typed_val);
-                    }
-                    // 2026-06-26: Track the stored value for per-field phi back-edge.
-                    // When the canonical loop uses phi nodes for state fields, the latch
-                    // needs the updated register value to feed back into the phi (instead
-                    // of reloading from %State, which would add a GEP+load round-trip).
-                    self.fun.pending_phi_backedge.insert(fname.clone(), val_boxed.clone());
-                    // 2026-06-27: Update ssa_old_registers so subsequent body reads
-                    // (guards, let-bindings) see the stored value. In the per-field phi
-                    // path, ssa_old_int_regs starts with phi regs (pre-tick values).
-                    // Without this update, a guard after a field write reads the
-                    // pre-write value (ring_buffer bug). Float/double update
-                    // ssa_old_float_regs above instead.
-                    if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
-                        self.fun.ssa_old_int_regs.insert(fname.clone(), val_boxed.clone());
-                    }
-                    // Phase 2: Invalidate ALL cache targets on field store
-                    if let Some(targets) = self.ctx.cache_slots.get(&fname) {
-                        for (_target, &(_cache_idx, valid_idx)) in targets {
-                            let inv_gep = format!("%civ{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = getelementptr inbounds %State, %State* %state, i32 0, i32 {}",
-                                indent, inv_gep, valid_idx).ok();
-                            writeln!(out, "{}store i8 0, i8* {}, align 1", indent, inv_gep).ok();
-                        }
-                    }
+                    self.emit_memory_field_store(out, indent, &fname, idx, &val, is_volatile);
                 } else if let Some(slot) = self.fun.param_slots.get(&fname).cloned() {
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, val_boxed, slot).ok();
