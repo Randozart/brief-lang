@@ -2366,6 +2366,11 @@ impl TypeChecker {
                     } else {
                         inop.outputs.first().cloned().unwrap_or(Type::Void)
                     }
+                // 2026-07-03: Indirect call through a function pointer variable.
+                // When `name` is a local variable with type Applied("Fn", ...),
+                // validate argument types and return the function's return type.
+                } else if let Some(result) = self.try_indirect_call(name, args) {
+                    result
                 } else {
                     Type::Custom(name.clone())
                 }
@@ -2497,6 +2502,7 @@ impl TypeChecker {
                         // &x :> Ptr → Ptr<typeof(x)>
                         // list :> Ptr → Ptr<element_type>
                         // ptr :> Ptr on Ptr<T> → Int (escape hatch to raw address)
+                        // fn :> Ptr → function pointer type
                         match &src_ty {
                             Type::Applied(name, inner) if name == "Ptr" => {
                                 // ptr :> Ptr on a Ptr<T> → raw Int address
@@ -2518,12 +2524,27 @@ impl TypeChecker {
                                 Type::Applied("Ptr".to_string(), vec![Type::Char])
                             }
                             _ => {
-                                self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                                    expected: "Ptr, List, String, or struct".to_string(),
-                                    found: self.type_to_string(&src_ty),
-                                    context: format!(":> Ptr projection is not supported on {}", self.type_to_string(&src_ty)),
-                                });
-                                Type::Void
+                                // 2026-07-03: Check if source is a function reference
+                                if let Expr::Identifier(fn_name) = source.as_ref() {
+                                    if let Some(params) = self.function_params(fn_name) {
+                                        let ret = self.function_return_type(fn_name);
+                                        Type::Applied("Fn".to_string(), vec![Type::Tuple(params), ret])
+                                    } else {
+                                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                            expected: "Ptr, List, String, struct, or function".to_string(),
+                                            found: self.type_to_string(&src_ty),
+                                            context: format!(":> Ptr projection is not supported on {}", self.type_to_string(&src_ty)),
+                                        });
+                                        Type::Void
+                                    }
+                                } else {
+                                    self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                                        expected: "Ptr, List, String, struct, or function".to_string(),
+                                        found: self.type_to_string(&src_ty),
+                                        context: format!(":> Ptr projection is not supported on {}", self.type_to_string(&src_ty)),
+                                    });
+                                    Type::Void
+                                }
                             }
                         }
                     }
@@ -2898,6 +2919,70 @@ Expr::ObjectLiteral(fields) => {
         } else {
             false
         }
+    }
+
+    // 2026-07-03: Look up the parameter types of a function by name.
+    fn function_params(&self, name: &str) -> Option<Vec<Type>> {
+        if let Some(defn) = self.definitions.get(name) {
+            let params = defn.parameters.iter().map(|p| p.1.clone()).collect();
+            return Some(params);
+        }
+        if let Some(txn) = self.transactions.get(name) {
+            let params = txn.parameters.iter().map(|p| p.1.clone()).collect();
+            return Some(params);
+        }
+        if let Some(sig) = self.signatures.get(name) {
+            let params = sig.params.iter().map(|p| p.1.clone()).collect();
+            return Some(params);
+        }
+        None
+    }
+
+    // 2026-07-03: Look up the return type of a function by name.
+    fn function_return_type(&self, name: &str) -> Type {
+        if let Some(defn) = self.definitions.get(name) {
+            return defn.outputs.first().cloned().unwrap_or(Type::Int);
+        }
+        if let Some(txn) = self.transactions.get(name) {
+            return txn.outputs.first().cloned().unwrap_or(Type::Int);
+        }
+        if let Some(sig) = self.signatures.get(name) {
+            // Signatures use ResultType for their output specification
+            match &sig.result_type {
+                crate::ast::ResultType::Projection(types) => {
+                    return types.first().cloned().unwrap_or(Type::Int);
+                }
+                crate::ast::ResultType::TrueAssertion => return Type::Bool,
+                crate::ast::ResultType::VoidType => return Type::Void,
+            }
+        }
+        Type::Int
+    }
+
+    // 2026-07-03: Try to resolve an indirect call through a function pointer variable.
+    // Returns Some(return_type) if name is a variable with fn-pointer type, None otherwise.
+    fn try_indirect_call(&self, name: &str, args: &[Expr]) -> Option<Type> {
+        let var_ty = self.lookup_variable(name)?;
+        let Type::Applied(fn_name, inner) = &var_ty else { return None; };
+        if fn_name != "Fn" || inner.len() != 2 {
+            return None;
+        }
+        let (param_types, ret_type) = (&inner[0], &inner[1]);
+        let Type::Tuple(params) = param_types else {
+            return Some(ret_type.clone());
+        };
+        for (i, arg) in args.iter().enumerate() {
+            let expected = params.get(i).cloned().unwrap_or(Type::Int);
+            let actual = self.infer_expression(arg);
+            if !self.types_compatible(&actual, &expected) {
+                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                    expected: self.type_to_string(&expected),
+                    found: self.type_to_string(&actual),
+                    context: format!("argument {} of indirect call to {}", i, name),
+                });
+            }
+        }
+        Some(ret_type.clone())
     }
 
     fn extract_type_substitutions(&self, expected: &Type, actual: &Type) -> HashMap<String, Type> {

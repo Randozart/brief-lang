@@ -466,35 +466,44 @@ fn validate_ptr_cast(
 
 ## 9. Phase 5 — Function Pointers and Dynamic Dispatch
 
-**Goal:** Add `fn(T) -> U` as a first-class type with `&f` address-of operator and indirect calls.
+**Goal:** Allow variables to hold function references, called via indirect dispatch.
 
-### 9.1 Syntax
+### 9.1 Design Decision
+
+Instead of `&f` (which conflicts with Brief's mutable `&` operator) or a new
+AST variant, function references use the existing `:> Ptr` projection:
 
 ```brief
-// Function pointer type
-type CompareFn = fn(Ptr<Bits @/0..8>, Ptr<Bits @/0..8>) -> Bool;
-
-// Address-of
-let cmp: CompareFn = &my_cmp;
-let result = cmp(ptr_a, ptr_b);  // indirect call
+let cmp: Ptr<fn(Int, Int) -> Bool> = my_cmp :> Ptr;
+let result = cmp(ptr_a, ptr_b);  // indirect call via Expr::Call on fn-ptr variable
 ```
 
-### 9.2 Type System
+### 9.2 Why No New AST Variants
 
-```rust
-pub enum Type {
-    // ... existing variants ...
-    Fn(Vec<Type>, Box<Type>),  // NEW: parameters → return type
-}
+- `:> Ptr` already parses to `Expr::Projection { target: Ptr }`
+- `call(args)` already parses to `Expr::Call(name, args)`
+- The typechecker resolves indirect calls: when `Call("cmp", args)` finds a
+  variable `cmp` with a function pointer type, it validates args and returns
+  the function's return type
+- The LLVM backend emits `load i64` → `inttoptr` → `call %loaded(...)`
+
+No parser changes. No new Expr variants. Pure typechecker + backend work.
+
+### 9.3 Type Representation
+
+Function pointer types stay as `Applied("Fn", vec![param_types, return_type])`.
+This is already produced by the parser for `(Int) -> Bool` syntax.
+
+### 9.4 LLVM Codegen
+
+```llvm
+; my_cmp :> Ptr → ptrtoint @my_cmp to i64
+%addr = ptrtoint i64 @my_cmp, i64
+
+; cmp(a, b) indirect call through function pointer variable
+%fn_ptr = inttoptr i64 %cmp_val to ptr
+%result = call i64 %fn_ptr(i64 %a, i64 %b)
 ```
-
-### 9.3 LLVM Codegen
-
-| Syntax | LLVM IR |
-|--------|---------|
-| `&my_fn` | `ptr @my_fn` |
-| `cmp(ptr_a, ptr_b)` | `call i64 %cmp(i64 %a, i64 %b)` |
-| `fn(Int) -> Int` type | `i64 (i64)*` |
 
 ### 9.4 Safety
 
