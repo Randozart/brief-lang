@@ -107,6 +107,18 @@ pub enum TimeUnit {
     Nanoseconds,
 }
 
+/// Layout constraint for a universal pointer — the safe void* equivalent.
+/// Describes the spatial shape of the pointee: byte size and alignment.
+/// Pointers parameterized by `LayoutConstraint` can point to ANY type
+/// matching these dimensions. Operations are gated to spatial-only
+/// (memcpy, memcmp, hash, volatile load/store) when the pointee is Bits.
+/// `Ptr64` desugars to `LayoutConstraint { bytes: 8, alignment: 8 }`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LayoutConstraint {
+    pub bytes: u64,
+    pub alignment: u64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum BitRange {
     Single(usize),
@@ -150,6 +162,10 @@ pub enum Type {
     Vector(Box<Type>, Vec<Dimension>),
     Enum(String),
     Constrained(Box<Type>, BitRange),
+    /// Layout-constrained universal pointer. Desugars from `Ptr<N>` or `Ptr<Bits @/0..N>`.
+    /// Carries byte size and alignment for the pointee. Operations are spatial-only
+    /// when the pointee is `Bits` — no semantic interpretation (add, field access, etc.).
+    LayoutPtr(LayoutConstraint),
 }
 
 // 2026-06-29: Fixed-width type helpers for the explicit-width types feature
@@ -232,7 +248,60 @@ impl Type {
             // Compound types without universe entries: use Int as safe default
             Type::Union(_) | Type::Tuple(_) | Type::TypeVar(_)
             | Type::Generic(_, _) | Type::Applied(_, _)
-            | Type::Vector(_, _) | Type::Constrained(_, _) => "Int",
+            | Type::Vector(_, _) | Type::Constrained(_, _)
+            | Type::LayoutPtr(_) => "Int",
+        }
+    }
+
+    // 2026-07-03: Normalize `Ptr<Bits @/0..N>` to `LayoutPtr`.
+    // Also normalizes `Ptr<Int>` (stays as Applied), `Ptr8` (already LayoutPtr),
+    // and nested occurrences inside compound types.
+    // Call this after parsing, before type checking, to canonicalize
+    // layout-constrained pointers.
+    pub fn normalize_layout_ptr(self) -> Type {
+        match self {
+            // Ptr<Bits @/range> → LayoutPtr
+            Type::Applied(name, mut args) if name == "Ptr" && args.len() == 1 => {
+                let inner = args.remove(0);
+                match inner {
+                    Type::Constrained(inner_ty, br) if matches!(*inner_ty, Type::Data) => {
+                        let bits = match br {
+                            BitRange::Range(start, end) => end - start + 1,
+                            BitRange::Single(_) => 1,
+                            BitRange::Any(n) => n,
+                        };
+                        let bytes = (bits + 7) / 8;
+                        Type::LayoutPtr(LayoutConstraint { bytes: bytes as u64, alignment: bytes as u64 })
+                    }
+                    // Other Ptr<T> where T is not Bits @/range stays as Applied
+                    other => {
+                        let inner = other.normalize_layout_ptr();
+                        Type::Applied(name, vec![inner])
+                    }
+                }
+            }
+            // Recurse into compound types
+            Type::Applied(name, args) => {
+                let args = args.into_iter().map(|a| a.normalize_layout_ptr()).collect();
+                Type::Applied(name, args)
+            }
+            Type::Union(types) => {
+                Type::Union(types.into_iter().map(|t| t.normalize_layout_ptr()).collect())
+            }
+            Type::Tuple(types) => {
+                Type::Tuple(types.into_iter().map(|t| t.normalize_layout_ptr()).collect())
+            }
+            Type::Generic(name, args) => {
+                Type::Generic(name, args.into_iter().map(|a| a.normalize_layout_ptr()).collect())
+            }
+            Type::Vector(inner, dims) => {
+                Type::Vector(Box::new(inner.normalize_layout_ptr()), dims)
+            }
+            Type::Constrained(inner, br) => {
+                Type::Constrained(Box::new(inner.normalize_layout_ptr()), br)
+            }
+            // All other types stay as-is
+            other => other,
         }
     }
 }

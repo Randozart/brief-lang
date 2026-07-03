@@ -1159,6 +1159,10 @@ impl TypeChecker {
     }
 
     fn resolve_type(&self, ty: Type) -> Type {
+        // 2026-07-03: Normalize Ptr<Bits @/N> → LayoutPtr before any other resolution.
+        // This must happen first so that the downstream type checker and codegen
+        // always see the canonical LayoutPtr form.
+        let ty = ty.normalize_layout_ptr();
         match ty {
             Type::Custom(name) => {
                 if self.signatures.contains_key(&name) {
@@ -2495,6 +2499,8 @@ impl TypeChecker {
                                 // ptr :> Ptr on a Ptr<T> → raw Int address
                                 Type::Int
                             }
+                            // 2026-07-03: LayoutPtr :> Ptr → raw Int address
+                            Type::LayoutPtr(_) => Type::Int,
                             Type::Applied(name, inner) if name == "List" || name == "Vector" => {
                                 // list :> Ptr → Ptr<element_type>
                                 let elem_ty = inner.first().cloned().unwrap_or(Type::Int);
@@ -2813,8 +2819,10 @@ Expr::ObjectLiteral(fields) => {
                         } else if l_ty.is_integral() && l_ty == r_ty {
                             l_ty
                         } else {
-                            let is_l_ptr = matches!(&l_ty, Type::Applied(n, _) if n == "Ptr");
-                            let is_r_ptr = matches!(&r_ty, Type::Applied(n, _) if n == "Ptr");
+                            let is_l_ptr = matches!(&l_ty, Type::Applied(n, _) if n == "Ptr")
+                                || matches!(&l_ty, Type::LayoutPtr(_));
+                            let is_r_ptr = matches!(&r_ty, Type::Applied(n, _) if n == "Ptr")
+                                || matches!(&r_ty, Type::LayoutPtr(_));
                             if is_l_ptr { l_ty }
                             else if is_r_ptr { r_ty }
                             // Phase 7B: Custom types in the universe preserve their type
@@ -3062,12 +3070,25 @@ Expr::ObjectLiteral(fields) => {
                 });
                 Type::Custom("type_error".to_string())
             }
-            // Ptr<T> + Int → preserves Ptr<T>
+            // Ptr<T> + Int → preserves Ptr<T>; LayoutPtr + Int preserves LayoutPtr
             (Type::Applied(n, _), Type::Int) | (Type::Int, Type::Applied(n, _)) if n == "Ptr" => {
+                l_ty.clone()
+            }
+            // 2026-07-03: LayoutPtr + Int preserves the layout-constrained pointer
+            (Type::LayoutPtr(_), Type::Int) | (Type::Int, Type::LayoutPtr(_)) => {
                 l_ty.clone()
             }
             // Ptr<T> + non-Int → error
             (Type::Applied(n, _), other) | (other, Type::Applied(n, _)) if n == "Ptr" => {
+                self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                    expected: "Int".to_string(),
+                    found: self.type_to_string(other),
+                    context: format!("cannot perform arithmetic on {} with {}", self.type_to_string(l_ty), self.type_to_string(r_ty)),
+                });
+                Type::Custom("type_error".to_string())
+            }
+            // 2026-07-03: LayoutPtr + non-Int → error
+            (Type::LayoutPtr(_), other) | (other, Type::LayoutPtr(_)) if *other != Type::Int => {
                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
                     expected: "Int".to_string(),
                     found: self.type_to_string(other),
@@ -3244,6 +3265,9 @@ Expr::ObjectLiteral(fields) => {
         // Ptr ↔ Int cast: any Int can become Ptr<T>, any Ptr<T> can become Int
         if let Type::Applied(name, _) = src { if name == "Ptr" && *dst == Type::Int { return true; } }
         if let Type::Applied(name, _) = dst { if name == "Ptr" && *src == Type::Int { return true; } }
+        // 2026-07-03: LayoutPtr ↔ Int cast: same as Ptr ↔ Int
+        if matches!(src, Type::LayoutPtr(_)) && *dst == Type::Int { return true; }
+        if matches!(dst, Type::LayoutPtr(_)) && *src == Type::Int { return true; }
         // Check meld-backed cast between custom types
         if let (Type::Custom(src_name), Type::Custom(dst_name)) = (src, dst) {
             if let Some(ref universe) = self.type_universe {
@@ -3358,6 +3382,8 @@ Expr::ObjectLiteral(fields) => {
             (Type::Generic(an, aa), Type::Generic(bn, ba)) => {
                 an == bn && aa.len() == ba.len() && aa.iter().zip(ba.iter()).all(|(a, b)| self.types_compatible(a, b))
             }
+            // 2026-07-03: LayoutPtr compatibility — same layout constraint = same type
+            (Type::LayoutPtr(a), Type::LayoutPtr(b)) => a == b,
             _ => false,
         }
     }

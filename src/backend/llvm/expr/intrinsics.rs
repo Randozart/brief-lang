@@ -1876,20 +1876,24 @@ pub fn emit_intrinsic_call(
             let addr = backend.emit_expr(out, &args[0], indent);
             // Safety net: typechecker should have caught non-Ptr types
             debug_assert!(
-                matches!(&addr.ty, Type::Applied(n, _) if n == "Ptr"),
-                "volatile_load# expected Ptr<T>, got {:?}", addr.ty
+                matches!(&addr.ty, Type::Applied(n, _) if n == "Ptr")
+                    || matches!(&addr.ty, Type::LayoutPtr(_)),
+                "volatile_load# expected Ptr<T> or LayoutPtr, got {:?}", addr.ty
             );
             let ptr = format!("%vlptr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
-            // Extract T from Ptr<T> argument type
-            let t = if let Type::Applied(name, inners) = &addr.ty {
-                if name == "Ptr" {
+            // Extract pointee type from Ptr<T> or LayoutPtr
+            let t = match &addr.ty {
+                Type::LayoutPtr(lc) => match lc.bytes {
+                    1 => Type::Int8,
+                    2 => Type::Int16,
+                    4 => Type::Int32,
+                    _ => Type::Int,
+                },
+                Type::Applied(name, inners) if name == "Ptr" => {
                     inners.first().cloned().unwrap_or(Type::Int)
-                } else {
-                    Type::Int
                 }
-            } else {
-                Type::Int
+                _ => Type::Int,
             };
             let llvm_t = backend.llvm_type(&t).to_string();
             let raw = format!("%vlraw{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -1918,20 +1922,24 @@ pub fn emit_intrinsic_call(
             let val = backend.emit_expr(out, &args[1], indent);
             // Safety net: typechecker should have caught non-Ptr types
             debug_assert!(
-                matches!(&addr.ty, Type::Applied(n, _) if n == "Ptr"),
-                "volatile_store# expected Ptr<T>, got {:?}", addr.ty
+                matches!(&addr.ty, Type::Applied(n, _) if n == "Ptr")
+                    || matches!(&addr.ty, Type::LayoutPtr(_)),
+                "volatile_store# expected Ptr<T> or LayoutPtr, got {:?}", addr.ty
             );
             let ptr = format!("%vsptr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr.name).ok();
-            // Extract T from Ptr<T> argument type
-            let t = if let Type::Applied(name, inners) = &addr.ty {
-                if name == "Ptr" {
+            // Extract pointee type from Ptr<T> or LayoutPtr
+            let t = match &addr.ty {
+                Type::LayoutPtr(lc) => match lc.bytes {
+                    1 => Type::Int8,
+                    2 => Type::Int16,
+                    4 => Type::Int32,
+                    _ => Type::Int,
+                },
+                Type::Applied(name, inners) if name == "Ptr" => {
                     inners.first().cloned().unwrap_or(Type::Int)
-                } else {
-                    Type::Int
                 }
-            } else {
-                Type::Int
+                _ => Type::Int,
             };
             let llvm_t = backend.llvm_type(&t).to_string();
             // Unbox val from i64 to native type T

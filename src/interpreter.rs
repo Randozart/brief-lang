@@ -2866,7 +2866,9 @@ impl Interpreter {
             (Value::Instance { .. }, _) => true,
             (Value::Enum(..), _) => true,
             (Value::DbvlTable(_) | Value::Regex(_), _) => true,
+            // 2026-07-03: Ptr value matches Ptr<T> or LayoutPtr type
             (Value::Ptr(_), Type::Applied(n, _)) if n == "Ptr" => true,
+            (Value::Ptr(_), Type::LayoutPtr(_)) => true,
             // Primitive type mismatch
             _ => false,
         }
@@ -6232,7 +6234,9 @@ impl Interpreter {
                     (Value::Enum(ename, ..), Type::Custom(n)) => ename == n,
                     (Value::Enum(ename, ..), Type::Enum(n)) => ename == n,
                     (Value::Enum(ename, ..), Type::Applied(n, _)) => ename == n,
+                    // 2026-07-03: Ptr value matches Ptr<T> or LayoutPtr type
                     (Value::Ptr(_), Type::Applied(n, _)) if n == "Ptr" => true,
+                    (Value::Ptr(_), Type::LayoutPtr(_)) => true,
                     _ => false,
                 };
                 Ok(Value::Bool(matches))
@@ -6345,15 +6349,19 @@ impl Interpreter {
 
             // Ptr ↔ Int
             (Value::Ptr(p), Type::Int) => Ok(Value::Int(*p as i64)),
+            // 2026-07-03: Int → Ptr<T> or Int → LayoutPtr
             (Value::Int(n), Type::Applied(name, _)) if name == "Ptr" => {
                 Ok(Value::Ptr(*n as u64))
             }
+            (Value::Int(n), Type::LayoutPtr(_)) => Ok(Value::Ptr(*n as u64)),
 
             // Identity casts (no-op)
             (Value::Int(_), Type::Int) => Ok(val.clone()),
             (Value::Float(_), Type::Float) => Ok(val.clone()),
             (Value::Bool(_), Type::Bool) => Ok(val.clone()),
+            // 2026-07-03: Ptr value → Ptr<T> or LayoutPtr (identity)
             (Value::Ptr(_), Type::Applied(name, _)) if name == "Ptr" => Ok(val.clone()),
+            (Value::Ptr(_), Type::LayoutPtr(_)) => Ok(val.clone()),
 
             // Meld-backed custom type cast: identity (reinterpretation, not conversion)
             (_, Type::Custom(_)) => Ok(val),

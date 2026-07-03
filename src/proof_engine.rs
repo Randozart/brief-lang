@@ -2943,6 +2943,8 @@ impl ProofEngine {
                 format!("Vector<{}, {}>", self.type_name(inner), dims_str.join(", "))
             }
             Type::Constrained(inner, _) => self.type_name(inner),
+            // 2026-07-03: Layout-constrained pointer — canonical form display
+            Type::LayoutPtr(lc) => format!("Ptr<Bits @/0..{}>", lc.bytes * 8 - 1),
         }
     }
 

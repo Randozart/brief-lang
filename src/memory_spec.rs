@@ -230,6 +230,8 @@ fn format_type(ty: &Type) -> String {
         Type::Constrained(inner, bit_range) => {
             format!("{}@/{}", format_type(inner), format_bit_range(bit_range))
         }
+        // 2026-07-03: Layout-constrained pointer — show canonical form
+        Type::LayoutPtr(lc) => format!("Ptr<Bits @/0..{}>", lc.bytes * 8 - 1),
     }
 }
 
@@ -272,6 +274,8 @@ fn estimate_type_size(ty: &Type) -> usize {
         Type::Constrained(_, BitRange::Single(_)) => 1,
         Type::Constrained(_, BitRange::Any(n)) => (*n + 7) / 8,
         Type::Constrained(_, BitRange::Range(start, end)) => (end - start + 1 + 7) / 8,
+        // 2026-07-03: Layout-constrained pointer — value is always pointer-width (8 bytes on x86_64)
+        Type::LayoutPtr(_) => 8,
     }
 }
 

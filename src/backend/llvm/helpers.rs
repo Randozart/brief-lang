@@ -975,8 +975,10 @@ impl LlvmBackend {
         }
 
         // Preserve Ptr type through arithmetic operations
-        let is_a_ptr = matches!(&a.ty, Type::Applied(n, _) if n == "Ptr");
-        let is_b_ptr = matches!(&b.ty, Type::Applied(n, _) if n == "Ptr");
+        let is_a_ptr = matches!(&a.ty, Type::Applied(n, _) if n == "Ptr")
+            || matches!(&a.ty, Type::LayoutPtr(_));
+        let is_b_ptr = matches!(&b.ty, Type::Applied(n, _) if n == "Ptr")
+            || matches!(&b.ty, Type::LayoutPtr(_));
         let ptr_ty = if is_a_ptr { Some(a.ty.clone()) }
                      else if is_b_ptr { Some(b.ty.clone()) }
                      else { None };
@@ -1027,9 +1029,9 @@ impl LlvmBackend {
         }
     }
 
-    /// Check if a type is `Ptr<T>` (returns true for any pointee type T).
+    /// Check if a type is `Ptr<T>` or a layout-constrained pointer (returns true for any).
     fn is_ptr_ty(ty: &Type) -> bool {
-        if let Type::Applied(name, _) = ty { name == "Ptr" } else { false }
+        if let Type::Applied(name, _) = ty { name == "Ptr" } else { matches!(ty, Type::LayoutPtr(_)) }
     }
 
     /// Check if an expression is a reference to a linked String trigger.

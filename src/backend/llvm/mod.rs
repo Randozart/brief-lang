@@ -2813,12 +2813,14 @@ self.emit_declares(&mut out);
             Expr::Projection { target, .. } => matches!(target, ProjectionTarget::Ptr),
             Expr::Identifier(name) => {
                 self.fun.let_binding_types.get(name)
-                    .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr"))
+                    .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr")
+                        || matches!(t, Type::LayoutPtr(_)))
                     .unwrap_or(false)
             }
             Expr::OwnedRef(name) => {
                 self.fun.let_binding_types.get(name)
-                    .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr"))
+                    .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr")
+                        || matches!(t, Type::LayoutPtr(_)))
                     .unwrap_or(false)
             }
             _ => false,

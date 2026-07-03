@@ -220,6 +220,8 @@ impl Annotator {
                 format!("Vector<{}, {}>", self.type_to_string(inner), dims_str.join(", "))
             }
             Type::Constrained(inner, _) => self.type_to_string(inner),
+            // 2026-07-03: Layout-constrained pointer — show as Ptr<Bits @/0..N>
+            Type::LayoutPtr(lc) => format!("Ptr<Bits @/0..{}>", lc.bytes * 8 - 1),
         }
     }
 

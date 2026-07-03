@@ -6860,6 +6860,23 @@ let span = self.current_span();
             ty = Type::Applied("Fn".to_string(), vec![ty, return_type]);
         }
 
+        // 2026-07-03: Desugar bare Ptr/PtrN to layout-constrained pointer.
+        // This runs AFTER generic arg parsing, so Ptr<Int> stays as Applied("Ptr", ...)
+        // while bare Ptr becomes LayoutPtr { bytes: 8 }. The "<:>" and "Ptr!->" variants
+        // remain as Custom names (not LayoutPtr) since they have different semantics.
+        if let Type::Custom(name) = &ty {
+            match name.as_str() {
+                "Ptr" => ty = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 }),
+                "Ptr8" => ty = Type::LayoutPtr(LayoutConstraint { bytes: 1, alignment: 1 }),
+                "Ptr16" => ty = Type::LayoutPtr(LayoutConstraint { bytes: 2, alignment: 2 }),
+                "Ptr32" => ty = Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }),
+                "Ptr64" => ty = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 }),
+                "Ptr128" => ty = Type::LayoutPtr(LayoutConstraint { bytes: 16, alignment: 16 }),
+                "Ptr256" => ty = Type::LayoutPtr(LayoutConstraint { bytes: 32, alignment: 32 }),
+                _ => {}
+            }
+        }
+
         // Check for union: Type | Type
         let mut union_types = Vec::new();
         union_types.push(ty);
