@@ -276,22 +276,81 @@ fn try_fn_ptr_call(
     args: &[Expr],
     indent: &str,
 ) -> Option<TypedRegister> {
-    let var_ty = backend.fun.let_binding_types.get(name)?;
-    let Type::Applied(fn_name, inner) = var_ty else { return None; };
+    // Clone upfront to avoid borrow conflicts with emit_expr
+    let var_ty = backend.fun.let_binding_types.get(name)?.clone();
+    let Type::Applied(fn_name, inner) = &var_ty else { return None; };
     if fn_name != "Fn" || inner.len() != 2 {
         return None;
     }
+    let (param_types, ret_type) = (inner[0].clone(), inner[1].clone());
     let fn_reg = backend.fun.let_bindings.get(name)
         .cloned()
         .unwrap_or_else(|| "0".to_string());
     let fn_ptr = format!("%ic_ptr{}", backend.fun.txn_counter);
     backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, fn_ptr, fn_reg).ok();
+    // Marshal arguments matching internal call convention: %state + typed args
     let mut arg_strs: Vec<String> = Vec::new();
-    for arg in args {
+    arg_strs.push("ptr %state".to_string());
+    let Type::Tuple(params) = &param_types else {
+        // Single return — no params; just pass %state
+        let ret = emit_indirect_return(backend, out, v, indent, &fn_ptr, &arg_strs, &ret_type);
+        return Some(ret);
+    };
+    for (i, arg) in args.iter().enumerate() {
         let val = backend.emit_expr(out, arg, indent);
-        arg_strs.push(format!("i64 {}", val));
+        let expected = params.get(i).cloned().unwrap_or(Type::Int);
+        match &expected {
+            Type::Bool => {
+                let boxed = backend.adapt_to_i64(out, indent, &val);
+                let tr = format!("%ic_tr{}", backend.fun.txn_counter);
+                backend.fun.txn_counter += 1;
+                writeln!(out, "{}{} = trunc i64 {} to i8", indent, tr, boxed).ok();
+                arg_strs.push(format!("i8 {}", tr));
+            }
+            Type::Float => {
+                let fl = backend.ensure_float_reg(out, indent, &val);
+                arg_strs.push(format!("float {}", fl));
+            }
+            Type::String | Type::Data => {
+                let boxed = backend.adapt_to_i64(out, indent, &val);
+                let p = format!("%ic_p{}", backend.fun.txn_counter);
+                backend.fun.txn_counter += 1;
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
+                arg_strs.push(format!("ptr {}", p));
+            }
+            _ => arg_strs.push(format!("i64 {}", val)),
+        }
     }
-    writeln!(out, "{}{} = call i64 {}({})", indent, v, fn_ptr, arg_strs.join(", ")).ok();
-    Some(TypedRegister { name: v.to_string(), ty: Type::Int })
+    let ret = emit_indirect_return(backend, out, v, indent, &fn_ptr, &arg_strs, &ret_type);
+    Some(ret)
+}
+
+// Emit the indirect call and handle return type marshalling.
+fn emit_indirect_return(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    v: &str,
+    indent: &str,
+    fn_ptr: &str,
+    arg_strs: &[String],
+    ret_type: &Type,
+) -> TypedRegister {
+    let is_float = matches!(ret_type, Type::Float);
+    let call_ret = if is_float { "float" } else { "i64" };
+    let call_result = format!("%ic_res{}", backend.fun.txn_counter);
+    backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = call {} {}({})", indent, call_result, call_ret, fn_ptr, arg_strs.join(", ")).ok();
+    if is_float {
+        let bi = format!("%ic_bi{}", backend.fun.txn_counter);
+        let ze = format!("%ic_ze{}", backend.fun.txn_counter);
+        backend.fun.txn_counter += 1;
+        writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, call_result).ok();
+        writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+        backend.fun.reg_float_cache.insert(ze.clone(), call_result);
+        TypedRegister { name: ze, ty: Type::Float }
+    } else {
+        writeln!(out, "{}{} = add i64 0, {}", indent, v, call_result).ok();
+        TypedRegister { name: v.to_string(), ty: Type::Int }
+    }
 }
