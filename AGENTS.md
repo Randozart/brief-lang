@@ -49,6 +49,106 @@ proven at compile time, not `unsafe` blocks.
     the work. All of it. If unsure, ask — do not decide. If prereqs are missing,
     implement them first.
 
+## Coding Standards
+
+### 1. Flat Control Flow — Max 2 Levels Deep
+
+Never write arrowhead code. Indentation depth must not exceed 2 levels.
+
+**Instead of:**
+```rust
+fn process(x: Option<Value>) -> Option<i64> {
+    if let Some(val) = x {
+        if let Some(result) = val.as_i64() {
+            if result > 0 {
+                return Some(result);
+            }
+        }
+    }
+    None
+}
+```
+
+**Write:**
+```rust
+fn process(x: Option<Value>) -> Option<i64> {
+    let val = x?;
+    let result = val.as_i64()?;
+    if result <= 0 {
+        return None;
+    }
+    Some(result)
+}
+```
+
+Use `?`, `if let`, `map`, `and_then`, and guard clauses to flatten code:
+- `let val = opt else { return ... };`
+- `if !eligible { return; }`
+- `let Some(inner) = x else { return None; }`
+
+If a function requires deeper nesting, extract the inner logic into a named helper function.
+
+### 2. Doc Comments on Every Definition
+
+Every `fn`, `struct`, `enum`, `trait`, `type`, `const`, and `mod` must have a `///` doc comment explaining intent, invariants, and usage.
+
+- **Functions**: what it does, each parameter, return value, any panics or errors
+- **Types**: what data they represent, valid invariants, field meanings
+- **Traits**: what capability they abstract, expected implementer contract, required methods
+- **Modules**: what the module provides, key types, relationship to other modules
+
+Doc comments are read by every engineer touching the code. Write them as if the reader knows Rust but not the domain. This is non-negotiable — code with missing doc comments must be rejected in review.
+
+### 3. Input Validation and Defensive Checks
+
+Every function must validate its inputs before use:
+- Check array/vector bounds before indexing
+- Assert struct invariants hold after construction or mutation
+- Print diagnostic context (function name, relevant values, expected vs actual) when validation fails
+- Check for NaN/Inf in floating-point parameters at FFI boundaries
+
+Use `debug_assert!` on hot paths, `assert!` for safety-critical invariants. Validation failures must produce messages that identify the function, file, and relevant state so bugs can be diagnosed from logs alone.
+
+### 4. Early Returns Over else-if
+
+Beyond a simple `if/else`, use guard clauses and early returns. `else if` chains deeper than one level are forbidden.
+
+```rust
+// Forbidden:
+if a { A }
+else if b { B }
+else if c { C }
+else { D }
+
+// Write:
+if a { return A; }
+if b { return B; }
+if c { return C; }
+D
+```
+
+### 5. Continuous Git Commits
+
+- Commit after each logical step, not at end of day
+- `git add` only intended files — inspect `git status` and `git diff` first
+- Write concise commit messages that state what and why (reference plan file if applicable)
+- Never amend commits — create new ones
+- The repo must always be in a state you can roll back to a working checkpoint
+
+### 6. Need-to-Know Dependency Injection
+
+Functions should receive only the data they need, not large context structs. When a function needs specific fields from a large state object, pass those fields explicitly.
+
+```rust
+// Avoid:
+fn emit_binop(ctx: &CompilerContext, state: &State) -> Result<()>;
+
+// Prefer:
+fn emit_binop(builder: &mut LlvmBuilder, op: BinOp, lhs: Type, rhs: Type) -> Result<String>;
+```
+
+This makes dependencies explicit, improves testability, and documents which data each function actually uses.
+
 ## Commands
 
 - **Build**: `cargo build`
@@ -425,20 +525,7 @@ to prevent state leakage and the fragile "save/restore" anti-pattern:
   `builder.gen_reg()`. Manual string-based register arithmetic
   (`format!("%t{}", counter)`) outside the builder is prohibited.
 
-### 2. Flat Code Layout (No-Nesting Rule)
-
-Deeply nested `match` and `if-let` structures degrade readability and make
-compiler logic difficult to audit.
-
-**Rules:**
-- **Guard Clauses First:** Prefer early returns or guard clauses
-  (`let Some(val) = opt else { return ... }` or `if !eligible { return; }`)
-  to handle fallback paths.
-- **Depth Limit:** Keep indentation levels to a maximum of 3 levels deep. If
-  an expression or statement handler requires deeper nesting, extract it into
-  a dedicated helper function in a sub-module.
-
-### 3. Strict Defensive Code Generation & Validation
+### 2. Strict Defensive Code Generation & Validation
 
 Textual code generation must not bypass the compiler's semantic type checks.
 
@@ -459,7 +546,7 @@ Textual code generation must not bypass the compiler's semantic type checks.
   be explicitly resolved using truncation/extension to prevent ABI register
   corruption.
 
-### 4. Mandatory Trade-Off Documentation
+### 3. Mandatory Trade-Off Documentation
 
 We do not write code without documenting *why* a specific pattern was chosen
 over its alternatives.
@@ -477,7 +564,7 @@ over its alternatives.
 - This comment must explicitly outline the trade-off (e.g., compile-time budget
   vs. binary size, loop-unrolling factor vs. stack spilling, etc.).
 
-### 5. Dual-Path / Adaptive Optimizations (Dynamic Dispatch)
+### 4. Dual-Path / Adaptive Optimizations (Dynamic Dispatch)
 
 We do not choose compiler design patterns dogmatically. If a feature can be
 implemented in two ways — where each excels under different workloads — **both

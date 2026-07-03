@@ -232,3 +232,12 @@ benchmarks/mandelbrot_cofficina
 nbody_newton_sym
 benchmarks/nbody_sqrt_idio
 inop_sadd
+src/backend/aarch64.rs
+src/backend/c.rs
+src/backend/cobol.rs
+src/backend/rust.rs
+src/backend/tcl_generator.rs
+src/backend/verilog.rs
+src/backend/vhdl.rs
+src/backend/wasm.rs
+src/backend/x86_64.rs

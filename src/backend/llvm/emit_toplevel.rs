@@ -742,7 +742,8 @@ impl LlvmBackend {
                             writeln!(out, "  store i32 {}, i32* {}, align {}", t, p, self.align_of("i32")).ok();
                         }
                         "float" => {
-                            let fl = self.native_float_or_box(out, "  ", &val_reg.to_string());
+                            // 2026-07-03: Same fix as above — pass boxed to native_float_or_box
+                            let fl = self.native_float_or_box(out, "  ", &boxed);
                             writeln!(out, "  store float {}, float* {}, align {}", fl, p, self.align_of("float")).ok();
                         }
                         // 2026-06-29: Float64 init store — bitcast i64 back to double
@@ -955,7 +956,13 @@ impl LlvmBackend {
                             writeln!(out, "{}store i32 {}, i32* {}, align {}", indent, t, p, self.align_of("i32")).ok();
                         }
                         "float" => {
-                            let fl = self.native_float_or_box(out, indent, &val_reg.to_string());
+                            // 2026-07-03: Pass boxed (adapt_to_i64 result) instead of raw
+                            // val_reg. native_float_or_box expects an i64 register, but
+                            // val_reg may be float-typed (e.g. fneg of a float literal).
+                            // Using boxed fixes the type mismatch that only appears with
+                            // Float32 (i32) — the trunc i64→i32 was applied to a float
+                            // register, producing "defined with type 'float' but expected 'i64'".
+                            let fl = self.native_float_or_box(out, indent, &boxed);
                             writeln!(out, "{}store float {}, float* {}, align {}", indent, fl, p, self.align_of("float")).ok();
                         }
                         "double" => {
