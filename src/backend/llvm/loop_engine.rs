@@ -934,10 +934,134 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
+    /// 2026-07-03: Load phi register values into ssa_old caches and emit
+    /// the loop body.  Clears caches before and after.  Sets loop_exit_label
+    /// to "done" so terminating statements branch to the post-loop block.
+    /// 2026-07-03: Load the loop bound into bound_reg.  The bound comes
+    /// from either a state field (total_idx), a global constant (total_const_name),
+    /// or zero (default).  Emitted directly into entry:
+    fn emit_countable_load_bound(&mut self, out: &mut String, bound_reg: &str,
+        total_idx: Option<usize>, total_const_name: Option<&str>, c0: usize)
+    {
+        let Some(ti) = total_idx else {
+            let Some(cn) = total_const_name else {
+                writeln!(out, "  {} = add i64 0, 0", bound_reg).ok();
+                return;
+            };
+            writeln!(out, "  {} = load i64, i64* @{}, align 8", bound_reg, cn).ok();
+            return;
+        };
+        writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c0, c0, ti).ok();
+        writeln!(out, "  {} = load i64, i64* %gt_{}_{}, align 8", bound_reg, c0, c0).ok();
+    }
+
+    /// 2026-07-03: Set up per-field phi and backedge registers, load
+    /// initial field values, and emit the loop header (phi nodes + exit
+    /// check).  Combined because the init register names must be available
+    /// for the phi node entries at loop_hdr.
+    fn emit_countable_setup_phis_and_header(
+        &mut self,
+        out: &mut String,
+        counter_idx: usize,
+        bound_reg: &str,
+    ) -> (String, String, String, String, String, String) {
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        let all_fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
+            .map(|(n, &i)| (n.clone(), i, self.ctx.field_types[i].clone()))
+            .collect();
+        let mut init_regs: HashMap<String, String> = HashMap::new();
+        let mut counter_name = String::new();
+        for (name, idx, ty) in &all_fields {
+            if *idx == counter_idx { counter_name = name.clone(); continue; }
+            let gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", *idx);
+            let init_load = format!("%init_{}_{}", name, self.fun.txn_counter);
+            self.fun.txn_counter += 1;
+            let tn = crate::backend::llvm::tbaa_node(ty);
+            writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", init_load, ty, ty, gep, self.align_of(ty), tn).ok();
+            init_regs.insert(name.clone(), init_load);
+            let phi_reg = format!("%phi_{}", name);
+            let be_reg = format!("%be_{}", name);
+            self.fun.phi_field_regs.insert(name.clone(), phi_reg);
+            self.fun.backedge_field_regs.insert(name.clone(), be_reg);
+        }
+        // Counter load
+        let c_gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", counter_idx);
+        let init_count = format!("%init_count_{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, i64* {}, align 8", init_count, c_gep).ok();
+        // Counter phi+backedge
+        let count_phi_reg = format!("%phi_{}", counter_name);
+        let count_be_reg = format!("%be_{}", counter_name);
+        self.fun.phi_field_regs.insert(counter_name.clone(), count_phi_reg.clone());
+        self.fun.backedge_field_regs.insert(counter_name.clone(), count_be_reg.clone());
+        let pi_name = format!("%pi_cnt_{}", self.fun.txn_counter);
+        let pn_name = format!("%pn_cnt_{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "  br label %loop_hdr").ok();
+        // ── Loop header: phi nodes + exit check ──────────────────────
+        writeln!(out, "loop_hdr:").ok();
+        writeln!(out, "  {} = phi i64 [ {}, %pre_phi ], [ {}, %latch ]", pi_name, init_count, pn_name).ok();
+        for (name, phi_reg) in &self.fun.phi_field_regs {
+            if *name == counter_name { continue; }
+            let init_reg = &init_regs[name];
+            let be_reg = &self.fun.backedge_field_regs[name];
+            let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
+            let ty = &self.ctx.field_types[idx];
+            writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", phi_reg, ty, init_reg, be_reg).ok();
+        }
+        // Counter phi
+        let ty_counter = &self.ctx.field_types[counter_idx];
+        writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", count_phi_reg, ty_counter, init_count, count_be_reg).ok();
+        // Exit check
+        let cmp_reg = format!("%cmp_hdr_{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "  {} = icmp slt i64 {}, {}", cmp_reg, pi_name, bound_reg).ok();
+        writeln!(out, "  br i1 {}, label %body, label %done", cmp_reg).ok();
+        (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, init_count)
+    }
+
+    fn emit_countable_body(&mut self, out: &mut String, body: &[Statement]) {
+        self.phi_regs_to_ssa_old();
+        self.fun.let_bindings.clear();
+        self.fun.let_binding_types.clear();
+        self.fun.reg_float_cache.clear();
+        self.fun.reg_type_cache.clear();
+        self.fun.expr_dedup_cache.clear();
+        self.fun.terminated = false;
+        self.fun.loop_exit_label = Some("done".into());
+        for s in body {
+            if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+                self.emit_stmt(out, s, "  ");
+            }
+        }
+        self.fun.loop_exit_label = None;
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+    }
+
     /// 2026-07-03: Emit the latch block for a per-field phi loop.
     /// Handles counter increment, per-field backedge reload from %State,
     /// and loop metadata.  Extracted from emit_countable_main for
     /// flat control flow (max depth 2).
+    /// 2026-07-03: Populate ssa_old_float_regs and ssa_old_int_regs from
+    /// phi_field_regs. Used when entering a loop body (to make phi values
+    /// available to emit_stmt reads) and in the post-loop done: block (to
+    /// make final field values available to hoisted guard bodies).
+    fn phi_regs_to_ssa_old(&mut self) {
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        for (name, phi_reg) in &self.fun.phi_field_regs {
+            let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
+            let ll_ty = &self.ctx.field_types[idx];
+            if ll_ty == "float" || ll_ty == "double" {
+                self.fun.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
+            } else {
+                self.fun.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
+            }
+        }
+    }
+
     fn emit_countable_latch(
         &mut self,
         out: &mut String,
@@ -1017,111 +1141,19 @@ impl LlvmBackend {
         self.emit_arena_init(out, "  ");
         // ── Load bound ────────────────────────────────────────────────
         let bound_reg = format!("%cnt_bound_{}", c0);
-        if let Some(ti) = total_idx {
-            writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c0, c0, ti).ok();
-            writeln!(out, "  {} = load i64, i64* %gt_{}_{}, align 8", bound_reg, c0, c0).ok();
-        } else if let Some(cn) = total_const_name {
-            writeln!(out, "  {} = load i64, i64* @{}, align 8", bound_reg, cn).ok();
-        } else {
-            writeln!(out, "  {} = add i64 0, 0", bound_reg).ok();
-        }
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
         self.emit_prealloc_for_body(out, "  ", body, &bound_reg);
-        // 2026-07-03: Use pre_phi block as the sole entry predecessor for
-        // loop_hdr. init-time intrinsics (getenv, etc.) may generate additional
-        // basic blocks; if they all flow through pre_phi, the phi nodes at
-        // loop_hdr have exactly two predecessors regardless of how many blocks
-        // the init code generates (pre_phi on the entry side, latch on backedge).
         writeln!(out, "  br label %pre_phi").ok();
         writeln!(out, "pre_phi:").ok();
-        // ── Initial field loads + phi/backedge register setup ────────
-        self.fun.phi_field_regs.clear();
-        self.fun.backedge_field_regs.clear();
-        // Clone field map to avoid borrow conflicts with emit_state_gep
-        let all_fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
-            .map(|(n, &i)| (n.clone(), i, self.ctx.field_types[i].clone()))
-            .collect();
-        let mut init_regs: HashMap<String, String> = HashMap::new();
-        let mut counter_name = String::new();
-        for (name, idx, ty) in &all_fields {
-            if *idx == counter_idx {
-                counter_name = name.clone();
-                continue; // loaded separately via phi below
-            }
-            let gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", *idx);
-            let init_load = format!("%init_{}_{}", name, self.fun.txn_counter);
-            self.fun.txn_counter += 1;
-            let tn = crate::backend::llvm::tbaa_node(ty);
-            writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", init_load, ty, ty, gep, self.align_of(ty), tn).ok();
-            init_regs.insert(name.clone(), init_load);
-            let phi_reg = format!("%phi_{}", name);
-            let be_reg = format!("%be_{}", name);
-            self.fun.phi_field_regs.insert(name.clone(), phi_reg);
-            self.fun.backedge_field_regs.insert(name.clone(), be_reg);
-        }
-        // Load counter initial value for the induction phi
-        let c_gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", counter_idx);
-        let init_count = format!("%init_count_{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, i64* {}, align 8", init_count, c_gep).ok();
-        // Counter field also gets a phi+backedge for completeness
-        let count_phi_reg = format!("%phi_{}", counter_name);
-        let count_be_reg = format!("%be_{}", counter_name);
-        self.fun.phi_field_regs.insert(counter_name.clone(), count_phi_reg.clone());
-        self.fun.backedge_field_regs.insert(counter_name.clone(), count_be_reg.clone());
-        let pi_name = format!("%pi_cnt_{}", self.fun.txn_counter);
-        let pn_name = format!("%pn_cnt_{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "  br label %loop_hdr").ok();
-        // ── Loop header: phi nodes + exit check ──────────────────────
-        writeln!(out, "loop_hdr:").ok();
-        writeln!(out, "  {} = phi i64 [ {}, %pre_phi ], [ {}, %latch ]", pi_name, init_count, pn_name).ok();
-        for (name, phi_reg) in &self.fun.phi_field_regs {
-            if *name == counter_name { continue; } // counter done above
-            let init_reg = &init_regs[name];
-            let be_reg = &self.fun.backedge_field_regs[name];
-            let ty = &self.ctx.field_types[*self.ctx.field_index_map.get(name).unwrap()];
-            writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", phi_reg, ty, init_reg, be_reg).ok();
-        }
-        // Counter phi (stored as field for emit_stmt compatibility)
-        let ty_counter = &self.ctx.field_types[counter_idx];
-        writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", count_phi_reg, ty_counter, init_count, count_be_reg).ok();
-        // Exit check
-        let cmp_reg = format!("%cmp_hdr_{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "  {} = icmp slt i64 {}, {}", cmp_reg, pi_name, bound_reg).ok();
-        writeln!(out, "  br i1 {}, label %body, label %done", cmp_reg).ok();
+        // ── Initial field loads + phi/backedge register setup + loop header ──
+        let (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, _init_count)
+            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg);
         // ── Body: load phi regs into ssa_old, emit_stmt ──────────────
         writeln!(out, "body:").ok();
         self.fun.ssa_state_reg = None; // memory mode: writes go through GEP+store
         self.fun.pending_phi_backedge.clear();
         self.fun.returns_i64 = false;
-        // Load phi regs into old-value caches so emit_stmt reads see phi values
-        self.fun.ssa_old_float_regs.clear();
-        self.fun.ssa_old_int_regs.clear();
-        for (name, phi_reg) in &self.fun.phi_field_regs {
-            let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
-            let ll_ty = &self.ctx.field_types[idx];
-            if ll_ty == "float" || ll_ty == "double" {
-                self.fun.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
-            } else {
-                self.fun.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
-            }
-        }
-        self.fun.let_bindings.clear();
-        self.fun.let_binding_types.clear();
-        self.fun.reg_float_cache.clear();
-        self.fun.reg_type_cache.clear();
-        self.fun.expr_dedup_cache.clear();
-        self.fun.terminated = false;
-        self.fun.loop_exit_label = Some("done".into());
-        for s in body {
-            if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
-                self.emit_stmt(out, s, "  ");
-            }
-        }
-        self.fun.loop_exit_label = None;
-        self.fun.ssa_old_float_regs.clear();
-        self.fun.ssa_old_int_regs.clear();
+        self.emit_countable_body(out, body);
         // ── Latch: increment counter, reload modified fields ─────────
         self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name);
         // ── Done: emit post-loop prints + exit ──────────────────────
@@ -2007,17 +2039,7 @@ impl LlvmBackend {
         // names defined in body: — reusing them in done: would create illegal
         // SSA use-before-def across blocks (body: does not dominate done:).
         self.fun.expr_dedup_cache.clear();
-        self.fun.ssa_old_float_regs.clear();
-        self.fun.ssa_old_int_regs.clear();
-        for (name, phi_reg) in &self.fun.phi_field_regs {
-            let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
-            let ll_ty = &self.ctx.field_types[idx];
-            if ll_ty == "float" || ll_ty == "double" {
-                self.fun.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
-            } else {
-                self.fun.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
-            }
-        }
+        self.phi_regs_to_ssa_old();
         for body_stmts in hoisted {
             for s in body_stmts {
                 self.emit_stmt(out, s, "  ");
