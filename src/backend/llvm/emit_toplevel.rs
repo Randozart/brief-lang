@@ -617,22 +617,173 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-03: Shared field initializer value emitter. Handles the
+    /// match-on-init_expr dispatch for field initialization, shared by
+    /// emit_init_state and emit_inline_init_stores. Arguments:
+    ///   - tag_strings: when true, OR 1 onto string pointers to mark as
+    ///     static (not heap-allocated). Used by inline init but not by
+    ///     @init_state (which runs at first access, before heap is live).
+    ///   - reg_suffix: suffix for intermediate register names (e.g. "s", "b").
+    ///     Use format!("%ip_{}{}", idx, suffix) to generate stable names.
+    fn emit_field_init_value(&mut self, out: &mut String, indent: &str,
+        init_clone: Option<Expr>, ty: &str, gep: &str, idx: usize, tag_strings: bool)
+    {
+        let mut field_reg = |suffix: &str| -> String { format!("%ip_{}{}", idx, suffix) };
+                // 2026-06-20: Handle LiteralExpr::Float directly, matching Expr::Float arm above.
+                // Without this, the catch-all boxes float to i64 and immediately unboxes it
+                // back, producing dead IR. LLVM DCE would clean them, but they may cause
+                // verifier errors if they cross adapt_to_i64 before DCE runs.
+        match init_clone {
+            Some(Expr::Integer(n)) => {
+                writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, n, gep, self.align_of("i64")).ok();
+            }
+            Some(Expr::Float(f)) => {
+                let h = float_to_llvm_hex(f);
+                let bits_reg = field_reg("b");
+                writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
+            }
+            // 2026-06-29: Float64 initializer — bitcast i64 hex to double
+            Some(Expr::Float64(f)) => {
+                let h = float64_to_llvm_hex(f);
+                let bits_reg = field_reg("b");
+                writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
+                writeln!(out, "{}store double {}, double* {}, align {}", indent, bits_reg, gep, self.align_of("double")).ok();
+            }
+            Some(Expr::Neg(ref inner)) => {
+                match inner.as_ref() {
+                    Expr::Float(f) => {
+                        let h = float_to_llvm_hex(-*f);
+                        let bits_reg = field_reg("b");
+                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                        writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
+                    }
+                    // 2026-06-29: Negative Float64 initializer
+                    Expr::Float64(f) => {
+                        let h = float64_to_llvm_hex(-*f);
+                        let bits_reg = field_reg("b");
+                        writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
+                        writeln!(out, "{}store double {}, double* {}, align {}", indent, bits_reg, gep, self.align_of("double")).ok();
+                    }
+                    Expr::Literal(lit) => {
+                        if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                            let h = float_to_llvm_hex(-*f);
+                            let bits_reg = field_reg("b");
+                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                            writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
+                        } else {
+                            writeln!(out, "{}store i64 0, i64* {}, align {}", indent, gep, self.align_of("i64")).ok();
+                        }
+                    }
+                    Expr::Integer(n) => {
+                        writeln!(out, "{}store i64 -{}, i64* {}, align {}", indent, n, gep, self.align_of("i64")).ok();
+                    }
+                    _ => {
+                        writeln!(out, "{}store i64 0, i64* {}, align {}", indent, gep, self.align_of("i64")).ok();
+                    }
+                }
+            }
+            Some(Expr::Bool(b)) => {
+                let v = if b { "1" } else { "0" };
+                writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, v, gep, self.align_of("i8")).ok();
+            }
+            Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
+                // 2026-06-17: Store string constant pointer for LiteralExpr::String.
+                // The string is stored as a bitcast of @str.N to i8*, matching
+                // what Expr::String emits in emit_expr.rs:32.
+                let s = match lit.as_ref() {
+                    crate::features::literal::LiteralExpr::String(s) => s,
+                    _ => unreachable!(),
+                };
+                let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                let g = format!("@str.{}", si);
+                let str_p = field_reg("s");
+                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
+                if tag_strings {
+                    // Tag with bit 0 = 1 to mark as static (not heap-allocated)
+                    let tag_p = field_reg("t");
+                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tag_p, str_p).ok();
+                    let tag_o = field_reg("o");
+                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
+                    let tag_b = field_reg("b");
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, tag_b, tag_o).ok();
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
+                } else {
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
+                }
+            }
+            Some(Expr::String(s)) => {
+                // 2026-06-17: Store actual string constant pointer, not null.
+                // The string is stored as a bitcast of @str.N to i8*.
+                let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                let g = format!("@str.{}", si);
+                let str_p = field_reg("s");
+                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
+                if tag_strings {
+                    // Tag with bit 0 = 1 to mark as static (not heap-allocated)
+                    let tag_p = field_reg("t");
+                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tag_p, str_p).ok();
+                    let tag_o = field_reg("o");
+                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
+                    let tag_b = field_reg("b");
+                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, tag_b, tag_o).ok();
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
+                } else {
+                    // 2026-06-29: No tagging for @init_state path — the init_state
+                    // function runs at first field access, before heap is live.
+                    // String constants in init_state are stored as raw untagged i8*.
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
+                }
+            }
+            Some(Expr::Char(c)) => {
+                let v = c as i32;
+                writeln!(out, "{}store i32 {}, i32* {}, align {}", indent, v, gep, self.align_of("i32")).ok();
+            }
+            Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Float(_)) => {
+                if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
+                    let h = crate::backend::llvm::float_to_llvm_hex(*f);
+                    let bits_reg = field_reg("b");
+                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
+                    writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
+                }
+            }
+            Some(expr) => {
+                let val_reg = self.emit_expr(out, &expr, indent);
+                let boxed = self.adapt_to_i64(out, indent, &val_reg);
+                // 2026-07-03: Use shared helper for type dispatch
+                let tv = self.ensure_typed_value(out, indent, ty, &boxed);
+                writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, tv, ty, gep, self.align_of(&ty)).ok();
+            }
+            None => {
+                if ty == "i8*" {
+                    // 2026-06-29: Initialize uninitialized String fields to @str.0
+                    // (empty string sentinel, untagged) instead of null.
+                    // Must NOT add tag bit (OR 1) because all sentinel comparisons
+                    // in trim/submit_input/handle_action check against the untagged
+                    // @str.0 address. A tagged pointer would shift all struct
+                    // field accesses by 1 byte, causing garbage reads and crashes.
+                    let str_p = field_reg("s");
+                    writeln!(out, "{}{} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to i8*", indent, str_p).ok();
+                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
+                } else {
+                    writeln!(out, "{}store {} 0, {}* {}, align {}", indent, ty, ty, gep, self.align_of(&ty)).ok();
+                }
+            }
+        }
+    }
+
     pub(super) fn emit_init_state(&mut self, out: &mut String) {
         writeln!(out, "define void @init_state(ptr noalias nocapture align 8 %state) local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
-        let mut reg = 0u32;
         let mut fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
             .map(|(name, &idx)| (name.clone(), idx, self.ctx.field_types[idx].clone()))
             .collect();
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, ty) in fields {
-            let p = format!("%ip{}", reg); reg += 1;
+            let p = format!("%ip_{}", idx);
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", p, idx).ok();
             let init_clone = self.ctx.field_initializers.get(&name).and_then(|e| e.clone());
             // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
-            // Check if this field's Brief type is RingBuffer<T> and the initializer is
-            // a ListLiteral. If so, emit RingBuf heap allocation + element stores instead
-            // of the generic emit_expr path (which would produce a List heap layout).
             if let Some(Expr::ListLiteral(ref items)) = init_clone {
                 if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[idx] {
                     if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
@@ -641,112 +792,7 @@ impl LlvmBackend {
                     }
                 }
             }
-            match init_clone {
-                Some(Expr::Integer(n)) => {
-                    writeln!(out, "  store i64 {}, i64* {}, align {}", n, p, self.align_of("i64")).ok();
-                }
-                Some(Expr::Float(f)) => {
-                    let h = float_to_llvm_hex(f);
-                    let bits_reg = format!("%ip{}b", reg - 1);
-                    writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
-                    writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
-                }
-                // 2026-06-29: Float64 initializer in init_state — bitcast i64 hex to double
-                Some(Expr::Float64(f)) => {
-                    let h = float64_to_llvm_hex(f);
-                    let bits_reg = format!("%ip{}b", reg - 1);
-                    writeln!(out, "  {} = bitcast i64 {} to double", bits_reg, h).ok();
-                    writeln!(out, "  store double {}, double* {}, align {}", bits_reg, p, self.align_of("double")).ok();
-                }
-                Some(Expr::Neg(ref inner)) => {
-                    match inner.as_ref() {
-                        Expr::Float(f) => {
-                            let h = float_to_llvm_hex(-*f);
-                            let bits_reg = format!("%ip{}b", reg - 1);
-                            writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
-                            writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
-                        }
-                        // 2026-06-29: Negative Float64 initializer in init_state
-                        Expr::Float64(f) => {
-                            let h = float64_to_llvm_hex(-*f);
-                            let bits_reg = format!("%ip{}b", reg - 1);
-                            writeln!(out, "  {} = bitcast i64 {} to double", bits_reg, h).ok();
-                            writeln!(out, "  store double {}, double* {}, align {}", bits_reg, p, self.align_of("double")).ok();
-                        }
-                        Expr::Literal(lit) => {
-                            if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                                let h = float_to_llvm_hex(-*f);
-                                let bits_reg = format!("%ip{}b", reg - 1);
-                                writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
-                                writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
-                            } else {
-                                writeln!(out, "  store i64 0, i64* {}, align {}", p, self.align_of("i64")).ok();
-                            }
-                        }
-                        Expr::Integer(n) => {
-                            writeln!(out, "  store i64 -{}, i64* {}, align {}", n, p, self.align_of("i64")).ok();
-                        }
-                        _ => {
-                            writeln!(out, "  store i64 0, i64* {}, align {}", p, self.align_of("i64")).ok();
-                        }
-                    }
-                }
-                Some(Expr::Bool(b)) => {
-                    let v = if b { "1" } else { "0" };
-                    writeln!(out, "  store i8 {}, i8* {}, align {}", v, p, self.align_of("i8")).ok();
-                }
-                Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
-                    let s = match lit.as_ref() {
-                        crate::features::literal::LiteralExpr::String(s) => s,
-                        _ => unreachable!(),
-                    };
-                    let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
-                    let g = format!("@str.{}", si);
-                    let str_p = format!("%ip{}s", reg); reg += 1;
-                    writeln!(out, "  {} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", str_p, s.len() + 1, g).ok();
-                    writeln!(out, "  store i8* {}, i8** {}, align {}", str_p, p, self.align_of("i8*")).ok();
-                }
-                Some(Expr::String(s)) => {
-                    let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
-                    let g = format!("@str.{}", si);
-                    let str_p = format!("%ip{}s", reg); reg += 1;
-                    writeln!(out, "  {} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", str_p, s.len() + 1, g).ok();
-                    writeln!(out, "  store i8* {}, i8** {}, align {}", str_p, p, self.align_of("i8*")).ok();
-                }
-                Some(Expr::Char(c)) => {
-                    let v = c as i32;
-                    writeln!(out, "  store i32 {}, i32* {}, align {}", v, p, self.align_of("i32")).ok();
-                }
-                // 2026-06-20: Handle LiteralExpr::Float directly, matching Expr::Float arm above.
-                // Same rationale as emit_inline_init_stores arm at line ~560.
-                Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Float(_)) => {
-                    if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                        let h = crate::backend::llvm::float_to_llvm_hex(*f);
-                        let bits_reg = format!("%ip{}b", reg - 1);
-                        writeln!(out, "  {} = bitcast i32 {} to float", bits_reg, h).ok();
-                        writeln!(out, "  store float {}, float* {}, align {}", bits_reg, p, self.align_of("float")).ok();
-                    }
-                }
-                Some(expr) => {
-                    let val_reg = self.emit_expr(out, &expr, "  ");
-                    let boxed = self.adapt_to_i64(out, "  ", &val_reg);
-                    // 2026-07-03: Use shared helper for type dispatch (trunc/bitcast/inttoptr)
-                    let tv = self.ensure_typed_value(out, "  ", &ty.as_str(), &boxed);
-                    writeln!(out, "  store {} {}, {}* {}, align {}", ty, tv, ty, p, self.align_of(&ty)).ok();
-                }
-                None => {
-                    if ty == "i8*" {
-                        // 2026-06-29: Initialize uninitialized String fields to @str.0
-                        // (empty string sentinel) instead of null. Prevents crashes when
-                        // string-processing code compares against @str.0's address.
-                        let str_p = format!("%ip{}s", reg); reg += 1;
-                        writeln!(out, "  {} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to i8*", str_p).ok();
-                        writeln!(out, "  store i8* {}, i8** {}, align {}", str_p, p, self.align_of("i8*")).ok();
-                    } else {
-                        writeln!(out, "  store {} 0, {}* {}, align {}", ty, ty, p, self.align_of(&ty)).ok();
-                    }
-                }
-            }
+            self.emit_field_init_value(out, "  ", init_clone, &ty, &p, idx, false);
         }
         let mmio_inits: Vec<(u64, Expr)> = {
             let mut v = Vec::new();
@@ -758,7 +804,7 @@ impl LlvmBackend {
             v
         };
         for (addr, expr) in mmio_inits {
-            let p = format!("%mio{}", reg); reg += 1;
+            let p = format!("%mio{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "  {} = inttoptr i64 {} to i64*", p, addr).ok();
             let val_reg = self.emit_expr(out, &expr, "  ");
             writeln!(out, "  store volatile i64 {}, i64* {}, align 1", val_reg, p).ok();
@@ -798,8 +844,6 @@ impl LlvmBackend {
             let init_clone = self.ctx.field_initializers.get(name).and_then(|e| e.clone());
             let ty = self.ctx.field_types[*idx].clone();
             // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
-            // Same detection as emit_init_state: check field's Brief type for RingBuffer.
-            // Emits RingBuf heap allocation + element stores instead of generic emit_expr.
             if let Some(Expr::ListLiteral(ref items)) = init_clone {
                 if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[*idx] {
                     if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
@@ -808,137 +852,7 @@ impl LlvmBackend {
                     }
                 }
             }
-            match init_clone {
-                Some(Expr::Integer(n)) => {
-                    writeln!(out, "{}store i64 {}, i64* {}, align {}", indent, n, p, self.align_of("i64")).ok();
-                }
-                Some(Expr::Float(f)) => {
-                    let h = float_to_llvm_hex(f);
-                    let bits_reg = format!("%ip_{}b", idx);
-                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                    writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
-                }
-                // 2026-06-29: Float64 initializer — bitcast i64 hex directly to double
-                Some(Expr::Float64(f)) => {
-                    let h = float64_to_llvm_hex(f);
-                    let bits_reg = format!("%ip_{}b", idx);
-                    writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
-                    writeln!(out, "{}store double {}, double* {}, align {}", indent, bits_reg, p, self.align_of("double")).ok();
-                }
-                Some(Expr::Neg(ref inner)) => {
-                    match inner.as_ref() {
-                        Expr::Float(f) => {
-                            let h = float_to_llvm_hex(-*f);
-                            let bits_reg = format!("%ip_{}b", idx);
-                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                            writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
-                        }
-                        // 2026-06-29: Negative Float64 initializer
-                        Expr::Float64(f) => {
-                            let h = float64_to_llvm_hex(-*f);
-                            let bits_reg = format!("%ip_{}b", idx);
-                            writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
-                            writeln!(out, "{}store double {}, double* {}, align {}", indent, bits_reg, p, self.align_of("double")).ok();
-                        }
-                        Expr::Literal(lit) => {
-                            if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                                let h = float_to_llvm_hex(-*f);
-                                let bits_reg = format!("%ip_{}b", idx);
-                                writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                                writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
-                            } else {
-                                writeln!(out, "{}store i64 0, i64* {}, align {}", indent, p, self.align_of("i64")).ok();
-                            }
-                        }
-                        Expr::Integer(n) => {
-                            writeln!(out, "{}store i64 -{}, i64* {}, align {}", indent, n, p, self.align_of("i64")).ok();
-                        }
-                        _ => {
-                            writeln!(out, "{}store i64 0, i64* {}, align {}", indent, p, self.align_of("i64")).ok();
-                        }
-                    }
-                }
-                Some(Expr::Bool(b)) => {
-                    let v = if b { "1" } else { "0" };
-                    writeln!(out, "{}store i8 {}, i8* {}, align {}", indent, v, p, self.align_of("i8")).ok();
-                }
-                Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
-                    // 2026-06-17: Store string constant pointer for LiteralExpr::String
-                    let s = match lit.as_ref() {
-                        crate::features::literal::LiteralExpr::String(s) => s,
-                        _ => unreachable!(),
-                    };
-                    let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
-                    let g = format!("@str.{}", si);
-                    let str_p = format!("%ip_{}s", idx);
-                    writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
-                    let tag_p = format!("%ip_{}t", idx);
-                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tag_p, str_p).ok();
-                    let tag_o = format!("%ip_{}o", idx);
-                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
-                    let tag_b = format!("%ip_{}b", idx);
-                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, tag_b, tag_o).ok();
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, tag_b, p, self.align_of("i8*")).ok();
-                }
-                Some(Expr::String(s)) => {
-                    // 2026-06-17: Store actual string constant pointer, not null.
-                    // The string is stored as a bitcast of @str.N to i8*, matching
-                    // what Expr::String emits in emit_expr.rs:32.
-                    let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
-                    let g = format!("@str.{}", si);
-                    let str_p = format!("%ip_{}s", idx);
-                    writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to i8*", indent, str_p, s.len() + 1, g).ok();
-                    // Tag with bit 0 = 1 to mark as static (not heap-allocated)
-                    let tag_p = format!("%ip_{}t", idx);
-                    writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tag_p, str_p).ok();
-                    let tag_o = format!("%ip_{}o", idx);
-                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
-                    let tag_b = format!("%ip_{}b", idx);
-                    writeln!(out, "{}{} = inttoptr i64 {} to i8*", indent, tag_b, tag_o).ok();
-                    writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, tag_b, p, self.align_of("i8*")).ok();
-                }
-                Some(Expr::Char(c)) => {
-                    let v = c as i32;
-                    writeln!(out, "{}store i32 {}, i32* {}, align {}", indent, v, p, self.align_of("i32")).ok();
-                }
-                // 2026-06-20: Handle LiteralExpr::Float directly, matching Expr::Float arm above.
-                // Without this, the catch-all boxes the float to i64 and immediately unboxes it
-                // back, producing dead IR. LLVM DCE would clean them, but they may cause verifier
-                // errors if they cross adapt_to_i64 before DCE runs.
-                Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Float(_)) => {
-                    if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                        let h = crate::backend::llvm::float_to_llvm_hex(*f);
-                        let bits_reg = format!("%ip_{}b", idx);
-                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                        writeln!(out, "{}store float {}, float* {}, align {}", indent, bits_reg, p, self.align_of("float")).ok();
-                    }
-                }
-                Some(expr) => {
-                    let val_reg = self.emit_expr(out, &expr, indent);
-                    let boxed = self.adapt_to_i64(out, indent, &val_reg);
-                    // 2026-07-03: Use shared helper for type dispatch.
-                    // ensure_typed_value handles trunc/bitcast/inttoptr for the field type.
-                    // The 2026-07-03 fix (pass boxed to native_float_or_box, not raw val_reg)
-                    // is now inside ensure_typed_value.
-                    let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &boxed);
-                    writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, tv, ty, p, self.align_of(&ty)).ok();
-                }
-                None => {
-                    if ty == "i8*" {
-                        // 2026-06-29: Initialize uninitialized String fields to @str.0
-                        // (empty string sentinel, untagged) instead of null.
-                        // Must NOT add tag bit (OR 1) because all sentinel comparisons
-                        // in trim/submit_input/handle_action check against the untagged
-                        // @str.0 address. A tagged pointer would shift all struct
-                        // field accesses by 1 byte, causing garbage reads and crashes.
-                        let str_p = format!("%ip_{}s", idx);
-                        writeln!(out, "{}{} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to i8*", indent, str_p).ok();
-                        writeln!(out, "{}store i8* {}, i8** {}, align {}", indent, str_p, p, self.align_of("i8*")).ok();
-                    } else {
-                        writeln!(out, "{}store {} 0, {}* {}, align {}", indent, ty, ty, p, self.align_of(&ty)).ok();
-                    }
-                }
-            }
+            self.emit_field_init_value(out, indent, init_clone, &ty, &p, *idx, true);
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
         for (_field_name, targets) in &self.ctx.cache_slots {
