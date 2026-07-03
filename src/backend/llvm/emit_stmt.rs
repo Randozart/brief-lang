@@ -34,28 +34,41 @@ impl LlvmBackend {
         let sr = self.fun.state_reg_name.clone();
         let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
         let vol_str = if is_volatile { " volatile" } else { "" };
-        let val_boxed = self.adapt_to_i64(out, indent, val);
-        if !is_volatile {
+        let ty_str = ty.as_str();
+        let is_native_float = ty_str == "float" || ty_str == "double";
+        if !is_volatile && !is_native_float {
+            // Integer/pointer types: box to i64, then unbox to target type for store.
+            // The box→unbox is needed because pending_phi_backedge stores i64 values
+            // for the integer phi backedge path.
+            let val_boxed = self.adapt_to_i64(out, indent, val);
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-            let typed_val = self.ensure_typed_value(out, indent, &ty.as_str(), &val_boxed);
+            let typed_val = self.ensure_typed_value(out, indent, ty_str, &val_boxed);
             writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}",
                 indent, vol_str, ty, typed_val, ty, p, self.align_of(&ty), tn).ok();
-            let ty_str = ty.as_str();
-            if ty_str == "float" || ty_str == "double" {
-                self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val.clone());
-            }
-            self.fun.pending_phi_backedge.insert(fname.to_string(), val_boxed.clone());
-            // 2026-07-03: Store the native-typed register for the latch to use
-            // directly as the phi backedge, avoiding a GEP+load from %State.
-            self.fun.pending_phi_native_backedge.insert(fname.to_string(), typed_val);
             if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
                 self.fun.ssa_old_int_regs.insert(fname.to_string(), val_boxed.clone());
             }
+            self.fun.pending_phi_backedge.insert(fname.to_string(), val_boxed);
+            self.fun.pending_phi_native_backedge.insert(fname.to_string(), typed_val);
+        } else if !is_volatile && is_native_float {
+            // 2026-07-03: Native float/double: store directly, skip box→unbox roundtrip.
+            // val.name is already a float-typed register (from emit_expr). Storing it
+            // directly is bit-identical to the box→unbox result but saves 4 instructions.
+            let typed_val = val.to_string();
+            let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
+            writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}",
+                indent, vol_str, ty, typed_val, ty, p, self.align_of(&ty), tn).ok();
+            self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val.clone());
+            // pending_phi_backedge key marks this field as modified (latch uses
+            // pending_phi_native_backedge for the actual backedge value).
+            self.fun.pending_phi_backedge.insert(fname.to_string(), typed_val.clone());
+            self.fun.pending_phi_native_backedge.insert(fname.to_string(), typed_val);
         } else {
-            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_boxed, ty, p, self.align_of(&ty)).ok();
-            self.fun.pending_phi_backedge.insert(fname.to_string(), val_boxed.clone());
-            // Volatile stores also feed the native backedge (identity pass-through).
-            self.fun.pending_phi_native_backedge.insert(fname.to_string(), val_boxed.clone());
+            // Volatile store (MMIO etc.): passthrough.
+            let val_raw = if is_native_float { val.to_string() } else { self.adapt_to_i64(out, indent, val) };
+            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_raw, ty, p, self.align_of(&ty)).ok();
+            self.fun.pending_phi_backedge.insert(fname.to_string(), val_raw.clone());
+            self.fun.pending_phi_native_backedge.insert(fname.to_string(), val_raw);
         }
         if let Some(targets) = self.ctx.cache_slots.get(fname) {
             for (_target, &(_cache_idx, valid_idx)) in targets {
