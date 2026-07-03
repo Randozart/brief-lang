@@ -1758,4 +1758,76 @@ impl LlvmBackend {
             _ => None,
         }
     }
+
+    /// 2026-07-03: Try to emit EOR-optimized cast: detects
+    /// Cast(BinaryOp(Cast(a, T), Cast(b, T)), U) where U <:> T.
+    /// If matched, emits the binary op directly without redundant casts.
+    pub(super) fn try_emit_eor(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        inner: &crate::ast::Expr,
+        target_ty: &crate::ast::Type,
+        indent: &str,
+    ) -> Option<TypedRegister> {
+        use crate::ast::Expr;
+        let (lhs, rhs) = match inner {
+            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+                (l.as_ref().clone(), r.as_ref().clone())
+            }
+            _ => return None,
+        };
+        let cast_ty = match (&lhs, &rhs) {
+            (Expr::Cast(_, lt), Expr::Cast(_, rt)) if lt == rt => lt.clone(),
+            _ => return None,
+        };
+        let has_meld = self.ctx.type_universe.as_ref()
+            .and_then(|tu| {
+                let tn = match target_ty {
+                    crate::ast::Type::Custom(n) => Some(n.as_str()),
+                    crate::ast::Type::Applied(n, _) => Some(n.as_str()),
+                    _ => None,
+                };
+                tn.and_then(|n| tu.find_meld(n, cast_ty.universe_key()))
+            })
+            .is_some();
+        if !has_meld {
+            return None;
+        }
+        let a = self.emit_expr(out, &lhs, indent);
+        let b = self.emit_expr(out, &rhs, indent);
+        match cast_ty {
+            crate::ast::Type::Float | crate::ast::Type::Float64 => {
+                let fl_a = self.ensure_float_reg(out, indent, &a);
+                let fl_b = self.ensure_float_reg(out, indent, &b);
+                let fl_op = match inner {
+                    Expr::Add(_, _) => "fadd",
+                    Expr::Sub(_, _) => "fsub",
+                    Expr::Mul(_, _) => "fmul",
+                    Expr::Div(_, _) => "fdiv",
+                    _ => return None,
+                };
+                writeln!(out, "{}{} = {} float {}, {}", indent, v, fl_op, fl_a, fl_b).ok();
+                let bi = format!("%eor_bi{}", self.fun.txn_counter);
+                self.fun.txn_counter += 1;
+                let ze = format!("%eor_ze{}", self.fun.txn_counter);
+                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, v).ok();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+                self.fun.reg_float_cache.insert(ze.clone(), v.to_string());
+                let ret_ty = if cast_ty == Type::Float64 { Type::Float64 } else { Type::Float };
+                return Some(TypedRegister { name: ze, ty: ret_ty });
+            }
+            _ => {
+                let op = match inner {
+                    Expr::Add(_, _) => "add",
+                    Expr::Sub(_, _) => "sub",
+                    Expr::Mul(_, _) => "mul",
+                    Expr::Div(_, _) => "sdiv",
+                    _ => return None,
+                };
+                writeln!(out, "{}{} = {} i64 {}, {}", indent, v, op, a, b).ok();
+                Some(TypedRegister { name: v.to_string(), ty: Type::Int })
+            }
+        }
+    }
 }

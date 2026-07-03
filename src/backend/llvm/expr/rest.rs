@@ -954,6 +954,11 @@ pub fn emit_rest_expr(
                 return crate::backend::llvm::expr::arrow::emit_arrow_transfer(backend, out, v, dest, source, indent);
             }
             Expr::Cast(inner, target_ty) => {
+                // 2026-07-03: EOR optimization — detect Cast(BinaryOp(Cast(a, T), Cast(b, T)), U)
+                // where U <:> T. Skips redundant casts, emits native arithmetic.
+                if let Some(tr) = backend.try_emit_eor(out, v, inner, target_ty, indent) {
+                    return tr;
+                }
                 let inner_val = backend.emit_expr(out, inner, indent);
                 // 2026-06-28: Use txn_counter to prevent %t{N} collision
                 let cv = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
