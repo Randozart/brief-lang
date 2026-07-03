@@ -364,6 +364,7 @@ mod tests {
             endian: 0,
             volatile: false,
             atomic: false,
+            defining_module: "builtin".to_string(),
             element_type: None,
             fixed_size: Some(true),
             insert_at: None,

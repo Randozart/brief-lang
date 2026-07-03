@@ -65,6 +65,11 @@ pub struct ResolvedType {
     pub volatile: bool,
     /// Atomic flag.
     pub atomic: bool,
+
+    // 2026-07-03: Module that defined this type. Used for opaque handle
+    // boundary enforcement — only the defining module may cast Ptr<Bits @/N>
+    // to Ptr<ConcreteType>. Built-in types have defining_module = "builtin".
+    pub defining_module: String,
     /// Element type (if collection).
     pub element_type: Option<String>,
     /// Whether size is fixed at compile time.
@@ -189,6 +194,8 @@ impl TypeUniverse {
             if let crate::ast::TopLevel::TypeDef(td) = item {
                 if let Some(resolved) = self.resolve_type_def(td) {
                     let name = resolved.name.clone();
+                    let mut resolved = resolved;
+                    resolved.defining_module = "builtin".to_string();
                     self.types.insert(name.clone(), resolved);
                     self.resolution_order.push(name);
                 }
@@ -344,6 +351,7 @@ impl TypeUniverse {
                 },
                 span: None,
             },
+            defining_module: "builtin".to_string(),
         }
     }
 
@@ -471,6 +479,7 @@ impl TypeUniverse {
             endian: 0,
             volatile: false,
             atomic: false,
+            defining_module: "user".to_string(),
             element_type: None,
             fixed_size: None,
             insert_at: None,
