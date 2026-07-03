@@ -934,6 +934,47 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
+    /// 2026-07-03: Emit the latch block for a per-field phi loop.
+    /// Handles counter increment, per-field backedge reload from %State,
+    /// and loop metadata.  Extracted from emit_countable_main for
+    /// flat control flow (max depth 2).
+    fn emit_countable_latch(
+        &mut self,
+        out: &mut String,
+        pi_name: &str,
+        pn_name: &str,
+        count_be_reg: &str,
+        counter_name: &str,
+    ) {
+        writeln!(out, "  br label %latch").ok();
+        writeln!(out, "latch:").ok();
+        writeln!(out, "  {} = add i64 {}, 1", pn_name, pi_name).ok();
+        let backedge_entries: Vec<(String, String)> = self.fun.backedge_field_regs.iter()
+            .map(|(n, r)| (n.clone(), r.clone()))
+            .collect();
+        let phi_entries: HashMap<String, String> = self.fun.phi_field_regs.iter()
+            .map(|(n, r)| (n.clone(), r.clone()))
+            .collect();
+        let field_map: HashMap<String, (usize, String)> = self.ctx.field_index_map.iter()
+            .map(|(n, &i)| (n.clone(), (i, self.ctx.field_types[i].clone())))
+            .collect();
+        let pending_mod: HashSet<String> = self.fun.pending_phi_backedge.keys().cloned().collect();
+        for (name, be_reg) in &backedge_entries {
+            if *name == counter_name { continue; }
+            if pending_mod.contains(name) {
+                let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
+                let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
+                writeln!(out, "  {} = load {}, {}* {}, align {}",
+                    be_reg, ty, ty, gep_reload, self.align_of(ty)).ok();
+            } else {
+                let phi_reg = phi_entries.get(name).cloned().unwrap_or_default();
+                writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg).ok();
+            }
+        }
+        writeln!(out, "  {} = add i64 0, {}", count_be_reg, pn_name).ok();
+        super::emit_loop_metadata(out, "  ", "loop_hdr", &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
+    }
+
     /// 2026-07-03: Emit a main() with per-field phi nodes (A005c — countable
     /// loop). Creates one phi per state field at the loop header so LLVM sees
     /// canonical induction variables and can vectorize the body.
@@ -1082,42 +1123,7 @@ impl LlvmBackend {
         self.fun.ssa_old_float_regs.clear();
         self.fun.ssa_old_int_regs.clear();
         // ── Latch: increment counter, reload modified fields ─────────
-        writeln!(out, "  br label %latch").ok();
-        writeln!(out, "latch:").ok();
-        // Counter increment
-        writeln!(out, "  {} = add i64 {}, 1", pn_name, pi_name).ok();
-        // Per-field backedge: reload modified fields from %State, identity for unchanged
-        let backedge_entries: Vec<(String, String)> = self.fun.backedge_field_regs.iter()
-            .map(|(n, r)| (n.clone(), r.clone()))
-            .collect();
-        let phi_entries: HashMap<String, String> = self.fun.phi_field_regs.iter()
-            .map(|(n, r)| (n.clone(), r.clone()))
-            .collect();
-        let field_map: HashMap<String, (usize, String)> = self.ctx.field_index_map.iter()
-            .map(|(n, &i)| (n.clone(), (i, self.ctx.field_types[i].clone())))
-            .collect();
-        let pending_mod: HashSet<String> = self.fun.pending_phi_backedge.keys().cloned().collect();
-        for (name, be_reg) in &backedge_entries {
-            if *name == counter_name {
-                // Counter backedge is the phi increment, not a reload
-                continue;
-            }
-            if pending_mod.contains(name) {
-                // Field was modified; reload from %State for the phi backedge
-                let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
-                let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
-                writeln!(out, "  {} = load {}, {}* {}, align {}",
-                    be_reg, ty, ty, gep_reload, self.align_of(ty)).ok();
-            } else {
-                // Field was not modified; use identity (phi value)
-                let phi_reg = phi_entries.get(name).cloned().unwrap_or_default();
-                writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg).ok();
-            }
-        }
-        // Counter backedge: use the incremented phi value so the field phi
-        // for count matches the induction variable after every iteration.
-        writeln!(out, "  {} = add i64 0, {}", count_be_reg, pn_name).ok();
-        super::emit_loop_metadata(out, "  ", "loop_hdr", &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
+        self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name);
         // ── Done: emit post-loop prints + exit ──────────────────────
         writeln!(out, "done:").ok();
         self.emit_arena_reset(out, "  ");
