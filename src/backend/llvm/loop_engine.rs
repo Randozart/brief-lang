@@ -1172,6 +1172,74 @@ impl LlvmBackend {
     /// avoiding the wide %State load/store + extractvalue/insertvalue pattern.
     /// Handles trigger sampling inline (via lazy emit_trg_load in emit_expr),
     /// and the wake path (__rt_wait) when has_wake_triggers is set.
+    /// 2026-07-03: Try modulo-switch dispatch for reactive txns.
+    /// Returns true if emitted via modulo-switch.
+    fn try_modulo_switch_dispatch(
+        &mut self,
+        out: &mut String,
+        reactive_txns: &[&(String, &crate::ast::Transaction)],
+    ) -> bool {
+        if reactive_txns.len() < 2 { return false; }
+        let mut counter: Option<String> = None;
+        let mut bound: Option<String> = None;
+        let mut divisor: Option<i64> = None;
+        let mut cases: Vec<(i64, &str)> = Vec::new();
+        let mut all_match = true;
+        for (name, txn) in reactive_txns {
+            let pre = &txn.contract.pre_condition;
+            let norm = pre.normalize_to_old_recursive();
+            let (cn, bn, ck_k, n) = match &norm {
+                Expr::And(left, right) => {
+                    let cn = match left.as_ref() {
+                        Expr::Lt(l, _) => if let Expr::Identifier(c) = l.as_ref() { Some(c.clone()) } else { None },
+                        _ => None,
+                    };
+                    let bn = match left.as_ref() {
+                        Expr::Lt(_, r) => if let Expr::Identifier(b) = r.as_ref() { Some(b.clone()) } else { None },
+                        _ => None,
+                    };
+                    let (ck_k, n) = match right.as_ref() {
+                        Expr::Eq(eq_l, eq_r) => (self.extract_mod_info(eq_l), eq_r.as_ref().as_integer()),
+                        _ => (None, None),
+                    };
+                    (cn, bn, ck_k, n)
+                }
+                _ => (None, None, None, None),
+            };
+            let Some(c) = cn else { all_match = false; break; };
+            let Some((mod_name, k)) = ck_k else { all_match = false; break; };
+            if mod_name != c { all_match = false; break; }
+            let Some(n) = n else { all_match = false; break; };
+            if let Some(ref prev_c) = counter { if *prev_c != c { all_match = false; break; } }
+            else {
+                if let Some(&idx) = self.ctx.field_index_map.get(&c) {
+                    let ct = &self.ctx.field_types[idx];
+                    if ct != "i64" && ct != "i32" { all_match = false; break; }
+                } else { all_match = false; break; }
+                counter = Some(c.clone());
+            }
+            if let Some(ref prev_b) = bound {
+                if let Some(ref b) = bn { if *prev_b != *b { all_match = false; break; } }
+                else { all_match = false; break; }
+            } else { bound = bn; }
+            if let Some(d) = divisor { if d != k { all_match = false; break; } }
+            else { divisor = Some(k); }
+            if k > 256 { all_match = false; break; }
+            if cases.iter().any(|(v, _)| *v == n) { all_match = false; break; }
+            cases.push((n, name.as_str()));
+        }
+        if !all_match || cases.len() < 2 { return false; }
+        let Some(count_name) = counter else { return false; };
+        let Some(d) = divisor else { return false; };
+        if !self.ctx.field_index_map.contains_key(&count_name) { return false; }
+        cases.sort_by_key(|(v, _)| *v);
+        let case_names: Vec<&str> = cases.iter().map(|(_, n)| *n).collect();
+        self.warnings.push(format!("info: modulo-switch dispatch for [{}] on {} % {}",
+            case_names.join(", "), count_name, d));
+        self.emit_modulo_switch_main(out, &reactive_txns.iter().map(|(n, t)| ((*n).clone(), *t)).collect::<Vec<_>>(), &count_name, d, &cases);
+        true
+    }
+
     pub(crate) fn emit_ssa_main(
         &mut self,
         out: &mut String,
@@ -1184,53 +1252,8 @@ impl LlvmBackend {
         // the first @main() is left unterminated (sparse_dispatch bug).
         let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
             .filter(|(_, t)| t.is_reactive).collect();
-        if reactive_txns.len() >= 2 {
-            // Extract counter, divisor, and cases for modulo-switch dispatch.
-            // Replicates the detection logic from the sequential fallthrough
-            // below, but runs BEFORE the @main() header is emitted.
-            let mut counter: Option<String> = None;
-            let mut divisor: Option<i64> = None;
-            let mut cases: Vec<(i64, &str)> = Vec::new();
-            let mut all_match = true;
-            for (name, txn) in &reactive_txns {
-                let pre = &txn.contract.pre_condition;
-                let norm = pre.normalize_to_old_recursive();
-                match &norm {
-                    Expr::And(left, right) => {
-                        let cn = match left.as_ref() {
-                            Expr::Lt(l, _) => if let Expr::Identifier(c) = l.as_ref() { Some(c.clone()) } else { None },
-                            _ => None,
-                        };
-                        if let (Some(c), _) = (cn, &left) {
-                            if let Expr::Eq(eq_l, eq_r) = right.as_ref() {
-                                if let (Some((ck, k)), Some(n)) = (self.extract_mod_info(eq_l),
-                                    eq_r.as_ref().as_integer())
-                                {
-                                    if let Some(ref prev_c) = counter { if *prev_c != c { all_match = false; } }
-                                    else { counter = Some(c); }
-                                    if let Some(d) = divisor { if d != k { all_match = false; } }
-                                    else { divisor = Some(k); }
-                                    if k > 256 { all_match = false; }
-                                    if cases.iter().any(|(v, _)| *v == n) { all_match = false; }
-                                    cases.push((n, name.as_str()));
-                                } else { all_match = false; }
-                            } else { all_match = false; }
-                        } else { all_match = false; }
-                    }
-                    _ => { all_match = false; }
-                }
-                if !all_match { break; }
-            }
-            if all_match && cases.len() >= 2 && counter.is_some() && divisor.is_some() {
-                cases.sort_by_key(|(v, _)| *v);
-                let count_name = counter.take().unwrap();
-                let d = divisor.unwrap();
-                let case_names: Vec<&str> = cases.iter().map(|(_, n)| *n).collect();
-                self.warnings.push(format!("info: modulo-switch dispatch for [{}] on {} % {}",
-                    case_names.join(", "), count_name, d));
-                self.emit_modulo_switch_main(out, txns, &count_name, d, &cases);
-                return;
-            }
+        if self.try_modulo_switch_dispatch(out, &reactive_txns) {
+            return;
         }
         self.fun.fn_ret_ty = "i32".to_string();
         self.fun.main_body = true;
@@ -1457,92 +1480,8 @@ impl LlvmBackend {
         if self.fun.phi_induction_reg.is_none() {
             let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
                 .filter(|(_, t)| t.is_reactive).collect();
-            if reactive_txns.len() >= 2 {
-                // Extract (K, N) from each precondition
-                let mut counter: Option<String> = None;
-                let mut bound: Option<String> = None;
-                let mut divisor: Option<i64> = None;
-                let mut cases: Vec<(i64, &str)> = Vec::new();
-                let mut all_match = true;
-                for (name, txn) in &reactive_txns {
-                    let pre = &txn.contract.pre_condition;
-                    // Match: And(Lt(counter, bound), Eq(Mod(counter, K), N))
-                    // 2026-07-01: Bind normalized expr to local to avoid
-                    // temporary-borrow-dropped errors from normalize_to_old_recursive.
-                    let norm = pre.normalize_to_old_recursive();
-                    match &norm {
-                        Expr::And(left, right) => {
-                            // Extract counter name from Lt(counter, bound)
-                            let cn = match left.as_ref() {
-                                Expr::Lt(l, _) => {
-                                    if let Expr::Identifier(c) = l.as_ref() { Some(c.clone()) } else { None }
-                                }
-                                _ => None,
-                            };
-                            let bn = match left.as_ref() {
-                                Expr::Lt(_, r) => {
-                                    if let Expr::Identifier(b) = r.as_ref() { Some(b.clone()) } else { None }
-                                }
-                                _ => None,
-                            };
-                            // 2026-07-01: Use as_integer() to handle both
-                            // Expr::Integer(n) and Expr::Literal(LiteralExpr::Integer(n)).
-                            // The parser creates Literal-wrapped integers; normalize_to_old
-                            // does not convert them back to Expr::Integer.
-                            if let Expr::Eq(eq_l, eq_r) = right.as_ref() {
-                                if let (Some((c, k)), Some(n)) = (self.extract_mod_info(eq_l),
-                                    eq_r.as_ref().as_integer())
-                                {
-                                    if let Some(ref prev_c) = counter {
-                                                if *prev_c != c { all_match = false; }
-                                            } else {
-                                                // For modulo dispatch, the counter must be an
-                                                // integer field. String/bool are rejected because
-                                                // srem only works on integers.
-                                                if let Some(&idx) = self.ctx.field_index_map.get(&c) {
-                                                    let ct = &self.ctx.field_types[idx];
-                                                    if ct != "i64" && ct != "i32" { all_match = false; }
-                                                } else { all_match = false; }
-                                                counter = Some(c);
-                                            }
-                                    if let Some(ref prev_b) = bound {
-                                        if let Some(ref b) = bn {
-                                            if *prev_b != *b { all_match = false; }
-                                        } else { all_match = false; }
-                                    } else {
-                                        bound = bn;
-                                    }
-                                    if let Some(d) = divisor {
-                                        if d != k { all_match = false; }
-                                    } else {
-                                        divisor = Some(k);
-                                    }
-                                    if k > 256 {
-                                        all_match = false;
-                                    }
-                                    if cases.iter().any(|(v, _)| *v == n) {
-                                        all_match = false;
-                                    }
-                                    cases.push((n, name.as_str()));
-                                } else { all_match = false; }
-                            } else { all_match = false; }
-                        }
-                        _ => { all_match = false; }
-                    }
-                    if !all_match { break; }
-                }
-                if all_match && cases.len() >= 2 && counter.is_some() {
-                    cases.sort_by_key(|(v, _)| *v);
-                    let count_name = counter.take().unwrap();
-                    if self.ctx.field_index_map.contains_key(&count_name) {
-                        // Emit modulo-switch dispatch
-                        let case_names: Vec<&str> = cases.iter().map(|(_, n)| *n).collect();
-                        self.warnings.push(format!("info: modulo-switch dispatch for [{}] on {} % {}",
-                            case_names.join(", "), count_name, divisor.unwrap()));
-                        self.emit_modulo_switch_main(out, txns, &count_name, divisor.unwrap(), &cases);
-                        return;
-                    }
-                }
+            if self.try_modulo_switch_dispatch(out, &reactive_txns) {
+                return;
             }
         }
 
