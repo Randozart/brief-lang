@@ -11,9 +11,6 @@
 import { get_env_int } from "std/env.bv";
 import "link/brief_rt.c";
 
-frgn #out __print_float(val: Float32) -> Bool;
-frgn #out __print_int(n: Int) -> Bool;
-
 let bound: Int = get_env_int("BOUND");
 let count: Int = 0;
 
