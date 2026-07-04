@@ -33,6 +33,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# ── RESULT COLLECTION ───────────────────────────────────────────
+# Collected as "name|brief|c|ratio|winner|correctness"
+declare -a RESULTS=()
+record_result() {
+    RESULTS+=("$1|$2|$3|$4|$5|$6")
+}
+
+print_summary_table() {
+    echo ""
+    echo "╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗"
+    echo "║ Benchmark                 ║ Brief      ║ C          ║ Ratio    ║ Winner ║ Correct   ║"
+    echo "╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣"
+    for entry in "${RESULTS[@]}"; do
+        IFS='|' read -r name brief c ratio winner correct <<< "$entry"
+        printf "║ %-25s ║ %-10s ║ %-10s ║ %-8s ║ %-6s ║ %-9s ║\n" \
+            "$name" "$brief" "$c" "$ratio" "$winner" "$correct"
+    done
+    echo "╚═══════════════════════════╩════════════╩════════════╩══════════╩════════╩═══════════╝"
+}
+
 # ── TAGS ──────────────────────────────────────────────────────────────
 # Every benchmark must be tagged as runtime or optimizer.
 #   runtime:   FFI call in hot loop body → timing is meaningful
@@ -231,6 +251,8 @@ is_precompute_ok() {
 
 # ── CORRECTNESS CHECK ────────────────────────────────────────────────
 
+LAST_CORRECTNESS=""
+
 check_correctness() {
     local name="$1"
     local brief_bin="benchmarks/${name}"
@@ -238,6 +260,7 @@ check_correctness() {
 
     if [ ! -f "$brief_bin" ] || [ ! -f "$c_bin" ]; then
         echo "  correctness: SKIP (binary missing)"
+        LAST_CORRECTNESS="SKIP"
         return
     fi
 
@@ -247,6 +270,7 @@ check_correctness() {
 
     if [ "$brief_out" = "$c_out" ]; then
         echo "  correctness: MATCH (output: \"${brief_out:0:40}\")"
+        LAST_CORRECTNESS="MATCH"
         return
     fi
 
@@ -261,6 +285,7 @@ check_correctness() {
     local n_c=${#c_lines[@]}
     if [ "$n_brief" -ne "$n_c" ]; then
         echo "  correctness: MISMATCH (line count $n_brief vs $n_c)"
+        LAST_CORRECTNESS="MISMATCH"
         return
     fi
     local all_float=true
@@ -276,6 +301,7 @@ check_correctness() {
         echo "  correctness: MISMATCH"
         echo "    brief: \"${brief_out:0:60}\""
         echo "    c:     \"${c_out:0:60}\""
+        LAST_CORRECTNESS="MISMATCH"
         return
     fi
     # All lines are floats — compare with epsilon
@@ -288,10 +314,12 @@ check_correctness() {
             echo "  correctness: MISMATCH (float diff $diff > $eps)"
             echo "    brief: \"${brief_out:0:60}\""
             echo "    c:     \"${c_out:0:60}\""
+            LAST_CORRECTNESS="MISMATCH"
             return
         fi
     done
     echo "  correctness: MATCH (output: \"${brief_out:0:40}\")"
+    LAST_CORRECTNESS="MATCH"
 }
 
 # ── BENCHMARK RUNNER ─────────────────────────────────────────────────
@@ -323,20 +351,24 @@ bench_self_term() {
     fi
     echo "  c binary:     ${c_text:-0}B"
         check_correctness "$name"
+        record_result "$name" "precomputed" "" "" "" "$LAST_CORRECTNESS"
         return
     fi
 
     if [ ! -f "$brief_bin" ]; then
         echo "  SKIP — no brief binary (linking issue)"
+        record_result "$name" "SKIP" "" "" "" "SKIP"
         return
     fi
     if [ ! -f "$c_bin" ]; then
         echo "  SKIP — no C binary"
+        record_result "$name" "SKIP" "" "" "" "SKIP"
         return
     fi
 
     if [ "$CORRECTNESS_ONLY" = true ]; then
         check_correctness "$name"
+        record_result "$name" "" "" "" "" "$LAST_CORRECTNESS"
         return
     fi
 
@@ -376,6 +408,7 @@ bench_self_term() {
     echo "  Ratio: ${ratio}x  →  ${winner} wins"
 
     check_correctness "$name"
+    record_result "$name" "${brief_avg}s" "${c_avg}s" "${ratio}x" "$winner" "$LAST_CORRECTNESS"
 }
 
 # ── FILTER ────────────────────────────────────────────────────────────
@@ -441,3 +474,7 @@ echo "  5 iterations per benchmark, avg wall clock via CLOCK_MONOTONIC."
 echo "  BOUND=50000000. Nanosecond-precision fork+exec timing harness."
 echo "  Tags: runtime=FFI in hot loop, optimizer=precompute_ok."
 echo "================================================"
+
+if [ ${#RESULTS[@]} -gt 0 ]; then
+    print_summary_table
+fi
