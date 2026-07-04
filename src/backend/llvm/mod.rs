@@ -146,15 +146,18 @@ pub(crate) fn hoist_terminating_guard(
                 .filter(|s| !matches!(s, Statement::TermBang { .. }))
                 .cloned()
                 .collect();
-            if !body_stmts.is_empty() {
-                // Also extract the swan_song from the TermBang (e.g. print_float).
-                // The swan_song lives inside TermBang, not as a separate statement
-                // in the guard body — filtering out TermBang would lose it.
-                let swan_song_stmt = statements.iter().find_map(|s| {
-                    if let Statement::TermBang { swan_song: Some(ss), .. } = s {
-                        Some(ss.as_ref().clone())
-                    } else { None }
-                });
+            let swan_song_stmt = statements.iter().find_map(|s| {
+                if let Statement::TermBang { swan_song: Some(ss), .. } = s {
+                    Some(ss.as_ref().clone())
+                } else { None }
+            });
+            // 2026-07-04: Hoist even when body_stmts is empty — the
+            // guard may be just `term! -> print_int#(result)` with no
+            // preceding statements.  Previously we only hoisted when
+            // body_stmts was non-empty, leaving the swan song in the
+            // body and blocking Path A (no-dead-stores) because
+            // pending_post_hoist was empty.
+            if !body_stmts.is_empty() || swan_song_stmt.is_some() {
                 let mut full_body = body_stmts;
                 if let Some(sw) = swan_song_stmt {
                     full_body.push(sw);
