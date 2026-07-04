@@ -991,11 +991,25 @@ impl LlvmBackend {
             // For pointer types (i8* for String/Data), readonly is
             // omitted because the pointee may be mutated through the
             // arena allocator.
+            // For Ptr<T> parameters, dereferenceable(N) is emitted with
+            // N = pointee byte size from the type universe's
+            // pointer_pointee_layout(). This tells LLVM the pointer is
+            // valid for N bytes — enabling load speculation and LICM
+            // hoisting for pointer operations.
             let ll_ty = self.llvm_type(t);
+            let deref = if let Some(u) = &self.ctx.type_universe {
+                if let Type::Applied(name, _) = t {
+                    if name == "Ptr" {
+                        u.pointer_pointee_layout(t)
+                            .map(|(bytes, _)| format!(" dereferenceable({})", bytes))
+                            .unwrap_or_default()
+                    } else { String::new() }
+                } else { String::new() }
+            } else { String::new() };
             if ll_ty == "i8*" || ll_ty == "ptr" {
-                let _ = write!(out, ", {} nofree nosync %arg{}", ll_ty, i);
+                let _ = write!(out, ", {} nofree nosync{} %arg{}", ll_ty, deref, i);
             } else {
-                let _ = write!(out, ", {} nofree nosync readonly %arg{}", ll_ty, i);
+                let _ = write!(out, ", {} nofree nosync readonly{} %arg{}", ll_ty, deref, i);
             }
         }
         writeln!(out, ") local_unnamed_addr #0 {{").ok();
@@ -1370,11 +1384,21 @@ impl LlvmBackend {
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
             // 2026-07-04: nofree nosync readonly on callable txn parameters.
             // Same reasoning as defn parameters — params are immutable in Brief.
+            // dereferenceable(N) for Ptr<T> params from type universe.
             let ll_ty = self.llvm_type(t);
+            let deref = if let Some(u) = &self.ctx.type_universe {
+                if let Type::Applied(name, _) = t {
+                    if name == "Ptr" {
+                        u.pointer_pointee_layout(t)
+                            .map(|(bytes, _)| format!(" dereferenceable({})", bytes))
+                            .unwrap_or_default()
+                    } else { String::new() }
+                } else { String::new() }
+            } else { String::new() };
             if ll_ty == "i8*" || ll_ty == "ptr" {
-                let _ = write!(out, ", {} nofree nosync %arg{}", ll_ty, i);
+                let _ = write!(out, ", {} nofree nosync{} %arg{}", ll_ty, deref, i);
             } else {
-                let _ = write!(out, ", {} nofree nosync readonly %arg{}", ll_ty, i);
+                let _ = write!(out, ", {} nofree nosync readonly{} %arg{}", ll_ty, deref, i);
             }
         }
         writeln!(out, ") local_unnamed_addr #0{} {{", inline_str).ok();
