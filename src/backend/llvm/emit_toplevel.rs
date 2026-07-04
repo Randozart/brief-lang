@@ -1,6 +1,7 @@
 use crate::analysis::bild_asm;
 use crate::ast::{Expr, Statement, TopLevel, Type};
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
+use crate::type_universe::TypeUniverse;
 use std::fmt::Write;
 
 impl LlvmBackend {
@@ -1117,6 +1118,24 @@ impl LlvmBackend {
     // 2026-06-13: Added ptr %state param — definitions can access global state.
     // Was missing the state pointer, causing invalid LLVM IR (SSA value out of scope).
 
+    // 2026-07-04: Return the known !range bounds for a Brief type based on
+    // its byte size in the type universe.  Narrow integer types have
+    // representation-level ranges that LLVM can exploit for bounds-check
+    // elimination — no contract precondition required.
+    // Two-tier range system:
+    // 1. Type-driven: from universe byte size (always available, no contract)
+    // 2. Contract-driven: from [pre] constraints (may tighten type-driven range)
+    // Returns None for types without a known range (Int is unbounded, Float
+    // is not range-constrained).
+    fn type_driven_range(universe: &TypeUniverse, ty: &Type) -> Option<(i64, i64)> {
+        let bytes = universe.byte_size(ty)?;
+        match bytes {
+            1 => Some((0, 256)),
+            2 => Some((0, 65536)),
+            _ => None,
+        }
+    }
+
     pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
         let has_output = txn.output_type.is_some() || !txn.outputs.is_empty();
         if !txn.is_reactive && (!txn.parameters.is_empty() || has_output) {
@@ -1132,6 +1151,26 @@ impl LlvmBackend {
                 let dlo = if lo > i64::MIN { lo } else { i64::MIN };
                 range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, dlo, hi));
                 self.ctx.field_to_meta_idx.insert(f.clone(), mi);
+            }
+        }
+        // 2026-07-04: Type-driven !range for narrow integer types.
+        // The type universe provides byte size information for each type.
+        // Types with known ranges (UInt8, UInt16, UInt32, Int8, Char) get
+        // automatic !range metadata on their field loads — no contract
+        // precondition required. This is information the type system
+        // provides for free that LLVM uses to eliminate bounds checks.
+        if let Some(ref universe) = self.ctx.type_universe {
+            for (field_name, &idx) in &self.ctx.field_index_map {
+                let brief_ty = self.ctx.field_brief_types.get(idx);
+                let Some(brief_ty) = brief_ty else { continue; };
+                let Some(range_bounds) = Self::type_driven_range(universe, brief_ty) else { continue; };
+                // Only add if no contract-driven range already exists
+                // (contract ranges are tighter and take priority).
+                if !self.ctx.field_to_meta_idx.contains_key(field_name) {
+                    let mi = range_meta.len();
+                    range_meta.push(format!("!{} = !{{ i64 {}, i64 {} }}", mi, range_bounds.0, range_bounds.1));
+                    self.ctx.field_to_meta_idx.insert(field_name.clone(), mi);
+                }
             }
         }
         // Resolve #inline / #?inline directives from transaction modifiers.
