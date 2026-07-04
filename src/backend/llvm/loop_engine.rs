@@ -1946,20 +1946,16 @@ impl LlvmBackend {
     /// pre_load_all_fields so field reads see fresh memory values (not stale phis).
     fn emit_hoisted_post_loop_prints(&mut self, out: &mut String, hoisted: &[Vec<Statement>]) {
         if hoisted.is_empty() { return; }
-        // 2026-07-03: Use phi registers instead of GEP+load from %State.
-        // The phi registers at loop_hdr are available in done: (loop_hdr
-        // dominates done in SSA).  The latch reloads modified fields from
-        // %State before the backedge, so phi values equal the final stored
-        // values.  Using phis eliminates %State GEP references from the
-        // done: block, letting SROA decompose the struct into scalar
-        // float phis — the loop vectorizer can then analyze each field.
-        //
-        // Key invariant: clear the expr_dedup_cache before re-emitting the
-        // hoisted body.  The original body populated the cache with register
-        // names defined in body: — reusing them in done: would create illegal
-        // SSA use-before-def across blocks (body: does not dominate done:).
+        // 2026-07-03: Load fresh field values from %State instead of using phi
+        // registers.  The phi registers at loop_hdr must NOT be used in done: —
+        // the vectorizer checks for loop-carried values that escape the loop,
+        // and any phi register used after the exit block blocks vectorization
+        // with "value not identified as reduction".  GEP+load from %State in
+        // done: breaks that use chain.  The GEP+load is outside the loop and
+        // does not affect loop-access analysis — the loop body's stores use
+        // constant-index GEPs that LoopAccessAnalysis can analyze directly.
         self.fun.expr_dedup_cache.clear();
-        self.phi_regs_to_ssa_old();
+        self.pre_load_all_fields(out, "%state");
         for body_stmts in hoisted {
             for s in body_stmts {
                 self.emit_stmt(out, s, "  ");
