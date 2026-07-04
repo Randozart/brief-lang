@@ -49,8 +49,13 @@ impl LlvmBackend {
             let val_boxed = self.adapt_to_i64(out, indent, val);
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
             let typed_val = self.ensure_typed_value(out, indent, ty_str, &val_boxed);
-            writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
-                indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
+            // 2026-07-04: Gate the store on needs_state_stores_in_body.
+            // Path A (false): No store — phi registers carry values forward.
+            // Path B (true):  Store emitted for done: block to read.
+            if self.fun.needs_state_stores_in_body {
+                writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
+                    indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
+            }
             if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
                 self.fun.ssa_old_int_regs.insert(fname.to_string(), val_boxed.clone());
             }
@@ -62,8 +67,13 @@ impl LlvmBackend {
             // directly is bit-identical to the box→unbox result but saves 4 instructions.
             let typed_val = val.to_string();
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-            writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
-                indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
+            // 2026-07-04: Gate the store on needs_state_stores_in_body.
+            // Path A (false): No store — phi registers carry values forward.
+            // Path B (true):  Store emitted for done: block to read.
+            if self.fun.needs_state_stores_in_body {
+                writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
+                    indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
+            }
             self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val.clone());
             // pending_phi_backedge key marks this field as modified (latch uses
             // pending_phi_native_backedge for the actual backedge value).
@@ -71,17 +81,21 @@ impl LlvmBackend {
             self.fun.pending_phi_native_backedge.insert(fname.to_string(), typed_val);
         } else {
             // Volatile store (MMIO etc.): passthrough.
+            // NOT gated on needs_state_stores_in_body — volatile stores have
+            // observable side effects and must always be emitted.
             let val_raw = if is_native_float { val.to_string() } else { self.adapt_to_i64(out, indent, val) };
             writeln!(out, "{}store{} {} {}, ptr {}, align {}", indent, vol_str, ty, val_raw, p, self.align_of(&ty)).ok();
             self.fun.pending_phi_backedge.insert(fname.to_string(), val_raw.clone());
             self.fun.pending_phi_native_backedge.insert(fname.to_string(), val_raw);
         }
-        if let Some(targets) = self.ctx.cache_slots.get(fname) {
-            for (_target, &(_cache_idx, valid_idx)) in targets {
-                let inv_gep = format!("%civ{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                    indent, inv_gep, valid_idx).ok();
-                writeln!(out, "{}store i8 0, ptr {}, align 1", indent, inv_gep).ok();
+        if self.fun.needs_state_stores_in_body {
+            if let Some(targets) = self.ctx.cache_slots.get(fname) {
+                for (_target, &(_cache_idx, valid_idx)) in targets {
+                    let inv_gep = format!("%civ{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                        indent, inv_gep, valid_idx).ok();
+                    writeln!(out, "{}store i8 0, ptr {}, align 1", indent, inv_gep).ok();
+                }
             }
         }
     }

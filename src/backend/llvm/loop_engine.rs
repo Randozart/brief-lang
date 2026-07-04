@@ -1226,6 +1226,20 @@ impl LlvmBackend {
         self.fun.pending_phi_backedge.clear();
         self.fun.pending_phi_native_backedge.clear();
         self.fun.returns_i64 = false;
+        // 2026-07-04: Decide whether the body must store to %State.
+        // Path A (no stores): done: does NOT read %State (no post-loop
+        //   hoisted guards).  Phi registers + pending_phi_native_backedge
+        //   carry all values forward.  Zero memory traffic in hot loop.
+        //   LLVM's optimizer sees a clean phi loop with no barriers.
+        // Path B (stores preserved): done: reads %State via GEP+load
+        //   (post-loop hoisted guards from term! -> swan_song).  Stores
+        //   ensure done:'s loads see the final iteration's field values.
+        //
+        // A005d (memory loop) is unaffected by this flag — its default
+        // value is true, and emit_countable_memory_main never sets it
+        // to false because the header loop test loads the counter from
+        // %State every iteration.
+        self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
         self.emit_countable_body(out, body);
         // ── Latch: increment counter, reload modified fields ─────────
         self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name);
@@ -1237,6 +1251,7 @@ impl LlvmBackend {
         writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
+        self.fun.needs_state_stores_in_body = true;
     }
 
     /// Emit a `main()` that uses per-field GEP loads/stores for all-convergent

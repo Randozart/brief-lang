@@ -260,6 +260,30 @@ pub struct FunctionContext {
     // as the phi backedge operand, eliminating the store→GEP→load roundtrip.
     pub pending_phi_native_backedge: HashMap<String, String>,
 
+    // 2026-07-04: Whether the A005c hot loop body must emit stores to %State
+    // for the done: block to read. When false (the common case — no post-loop
+    // hoisted guards), the field stores are suppressed. The phi registers and
+    // pending_phi_native_backedge carry all values forward, and the latch uses
+    // the native backedge registers directly. LLVM's optimizer sees a clean
+    // phi loop with zero memory traffic — no dead stores for DSE to eliminate,
+    // no barriers for the vectorizer.
+    //
+    // Dual-path architecture:
+    //   Path A (false): Zero stores in the hot loop body. The loop body
+    //     is a pure register pipeline (phi → compute → latch backedge).
+    //     Used when done: does not read %State (no pending_post_hoist).
+    //     Enables full vectorization and ILP scheduling.
+    //   Path B (true): Stores emitted as before. Required when done:
+    //     reads %State via GEP+load (post-loop hoisted guards from
+    //     term! -> swan_song). The stores ensure done:'s loads see
+    //     the final iteration's field values.
+    //
+    // Both paths must be preserved when refactoring. Removing Path A
+    // regresses all A005c benchmarks by N dead stores per iteration
+    // (N = field count). Removing Path B breaks term! swan song
+    // correctness for benchmarks that print at convergence.
+    pub needs_state_stores_in_body: bool,
+
     // Chimera tracking
     pub chimera_map: HashMap<String, ChimeraInfo>,
 
@@ -311,6 +335,7 @@ impl FunctionContext {
             pending_post_hoist: Vec::new(),
             pending_cleanup: Vec::new(),
             pending_phi_native_backedge: HashMap::new(),
+            needs_state_stores_in_body: true,
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
         }
