@@ -333,6 +333,15 @@ pub struct FunctionContext {
     // needed" (fallback — emit all stores).
     pub done_needs_fields: HashSet<String>,
 
+    // 2026-07-04: Last-value temporaries for the phi commit block.
+    // Maps field name → alloca register name.  Populated by
+    // emit_countable_main before the loop body.  The commit block
+    // (between loop_hdr and done) stores each phi's final value to
+    // these allocas ONCE at loop exit.  emit_done_field_loads loads
+    // from them instead of from %State — eliminating all per-iteration
+    // stores while keeping post-loop values available for hoisted prints.
+    pub last_val_temps: HashMap<String, String>,
+
     // Chimera tracking
     pub chimera_map: HashMap<String, ChimeraInfo>,
 
@@ -389,6 +398,7 @@ impl FunctionContext {
             counter_field_name: None,
             parallel_safe_exempt_fields: HashSet::new(),
             done_needs_fields: HashSet::new(),
+            last_val_temps: HashMap::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
         }

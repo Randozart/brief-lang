@@ -501,8 +501,79 @@ body only reads one field (e.g., `checksum` in fannkuch_redux).
 |-----------|---------|----------|
 | fannkuch_redux | 1.66× | ~1.2× (16 stores → 1 store) |
 
-## Implementation Order
+## Optimization 8: Phi Commit Block (Eliminate Per-Iteration Stores)
 
-1. **Parallel-safe detection** — closes float_math_nonzero gap
-2. **Per-field liveness** — closes fannkuch_redux gap
-3. Build, test, benchmark
+### Problem
+
+For benchmarks with hoisted terminating guards (nbody_sqrt, fannkuch),
+Path B emits stores in the hot loop body for every field that the
+done: block reads.  nbody_sqrt has 30 stores — one for each position/
+velocity field — because the hoisted energy computation references
+all of them.  These stores execute EVERY iteration, adding memory
+traffic to the critical path.
+
+### Root Cause
+
+The hoisted guard body is re-emitted in `done:`.  It reads state
+fields via `pre_load_all_fields` which loads from `%State`.  The
+body stores to `%State` so `done:` sees fresh values.  But the
+stores are scattered through the body and execute every iteration.
+
+### Fix: Phi Commit Block
+
+Replace per-iteration stores with a single `commit:` block that runs
+ONCE at loop exit.  It stores each phi's final value to a temporary
+alloca.  `done:` reads from these temporaries instead of `%State`.
+
+```llvm
+loop_hdr:
+  %phi_x0 = phi float [%init_x0, %pre_phi], [%be_x0, %latch]
+  ...
+  br i1 %cmp, label %body, label %commit
+
+body:
+  ; pure register pipeline — zero stores
+  ...
+  br label %latch
+
+latch:
+  ; phi backedge values
+  ...
+  br label %loop_hdr
+
+commit:                ; ← NEW — runs ONCE at exit
+  store float %phi_x0, ptr %last_x0
+  ...
+  br label %done
+
+done:
+  %lv_x0 = load float, ptr %last_x0  ; ← reads from commit temp
+  ; re-emit hoisted guard body
+  ret i32 0
+```
+
+### Impact
+
+| Benchmark | Before | After |
+|-----------|--------|-------|
+| nbody_sqrt | 1.25×, 30 stores/iter | ~1.0×, 0 stores/iter (30 loads ONCE at exit) |
+| nbody_sqrt_idio | .83×, 30 stores/iter | ~.78×, 0 stores/iter |
+| nbody_newton | .76×, 1 store/iter | ~.74×, 0 stores/iter |
+| fannkuch_redux | 1.83×, 1 store/iter | ~1.80×, 0 stores/iter |
+
+### Implementation
+
+| Step | File | Change |
+|------|------|--------|
+| 1 | `context.rs` | Add `last_val_temps: HashMap<String, String>` |
+| 2 | `loop_engine.rs` | `emit_countable_setup_phis_and_header` takes `exit_label` param |
+| 3 | `loop_engine.rs` | `emit_countable_main` creates last-value allocas + commit block |
+| 4 | `loop_engine.rs` | New `emit_done_field_loads` — loads from commit temps instead of %State |
+| 5 | `loop_engine.rs` | `emit_hoisted_post_loop_prints` skips `pre_load_all_fields` |
+
+### Flat Control Flow
+
+All loops are depth ≤ 2.  Helper functions extracted:
+- `emit_last_val_allocas` — creates one alloca per done-read field
+- `emit_commit_block` — stores phi values to last-value allocas
+- `emit_done_field_loads` — loads from diff

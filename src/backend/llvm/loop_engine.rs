@@ -969,6 +969,7 @@ impl LlvmBackend {
         counter_idx: usize,
         bound_reg: &str,
         write_set: &HashSet<String>,
+        exit_label: &str,
     ) -> (String, String, String, String, String, String) {
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
@@ -1036,7 +1037,7 @@ impl LlvmBackend {
         let cmp_reg = format!("%cmp_hdr_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
         writeln!(out, "  {} = icmp slt i64 {}, {}", cmp_reg, pi_name, bound_reg).ok();
-        writeln!(out, "  br i1 {}, label %body, label %done", cmp_reg).ok();
+        writeln!(out, "  br i1 {}, label %body, label %{}", cmp_reg, exit_label).ok();
         (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, init_count)
     }
 
@@ -1236,9 +1237,41 @@ impl LlvmBackend {
         self.emit_prealloc_for_body(out, "  ", body, &bound_reg);
         writeln!(out, "  br label %pre_phi").ok();
         writeln!(out, "pre_phi:").ok();
+        // 2026-07-04: Populate done_needs_fields BEFORE phi setup and
+        // last-value alloca creation so the exit_label and allocas
+        // reflect the hoisted print's field requirements.
+        self.fun.done_needs_fields.clear();
+        for hoisted_body in &self.fun.pending_post_hoist {
+            for s in hoisted_body {
+                collect_field_refs(s, &mut self.fun.done_needs_fields, &self.ctx.field_index_map);
+            }
+        }
+        // ── Last-value allocas for phi commit (eliminate per-iteration stores) ──
+        // If the done: block reads state fields (hoisted prints), create
+        // temporaries that store the phi's final value ONCE at loop exit.
+        // The commit block stores to these; done: loads from them instead
+        // of from %State, eliminating ~N stores per iteration.
+        self.fun.last_val_temps.clear();
+        let exit_label = if !self.fun.done_needs_fields.is_empty() {
+            for field_name in self.fun.done_needs_fields.iter() {
+                let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
+                let ty = &self.ctx.field_types[idx];
+                let reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "  {} = alloca {}, align {}", reg, ty, self.align_of(ty)).ok();
+                self.fun.last_val_temps.insert(field_name.clone(), reg);
+            }
+            // 2026-07-04: Phi commit block replaces per-iteration stores.
+            // Suppress body stores via needs_state_stores_in_body = false.
+            // The commit block writes phi final values once at loop exit,
+            // and emit_hoisted_post_loop_prints reads from them.
+            self.fun.needs_state_stores_in_body = false;
+            "commit"
+        } else {
+            "done"
+        };
         // ── Initial field loads + phi/backedge register setup + loop header ──
         let (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, _init_count)
-            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg, write_set);
+            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg, write_set, exit_label);
         // ── Body: load phi regs into ssa_old, emit_stmt ──────────────
         writeln!(out, "body:").ok();
         self.fun.ssa_state_reg = None; // memory mode: writes go through GEP+store
@@ -1258,7 +1291,12 @@ impl LlvmBackend {
         // value is true, and emit_countable_memory_main never sets it
         // to false because the header loop test loads the counter from
         // %State every iteration.
-        self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
+        if self.fun.last_val_temps.is_empty() {
+            // No phi commit block — fall back to old Path A/B logic.
+            // When last_val_temps is non-empty, the phi commit block
+            // was created above and already set the flag to false.
+            self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
+        }
         // 2026-07-04: Enable parallel-safe mode for ALL bodies.
         // ssa_old caches are NOT updated after & assignments — all reads
         // use old (phi) values.  This makes every computation independent,
@@ -1277,18 +1315,25 @@ impl LlvmBackend {
         self.fun.parallel_safe_exempt_fields.clear();
         let mut guard_exempt = HashSet::new();
         collect_parallel_safe_exemptions(body, &mut self.fun.parallel_safe_exempt_fields, &mut guard_exempt, &self.ctx.field_index_map);
-        // 2026-07-04: Pre-populate done_needs_fields from pending_post_hoist
-        // so emit_memory_field_store can gate stores on the subset of fields
-        // that the done: block actually reads (per-field liveness).
-        self.fun.done_needs_fields.clear();
-        for hoisted_body in &self.fun.pending_post_hoist {
-            for s in hoisted_body {
-                collect_field_refs(s, &mut self.fun.done_needs_fields, &self.ctx.field_index_map);
-            }
-        }
         self.emit_countable_body(out, body);
         // ── Latch: increment counter, reload modified fields ─────────
         self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name);
+        // ── Commit block: store phi final values to last-value allocas ──
+        // Runs ONCE at loop exit (when the header branches to %commit instead
+        // of %done).  done: loads from these allocas — no per-iteration stores.
+        if !self.fun.last_val_temps.is_empty() {
+            writeln!(out, "commit:").ok();
+            for (field_name, temp_reg) in &self.fun.last_val_temps {
+                let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
+                let ty = &self.ctx.field_types[idx];
+                let phi_reg = self.fun.phi_field_regs.get(field_name)
+                    .map(|s| s.as_str()).unwrap_or("");
+                if !phi_reg.is_empty() {
+                    writeln!(out, "  store {} {}, ptr {}, align {}", ty, phi_reg, temp_reg, self.align_of(ty)).ok();
+                }
+            }
+            writeln!(out, "  br label %done").ok();
+        }
         // ── Done: emit post-loop prints + exit ──────────────────────
         writeln!(out, "done:").ok();
         self.emit_arena_reset(out, "  ");
@@ -2075,17 +2120,43 @@ impl LlvmBackend {
         // done: breaks that use chain.  The GEP+load is outside the loop and
         // does not affect loop-access analysis — the loop body's stores use
         // constant-index GEPs that LoopAccessAnalysis can analyze directly.
-        // 2026-07-04: done_needs_fields is already populated by the pre-body
-        // scan in emit_countable_main.  Pass it as a load filter.
+        // 2026-07-04: Load from last-value temporaries (phi commit) if available,
+        // falling back to pre_load_all_fields from %State.  The commit block
+        // stores phi final values ONCE at loop exit, eliminating per-iteration
+        // stores while keeping post-loop values available for hoisted prints.
         self.fun.expr_dedup_cache.clear();
-        let filter: Option<HashSet<String>> = if self.fun.done_needs_fields.is_empty() { None } else { Some(self.fun.done_needs_fields.clone()) };
-        self.pre_load_all_fields(out, "%state", filter.as_ref());
+        if !self.fun.last_val_temps.is_empty() {
+            self.load_last_val_temps(out);
+        } else {
+            let filter: Option<HashSet<String>> = if self.fun.done_needs_fields.is_empty() { None } else { Some(self.fun.done_needs_fields.clone()) };
+            self.pre_load_all_fields(out, "%state", filter.as_ref());
+        }
         for body_stmts in hoisted {
             for s in body_stmts {
                 self.emit_stmt(out, s, "  ");
             }
         }
         self.fun.done_needs_fields.clear();
+    }
+
+    /// 2026-07-04: Load state field values from last-value temporaries
+    /// (phi commit allocas) into ssa_old caches for the done: block.
+    /// Only loads fields in done_needs_fields.
+    fn load_last_val_temps(&mut self, out: &mut String) {
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        for field_name in self.fun.done_needs_fields.iter() {
+            let Some(temp_reg) = self.fun.last_val_temps.get(field_name) else { continue; };
+            let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
+            let ty = &self.ctx.field_types[idx];
+            let load_reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = load {}, ptr {}, align {}", load_reg, ty, temp_reg, self.align_of(ty)).ok();
+            if ty == "float" || ty == "double" {
+                self.fun.ssa_old_float_regs.insert(field_name.clone(), load_reg);
+            } else {
+                self.fun.ssa_old_int_regs.insert(field_name.clone(), load_reg);
+            }
+        }
     }
 
     /// Emit a single print intrinsic call from raw register names (no TypedRegister).
