@@ -290,21 +290,40 @@ pub struct FunctionContext {
     pub needs_state_stores_in_body: bool,
 
     // 2026-07-04: Whether the current loop body is parallel-safe.
-    // A body is parallel-safe when each field is mutated by & at most
-    // once AND no & assignment's RHS references a field that was mutated
-    // by a preceding & in the same body. When true, emit_memory_field_store
-    // does NOT update ssa_old_*_regs — all reads continue to use the phi
-    // register (old value). This makes every computation independent of
-    // every other computation — LLVM's vectorizer can SIMD the entire
-    // body at once.
+    // When true, emit_memory_field_store does NOT update ssa_old_*_regs
+    // after & assignments — all reads continue to use the phi register
+    // (old value).  This makes every computation independent of every
+    // other, enabling LLVM's vectorizer to SIMD the entire body.
     //
-    // Why this is safe: when each field is mutated at most once, the &
-    // assignments form a set of independent coordinate updates. The
-    // ordering of computations does not affect the final state because
-    // each field's final value depends only on the initial (phi) state.
-    // The intermediate values (after some fields updated but before others)
-    // are never observed since each field is written once.
+    // Enabled for ALL bodies.  This restores the A005a struct-SSA behavior:
+    // extractvalue from the state phi always gives old values, so all
+    // computations are naturally independent.  The per-field phi loop
+    // (A005c) broke this by updating ssa_old caches after each &
+    // (correct per Brief semantics but creates artificial dependency
+    // chains).  Parallel-safe mode restores the A005a independence.
+    //
+    // Exception: the counter field (tracked by counter_field_name) always
+    // updates ssa_old_*_regs even in parallel-safe mode.  Guard conditions
+    // like [count % 5000000 == 0] read the counter — they must see the
+    // new value, not the old phi register.
     pub parallel_safe_body: bool,
+
+    // 2026-07-04: Name of the loop counter field (the induction variable).
+    // Set by emit_countable_main when entering the loop body.  This field
+    // is exempt from parallel-safe mode — it always updates ssa_old_*_regs
+    // so guard conditions like [count % N == 0] see the correct new value.
+    pub counter_field_name: Option<String>,
+
+    // 2026-07-04: State fields that guard conditions read.
+    // Populated by scanning the body for Guarded statements and collecting
+    // Expr::Identifier references.  These fields are exempt from parallel-
+    // safe mode — they always update ssa_old_*_regs so guards see the
+    // correct new values.  The counter_field_name is also implicitly exempt
+    // (tracked separately as it's always the induction variable).
+    // Guards containing TermBang (terminating guards) are excluded from
+    // this scan — their bodies are hoisted and re-emitted post-loop, so
+    // they don't need sequential updates within the loop body.
+    pub parallel_safe_exempt_fields: HashSet<String>,
 
     // 2026-07-04: State fields that the done: block reads via
     // emit_hoisted_post_loop_prints. Populated by scanning hoisted
@@ -366,7 +385,9 @@ impl FunctionContext {
             pending_cleanup: Vec::new(),
             pending_phi_native_backedge: HashMap::new(),
             needs_state_stores_in_body: true,
-            parallel_safe_body: false,
+            parallel_safe_body: true,
+            counter_field_name: None,
+            parallel_safe_exempt_fields: HashSet::new(),
             done_needs_fields: HashSet::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),

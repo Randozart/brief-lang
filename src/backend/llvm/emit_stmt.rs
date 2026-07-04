@@ -62,7 +62,14 @@ impl LlvmBackend {
             // independent — enabling SIMD vectorization.  The ssa_old caches
             // are NOT updated because subsequent reads of this field should
             // still see the pre-iteration value, not the newly computed one.
-            if !self.fun.parallel_safe_body {
+            // Exceptions:
+            //   - counter_field_name: the induction variable, always updated
+            //     so guard conditions like [count % N == 0] see new count
+            //   - parallel_safe_exempt_fields: fields that guard conditions
+            //     read (periodic print guards need latest values)
+            let is_counter = self.fun.counter_field_name.as_deref() == Some(fname);
+            let is_exempt = is_counter || self.fun.parallel_safe_exempt_fields.contains(fname);
+            if !self.fun.parallel_safe_body || is_exempt {
                 if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
                     self.fun.ssa_old_int_regs.insert(fname.to_string(), val_boxed.clone());
                 }
@@ -83,7 +90,10 @@ impl LlvmBackend {
             }
             // 2026-07-04: When parallel_safe_body, keep old (phi) register
             // in ssa_old caches so all computations use old values.
-            if !self.fun.parallel_safe_body {
+            // Exemptions: counter field + fields that guard conditions read.
+            let is_counter = self.fun.counter_field_name.as_deref() == Some(fname);
+            let is_exempt = is_counter || self.fun.parallel_safe_exempt_fields.contains(fname);
+            if !self.fun.parallel_safe_body || is_exempt {
                 self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val.clone());
             }
             // pending_phi_backedge key marks this field as modified (latch uses

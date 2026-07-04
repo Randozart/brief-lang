@@ -1259,11 +1259,24 @@ impl LlvmBackend {
         // to false because the header loop test loads the counter from
         // %State every iteration.
         self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
-        // 2026-07-04: Check if the body is parallel-safe (each field
-        // mutated at most once). When true, emit_memory_field_store
-        // keeps old phi registers in ssa_old caches — all computations
-        // use old values and become independent, enabling SIMD.
+        // 2026-07-04: Enable parallel-safe mode for ALL bodies.
+        // ssa_old caches are NOT updated after & assignments — all reads
+        // use old (phi) values.  This makes every computation independent,
+        // enabling LLVM to SIMD-vectorize across the entire body.
+        // The counter field is exempt (tracked by counter_field_name).
         self.fun.parallel_safe_body = is_body_parallel_safe(body);
+        // 2026-07-04: Track the counter field name so emit_memory_field_store
+        // can exempt it from parallel-safe mode.  Guard conditions like
+        // [count % 5000000 == 0] need to read the new counter value, not the
+        // old phi register.  The counter always updates ssa_old_*_regs.
+        self.fun.counter_field_name = Some(counter_name.clone());
+        // 2026-07-04: Scan body for fields that need sequential updates
+        // (read-after-write + guard conditions/arguments).  These fields
+        // are exempt from parallel-safe mode — they get normal sequential
+        // ssa_old updates so later reads or guard conditions see correct values.
+        self.fun.parallel_safe_exempt_fields.clear();
+        let mut guard_exempt = HashSet::new();
+        collect_parallel_safe_exemptions(body, &mut self.fun.parallel_safe_exempt_fields, &mut guard_exempt, &self.ctx.field_index_map);
         // 2026-07-04: Pre-populate done_needs_fields from pending_post_hoist
         // so emit_memory_field_store can gate stores on the subset of fields
         // that the done: block actually reads (per-field liveness).
@@ -1285,6 +1298,8 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
         writeln!(out).ok();
         self.fun.needs_state_stores_in_body = true;
+        self.fun.counter_field_name = None;
+        self.fun.parallel_safe_exempt_fields.clear();
     }
 
     /// Emit a `main()` that uses per-field GEP loads/stores for all-convergent
@@ -2618,12 +2633,157 @@ impl LlvmBackend {
     }
 }
 
-/// 2026-07-04: Check if a loop body is parallel-safe.
-/// Disabled — all runtime benchmarks have guards that read mutated fields,
-/// so the optimization never activates. Kept as documentation for future
-/// exploration of guard-free parallel bodies.
+/// True if the guard contains a TermBang (will be hoisted post-loop).
+fn terminating_guard(statements: &[Statement]) -> bool {
+    statements.iter().any(|gs| matches!(gs, Statement::TermBang { .. }))
+}
+
+/// 2026-07-04: Scan body for fields that need sequential (non-parallel-safe)
+/// updates.  Two categories passed as separate sets:
+///
+/// exempt_fields — fields that are mutated by `&` AND then READ later in
+/// the same body (read-after-write).  Reading a field after mutating it
+/// means subsequent computations depend on the new value, so ssa_old must
+/// be updated.
+///
+/// guard_exempt_fields — fields referenced in guard CONDITIONS (e.g.,
+/// [count % N == 0]) or as direct identifier arguments to side-effecting
+/// calls inside guard bodies.  Guard conditions need the new count value;
+/// print arguments need exact values for correctness comparison.
+fn collect_parallel_safe_exemptions(
+    body: &[Statement],
+    exempt_fields: &mut HashSet<String>,
+    guard_exempt_fields: &mut HashSet<String>,
+    field_index_map: &HashMap<String, usize>,
+) {
+    let mut mutation_order: Vec<String> = Vec::new();
+    for s in body {
+        // Track mutation order
+        if let Statement::Assignment { lhs, .. } = s {
+            if let (Expr::Identifier(name) | Expr::OwnedRef(name)) = lhs {
+                mutation_order.push(name.clone());
+            }
+        }
+        // Guard-specific exemptions: conditions need new values
+        if let Statement::Guarded { condition, statements, .. } = s {
+            if terminating_guard(statements) { continue; }
+            collect_expr_field_refs(condition, guard_exempt_fields, field_index_map);
+            // Direct identifier arguments to side-effecting calls in guard
+            // bodies need exact values for correctness comparison.
+            for gs in statements {
+                let args = match gs {
+                    Statement::Expression(Expr::IntrinsicCall { args, .. }) => Some(args),
+                    Statement::Expression(Expr::Call(_, args)) => Some(args),
+                    _ => None,
+                };
+                let Some(args) = args else { continue; };
+                for arg in args {
+                    if let (Expr::Identifier(name) | Expr::OwnedRef(name)) = arg {
+                        if field_index_map.contains_key(name) {
+                            guard_exempt_fields.insert(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Read-after-write analysis: any field that is read after its mutation
+    // needs sequential update.  Scan for field reads after each mutation.
+    for s in body {
+        let read_fields = extract_read_fields(s, field_index_map);
+        for fname in &read_fields {
+            if let Some(pos) = mutation_order.iter().position(|m| m == fname) {
+                exempt_fields.insert(fname.clone());
+            }
+        }
+    }
+    // Merge guard exemptions into the main exempt set
+    for fname in guard_exempt_fields.drain() {
+        exempt_fields.insert(fname);
+    }
+}
+
+/// Collect state field identifiers that are READ in a statement.
+fn extract_read_fields(
+    s: &Statement,
+    field_index_map: &HashMap<String, usize>,
+) -> Vec<String> {
+    let mut result = Vec::new();
+    match s {
+        Statement::Assignment { expr, .. } => {
+            collect_read_field_expr(expr, &mut result, field_index_map);
+        }
+        Statement::Guarded { condition, statements, .. } => {
+            collect_read_field_expr(condition, &mut result, field_index_map);
+            for gs in statements {
+                for sf in extract_read_fields(gs, field_index_map) {
+                    result.push(sf);
+                }
+            }
+        }
+        Statement::Let { expr: Some(e), .. }
+        | Statement::Expression(e)
+        | Statement::Escape(Some(e)) => {
+            collect_read_field_expr(e, &mut result, field_index_map);
+        }
+        _ => {}
+    }
+    result
+}
+
+/// Collect field identifiers from an expression.
+fn collect_read_field_expr(
+    e: &Expr,
+    result: &mut Vec<String>,
+    field_index_map: &HashMap<String, usize>,
+) {
+    match e {
+        Expr::Identifier(name) | Expr::OwnedRef(name) => {
+            if field_index_map.contains_key(name) {
+                result.push(name.clone());
+            }
+        }
+        Expr::BinaryOp(bop) => {
+            let bop = bop.as_ref();
+            collect_read_field_expr(&bop.left, result, field_index_map);
+            collect_read_field_expr(&bop.right, result, field_index_map);
+        }
+        Expr::UnaryOp(uop) => {
+            let uop = uop.as_ref();
+            collect_read_field_expr(&uop.operand, result, field_index_map);
+        }
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+        | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
+        | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::Or(l, r)
+        | Expr::And(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r)
+        | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r)
+        | Expr::Concat(l, r) | Expr::ListIndex(l, r) => {
+            collect_read_field_expr(l, result, field_index_map);
+            collect_read_field_expr(r, result, field_index_map);
+        }
+        Expr::Not(op) | Expr::Neg(op) | Expr::BitNot(op) | Expr::Cast(op, _) => {
+            collect_read_field_expr(op, result, field_index_map);
+        }
+        Expr::Call(_, args) | Expr::ListLiteral(args) | Expr::IntrinsicCall { args, .. } => {
+            for arg in args {
+                collect_read_field_expr(arg, result, field_index_map);
+            }
+        }
+        _ => {}
+    }
+}
+/// Always returns true — parallel-safe mode is enabled for ALL bodies.
+/// This restores the A005a struct-SSA behavior where extractvalue from
+/// the state phi always gives old values, keeping all computations
+/// independent.  The per-field phi loop (A005c) broke this by updating
+/// ssa_old caches after each & assignment, creating artificial dependency
+/// chains that prevent SIMD vectorization.
+///
+/// The counter field is exempt (handled by counter_field_name in
+/// emit_memory_field_store) — guard conditions like [count % N == 0]
+/// still see the correct new value.
 fn is_body_parallel_safe(_body: &[Statement]) -> bool {
-    false
+    true
 }
 
 /// Helper: extract identifiers from an expression into a set.
