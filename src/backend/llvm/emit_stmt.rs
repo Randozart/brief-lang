@@ -49,15 +49,22 @@ impl LlvmBackend {
             let val_boxed = self.adapt_to_i64(out, indent, val);
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
             let typed_val = self.ensure_typed_value(out, indent, ty_str, &val_boxed);
-            // 2026-07-04: Gate the store on needs_state_stores_in_body.
-            // Path A (false): No store — phi registers carry values forward.
-            // Path B (true):  Store emitted for done: block to read.
-            if self.fun.needs_state_stores_in_body {
+            // 2026-07-04: Gate the store on both needs_state_stores_in_body
+            // and per-field done: liveness.  When done_needs_fields is
+            // non-empty, only store fields that the done: block reads.
+            if self.fun.needs_state_stores_in_body && self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname) {
                 writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
                     indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
             }
-            if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
-                self.fun.ssa_old_int_regs.insert(fname.to_string(), val_boxed.clone());
+            // 2026-07-04: When parallel_safe_body, keep old (phi) register
+            // in ssa_old caches so all computations use old values and become
+            // independent — enabling SIMD vectorization.  The ssa_old caches
+            // are NOT updated because subsequent reads of this field should
+            // still see the pre-iteration value, not the newly computed one.
+            if !self.fun.parallel_safe_body {
+                if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
+                    self.fun.ssa_old_int_regs.insert(fname.to_string(), val_boxed.clone());
+                }
             }
             self.fun.pending_phi_backedge.insert(fname.to_string(), val_boxed);
             self.fun.pending_phi_native_backedge.insert(fname.to_string(), typed_val);
@@ -67,14 +74,17 @@ impl LlvmBackend {
             // directly is bit-identical to the box→unbox result but saves 4 instructions.
             let typed_val = val.to_string();
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-            // 2026-07-04: Gate the store on needs_state_stores_in_body.
-            // Path A (false): No store — phi registers carry values forward.
-            // Path B (true):  Store emitted for done: block to read.
-            if self.fun.needs_state_stores_in_body {
+            // 2026-07-04: Gate the store on both needs_state_stores_in_body
+            // and per-field done: liveness.
+            if self.fun.needs_state_stores_in_body && self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname) {
                 writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
                     indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
             }
-            self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val.clone());
+            // 2026-07-04: When parallel_safe_body, keep old (phi) register
+            // in ssa_old caches so all computations use old values.
+            if !self.fun.parallel_safe_body {
+                self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val.clone());
+            }
             // pending_phi_backedge key marks this field as modified (latch uses
             // pending_phi_native_backedge for the actual backedge value).
             self.fun.pending_phi_backedge.insert(fname.to_string(), typed_val.clone());
@@ -88,7 +98,9 @@ impl LlvmBackend {
             self.fun.pending_phi_backedge.insert(fname.to_string(), val_raw.clone());
             self.fun.pending_phi_native_backedge.insert(fname.to_string(), val_raw);
         }
-        if self.fun.needs_state_stores_in_body {
+        // 2026-07-04: Cache invalidation gated on same conditions:
+        // needs_state_stores_in_body + per-field done: liveness.
+        if self.fun.needs_state_stores_in_body && (self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname)) {
             if let Some(targets) = self.ctx.cache_slots.get(fname) {
                 for (_target, &(_cache_idx, valid_idx)) in targets {
                     let inv_gep = format!("%civ{}", self.fun.txn_counter); self.fun.txn_counter += 1;

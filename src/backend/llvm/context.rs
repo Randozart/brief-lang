@@ -284,6 +284,31 @@ pub struct FunctionContext {
     // correctness for benchmarks that print at convergence.
     pub needs_state_stores_in_body: bool,
 
+    // 2026-07-04: Whether the current loop body is parallel-safe.
+    // A body is parallel-safe when each field is mutated by & at most
+    // once AND no & assignment's RHS references a field that was mutated
+    // by a preceding & in the same body. When true, emit_memory_field_store
+    // does NOT update ssa_old_*_regs — all reads continue to use the phi
+    // register (old value). This makes every computation independent of
+    // every other computation — LLVM's vectorizer can SIMD the entire
+    // body at once.
+    //
+    // Why this is safe: when each field is mutated at most once, the &
+    // assignments form a set of independent coordinate updates. The
+    // ordering of computations does not affect the final state because
+    // each field's final value depends only on the initial (phi) state.
+    // The intermediate values (after some fields updated but before others)
+    // are never observed since each field is written once.
+    pub parallel_safe_body: bool,
+
+    // 2026-07-04: State fields that the done: block reads via
+    // emit_hoisted_post_loop_prints. Populated by scanning hoisted
+    // statements for Expr::Identifier references. When non-empty,
+    // only these fields get stores emitted in Path B
+    // (needs_state_stores_in_body=true). Empty set means "all fields
+    // needed" (fallback — emit all stores).
+    pub done_needs_fields: HashSet<String>,
+
     // Chimera tracking
     pub chimera_map: HashMap<String, ChimeraInfo>,
 
@@ -336,6 +361,8 @@ impl FunctionContext {
             pending_cleanup: Vec::new(),
             pending_phi_native_backedge: HashMap::new(),
             needs_state_stores_in_body: true,
+            parallel_safe_body: false,
+            done_needs_fields: HashSet::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
         }

@@ -415,3 +415,94 @@ operations per iteration. The per-field phi path is strictly better.
 
 Keeping A005d is dead weight — two code paths to maintain, and the
 "optimization" (memory over phis) is actually a pessimization.
+
+## Optimization 6: Parallel-Safe Body Detection
+
+### Problem
+
+Brief's sequential semantics create data dependencies between `&`
+assignments. When `&x1 = A10*x0 + ...` follows `&x0 = ...`, the
+backend updates `ssa_old_*_regs` so subsequent reads see the NEW
+x0 value. This serializes the computations — LLVM's vectorizer
+sees a dependency chain and cannot SIMD.
+
+### Detection
+
+Scan the body BEFORE emission. The body is "parallel-safe" when:
+- Each field is mutated by `&` at most once
+- No `&` assignment's RHS references a field that was mutated by
+  a preceding `&` in the same body
+
+If parallel-safe, set `parallel_safe_body = true`. During emission,
+in `emit_memory_field_store`, do NOT update `ssa_old_float_regs` or
+`ssa_old_int_regs`. All subsequent reads continue to use the phi
+register (old value). This makes every computation depend only on
+phi-register values — all independent.
+
+### Impact
+
+| Benchmark | Current | Expected after fix |
+|-----------|---------|-------------------|
+| float_math_nonzero | 2.35× | ~0.8× (three x computations become SIMD-independent) |
+| nbody_sqrt | 1.27× | ~1.1× (some field chains become independent) |
+
+### Safety
+
+When each field is mutated at most once, keeping old values for
+reads is semantically correct: the final state after all `&`
+assignments is the same regardless of computation order. The
+intermediate values differ but are never observed (each field
+only gets its final value).
+
+Formally: the `&` assignments form a function `S → S` where each
+state field is updated at most once. The map is a composition of
+independent updates `f_i: S → S` where `f_i` updates field i and
+leaves others unchanged. Since the updates commute (each modifies
+a different coordinate), `f_n ∘ ... ∘ f_1 = f_1 ∘ ... ∘ f_n`.
+All computation orders produce the same final state.
+
+### Implementation
+
+1. Add `parallel_safe_body: bool` to FunctionContext (default false).
+2. Before `emit_countable_body`, scan body statements:
+   - Collect `&field` targets → `mutation_targets: HashSet<String>`
+   - For each `&field = expr`, collect `Expr::Identifier` refs in `expr`
+   - Intersect with `mutation_targets` excluding the field itself
+   - If ALL intersections are empty → `parallel_safe_body = true`
+3. In `emit_memory_field_store`, when `parallel_safe_body`:
+   - Skip `ssa_old_*_regs.insert(field, new_reg)` — keep phi reg
+   - Everything else (store to %State, cache invalidation,
+     pending_phi_backedge, pending_phi_native_backedge) unchanged
+
+## Optimization 7: Per-Field Done: Liveness
+
+### Problem
+
+When `needs_state_stores_in_body = true` (Path B), the body emits
+stores for ALL fields. But `emit_hoisted_post_loop_prints` loads
+ALL fields via `pre_load_all_fields`, even when the hoisted guard
+body only reads one field (e.g., `checksum` in fannkuch_redux).
+
+### Fix
+
+1. In `emit_hoisted_post_loop_prints`, scan hoisted statements for
+   `Expr::Identifier` references to state fields. Build
+   `done_needs_fields: HashSet<String>`.
+2. In `pre_load_all_fields` when called from
+   `emit_hoisted_post_loop_prints`, only load fields in
+   `done_needs_fields`.
+3. In `emit_memory_field_store`, when `needs_state_stores_in_body`
+   is true but the field is NOT in `done_needs_fields`, skip the
+   store and cache invalidation.
+
+### Impact
+
+| Benchmark | Current | Expected |
+|-----------|---------|----------|
+| fannkuch_redux | 1.66× | ~1.2× (16 stores → 1 store) |
+
+## Implementation Order
+
+1. **Parallel-safe detection** — closes float_math_nonzero gap
+2. **Per-field liveness** — closes fannkuch_redux gap
+3. Build, test, benchmark

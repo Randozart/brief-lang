@@ -424,12 +424,16 @@ impl LlvmBackend {
     /// struct but have different logical types. Without TBAA, LLVM sees
     /// all GEP loads as MayAlias (same struct), preventing GVN and ILP.
     /// With TBAA, a Float field load never aliases an Int field store.
-    fn pre_load_all_fields(&mut self, out: &mut String, state_ptr: &str) {
+    fn pre_load_all_fields(&mut self, out: &mut String, state_ptr: &str, filter: Option<&HashSet<String>>) {
         self.fun.ssa_old_float_regs.clear();
         self.fun.ssa_old_int_regs.clear();
         let field_entries: Vec<(String, usize)> = self.ctx.field_index_map.iter()
             .map(|(n, &i)| (n.clone(), i)).collect();
         for (field_name, field_idx) in &field_entries {
+            // 2026-07-04: When filter is Some, only load fields in the set.
+            if let Some(f) = filter {
+                if !f.contains(field_name) { continue; }
+            }
             let ty_str = self.ctx.field_types[*field_idx].clone();
             let gep = self.emit_state_gep(out, "  ", "gep", state_ptr, *field_idx);
             let old_reg = format!("%{}_old_{}", field_name, self.fun.txn_counter);
@@ -907,7 +911,7 @@ impl LlvmBackend {
         // Memory mode: body reads the counter via GEP+load from %State.
         // No phi override needed — the body always reads the pre-tick value.
         // (The body starts with GEP+load of each field, including the counter.)
-        self.pre_load_all_fields(out, "%state");
+        self.pre_load_all_fields(out, "%state", None);
         for s in body {
             if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
                 self.emit_stmt(out, s, "  ");
@@ -1171,7 +1175,7 @@ impl LlvmBackend {
         self.fun.pending_phi_backedge.clear();
         self.fun.pending_phi_native_backedge.clear();
         self.fun.returns_i64 = false;
-        self.pre_load_all_fields(out, "%state");
+        self.pre_load_all_fields(out, "%state", None);
         self.fun.loop_exit_label = Some("_done".into());
         for s in body {
             if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
@@ -1240,6 +1244,20 @@ impl LlvmBackend {
         // to false because the header loop test loads the counter from
         // %State every iteration.
         self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
+        // 2026-07-04: Check if the body is parallel-safe (each field
+        // mutated at most once). When true, emit_memory_field_store
+        // keeps old phi registers in ssa_old caches — all computations
+        // use old values and become independent, enabling SIMD.
+        self.fun.parallel_safe_body = is_body_parallel_safe(body);
+        // 2026-07-04: Pre-populate done_needs_fields from pending_post_hoist
+        // so emit_memory_field_store can gate stores on the subset of fields
+        // that the done: block actually reads (per-field liveness).
+        self.fun.done_needs_fields.clear();
+        for hoisted_body in &self.fun.pending_post_hoist {
+            for s in hoisted_body {
+                collect_field_refs(s, &mut self.fun.done_needs_fields, &self.ctx.field_index_map);
+            }
+        }
         self.emit_countable_body(out, body);
         // ── Latch: increment counter, reload modified fields ─────────
         self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name);
@@ -1437,7 +1455,7 @@ impl LlvmBackend {
         body_stmts: &[&Statement],
         post_hoist: &[Vec<Statement>],
     ) {
-        self.pre_load_all_fields(out, "%state");
+        self.pre_load_all_fields(out, "%state", None);
         self.fun.expr_dedup_cache.clear();
         let saved_float_regs = self.fun.ssa_old_float_regs.clone();
         let saved_int_regs = self.fun.ssa_old_int_regs.clone();
@@ -1491,7 +1509,7 @@ impl LlvmBackend {
         self.fun.expr_dedup_cache.clear();
         self.fun.terminated = false;
         self.fun.returns_i64 = false;
-        self.pre_load_all_fields(out, "%state");
+        self.pre_load_all_fields(out, "%state", None);
         if let Some((ref cname, ref pi_reg, _)) = self.fun.phi_induction_reg {
             self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
         }
@@ -1987,7 +2005,7 @@ impl LlvmBackend {
             self.fun.expr_dedup_cache.clear();
             self.fun.terminated = false;
             self.fun.returns_i64 = false;
-            self.pre_load_all_fields(out, "%state");
+            self.pre_load_all_fields(out, "%state", None);
             self.fun.loop_exit_label = Some("after_switch".into());
             for s in &txn.body {
                 self.emit_stmt(out, s, "  ");
@@ -2027,13 +2045,17 @@ impl LlvmBackend {
         // done: breaks that use chain.  The GEP+load is outside the loop and
         // does not affect loop-access analysis — the loop body's stores use
         // constant-index GEPs that LoopAccessAnalysis can analyze directly.
+        // 2026-07-04: done_needs_fields is already populated by the pre-body
+        // scan in emit_countable_main.  Pass it as a load filter.
         self.fun.expr_dedup_cache.clear();
-        self.pre_load_all_fields(out, "%state");
+        let filter: Option<HashSet<String>> = if self.fun.done_needs_fields.is_empty() { None } else { Some(self.fun.done_needs_fields.clone()) };
+        self.pre_load_all_fields(out, "%state", filter.as_ref());
         for body_stmts in hoisted {
             for s in body_stmts {
                 self.emit_stmt(out, s, "  ");
             }
         }
+        self.fun.done_needs_fields.clear();
     }
 
     /// Emit a single print intrinsic call from raw register names (no TypedRegister).
@@ -2578,6 +2600,128 @@ impl LlvmBackend {
         writeln!(out, "}}").ok();
         writeln!(out).ok();
         self.fun.txn_counter = tc;
+    }
+}
+
+/// 2026-07-04: Check if a loop body is parallel-safe.
+/// Disabled — all runtime benchmarks have guards that read mutated fields,
+/// so the optimization never activates. Kept as documentation for future
+/// exploration of guard-free parallel bodies.
+fn is_body_parallel_safe(_body: &[Statement]) -> bool {
+    false
+}
+
+/// Helper: extract identifiers from an expression into a set.
+fn collect_expr_field_refs_for_set(e: &Expr, refs: &mut HashSet<String>) {
+    match e {
+        Expr::Identifier(name) | Expr::OwnedRef(name) => { refs.insert(name.clone()); }
+        Expr::BinaryOp(bop) => {
+            let bop = bop.as_ref();
+            collect_expr_field_refs_for_set(&bop.left, refs);
+            collect_expr_field_refs_for_set(&bop.right, refs);
+        }
+        Expr::UnaryOp(uop) => {
+            let uop = uop.as_ref();
+            collect_expr_field_refs_for_set(&uop.operand, refs);
+        }
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+        | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
+        | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::Or(l, r)
+        | Expr::And(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r)
+        | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r)
+        | Expr::Concat(l, r) | Expr::ListIndex(l, r) => {
+            collect_expr_field_refs_for_set(l, refs);
+            collect_expr_field_refs_for_set(r, refs);
+        }
+        Expr::Not(op) | Expr::Neg(op) | Expr::BitNot(op) => {
+            collect_expr_field_refs_for_set(op, refs);
+        }
+        Expr::Call(_, args) | Expr::ListLiteral(args) => {
+            for arg in args { collect_expr_field_refs_for_set(arg, refs); }
+        }
+        Expr::IntrinsicCall { args, .. } => {
+            for arg in args { collect_expr_field_refs_for_set(arg, refs); }
+        }
+        Expr::Cast(op, _) => { collect_expr_field_refs_for_set(op, refs); }
+        _ => {}
+    }
+}
+
+/// 2026-07-04: Recursively collect state field references from a statement.
+/// Walks guard bodies, let-bindings, and assignment RHS to find all
+/// Expr::Identifier references that correspond to state fields.
+fn collect_field_refs(
+    s: &Statement,
+    fields: &mut HashSet<String>,
+    field_index_map: &HashMap<String, usize>,
+) {
+    match s {
+        Statement::Guarded { statements, .. } => {
+            for gs in statements { collect_field_refs(gs, fields, field_index_map); }
+        }
+        Statement::Let { expr: Some(e), .. }
+        | Statement::Expression(e)
+        | Statement::Escape(Some(e)) => {
+            collect_expr_field_refs(e, fields, field_index_map);
+        }
+        Statement::Assignment { expr, .. } => {
+            collect_expr_field_refs(expr, fields, field_index_map);
+        }
+        Statement::Term { swan_song: Some(ss), .. }
+        | Statement::TermBang { swan_song: Some(ss), .. } => {
+            collect_field_refs(ss, fields, field_index_map);
+        }
+        _ => {}
+    }
+}
+
+/// Recursively collect state field references from an expression.
+fn collect_expr_field_refs(
+    e: &Expr,
+    fields: &mut HashSet<String>,
+    field_index_map: &HashMap<String, usize>,
+) {
+    match e {
+        Expr::Identifier(name) | Expr::OwnedRef(name) => {
+            if field_index_map.contains_key(name) {
+                fields.insert(name.clone());
+            }
+        }
+        // Pattern B packed variants (what parser produces)
+        Expr::BinaryOp(bop) => {
+            let bop = bop.as_ref();
+            collect_expr_field_refs(&bop.left, fields, field_index_map);
+            collect_expr_field_refs(&bop.right, fields, field_index_map);
+        }
+        Expr::UnaryOp(uop) => {
+            let uop = uop.as_ref();
+            collect_expr_field_refs(&uop.operand, fields, field_index_map);
+        }
+        // Standard unpacked binary ops (from normalize_to_old)
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+        | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
+        | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::Or(l, r)
+        | Expr::And(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r)
+        | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r)
+        | Expr::Concat(l, r) | Expr::ListIndex(l, r) => {
+            collect_expr_field_refs(l, fields, field_index_map);
+            collect_expr_field_refs(r, fields, field_index_map);
+        }
+        Expr::Not(op) | Expr::Neg(op) | Expr::BitNot(op) => {
+            collect_expr_field_refs(op, fields, field_index_map);
+        }
+        // Calls and intrinsics
+        Expr::Call(_, args) | Expr::ListLiteral(args) => {
+            for arg in args { collect_expr_field_refs(arg, fields, field_index_map); }
+        }
+        Expr::IntrinsicCall { args, .. } => {
+            for arg in args { collect_expr_field_refs(arg, fields, field_index_map); }
+        }
+        Expr::Cast(op, _) => {
+            collect_expr_field_refs(op, fields, field_index_map);
+        }
+        // Literals and terminal expressions — no field refs
+        _ => {}
     }
 }
 
