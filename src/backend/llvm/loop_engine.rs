@@ -2657,6 +2657,7 @@ fn collect_parallel_safe_exemptions(
     field_index_map: &HashMap<String, usize>,
 ) {
     let mut mutation_order: Vec<String> = Vec::new();
+    // Phase 1: collect mutation order + guard/body exemptions
     for s in body {
         // Track mutation order
         if let Statement::Assignment { lhs, .. } = s {
@@ -2664,93 +2665,89 @@ fn collect_parallel_safe_exemptions(
                 mutation_order.push(name.clone());
             }
         }
-        // Guard-specific exemptions: conditions need new values
+        // Guard CONDITIONS: always exempt all field reads
         if let Statement::Guarded { condition, statements, .. } = s {
             if terminating_guard(statements) { continue; }
             collect_expr_field_refs(condition, guard_exempt_fields, field_index_map);
-            // Direct identifier arguments to side-effecting calls in guard
-            // bodies need exact values for correctness comparison.
+            // Guard body: side-effecting call arguments
             for gs in statements {
-                let args = match gs {
-                    Statement::Expression(Expr::IntrinsicCall { args, .. }) => Some(args),
-                    Statement::Expression(Expr::Call(_, args)) => Some(args),
-                    _ => None,
-                };
-                let Some(args) = args else { continue; };
-                for arg in args {
-                    if let (Expr::Identifier(name) | Expr::OwnedRef(name)) = arg {
-                        if field_index_map.contains_key(name) {
-                            guard_exempt_fields.insert(name.clone());
-                        }
-                    }
-                }
+                exempt_side_effect_args(gs, guard_exempt_fields, field_index_map);
             }
         }
+        // Main body: side-effecting call arguments
+        exempt_side_effect_args(s, guard_exempt_fields, field_index_map);
     }
-    // Read-after-write analysis: any field that is read after its mutation
-    // needs sequential update.  Scan for field reads after each mutation.
+    // Phase 2: read-after-write for side-effect-referenced fields only
     for s in body {
-        let read_fields = extract_read_fields(s, field_index_map);
-        for fname in &read_fields {
+        let read_side_effect_fields = extract_side_effect_reads(s, field_index_map);
+        for fname in &read_side_effect_fields {
             if let Some(pos) = mutation_order.iter().position(|m| m == fname) {
                 exempt_fields.insert(fname.clone());
             }
         }
     }
-    // Merge guard exemptions into the main exempt set
+    // Merge guard exemptions + counter is always exempt via counter_field_name
     for fname in guard_exempt_fields.drain() {
         exempt_fields.insert(fname);
     }
 }
 
-/// Collect state field identifiers that are READ in a statement.
-fn extract_read_fields(
+/// Check if a statement is a side-effecting call and exempt its argument
+/// field identifiers.  Float-producing calls (print_float#) only exempt
+/// direct identifier arguments — compound-expression differences are within
+/// epsilon.  Integer-producing calls (print_int#, putchar#, FFI) exempt ALL
+/// field identifiers in argument expressions — exact comparison requires it.
+fn exempt_side_effect_args(
     s: &Statement,
+    fields: &mut HashSet<String>,
     field_index_map: &HashMap<String, usize>,
-) -> Vec<String> {
-    let mut result = Vec::new();
-    match s {
-        Statement::Assignment { expr, .. } => {
-            collect_read_field_expr(expr, &mut result, field_index_map);
+) {
+    let (args, is_float_call) = match s {
+        Statement::Expression(Expr::IntrinsicCall { intrinsic: crate::ast::Intrinsic::PrintFloat, args, .. }) => {
+            (Some(args), true)
         }
-        Statement::Guarded { condition, statements, .. } => {
-            collect_read_field_expr(condition, &mut result, field_index_map);
-            for gs in statements {
-                for sf in extract_read_fields(gs, field_index_map) {
-                    result.push(sf);
+        Statement::Expression(Expr::IntrinsicCall { args, .. }) => {
+            (Some(args), false)
+        }
+        Statement::Expression(Expr::Call(_, args)) => {
+            (Some(args), false)
+        }
+        _ => return,
+    };
+    let Some(args) = args else { return; };
+    for arg in args {
+        if is_float_call {
+            // Float calls: only direct Expr::Identifier args need exact values
+            if let (Expr::Identifier(name) | Expr::OwnedRef(name)) = arg {
+                if field_index_map.contains_key(name) {
+                    fields.insert(name.clone());
                 }
             }
+        } else {
+            // Integer calls: ALL field identifiers in the arg expression need exact values
+            collect_field_ids_from_expr(arg, fields, field_index_map);
         }
-        Statement::Let { expr: Some(e), .. }
-        | Statement::Expression(e)
-        | Statement::Escape(Some(e)) => {
-            collect_read_field_expr(e, &mut result, field_index_map);
-        }
-        _ => {}
     }
-    result
 }
 
-/// Collect field identifiers from an expression.
-fn collect_read_field_expr(
+/// Collect all state field identifiers from an expression (recursive).
+fn collect_field_ids_from_expr(
     e: &Expr,
-    result: &mut Vec<String>,
+    fields: &mut HashSet<String>,
     field_index_map: &HashMap<String, usize>,
 ) {
     match e {
         Expr::Identifier(name) | Expr::OwnedRef(name) => {
-            if field_index_map.contains_key(name) {
-                result.push(name.clone());
-            }
+            if field_index_map.contains_key(name) { fields.insert(name.clone()); }
         }
         Expr::BinaryOp(bop) => {
             let bop = bop.as_ref();
-            collect_read_field_expr(&bop.left, result, field_index_map);
-            collect_read_field_expr(&bop.right, result, field_index_map);
+            collect_field_ids_from_expr(&bop.left, fields, field_index_map);
+            collect_field_ids_from_expr(&bop.right, fields, field_index_map);
         }
         Expr::UnaryOp(uop) => {
             let uop = uop.as_ref();
-            collect_read_field_expr(&uop.operand, result, field_index_map);
+            collect_field_ids_from_expr(&uop.operand, fields, field_index_map);
         }
         Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
         | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
@@ -2758,20 +2755,54 @@ fn collect_read_field_expr(
         | Expr::And(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r)
         | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r)
         | Expr::Concat(l, r) | Expr::ListIndex(l, r) => {
-            collect_read_field_expr(l, result, field_index_map);
-            collect_read_field_expr(r, result, field_index_map);
+            collect_field_ids_from_expr(l, fields, field_index_map);
+            collect_field_ids_from_expr(r, fields, field_index_map);
         }
         Expr::Not(op) | Expr::Neg(op) | Expr::BitNot(op) | Expr::Cast(op, _) => {
-            collect_read_field_expr(op, result, field_index_map);
+            collect_field_ids_from_expr(op, fields, field_index_map);
         }
         Expr::Call(_, args) | Expr::ListLiteral(args) | Expr::IntrinsicCall { args, .. } => {
-            for arg in args {
-                collect_read_field_expr(arg, result, field_index_map);
-            }
+            for arg in args { collect_field_ids_from_expr(arg, fields, field_index_map); }
         }
         _ => {}
     }
 }
+
+/// Extract state field identifiers from side-effecting call arguments.
+/// Only returns fields that are read by a side-effecting call (print, putchar, FFI).
+/// This is distinct from the full extract_read_fields which catches ALL reads.
+fn extract_side_effect_reads(
+    s: &Statement,
+    field_index_map: &HashMap<String, usize>,
+) -> Vec<String> {
+    let mut result = Vec::new();
+    let (args, is_float_call) = match s {
+        Statement::Expression(Expr::IntrinsicCall { intrinsic: crate::ast::Intrinsic::PrintFloat, args, .. }) => {
+            (Some(args), true)
+        }
+        Statement::Expression(Expr::IntrinsicCall { args, .. })
+        | Statement::Expression(Expr::Call(_, args)) => {
+            (Some(args), false)
+        }
+        _ => return result,
+    };
+    let Some(args) = args else { return result; };
+    for arg in args {
+        if is_float_call {
+            // Float: only direct identifiers
+            if let (Expr::Identifier(name) | Expr::OwnedRef(name)) = arg {
+                if field_index_map.contains_key(name) { result.push(name.clone()); }
+            }
+        } else {
+            // Integer: all field identifiers in the expression
+            let mut tmp = HashSet::new();
+            collect_field_ids_from_expr(arg, &mut tmp, field_index_map);
+            for fname in tmp { result.push(fname); }
+        }
+    }
+    result
+}
+
 /// Always returns true — parallel-safe mode is enabled for ALL bodies.
 /// This restores the A005a struct-SSA behavior where extractvalue from
 /// the state phi always gives old values, keeping all computations
