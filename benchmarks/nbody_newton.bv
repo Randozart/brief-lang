@@ -52,6 +52,11 @@ let vy4: Float32 = 0.00162824170038242295f32 * dpy;
 let vz4: Float32 = -0.0000951592254519715870f32 * dpy;
 const m4: Float32 = 0.0000515138902046611451f32 * solar_mass;
 
+// State field for hoisted swan song print — stores the last computed
+// energy so the done: block can access it via GEP+load without
+// referencing let-bindings that go out of scope.
+let last_energy: Float32 = 0.0f32;
+
 rct txn simulate [
     count < bound
 ][count == bound] {
@@ -343,12 +348,13 @@ rct txn simulate [
     let ek4c: Float32 = 0.5f32 * m4 * (vx4 * vx4 + vy4 * vy4 + vz4 * vz4);
     let ekc: Float32 = ek0c + ek1c + ek2c + ek3c + ek4c;
     let energy: Float32 = epp + ekc;
+    &last_energy = energy;
 
     [count % 5000000 == 0] {
         let __periodic: Bool = print_float#(energy);
     };
     [count == bound] {
-        term! -> print_float#(energy);
+        term! -> print_float#(last_energy);
     };
     term;
 };

@@ -186,7 +186,7 @@ impl LlvmBackend {
             }
             // Float: trunc i64 to i32, then bitcast i32 to float
             // (was bitcast float→i32, then zext i32→i64)
-            "bitcast.f32.to.i64#" => {
+            "bitcast.f32.to.i64#" | "bitcast.i64.to.f32#" => {
                 let m = format!("%uf{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = trunc i64 {} to i32", indent, m, val).ok();
                 writeln!(out, "{}{} = bitcast i32 {} to float", indent, r, m).ok();
