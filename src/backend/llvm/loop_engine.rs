@@ -427,15 +427,15 @@ impl LlvmBackend {
     fn pre_load_all_fields(&mut self, out: &mut String, state_ptr: &str) {
         self.fun.ssa_old_float_regs.clear();
         self.fun.ssa_old_int_regs.clear();
-        for (field_name, &field_idx) in &self.ctx.field_index_map {
-            let ty_str = &self.ctx.field_types[field_idx];
-            let gc = self.fun.txn_counter; self.fun.txn_counter += 1;
-            let gep = format!("%gep_{}_{}", field_name, gc);
-            writeln!(out, "  {} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", gep, state_ptr, field_idx).ok();
+        let field_entries: Vec<(String, usize)> = self.ctx.field_index_map.iter()
+            .map(|(n, &i)| (n.clone(), i)).collect();
+        for (field_name, field_idx) in &field_entries {
+            let ty_str = self.ctx.field_types[*field_idx].clone();
+            let gep = self.emit_state_gep(out, "  ", "gep", state_ptr, *field_idx);
             let old_reg = format!("%{}_old_{}", field_name, self.fun.txn_counter);
             self.fun.txn_counter += 1;
-            let tn = crate::backend::llvm::tbaa_node(ty_str, self.ctx.type_universe.as_ref());
-            writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", old_reg, ty_str, ty_str, gep, self.align_of(ty_str), tn).ok();
+            let tn = crate::backend::llvm::tbaa_node(&ty_str, self.ctx.type_universe.as_ref());
+            writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", old_reg, ty_str, ty_str, gep, self.align_of(&ty_str), tn).ok();
             // 2026-06-29: Track both "float" (Float) and "double" (Float64) as float regs
             if ty_str == "float" || ty_str == "double" {
                 self.fun.ssa_old_float_regs.insert(field_name.clone(), old_reg);
@@ -951,8 +951,8 @@ impl LlvmBackend {
             writeln!(out, "  {} = load i64, ptr @{}, align 8", bound_reg, cn).ok();
             return;
         };
-        writeln!(out, "  %gt_{}_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c0, c0, ti).ok();
-        writeln!(out, "  {} = load i64, ptr %gt_{}_{}, align 8", bound_reg, c0, c0).ok();
+        let gt = self.emit_state_gep(out, "  ", "gt", "%state", ti);
+        writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, gt).ok();
     }
 
     /// 2026-07-03: Set up per-field phi and backedge registers, load
@@ -1149,7 +1149,7 @@ impl LlvmBackend {
         self.fun.main_body = true;
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_allocas(out);
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
         self.emit_arena_init(out, "  ");
@@ -1486,7 +1486,7 @@ impl LlvmBackend {
         let attr = self.slp_attr("main", "#3");
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_state_allocas(out);
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
         // 2026-06-26: Removed setvbuf(stdout, NULL, _IOLBF, 0) — see

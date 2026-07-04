@@ -4,6 +4,12 @@ use crate::features::traits::*;
 use std::collections::HashMap;
 use std::fmt::Write;
 
+/// 2026-07-04: Maximum fields per %State sub-alloca.  LLVM's SROA pass
+/// decomposes structs with up to ~16 elements.  Chunks of <16 ensure
+/// SROA can decompose each chunk into scalars for alias analysis and
+/// vectorization.  Must match the chunk size used in declare_state_type.
+pub(crate) const MAX_FIELDS_PER_ALLLOCA: usize = 15;
+
 impl LlvmBackend {
     /// 2026-07-03: Invalidate cache slots for a field by writing i8 0 to
     /// each valid-bit slot.  Used after both SSA insertvalue and memory stores.
@@ -119,10 +125,43 @@ impl LlvmBackend {
     pub(super) fn emit_state_gep(&mut self, out: &mut String, indent: &str,
         prefix: &str, state_ptr: &str, idx: usize) -> String
     {
+        // 2026-07-04: Route to chunk allocas when emitting @main (main_body=true).
+        // @init_state and other non-main functions use the monolithic %State type
+        // with a single %state pointer (function parameter or standalone alloca).
+        let (ptr, struct_ty, sub_idx) = if state_ptr == "%state" && self.fun.main_body {
+            let chunk = idx / MAX_FIELDS_PER_ALLLOCA;
+            (format!("%state_{}", chunk), format!("%StateChunk{}", chunk), idx % MAX_FIELDS_PER_ALLLOCA)
+        } else {
+            (state_ptr.to_string(), "%State".to_string(), idx)
+        };
         let p = format!("%{}_{}", prefix, self.fun.txn_counter);
         self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, state_ptr, idx).ok();
+        writeln!(out, "{}{} = getelementptr inbounds {}, ptr {}, i32 0, i32 {}", indent, p, struct_ty, ptr, sub_idx).ok();
         p
+    }
+
+    /// 2026-07-04: Emit chunk allocas for all %State sub-structs.
+    /// Each chunk has ≤MAX_FIELDS_PER_CHUNK fields so SROA can decompose
+    /// each chunk into scalar registers for alias analysis and vectorization.
+    /// Also emits a monolithic %state alloca for backward compat — helper
+    /// functions emit raw %State GEPs (pre_load_all_fields, emit_trg_init,
+    /// prealloc, etc.) that reference %state directly.  The chunk allocas
+    /// are used by emit_state_gep (routed path); the monolithic %state is
+    /// used by the raw GEP path.  Both point to the same logical fields.
+    /// pub(super): shared across the llvm backend.
+    pub(super) fn emit_state_allocas(&mut self, out: &mut String) {
+        let num = self.ctx.field_types.len();
+        if num == 0 {
+            writeln!(out, "  %state = alloca %State, align 8").ok();
+            return;
+        }
+        // Chunk allocas for the routed path (emit_state_gep → SROA-friendly)
+        let chunks = (num + MAX_FIELDS_PER_ALLLOCA - 1) / MAX_FIELDS_PER_ALLLOCA;
+        for i in 0..chunks {
+            writeln!(out, "  %state_{} = alloca %StateChunk{}, align 8", i, i).ok();
+        }
+        // Monolithic %state for backward compat with raw GEP paths
+        writeln!(out, "  %state = alloca %State, align 8").ok();
     }
 
     /// Store a native-typed value to the i64 result slot, boxing if needed.

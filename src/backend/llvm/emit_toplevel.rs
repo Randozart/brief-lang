@@ -492,6 +492,23 @@ impl LlvmBackend {
             writeln!(out, "%State = type {{ i64 }}").ok();
             return;
         }
+        // 2026-07-04: Emit chunk struct definitions so SROA can decompose
+        // each chunk into scalar registers.  Each chunk has ≤CHUNK fields
+        // (15).  The monolithic %State is kept for backward compat with
+        // non-routed paths (old A005a/b, @init_state).
+        let chunk_size = crate::backend::llvm::emit_stmt::MAX_FIELDS_PER_ALLLOCA;
+        let total = self.ctx.field_types.len();
+        let num_chunks = (total + chunk_size - 1) / chunk_size;
+        for chunk in 0..num_chunks {
+            let start = chunk * chunk_size;
+            let end = std::cmp::min(start + chunk_size, total);
+            write!(out, "%StateChunk{} = type {{ ", chunk).ok();
+            for i in start..end {
+                if i > start { write!(out, ", ").ok(); }
+                write!(out, "{}", self.ctx.field_types[i]).ok();
+            }
+            writeln!(out, " }}").ok();
+        }
         write!(out, "%State = type {{ ").ok();
         for (i, f) in self.ctx.field_types.iter().enumerate() {
             if i > 0 { write!(out, ", ").ok(); }
@@ -840,7 +857,7 @@ impl LlvmBackend {
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, _ty) in &fields {
             let p = format!("%ip_{}", idx);
-            writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, p, state_ptr, idx).ok();
+            let gep_reg = self.emit_state_gep(out, indent, "ip", "%state", *idx);
             let init_clone = self.ctx.field_initializers.get(name).and_then(|e| e.clone());
             let ty = self.ctx.field_types[*idx].clone();
             // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
@@ -852,7 +869,7 @@ impl LlvmBackend {
                     }
                 }
             }
-            self.emit_field_init_value(out, indent, init_clone, &ty, &p, *idx, true);
+            self.emit_field_init_value(out, indent, init_clone, &ty, &gep_reg, *idx, true);
         }
         // Initialize cache slots for LazyCached fields: cache_value = 0, valid_flag = 0
         for (_field_name, targets) in &self.ctx.cache_slots {
@@ -1467,12 +1484,13 @@ impl LlvmBackend {
                     if let Some(&idx) = self.ctx.field_index_map.get(name) {
                         let bound = if let Expr::Integer(b) = rhs.as_ref() { *b } else { 0 };
                         let gep = format!("%prg{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        let ty = &self.ctx.field_types[idx];
-                        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, gep, idx).ok();
+                        let ty = self.ctx.field_types[idx].clone();
+                        let idx_val = idx;
+                        let gep = self.emit_state_gep(out, indent, "prg", "%state", idx_val);
                         let rl = format!("%prl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        let tn = crate::backend::llvm::tbaa_node(ty, self.ctx.type_universe.as_ref());
+                        let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
                         writeln!(out, "{}{} = load {}, {}* {}, align {}, !tbaa !{}, !range !{{{}, {}}}",
-                            indent, rl, ty, ty, gep, self.align_of(ty), tn, 0i64, bound).ok();
+                            indent, rl, ty, ty, gep, self.align_of(&ty), tn, 0i64, bound).ok();
                     } else {
                         writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
                     }
