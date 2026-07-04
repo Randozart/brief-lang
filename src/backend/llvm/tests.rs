@@ -6380,3 +6380,35 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("attributes #7"),
             "Module should define #7 (memory(read))");
     }
+
+    #[test]
+    fn test_invariant_load_smoke() {
+        // Verify that the module compiles without error when fields exist.
+        // !invariant.load is emitted by the A005c dispatch path which requires
+        // the full analysis pipeline (not available in unit test setup).
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::StateDecl(StateDecl {
+                    name: "count".to_string(), ty: Type::Int, expr: Some(Expr::Integer(0)),
+                    address: None, bit_range: None, is_override: false, os_mode: false,
+                    span: None, attrs: vec![], constraint: None,
+                }),
+                TopLevel::StateDecl(StateDecl {
+                    name: "ro".to_string(), ty: Type::Int, expr: Some(Expr::Integer(100)),
+                    address: None, bit_range: None, is_override: false, os_mode: false,
+                    span: None, attrs: vec![], constraint: None,
+                }),
+            ],
+            comments: vec![], reactor_speed: None, attrs: Vec::new(),
+            ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
+            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        let output = backend.generate(&program);
+        // Just check no panic and basic structure is valid
+        assert!(output.contains("%State"),
+            "State struct should be declared");
+        assert!(output.contains("attributes #8"),
+            "#8 should be present for definitions");
+    }
