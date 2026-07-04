@@ -2159,24 +2159,31 @@ self.emit_declares(&mut out);
                                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
                                 self.emit_folded_pure_counter(&mut out, counter_idx, tv);
                                 true
+                        } else {
+                            // Dispatch: per-field phi vs memory-access loop.
+                            let num_fields = node.write_set.len().max(2);
+                            self.fun.pending_post_hoist = post_hoist;
+                            if num_fields > 8 {
+                                self.warnings.push(format!("info: txn '{}' dispatched via memory loop (A005d, {} fields)", &node.name, num_fields));
+                                self.emit_countable_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
                             } else {
-                                // A005: pure body with runtime-variable bound — phi pipeline
-                                // (counter-only phi, no body emission needed — body was precomputed)
-                                self.warnings.push(format!("info: txn '{}' dispatched via folded SSA (runtime-variable bound)", node.name));
-                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, true, None);
-                                true
+                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                            }
+                            true
                             }
                         } else {
-                            // A005c: per-field phi loop for all non-pure foldable txns.
-                            // Replaces the old A005a (inline SSA, %slot_case alloca) and
-                            // A005b (memory-based counter, GEP+load+add+store). Emits one
-                            // phi per state field at the loop header. The latch reloads
-                            // modified field values from %State; GVN eliminates the
-                            // redundant load-via-store round trip since the GEP addresses
-                            // match. Unmodified fields use identity (phi value itself).
+                            // Non-pure body: dispatch between per-field phi (A005c)
+                            // and memory-access (A005d) based on field count.
+                            let num_fields = node.write_set.len().max(2);
                             self.fun.pending_post_hoist = post_hoist;
-                            self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c)", &node.name));
-                            self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                            if num_fields > 8 {
+                                self.warnings.push(format!("info: txn '{}' dispatched via memory loop (A005d, {} fields)", &node.name, num_fields));
+                                self.emit_countable_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                            } else {
+                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                            }
                             true
                         }
                     } else { false }

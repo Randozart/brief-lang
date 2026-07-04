@@ -769,7 +769,7 @@ impl LlvmBackend {
                 let boxed = self.adapt_to_i64(out, indent, &val_reg);
                 // 2026-07-03: Use shared helper for type dispatch
                 let tv = self.ensure_typed_value(out, indent, ty, &boxed);
-                writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, tv, ty, gep, self.align_of(&ty)).ok();
+                writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, gep, self.align_of(&ty)).ok();
             }
             None => {
                 if ty == "i8*" {
@@ -783,7 +783,7 @@ impl LlvmBackend {
                     writeln!(out, "{}{} = bitcast <{{ i64, i64, [1 x i8] }}>* @str.0 to ptr", indent, str_p).ok();
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
                 } else {
-                    writeln!(out, "{}store {} 0, {}* {}, align {}", indent, ty, ty, gep, self.align_of(&ty)).ok();
+                    writeln!(out, "{}store {} 0, ptr {}, align {}", indent, ty, gep, self.align_of(&ty)).ok();
                 }
             }
         }
@@ -1489,8 +1489,8 @@ impl LlvmBackend {
                         let gep = self.emit_state_gep(out, indent, "prg", "%state", idx_val);
                         let rl = format!("%prl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-                        writeln!(out, "{}{} = load {}, {}* {}, align {}, !tbaa !{}, !range !{{{}, {}}}",
-                            indent, rl, ty, ty, gep, self.align_of(&ty), tn, 0i64, bound).ok();
+                        writeln!(out, "{}{} = load {}, ptr {}, align {}, !tbaa !{}, !range !{{{}, {}}}",
+                            indent, rl, ty, gep, self.align_of(&ty), tn, 0i64, bound).ok();
                     } else {
                         writeln!(out, "{}call void @llvm.assume(i1 {})", indent, i1).ok();
                     }

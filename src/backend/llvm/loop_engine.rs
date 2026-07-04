@@ -435,7 +435,7 @@ impl LlvmBackend {
             let old_reg = format!("%{}_old_{}", field_name, self.fun.txn_counter);
             self.fun.txn_counter += 1;
             let tn = crate::backend::llvm::tbaa_node(&ty_str, self.ctx.type_universe.as_ref());
-            writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", old_reg, ty_str, ty_str, gep, self.align_of(&ty_str), tn).ok();
+            writeln!(out, "  {} = load {}, ptr {}, align {}, !tbaa !{}", old_reg, ty_str, gep, self.align_of(&ty_str), tn).ok();
             // 2026-06-29: Track both "float" (Float) and "double" (Float64) as float regs
             if ty_str == "float" || ty_str == "double" {
                 self.fun.ssa_old_float_regs.insert(field_name.clone(), old_reg);
@@ -665,7 +665,7 @@ impl LlvmBackend {
                         let gep = format!("%gep{}_{}", label_prefix, self.fun.txn_counter); self.fun.txn_counter += 1;
                         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gep, idx).ok();
                         let ld = format!("%ld{}_{}", label_prefix, self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "  {} = load {}, {}* {}, align {}", ld, ty, ty, gep, self.align_of(&ty)).ok();
+                        writeln!(out, "  {} = load {}, ptr {}, align {}", ld, ty, gep, self.align_of(&ty)).ok();
                         let iv = format!("%liv{}_{}", label_prefix, self.fun.txn_counter); self.fun.txn_counter += 1;
                         writeln!(out, "  {} = insertvalue %State {}, {} {}, {}", iv, cur_init, ty, ld, idx).ok();
                         cur_init = iv;
@@ -978,7 +978,7 @@ impl LlvmBackend {
             let init_load = format!("%init_{}_{}", name, self.fun.txn_counter);
             self.fun.txn_counter += 1;
             let tn = crate::backend::llvm::tbaa_node(ty, self.ctx.type_universe.as_ref());
-            writeln!(out, "  {} = load {}, {}* {}, align {}, !tbaa !{}", init_load, ty, ty, gep, self.align_of(ty), tn).ok();
+            writeln!(out, "  {} = load {}, ptr {}, align {}, !tbaa !{}", init_load, ty, gep, self.align_of(ty), tn).ok();
             init_regs.insert(name.clone(), init_load);
             let phi_reg = format!("%phi_{}", name);
             let be_reg = format!("%be_{}", name);
@@ -1101,8 +1101,8 @@ impl LlvmBackend {
                     // Fallback: reload from %State
                     let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
                     let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
-                    writeln!(out, "  {} = load {}, {}* {}, align {}",
-                        be_reg, ty, ty, gep_reload, self.align_of(ty)).ok();
+                    writeln!(out, "  {} = load {}, ptr {}, align {}",
+                        be_reg, ty, gep_reload, self.align_of(ty)).ok();
                 }
             } else {
                 let phi_reg = phi_entries.get(name).cloned().unwrap_or_default();
@@ -1133,6 +1133,64 @@ impl LlvmBackend {
     /// Why identity backedge for unmodified fields: fields not written by the
     /// body keep their phi value unchanged. GVN copy-propagates the phi
     /// register, producing zero instructions for the backedge.
+    /// 2026-07-04: Memory-access loop with 1 induction phi (A005d).
+    /// Used when the loop has many state fields (default threshold: 8+).
+    pub(super) fn emit_countable_memory_main(
+        &mut self,
+        out: &mut String,
+        txn_name: &str,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        body: &[Statement],
+        write_set: &HashSet<String>,
+    ) {
+        let c0 = self.fun.txn_counter;
+        self.fun.expr_dedup_cache.clear();
+        self.fun.fn_ret_ty = "i32".to_string();
+        self.fun.main_body = true;
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "  entry:").ok();
+        self.emit_state_allocas(out);
+        self.emit_inline_init_stores(out, "%state");
+        self.emit_trg_init(out);
+        self.emit_arena_init(out, "  ");
+        let bound_reg = format!("%cnt_bound_{}", c0);
+        self.emit_countable_load_bound(out, &bound_reg, total_idx, total_const_name, c0);
+        self.emit_prealloc_for_body(out, "  ", body, &bound_reg);
+        writeln!(out, "  br label %_hdr").ok();
+        writeln!(out, "_hdr:").ok();
+        let c_val = self.emit_state_gep(out, "  ", "cv", "%state", counter_idx);
+        let cld = format!("%cld_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = load i64, ptr {}, align 8", cld, c_val).ok();
+        let cmp_reg = format!("%chc_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        writeln!(out, "  {} = icmp slt i64 {}, {}", cmp_reg, cld, bound_reg).ok();
+        writeln!(out, "  br i1 {}, label %_body, label %_done", cmp_reg).ok();
+        writeln!(out, "_body:").ok();
+        self.fun.ssa_state_reg = None;
+        self.fun.pending_phi_backedge.clear();
+        self.fun.pending_phi_native_backedge.clear();
+        self.fun.returns_i64 = false;
+        self.pre_load_all_fields(out, "%state");
+        self.fun.loop_exit_label = Some("_done".into());
+        for s in body {
+            if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+                self.emit_stmt(out, s, "  ");
+            }
+        }
+        self.fun.loop_exit_label = None;
+        self.fun.ssa_old_float_regs.clear();
+        self.fun.ssa_old_int_regs.clear();
+        super::emit_loop_metadata(out, "  ", "_hdr", &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
+        writeln!(out, "_done:").ok();
+        self.emit_arena_reset(out, "  ");
+        let saved = std::mem::take(&mut self.fun.pending_post_hoist);
+        self.emit_hoisted_post_loop_prints(out, &saved);
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
     pub(super) fn emit_countable_main(
         &mut self,
         out: &mut String,
@@ -1291,7 +1349,7 @@ impl LlvmBackend {
             let gep_init = format!("%gep_init_{}", self.fun.txn_counter);
             let init_load = format!("%init_field_{}", self.fun.txn_counter);
             writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gep_init, field_idx).ok();
-            writeln!(out, "  {} = load {}, {}* {}, align {}", init_load, ty, ty, gep_init, self.align_of(ty)).ok();
+            writeln!(out, "  {} = load {}, ptr {}, align {}", init_load, ty, gep_init, self.align_of(ty)).ok();
             init_regs.insert(name.clone(), init_load);
             let phi_reg = format!("%phi_{}", name);
             let be_reg = format!("%be_{}", name);
@@ -1659,8 +1717,8 @@ impl LlvmBackend {
                         let gep = format!("%gep_be_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                             gep, idx).ok();
-                        writeln!(out, "  {} = load {}, {}* {}, align {}",
-                            be_reg, ty, ty, gep, self.align_of(ty)).ok();
+                        writeln!(out, "  {} = load {}, ptr {}, align {}",
+                            be_reg, ty, gep, self.align_of(ty)).ok();
                     }
                 } else {
                     // Field was not modified; use the phi value itself

@@ -49,8 +49,8 @@ impl LlvmBackend {
             let val_boxed = self.adapt_to_i64(out, indent, val);
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
             let typed_val = self.ensure_typed_value(out, indent, ty_str, &val_boxed);
-            writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}",
-                indent, vol_str, ty, typed_val, ty, p, self.align_of(&ty), tn).ok();
+            writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
+                indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
             if ty_str == "i8*" || ty_str == "ptr" || (ty_str != "float" && ty_str != "double") {
                 self.fun.ssa_old_int_regs.insert(fname.to_string(), val_boxed.clone());
             }
@@ -62,8 +62,8 @@ impl LlvmBackend {
             // directly is bit-identical to the box→unbox result but saves 4 instructions.
             let typed_val = val.to_string();
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-            writeln!(out, "{}store{} {} {}, {}* {}, align {}, !tbaa !{}",
-                indent, vol_str, ty, typed_val, ty, p, self.align_of(&ty), tn).ok();
+            writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
+                indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
             self.fun.ssa_old_float_regs.insert(fname.to_string(), typed_val.clone());
             // pending_phi_backedge key marks this field as modified (latch uses
             // pending_phi_native_backedge for the actual backedge value).
@@ -72,7 +72,7 @@ impl LlvmBackend {
         } else {
             // Volatile store (MMIO etc.): passthrough.
             let val_raw = if is_native_float { val.to_string() } else { self.adapt_to_i64(out, indent, val) };
-            writeln!(out, "{}store{} {} {}, {}* {}, align {}", indent, vol_str, ty, val_raw, ty, p, self.align_of(&ty)).ok();
+            writeln!(out, "{}store{} {} {}, ptr {}, align {}", indent, vol_str, ty, val_raw, p, self.align_of(&ty)).ok();
             self.fun.pending_phi_backedge.insert(fname.to_string(), val_raw.clone());
             self.fun.pending_phi_native_backedge.insert(fname.to_string(), val_raw);
         }
@@ -645,7 +645,7 @@ impl LlvmBackend {
                                 let sr = self.fun.state_reg_name.clone();
                                 let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
                                 let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &elem.to_string());
-                                writeln!(out, "{}store {} {}, {}* {}, align {}", indent, ty, tv, ty, p, self.align_of(&ty)).ok();
+                                writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
                             } else if let Some(slot) = self.fun.param_slots.get(name) {
                                 writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, elem, slot).ok();
                                 self.fun.let_bindings.insert(name.clone(), elem.clone());
