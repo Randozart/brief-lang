@@ -210,6 +210,16 @@ Before every commit:
 5. Log bugs/gotchas in BUGS.md or `docs/architecture/praetor-log.md`
 6. Add Kani harnesses for all newly written or modified functions
 
+### Regression Guard Checklist (every refactoring)
+
+Before every refactoring change:
+7. **Inspect every match arm** in the function being refactored.
+   Silent regressions come from removed arms, not added ones.
+8. **Verify optimized IR** — not just that tests pass. Run the relevant
+   benchmarks and compare against the pre-refactoring numbers.
+9. **Update architecture comments** to reflect the new structure. Delete
+   no rationale comments; rewrite them to explain the current design.
+
 ### LLVM Diagnostic Commands (when optimizer fails)
 
 ```bash
@@ -471,6 +481,58 @@ Comments must be placed at the site of the change, not in a commit message.
 If the change has trade-offs (faster path A but slower path B), the comment
 must document them and explain why the chosen approach is optimal for the
 targeted situation.
+
+## Optimization Philosophy
+
+### 1. Long-Term Best Optimization
+
+Always emit the IR that produces the BEST FINAL CODE after LLVM's full
+optimization pipeline (SROA + GVN + DSE + LICM + vectorizer + backend),
+not the IR that looks cleanest before optimization. If a more complex
+emission pattern unlocks a downstream LLVM pass (e.g., struct-SSA enables
+SROA where per-field GEPs do not), use the complex pattern.
+
+This means:
+- Think about what `opt -O3` + `llc -O2` will produce, not just what
+  the initial `.ll` looks like
+- Prefer patterns that LLVM's optimizer is designed to recognize and
+  simplify (phi + icmp + add for induction variables, extractvalue/
+  insertvalue for struct decomposition)
+- Avoid patterns that produce "already clean" IR at the cost of
+  blocking later optimization (e.g., dead stores that DSE must labor
+  through a call barrier)
+- When in doubt, check the optimized IR (`opt -O3 -S unopt.ll`) and
+  count the remaining instructions — that is the true cost
+- If you see a way to make the generated IR produce better final code
+  after all LLVM passes, implement it — even if the initial IR looks
+  more complex
+
+### 2. Regression Prevention
+
+Every optimization decision must leave a comment documenting:
+- What pattern it targets
+- What it gains (specific benchmarks, expected improvement)
+- What it costs (IR bloat, compile time, edge cases)
+- Why the trade-off is optimal for the targeted pattern
+- What happens if this optimization is removed (exact regressions)
+
+When refactoring, inspect ALL match arms and code paths that the
+refactoring touches. A refactoring that accidentally removes an
+optimization (like the A005c body stores eliminated on 2026-07-04)
+causes silent regressions that may not be caught by correctness
+tests. The architecture comments are the primary defense — they
+tell the next engineer WHY each pattern exists.
+
+Before every commit:
+1. Check: "Does this change affect any existing optimization path?"
+2. If yes, verify the optimization still fires (check IR, benchmark)
+3. Update comments to reflect the new structure
+4. Run full test suite AND benchmark suite
+5. Document any trade-off decisions in the commit message
+
+The cost of a missed optimization is measured in months — a pattern
+broken today may not be rediscovered until a benchmark regresses, and
+the regression may be blamed on "noise" rather than root-caused.
 
 ## Regression Watch & Trade-Off Analysis
 

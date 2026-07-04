@@ -2142,6 +2142,15 @@ self.emit_declares(&mut out);
                         //   handled naturally: every path stores to the same GEP
                         //   addresses, and the latch reloads from them (GVN eliminates
                         //   the redundant load-via-store round trip).
+                        //
+                        // 2026-07-04: A005d (memory loop) removed. A005c (per-field
+                        // phi loop) is now used for ALL field counts. The original
+                        // concern was that 31+ phi nodes would choke SROA, but chunk
+                        // allocas (≤15 fields per chunk, MAX_FIELDS_PER_ALLLOCA=15)
+                        // decompose the state into SROA-friendly chunks. With Path A
+                        // (needs_state_stores_in_body=false), A005c emits zero memory
+                        // traffic regardless of field count — strictly better than
+                        // A005d's GEP+load+store per iteration.
                         if !has_swan_song && (node.is_pure_body || node.is_effectively_pure) {
                             let total_val = self.ctx.field_initializers
                                 .get(&bp.bound_var)
@@ -2160,30 +2169,24 @@ self.emit_declares(&mut out);
                                 self.emit_folded_pure_counter(&mut out, counter_idx, tv);
                                 true
                         } else {
-                            // Dispatch: per-field phi vs memory-access loop.
-                            let num_fields = node.write_set.len().max(2);
+                            // Dispatch: per-field phi loop (A005c) for all field counts.
+                            // 2026-07-04: A005d removed — per-field phi with Path A
+                            // (needs_state_stores_in_body=false) outperforms memory loop
+                            // for ALL field counts because SROA-on-chunks handles
+                            // 31+ phis cleanly while memory loop pays GEP+load+store
+                            // per field per iteration.
                             self.fun.pending_post_hoist = post_hoist;
-                            if num_fields > 8 {
-                                self.warnings.push(format!("info: txn '{}' dispatched via memory loop (A005d, {} fields)", &node.name, num_fields));
-                                self.emit_countable_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
-                            } else {
-                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
-                            }
+                            let num_fields = node.write_set.len().max(2);
+                            self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
+                            self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
                             true
                             }
                         } else {
-                            // Non-pure body: dispatch between per-field phi (A005c)
-                            // and memory-access (A005d) based on field count.
-                            let num_fields = node.write_set.len().max(2);
+                            // Non-pure body: per-field phi loop (A005c) for all field counts.
                             self.fun.pending_post_hoist = post_hoist;
-                            if num_fields > 8 {
-                                self.warnings.push(format!("info: txn '{}' dispatched via memory loop (A005d, {} fields)", &node.name, num_fields));
-                                self.emit_countable_memory_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
-                            } else {
-                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
-                            }
+                            let num_fields = node.write_set.len().max(2);
+                            self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
+                            self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
                             true
                         }
                     } else { false }
