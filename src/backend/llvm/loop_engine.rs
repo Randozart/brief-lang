@@ -968,6 +968,7 @@ impl LlvmBackend {
         out: &mut String,
         counter_idx: usize,
         bound_reg: &str,
+        write_set: &HashSet<String>,
     ) -> (String, String, String, String, String, String) {
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
@@ -982,7 +983,21 @@ impl LlvmBackend {
             let init_load = format!("%init_{}_{}", name, self.fun.txn_counter);
             self.fun.txn_counter += 1;
             let tn = crate::backend::llvm::tbaa_node(ty, self.ctx.type_universe.as_ref());
-            writeln!(out, "  {} = load {}, ptr {}, align {}, !tbaa !{}", init_load, ty, gep, self.align_of(ty), tn).ok();
+            // 2026-07-04: !invariant.load for read-only fields.
+            // Fields not in the transaction's write_set are never modified
+            // by the loop body (Brief has no hidden mutation through pointers).
+            // Marking the initial load as invariant lets LLVM's LICM hoist it
+            // out of the loop — the field value is loaded once and never
+            // reloaded, even when needs_state_stores_in_body=true (Path B).
+            // For write-set fields, !invariant.load is NOT emitted because
+            // the body may modify them (the phi node carries iteration values).
+            if !write_set.contains(name) {
+                writeln!(out, "  {} = load {}, ptr {}, align {}, !tbaa !{}, !invariant.load !{{}}",
+                    init_load, ty, gep, self.align_of(ty), tn).ok();
+            } else {
+                writeln!(out, "  {} = load {}, ptr {}, align {}, !tbaa !{}",
+                    init_load, ty, gep, self.align_of(ty), tn).ok();
+            }
             init_regs.insert(name.clone(), init_load);
             let phi_reg = format!("%phi_{}", name);
             let be_reg = format!("%be_{}", name);
@@ -1223,7 +1238,7 @@ impl LlvmBackend {
         writeln!(out, "pre_phi:").ok();
         // ── Initial field loads + phi/backedge register setup + loop header ──
         let (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, _init_count)
-            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg);
+            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg, write_set);
         // ── Body: load phi regs into ssa_old, emit_stmt ──────────────
         writeln!(out, "body:").ok();
         self.fun.ssa_state_reg = None; // memory mode: writes go through GEP+store

@@ -468,13 +468,24 @@ impl LlvmBackend {
     }
 
     pub(super) fn align_of(&self, ty: &str) -> u32 {
+        // 2026-07-04: Universe-driven alignment lookup.
+        // The type universe provides per-type alignment from type declarations.
+        // Falls back to hardcoded byte-size-based alignment when not found.
+        // This enables custom types (e.g., packed structs) to specify their
+        // own alignment without modifying the backend.
+        if let Some(u) = &self.ctx.type_universe {
+            for rt in u.types.values() {
+                if rt.llvm_type == ty {
+                    return rt.alignment as u32;
+                }
+            }
+        }
         match ty {
             "i64" | "double" => 8,
             "float" | "i32" => 4,
             "i16" => 2,
             "i8" => 1,
             _ => 8,
-
         }
     }
 
