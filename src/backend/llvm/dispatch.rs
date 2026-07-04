@@ -134,12 +134,48 @@ impl LlvmBackend {
         Self::extract_ranges_inner(pre, &mut r);
         r
     }
+    // 2026-07-04: Unwrap Cast(inner, Int) to find the underlying field name.
+    // Ptr<T> fields use "ptr_field as Int" in contracts to constrain the
+    // pointer's address range (e.g., [ptr as Int >= BASE && ptr as Int < END]).
+    // Without unwrapping, these patterns fall through to @llvm.assume and
+    // never produce !range metadata.
+    // Other paths for range extraction:
+    // - Bare Identifier(n): direct field name (Int, Bool, etc.)
+    // - Cast(Identifier(n), Int): Ptr<T> field address range
+    fn unwrap_cast_to_ident(e: &Expr) -> Option<&str> {
+        match e {
+            Expr::Cast(inner, Type::Int) => Self::unwrap_cast_to_ident(inner),
+            Expr::Identifier(n) => Some(n.as_str()),
+            _ => None,
+        }
+    }
     pub(crate) fn extract_ranges_inner(expr: &Expr, r: &mut HashMap<String, (i64, i64)>) {
         match expr {
             Expr::And(l, rgt) => { Self::extract_ranges_inner(l, r); Self::extract_ranges_inner(rgt, r); }
-            Expr::Lt(l, rgt) => { if let Expr::Identifier(n) = l.as_ref() { if let Expr::Integer(v) = rgt.as_ref() { let e = r.entry(n.clone()).or_insert((i64::MIN, i64::MAX)); if *v < e.1 { e.1 = *v; } } } }
-            Expr::Ge(l, rgt) => { if let Expr::Identifier(n) = l.as_ref() { if let Expr::Integer(v) = rgt.as_ref() { let e = r.entry(n.clone()).or_insert((i64::MIN, i64::MAX)); if *v > e.0 { e.0 = *v; } } } }
-            Expr::Gt(l, rgt) => { if let Expr::Identifier(n) = l.as_ref() { if let Expr::Integer(v) = rgt.as_ref() { let e = r.entry(n.clone()).or_insert((i64::MIN, i64::MAX)); if v + 1 > e.0 { e.0 = v + 1; } } } }
+            Expr::Lt(l, rgt) => {
+                if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
+                    if let Expr::Integer(v) = rgt.as_ref() {
+                        let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
+                        if *v < e.1 { e.1 = *v; }
+                    }
+                }
+            }
+            Expr::Ge(l, rgt) => {
+                if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
+                    if let Expr::Integer(v) = rgt.as_ref() {
+                        let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
+                        if *v > e.0 { e.0 = *v; }
+                    }
+                }
+            }
+            Expr::Gt(l, rgt) => {
+                if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
+                    if let Expr::Integer(v) = rgt.as_ref() {
+                        let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
+                        if v + 1 > e.0 { e.0 = v + 1; }
+                    }
+                }
+            }
             _ => {}
         }
     }

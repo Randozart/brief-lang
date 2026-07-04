@@ -1500,8 +1500,20 @@ impl LlvmBackend {
         // GVN-eliminated if the bound is already provable by LLVM.
         match pre {
             Expr::Lt(lhs, rhs) if matches!(rhs.as_ref(), Expr::Integer(_)) => {
-                if let Expr::Identifier(name) = lhs.as_ref() {
-                    if let Some(&idx) = self.ctx.field_index_map.get(name) {
+                // 2026-07-04: Unwrap Cast(Identifier, Int) for Ptr<T> fields.
+                // Ptr<T> fields use "ptr_field as Int" in precondition contracts
+                // (e.g., [ptr as Int >= BASE && ptr as Int < END]). The Cast
+                // wrapper must be unwrapped to find the state field name.
+                let field_name = match lhs.as_ref() {
+                    Expr::Cast(inner, Type::Int) => match inner.as_ref() {
+                        Expr::Identifier(n) => Some(n.clone()),
+                        _ => None,
+                    },
+                    Expr::Identifier(name) => Some(name.clone()),
+                    _ => None,
+                };
+                if let Some(ref name) = field_name {
+                    if let Some(&idx) = self.ctx.field_index_map.get(name.as_str()) {
                         let bound = if let Expr::Integer(b) = rhs.as_ref() { *b } else { 0 };
                         let gep = format!("%prg{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let ty = self.ctx.field_types[idx].clone();
