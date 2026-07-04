@@ -780,7 +780,8 @@ impl LlvmBackend {
                 let val_reg = self.emit_expr(out, &expr, indent);
                 let boxed = self.adapt_to_i64(out, indent, &val_reg);
                 // 2026-07-03: Use shared helper for type dispatch
-                let tv = self.ensure_typed_value(out, indent, ty, &boxed);
+                let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
+                let tv = self.ensure_typed_value(out, indent, ty, &boxed, brief_ty);
                 writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, gep, self.align_of(&ty)).ok();
             }
             None => {

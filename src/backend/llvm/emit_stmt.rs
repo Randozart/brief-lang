@@ -48,7 +48,8 @@ impl LlvmBackend {
             // for the integer phi backedge path.
             let val_boxed = self.adapt_to_i64(out, indent, val);
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
-            let typed_val = self.ensure_typed_value(out, indent, ty_str, &val_boxed);
+            let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
+            let typed_val = self.ensure_typed_value(out, indent, ty_str, &val_boxed, brief_ty);
             // 2026-07-04: Gate the store on both needs_state_stores_in_body
             // and per-field done: liveness.  When done_needs_fields is
             // non-empty, only store fields that the done: block reads.
@@ -112,14 +113,28 @@ impl LlvmBackend {
         }
     }
 
-    /// 2026-07-03: Ensure a value has the right LLVM type for storage.
+    /// 2026-07-04: Ensure a value has the right LLVM type for storage.
     /// Returns the register name usable as the typed value (trunc, bitcast,
     /// or identity). Callers are responsible for the store instruction.
-    /// pub(super): shared across emit_stmt, emit_toplevel, and other
-    /// sibling modules in the llvm backend.
+    /// If `brief_ty` is provided (cloned), the type universe is queried
+    /// for the correct unbox operation — enabling custom-type-aware codegen
+    /// rather than hardcoded LLVM type string matching.
     pub(super) fn ensure_typed_value(&mut self, out: &mut String, indent: &str,
-        ty: &str, val: &str) -> String
+        ty: &str, val: &str, brief_ty: Option<crate::ast::Type>) -> String
     {
+        // 2026-07-04: Try universe-driven unbox first.
+        // Clone unbox_op to avoid simultaneous immutable/mutable borrow of self.
+        let universe_unbox = brief_ty.as_ref().and_then(|brief| {
+            let u = self.ctx.type_universe.as_ref()?;
+            let rt = u.get_by_type(brief)?;
+            let op = rt.unbox_op.clone()?;
+            if op.is_empty() || op == "identity#" { return None; }
+            Some(op)
+        });
+        if let Some(ref op) = universe_unbox {
+            return self.emit_unbox_param(out, indent, ty, val, op);
+        }
+        // Fallback: hardcoded LLVM type string matching.
         match ty {
             "i8" => {
                 let tr = format!("%tr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -148,6 +163,56 @@ impl LlvmBackend {
     /// 2026-07-03: Emit a GEP into %State for a given field index.
     /// Returns the register name holding the field pointer.
     /// pub(super): shared across the llvm backend.
+    /// 2026-07-04: Emit the reverse of emit_box_param — convert an i64-boxed
+    /// value to its native LLVM type using the `unbox_op` intrinsic name.
+    /// Returns the native-typed register name.
+    fn emit_unbox_param(&mut self, out: &mut String, indent: &str,
+        ty: &str, val: &str, unbox_op: &str) -> String
+    {
+        let r = format!("%ub{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        match unbox_op {
+            // Bool: trunc i64 to i8 (was widened i8 → i64 via zext)
+            "zext.i1.to.i64#" => {
+                writeln!(out, "{}{} = trunc i64 {} to i8", indent, r, val).ok();
+            }
+            // Char / UInt32: trunc i64 to i32 (was widened i32 → i64 via zext)
+            "zext.i32.to.i64#" => {
+                writeln!(out, "{}{} = trunc i64 {} to i32", indent, r, val).ok();
+            }
+            // String/Data: inttoptr i64 → ptr (was converted ptr → i64 via ptrtoint)
+            "ptrtoint#" => {
+                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, r, val).ok();
+            }
+            // Float: trunc i64 to i32, then bitcast i32 to float
+            // (was bitcast float→i32, then zext i32→i64)
+            "bitcast.f32.to.i64#" => {
+                let m = format!("%uf{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = trunc i64 {} to i32", indent, m, val).ok();
+                writeln!(out, "{}{} = bitcast i32 {} to float", indent, r, m).ok();
+            }
+            // Float64: bitcast i64 to double (same width, direct bitcast)
+            "bitcast.f64.to.i64#" => {
+                writeln!(out, "{}{} = bitcast i64 {} to double", indent, r, val).ok();
+            }
+            // Signed/unsigned fixed-width: trunc i64 to native size
+            op if op.starts_with("sext.") || op.starts_with("zext.") => {
+                let llvm_ty = match op {
+                    "sext.i8.to.i64#" | "zext.i8.to.i64#" => "i8",
+                    "sext.i16.to.i64#" | "zext.i16.to.i64#" => "i16",
+                    _ => "i32",
+                };
+                writeln!(out, "{}{} = trunc i64 {} to {}", indent, r, val, llvm_ty).ok();
+            }
+            // Unknown unbox_op — keep as-is.
+            _ => {
+                self.fun.txn_counter -= 1; // didn't use the register
+                return val.to_string();
+            }
+        }
+        r
+    }
+
     pub(super) fn emit_state_gep(&mut self, out: &mut String, indent: &str,
         prefix: &str, state_ptr: &str, idx: usize) -> String
     {
@@ -670,7 +735,8 @@ impl LlvmBackend {
                                 let ty = self.ctx.field_types[idx].clone();
                                 let sr = self.fun.state_reg_name.clone();
                                 let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
-                                let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &elem.to_string());
+                                let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
+                                let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &elem.to_string(), brief_ty);
                                 writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
                             } else if let Some(slot) = self.fun.param_slots.get(name) {
                                 writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, elem, slot).ok();
