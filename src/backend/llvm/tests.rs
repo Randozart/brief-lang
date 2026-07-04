@@ -6333,3 +6333,50 @@ let spec = crate::target_spec::TargetSpec {
         assert!(!output.contains("%any_fired"),
             "Countable loop should not use %any_fired. Output: {}", output);
     }
+
+    // ── Borrow-inspired attribute tests ─────────────────────────
+
+    #[test]
+    fn test_attribute_group_7_readonly() {
+        let mut backend = LlvmBackend::new();
+        let output = backend.generate(&empty_program());
+        assert!(output.contains(r#"attributes #7 = {"#),
+            "#7 should be memory(read) for @pre_* functions");
+        assert!(output.contains("memory(read)"),
+            "#7 should contain memory(read)");
+    }
+
+    #[test]
+    fn test_attribute_groups_8_9_10_argmem() {
+        let mut backend = LlvmBackend::new();
+        let output = backend.generate(&empty_program());
+        assert!(output.contains(r#"attributes #8 = {"#),
+            "#8 should be argmem:readwrite for definitions");
+        assert!(output.contains("memory(argmem: readwrite)"),
+            "#8 should contain memory(argmem: readwrite)");
+        assert!(output.contains(r#"attributes #10 = {"#),
+            "#10 should be argmem:read for @pre_*");
+        assert!(output.contains("memory(argmem: read)"),
+            "#10 should contain memory(argmem: read)");
+    }
+
+    #[test]
+    fn test_state_alias_scope() {
+        let mut backend = LlvmBackend::new();
+        let output = backend.generate(&empty_program());
+        assert!(output.contains("!99 = distinct !{} ; StateAliasScope"),
+            "!99 should be the StateAliasScope node");
+    }
+
+    #[test]
+    fn test_definitions_and_pre_use_correct_attrs() {
+        // Quick smoke test: the empty program still contains the attribute groups.
+        let mut backend = LlvmBackend::new();
+        let output = backend.generate(&empty_program());
+        assert!(output.contains("attributes #8"),
+            "Module should define #8 (argmem:readwrite)");
+        assert!(output.contains("attributes #10"),
+            "Module should define #10 (argmem:read)");
+        assert!(output.contains("attributes #7"),
+            "Module should define #7 (memory(read))");
+    }
