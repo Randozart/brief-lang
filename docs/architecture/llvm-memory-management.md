@@ -658,11 +658,11 @@ Files: `mod.rs:1155-1165` (emit_arena_reset), `loop_engine.rs:667,774`
 | `%State` alloca (stack) | `loop_engine.rs:553,606,678,1285`; `emit_toplevel.rs:1374` |
 | `noalias nocapture` on `%State*` | `mod.rs:416-430`, `emit_toplevel.rs:710,1124,1182`, `dispatch.rs:26,139`, `loop_engine.rs:1306` |
 | Pre-extraction (float/int fields) | `loop_engine.rs:212-246` |
-| Pre-load all fields (GEP) | `loop_engine.rs:252-270` |
-| SSA insertvalue chain (A005a) | `loop_engine.rs:362,412-461` |
-| Counter phi (SSA / memory / direct) | `loop_engine.rs:304-349,626-628,714-719` |
-| Memory GEP path (A005b) | `loop_engine.rs:571-659` |
-| Pure counter fold (A005c) | `loop_engine.rs:1282-1292` |
+| Pre-load all fields (GEP) | `loop_engine.rs:431-446` |
+| Per-field phi loop (A005c) — Path A (zero stores) / Path B (per-field subset) | `loop_engine.rs:1119-1260`; `emit_stmt.rs:45-104` |
+| Counter phi (per-field induction) | `loop_engine.rs:958-1022,1065-1114` |
+| Native backedge (no store reload) | `loop_engine.rs:1088-1114`; `emit_stmt.rs:62-63,80-81` |
+| Pure counter fold (A001) | `loop_engine.rs:1282-1292` |
 | SSA register pipeline (A006) | `loop_engine.rs:678-860` |
 | Precomputation (A000) | `emit_expr.rs:4448-4485`; `mod.rs:1243-1260` |
 | Composed chain folding (all-internal) | `mod.rs:1704-1718` |
@@ -716,12 +716,11 @@ analysis, not at runtime.
 graph TD
     P[Program enters codegen] --> A{All inputs const + within budget?}
     A -->|Yes| A000["A000: Precompute<br>O(1) final store, zero runtime alloc"]
-    A -->|No| B{Single foldable txn?}
+    A -->|No| B{Counter-bounded?}
 
     B -->|Yes| D{Body structure}
-    D -->|Pure counter, no body side effects| A005c["A005c: store + ret<br>No collection ops, no arena needed"]
-    D -->|Straight-line, provably linear| A005a["A005a: SSA insertvalue<br>arena for any collection ops"]
-    D -->|Branching guards, non-linear| A005b["A005b: memory GEP path<br>arena for any collection ops"]
+    D -->|Pure counter, const bound| A001["A001: store + ret<br>No collection ops, no arena needed"]
+    D -->|Anything else| A005c["A005c: Per-field phi loop<br>Dual-path: zero stores (A) or per-field subset (B)<br>arena for any collection ops"]
 
     B -->|No| C{Multi-txn all-pure?}
     C -->|Yes| E[Folded multi-txn: per-txn folded loops + arena]

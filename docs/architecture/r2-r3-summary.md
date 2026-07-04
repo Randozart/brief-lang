@@ -96,3 +96,35 @@ needed:
 | fannkuch_redux | 31 (18%) | 3 (2%) | 90% |
 | knucleotide | 22 (18%) | 4 (3%) | 82% |
 | nbody_newton | 7 (0%) | 0 (0%) | 100% |
+
+## R3 Evolution: A005c Per-Field Phi Loop
+
+**Date:** 2026-07-04
+
+The per-field GEP approach (R3) was the foundation, but it evolved through
+several iterations:
+
+### A005a: Struct-SSA (original)
+Wide `load %State` + `extractvalue`/`insertvalue` chain. SROA-dependent.
+Emitted both for straight-line and branching bodies.
+
+### A005b: Memory GEP (fallback)
+Per-field GEP+load+store, no phi nodes. For branching bodies where phi
+dominance was violated. Single counter phi only.
+
+### A005c: Per-Field Phi Loop (current — July 3+)
+One phi per state field at the loop header. Direct SSA values from the
+start — no SROA dependency. Replaced both A005a and A005b.
+
+**Key advances:**
+- **Dual-path stores:** Path A (zero stores) when no post-loop hoisted
+  guards; Path B (per-field subset) when hoisted prints need state.
+- **Native backedge:** Latch uses `pending_phi_native_backedge` to avoid
+  GEP+load roundtrip — computed register feeds phi directly.
+- **Chunk allocas:** `%State` split into ≤15-field chunks for SROA
+  decomposition at `opt -O3`.
+
+### A005d: Memory Loop (removed — July 4)
+Temporary path for >8 fields. Counter loaded from `%State` at header every
+iteration via GEP. 31 GEP+load+store pairs per iteration. **Removed** when
+chunk allocas made per-field phi viable for all field counts.

@@ -2596,8 +2596,34 @@ self.emit_declares(&mut out);
         // Other paths: #0 for definitions and callable txns (they may read
         // and write through %state), #2 for reactor_tick (always writes
         // the state copy), #3 for @main (writes through reactor tick loop).
+        // 2026-07-04: #7 = memory(read) for @pre_* functions.
+        // LLVM 18+ uses lowercase access kinds: memory(read) not memory(readonly).
         writeln!(out, "attributes #7 = {{").ok();
-        writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(readonly)").ok();
+        writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(read)").ok();
+        writeln!(out, "}}").ok();
+        // 2026-07-04: #8 = argmemonly variant of #0 for definitions/callable txns.
+        // Brief functions only access memory through pointer arguments (%state).
+        // No globals, no heap (beyond arena which is stack-allocated), no trigger
+        // globals for defns. argmemonly lets LLVM promote allocas and eliminate
+        // redundant loads across call boundaries.
+        // Not used for reactive txns (they may read @link trigger globals).
+        writeln!(out, "attributes #8 = {{").ok();
+        writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: readwrite)").ok();
+        writeln!(out, "}}").ok();
+        // 2026-07-04: #9 = argmem:readwrite variant of #3 for @main.
+        // The main function only accesses memory through %state (no trigger
+        // globals directly — trigger access is through reactor_tick). This
+        // is not willreturn (main runs until convergence, not guaranteed to
+        // return), matching the original #3 semantics.
+        writeln!(out, "attributes #9 = {{").ok();
+        writeln!(out, "    nofree norecurse nosync nounwind memory(argmem: readwrite)").ok();
+        writeln!(out, "}}").ok();
+        // 2026-07-04: #10 = argmem:read + willreturn for @pre_* functions.
+        // Precondition functions only read state through %state and never
+        // access trigger globals. Combines the benefits of #7 (memory(read))
+        // and #8 (memory(argmem: readwrite)).
+        writeln!(out, "attributes #10 = {{").ok();
+        writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: read)").ok();
         writeln!(out, "}}").ok();
         // Range metadata
         if !range_meta.is_empty() {

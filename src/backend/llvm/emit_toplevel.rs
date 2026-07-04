@@ -983,26 +983,13 @@ impl LlvmBackend {
         write!(out, "define {} @{}(", ll_ret_ty, ll_name).ok();
         write!(out, "ptr noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
-            // 2026-07-04: nofree nosync readonly on defn parameters.
-            // readonly lets LLVM CSE calls with identical args and
-            // eliminate dead parameters.  For Ptr<T> parameters,
-            // dereferenceable(N) tells LLVM the pointer is valid for
-            // N bytes — enables load speculation and LICM hoisting.
-            let ll_ty = self.llvm_type(t);
-            let deref = if let Some(u) = &self.ctx.type_universe {
-                if let Type::Applied(name, _) = t {
-                    if name == "Ptr" {
-                        u.pointer_pointee_layout(t)
-                            .map(|(bytes, _)| format!(" dereferenceable({})", bytes))
-                            .unwrap_or_default()
-                    } else { String::new() }
-                } else { String::new() }
-            } else { String::new() };
-            if ll_ty == "i8*" || ll_ty == "ptr" {
-                let _ = write!(out, ", {} nofree nosync{} %arg{}", ll_ty, deref, i);
-            } else {
-                let _ = write!(out, ", {} nofree nosync readonly{} %arg{}", ll_ty, deref, i);
-            }
+            // 2026-07-04: dereferenceable(N) for Ptr<T> parameters.
+            // LLVM parameter attributes on i64 scalars are rejected by
+            // LLVM 18+ (only function-level attributes apply). Ptr<T>
+            // parameters are also i64 (opaque pointer addresses) so
+            // dereferenceable is ommitted — it only works on pointer
+            // types, and Ptr<T> is an i64 at the LLVM level.
+            let _ = write!(out, ", {} %arg{}", self.llvm_type(t), i);
         }
         // 2026-07-04: Use #8 (argmemonly) for definitions.
         // Definitions never access @link trigger globals — they only
@@ -1378,23 +1365,11 @@ impl LlvmBackend {
         write!(out, "define {} @{}(", ret_llvm, name).ok();
         write!(out, "ptr noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
-            // 2026-07-04: nofree nosync readonly + dereferenceable(N)
-            // on callable txn parameters. Same reasoning as defn params.
-            let ll_ty = self.llvm_type(t);
-            let deref = if let Some(u) = &self.ctx.type_universe {
-                if let Type::Applied(name, _) = t {
-                    if name == "Ptr" {
-                        u.pointer_pointee_layout(t)
-                            .map(|(bytes, _)| format!(" dereferenceable({})", bytes))
-                            .unwrap_or_default()
-                    } else { String::new() }
-                } else { String::new() }
-            } else { String::new() };
-            if ll_ty == "i8*" || ll_ty == "ptr" {
-                let _ = write!(out, ", {} nofree nosync{} %arg{}", ll_ty, deref, i);
-            } else {
-                let _ = write!(out, ", {} nofree nosync readonly{} %arg{}", ll_ty, deref, i);
-            }
+            // 2026-07-04: Parameter-level attributes are omitted because
+            // Ptr<T> is i64 at the LLVM level (not a pointer type). LLVM
+            // function-level attributes (#8) provide the important guarantees
+            // (argmemonly, nofree, nosync, nounwind).
+            let _ = write!(out, ", {} %arg{}", self.llvm_type(t), i);
         }
         // 2026-07-04: Use #8 (argmemonly) for callable transactions.
         // Callable txns never access @link trigger globals — they only

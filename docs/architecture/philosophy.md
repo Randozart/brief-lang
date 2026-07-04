@@ -31,10 +31,11 @@ emit as LLVM metadata. C++ `restrict` is a programmer promise; Brief
 `[!aliased]` is a machine-checked guarantee. The optimizer can rely on it
 absolutely.
 
-The A005b linearity-memory path is the canonical example: when guards are
-provably linear, the compiler knows every field write is dead-eliminable.
-C++ cannot prove this without whole-program alias analysis. Brief proves it
-from the guard structure alone.
+The A005c dual-path store strategy is the canonical example: when the
+compiler proves `done:` does not read `%State`, it suppresses all stores
+in the hot loop body (Path A). C preserves every store through function
+call barriers; Brief's contract structure lets the compiler see through
+them.
 
 ### 2. Full Machine Access Through Contracts, Not Escapes
 
