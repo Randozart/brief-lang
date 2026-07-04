@@ -55,68 +55,78 @@ collapses (`mod.rs:416-430`).
 
 ### 1.2 Path Selection Tree
 
-The backend selects a codegen strategy at `mod.rs:1833-1860` by walking
+The backend selects a codegen strategy at `mod.rs:2162-2190` by walking
 a decision tree: all-const inputs within budget → precompute; else check
-single foldable txn → pure counter or SSA or memory GEP; else multi-txn
-all-pure fold; else SSA register pipeline; else enum dispatch; else
-reactor tick loop.
+single foldable txn → pure counter or A005c per-field phi loop; else
+A006 direct SSA pipeline; else reactor tick loop.
 
 | Code | Condition | Memory Strategy |
 |------|-----------|-----------------|
-| **A000** | All-const inputs within budget | No runtime loop — `GEP + store` per final value. `mod.rs:1243-1260`, `emit_expr.rs:4448-4485` |
-| **A005a** (SSA insertvalue) | Straight-line or provably linear body | `extractvalue`/`insertvalue` chain on a single `%State` SSA register. LLVM SROA decomposes to scalars. `loop_engine.rs:362,412-461` |
-| **A005b** (Memory GEP) | Non-linear body with branching guards | Per-field `GEP + load/store`, counter phi. `loop_engine.rs:571-659` |
-| **A005c** (Pure counter) | Constant bound + pure body | Single `store i64 <total>` into counter, `ret`. `loop_engine.rs:1282-1292` |
-| **A006** (SSA pipeline) | Sequential bounded multi-txn | Per-field GEP pre-load, direct SSA loop with phi induction. `loop_engine.rs:678-860` |
+| **A000** | All-const inputs within budget | No runtime loop — `GEP + store` per final value. `loop_engine.rs:emit_precomputed_main` |
+| **A005c** | Counter-bounded, any body (pure or non-pure) | Per-field phi loop. One phi per state field. Dual-path: **Path A** (no stores in body) or **Path B** (per-field subset stores for `done:` block). `loop_engine.rs:emit_countable_main` |
+| **A006** | Sequential bounded multi-txn | Per-field GEP pre-load, direct SSA loop with phi induction. `loop_engine.rs:emit_ssa_main` |
+
+A005a (struct-SSA insertvalue), A005b (memory GEP counter), and A005d
+(memory loop for >8 fields) have been removed. A005c now handles ALL
+countable-loop field counts. Chunk allocas (≤15 fields per chunk) let
+SROA decompose even 31-field states into scalar phis — zero memory
+traffic with Path A.
 
 ### 1.3 Counter Phi Structure
 
-The counter phi is the induction variable that drives every counted loop.
-Its structure varies by path:
+The counter phi is the induction variable that drives every counted loop
+(A005c). It uses a per-field phi structure:
 
-**SSA phi** (`emit_folded_loop`, `loop_engine.rs:304-349`, `use_phi=true`):
 ```llvm
-_phdr:        ; header
-  %phi = phi i64 [ 0, %entry ], [ %next, %latch ]
-  %cmp = icmp slt i64 %phi, %bound
+loop_hdr:        ; header
+  %cnt = phi i64 [ %init, %pre_phi ], [ %cnt_next, %latch ]
+  %x0 = phi float [ %init_x0, %pre_phi ], [ %be_x0, %latch ]
+  ; ... one phi per field
+  %cmp = icmp slt i64 %cnt, %bound
   br i1 %cmp, label %body, label %done
-_body:
-  store i64 <body-counter-val>, ptr %state_slot
+body:
+  ; compute using phi registers — zero memory traffic (Path A)
+  ; or GEP+store (Path B)
   br label %latch
-_latch:
-  %next = add i64 %phi, 1
-  br label %phdr, !llvm.loop !N
+latch:
+  %cnt_next = add i64 %cnt, 1
+  %be_x0 = fadd float %new_x0, 0.0
+  ; ... one backedge per field
+  br label %loop_hdr, !llvm.loop !N
+done:
+  ; arena cleanup + optional hoisted prints + ret
 ```
-
-**Memory/GEP phi** (`emit_folded_memory_main`, `loop_engine.rs:626-628`):
-Counter lives in a `phi i64` alone — body does `pre_load_all_fields` and
-writes counter back through GEP+store. The phi eliminates one GEP load +
-one GEP store per iteration for the counter field.
-
-**SSA direct loop** (`emit_ssa_main`, `loop_engine.rs:714-719`):
-The phi induction variable drives the body directly; no precondition
-check needed because the phi range guarantees the contract.
 
 ### 1.4 Pre-extraction
 
-Before any body loop, float fields are extracted into native float
-registers (`pre_extract_float_fields`, `loop_engine.rs:212-226`) and
-Int/Bool/Char/String fields into old-value maps (`pre_extract_int_fields`,
-`loop_engine.rs:232-246`). This eliminates the per-reference `extractvalue`
-chain that inflated IR by ~5x for field-heavy benchmarks.
+`phi_regs_to_ssa_old()` (`loop_engine.rs:1027-1040`) copies phi register
+names into `ssa_old_float_regs` and `ssa_old_int_regs` at the A005c body
+start. Subsequent statement emission reads from these caches instead of
+GEP+loading from `%State`. This eliminates all memory traffic from field
+reads in the hot loop.
+
+When `parallel_safe_body` is enabled, `emit_memory_field_store` does NOT
+update these caches after `&` assignments — keeping phi registers for ALL
+reads so computations become independent.
 
 ### 1.5 Per-Field GEP Loading (Memory Path)
 
-`pre_load_all_fields()` (`loop_engine.rs:252-270`) loads ALL state fields
-at tick entry via per-field `GEP`:
+`pre_load_all_fields()` (`loop_engine.rs:431-446`) loads state fields at
+tick entry via per-field `GEP`:
 
 ```llvm
 %gep_X = getelementptr inbounds %State, ptr %state, i32 0, i32 <field_idx>
-%X_old = load <ty>, <ty>* %gep_X, align <N>, !tbaa !<N>
+%X_old = load <ty>, ptr %gep_X, align <N>, !tbaa !<N>
 ```
 
-Identifier expressions read from these pre-loaded registers directly
-(`emit_expr.rs:64-98`) — zero memory traffic for the hot path.
+Accepts an optional `filter: Option<&HashSet<String>>` for per-field
+liveness. When `emit_hoisted_post_loop_prints` calls it, only the fields
+in `done_needs_fields` are loaded — avoiding unnecessary GEP+load for
+fields the hoisted print doesn't reference.
+
+Identifier expressions read from `ssa_old_*_regs` (populated by
+`pre_load_all_fields` or `phi_regs_to_ssa_old`) directly — zero memory
+traffic for the hot path.
 
 ## 2. Precomputation (A000)
 

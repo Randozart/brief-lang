@@ -1654,7 +1654,6 @@ self.emit_declares(&mut out);
             }
             writeln!(out, ") #6").ok();
         }
-
         // Declare memory/string helpers used by inline concat and FFI marshaling
         // malloc/strlen declared by brief_rt.c via #include <stdlib.h> + <string.h>
         writeln!(out, "declare i64 @strlen(i8*) #1").ok();
@@ -2589,6 +2588,17 @@ self.emit_declares(&mut out);
             writeln!(out, "}}").ok();
         }
         writeln!(out, "attributes #6 = {{ nounwind }}").ok();
+        // 2026-07-04: #7 = readonly for @pre_* functions.
+        // Precondition expressions never write to %State — they only read
+        // state fields via GEP+load. readonly tells LLVM the function has
+        // no memory writes, enabling CSE of redundant pre_ calls and load
+        // hoisting past precondition checks.
+        // Other paths: #0 for definitions and callable txns (they may read
+        // and write through %state), #2 for reactor_tick (always writes
+        // the state copy), #3 for @main (writes through reactor tick loop).
+        writeln!(out, "attributes #7 = {{").ok();
+        writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(readonly)").ok();
+        writeln!(out, "}}").ok();
         // Range metadata
         if !range_meta.is_empty() {
             writeln!(out).ok();
@@ -2613,8 +2623,17 @@ self.emit_declares(&mut out);
             writeln!(out, "!2 = !{{!\"Bool\", !0}}").ok();
             writeln!(out, "!3 = !{{!\"Char\", !0}}").ok();
             writeln!(out, "!4 = !{{!\"String\", !0}}").ok();
-            writeln!(out, "!5 = !{{!\"Float\", !0}}").ok();
+                writeln!(out, "!5 = !{{!\"Float\", !0}}").ok();
         }
+        // 2026-07-04: StateAliasScope — a distinct !{} node used by !noalias
+        // metadata on Ptr<T> volatile load/store instructions.  This scope
+        // represents "accesses to %State memory."  By annotating volatile
+        // accesses through Ptr<T> with !noalias !{!StateScope}, we tell LLVM
+        // that the Ptr<T> access does NOT alias with any %State field access.
+        // The scope ID is fixed at 99 to avoid conflicts with TBAA (!0..!N),
+        // range metadata (!{i}), and function-scoped metadata (starting at 100).
+        self.ctx.state_alias_scope_md = 99;
+        writeln!(out, "!99 = distinct !{{}} ; StateAliasScope").ok();
 
         // Build optimization report if requested
         if self.ctx.optimize_report {

@@ -982,7 +982,20 @@ impl LlvmBackend {
         write!(out, "define {} @{}(", ll_ret_ty, ll_name).ok();
         write!(out, "ptr noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in d.parameters.iter().enumerate() {
-            write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
+            // 2026-07-04: nofree nosync readonly on defn parameters.
+            // defn parameters are immutable — no &param mutation in Brief.
+            // readonly lets LLVM CSE calls with identical args and
+            // eliminate dead parameters.  nofree and nosync are always
+            // correct (no free/threading in Brief functions).
+            // For pointer types (i8* for String/Data), readonly is
+            // omitted because the pointee may be mutated through the
+            // arena allocator.
+            let ll_ty = self.llvm_type(t);
+            if ll_ty == "i8*" || ll_ty == "ptr" {
+                let _ = write!(out, ", {} nofree nosync %arg{}", ll_ty, i);
+            } else {
+                let _ = write!(out, ", {} nofree nosync readonly %arg{}", ll_ty, i);
+            }
         }
         writeln!(out, ") local_unnamed_addr #0 {{").ok();
         writeln!(out, "  entry:").ok();
@@ -1316,7 +1329,14 @@ impl LlvmBackend {
         write!(out, "define {} @{}(", ret_llvm, name).ok();
         write!(out, "ptr noalias nocapture align 8 %state").ok();
         for (i, (n, t)) in txn.parameters.iter().enumerate() {
-            write!(out, ", {} %arg{}", self.llvm_type(t), i).ok();
+            // 2026-07-04: nofree nosync readonly on callable txn parameters.
+            // Same reasoning as defn parameters — params are immutable in Brief.
+            let ll_ty = self.llvm_type(t);
+            if ll_ty == "i8*" || ll_ty == "ptr" {
+                let _ = write!(out, ", {} nofree nosync %arg{}", ll_ty, i);
+            } else {
+                let _ = write!(out, ", {} nofree nosync readonly %arg{}", ll_ty, i);
+            }
         }
         writeln!(out, ") local_unnamed_addr #0{} {{", inline_str).ok();
         writeln!(out, "  entry:").ok();
@@ -1522,7 +1542,15 @@ impl LlvmBackend {
     //   allocas that would otherwise escape to the @pre_* call.
     pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
         if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
-        writeln!(out, "define internal i1 @pre_{}(ptr noalias nocapture align 8 %state) #0 {{", name).ok();
+        // 2026-07-04: Use #7 (memory(readonly)) for @pre_* functions.
+        // Precondition expressions never write to %State — they only read
+        // state fields via GEP+load. readonly tells LLVM the function has
+        // no memory writes, enabling CSE of redundant pre_ calls and load
+        // hoisting past precondition checks.
+        // Other paths: #0 for definitions and callable txns (they may read
+        // and write through %state), #2 for reactor_tick (always writes
+        // the state copy), #3 for @main (writes through reactor tick loop).
+        writeln!(out, "define internal i1 @pre_{}(ptr noalias nocapture align 8 %state) #7 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0;
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();

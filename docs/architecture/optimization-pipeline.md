@@ -1,6 +1,6 @@
 # Optimization Pipeline
 
-**Date:** 2026-06-11
+**Date:** 2026-07-04 (updated — A005a/A005b removed, unified under A005c)
 **Status:** Current
 
 ## Decision Tree
@@ -18,15 +18,12 @@ flowchart TD
     B -->|No| F
     
     F --> G{is_counter_bounded?}
-    G -->|Yes| H{Body has FFI?}
-    H -->|No| I{A001: Pure counter fold?}
-    I -->|Const bound| J[A001: O(1) store]
-    I -->|Runtime bound| K[A005: Phi pipeline]
-    H -->|Yes| L{Body has branching?}
-    L -->|No| M[A005a: Folded SSA insertvalue]
-    L -->|Yes| N{prove_linear?}
-    N -->|Yes| M
-    N -->|No| O[A005b: Folded memory (no phi)]
+    G -->|Yes| H{Const bound + pure + no swan song?}
+    H -->|Yes| I[A001: O(1) pure counter store]
+    H -->|No| J[A005c: Per-field phi loop]
+    J --> K{Dual-path selection}
+    K -->|No post-loop hoisted guards| L[Path A: zero stores in body]
+    K -->|Has post-loop hoisted guards| M[Path B: per-field stores via done_needs_fields]
     
     G -->|No| P{Async/MMIO/triggers?}
     P -->|Yes| Q[Reactor tick loop]
@@ -60,58 +57,54 @@ counter value. No runtime loop.
 
 File: `src/backend/llvm/loop_engine.rs` — `emit_folded_pure_counter`
 
-### A005: Folded SSA / Memory (Counted Loop)
+### A005c: Per-Field Phi Loop (All Counter-Bounded Bodies)
 
-For programs with a counter-bounded reactive txn (e.g. `[count < N]`)
-and a non-pure body (has FFI calls), the compiler emits a counted-loop
-`main()`. Two sub-paths based on body structure:
+For ALL counter-bounded non-precomputed programs, the compiler emits a
+per-field phi loop (A005c). There is no longer an A005a (SSA insertvalue)
+or A005b (memory GEP) path — both are replaced by A005c's unified approach.
 
-#### A005a: Folded SSA Insertvalue (Straight-Line or Provably Linear)
-
-When the body contains NO `Guarded`/`Escape` statements, OR when all
-guard conditions are pairwise mutually exclusive (`prove_linear()` returns
-true), the compiler uses the SSA insertvalue chain:
-
+**Structure:**
 ```
-entry → _hdr → _body4 (4× unrolled) → _hdr (backedge) → _done → ret
+entry → pre_phi → loop_hdr → body → latch → loop_hdr (backedge) → done → ret
 ```
 
-- State read: `extractvalue %State %ssa_reg, %field_idx`
-- State write: `insertvalue %State %ssa_reg, %val, %field_idx`
-- Guard merge: `phi %State [ %then_val, %then_l ], [ %else_val, %entry_l ]`
-- `%slot_` alloca carries state across loop iterations (load/store %State)
+- One phi per state field at `loop_hdr`
+- Backedge registers for each field computed at `latch`
+- Zero or more guards inside `body` for periodic prints
+- Swan song guards (`term! -> print_int#`) hoisted to post-loop `done:` block
 
-Safe only when `prove_linear()` confirms all guards are pairwise mutually
-exclusive — otherwise phi incoming values don't dominate the merge block.
+**Dual-path memory:**
 
-File: `src/backend/llvm/loop_engine.rs` — `emit_folded_main(use_phi=false, body=Some(stmts))`
+| Path | Stores in body | When selected | Loads in done: |
+|------|---------------|---------------|----------------|
+| **A** | Zero | No post-loop hoisted guards (Path A active) | Nothing — `done:` skips `pre_load_all_fields` |
+| **B** | Per-field subset via `done_needs_fields` | Post-loop hoisted guards exist (swan song) | Filtered by `done_needs_fields` — only fields the print references |
 
-#### A005b: Folded Memory (Non-Linear Body)
+**Path A** (no stores): The hot loop body is a pure register pipeline:
+phi → compute → latch backedge. Zero memory traffic. LLVM's optimizer
+sees a clean phi loop with no barriers — enabling full vectorization,
+ILP scheduling, and SROA.
 
-When the body HAS branching control flow (Guarded/Escape) AND `prove_linear()`
-cannot prove mutual exclusivity, the compiler falls back to per-field
-GEP+load/store with no phi nodes:
+**Path B** (stores preserved): The hot loop body emits stores for fields
+that `done:` reads. `done_needs_fields` (populated by scanning hoisted
+guard bodies) limits stores to the subset of fields the hoisted print
+actually references. Unreferenced fields get zero stores.
 
-```
-entry → _hdr → _body → _hdr (backedge) → _done → ret
-```
+**Chunk allocas:** `%State` is split into ≤15-field chunks
+(`%StateChunk0`, `%StateChunk1`, ...) to ensure LLVM's SROA pass can
+decompose each chunk into scalar phi nodes independently.
 
-- State read: GEP+load from `%state` pointer (via `pre_load_all_fields`)
-- State write: GEP+store to `%state` pointer (via `ssa_state_reg = None`)
-- No slot alloca, no extractvalue/insertvalue, no phi
-- No 4× unrolling (single body emission)
+**Key files:**
+- `src/backend/llvm/loop_engine.rs` — `emit_countable_main`, `emit_countable_body`, `emit_countable_latch`
+- `src/backend/llvm/emit_stmt.rs` — `emit_memory_field_store` with store gating
+- `src/backend/llvm/context.rs` — `needs_state_stores_in_body`, `done_needs_fields`, `parallel_safe_body`
 
-LLVM's GVN/LICM eliminate redundant GEPs across the loop.
+### A006: Direct SSA Loop
 
-File: `src/backend/llvm/loop_engine.rs` — `emit_folded_memory_main` (2026-06-13)
-
-### A005: Folded Phi Pipeline (Pure Body, Runtime-Variable Bound)
-
-When the body is pure (no FFI) but the bound is runtime-determined
-(`__get_env_int`), the compiler emits a counter-only phi pipeline.
-The txn body is NOT emitted inline — it's called as `@txn(%State* %state)`.
-
-File: `src/backend/llvm/loop_engine.rs` — `emit_folded_main(use_phi=true, body=None)`
+For programs with NO async triggers and NO MMIO mappings, and where the
+counter-bounded optimization (A005c) does not apply, the reactor tick
+dispatch function (`@reactor_tick`) is eliminated. Instead, a tight `while`
+loop is emitted directly in `main()` with per-field GEP+load+store.
 
 ### A006: Direct SSA Loop
 

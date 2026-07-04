@@ -1896,8 +1896,15 @@ pub fn emit_intrinsic_call(
                 _ => Type::Int,
             };
             let llvm_t = backend.llvm_type(&t).to_string();
+            // 2026-07-04: !noalias !{!99} tells LLVM this volatile load through
+            // Ptr<T> does not alias with any %State field access.  Ptr<T> values
+            // are opaque integer addresses (MMIO, GPU buffers, heap) — never
+            // derived from %State.  !99 = StateAliasScope is defined in the
+            // module preamble (mod.rs).  This enables load hoisting and store
+            // sinking past volatile Ptr<T> accesses.
+            let noalias = format!(", !noalias !{{!{}}}", backend.ctx.state_alias_scope_md);
             let raw = format!("%vlraw{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load volatile {}, ptr {}", indent, raw, llvm_t, ptr).ok();
+            writeln!(out, "{}{} = load volatile {}, ptr {}{}", indent, raw, llvm_t, ptr, noalias).ok();
             // Box result to i64 if needed
             match t {
                 Type::Bool => {
@@ -1965,7 +1972,12 @@ pub fn emit_intrinsic_call(
                     val.name.clone()
                 }
             };
-            writeln!(out, "{}store volatile {} {}, ptr {}", indent, llvm_t, native_val, ptr).ok();
+            // 2026-07-04: !noalias on volatile store through Ptr<T>.
+            // Same reasoning as volatile_load# — the pointer address is an
+            // opaque integer, never derived from %State, so the store does
+            // not alias with any %State field access.
+            let noalias = format!(", !noalias !{{!{}}}", backend.ctx.state_alias_scope_md);
+            writeln!(out, "{}store volatile {} {}, ptr {}{}", indent, llvm_t, native_val, ptr, noalias).ok();
             writeln!(out, "{}{} = add i64 0, 1 ; volatile_store success", indent, v).ok();
             return TypedRegister { name: v.to_string(), ty: Type::Bool };
         }

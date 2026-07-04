@@ -72,6 +72,10 @@ pub struct CompilerContext {
     pub cache_slots: HashMap<String, HashMap<String, (usize, usize)>>,
     pub range_bounds: HashMap<String, (i64, i64)>,
     pub field_to_meta_idx: HashMap<String, usize>,
+    // 2026-07-04: Metadata ID for the !StateAliasScope used by !noalias
+    // on Ptr<T> volatile accesses. Set during IR emission, then read-only
+    // by intrinsics.rs volatile_load#/volatile_store# emission.
+    pub state_alias_scope_md: usize,
     pub exit_condition: Option<Box<Expr>>,
     pub has_natural_exit: bool,
 
@@ -140,6 +144,7 @@ impl CompilerContext {
             cache_slots: HashMap::new(),
             range_bounds: HashMap::new(),
             field_to_meta_idx: HashMap::new(),
+            state_alias_scope_md: 0,
             exit_condition: None,
             has_natural_exit: false,
             mmio_fields: HashMap::new(),
