@@ -586,15 +586,17 @@ universe instead of hardcoded LLVM string matching.
 
 ---
 
-## Implementation Order (Executing Now)
+## Implementation Status
 
-1. **`readonly` on `@pre_*`** — new `#7` group, `memory(readonly)` on pre_ functions
-2. **`readonly` on defn/txn scalar params** — `nofree nosync readonly` on every `%argN`
-3. **`!noalias` between Ptr<T> and `%State`** — `!noalias !{!StateScope}` on volatile accesses
-4. **Cast-unwrapping for `ptr_field as Int`** — range metadata for Ptr<T> contracts
-5. **Universe-driven `!range` for narrow types** — automatic range from type byte size
-6. **`dereferenceable(N)` for Ptr<T> params** — from `pointer_pointee_layout()`
-7. **`argmemonly` attribute groups** — `#8`/`#9`/`#10` for defns/pre_/main
-8. **Universe-driven `align_of()` and `ensure_typed_value()`**
-9. **Per-field `!invariant.load`** — read-only field optimization
-10. **`!alias.scope` for async txns** — memory barrier elimination
+| # | Optimization | Status | Notes |
+|---|-------------|--------|-------|
+| 1 | `readonly` on `@pre_*` | ✅ Done | `#7` = `memory(read)` group, LLVM 18 compat |
+| 2 | `readonly` on scalar params | ✅ Done | Removed — LLVM 18 rejects attributes on i64 params. Function-level attrs suffice. |
+| 3 | `!noalias` between Ptr<T> and `%State` | ✅ Done | `!99 = distinct !{}` StateAliasScope on volatile load/store |
+| 4 | Cast-unwrapping for `ptr_field as Int` | ✅ Done | `extract_ranges_inner` + `emit_precondition_check` unwrap Cast |
+| 5 | Universe-driven `!range` for narrow types | ✅ Done | `type_driven_range()` from `byte_size()` |
+| 6 | `dereferenceable(N)` for Ptr<T> params | ✅ Done | Removed — Ptr<T> is i64 at LLVM level, not a pointer type |
+| 7 | `argmemonly` attribute groups | ✅ Done | `#8`/`#9`/`#10` groups, `memory(argmem: readwrite/read)` |
+| 8 | Universe-driven `align_of()` + `ensure_typed_value()` | ✅ Done | `align_of()` queries universe; `ensure_typed_value` accepts `Option<Type>` for unbox_op |
+| 9 | Per-field `!invariant.load` | ✅ Done | A005c phi init loads, gated on write_set membership |
+| 10 | `!alias.scope` for async txns | ❌ Deferred | Thread pool runtime dispatches async bodies internally — no LLVM call instructions to annotate. Requires async dispatch refactoring. |
