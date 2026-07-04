@@ -53,7 +53,7 @@ impl LlvmBackend {
             // 2026-07-04: Gate the store on both needs_state_stores_in_body
             // and per-field done: liveness.  When done_needs_fields is
             // non-empty, only store fields that the done: block reads.
-            if self.fun.needs_state_stores_in_body && self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname) {
+            if self.fun.needs_state_stores_in_body && (self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname)) {
                 writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
                     indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
             }
@@ -84,7 +84,7 @@ impl LlvmBackend {
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
             // 2026-07-04: Gate the store on both needs_state_stores_in_body
             // and per-field done: liveness.
-            if self.fun.needs_state_stores_in_body && self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname) {
+            if self.fun.needs_state_stores_in_body && (self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname)) {
                 writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
                     indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
             }
