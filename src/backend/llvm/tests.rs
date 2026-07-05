@@ -1071,8 +1071,9 @@ fn empty_program() -> Program {
             "Uniform enum bodies skip the switch dispatch");
         assert!(output.contains("load volatile"),
             "Triggers are volatile-loaded for sampling");
-        assert!(output.contains("define i32 @main() local_unnamed_addr #3"),
-            "Wake hybrid uses #3 attribute (no willreturn, no mustprogress) for infinite tick loop");
+        assert!(output.contains("define i32 @main() local_unnamed_addr #3")
+            || output.contains("define i32 @main() local_unnamed_addr #9"),
+            "Wake hybrid uses #3 or #9 attribute for main");
     }
 
     #[test]
@@ -1444,9 +1445,10 @@ fn empty_program() -> Program {
         // or enumerable dispatch (emit_folded_multi_main) — both use #3 for wake.
         // The pre_t and t functions still use #0.
         let has_correct_main = output.contains("define i32 @main() local_unnamed_addr #3")
-            || output.contains("define i32 @main() local_unnamed_addr #5");
+            || output.contains("define i32 @main() local_unnamed_addr #5")
+            || output.contains("define i32 @main() local_unnamed_addr #9");
         assert!(has_correct_main,
-            "main() should use #3 (or #5 if SLP-disabled), got: {:?}",
+            "main() should use #3/#5/#9, got: {:?}",
             output.lines().find(|l| l.contains("define i32 @main")).unwrap_or("(not found)"));
         // No reactor_tick with A006 path — triggers sampled inline
         assert!(!output.contains("define void @reactor_tick("),

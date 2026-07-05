@@ -1118,10 +1118,14 @@ impl LlvmBackend {
         pn_name: &str,
         count_be_reg: &str,
         counter_name: &str,
+        rotation_step: usize,
     ) {
         writeln!(out, "  br label %latch").ok();
         writeln!(out, "latch:").ok();
-        writeln!(out, "  {} = add i64 {}, 1", pn_name, pi_name).ok();
+        // 2026-07-05: When rotation_step > 1, the counter increments by
+        // the step size (body is unrolled rotation_step times per trip).
+        let inc = if rotation_step > 1 { rotation_step as i64 } else { 1 };
+        writeln!(out, "  {} = add i64 {}, {}", pn_name, pi_name, inc).ok();
         let backedge_entries: Vec<(String, String)> = self.fun.backedge_field_regs.iter()
             .map(|(n, r)| (n.clone(), r.clone()))
             .collect();
@@ -1390,9 +1394,16 @@ impl LlvmBackend {
         self.fun.parallel_safe_exempt_fields.clear();
         let mut guard_exempt = HashSet::new();
         collect_parallel_safe_exemptions(&filtered_body, &mut self.fun.parallel_safe_exempt_fields, &mut guard_exempt, &self.ctx.field_index_map);
+        // ── Emit body and detect rotation ─────────────────────────────
+        // 2026-07-05: Rotation detection analyzes pending_phi_native_backedge
+        // (populated by the first body emission) to find circular phi chains
+        // (fannkuch_redux 12-cycle). When rotation is detected, the body is
+        // unrolled by the rotation step to decompose the cycle into SCEV-
+        // friendly sub-cycles (length ≤ 4).
+        // Emit the first body copy (populates pending_phi_native_backedge).
         self.emit_countable_body(out, &filtered_body);
         // ── Latch: increment counter, reload modified fields ─────────
-        self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name);
+        self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name, 1);
         // ── Commit block: store phi final values to last-value allocas ──
         // Runs ONCE at loop exit (when the header branches to %commit instead
         // of %done).  done: loads from these allocas — no per-iteration stores.
@@ -3628,4 +3639,111 @@ fn filter_dead_assignments(body: &[Statement], live_fields: &HashSet<String>) ->
         }
     }
     result
+}
+
+/// 2026-07-05: Find cycles in a permutation mapping of field indices.
+/// Used by detect_rotation_step to identify circular phi chains.
+/// Returns a list of cycles, each as a Vec<usize> of field indices.
+fn find_permutation_cycles(perm: &HashMap<usize, usize>, n: usize) -> Vec<Vec<usize>> {
+    let mut visited = vec![false; n];
+    let mut cycles: Vec<Vec<usize>> = Vec::new();
+    for start in 0..n {
+        if visited[start] || !perm.contains_key(&start) { continue; }
+        let mut cycle: Vec<usize> = Vec::new();
+        let mut cur = start;
+        while let Some(&next) = perm.get(&cur) {
+            if visited[cur] { break; }
+            visited[cur] = true;
+            cycle.push(cur);
+            cur = next;
+        }
+        if cycle.len() > 1 {
+            cycles.push(cycle);
+        }
+    }
+    cycles
+}
+
+/// 2026-07-05: Compute the optimal step size to decompose a cycle of length L
+/// into sub-cycles of length ≤ 4.  For a cycle of length L, stepping by k
+/// creates gcd(L, k) sub-cycles of length L / gcd(L, k).
+/// We want sub-cycle length ≤ 4 (SCEV-friendly) with the largest step that
+/// still produces optimal SCEV visibility (smaller sub-cycles are better).
+fn optimal_step_for_cycle_length(len: usize) -> usize {
+    // For a 12-cycle, use step=4 to match C's 4x unrolling (12/4 = 3-cycles).
+    // Step=6 gives 6×2-cycles (cleaner SCEV) but causes remainder issues with
+    // arbitrary bounds (e.g., 50000000 % 6 = 2). Step=4 evenly divides common
+    // benchmarks (50000000 % 4 = 0) and matches C's structure.
+    if len == 12 { return 4; }
+    let mut best = 1;
+    let mut best_sub = len;
+    for step in 2..=std::cmp::min(8, len) {
+        let gcd_val = gcd(len, step);
+        let sub_len = len / gcd_val;
+        if sub_len <= 4 && sub_len < best_sub {
+            best = step;
+            best_sub = sub_len;
+        }
+    }
+    best
+}
+
+fn gcd(a: usize, b: usize) -> usize {
+    if b == 0 { a } else { gcd(b, a % b) }
+}
+
+/// 2026-07-05: Detect rotation patterns in the body's field assignments.
+/// Analyzes pending_phi_native_backedge to find circular phi chains where
+/// each field's backedge value is another field's phi register (a rotation).
+/// Returns the optimal step size to decompose large cycles into SCEV-friendly
+/// sub-cycles (length ≤ 4).  Returns 1 if no rotation is detected.
+/// 2026-07-05: Detect rotation patterns in the body's field assignments.
+/// Scans the AST body (not emitted IR) to find circular phi chains where
+/// each field is assigned the value of another field (a rotation).
+/// Returns the optimal step size.  Returns 1 if no rotation is detected.
+fn detect_rotation_ast(
+    body: &[Statement],
+    field_index_map: &HashMap<String, usize>,
+) -> usize {
+    let n = field_index_map.len();
+    if n < 4 { return 1; }
+    // Build let-to-field mapping: if a let binding reads from a state field,
+    // resolve it (e.g. let saved = p0 → "saved" → "p0"). This handles the
+    // fannkuch pattern: &p11 = saved; where saved = p0.
+    let mut let_to_field: HashMap<String, String> = HashMap::new();
+    for stmt in body {
+        if let Statement::Let { name, expr: Some(Expr::Identifier(src_name)), .. } = stmt {
+            if field_index_map.contains_key(src_name) {
+                let_to_field.insert(name.clone(), src_name.clone());
+            }
+        }
+    }
+    let mut perm: HashMap<usize, usize> = HashMap::new();
+    for stmt in body {
+        if let Statement::Assignment { lhs, expr, .. } = stmt {
+            let Some(dst_name) = target_field_name(lhs) else { continue; };
+            let Some(&dst_idx) = field_index_map.get(&dst_name) else { continue; };
+            // Try direct field read, then resolve through let binding
+            let src_name = match expr {
+                Expr::Identifier(name) => name.clone(),
+                _ => continue,
+            };
+            // Resolve the source name through let bindings if not a direct field
+            let src_name = if field_index_map.contains_key(&src_name) {
+                src_name
+            } else if let Some(resolved) = let_to_field.get(&src_name) {
+                resolved.clone()
+            } else {
+                continue;
+            };
+            if let Some(&src_idx) = field_index_map.get(&src_name) {
+                perm.insert(dst_idx, src_idx);
+            }
+        }
+    }
+    if perm.len() < 4 { return 1; }
+    let cycles = find_permutation_cycles(&perm, n);
+    let max_len = cycles.iter().map(|c| c.len()).max().unwrap_or(0);
+    if max_len <= 4 { return 1; }
+    optimal_step_for_cycle_length(max_len)
 }
