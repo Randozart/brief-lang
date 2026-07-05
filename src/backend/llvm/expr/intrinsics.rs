@@ -179,14 +179,14 @@ pub fn emit_intrinsic_call(
                 let str_ptr = format!("%pplp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
                 let so = format!("%pplo{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so).ok();
                 let fmt = format!("%pplf{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr [4 x i8], [4 x i8]* @FMT_STR, i64 0, i64 0", indent, fmt).ok();
                 let fr = format!("%ppfr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, ptr {})",
                     indent, fr, so, fmt, str_ptr).ok();
                 let so2 = format!("%pplo{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so2).ok();
+                writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so2).ok();
                 writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, v, so2).ok();
             } else {
                 writeln!(out, "{}{} = add i64 0, 1 ; println no arg", indent, v).ok();
@@ -210,7 +210,7 @@ pub fn emit_intrinsic_call(
                 let str_ptr = format!("%pplp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, str_ptr, data_ptr).ok();
                 let so = format!("%pplo{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so).ok();
                 let fr = format!("%ppfr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = call i32 @fputs(ptr {}, ptr {})",
                     indent, v, str_ptr, so).ok();
@@ -1561,7 +1561,7 @@ pub fn emit_intrinsic_call(
             let so = format!("%pso{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             let fmt = format!("%pfi{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             let pi = format!("%ppi{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+            writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so).ok();
             writeln!(out, "{}{} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", indent, fmt).ok();
             writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, i64 {})",
                 indent, pi, so, fmt, n).ok();
@@ -1573,7 +1573,7 @@ pub fn emit_intrinsic_call(
             let pc = format!("%ppc{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             let so = format!("%pso{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = trunc i64 {} to i32", indent, ct, c).ok();
-            writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+            writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so).ok();
             writeln!(out, "{}{} = call i32 @fputc(i32 {}, ptr {})",
                 indent, v, ct, so).ok();
         }
@@ -1586,13 +1586,13 @@ pub fn emit_intrinsic_call(
             let pf = format!("%ppf{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             // 2026-06-29: Float64 is already double, skip fpext
             if d.ty == Type::Float64 {
-                writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so).ok();
                 writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt).ok();
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
                     indent, pf, so, fmt, fl).ok();
             } else {
                 writeln!(out, "{}{} = fpext float {} to double", indent, fd, fl).ok();
-                writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+                writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so).ok();
                 writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt).ok();
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
                     indent, pf, so, fmt, fd).ok();
@@ -1635,7 +1635,7 @@ pub fn emit_intrinsic_call(
             let mt = format!("%gbm{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             let so = format!("%gbso{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = trunc i64 {} to i32", indent, mt, mode).ok();
-            writeln!(out, "{}{} = load ptr, ptr @stdout", indent, so).ok();
+            writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so).ok();
             writeln!(out, "{}{} = call i32 @setvbuf(ptr {}, ptr null, i32 {}, i64 0)",
                 indent, v, so, mt).ok();
         }

@@ -2283,10 +2283,17 @@ fn link_and_optimize(
         None => { return None; }
     }
 
-    // Step 4: opt -O3 on merged module
+    // Step 4: opt -O2 on merged module (not -O3).
+    // 2026-07-05: -O3 includes ipsccp + globalopt which eliminate external
+    // globals like @stdout when no definition is visible in IR, causing
+    // fprintf calls to be treated as UB (null stdout) and eliminated.
+    // This made knucleotide, fasta, and cancel_math produce empty output
+    // — the entire loop + fprintf chain was removed by LLVM despite
+    // memory(readwrite) on the fprintf declaration. -O2 preserves the
+    // fprintf calls correctly; the runtime library provides @stdout.
     let opt_status = {
         let mut cmd = std::process::Command::new("opt");
-        cmd.args(["-O3", "-mtriple=x86_64-pc-linux-gnu", "-ffast-math", "-o"]);
+        cmd.args(["-O2", "-mtriple=x86_64-pc-linux-gnu", "-ffast-math", "-o"]);
         cmd.arg(&merged_opt_bc);
         cmd.arg(&merged_bc);
         for flag in llvm_extra_flags {
@@ -2304,9 +2311,9 @@ fn link_and_optimize(
         Err(_) => { return None; }
     }
 
-    // Step 5: llc → object
+    // Step 5: llc → object (use -O2, not -O3, to preserve fprintf calls)
     let llc_status = std::process::Command::new("llc")
-        .args(["-filetype=obj", "-O3", "--mcpu=native", "-o"])
+        .args(["-filetype=obj", "-O2", "--mcpu=native", "-o"])
         .arg(&obj_path)
         .arg(&merged_opt_bc)
         .status()

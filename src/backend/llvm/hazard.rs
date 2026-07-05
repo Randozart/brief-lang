@@ -156,6 +156,18 @@ fn compute_peak_live_floats(body: &[Statement], float_names: &[String]) -> u32 {
 
 impl LlvmBackend {
     pub(super) fn slp_attr(&self, fn_name: &str, default: &str) -> String {
+        // 2026-07-05: Map main functions to #9 to avoid attribute collision.
+        // clang-generated bitcode (from brief_rt.c) uses #0-#8, which would
+        // override the program's #0 during llvm-link LTO merging.
+        // clang's #0 has memory(inaccessiblemem: write), which makes LLVM
+        // eliminate fprintf@stdout calls — causing precomputed benchmarks
+        // with I/O to produce empty output (knucleotide, fasta).
+        if fn_name == "main" {
+            if self.ctx.slp_hazard_fns.contains(fn_name) {
+                return "#5".to_string();
+            }
+            return "#9".to_string();
+        }
         if self.ctx.slp_hazard_fns.contains(fn_name) {
             match default {
                 "#0" => "#4".to_string(),

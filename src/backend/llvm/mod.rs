@@ -1753,7 +1753,12 @@ self.emit_declares(&mut out);
         // Error message for read_file# — returned as Err's String payload
         writeln!(out, "@STR_READFILE_ERR = private unnamed_addr constant [15 x i8] c\"file not found\\00\"").ok();
         // Declare libc functions used by direct-libc intrinsics
-        writeln!(out, "@stdout = external global ptr").ok();
+        // 2026-07-05: dso_local prevents LLVM globalopt from treating
+        // @stdout as null (LLVM 18 assumes external globals without
+        // initializer are zero = null). Without dso_local, LLVM's
+        // function-attributor deduces fprintf(stdout) has a null pointer
+        // argument → UB → entire body is dead → knucleotide prints nothing.
+        writeln!(out, "@stdout = external dso_local global ptr").ok();
         writeln!(out, "declare i32 @fprintf(ptr, ptr, ...) #1").ok();
         writeln!(out, "declare i32 @fputc(i32, ptr) #1").ok();
         writeln!(out, "declare i32 @fflush(ptr) #1").ok();
@@ -2245,13 +2250,19 @@ self.emit_declares(&mut out);
                             // handled via phi merge (emit_stmt.rs:983-992).  A005c is
                             // selected for sparse-write, large-field bodies — per-field
                             // phis avoid the long insertvalue chain.
-                            // 2026-07-05: has_guards removed from A005a criteria — SSA mode
-                            // handles guards with phi merge at guard exit.  knucleotide
-                            // (0.42x best-known) has guards but needs A005a for perf.
+                            // 2026-07-05: When the body has FFI calls (print_int#, etc.),
+                            // use A005c instead of A005a.  A005a's insertvalue chain makes
+                            // it easier for LLVM's ipsccp/globalopt to prove the loop is
+                            // pure (by analyzing @stdout as null/undef), which causes
+                            // LLVM to eliminate the entire loop including all fprintf
+                            // calls — producing empty output (knucleotide, fasta bug).
                             let total_fields = self.ctx.field_index_map.len();
                             let write_count = node.write_set.len();
                             let write_density = if total_fields > 0 { write_count as f64 / total_fields as f64 } else { 1.0 };
-                            if write_density >= 0.5 && total_fields < 8 {
+                            let has_body_ffi = raw_body.iter().any(|s| {
+                                crate::analysis::transition_graph::statement_contains_ffi(s)
+                            });
+                            if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
                                 // A005a: inline SSA with insertvalue chain.
                                 // Best for dense writes (knucleotide: 4 fields all written,
                                 // mandelbrot: 5 fields all written).
@@ -2275,10 +2286,16 @@ self.emit_declares(&mut out);
                             // small fields favors A005a insertvalue chain.  The SSA mode
                             // guard handler (emit_stmt.rs:983-992) handles guards with
                             // phi merge, so guards don't disqualify A005a.
+                            // 2026-07-05: has_body_ffi check — when the body has FFI
+                            // calls, use A005c to prevent LLVM from eliminating the
+                            // loop+fprintf chain via globalopt (knucleotide bug).
                             let total_fields = self.ctx.field_index_map.len();
                             let write_count = node.write_set.len();
                             let write_density = if total_fields > 0 { write_count as f64 / total_fields as f64 } else { 1.0 };
-                            if write_density >= 0.5 && total_fields < 8 {
+                            let has_body_ffi = raw_body.iter().any(|s| {
+                                crate::analysis::transition_graph::statement_contains_ffi(s)
+                            });
+                            if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
                                 self.fun.pending_post_hoist = post_hoist;
                                 self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (A005a, {}/{} fields written)", &node.name, write_count, total_fields));
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
@@ -2669,9 +2686,9 @@ self.emit_declares(&mut out);
         }
         writeln!(out).ok();
         writeln!(out, "attributes #0 = {{").ok();
-        writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn").ok();
+        writeln!(out, "    mustprogress nofree norecurse nosync nounwind memory(readwrite)").ok();
         writeln!(out, "}}").ok();
-        writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn }}").ok();
+        writeln!(out, "attributes #1 = {{ nocallback nofree nosync nounwind willreturn memory(readwrite) }}").ok();
         writeln!(out, "attributes #2 = {{ mustprogress nofree norecurse nosync nounwind memory(readwrite) }}").ok();
         writeln!(out, "attributes #3 = {{ nofree norecurse nosync nounwind memory(readwrite) }}").ok();
         // SLP-safe attribute variants: #4 = #0 + disable-slp, #5 = #3 + disable-slp.
@@ -2679,7 +2696,7 @@ self.emit_declares(&mut out);
         // compatibility across versions 15–22+. Emitted only when needed.
         if !self.ctx.slp_hazard_fns.is_empty() {
             writeln!(out, "attributes #4 = {{").ok();
-            writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn").ok();
+            writeln!(out, "    mustprogress nofree norecurse nosync nounwind memory(readwrite)").ok();
             writeln!(out, "    \"disable-slp-vectorize\"=\"true\" \"no-vectorize-slp\"=\"true\"").ok();
             writeln!(out, "}}").ok();
             writeln!(out, "attributes #5 = {{").ok();
@@ -2711,12 +2728,15 @@ self.emit_declares(&mut out);
         writeln!(out, "    mustprogress nofree norecurse nosync nounwind willreturn memory(argmem: readwrite)").ok();
         writeln!(out, "}}").ok();
         // 2026-07-04: #9 = argmem:readwrite variant of #3 for @main.
-        // The main function only accesses memory through %state (no trigger
-        // globals directly — trigger access is through reactor_tick). This
-        // is not willreturn (main runs until convergence, not guaranteed to
-        // return), matching the original #3 semantics.
+        // 2026-07-05: #9 = memory(readwrite) for main functions.
+        // Main accesses @stdout (a global, not argmem) through fprintf
+        // calls. Using memory(readwrite) prevents LLVM from eliminating
+        // side-effectful I/O calls during opt's ipsccp/globalopt passes.
+        // This attribute is deliberately HIGH-numbered (#9) to avoid
+        // collision with clang-generated bitcode attributes (#0-#8)
+        // during LTO merging (llvm-link renumbers but keeps #9).
         writeln!(out, "attributes #9 = {{").ok();
-        writeln!(out, "    nofree norecurse nosync nounwind memory(argmem: readwrite)").ok();
+        writeln!(out, "    nofree norecurse nosync nounwind memory(readwrite)").ok();
         writeln!(out, "}}").ok();
         // 2026-07-04: #10 = argmem:read + willreturn for @pre_* functions.
         // Precondition functions only read state through %state and never
