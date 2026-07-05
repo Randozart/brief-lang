@@ -3836,3 +3836,45 @@ fn detect_rotation_ast(
     if max_len <= 4 { return 1; }
     optimal_step_for_cycle_length(max_len)
 }
+
+/// 2026-07-05: Build vector phi groups for register pressure reduction.
+/// Scans state fields matching pattern `[a-z][a-z][0-9]+` and groups them
+/// into `<4 x float>` vector phi nodes.  For nbody_sqrt's 30 float fields,
+/// this reduces phi count from 32 scalar to ~8 vector (eliminating spills).
+fn build_vector_phi_groups(
+    field_index_map: &HashMap<String, usize>,
+    field_types: &[String],
+) -> HashMap<String, Vec<String>> {
+    let mut groups: HashMap<String, Vec<(usize, String)>> = HashMap::new();
+    for (name, &idx) in field_index_map.iter() {
+        if idx >= field_types.len() { continue; }
+        let ty = &field_types[idx];
+        if ty != "float" && ty != "double" { continue; }
+        let bytes = name.as_bytes();
+        if bytes.len() < 3 { continue; }
+        // Pattern: [a-z][a-z][0-9]  e.g., vx0, by3, bz4
+        let c0 = bytes[0] as char;
+        let c1 = bytes[1] as char;
+        let rest = &name[2..];
+        let digit: usize = match rest.parse() {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+        if !c0.is_ascii_lowercase() || !c1.is_ascii_lowercase() { continue; }
+        // Group key: "{base}{component}" e.g., "vx" for vx0..vx4
+        let key = format!("{}{}", c0, c1);
+        groups.entry(key).or_default().push((idx, name.clone()));
+    }
+    let mut result: HashMap<String, Vec<String>> = HashMap::new();
+    for (key, mut members) in groups {
+        if members.len() < 4 { continue; }
+        // Sort by field index for stable ordering
+        members.sort_by_key(|(idx, _)| *idx);
+        // Take first 4 for the vector phi; remaining stay scalar
+        let names: Vec<String> = members.into_iter().take(4).map(|(_, n)| n).collect();
+        // Vector phi register name: %phi_{key}_v4
+        let vec_phi_name = format!("%phi_{}_v4", key);
+        result.insert(vec_phi_name, names);
+    }
+    result
+}

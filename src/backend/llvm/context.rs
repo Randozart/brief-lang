@@ -346,6 +346,14 @@ pub struct FunctionContext {
     // via GEP, breaking circular phi chains for SCEV analysis.
     pub rotation_fields: HashSet<String>,
 
+    // 2026-07-05: Vector phi groups for register pressure reduction.
+    // When multiple scalar fields form a contiguous group (e.g., vx0..vx3),
+    // they are promoted to a single <4 x float> phi node.  This reduces
+    // register pressure in the hot loop from 32 scalar phis to ~8 vector
+    // phis, eliminating register spills (nbody_sqrt: 16 spills → 0).
+    // Maps vector phi register name → Vec of field names it covers.
+    pub vector_phi_groups: HashMap<String, Vec<String>>,
+
     // Chimera tracking
 
     // Chimera tracking
@@ -406,6 +414,7 @@ impl FunctionContext {
             done_needs_fields: HashSet::new(),
             last_val_temps: HashMap::new(),
             rotation_fields: HashSet::new(),
+            vector_phi_groups: HashMap::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
         }
