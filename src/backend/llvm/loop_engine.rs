@@ -3452,6 +3452,34 @@ fn seed_observable_idents(
     field_index_map: &HashMap<String, usize>,
     live: &mut HashSet<String>,
 ) {
+    // 2026-07-05: Trace guard conditions — when a Guarded statement
+    // contains observable code (like term! -> print), the guard
+    // condition's field references must be live (they control whether
+    // the observable output executes). Without this, guard conditions'
+    // field refs (like `count` in [count == bound]) are never seeded
+    // as live, so filter_dead_assignments removes the counter increment
+    // and ssa_old_int_regs is never updated (nbody_newton bug).
+    if let Statement::Guarded { condition, statements } = stmt {
+        let has_observable = statements.iter().any(|gs| {
+            let mut sink = HashSet::new();
+            seed_observable_idents(gs, let_fields, field_index_map, &mut sink);
+            !sink.is_empty()
+        });
+        if has_observable {
+            let mut idents = HashSet::new();
+            collect_all_idents(condition, &mut idents);
+            for ident in &idents {
+                if field_index_map.contains_key(ident) {
+                    live.insert(ident.clone());
+                } else if let Some(sub_refs) = let_fields.get(ident) {
+                    for r in sub_refs {
+                        live.insert(r.clone());
+                    }
+                }
+            }
+        }
+        return;
+    }
     let expr = match stmt {
         Statement::TermBang { swan_song: Some(ss), .. }
         | Statement::Term { swan_song: Some(ss), .. } => {
@@ -3461,6 +3489,12 @@ fn seed_observable_idents(
             }
         }
         Statement::Expression(e) | Statement::Escape(Some(e)) => {
+            if is_output_call(e) { Some(e) } else { None }
+        }
+        // 2026-07-05: Handle Let bindings wrapping observable calls.
+        // In nbody_newton: let __periodic: Bool = print_float#(energy);
+        // Without this, the print call inside the Let is missed.
+        Statement::Let { expr: Some(e), .. } => {
             if is_output_call(e) { Some(e) } else { None }
         }
         _ => None,
