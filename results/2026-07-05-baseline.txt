@@ -1,0 +1,473 @@
+
+================================================
+  Building: ring_buffer  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/ring_buffer.bv 
+info: txn 'work' dispatched via per-field phi loop (A005c, 2 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/ring_buffer.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/ring_buffer
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: float_math  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/float_math.bv 
+info: txn 'tick' dispatched via per-field phi loop (A005c, 13 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/float_math.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/float_math
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: float_math_nonzero  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/float_math_nonzero.bv 
+info: txn 'tick' dispatched via per-field phi loop (A005c, 7 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/float_math_nonzero.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/float_math_nonzero
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: sparse_dispatch  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/sparse_dispatch.bv 
+info: modulo-switch dispatch for [ping, ack, err, debug, data, ctrl, sync_, stat] on count % 8
+  Output: benchmarks/sparse_dispatch.ll
+  Runtime object: benchmarks/brief_rt.o
+opt: benchmarks/sparse_dispatch.ll:1093:53: error: use of undefined value '%state_0'
+  %ip_16 = getelementptr inbounds %StateChunk0, ptr %state_0, i32 0, i32 0
+                                                    ^
+llc: error: llc: benchmarks/sparse_dispatch.ll:1093:53: error: use of undefined value '%state_0'
+  %ip_16 = getelementptr inbounds %StateChunk0, ptr %state_0, i32 0, i32 0
+                                                    ^
+  Warning: LLVM toolchain not found or failed. Compile manually:
+    opt -O2 -S benchmarks/sparse_dispatch.ll -o sparse_dispatch.opt.ll
+    llc sparse_dispatch.opt.ll -filetype=obj -o benchmarks/sparse_dispatch.o
+    ld sparse_dispatch.o benchmarks/brief_rt.o -o sparse_dispatch -lpthread
+benchmarks/sparse_dispatch.ll:1093:53: error: use of undefined value '%state_0'
+ 1093 |   %ip_16 = getelementptr inbounds %StateChunk0, ptr %state_0, i32 0, i32 0
+      |                                                     ^
+1 error generated.
+  (clang linking skipped — possibly linked by compiler)
+  (no binary — linking deferred)
+  C binary ready.
+
+================================================
+  Building: print_loop  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/print_loop.bv 
+info: txn 'work' dispatched via per-field phi loop (A005c, 2 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/print_loop.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/print_loop
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: nbody_newton  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/nbody_newton.bv 
+info: txn 'simulate' dispatched via per-field phi loop (A005c, 32 fields)
+info: field(s) 'last_energy' written by txn 'simulate' are never read — wasted work
+note: not referenced by any precondition or #!exit; values computed but have no effect
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/nbody_newton.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/nbody_newton
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: nbody_sqrt  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/nbody_sqrt.bv 
+info: txn 'simulate' dispatched via per-field phi loop (A005c, 31 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/nbody_sqrt.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/nbody_sqrt
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: nbody_sqrt_idio  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/nbody_sqrt_idio.bv 
+info: txn 'simulate' dispatched via per-field phi loop (A005c, 31 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/nbody_sqrt_idio.ll
+  Runtime object: benchmarks/brief_rt.o
+opt: benchmarks/nbody_sqrt_idio.ll:14485:24: error: '%phi_vx3' defined with type 'float' but expected 'i64'
+  %be_vx3 = add i64 0, %phi_vx3
+                       ^
+llc: error: llc: benchmarks/nbody_sqrt_idio.ll:14485:24: error: '%phi_vx3' defined with type 'float' but expected 'i64'
+  %be_vx3 = add i64 0, %phi_vx3
+                       ^
+  Warning: LLVM toolchain not found or failed. Compile manually:
+    opt -O2 -S benchmarks/nbody_sqrt_idio.ll -o nbody_sqrt_idio.opt.ll
+    llc nbody_sqrt_idio.opt.ll -filetype=obj -o benchmarks/nbody_sqrt_idio.o
+    ld nbody_sqrt_idio.o benchmarks/brief_rt.o -o nbody_sqrt_idio -lpthread
+benchmarks/nbody_sqrt_idio.ll:14485:24: error: '%phi_vx3' defined with type 'float' but expected 'i64'
+ 14485 |   %be_vx3 = add i64 0, %phi_vx3
+       |                        ^
+1 error generated.
+  (clang linking skipped — possibly linked by compiler)
+  (no binary — linking deferred)
+  C binary ready.
+
+================================================
+  Building: fasta  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/fasta.bv 
+info: txn 'fasta' dispatched via inline SSA (A005a, 2/4 fields written)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/fasta.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/fasta
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: fannkuch_redux  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/fannkuch_redux.bv 
+info: txn 'fan' dispatched via per-field phi loop (A005c, 16 fields)
+  Output: benchmarks/fannkuch_redux.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/fannkuch_redux
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: mandelbrot  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/mandelbrot.bv 
+info: txn 'mb' dispatched via per-field phi loop (A005c, 10 fields)
+info: field(s) 'ci', 't3', 'cr', 't1', 't2' written by txn 'mb' are never read — wasted work
+note: not referenced by any precondition or #!exit; values computed but have no effect
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/mandelbrot.ll
+  Runtime object: benchmarks/brief_rt.o
+Instruction does not dominate all uses!
+  %t216 = add i64 %t207, %t215
+  %t265 = add i64 0, %t216
+opt: benchmarks/mandelbrot.ll: error: input module is broken!
+Instruction does not dominate all uses!
+  %t216 = add i64 %t207, %t215
+  %t265 = add i64 0, %t216
+llc: error: 'benchmarks/mandelbrot.ll': input module cannot be verified
+  Warning: LLVM toolchain not found or failed. Compile manually:
+    opt -O2 -S benchmarks/mandelbrot.ll -o mandelbrot.opt.ll
+    llc mandelbrot.opt.ll -filetype=obj -o benchmarks/mandelbrot.o
+    ld mandelbrot.o benchmarks/brief_rt.o -o mandelbrot -lpthread
+/usr/bin/ld: /usr/lib/gcc/x86_64-linux-gnu/13/../../../x86_64-linux-gnu/crt1.o: in function `_start':
+(.text+0x1b): undefined reference to `main'
+collect2: error: ld returned 1 exit status
+  (link failed — try manual link)
+  (no binary — linking deferred)
+  C binary ready.
+
+================================================
+  Building: kalman_filter_runtime  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/kalman_filter_runtime.bv 
+info: txn 'propagate' dispatched via per-field phi loop (A005c, 13 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/kalman_filter_runtime.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/kalman_filter_runtime
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: knucleotide  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/knucleotide.bv 
+info: txn 'kn' dispatched via inline SSA (A005a, 4/6 fields written)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/knucleotide.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/knucleotide
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: cancel_math  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/cancel_math.bv 
+info: txn 'step' dispatched via inline SSA (A005a, 2/4 fields written)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/cancel_math.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/cancel_math
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: bit_clear  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/bit_clear.bv 
+info: program dispatched via direct SSA loop
+info: sequential bounded dispatch (non-modulo preconditions)
+  Output: benchmarks/bit_clear.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/bit_clear
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: queue_drain  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/queue_drain.bv 
+info: txn 'work' dispatched via per-field phi loop (A005c, 2 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/queue_drain.ll
+  Runtime object: benchmarks/brief_rt.o
+opt: benchmarks/queue_drain.ll:745:25: error: use of undefined value '%ip_2'
+  store i64 %rb2_h, ptr %ip_2, align 8
+                        ^
+llc: error: llc: benchmarks/queue_drain.ll:745:25: error: use of undefined value '%ip_2'
+  store i64 %rb2_h, ptr %ip_2, align 8
+                        ^
+  Warning: LLVM toolchain not found or failed. Compile manually:
+    opt -O2 -S benchmarks/queue_drain.ll -o queue_drain.opt.ll
+    llc queue_drain.opt.ll -filetype=obj -o benchmarks/queue_drain.o
+    ld queue_drain.o benchmarks/brief_rt.o -o queue_drain -lpthread
+benchmarks/queue_drain.ll:745:25: error: use of undefined value '%ip_2'
+  745 |   store i64 %rb2_h, ptr %ip_2, align 8
+      |                         ^
+1 error generated.
+  (clang linking skipped — possibly linked by compiler)
+  (no binary — linking deferred)
+  C binary ready.
+
+================================================
+  Building: queue_drain_sym  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/queue_drain_sym.bv 
+info: txn 'work' dispatched via per-field phi loop (A005c, 2 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/queue_drain_sym.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/queue_drain_sym
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  Building: queue_drain_idio  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/queue_drain_idio.bv 
+info: txn 'work' dispatched via per-field phi loop (A005c, 2 fields)
+warning: #!exit declared but program has no tick loop
+note: the exit condition will never be checked
+help: add an @link trigger to make the program reactive, or remove #!exit
+  Output: benchmarks/queue_drain_idio.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/queue_drain_idio
+  Brief binary ready.
+  (no C reference — skipping)
+
+================================================
+  Building: interval_step  (tag: runtime)
+================================================
+Compiling to LLVM IR: benchmarks/interval_step.bv 
+info: program dispatched via direct SSA loop
+info: sequential bounded dispatch (non-modulo preconditions)
+  Output: benchmarks/interval_step.ll
+  LTO-merged: program.bc + 1 foreign modules → optimized
+  Binary: benchmarks/interval_step
+  Brief binary ready.
+  C binary ready.
+
+================================================
+  RUNNING BENCHMARKS
+================================================
+
+=== ring_buffer ===
+  Brief: .0619s  (min 0.059713s, max 0.063102s)
+  C:     .0615s
+  Ratio: 1.00x  →  ~tie wins
+  correctness: MATCH (output: "")
+
+=== float_math ===
+  Brief: .0610s  (min 0.057462s, max 0.064431s)
+  C:     .0721s
+  Ratio: .84x  →  Brief wins
+  correctness: MISMATCH
+    brief: "0.300000012"
+    c:     ""
+
+=== float_math_nonzero ===
+  Brief: .1724s  (min 0.170719s, max 0.173836s)
+  C:     .1704s
+  Ratio: 1.01x  →  C wins
+  correctness: MISMATCH
+    brief: "2.000000000"
+    c:     ""
+
+=== sparse_dispatch ===
+  brief binary: (no binary — linking issue)
+  c binary:     1777B
+  correctness: SKIP (binary missing)
+
+=== print_loop ===
+  Brief: .0600s  (min 0.057506s, max 0.061891s)
+  C:     .0606s
+  Ratio: .99x  →  Brief wins
+  correctness: MATCH (output: "")
+
+=== nbody_newton ===
+  Brief: 7.6231s  (min 7.255276s, max 8.392667s)
+  C:     9.2509s
+  Ratio: .82x  →  Brief wins
+  correctness: MISMATCH (line count 2 vs 1)
+
+=== nbody_sqrt ===
+  Brief: 3.9217s  (min 3.793951s, max 4.136226s)
+  C:     3.0539s
+  Ratio: 1.28x  →  C wins
+  correctness: MATCH (output: "-0.169288784")
+
+=== nbody_sqrt_idio ===
+  brief binary: (no binary — linking issue)
+  c binary:     5418B
+  correctness: SKIP (binary missing)
+
+=== fasta ===
+  Brief: .0006s  (min 0.000634s, max 0.000724s)
+  C:     .2271s
+  Ratio: 0x  →  Brief wins
+  correctness: MISMATCH
+    brief: ""
+    c:     "xqjqf"
+
+=== fannkuch_redux ===
+  Brief: .1029s  (min 0.101258s, max 0.105794s)
+  C:     .0638s
+  Ratio: 1.61x  →  C wins
+  correctness: MATCH (output: "10")
+
+=== mandelbrot ===
+  brief binary: (no binary — linking issue)
+  c binary:     2195B
+  correctness: SKIP (binary missing)
+
+=== kalman_filter_runtime ===
+  Brief: .1802s  (min 0.177557s, max 0.184047s)
+  C:     .1805s
+  Ratio: .99x  →  Brief wins
+  correctness: MISMATCH
+    brief: "0.307020009"
+    c:     ""
+
+=== knucleotide ===
+  Brief: .0006s  (min 0.000595s, max 0.000682s)
+  C:     .1937s
+  Ratio: 0x  →  Brief wins
+  correctness: MISMATCH
+    brief: ""
+    c:     "3"
+
+=== cancel_math ===
+  Brief: .0006s  (min 0.000589s, max 0.000819s)
+  C:     .0666s
+  Ratio: 0x  →  Brief wins
+  correctness: MATCH (output: "")
+
+=== bit_clear ===
+  Brief: .0006s  (min 0.000590s, max 0.000714s)
+  C:     .0006s
+  Ratio: 1.00x  →  ~tie wins
+  correctness: MISMATCH
+    brief: ""
+    c:     "0"
+
+=== queue_drain ===
+  brief binary: (no binary — linking issue)
+  c binary:     1777B
+  correctness: SKIP (binary missing)
+
+=== queue_drain_sym ===
+  Brief: .0598s  (min 0.058819s, max 0.061211s)
+  C:     .0580s
+  Ratio: 1.03x  →  C wins
+  correctness: MATCH (output: "")
+
+=== queue_drain_idio ===
+benchmarks/build_and_bench.sh: line 244: [: : integer expression expected
+  SKIP — no C binary
+
+=== interval_step ===
+  Brief: .0008s  (min 0.000574s, max 0.001414s)
+  C:     .0633s
+  Ratio: .01x  →  Brief wins
+  correctness: MATCH (output: "")
+
+================================================
+  SUMMARY
+================================================
+  5 iterations per benchmark, avg wall clock via CLOCK_MONOTONIC.
+  BOUND=50000000. Nanosecond-precision fork+exec timing harness.
+  Tags: runtime=FFI in hot loop, optimizer=precompute_ok.
+================================================
+
+╔═══════════════════════════╦════════════╦════════════╦══════════╦════════╦═══════════╗
+║ Benchmark                 ║ Brief      ║ C          ║ Ratio    ║ Winner ║ Correct   ║
+╠═══════════════════════════╬════════════╬════════════╬══════════╬════════╬═══════════╣
+║ ring_buffer               ║ .0619s     ║ .0615s     ║ 1.00x    ║ ~tie   ║ MATCH     ║
+║ float_math                ║ .0610s     ║ .0721s     ║ .84x     ║ Brief  ║ MISMATCH  ║
+║ float_math_nonzero        ║ .1724s     ║ .1704s     ║ 1.01x    ║ C      ║ MISMATCH  ║
+║ sparse_dispatch           ║ precomputed ║            ║          ║        ║ SKIP      ║
+║ print_loop                ║ .0600s     ║ .0606s     ║ .99x     ║ Brief  ║ MATCH     ║
+║ nbody_newton              ║ 7.6231s    ║ 9.2509s    ║ .82x     ║ Brief  ║ MISMATCH  ║
+║ nbody_sqrt                ║ 3.9217s    ║ 3.0539s    ║ 1.28x    ║ C      ║ MATCH     ║
+║ nbody_sqrt_idio           ║ precomputed ║            ║          ║        ║ SKIP      ║
+║ fasta                     ║ .0006s     ║ .2271s     ║ 0x       ║ Brief  ║ MISMATCH  ║
+║ fannkuch_redux            ║ .1029s     ║ .0638s     ║ 1.61x    ║ C      ║ MATCH     ║
+║ mandelbrot                ║ precomputed ║            ║          ║        ║ SKIP      ║
+║ kalman_filter_runtime     ║ .1802s     ║ .1805s     ║ .99x     ║ Brief  ║ MISMATCH  ║
+║ knucleotide               ║ .0006s     ║ .1937s     ║ 0x       ║ Brief  ║ MISMATCH  ║
+║ cancel_math               ║ .0006s     ║ .0666s     ║ 0x       ║ Brief  ║ MATCH     ║
+║ bit_clear                 ║ .0006s     ║ .0006s     ║ 1.00x    ║ ~tie   ║ MISMATCH  ║
+║ queue_drain               ║ precomputed ║            ║          ║        ║ SKIP      ║
+║ queue_drain_sym           ║ .0598s     ║ .0580s     ║ 1.03x    ║ C      ║ MATCH     ║
+║ queue_drain_idio          ║ SKIP       ║            ║          ║        ║ SKIP      ║
+║ interval_step             ║ .0008s     ║ .0633s     ║ .01x     ║ Brief  ║ MATCH     ║
+╚═══════════════════════════╩════════════╩════════════╩══════════╩════════╩═══════════╝

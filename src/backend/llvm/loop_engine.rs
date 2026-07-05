@@ -1154,8 +1154,17 @@ impl LlvmBackend {
                         be_reg, ty, gep_reload, self.align_of(ty)).ok();
                 }
             } else {
+                // 2026-07-05: Identity backedge — use phi register unchanged.
+                // For float/double fields, use fadd 0.0 (identity) instead of
+                // add i64, which would produce type mismatch when the phi
+                // register is float-typed.
                 let phi_reg = phi_entries.get(name).cloned().unwrap_or_default();
-                writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg).ok();
+                let Some(&(_, ref ty)) = field_map.get(name) else { continue; };
+                let _ = match ty.as_str() {
+                    "float" => writeln!(out, "  {} = fadd float {}, 0.0", be_reg, phi_reg),
+                    "double" => writeln!(out, "  {} = fadd double {}, 0.0", be_reg, phi_reg),
+                    _ => writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg),
+                };
             }
         }
         writeln!(out, "  {} = add i64 0, {}", count_be_reg, pn_name).ok();
