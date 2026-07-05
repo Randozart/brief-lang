@@ -1175,21 +1175,22 @@ impl LlvmBackend {
         self.fun.needs_state_stores_in_body = true;
         let (counter_name, _count_phi_reg, pi_name, pn_name, _init_count)
             = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg);
+        // ── Dead-field analysis: trace liveness, filter dead assignments ──
+        // 2026-07-04: Eliminate & assignments to fields that no observable
+        // output consumes.  This shrinks the body seen by LLVM's loop unroller,
+        // fixing the phase-ordering issue (fannkuch_redux: ~80→~40 insns).
+        let live = trace_live_fields(body, &self.ctx.field_index_map);
+        let filtered_body = filter_dead_assignments(body, &live);
         // ── Body: load all fields from %State, emit statements ──────
         writeln!(out, "body:").ok();
         self.fun.ssa_state_reg = None;
         self.fun.returns_i64 = false;
-        // 2026-07-04: Enable parallel-safe mode for ALL bodies.
-        // ssa_old caches are NOT updated after & assignments — all reads
-        // use old (phi) values.  This makes every computation independent,
-        // enabling LLVM to SIMD-vectorize across the entire body.
-        // The counter field is exempt (tracked by counter_field_name).
-        self.fun.parallel_safe_body = is_body_parallel_safe(body);
+        self.fun.parallel_safe_body = is_body_parallel_safe(&filtered_body);
         self.fun.counter_field_name = Some(counter_name.clone());
         self.fun.parallel_safe_exempt_fields.clear();
         let mut guard_exempt = HashSet::new();
-        collect_parallel_safe_exemptions(body, &mut self.fun.parallel_safe_exempt_fields, &mut guard_exempt, &self.ctx.field_index_map);
-        self.emit_countable_body(out, body);
+        collect_parallel_safe_exemptions(&filtered_body, &mut self.fun.parallel_safe_exempt_fields, &mut guard_exempt, &self.ctx.field_index_map);
+        self.emit_countable_body(out, &filtered_body);
         // ── Latch: increment counter ───────────────────────────────
         self.emit_countable_latch(out, &pi_name, &pn_name);
         // ── Done: emit post-loop prints + exit ──────────────────────
