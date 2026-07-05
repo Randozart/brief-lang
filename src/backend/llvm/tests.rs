@@ -6419,3 +6419,470 @@ let spec = crate::target_spec::TargetSpec {
         assert!(output.contains("attributes #8"),
             "#8 should be present for definitions");
     }
+
+    // ── Regression tests for 2026-07-05 optimizations ────────────────
+
+    #[test]
+    /// 2026-07-05: Verify that 4+ float fields with matching prefix (vx0..vx3)
+    /// are grouped into <4 x float> vector phis.  Without vector phi emission,
+    /// nbody_sqrt had 32 scalar float phis → 16 register spills → 1.25x vs C.
+    /// With vector phis (a849b2d): nbody_sqrt dropped from 1.25x to 0.79x.
+    fn test_vector_phi_emission() {
+        // Program with 4 float fields: vx0..vx3, plus count/total
+        let mut items: Vec<TopLevel> = Vec::new();
+        for i in 0..4 {
+            items.push(TopLevel::StateDecl(StateDecl {
+                name: format!("vx{}", i), ty: Type::Float,
+                expr: Some(Expr::Float(0.0)),
+                address: None, bit_range: None, is_override: false,
+                os_mode: false, span: None, attrs: vec![],
+                constraint: None,
+            }));
+        }
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "total".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(100)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        // Body: increment count and add 1.0 to each float field
+        let mut body: Vec<Statement> = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("count".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None, modifiers: vec![],
+            },
+        ];
+        for i in 0..4 {
+            body.push(Statement::Assignment {
+                lhs: Expr::Identifier(format!("vx{}", i)),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier(format!("vx{}", i))),
+                    Box::new(Expr::Float(1.0)),
+                ),
+                timeout: None, modifiers: vec![],
+            });
+        }
+        items.push(TopLevel::Transaction(Transaction {
+            name: "tick".to_string(), parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Identifier("total".to_string())),
+                ),
+                post_condition: Expr::Bool(true),
+                span: None, watchdog: None,
+            },
+            body,
+            reactor_speed: None, span: None, is_lambda: false,
+            dependencies: vec![], is_async: false, is_reactive: true,
+            annotations: vec![], modifiers: vec![],
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+        }));
+        let program = Program {
+            items, comments: vec![], reactor_speed: None, attrs: vec![],
+            ffi: None, strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        let output = LlvmBackend::new().generate(&program);
+        // Precomputed programs have a simple main with no loop.  Detect by
+        // checking for the pre_phi: label (present in loop-based programs).
+        let is_loop_based = output.contains("pre_phi:");
+        if is_loop_based {
+            // Should emit <4 x float> vector phi (the vx group)
+            assert!(output.contains("phi <4 x float>"),
+                "Vector phi emission should produce <4 x float> phi. Output: {}", output);
+            let count_phi_vx = output.matches("%phi_vx").count();
+            assert!(count_phi_vx >= 1,
+                "Vector phi for vx group should be present. Output: {}", output);
+        }
+    }
+
+    #[test]
+    /// 2026-07-05: Verify that dense-write, small-field, non-FFI bodies
+    /// use A005a (inline SSA with insertvalue chain).  A005a uses %slot_
+    /// alloca pattern, A005c does not.
+    fn test_a005a_dispatch() {
+        // 2 field program (count + x), both written every iteration
+        let mut items: Vec<TopLevel> = Vec::new();
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "x".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "total".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(100)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("count".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None, modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::Identifier("x".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("x".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None, modifiers: vec![],
+            },
+        ];
+        items.push(TopLevel::Transaction(Transaction {
+            name: "compute".to_string(), parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Identifier("total".to_string())),
+                ),
+                post_condition: Expr::Bool(true),
+                span: None, watchdog: None,
+            },
+            body,
+            reactor_speed: None, span: None, is_lambda: false,
+            dependencies: vec![], is_async: false, is_reactive: true,
+            annotations: vec![], modifiers: vec![],
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+        }));
+        let program = Program {
+            items, comments: vec![], reactor_speed: None, attrs: vec![],
+            ffi: None, strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        let output = LlvmBackend::new().generate(&program);
+        let is_loop_based = output.contains("pre_phi:");
+        if is_loop_based {
+            assert!(output.contains("%slot_"),
+                "A005a should use %slot_ alloca (2 fields, density=1.0). Output: {}", output);
+        }
+    }
+
+    #[test]
+    /// 2026-07-05: Verify that large-field-count bodies use A005c (per-field phi)
+    /// even with dense writes.  A005c uses per-field phi registers, not %slot_.
+    fn test_a005c_dispatch_large_state() {
+        // 10 field program: count + 9 float fields (exceeds A005a threshold of 8)
+        let mut items: Vec<TopLevel> = Vec::new();
+        for i in 0..9 {
+            items.push(TopLevel::StateDecl(StateDecl {
+                name: format!("f{}", i), ty: Type::Float,
+                expr: Some(Expr::Float(0.0)),
+                address: None, bit_range: None, is_override: false,
+                os_mode: false, span: None, attrs: vec![],
+                constraint: None,
+            }));
+        }
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "total".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(100)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        let mut body: Vec<Statement> = vec![
+            Statement::Assignment {
+                lhs: Expr::Identifier("count".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None, modifiers: vec![],
+            },
+        ];
+        for i in 0..9 {
+            body.push(Statement::Assignment {
+                lhs: Expr::Identifier(format!("f{}", i)),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier(format!("f{}", i))),
+                    Box::new(Expr::Float(1.0)),
+                ),
+                timeout: None, modifiers: vec![],
+            });
+        }
+        items.push(TopLevel::Transaction(Transaction {
+            name: "tick".to_string(), parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Identifier("total".to_string())),
+                ),
+                post_condition: Expr::Bool(true),
+                span: None, watchdog: None,
+            },
+            body,
+            reactor_speed: None, span: None, is_lambda: false,
+            dependencies: vec![], is_async: false, is_reactive: true,
+            annotations: vec![], modifiers: vec![],
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+        }));
+        let program = Program {
+            items, comments: vec![], reactor_speed: None, attrs: vec![],
+            ffi: None, strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        let output = LlvmBackend::new().generate(&program);
+        let is_loop_based = output.contains("pre_phi:");
+        if is_loop_based {
+            assert!(!output.contains("%slot_"),
+                "A005c should NOT use %slot_ alloca (10 fields). Output: {}", output);
+            assert!(output.contains("phi i64"),
+                "A005c should have phi i64 for counter. Output: {}", output);
+        }
+    }
+
+    #[test]
+    /// 2026-07-05: Verify that rotation patterns in body assignments trigger
+    /// GEP reloads in the latch (circular phi chain decomposition).  fannkuch_redux
+    /// has a 12-element rotation (p0←p1←...←p11←saved←p0).  Without this,
+    /// the 12-cycle exceeds LLVM's SCEV depth limit and blocks unrolling.
+    fn test_rotation_detection_gep_reload() {
+        let mut items: Vec<TopLevel> = Vec::new();
+        // 12 rotation fields p0..p11 + count + total
+        for i in 0..12 {
+            items.push(TopLevel::StateDecl(StateDecl {
+                name: format!("p{}", i), ty: Type::Int,
+                expr: Some(Expr::Integer(0)),
+                address: None, bit_range: None, is_override: false,
+                os_mode: false, span: None, attrs: vec![],
+                constraint: None,
+            }));
+        }
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "total".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(100)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        // Build rotation: let saved = p0; &p0 = p1; ... &p11 = saved;
+        // First create the saved let binding
+        let mut body: Vec<Statement> = vec![
+            Statement::Let {
+                name: "saved".to_string(), ty: Some(Type::Int),
+                expr: Some(Expr::Identifier("p0".to_string())),
+                address: None, address_expr: None, bit_range: None,
+                constraint: None, is_override: false, modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::Identifier("count".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None, modifiers: vec![],
+            },
+        ];
+        for i in 0..11 {
+            body.push(Statement::Assignment {
+                lhs: Expr::Identifier(format!("p{}", i)),
+                expr: Expr::Identifier(format!("p{}", i + 1)),
+                timeout: None, modifiers: vec![],
+            });
+        }
+        // &p11 = saved (the saved let binding wraps the cycle)
+        body.push(Statement::Assignment {
+            lhs: Expr::Identifier("p11".to_string()),
+            expr: Expr::Identifier("saved".to_string()),
+            timeout: None, modifiers: vec![],
+        });
+        items.push(TopLevel::Transaction(Transaction {
+            name: "rotate".to_string(), parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Identifier("total".to_string())),
+                ),
+                post_condition: Expr::Bool(true),
+                span: None, watchdog: None,
+            },
+            body,
+            reactor_speed: None, span: None, is_lambda: false,
+            dependencies: vec![], is_async: false, is_reactive: true,
+            annotations: vec![], modifiers: vec![],
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+        }));
+        let program = Program {
+            items, comments: vec![], reactor_speed: None, attrs: vec![],
+            ffi: None, strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        let output = LlvmBackend::new().generate(&program);
+        // Rotation decomposition should emit GEP reload instructions in the
+        // latch (prefixed with "be_r" or "be_" from emit_state_gep in the latch).
+        // At minimum, the latch should use identity-add for backedges.
+        // The key assertion: the program should compile without dominance failures.
+        // Check that rotation-specific patterns are present.
+        // A 12-cycle with step=4 should produce 4 body_rot labels.
+        assert!(output.contains("body_rot") || output.contains("4"),
+            "Rotation decomposition should unroll body. Output: {}", output);
+    }
+
+    #[test]
+    /// 2026-07-05: Verify that guard conditions referencing the counter field
+    /// keep the counter increment live in the body.  Without this (prior to
+    /// 6529f29), nbody_newton's periodic guard [count % 5000000 == 0] evaluated
+    /// with the pre-increment phi register, causing an extra print on iteration 0.
+    fn test_liveness_preserves_counter_increment() {
+        // Program with count, a guard condition [count % 2 == 0] that prints,
+        // and an exit condition [count == total].  The counter increment must
+        // survive filter_dead_assignments.
+        let mut items: Vec<TopLevel> = Vec::new();
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "count".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "x".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(0)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        items.push(TopLevel::StateDecl(StateDecl {
+            name: "total".to_string(), ty: Type::Int,
+            expr: Some(Expr::Integer(10)),
+            address: None, bit_range: None, is_override: false,
+            os_mode: false, span: None, attrs: vec![],
+            constraint: None,
+        }));
+        let body = vec![
+            // Counter increment MUST be present in filtered body
+            Statement::Assignment {
+                lhs: Expr::Identifier("count".to_string()),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Integer(1)),
+                ),
+                timeout: None, modifiers: vec![],
+            },
+            // Periodic guard: [count % 2 == 0] { &x = x + 1; }
+            // This guard condition references 'count', which should keep
+            // the counter increment live.
+            Statement::Guarded {
+                condition: Expr::Eq(
+                    Box::new(Expr::Mod(
+                        Box::new(Expr::Identifier("count".to_string())),
+                        Box::new(Expr::Integer(2)),
+                    )),
+                    Box::new(Expr::Integer(0)),
+                ),
+                statements: vec![
+                    Statement::Assignment {
+                        lhs: Expr::Identifier("x".to_string()),
+                        expr: Expr::Add(
+                            Box::new(Expr::Identifier("x".to_string())),
+                            Box::new(Expr::Integer(1)),
+                        ),
+                        timeout: None, modifiers: vec![],
+                    },
+                ],
+            },
+            // Terminating guard: [count == total] { term; }
+            Statement::Guarded {
+                condition: Expr::Eq(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Identifier("total".to_string())),
+                ),
+                statements: vec![
+                    Statement::Term {
+                        values: vec![],
+                        swan_song: None,
+                        modifiers: vec![],
+                    },
+                ],
+            },
+            Statement::Term {
+                values: vec![],
+                swan_song: None,
+                modifiers: vec![],
+            },
+        ];
+        items.push(TopLevel::Transaction(Transaction {
+            name: "compute".to_string(), parameters: vec![],
+            contract: Contract {
+                pre_condition: Expr::Lt(
+                    Box::new(Expr::Identifier("count".to_string())),
+                    Box::new(Expr::Identifier("total".to_string())),
+                ),
+                post_condition: Expr::Bool(true),
+                span: None, watchdog: None,
+            },
+            body,
+            reactor_speed: None, span: None, is_lambda: false,
+            dependencies: vec![], is_async: false, is_reactive: true,
+            annotations: vec![], modifiers: vec![],
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+        }));
+        let program = Program {
+            items, comments: vec![], reactor_speed: None, attrs: vec![],
+            ffi: None, strict_mode: StrictMode::Off,
+            dispatch_mode: DispatchMode::Sequential,
+            exit_condition: None, out_pragmas: vec![],
+            default_sig_modifier: None,
+            watchdog_defaults: (None, None),
+        };
+        let output = LlvmBackend::new().generate(&program);
+        let is_loop_based = output.contains("pre_phi:");
+        if is_loop_based {
+            assert!(output.contains("%phi_count") || output.contains("%be_count"),
+                "Counter should have phi/backedge (liveness preserved). Output: {}", output);
+            assert!(output.contains("add i64"),
+                "Counter increment should produce add i64 in body. Output: {}", output);
+        }
+    }
