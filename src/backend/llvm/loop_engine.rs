@@ -1179,7 +1179,20 @@ impl LlvmBackend {
         // 2026-07-04: Eliminate & assignments to fields that no observable
         // output consumes.  This shrinks the body seen by LLVM's loop unroller,
         // fixing the phase-ordering issue (fannkuch_redux: ~80→~40 insns).
-        let live = trace_live_fields(body, &self.ctx.field_index_map);
+        // 2026-07-05: Include hoisted terminating guard content in liveness
+        // analysis.  hoist_terminating_guard removes [count==bound]{...} from
+        // body_stmts and stores it in pending_post_hoist.  Without it,
+        // trace_live_fields never sees print_float#(energy) and marks all
+        // fields dead — causing nbody_sqrt to eliminate all stores.
+        let liveness_body = {
+            let post = &self.fun.pending_post_hoist;
+            let mut combined = body.to_vec();
+            for hoisted in post {
+                combined.extend(hoisted.iter().cloned());
+            }
+            combined
+        };
+        let live = trace_live_fields(&liveness_body, &self.ctx.field_index_map);
         let filtered_body = filter_dead_assignments(body, &live);
         // ── Body: load all fields from %State, emit statements ──────
         writeln!(out, "body:").ok();
@@ -2560,14 +2573,19 @@ fn collect_parallel_safe_exemptions(
                 mutation_order.push(name.clone());
             }
         }
-        // Guard CONDITIONS: always exempt all field reads
+        // Guard: collect condition field reads + body field reads.
+        // Terminating guards skip the condition field reads (they're only used
+        // to determine loop exit, not visible computation), but still exempt
+        // body fields so LET bindings in the guard body (like vx0, bx0 used
+        // to compute energy) have updated ssa_old values.
         if let Statement::Guarded { condition, statements, .. } = s {
-            if terminating_guard(statements) { continue; }
-            collect_expr_field_refs(condition, guard_exempt_fields, field_index_map);
-            // Guard body: side-effecting call arguments
-            for gs in statements {
-                exempt_side_effect_args(gs, guard_exempt_fields, field_index_map);
+            if !terminating_guard(statements) {
+                collect_expr_field_refs(condition, guard_exempt_fields, field_index_map);
             }
+            // Guard body: collect field refs from all LET RHS + term values
+            // (not just side-effect call args), so ssa_old is kept current
+            // for fields the guard body reads.
+            collect_guard_body_field_refs(statements, guard_exempt_fields, field_index_map);
         }
         // Main body: side-effecting call arguments
         exempt_side_effect_args(s, guard_exempt_fields, field_index_map);
@@ -2584,6 +2602,38 @@ fn collect_parallel_safe_exemptions(
     // Merge guard exemptions + counter is always exempt via counter_field_name
     for fname in guard_exempt_fields.drain() {
         exempt_fields.insert(fname);
+    }
+}
+
+/// Collect all state field references from guard body statements.
+/// Handles LET RHS expressions, term values, and nested guards recursively.
+/// This ensures fields read by terminating guard bodies (like positions
+/// and velocities in nbody_sqrt's energy computation) are added to the
+/// parallel_safe_exempt_fields set, so ssa_old is kept current after
+/// stores — allowing print_float# to see the latest iteration values.
+fn collect_guard_body_field_refs(
+    statements: &[Statement],
+    fields: &mut HashSet<String>,
+    field_index_map: &HashMap<String, usize>,
+) {
+    for stmt in statements {
+        match stmt {
+            Statement::Let { expr: Some(e), .. } => {
+                collect_expr_field_refs(e, fields, field_index_map);
+            }
+            Statement::TermBang { values, .. } | Statement::Term { values, .. } => {
+                for v in values.iter().flatten() {
+                    collect_expr_field_refs(v, fields, field_index_map);
+                }
+            }
+            Statement::Guarded { statements: inner, .. } => {
+                collect_guard_body_field_refs(inner, fields, field_index_map);
+            }
+            Statement::Assignment { expr, .. } => {
+                collect_expr_field_refs(expr, fields, field_index_map);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -3035,13 +3085,24 @@ fn build_let_field_refs(body: &[Statement], field_index_map: &HashMap<String, us
 {
     let mut let_fields: HashMap<String, HashSet<String>> = HashMap::new();
     let mut changed = true;
+    // Helper: collect LET bindings from body + guard bodies recursively.
+    // e is &Expr (auto-derefed from Box<Expr> through stmt: &Statement destructuring).
+    fn collect_let_bindings<'a>(stmt: &'a Statement, collected: &mut Vec<(String, &'a Expr)>) {
+        match stmt {
+            Statement::Let { name, expr: Some(e), .. } => collected.push((name.clone(), e)),
+            Statement::Guarded { statements, .. } => {
+                for gs in statements { collect_let_bindings(gs, collected); }
+            }
+            _ => {}
+        }
+    }
+    let mut let_defs: Vec<(String, &Expr)> = Vec::new();
+    for stmt in body {
+        collect_let_bindings(stmt, &mut let_defs);
+    }
     while changed {
         changed = false;
-        for stmt in body {
-            let (name, expr) = match stmt {
-                Statement::Let { name, expr: Some(e), .. } => (name.clone(), e),
-                _ => continue,
-            };
+        for (name, expr) in &let_defs {
             let mut refs = HashSet::new();
             collect_expr_field_refs(expr, &mut refs, field_index_map);
             // Resolve identifiers that refer to other LET bindings
@@ -3054,7 +3115,7 @@ fn build_let_field_refs(body: &[Statement], field_index_map: &HashMap<String, us
                     }
                 }
             }
-            match let_fields.entry(name) {
+            match let_fields.entry(name.clone()) {
                 std::collections::hash_map::Entry::Occupied(mut e) => {
                     if *e.get() != refs {
                         e.insert(refs);
@@ -3115,6 +3176,45 @@ fn target_field_name(lhs: &Expr) -> Option<String> {
     }
 }
 
+/// Collect all identifiers from observable statements and seed the live set.
+/// Resolves LET binding names through `let_fields` to find underlying state
+/// field references.  This is needed because observable_field_refs only
+/// returns state field names (filtered through field_index_map), but
+/// arguments to observable calls are often LET bindings (e.g. `energy` in
+/// `print_float#(energy)`).
+fn seed_observable_idents(
+    stmt: &Statement,
+    let_fields: &HashMap<String, HashSet<String>>,
+    field_index_map: &HashMap<String, usize>,
+    live: &mut HashSet<String>,
+) {
+    let expr = match stmt {
+        Statement::TermBang { swan_song: Some(ss), .. }
+        | Statement::Term { swan_song: Some(ss), .. } => {
+            match ss.as_ref() {
+                Statement::Expression(e) | Statement::Escape(Some(e)) => Some(e),
+                _ => None,
+            }
+        }
+        Statement::Expression(e) | Statement::Escape(Some(e)) => {
+            if is_output_call(e) { Some(e) } else { None }
+        }
+        _ => None,
+    };
+    let Some(e) = expr else { return; };
+    let mut idents = HashSet::new();
+    collect_all_idents(e, &mut idents);
+    for ident in &idents {
+        if field_index_map.contains_key(ident) {
+            live.insert(ident.clone());
+        } else if let Some(sub_refs) = let_fields.get(ident) {
+            for r in sub_refs {
+                live.insert(r.clone());
+            }
+        }
+    }
+}
+
 /// Trace which state fields are transitively consumed by observable
 /// operations.  Starts from observable sinks (prints, swan songs) and
 /// propagates backward through `&x = f(y)` assignments (when `x` is live)
@@ -3124,14 +3224,19 @@ fn trace_live_fields(body: &[Statement], field_index_map: &HashMap<String, usize
     // Phase 1: compute transitive field refs for each LET binding
     let let_fields = build_let_field_refs(body, field_index_map);
 
-    // Phase 2: seed live set from observable sinks
+    // Phase 2: seed live set from observable sinks.
+    // Unlike observable_field_refs (which only returns state field refs),
+    // we collect ALL identifiers from observable expressions and resolve
+    // LET binding names through let_fields.  This handles the pattern:
+    //   let energy = ... ; term! -> print_float#(energy);
+    // where `energy` is a LET binding, not a state field.
     let mut live: HashSet<String> = HashSet::new();
     let mut changed = true;
     for stmt in body {
-        for id in observable_field_refs(stmt, field_index_map) { live.insert(id); }
+        seed_observable_idents(stmt, &let_fields, field_index_map, &mut live);
         if let Statement::Guarded { statements, .. } = stmt {
             for gs in statements {
-                for id in observable_field_refs(gs, field_index_map) { live.insert(id); }
+                seed_observable_idents(gs, &let_fields, field_index_map, &mut live);
             }
         }
     }
