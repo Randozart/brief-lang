@@ -1,6 +1,6 @@
 # Optimization Pipeline
 
-**Date:** 2026-07-04 (updated — A005a/A005b removed, unified under A005c)
+**Date:** 2026-07-05 (updated — A005a re-added, vector phi emission)
 **Status:** Current
 
 ## Decision Tree
@@ -20,10 +20,12 @@ flowchart TD
     F --> G{is_counter_bounded?}
     G -->|Yes| H{Const bound + pure + no swan song?}
     H -->|Yes| I[A001: O(1) pure counter store]
-    H -->|No| J[A005c: Per-field phi loop]
-    J --> K{Dual-path selection}
-    K -->|No post-loop hoisted guards| L[Path A: zero stores in body]
-    K -->|Has post-loop hoisted guards| M[Path B: per-field stores via done_needs_fields]
+    H -->|No| J{write_density >= 50%<br>AND fields < 8<br>AND no body FFI?}
+    J -->|Yes| K[A005a: Inline SSA insertvalue chain]
+    J -->|No| L[A005c: Per-field phi loop]
+    L --> M{Dual-path + vector phi selection}
+    M -->|No vector groups| N[Path A/B standard]
+    M -->|Vector groups detected| O[<4 x float> vector phis]
     
     G -->|No| P{Async/MMIO/triggers?}
     P -->|Yes| Q[Reactor tick loop]
@@ -57,18 +59,32 @@ counter value. No runtime loop.
 
 File: `src/backend/llvm/loop_engine.rs` — `emit_folded_pure_counter`
 
-### A005c: Per-Field Phi Loop (All Counter-Bounded Bodies)
+### A005a: Inline SSA (insertvalue chain)
 
-For ALL counter-bounded non-precomputed programs, the compiler emits a
-per-field phi loop (A005c). There is no longer an A005a (SSA insertvalue)
-or A005b (memory GEP) path — both are replaced by A005c's unified approach.
+For bodies with write_density >= 50%, field_count < 8, and no FFI calls,
+the compiler emits a single `%State` phi with extractvalue/insertvalue
+access. This allows LLVM's SROA+GVN to optimize the entire state as one
+SSA unit.
+
+Re-introduced in `4ff9bde` (2026-07-05) after being removed in `a71c586`.
+The adaptive dispatch decision tree selects A005a vs A005c per transaction.
+
+### A005c: Per-Field Phi Loop (Default for Most Bodies)
+
+For counter-bounded programs that don't qualify for A005a, the compiler
+emits a per-field phi loop (A005c). Reverted from A005e hybrid mode
+(memory-based fields with counter-only phi) in `4ff9bde` because A005e
+re-introduced memory traffic:
+
+- interval_step: 0.01x (A005c) vs 1.00x (A005e) — **100× faster**
+- nbody_newton: 0.89x (A005c) vs 1.41x (A005e) — **37% faster**
 
 **Structure:**
 ```
 entry → pre_phi → loop_hdr → body → latch → loop_hdr (backedge) → done → ret
 ```
 
-- One phi per state field at `loop_hdr`
+- One phi per state field at `loop_hdr` (scalar or `<4 x float>` vector phi)
 - Backedge registers for each field computed at `latch`
 - Zero or more guards inside `body` for periodic prints
 - Swan song guards (`term! -> print_int#`) hoisted to post-loop `done:` block
@@ -78,6 +94,8 @@ entry → pre_phi → loop_hdr → body → latch → loop_hdr (backedge) → do
 | Path | Stores in body | When selected | Loads in done: |
 |------|---------------|---------------|----------------|
 | **A** | Zero | No post-loop hoisted guards (Path A active) | Nothing — `done:` skips `pre_load_all_fields` |
+
+(Showing lines 1-80 of 253. Use offset=81 to continue.)
 | **B** | Per-field subset via `done_needs_fields` | Post-loop hoisted guards exist (swan song) | Filtered by `done_needs_fields` — only fields the print references |
 
 **Path A** (no stores): The hot loop body is a pure register pipeline:

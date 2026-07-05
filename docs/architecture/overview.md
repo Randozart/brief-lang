@@ -145,4 +145,53 @@ to prevent state leakage between compiled functions:
 | `FunctionContext` | Per-function/transaction | Mutable (scoped) | SSA counter, local bindings, phi state, arena |
 | `BlockContext` | Per-basic-block | Mutable (transient) | Current label |
 
+## LLVM Loop Dispatch Architecture
+
+The compiler has three dispatch paths for countable loops, chosen
+adaptively based on transaction characteristics:
+
+### A005a — Inline SSA (insertvalue chain)
+- Single `%State` phi + `extractvalue`/`insertvalue` for field access
+- Selected when `write_density >= 0.5 && field_count < 8 && !has_body_ffi`
+- Best for dense-write, small-state loops (e.g., knucleotide: 4 fields)
+- Added `a849b2d` (2026-07-05)
+
+### A005c — Per-Field Phi (default for most loops)
+- Each state field gets its own SSA phi node at loop header
+- Selected for sparse writes, large states, or FFI-containing bodies
+- Supports: Path A (zero stores in hot loop), phi commit block,
+  parallel-safe mode (ssa_old cache keeps old phi values),
+  dead-field liveness analysis, !invariant.load for read-only fields
+- Reverted from A005e hybrid memory mode in `4ff9bde` (2026-07-05)
+
+### A000c — Pure Counter Fold
+- For pure bodies with compile-time constant bounds — O(1) single store
+
+### Optimization Results (2026-07-05)
+
+All measurements at BOUND=50000000, 5 iterations, CLOCK_MONOTONIC.
+
+| Benchmark | Before | After | Improvement | Commit |
+|-----------|--------|-------|-------------|--------|
+| nbody_newton | MISMATCH | **0.63x** (beats C 37%) | Phase C+E | `6529f29`+`a849b2d` |
+| nbody_sqrt | 1.25x | **0.79x** (beats C 21%) | Vector phi emission | `a849b2d` |
+| nbody_sqrt_idio | 0.82x | **0.67x** (beats C 33%) | Vector phi emission | `a849b2d` |
+| fannkuch_redux | 1.65x | **1.37x** | Rotation decomposition | `ca9f483` |
+| knucleotide | 0x (broken) | **0.99x** | Precomputation fix | `981819c` |
+| mandelbrot | SKIP | **1.10x** | IR bug fix | `2b2ef32` |
+| queue_drain | SKIP | **1.02x** | IR bug fix | `2b2ef32` |
+| float_math | MISMATCH | **0.83x** | Liveness fix | `6529f29` |
+
+Key architectural decisions:
+- **A005c over A005e** (`4ff9bde`): Per-field phis eliminate memory traffic
+  vs hybrid counter-phi+memory. interval_step: 0.01x vs 1.00x (100× faster).
+- **FFI guard in dispatch** (`981819c`): A005a blocked for FFI-containing
+  bodies to prevent LLVM from eliminating fprintf through @stdout analysis.
+- **Vector phi emission** (`a849b2d`): Groups of 4 related fields (vx0..vx3)
+  promoted to `<4 x float>` phis, eliminating register spills from 32 scalar
+  float phis. Reduced phi count from 32 to ~14 (fits in 16 XMM regs).
+- **Rotation decomposition** (`ca9f483`): GEP-reload latch breaks 12-element
+  circular phi chain for fannkuch_redux. Failed step-k approach documented
+  in `docs/plans/2026-07-05-fannkuch-rotation-decomposition.md`.
+
 See `docs/architecture/backend-refactor.md` for the full architecture guide.

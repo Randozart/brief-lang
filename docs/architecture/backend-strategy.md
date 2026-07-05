@@ -1,6 +1,28 @@
-<!-- 2026-06-09. Updated 2026-06-19 — Dead backends archived, routing by extension -->
+<!-- 2026-06-09. Updated 2026-07-05 — optimization results added -->
+<!-- See docs/architecture/overview.md for current dispatch architecture -->
 
 # Backend Strategy
+
+## Recent Optimizations (2026-07-05)
+
+Key updates since the original writing of this document:
+
+- **A005e (hybrid counter-phi + memory) removed** (`4ff9bde`): Reverted to
+  A005c per-field phi dispatch. interval_step: 0.01x vs 1.00x (100× faster).
+- **A005a (insertvalue chain) re-added** (`4ff9bde`): Adaptive dispatch
+  selects A005a for dense-write bodies with <8 fields and no FFI.
+- **Vector phi emission** (`a849b2d`): `<4 x float>` vector phis for grouped
+  float fields. Reduces register pressure from 32 scalar phis to ~14, fits
+  in 16 XMM registers. nbody_sqrt: 1.25x → 0.79x (beats C by 21%).
+- **Rotation decomposition** (`ca9f483`): GEP-reload latch breaks 12-element
+  circular phi chain for fannkuch_redux. 1.65x → 1.37x.
+- **Precomputation fix** (`981819c`): `@stdout` dso_local + volatile load
+  prevents LLVM from eliminating fprintf. knucleotide: 0x → 0.99x.
+- **Dead-field liveness** (`6529f29`): trace_live_fields correctly traces
+  through guard conditions and Let-wrapped output calls, fixing nbody_newton
+  and float_math MISMATCHes.
+- **@stdout volatile load** (`981819c`): Prevents LLVM globalopt from
+  treating @stdout as null (external global without initializer = undef).
 
 ## Principle
 
