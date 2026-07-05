@@ -29,7 +29,7 @@
 // and loop vectorization. The per-field phi loop provides this, while
 // the old A005a path used a %State alloca round-trip and A005b kept
 // the counter in memory — both hiding the loop structure from LLVM.
-use crate::ast::{Expr, Statement, Type};
+use crate::ast::{Expr, Intrinsic, Statement, Type};
 use crate::backend::llvm::{float_to_llvm_hex, find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
 use crate::analysis::dependency_graph::DependencyGraph;
 use std::collections::HashMap;
@@ -3144,4 +3144,261 @@ fn emit_cycle_count_increment(backend: &mut LlvmBackend, out: &mut String) {
         writeln!(out, "  %cc_new = add i64 %cc_old, 1").ok();
         writeln!(out, "  store i64 %cc_new, ptr %cc_gep, align 8").ok();
     }
+}
+
+// ── Dead-Field Liveness Analysis ─────────────────────────────────────────
+//
+// 2026-07-04: Trace which state fields are transitively consumed by
+// observable operations (prints, FFI calls, swan songs).  Walks backward
+// from observable sinks through LET bindings and `&` assignments.
+// A field written as `&x = f(y, z)` where x is live makes y and z live.
+// A field written as `&x = f(...)` where x is never read by any sink is
+// dead even if it appears as a backedge source (self-referential cycle).
+//
+// This is used by emit_countable_main to filter out dead assignments
+// before LLVM sees them.  In fannkuch_redux, seed and max_flips are
+// dead — they're only written and self-referentially read, never
+// consumed by any print/FFI output.  Eliminating them before LLVM
+// sees the body fixes the phase-ordering issue where LLVM's loop
+// unroller evaluates an inflated body and decides not to unroll.
+//
+// After dead-field filter:
+//   fannkuch_redux body: ~80 → ~40 unopt insns → LLVM unrolls 4×
+
+/// Collect every `Identifier` / `OwnedRef` from an expression (not filtered
+/// to state fields only).  Used by trace_live_fields to resolve chains
+/// through LET bindings (e.g. `let nchecksum = checksum + saved % 13`
+/// followed by `&checksum = nchecksum` — the identifier `nchecksum` is not
+/// a state field, but tracing through the LET uncovers `checksum` and `saved`).
+fn collect_all_idents(e: &Expr, idents: &mut HashSet<String>) {
+    match e {
+        Expr::Identifier(name) | Expr::OwnedRef(name) => { idents.insert(name.clone()); }
+        Expr::BinaryOp(bop) => {
+            collect_all_idents(&bop.left, idents);
+            collect_all_idents(&bop.right, idents);
+        }
+        Expr::UnaryOp(uop) => {
+            collect_all_idents(&uop.operand, idents);
+        }
+        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
+        | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r)
+        | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::Or(l, r)
+        | Expr::And(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r)
+        | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r)
+        | Expr::Concat(l, r) | Expr::ListIndex(l, r) => {
+            collect_all_idents(l, idents);
+            collect_all_idents(r, idents);
+        }
+        Expr::Not(op) | Expr::Neg(op) | Expr::BitNot(op) | Expr::Cast(op, _) => {
+            collect_all_idents(op, idents);
+        }
+        Expr::Call(_, args) | Expr::ListLiteral(args) => {
+            for arg in args { collect_all_idents(arg, idents); }
+        }
+        Expr::IntrinsicCall { args, .. } => {
+            for arg in args { collect_all_idents(arg, idents); }
+        }
+        _ => {}
+    }
+}
+
+/// Compute the transitive closure of state fields referenced by each LET
+/// binding in the body.  A LET binding `let x = f(y)` where `y` is itself
+/// defined by another LET `let y = g(z)` resolves to include both `y` and
+/// `z` (if `z` is a state field).  Returns `(name → field ref set)`.
+fn build_let_field_refs(body: &[Statement], field_index_map: &HashMap<String, usize>)
+    -> HashMap<String, HashSet<String>>
+{
+    let mut let_fields: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for stmt in body {
+            let (name, expr) = match stmt {
+                Statement::Let { name, expr: Some(e), .. } => (name.clone(), e),
+                _ => continue,
+            };
+            let mut refs = HashSet::new();
+            collect_expr_field_refs(expr, &mut refs, field_index_map);
+            // Resolve identifiers that refer to other LET bindings
+            let mut idents = HashSet::new();
+            collect_all_idents(expr, &mut idents);
+            for ident in &idents {
+                if let Some(sub_refs) = let_fields.get(ident) {
+                    for r in sub_refs {
+                        refs.insert(r.clone());
+                    }
+                }
+            }
+            match let_fields.entry(name) {
+                std::collections::hash_map::Entry::Occupied(mut e) => {
+                    if *e.get() != refs {
+                        e.insert(refs);
+                        changed = true;
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(e) => {
+                    e.insert(refs);
+                    changed = true;
+                }
+            }
+        }
+    }
+    let_fields
+}
+
+/// Returns true if an expression is a call that produces observable output.
+/// Intrinsic outputs: Print, Println, PrintInt, PrintFloat.
+/// Also handles frgn FFI calls that produce output (identified by print_ prefix).
+fn is_output_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::IntrinsicCall { intrinsic, .. } => {
+            matches!(intrinsic, Intrinsic::Print | Intrinsic::Println
+                | Intrinsic::PrintInt | Intrinsic::PrintFloat)
+        }
+        Expr::Call(name, _) => {
+            name.starts_with("print_") || name == "putchar#"
+        }
+        _ => false,
+    }
+}
+
+/// Collect field references from statements that produce observable output.
+/// These are: print_*/println/print intrinsics, swan_song in term!, FFI calls.
+fn observable_field_refs(stmt: &Statement, field_index_map: &HashMap<String, usize>) -> HashSet<String> {
+    let mut refs = HashSet::new();
+    match stmt {
+        Statement::TermBang { swan_song: Some(ss), .. }
+        | Statement::Term { swan_song: Some(ss), .. } => {
+            collect_field_refs(ss.as_ref(), &mut refs, field_index_map);
+        }
+        Statement::Expression(e) | Statement::Escape(Some(e)) => {
+            if is_output_call(e) {
+                collect_expr_field_refs(e, &mut refs, field_index_map);
+            }
+        }
+        _ => {}
+    }
+    refs
+}
+
+/// Extract the target field name from an `Assignment`'s lhs expression.
+/// Returns `None` for non-identifier lhs (list-index assigns, tupledestructure, etc.).
+fn target_field_name(lhs: &Expr) -> Option<String> {
+    match lhs {
+        Expr::Identifier(n) | Expr::OwnedRef(n) => Some(n.clone()),
+        _ => None,
+    }
+}
+
+/// Trace which state fields are transitively consumed by observable
+/// operations.  Starts from observable sinks (prints, swan songs) and
+/// propagates backward through `&x = f(y)` assignments (when `x` is live)
+/// and through LET bindings (when a LET name appears in a live-producing
+/// expression's right-hand side).
+fn trace_live_fields(body: &[Statement], field_index_map: &HashMap<String, usize>) -> HashSet<String> {
+    // Phase 1: compute transitive field refs for each LET binding
+    let let_fields = build_let_field_refs(body, field_index_map);
+
+    // Phase 2: seed live set from observable sinks
+    let mut live: HashSet<String> = HashSet::new();
+    let mut changed = true;
+    for stmt in body {
+        for id in observable_field_refs(stmt, field_index_map) { live.insert(id); }
+        if let Statement::Guarded { statements, .. } = stmt {
+            for gs in statements {
+                for id in observable_field_refs(gs, field_index_map) { live.insert(id); }
+            }
+        }
+    }
+
+    // Phase 3: propagate backward — if `x` is live and `&x = f(y, ...)`,
+    // then `y, ...` are live (including through LET bindings).
+    while changed {
+        changed = false;
+        for stmt in body {
+            match stmt {
+                Statement::Assignment { lhs, expr, .. } => {
+                    let Some(fname) = target_field_name(lhs) else { continue; };
+                    if !live.contains(&fname) { continue; }
+                    let mut refs = HashSet::new();
+                    collect_expr_field_refs(expr, &mut refs, field_index_map);
+                    let mut idents = HashSet::new();
+                    collect_all_idents(expr, &mut idents);
+                    for ident in &idents {
+                        if let Some(sub_refs) = let_fields.get(ident) {
+                            for r in sub_refs { refs.insert(r.clone()); }
+                        }
+                    }
+                    for id in &refs {
+                        if live.insert(id.clone()) { changed = true; }
+                    }
+                }
+                Statement::Guarded { statements, .. } => {
+                    for gs in statements {
+                        if let Statement::Assignment { lhs, expr, .. } = gs {
+                            let Some(fname) = target_field_name(lhs) else { continue; };
+                            if !live.contains(&fname) { continue; }
+                            let mut refs = HashSet::new();
+                            collect_expr_field_refs(expr, &mut refs, field_index_map);
+                            let mut idents = HashSet::new();
+                            collect_all_idents(expr, &mut idents);
+                            for ident in &idents {
+                                if let Some(sub_refs) = let_fields.get(ident) {
+                                    for r in sub_refs { refs.insert(r.clone()); }
+                                }
+                            }
+                            for id in &refs {
+                                if live.insert(id.clone()) { changed = true; }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    live
+}
+
+/// 2026-07-04: Filter out `&` assignments to state fields that are not in
+/// the live set.  Keeps all non-assignment statements (guards, terms, LETs).
+/// Dead-field assignments are removed to reduce the body size seen by LLVM's
+/// loop unroller, fixing the phase-ordering issue where dead code inflates
+/// the body and prevents unrolling.
+fn filter_dead_assignments(body: &[Statement], live_fields: &HashSet<String>) -> Vec<Statement> {
+    let mut result = Vec::with_capacity(body.len());
+    for stmt in body {
+        match stmt {
+            Statement::Assignment { lhs, .. } => {
+                let Some(fname) = target_field_name(lhs) else {
+                    result.push(stmt.clone());
+                    continue;
+                };
+                if live_fields.contains(&fname) {
+                    result.push(stmt.clone());
+                }
+            }
+            Statement::Guarded { condition, statements } => {
+                let filtered: Vec<Statement> = statements.iter()
+                    .filter(|gs| {
+                        if let Statement::Assignment { lhs, .. } = gs {
+                            target_field_name(lhs)
+                                .map(|n| live_fields.contains(&n))
+                                .unwrap_or(true)
+                        } else { true }
+                    })
+                    .cloned()
+                    .collect();
+                if !filtered.is_empty() {
+                    result.push(Statement::Guarded {
+                        condition: condition.clone(),
+                        statements: filtered,
+                    });
+                }
+            }
+            _ => result.push(stmt.clone()),
+        }
+    }
+    result
 }
