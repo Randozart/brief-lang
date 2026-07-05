@@ -10,13 +10,13 @@
 //    For pure bodies with a runtime-variable bound. Counter-only phi
 //    node, no body emission (body was precomputed).
 //
-// 3. PER-FIELD PHI LOOP (emit_countable_main, A005c):
-//    For all non-pure foldable single-txn programs. Creates per-field
-//    phi nodes at the loop header, with GEP loads/stores for field
-//    access. The latch reloads modified fields from %State; GVN
-//    eliminates redundant load-via-store round trips. This replaces
-//    the old A005a (inline SSA with %slot_case alloca) and A005b
-//    (memory-based counter) paths entirely.
+// 3. HYBRID COUNTER-PHI + MEMORY FIELDS (emit_countable_main, A005e):
+//    For all non-pure foldable single-txn programs. Creates only a
+//    single counter phi (induction variable for LLVM's trip count
+//    analysis).  State fields are loaded from %State at body entry
+//    (pre_load_all_fields) and stored back in the body.  LLVM's SROA
+//    converts the GEP+load+store pattern to closed-SSA phis, avoiding
+//    the phi-escape problem that blocks the vectorizer.
 //
 // 4. SSA REGISTER PIPELINE (emit_ssa_main):
 //    For multi-txn reactive programs (rct txn). Precondition checked
@@ -963,86 +963,45 @@ impl LlvmBackend {
     /// initial field values, and emit the loop header (phi nodes + exit
     /// check).  Combined because the init register names must be available
     /// for the phi node entries at loop_hdr.
+    /// 2026-07-05: A005e — counter phi only.  No per-field phis.  Fields
+    /// are loaded from %State via pre_load_all_fields at body entry.
+    /// LLVM's SROA converts the GEP+load+store pattern to closed-SSA phis
+    /// after vectorization analysis, avoiding the phi-escape problem.
     fn emit_countable_setup_phis_and_header(
         &mut self,
         out: &mut String,
         counter_idx: usize,
         bound_reg: &str,
-        write_set: &HashSet<String>,
-        exit_label: &str,
-    ) -> (String, String, String, String, String, String) {
-        self.fun.phi_field_regs.clear();
-        self.fun.backedge_field_regs.clear();
-        let all_fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
-            .map(|(n, &i)| (n.clone(), i, self.ctx.field_types[i].clone()))
-            .collect();
-        let mut init_regs: HashMap<String, String> = HashMap::new();
+    ) -> (String, String, String, String, String) {
         let mut counter_name = String::new();
-        for (name, idx, ty) in &all_fields {
-            if *idx == counter_idx { counter_name = name.clone(); continue; }
-            let gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", *idx);
-            let init_load = format!("%init_{}_{}", name, self.fun.txn_counter);
-            self.fun.txn_counter += 1;
-            let tn = crate::backend::llvm::tbaa_node(ty, self.ctx.type_universe.as_ref());
-            // 2026-07-04: !invariant.load for read-only fields.
-            // Fields not in the transaction's write_set are never modified
-            // by the loop body (Brief has no hidden mutation through pointers).
-            // Marking the initial load as invariant lets LLVM's LICM hoist it
-            // out of the loop — the field value is loaded once and never
-            // reloaded, even when needs_state_stores_in_body=true (Path B).
-            // For write-set fields, !invariant.load is NOT emitted because
-            // the body may modify them (the phi node carries iteration values).
-            if !write_set.contains(name) {
-                writeln!(out, "  {} = load {}, ptr {}, align {}, !tbaa !{}, !invariant.load !{{}}",
-                    init_load, ty, gep, self.align_of(ty), tn).ok();
-            } else {
-                writeln!(out, "  {} = load {}, ptr {}, align {}, !tbaa !{}",
-                    init_load, ty, gep, self.align_of(ty), tn).ok();
-            }
-            init_regs.insert(name.clone(), init_load);
-            let phi_reg = format!("%phi_{}", name);
-            let be_reg = format!("%be_{}", name);
-            self.fun.phi_field_regs.insert(name.clone(), phi_reg);
-            self.fun.backedge_field_regs.insert(name.clone(), be_reg);
+        for (n, i) in &self.ctx.field_index_map {
+            if *i == counter_idx { counter_name = n.clone(); break; }
         }
-        // Counter load
-        let c_gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", counter_idx);
         let init_count = format!("%init_count_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
+        let c_gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", counter_idx);
         writeln!(out, "  {} = load i64, ptr {}, align 8", init_count, c_gep).ok();
-        // Counter phi+backedge
-        let count_phi_reg = format!("%phi_{}", counter_name);
-        let count_be_reg = format!("%be_{}", counter_name);
-        self.fun.phi_field_regs.insert(counter_name.clone(), count_phi_reg.clone());
-        self.fun.backedge_field_regs.insert(counter_name.clone(), count_be_reg.clone());
         let pi_name = format!("%pi_cnt_{}", self.fun.txn_counter);
         let pn_name = format!("%pn_cnt_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
         writeln!(out, "  br label %loop_hdr").ok();
-        // ── Loop header: phi nodes + exit check ──────────────────────
         writeln!(out, "loop_hdr:").ok();
         writeln!(out, "  {} = phi i64 [ {}, %pre_phi ], [ {}, %latch ]", pi_name, init_count, pn_name).ok();
-        for (name, phi_reg) in &self.fun.phi_field_regs {
-            if *name == counter_name { continue; }
-            let init_reg = &init_regs[name];
-            let be_reg = &self.fun.backedge_field_regs[name];
-            let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
-            let ty = &self.ctx.field_types[idx];
-            writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", phi_reg, ty, init_reg, be_reg).ok();
-        }
-        // Counter phi
-        let ty_counter = &self.ctx.field_types[counter_idx];
-        writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", count_phi_reg, ty_counter, init_count, count_be_reg).ok();
-        // Exit check
         let cmp_reg = format!("%cmp_hdr_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
         writeln!(out, "  {} = icmp slt i64 {}, {}", cmp_reg, pi_name, bound_reg).ok();
-        writeln!(out, "  br i1 {}, label %body, label %{}", cmp_reg, exit_label).ok();
-        (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, init_count)
+        writeln!(out, "  br i1 {}, label %body, label %done", cmp_reg).ok();
+        let count_phi_reg = pi_name.clone();
+        (counter_name, count_phi_reg, pi_name, pn_name, init_count)
     }
 
+    /// 2026-07-05: A005e — load all fields from %State at body entry
+    /// via pre_load_all_fields.  SROA converts these GEP+loads to closed-
+    /// SSA phis, avoiding phi escape for the vectorizer.  The ssa_old
+    /// caches are populated once at entry; parallel-safe mode keeps them
+    /// unchanged after writes within the same iteration.
     fn emit_countable_body(&mut self, out: &mut String, body: &[Statement]) {
-        self.phi_regs_to_ssa_old();
+        self.pre_load_all_fields(out, "%state", None);
         self.fun.let_bindings.clear();
         self.fun.let_binding_types.clear();
         self.fun.reg_float_cache.clear();
@@ -1082,54 +1041,18 @@ impl LlvmBackend {
         }
     }
 
+    /// 2026-07-05: A005e — counter increment + metadata only.  No per-field
+    /// backedge reloads.  Fields are stored to %State in the body; the header
+    /// loads them fresh each iteration via pre_load_all_fields.
     fn emit_countable_latch(
         &mut self,
         out: &mut String,
         pi_name: &str,
         pn_name: &str,
-        count_be_reg: &str,
-        counter_name: &str,
     ) {
         writeln!(out, "  br label %latch").ok();
         writeln!(out, "latch:").ok();
         writeln!(out, "  {} = add i64 {}, 1", pn_name, pi_name).ok();
-        let backedge_entries: Vec<(String, String)> = self.fun.backedge_field_regs.iter()
-            .map(|(n, r)| (n.clone(), r.clone()))
-            .collect();
-        let phi_entries: HashMap<String, String> = self.fun.phi_field_regs.iter()
-            .map(|(n, r)| (n.clone(), r.clone()))
-            .collect();
-        let field_map: HashMap<String, (usize, String)> = self.ctx.field_index_map.iter()
-            .map(|(n, &i)| (n.clone(), (i, self.ctx.field_types[i].clone())))
-            .collect();
-        let pending_mod: HashSet<String> = self.fun.pending_phi_backedge.keys().cloned().collect();
-        for (name, be_reg) in &backedge_entries {
-            if *name == counter_name { continue; }
-            if pending_mod.contains(name) {
-                // 2026-07-03: If the body stored a native-typed value, use it
-                // directly as the phi backedge instead of reloading from %State.
-                // This eliminates the store→GEP→load roundtrip per field.
-                // For float/double use fadd 0.0 (identity), for ints use add 0.
-                if let Some(typed_reg) = self.fun.pending_phi_native_backedge.get(name) {
-                    let Some(&(_, ref ty)) = field_map.get(name) else { continue; };
-                    let _ = match ty.as_str() {
-                        "float" => writeln!(out, "  {} = fadd float {}, 0.0", be_reg, typed_reg),
-                        "double" => writeln!(out, "  {} = fadd double {}, 0.0", be_reg, typed_reg),
-                        _ => writeln!(out, "  {} = add i64 0, {}", be_reg, typed_reg),
-                    };
-                } else {
-                    // Fallback: reload from %State
-                    let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
-                    let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
-                    writeln!(out, "  {} = load {}, ptr {}, align {}",
-                        be_reg, ty, gep_reload, self.align_of(ty)).ok();
-                }
-            } else {
-                let phi_reg = phi_entries.get(name).cloned().unwrap_or_default();
-                writeln!(out, "  {} = add i64 0, {}", be_reg, phi_reg).ok();
-            }
-        }
-        writeln!(out, "  {} = add i64 0, {}", count_be_reg, pn_name).ok();
         super::emit_loop_metadata(out, "  ", "loop_hdr", &mut self.fun.metadata_counter, &mut self.fun.pending_metadata);
     }
 
@@ -1211,6 +1134,16 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
+    /// 2026-07-05: A005e — hybrid countable loop (counter phi + memory
+    /// fields).  Only the counter has a phi node (induction variable for
+    /// LLVM's trip count analysis).  All state fields are loaded from
+    /// %State at body entry via pre_load_all_fields and stored back via
+    /// emit_memory_field_store in the body.  There is no commit block —
+    /// the done: block reads from %State directly.
+    ///
+    /// LLVM's SROA converts the GEP+load+store pattern to closed-SSA
+    /// phis, and since there is no phi escape (no commit block), the
+    /// vectorizer sees clean memory-based access patterns.
     pub(super) fn emit_countable_main(
         &mut self,
         out: &mut String,
@@ -1219,7 +1152,7 @@ impl LlvmBackend {
         total_idx: Option<usize>,
         total_const_name: Option<&str>,
         body: &[Statement],
-        write_set: &HashSet<String>,
+        _write_set: &HashSet<String>,
     ) {
         let c0 = self.fun.txn_counter;
         self.fun.expr_dedup_cache.clear();
@@ -1237,103 +1170,28 @@ impl LlvmBackend {
         self.emit_prealloc_for_body(out, "  ", body, &bound_reg);
         writeln!(out, "  br label %pre_phi").ok();
         writeln!(out, "pre_phi:").ok();
-        // 2026-07-04: Populate done_needs_fields BEFORE phi setup and
-        // last-value alloca creation so the exit_label and allocas
-        // reflect the hoisted print's field requirements.
-        self.fun.done_needs_fields.clear();
-        for hoisted_body in &self.fun.pending_post_hoist {
-            for s in hoisted_body {
-                collect_field_refs(s, &mut self.fun.done_needs_fields, &self.ctx.field_index_map);
-            }
-        }
-        // ── Last-value allocas for phi commit (eliminate per-iteration stores) ──
-        // If the done: block reads state fields (hoisted prints), create
-        // temporaries that store the phi's final value ONCE at loop exit.
-        // The commit block stores to these; done: loads from them instead
-        // of from %State, eliminating ~N stores per iteration.
-        self.fun.last_val_temps.clear();
-        let exit_label = if !self.fun.done_needs_fields.is_empty() {
-            for field_name in self.fun.done_needs_fields.iter() {
-                let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
-                let ty = &self.ctx.field_types[idx];
-                let reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "  {} = alloca {}, align {}", reg, ty, self.align_of(ty)).ok();
-                self.fun.last_val_temps.insert(field_name.clone(), reg);
-            }
-            // 2026-07-04: Phi commit block replaces per-iteration stores.
-            // Suppress body stores via needs_state_stores_in_body = false.
-            // The commit block writes phi final values once at loop exit,
-            // and emit_hoisted_post_loop_prints reads from them.
-            self.fun.needs_state_stores_in_body = false;
-            "commit"
-        } else {
-            "done"
-        };
-        // ── Initial field loads + phi/backedge register setup + loop header ──
-        let (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, _init_count)
-            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg, write_set, exit_label);
-        // ── Body: load phi regs into ssa_old, emit_stmt ──────────────
+        // A005e: Counter phi only, no per-field phis, no commit block.
+        // Stores always go to %State; SROA promotes to closed-SSA phis.
+        self.fun.needs_state_stores_in_body = true;
+        let (counter_name, _count_phi_reg, pi_name, pn_name, _init_count)
+            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg);
+        // ── Body: load all fields from %State, emit statements ──────
         writeln!(out, "body:").ok();
-        self.fun.ssa_state_reg = None; // memory mode: writes go through GEP+store
-        self.fun.pending_phi_backedge.clear();
-        self.fun.pending_phi_native_backedge.clear();
+        self.fun.ssa_state_reg = None;
         self.fun.returns_i64 = false;
-        // 2026-07-04: Decide whether the body must store to %State.
-        // Path A (no stores): done: does NOT read %State (no post-loop
-        //   hoisted guards).  Phi registers + pending_phi_native_backedge
-        //   carry all values forward.  Zero memory traffic in hot loop.
-        //   LLVM's optimizer sees a clean phi loop with no barriers.
-        // Path B (stores preserved): done: reads %State via GEP+load
-        //   (post-loop hoisted guards from term! -> swan_song).  Stores
-        //   ensure done:'s loads see the final iteration's field values.
-        //
-        // A005d (memory loop) is unaffected by this flag — its default
-        // value is true, and emit_countable_memory_main never sets it
-        // to false because the header loop test loads the counter from
-        // %State every iteration.
-        if self.fun.last_val_temps.is_empty() {
-            // No phi commit block — fall back to old Path A/B logic.
-            // When last_val_temps is non-empty, the phi commit block
-            // was created above and already set the flag to false.
-            self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
-        }
         // 2026-07-04: Enable parallel-safe mode for ALL bodies.
         // ssa_old caches are NOT updated after & assignments — all reads
         // use old (phi) values.  This makes every computation independent,
         // enabling LLVM to SIMD-vectorize across the entire body.
         // The counter field is exempt (tracked by counter_field_name).
         self.fun.parallel_safe_body = is_body_parallel_safe(body);
-        // 2026-07-04: Track the counter field name so emit_memory_field_store
-        // can exempt it from parallel-safe mode.  Guard conditions like
-        // [count % 5000000 == 0] need to read the new counter value, not the
-        // old phi register.  The counter always updates ssa_old_*_regs.
         self.fun.counter_field_name = Some(counter_name.clone());
-        // 2026-07-04: Scan body for fields that need sequential updates
-        // (read-after-write + guard conditions/arguments).  These fields
-        // are exempt from parallel-safe mode — they get normal sequential
-        // ssa_old updates so later reads or guard conditions see correct values.
         self.fun.parallel_safe_exempt_fields.clear();
         let mut guard_exempt = HashSet::new();
         collect_parallel_safe_exemptions(body, &mut self.fun.parallel_safe_exempt_fields, &mut guard_exempt, &self.ctx.field_index_map);
         self.emit_countable_body(out, body);
-        // ── Latch: increment counter, reload modified fields ─────────
-        self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name);
-        // ── Commit block: store phi final values to last-value allocas ──
-        // Runs ONCE at loop exit (when the header branches to %commit instead
-        // of %done).  done: loads from these allocas — no per-iteration stores.
-        if !self.fun.last_val_temps.is_empty() {
-            writeln!(out, "commit:").ok();
-            for (field_name, temp_reg) in &self.fun.last_val_temps {
-                let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
-                let ty = &self.ctx.field_types[idx];
-                let phi_reg = self.fun.phi_field_regs.get(field_name)
-                    .map(|s| s.as_str()).unwrap_or("");
-                if !phi_reg.is_empty() {
-                    writeln!(out, "  store {} {}, ptr {}, align {}", ty, phi_reg, temp_reg, self.align_of(ty)).ok();
-                }
-            }
-            writeln!(out, "  br label %done").ok();
-        }
+        // ── Latch: increment counter ───────────────────────────────
+        self.emit_countable_latch(out, &pi_name, &pn_name);
         // ── Done: emit post-loop prints + exit ──────────────────────
         writeln!(out, "done:").ok();
         self.emit_arena_reset(out, "  ");
@@ -2110,51 +1968,16 @@ impl LlvmBackend {
     /// The guard body (energy computation + print intrinsic) is re-emitted after
     /// the loop exits. Before emitting, load all state fields from %State via
     /// pre_load_all_fields so field reads see fresh memory values (not stale phis).
+    /// 2026-07-05: A005e — always load from %State via pre_load_all_fields.
+    /// No commit block or last-value temporaries exist.  The body stores to
+    /// %State every iteration, so done: sees the final iteration's values.
     fn emit_hoisted_post_loop_prints(&mut self, out: &mut String, hoisted: &[Vec<Statement>]) {
         if hoisted.is_empty() { return; }
-        // 2026-07-03: Load fresh field values from %State instead of using phi
-        // registers.  The phi registers at loop_hdr must NOT be used in done: —
-        // the vectorizer checks for loop-carried values that escape the loop,
-        // and any phi register used after the exit block blocks vectorization
-        // with "value not identified as reduction".  GEP+load from %State in
-        // done: breaks that use chain.  The GEP+load is outside the loop and
-        // does not affect loop-access analysis — the loop body's stores use
-        // constant-index GEPs that LoopAccessAnalysis can analyze directly.
-        // 2026-07-04: Load from last-value temporaries (phi commit) if available,
-        // falling back to pre_load_all_fields from %State.  The commit block
-        // stores phi final values ONCE at loop exit, eliminating per-iteration
-        // stores while keeping post-loop values available for hoisted prints.
         self.fun.expr_dedup_cache.clear();
-        if !self.fun.last_val_temps.is_empty() {
-            self.load_last_val_temps(out);
-        } else {
-            let filter: Option<HashSet<String>> = if self.fun.done_needs_fields.is_empty() { None } else { Some(self.fun.done_needs_fields.clone()) };
-            self.pre_load_all_fields(out, "%state", filter.as_ref());
-        }
+        self.pre_load_all_fields(out, "%state", None);
         for body_stmts in hoisted {
             for s in body_stmts {
                 self.emit_stmt(out, s, "  ");
-            }
-        }
-        self.fun.done_needs_fields.clear();
-    }
-
-    /// 2026-07-04: Load state field values from last-value temporaries
-    /// (phi commit allocas) into ssa_old caches for the done: block.
-    /// Only loads fields in done_needs_fields.
-    fn load_last_val_temps(&mut self, out: &mut String) {
-        self.fun.ssa_old_float_regs.clear();
-        self.fun.ssa_old_int_regs.clear();
-        for field_name in self.fun.done_needs_fields.iter() {
-            let Some(temp_reg) = self.fun.last_val_temps.get(field_name) else { continue; };
-            let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
-            let ty = &self.ctx.field_types[idx];
-            let load_reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "  {} = load {}, ptr {}, align {}", load_reg, ty, temp_reg, self.align_of(ty)).ok();
-            if ty == "float" || ty == "double" {
-                self.fun.ssa_old_float_regs.insert(field_name.clone(), load_reg);
-            } else {
-                self.fun.ssa_old_int_regs.insert(field_name.clone(), load_reg);
             }
         }
     }
