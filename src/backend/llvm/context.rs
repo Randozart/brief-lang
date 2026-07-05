@@ -354,6 +354,11 @@ pub struct FunctionContext {
     // Maps vector phi register name → Vec of field names it covers.
     pub vector_phi_groups: HashMap<String, Vec<String>>,
 
+    // 2026-07-05: Tracks the current accumulated vector value during body
+    // emission for insertelement chaining.  Maps vector phi register name
+    // → the most recent insertelement result register.
+    pub vector_phi_current: HashMap<String, String>,
+
     // Chimera tracking
 
     // Chimera tracking
@@ -415,6 +420,7 @@ impl FunctionContext {
             last_val_temps: HashMap::new(),
             rotation_fields: HashSet::new(),
             vector_phi_groups: HashMap::new(),
+            vector_phi_current: HashMap::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
         }

@@ -989,20 +989,16 @@ impl LlvmBackend {
             .collect();
         let mut init_regs: HashMap<String, String> = HashMap::new();
         let mut counter_name = String::new();
+        // Build lookup: is a field name a member of a vector group?
+        let vec_group_members: HashSet<String> = self.fun.vector_phi_groups.values()
+            .flat_map(|members| members.iter().cloned())
+            .collect();
         for (name, idx, ty) in &all_fields {
             if *idx == counter_idx { counter_name = name.clone(); continue; }
             let gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", *idx);
             let init_load = format!("%init_{}_{}", name, self.fun.txn_counter);
             self.fun.txn_counter += 1;
             let tn = crate::backend::llvm::tbaa_node(ty, self.ctx.type_universe.as_ref());
-            // 2026-07-04: !invariant.load for read-only fields.
-            // Fields not in the transaction's write_set are never modified
-            // by the loop body (Brief has no hidden mutation through pointers).
-            // Marking the initial load as invariant lets LLVM's LICM hoist it
-            // out of the loop — the field value is loaded once and never
-            // reloaded, even when needs_state_stores_in_body=true (Path B).
-            // For write-set fields, !invariant.load is NOT emitted because
-            // the body may modify them (the phi node carries iteration values).
             if !write_set.contains(name) {
                 writeln!(out, "  {} = load {}, ptr {}, align {}, !tbaa !{}, !invariant.load !{{}}",
                     init_load, ty, gep, self.align_of(ty), tn).ok();
@@ -1011,10 +1007,29 @@ impl LlvmBackend {
                     init_load, ty, gep, self.align_of(ty), tn).ok();
             }
             init_regs.insert(name.clone(), init_load);
-            let phi_reg = format!("%phi_{}", name);
-            let be_reg = format!("%be_{}", name);
-            self.fun.phi_field_regs.insert(name.clone(), phi_reg);
-            self.fun.backedge_field_regs.insert(name.clone(), be_reg);
+            // Register mapping: use vector phi register for group members
+            let mut found_group = false;
+            for (vec_phi_name, members) in &self.fun.vector_phi_groups {
+                if members.contains(name) {
+                    self.fun.phi_field_regs.insert(name.clone(), vec_phi_name.clone());
+                    // All group members share the same vector backedge register
+                    let be_reg_name = format!("%be{}_{}",
+                        &vec_phi_name[4..vec_phi_name.len() - 3],
+                        &vec_phi_name[vec_phi_name.len() - 3..]);
+                    // Actually: derive backedge name from vector phi name
+                    // %phi_vx_v4 → %be_vx_v4
+                    let be_name = format!("%be{}", &vec_phi_name[4..]);
+                    self.fun.backedge_field_regs.insert(name.clone(), be_name);
+                    found_group = true;
+                    break;
+                }
+            }
+            if !found_group {
+                let phi_reg = format!("%phi_{}", name);
+                let be_reg = format!("%be_{}", name);
+                self.fun.phi_field_regs.insert(name.clone(), phi_reg);
+                self.fun.backedge_field_regs.insert(name.clone(), be_reg);
+            }
         }
         // Counter load
         let c_gep = self.emit_state_gep(out, "  ", "init_cnt", "%state", counter_idx);
@@ -1029,17 +1044,46 @@ impl LlvmBackend {
         let pi_name = format!("%pi_cnt_{}", self.fun.txn_counter);
         let pn_name = format!("%pn_cnt_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
+        // ── Initial vector construction (before br, so loop_hdr phis are at top) ──
+        // 2026-07-05: Construct initial <4 x float> vectors from scalar init regs.
+        // Must happen BEFORE br (in pre_phi block).  loop_hdr: phis use these values.
+        let mut vec_phi_init: HashMap<String, String> = HashMap::new();
+        for (phi_reg, members) in &self.fun.vector_phi_groups {
+            let mut prev = "undef".to_string();
+            for (i, member) in members.iter().enumerate() {
+                let init_r = &init_regs[member];
+                let ins = format!("%iv{}_{}{}", self.fun.txn_counter, &phi_reg[1..], self.fun.txn_counter);
+                self.fun.txn_counter += 1;
+                writeln!(out, "  {} = insertelement <4 x float> {}, float {}, i32 {}", ins, prev, init_r, i).ok();
+                prev = ins;
+            }
+            vec_phi_init.insert(phi_reg.clone(), prev);
+        }
         writeln!(out, "  br label %loop_hdr").ok();
         // ── Loop header: phi nodes + exit check ──────────────────────
         writeln!(out, "loop_hdr:").ok();
         writeln!(out, "  {} = phi i64 [ {}, %pre_phi ], [ {}, %latch ]", pi_name, init_count, pn_name).ok();
+        // Emit scalar phis for non-grouped fields.  Vector phis are emitted
+        // AFTER scalar phis because they don't affect the "phis at top" rule
+        // (the insertelement initialization is in pre_phi, not loop_hdr).
+        let mut emitted_vec_phis: HashSet<String> = HashSet::new();
         for (name, phi_reg) in &self.fun.phi_field_regs {
             if *name == counter_name { continue; }
-            let init_reg = &init_regs[name];
-            let be_reg = &self.fun.backedge_field_regs[name];
             let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
             let ty = &self.ctx.field_types[idx];
-            writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", phi_reg, ty, init_reg, be_reg).ok();
+            // Check if this is a vector group member (phi_reg is a vector, not scalar)
+            if self.fun.vector_phi_groups.contains_key(phi_reg) {
+                // Emit vector phi only once per group (uses pre-constructed init from vec_phi_init)
+                if emitted_vec_phis.insert(phi_reg.clone()) {
+                    let init_vec = vec_phi_init.get(phi_reg).cloned().unwrap_or_else(|| "undef".to_string());
+                    let be_reg = &self.fun.backedge_field_regs[name];
+                    writeln!(out, "  {} = phi <4 x float> [ {}, %pre_phi ], [ {}, %latch ]", phi_reg, init_vec, be_reg).ok();
+                }
+            } else {
+                let init_reg = &init_regs[name];
+                let be_reg = &self.fun.backedge_field_regs[name];
+                writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", phi_reg, ty, init_reg, be_reg).ok();
+            }
         }
         // Counter phi
         let ty_counter = &self.ctx.field_types[counter_idx];
@@ -1060,12 +1104,18 @@ impl LlvmBackend {
     /// instead of GEP+load from %State.  This eliminates the memory roundtrip
     /// per iteration — the phi register carries the iteration value directly.
     fn emit_countable_body(&mut self, out: &mut String, body: &[Statement]) {
-        self.phi_regs_to_ssa_old();
+        self.phi_regs_to_ssa_old(out);
         self.fun.let_bindings.clear();
         self.fun.let_binding_types.clear();
         self.fun.reg_float_cache.clear();
         self.fun.reg_type_cache.clear();
         self.fun.expr_dedup_cache.clear();
+        // 2026-07-05: Initialize vector_phi_current with the phi register values.
+        // The first insertelement for each vector group uses the phi register
+        // (which holds the previous iteration's accumulated value) as the base.
+        for (vec_phi, _members) in &self.fun.vector_phi_groups {
+            self.fun.vector_phi_current.insert(vec_phi.clone(), vec_phi.clone());
+        }
         self.fun.terminated = false;
         self.fun.loop_exit_label = Some("done".into());
         for s in body {
@@ -1086,13 +1136,25 @@ impl LlvmBackend {
     /// phi_field_regs. Used when entering a loop body (to make phi values
     /// available to emit_stmt reads) and in the post-loop done: block (to
     /// make final field values available to hoisted guard bodies).
-    fn phi_regs_to_ssa_old(&mut self) {
+    fn phi_regs_to_ssa_old(&mut self, out: &mut String) {
         self.fun.ssa_old_float_regs.clear();
         self.fun.ssa_old_int_regs.clear();
+        // Build set of all vector group member field names
+        let mut vec_member_to_info: HashMap<String, (&String, usize)> = HashMap::new();
+        for (vec_phi, members) in &self.fun.vector_phi_groups {
+            for (i, member) in members.iter().enumerate() {
+                vec_member_to_info.insert(member.clone(), (vec_phi, i));
+            }
+        }
         for (name, phi_reg) in &self.fun.phi_field_regs {
             let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
             let ll_ty = &self.ctx.field_types[idx];
-            if ll_ty == "float" || ll_ty == "double" {
+            if let Some((vec_phi, comp_idx)) = vec_member_to_info.get(name) {
+                // Vector group member: extract element from vector phi
+                let ext = format!("%{}_e{}", &phi_reg[1..phi_reg.len() - 3], comp_idx);
+                writeln!(out, "  {} = extractelement <4 x float> {}, i32 {}", ext, vec_phi, comp_idx).ok();
+                self.fun.ssa_old_float_regs.insert(name.clone(), ext);
+            } else if ll_ty == "float" || ll_ty == "double" {
                 self.fun.ssa_old_float_regs.insert(name.clone(), phi_reg.clone());
             } else {
                 self.fun.ssa_old_int_regs.insert(name.clone(), phi_reg.clone());
@@ -1136,8 +1198,12 @@ impl LlvmBackend {
             .map(|(n, &i)| (n.clone(), (i, self.ctx.field_types[i].clone())))
             .collect();
         let pending_mod: HashSet<String> = self.fun.pending_phi_backedge.keys().cloned().collect();
+        let mut emitted_be: HashSet<String> = HashSet::new();
         for (name, be_reg) in &backedge_entries {
             if *name == counter_name { continue; }
+            // 2026-07-05: Skip duplicate backedge registers (vector group members
+            // share the same be_reg — all 4 components emit into the same vector).
+            if !emitted_be.insert(be_reg.clone()) { continue; }
             if pending_mod.contains(name) {
                 // 2026-07-05: Rotation fields: GEP reload from %State in the
                 // latch block (dominates backedge trivially).  GVN will CSE
@@ -1155,11 +1221,17 @@ impl LlvmBackend {
                 // For float/double use fadd 0.0 (identity), for ints use add 0.
                 } else if let Some(typed_reg) = self.fun.pending_phi_native_backedge.get(name) {
                     let Some(&(_, ref ty)) = field_map.get(name) else { continue; };
-                    let _ = match ty.as_str() {
-                        "float" => writeln!(out, "  {} = fadd float {}, 0.0", be_reg, typed_reg),
-                        "double" => writeln!(out, "  {} = fadd double {}, 0.0", be_reg, typed_reg),
-                        _ => writeln!(out, "  {} = add i64 0, {}", be_reg, typed_reg),
-                    };
+                    // 2026-07-05: Vector group backedges use the accumulated <4 x float>
+                    // from the body's insertelement chain (no arithmetic or type coercion).
+                    if typed_reg.starts_with("%iv") {
+                        writeln!(out, "  {} = bitcast <4 x float> {} to <4 x float>", be_reg, typed_reg).ok();
+                    } else {
+                        let _ = match ty.as_str() {
+                            "float" => writeln!(out, "  {} = fadd float {}, 0.0", be_reg, typed_reg),
+                            "double" => writeln!(out, "  {} = fadd double {}, 0.0", be_reg, typed_reg),
+                            _ => writeln!(out, "  {} = add i64 0, {}", be_reg, typed_reg),
+                        };
+                    }
                 } else {
                     // Fallback: reload from %State
                     let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
@@ -1331,9 +1403,33 @@ impl LlvmBackend {
             for field_name in self.fun.done_needs_fields.iter() {
                 let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
                 let ty = &self.ctx.field_types[idx];
-                let reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "  {} = alloca {}, align {}", reg, ty, self.align_of(ty)).ok();
-                self.fun.last_val_temps.insert(field_name.clone(), reg);
+                // 2026-07-05: Vector group members share one <4 x float> alloca.
+                // Check if this field belongs to a vector group and another member
+                // already created the alloca.
+                let mut shared_alloca = None;
+                for (vec_phi, members) in &self.fun.vector_phi_groups {
+                    if members.contains(field_name) {
+                        for m in members {
+                            if let Some(shared) = self.fun.last_val_temps.get(m) {
+                                shared_alloca = Some(shared.clone());
+                                break;
+                            }
+                        }
+                        break;
+                    }
+                }
+                if let Some(shared) = shared_alloca {
+                    self.fun.last_val_temps.insert(field_name.clone(), shared);
+                } else if self.fun.vector_phi_groups.values().any(|m| m.contains(field_name)) {
+                    // First member of group: create <4 x float> alloca
+                    let reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = alloca <4 x float>, align 16", reg).ok();
+                    self.fun.last_val_temps.insert(field_name.clone(), reg);
+                } else {
+                    let reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = alloca {}, align {}", reg, ty, self.align_of(ty)).ok();
+                    self.fun.last_val_temps.insert(field_name.clone(), reg);
+                }
             }
             // 2026-07-04: Phi commit block replaces per-iteration stores.
             // Suppress body stores via needs_state_stores_in_body = false.
@@ -1363,6 +1459,13 @@ impl LlvmBackend {
         };
         let live = trace_live_fields(&liveness_body, &self.ctx.field_index_map);
         let filtered_body = filter_dead_assignments(body, &live);
+        // ── Vector phi groups for register pressure reduction ─────────
+        // 2026-07-05: Group fields like vx0..vx3 into <4 x float> vector phis.
+        // Reduces register pressure from 32 scalar to ~8 vector phis.
+        self.fun.vector_phi_groups = build_vector_phi_groups(
+            &self.ctx.field_index_map,
+            &self.ctx.field_types,
+        );
         // ── Initial field loads + phi/backedge register setup + loop header ──
         let (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, _init_count)
             = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg, write_set, exit_label);
@@ -1497,13 +1600,24 @@ impl LlvmBackend {
         // of %done).  done: loads from these allocas — no per-iteration stores.
         if !self.fun.last_val_temps.is_empty() {
             writeln!(out, "commit:").ok();
+            let mut committed_vec: HashSet<String> = HashSet::new();
             for (field_name, temp_reg) in &self.fun.last_val_temps {
                 let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
                 let ty = &self.ctx.field_types[idx];
                 let phi_reg = self.fun.phi_field_regs.get(field_name)
                     .map(|s| s.as_str()).unwrap_or("");
                 if !phi_reg.is_empty() {
-                    writeln!(out, "  store {} {}, ptr {}, align {}", ty, phi_reg, temp_reg, self.align_of(ty)).ok();
+                    // 2026-07-05: Vector group members share the same phi register.
+                    // Only emit the store once per vector group.
+                    if committed_vec.insert(phi_reg.to_string()) {
+                        // Determine the store type: for vector groups, the phi_reg
+                        // has a "_v4" suffix — use <4 x float> instead of scalar.
+                        if phi_reg.ends_with("_v4") {
+                            writeln!(out, "  store <4 x float> {}, ptr {}, align 16", phi_reg, temp_reg).ok();
+                        } else {
+                            writeln!(out, "  store {} {}, ptr {}, align {}", ty, phi_reg, temp_reg, self.align_of(ty)).ok();
+                        }
+                    }
                 }
             }
             writeln!(out, "  br label %done").ok();
@@ -1520,6 +1634,8 @@ impl LlvmBackend {
         self.fun.counter_field_name = None;
         self.fun.parallel_safe_exempt_fields.clear();
         self.fun.rotation_fields.clear();
+        self.fun.vector_phi_groups.clear();
+        self.fun.vector_phi_current.clear();
     }
 
     /// Emit a `main()` that uses per-field GEP loads/stores for all-convergent
@@ -1677,7 +1793,7 @@ impl LlvmBackend {
         post_hoist: &[Vec<Statement>],
     ) {
         self.fun.pending_phi_backedge.clear();
-        self.phi_regs_to_ssa_old();
+        self.phi_regs_to_ssa_old(out);
         if let Some((ref cname, ref pi_reg, _)) = self.fun.phi_induction_reg {
             self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
         }
@@ -2346,10 +2462,39 @@ impl LlvmBackend {
     fn load_last_val_temps(&mut self, out: &mut String) {
         self.fun.ssa_old_float_regs.clear();
         self.fun.ssa_old_int_regs.clear();
+        // 2026-07-05: Track which vector phis have been loaded (one load serves
+        // all members of the group via extractelement).
+        let mut loaded_vec: HashSet<String> = HashSet::new();
         for field_name in self.fun.done_needs_fields.iter() {
             let Some(temp_reg) = self.fun.last_val_temps.get(field_name) else { continue; };
             let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
             let ty = &self.ctx.field_types[idx];
+            // Check if this field is in a vector group and the vector was already loaded
+            let mut vec_field = None;
+            for (vec_phi, members) in &self.fun.vector_phi_groups {
+                if let Some(pos) = members.iter().position(|m| m == field_name) {
+                    if !loaded_vec.insert(vec_phi.clone()) {
+                        // Vector already loaded; skip (extractelement was emitted earlier)
+                        // But we still need to set ssa_old for this field from the earlier
+                        // extract. We can find the extract register by scanning ssa_old...
+                        // Actually, we stored the extract reg in ssa_old_float_regs during
+                        // a previous iteration of this loop. We just need to skip.
+                        break;
+                    }
+                    // First member: load vector
+                    let load_reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = load <4 x float>, ptr {}, align 16", load_reg, temp_reg).ok();
+                    // Extract ALL members of the group
+                    for (pos2, member) in members.iter().enumerate() {
+                        let ext_reg = format!("%lve_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                        writeln!(out, "  {} = extractelement <4 x float> {}, i32 {}", ext_reg, load_reg, pos2).ok();
+                        self.fun.ssa_old_float_regs.insert(member.clone(), ext_reg);
+                    }
+                    vec_field = Some(());
+                    break;
+                }
+            }
+            if vec_field.is_some() { continue; }
             let load_reg = format!("%lv_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "  {} = load {}, ptr {}, align {}", load_reg, ty, temp_reg, self.align_of(ty)).ok();
             if ty == "float" || ty == "double" {

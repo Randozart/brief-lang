@@ -36,6 +36,24 @@ impl LlvmBackend {
         val: &TypedRegister,
         is_volatile: bool,
     ) {
+        // 2026-07-05: Vector group handling — instead of GEP store, emit
+        // insertelement to build the vector backedge.  The latch's phi
+        // backedge for vector groups is the accumulated vector value.
+        for (vec_phi, members) in &self.fun.vector_phi_groups {
+            if let Some(comp_idx) = members.iter().position(|m| m == fname) {
+                if is_volatile { break; }
+                let cur_vec = self.fun.vector_phi_current.get(vec_phi)
+                    .cloned().unwrap_or_else(|| vec_phi.clone());
+                let ins = format!("%iv{}_{}", self.fun.txn_counter, &vec_phi[1..]);
+                self.fun.txn_counter += 1;
+                writeln!(out, "{} {} = insertelement <4 x float> {}, float {}, i32 {}",
+                    indent, ins, cur_vec, val, comp_idx).ok();
+                self.fun.vector_phi_current.insert(vec_phi.clone(), ins.clone());
+                self.fun.pending_phi_backedge.insert(fname.to_string(), ins.clone());
+                self.fun.pending_phi_native_backedge.insert(fname.to_string(), ins);
+                return;
+            }
+        }
         let ty = self.ctx.field_types[idx].clone();
         let sr = self.fun.state_reg_name.clone();
         let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
