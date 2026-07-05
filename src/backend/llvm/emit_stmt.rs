@@ -53,7 +53,14 @@ impl LlvmBackend {
             // 2026-07-04: Gate the store on both needs_state_stores_in_body
             // and per-field done: liveness.  When done_needs_fields is
             // non-empty, only store fields that the done: block reads.
-            if self.fun.needs_state_stores_in_body && (self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname)) {
+            // 2026-07-05: rotation_fields override — body stores must be
+            // emitted for rotation fields so the latch can GEP-reload them
+            // (breaking the circular phi chain for SCEV analysis).
+            // Also override for counter_field_name (the latch's overflow
+            // guard needs to GEP-reload the counter to check bound).
+            let is_counter = self.fun.counter_field_name.as_deref() == Some(fname);
+            if (self.fun.needs_state_stores_in_body || self.fun.rotation_fields.contains(fname) || is_counter)
+                && (self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname) || self.fun.rotation_fields.contains(fname) || is_counter) {
                 writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
                     indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
             }
@@ -83,8 +90,10 @@ impl LlvmBackend {
             let typed_val = val.to_string();
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
             // 2026-07-04: Gate the store on both needs_state_stores_in_body
-            // and per-field done: liveness.
-            if self.fun.needs_state_stores_in_body && (self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname)) {
+            // and per-field done: liveness.  2026-07-05: rotation_fields + counter override.
+            let is_counter = self.fun.counter_field_name.as_deref() == Some(fname);
+            if (self.fun.needs_state_stores_in_body || self.fun.rotation_fields.contains(fname) || is_counter)
+                && (self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(fname) || self.fun.rotation_fields.contains(fname) || is_counter) {
                 writeln!(out, "{}store{} {} {}, ptr {}, align {}, !tbaa !{}",
                     indent, vol_str, ty, typed_val, p, self.align_of(&ty), tn).ok();
             }

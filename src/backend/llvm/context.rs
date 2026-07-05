@@ -341,6 +341,11 @@ pub struct FunctionContext {
     // alloca register name.
     pub last_val_temps: HashMap<String, String>,
 
+    // 2026-07-05: Fields participating in a body rotation pattern.
+    // Forces body stores for these fields so the latch can reload them
+    // via GEP, breaking circular phi chains for SCEV analysis.
+    pub rotation_fields: HashSet<String>,
+
     // Chimera tracking
 
     // Chimera tracking
@@ -400,6 +405,7 @@ impl FunctionContext {
             parallel_safe_exempt_fields: HashSet::new(),
             done_needs_fields: HashSet::new(),
             last_val_temps: HashMap::new(),
+            rotation_fields: HashSet::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
         }

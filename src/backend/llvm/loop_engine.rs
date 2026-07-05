@@ -1139,11 +1139,21 @@ impl LlvmBackend {
         for (name, be_reg) in &backedge_entries {
             if *name == counter_name { continue; }
             if pending_mod.contains(name) {
+                // 2026-07-05: Rotation fields: GEP reload from %State in the
+                // latch block (dominates backedge trivially).  GVN will CSE
+                // the load-via-store with the body's store at the same GEP
+                // address, producing zero memory traffic in the final code.
+                // This breaks the circular phi chain for SCEV analysis.
+                if rotation_step > 1 && self.fun.rotation_fields.contains(name) {
+                    let Some(&(idx, ref ty)) = field_map.get(name) else { continue; };
+                    let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
+                    writeln!(out, "  {} = load {}, ptr {}, align {}",
+                        be_reg, ty, gep_reload, self.align_of(ty)).ok();
                 // 2026-07-03: If the body stored a native-typed value, use it
                 // directly as the phi backedge instead of reloading from %State.
                 // This eliminates the store→GEP→load roundtrip per field.
                 // For float/double use fadd 0.0 (identity), for ints use add 0.
-                if let Some(typed_reg) = self.fun.pending_phi_native_backedge.get(name) {
+                } else if let Some(typed_reg) = self.fun.pending_phi_native_backedge.get(name) {
                     let Some(&(_, ref ty)) = field_map.get(name) else { continue; };
                     let _ = match ty.as_str() {
                         "float" => writeln!(out, "  {} = fadd float {}, 0.0", be_reg, typed_reg),
@@ -1394,16 +1404,94 @@ impl LlvmBackend {
         self.fun.parallel_safe_exempt_fields.clear();
         let mut guard_exempt = HashSet::new();
         collect_parallel_safe_exemptions(&filtered_body, &mut self.fun.parallel_safe_exempt_fields, &mut guard_exempt, &self.ctx.field_index_map);
-        // ── Emit body and detect rotation ─────────────────────────────
-        // 2026-07-05: Rotation detection analyzes pending_phi_native_backedge
-        // (populated by the first body emission) to find circular phi chains
-        // (fannkuch_redux 12-cycle). When rotation is detected, the body is
-        // unrolled by the rotation step to decompose the cycle into SCEV-
-        // friendly sub-cycles (length ≤ 4).
-        // Emit the first body copy (populates pending_phi_native_backedge).
-        self.emit_countable_body(out, &filtered_body);
+        // ── Rotation detection ────────────────────────────────────────
+        // 2026-07-05: Detect circular phi chains in rotation patterns
+        // (fannkuch_redux 12-cycle).  Body unrolling + GEP reloads in the
+        // latch break the cycle into independent SCEV-analyzable values.
+        let rotation_step = detect_rotation_ast(&filtered_body, &self.ctx.field_index_map);
+        // When rotation is active, use the ORIGINAL body (not filtered_body)
+        // because filter_dead_assignments may remove the counter increment
+        // (count is dead in liveness analysis when the terminating guard
+        // condition is hoisted without its condition expression).
+        let emit_body: &[Statement] = if rotation_step > 1 { body } else { &filtered_body };
+        if rotation_step > 1 {
+            // Build rotation_fields set — forces body stores to %State so
+            // the latch can GEP-reload them (breaking the phi chain).
+            for s in emit_body {
+                if let Statement::Assignment { lhs, .. } = s {
+                    if let Some(fname) = target_field_name(lhs) {
+                        if self.fun.phi_field_regs.contains_key(&fname) {
+                            self.fun.rotation_fields.insert(fname.clone());
+                            self.fun.parallel_safe_exempt_fields.insert(fname.clone());
+                        }
+                    }
+                }
+            }
+            // Must force stores for rotation fields (latch needs fresh values).
+            // Keep done_needs_fields intact (commit block ensures done: reads
+            // correct field values from last_val_temps, not from monolithic
+            // %State which is never written by the chunk-based body stores).
+            self.fun.needs_state_stores_in_body = true;
+        }
+        // ── Emit body (possibly unrolled for rotation) ────────────────
+        self.emit_countable_body(out, emit_body);
+        if rotation_step > 1 {
+            // Unroll additional body copies.  GEP-reload rotation fields
+            // between copies so each sees the previous copy's computed values.
+            // Overflow guard after each copy handles non-divisible bounds.
+            for i in 1..rotation_step {
+                // GEP-reload rotation fields into ssa_old caches.
+                let rot_fields: Vec<String> = self.fun.rotation_fields.iter().cloned().collect();
+                for fname in &rot_fields {
+                    let Some(&idx) = self.ctx.field_index_map.get(fname) else { continue; };
+                    let ty = self.ctx.field_types[idx].clone();
+                    let gep = self.emit_state_gep(out, "  ", "rr", "%state", idx);
+                    let ld = format!("%rld_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = load {}, ptr {}, align {}", ld, ty, gep, self.align_of(&ty)).ok();
+                    if ty == "float" || ty == "double" {
+                        self.fun.ssa_old_float_regs.insert(fname.clone(), ld.clone());
+                    } else {
+                        self.fun.ssa_old_int_regs.insert(fname.clone(), ld.clone());
+                    }
+                }
+                // GEP-reload count field too (emit_countable_body clears ssa_old,
+                // so count is lost after the first body copy).
+                if let Some(&cnt_idx) = self.ctx.field_index_map.get("count") {
+                    let cnt_gep = self.emit_state_gep(out, "  ", "rc", "%state", cnt_idx);
+                    let cnt_ld = format!("%rlc_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = load i64, ptr {}, align 8", cnt_ld, cnt_gep).ok();
+                    self.fun.ssa_old_int_regs.insert("count".to_string(), cnt_ld.clone());
+                    if counter_name != "count" {
+                        self.fun.ssa_old_int_regs.insert(counter_name.clone(), cnt_ld);
+                    }
+                }
+                // Overflow guard: if count >= bound, exit to done.
+                let count_reg = self.fun.ssa_old_int_regs.get("count")
+                    .or_else(|| self.fun.ssa_old_int_regs.get(&counter_name)).cloned();
+                if let Some(creg) = count_reg {
+                    let chk = format!("%ro_chk_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = icmp sge i64 {}, {}", chk, creg, bound_reg).ok();
+                    writeln!(out, "  br i1 {}, label %latch, label %body_rot{}", chk, i).ok();
+                    writeln!(out, "body_rot{}:", i).ok();
+                }
+                // Emit body copy (preserves ssa_old from GEP reloads).
+                self.fun.let_bindings.clear();
+                self.fun.let_binding_types.clear();
+                self.fun.reg_float_cache.clear();
+                self.fun.reg_type_cache.clear();
+                self.fun.expr_dedup_cache.clear();
+                self.fun.terminated = false;
+                self.fun.loop_exit_label = Some("done".into());
+                for s in emit_body {
+                    if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+                        self.emit_stmt(out, s, "  ");
+                    }
+                }
+                self.fun.loop_exit_label = None;
+            }
+        }
         // ── Latch: increment counter, reload modified fields ─────────
-        self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name, 1);
+        self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name, rotation_step);
         // ── Commit block: store phi final values to last-value allocas ──
         // Runs ONCE at loop exit (when the header branches to %commit instead
         // of %done).  done: loads from these allocas — no per-iteration stores.
@@ -1431,6 +1519,7 @@ impl LlvmBackend {
         self.fun.needs_state_stores_in_body = true;
         self.fun.counter_field_name = None;
         self.fun.parallel_safe_exempt_fields.clear();
+        self.fun.rotation_fields.clear();
     }
 
     /// Emit a `main()` that uses per-field GEP loads/stores for all-convergent
