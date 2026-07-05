@@ -333,6 +333,14 @@ pub struct FunctionContext {
     // needed" (fallback — emit all stores).
     pub done_needs_fields: HashSet<String>,
 
+    // 2026-07-04: Last-value temporaries (allocas) for phi commit block.
+    // When the done: block reads state fields (hoisted prints), these
+    // allocas store the phi's final value ONCE at loop exit (in the commit
+    // block).  emit_hoisted_post_loop_prints loads from these instead of
+    // from %State, eliminating per-iteration stores.  Maps field_name →
+    // alloca register name.
+    pub last_val_temps: HashMap<String, String>,
+
     // Chimera tracking
 
     // Chimera tracking
@@ -391,6 +399,7 @@ impl FunctionContext {
             counter_field_name: None,
             parallel_safe_exempt_fields: HashSet::new(),
             done_needs_fields: HashSet::new(),
+            last_val_temps: HashMap::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
         }

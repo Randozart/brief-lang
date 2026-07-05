@@ -2166,30 +2166,63 @@ self.emit_declares(&mut out);
                                     })
                                 });
                             if let Some(tv) = total_val {
-                                // A005: pure counter fold (O(1) — single store, no loop)
+                                // A000: pure counter fold (O(1) — single store, no loop)
                                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
                                 self.emit_folded_pure_counter(&mut out, counter_idx, tv);
                                 true
                         } else {
-                            // Dispatch: per-field phi loop (A005c) for all field counts.
-                            // 2026-07-04: A005d removed — per-field phi with Path A
-                            // (needs_state_stores_in_body=false) outperforms memory loop
-                            // for ALL field counts because SROA-on-chunks handles
-                            // 31+ phis cleanly while memory loop pays GEP+load+store
-                            // per field per iteration.
-                            self.fun.pending_post_hoist = post_hoist;
-                            let num_fields = node.write_set.len().max(2);
-                            self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
-                            self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
-                            true
+                            // Adaptive dispatch: A005a (inline SSA) vs A005c (per-field phi).
+                            // 2026-07-05: A005a is selected for dense-write, small-field
+                            // bodies — the single %State phi + insertvalue chain lets
+                            // LLVM optimize the entire state as one SSA unit.  Guards are
+                            // handled via phi merge (emit_stmt.rs:983-992).  A005c is
+                            // selected for sparse-write, large-field bodies — per-field
+                            // phis avoid the long insertvalue chain.
+                            // 2026-07-05: has_guards removed from A005a criteria — SSA mode
+                            // handles guards with phi merge at guard exit.  knucleotide
+                            // (0.42x best-known) has guards but needs A005a for perf.
+                            let total_fields = self.ctx.field_index_map.len();
+                            let write_count = node.write_set.len();
+                            let write_density = if total_fields > 0 { write_count as f64 / total_fields as f64 } else { 1.0 };
+                            if write_density >= 0.5 && total_fields < 8 {
+                                // A005a: inline SSA with insertvalue chain.
+                                // Best for dense writes (knucleotide: 4 fields all written,
+                                // mandelbrot: 5 fields all written).
+                                self.fun.pending_post_hoist = post_hoist;
+                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (A005a, {}/{} fields written)", &node.name, write_count, total_fields));
+                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+                                true
+                            } else {
+                                // A005c: per-field phi loop with Path A + dead-field
+                                // elimination + commit block.
+                                self.fun.pending_post_hoist = post_hoist;
+                                let num_fields = node.write_set.len().max(2);
+                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                                true
+                            }
                             }
                         } else {
-                            // Non-pure body: per-field phi loop (A005c) for all field counts.
-                            self.fun.pending_post_hoist = post_hoist;
-                            let num_fields = node.write_set.len().max(2);
-                            self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
-                            self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
-                            true
+                            // Adaptive dispatch for non-pure bodies: A005a vs A005c.
+                            // 2026-07-05: Same criteria as pure path — dense writes,
+                            // small fields favors A005a insertvalue chain.  The SSA mode
+                            // guard handler (emit_stmt.rs:983-992) handles guards with
+                            // phi merge, so guards don't disqualify A005a.
+                            let total_fields = self.ctx.field_index_map.len();
+                            let write_count = node.write_set.len();
+                            let write_density = if total_fields > 0 { write_count as f64 / total_fields as f64 } else { 1.0 };
+                            if write_density >= 0.5 && total_fields < 8 {
+                                self.fun.pending_post_hoist = post_hoist;
+                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (A005a, {}/{} fields written)", &node.name, write_count, total_fields));
+                                self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
+                                true
+                            } else {
+                                self.fun.pending_post_hoist = post_hoist;
+                                let num_fields = node.write_set.len().max(2);
+                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                                true
+                            }
                         }
                     } else { false }
                 } else { false }
