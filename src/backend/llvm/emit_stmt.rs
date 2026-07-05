@@ -954,15 +954,26 @@ impl LlvmBackend {
                 // Without saving/restoring, subsequent reads of state fields
                 // via ssa_old_int_regs would use registers from the guard body,
                 // producing "Instruction does not dominate all uses" errors.
+                // 2026-07-05: Save/restore pending_phi_backedge and
+                // pending_phi_native_backedge across guard boundaries.
+                // Stores inside the guard body populate these with registers
+                // from the guard's then-block. Without save/restore, the latch
+                // (emit_countable_latch) reads registers that are defined in a
+                // non-dominating block, causing "Instruction does not dominate
+                // all uses" errors (mandelbrot bug).
                 let saved_bindings = self.fun.let_bindings.clone();
                 let saved_types = self.fun.let_binding_types.clone();
                 let saved_old_int = self.fun.ssa_old_int_regs.clone();
                 let saved_old_float = self.fun.ssa_old_float_regs.clone();
+                let saved_pending_backedge = self.fun.pending_phi_backedge.clone();
+                let saved_pending_native = self.fun.pending_phi_native_backedge.clone();
                 for s in statements { self.emit_stmt(out, s, &format!("{}  ", indent)); }
                 self.fun.let_bindings = saved_bindings;
                 self.fun.let_binding_types = saved_types;
                 self.fun.ssa_old_int_regs = saved_old_int;
                 self.fun.ssa_old_float_regs = saved_old_float;
+                self.fun.pending_phi_backedge = saved_pending_backedge;
+                self.fun.pending_phi_native_backedge = saved_pending_native;
                 if !self.fun.terminated {
                     // Emit a sentinel then-exit block so the phi at end_l:
                     // (a) has a single predecessor from the then-path (not then_l

@@ -133,6 +133,19 @@ pub(crate) fn hoist_terminating_guard(
     let mut stmts: Vec<&Statement> = body.iter()
         .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
         .collect();
+    // 2026-07-05: Build let-to-state-field mapping from body assignments.
+    // When the hoisted swan song references a let binding (like nesc in
+    // mandelbrot), the done: block can't use the body's register.  We remap
+    // the let binding to the state field that stores its value.
+    // Pattern: &field_name = let_name  →  map[let_name] = field_name
+    let mut let_to_field: HashMap<String, String> = HashMap::new();
+    for s in body {
+        if let Statement::Assignment { lhs: Expr::OwnedRef(field_name), expr: Expr::Identifier(let_name), .. } = s {
+            if field_index_map.contains_key(field_name) {
+                let_to_field.insert(let_name.clone(), field_name.clone());
+            }
+        }
+    }
     let mut hoist: Vec<Vec<Statement>> = Vec::new();
     while let Some(last_idx) = stmts.len().checked_sub(1) {
         if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
@@ -142,14 +155,23 @@ pub(crate) fn hoist_terminating_guard(
             // into a Vec<Statement> that the post-loop block can re-emit.
             // This handles both simple field-print patterns (original hoisting)
             // and let-binding-based patterns (nbody: energy computation + print).
-            let body_stmts: Vec<Statement> = statements.iter()
+            let mut body_stmts: Vec<Statement> = statements.iter()
                 .filter(|s| !matches!(s, Statement::TermBang { .. }))
                 .cloned()
                 .collect();
+            // Remap let binding references to state field names in hoisted body.
+            for s in &mut body_stmts {
+                remap_stmt_identifiers(s, &let_to_field);
+            }
             let swan_song_stmt = statements.iter().find_map(|s| {
                 if let Statement::TermBang { swan_song: Some(ss), .. } = s {
                     Some(ss.as_ref().clone())
                 } else { None }
+            });
+            // Remap swan song identifiers too.
+            let swan_song_stmt = swan_song_stmt.map(|mut ss| {
+                remap_stmt_identifiers(&mut ss, &let_to_field);
+                ss
             });
             // 2026-07-04: Hoist even when body_stmts is empty — the
             // guard may be just `term! -> print_int#(result)` with no
@@ -170,6 +192,51 @@ pub(crate) fn hoist_terminating_guard(
     }
     let body_vec: Vec<Statement> = stmts.into_iter().cloned().collect();
     (body_vec, hoist)
+}
+
+/// Recursively remap identifiers in a statement using the let-to-field map.
+fn remap_stmt_identifiers(s: &mut Statement, map: &HashMap<String, String>) {
+    match s {
+        Statement::Assignment { expr, .. } => {
+            remap_expr_into(expr, map);
+        }
+        Statement::Expression(e) => {
+            remap_expr_into(e, map);
+        }
+        Statement::TermBang { swan_song: Some(ss), .. } => {
+            remap_stmt_identifiers(ss, map);
+        }
+        Statement::Guarded { condition, statements, .. } => {
+            remap_expr_into(condition, map);
+            for stmt in statements.iter_mut() {
+                remap_stmt_identifiers(stmt, map);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Recursively remap identifiers in a normalized expression.
+/// Uses the old-style (normalized) Expr variants for matching.
+fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
+    match e {
+        Expr::Identifier(name) => {
+            if let Some(field) = map.get(name) {
+                *name = field.clone();
+            }
+        }
+        Expr::Call(_, args) => {
+            for arg in args.iter_mut() {
+                remap_expr_into(arg, map);
+            }
+        }
+        Expr::IntrinsicCall { intrinsic: _, args } => {
+            for arg in args.iter_mut() {
+                remap_expr_into(arg, map);
+            }
+        }
+        _ => {}
+    }
 }
 
 use crate::ast::{

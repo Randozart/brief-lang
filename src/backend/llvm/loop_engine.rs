@@ -1727,6 +1727,9 @@ impl LlvmBackend {
         let attr = self.slp_attr("main", "#3");
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
+        // 2026-07-05: Use emit_state_allocas for chunk allocas + %state.
+        // emit_modulo_switch_main was missing this call, causing
+        // "use of undefined value '%state_0'" in sparse_dispatch.
         self.emit_state_allocas(out);
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
@@ -1986,7 +1989,10 @@ impl LlvmBackend {
         let attr = self.slp_attr("main", "#3");
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", attr).ok();
         writeln!(out, "  entry:").ok();
-        writeln!(out, "  %state = alloca %State, align 8").ok();
+        // 2026-07-05: Use emit_state_allocas for chunk allocas + %state.
+        // emit_modulo_rotated was missing this (same bug as
+        // emit_modulo_switch_main — sparse_dispatch hits this path).
+        self.emit_state_allocas(out);
         self.emit_inline_init_stores(out, "%state");
         self.emit_trg_init(out);
         self.emit_arena_init(out, "  ");
@@ -2202,17 +2208,34 @@ impl LlvmBackend {
         // falling back to pre_load_all_fields from %State.  The commit block
         // stores phi final values ONCE at loop exit, eliminating per-iteration
         // stores while keeping post-loop values available for hoisted prints.
+        // 2026-07-05: Save let_bindings before clearing, then remap let bindings
+        // that hoisted statements reference to their equivalent state field values.
+        // Let bindings defined in the loop body (like nesc in mandelbrot) use
+        // registers valid only in the body block.  Without remapping, hoisted
+        // statements reference body-block registers from the done: block producing
+        // "Instruction does not dominate all uses" (mandelbrot bug).
+        // The remapping works by scanning the body for `&field = let_binding`
+        // patterns — when a let binding is stored to a state field, we alias it
+        // to the state field's loaded value in ssa_old_int_regs.
+        let saved_let_bindings = std::mem::take(&mut self.fun.let_bindings);
+        let saved_let_types = std::mem::take(&mut self.fun.let_binding_types);
         self.fun.expr_dedup_cache.clear();
+        self.fun.reg_float_cache.clear();
+        self.fun.reg_type_cache.clear();
         if !self.fun.last_val_temps.is_empty() {
             self.load_last_val_temps(out);
         } else {
             let filter: Option<HashSet<String>> = if self.fun.done_needs_fields.is_empty() { None } else { Some(self.fun.done_needs_fields.clone()) };
             self.pre_load_all_fields(out, "%state", filter.as_ref());
         }
+        self.fun.expr_dedup_cache.clear();
         for body_stmts in hoisted {
             for s in body_stmts {
                 self.emit_stmt(out, s, "  ");
             }
+            self.fun.expr_dedup_cache.clear();
+            self.fun.reg_float_cache.clear();
+            self.fun.reg_type_cache.clear();
         }
         self.fun.done_needs_fields.clear();
     }

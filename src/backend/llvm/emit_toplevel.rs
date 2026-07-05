@@ -869,7 +869,6 @@ impl LlvmBackend {
             .collect();
         fields.sort_by_key(|&(_, idx, _)| idx);
         for (name, idx, _ty) in &fields {
-            let p = format!("%ip_{}", idx);
             let gep_reg = self.emit_state_gep(out, indent, "ip", "%state", *idx);
             let init_clone = self.ctx.field_initializers.get(name).and_then(|e| e.clone());
             let ty = self.ctx.field_types[*idx].clone();
@@ -877,7 +876,12 @@ impl LlvmBackend {
             if let Some(Expr::ListLiteral(ref items)) = init_clone {
                 if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[*idx] {
                     if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
-                        self.emit_ringbuf_init(out, items, *idx, name, &p, indent);
+                        // 2026-07-05: Use gep_reg (from emit_state_gep) instead of
+                        // stable name %ip_{idx}. The stable name would reference a
+                        // register that was defined in a different function (like
+                        // @init_state) but not in @main, causing "use of undefined
+                        // value '%ip_N'" in queue_drain.
+                        self.emit_ringbuf_init(out, items, *idx, name, &gep_reg, indent);
                         continue;
                     }
                 }
