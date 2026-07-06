@@ -428,8 +428,10 @@ impl LlvmBackend {
     fn pre_load_all_fields(&mut self, out: &mut String, state_ptr: &str, filter: Option<&HashSet<String>>) {
         self.fun.ssa_old_float_regs.clear();
         self.fun.ssa_old_int_regs.clear();
-        let field_entries: Vec<(String, usize)> = self.ctx.field_index_map.iter()
+        let mut field_entries: Vec<(String, usize)> = self.ctx.field_index_map.iter()
             .map(|(n, &i)| (n.clone(), i)).collect();
+        // 2026-07-06: Sort by field name for deterministic pre-load order.
+        field_entries.sort_by_key(|(n, _)| n.clone());
         for (field_name, field_idx) in &field_entries {
             // 2026-07-04: When filter is Some, only load fields in the set.
             if let Some(f) = filter {
@@ -985,9 +987,11 @@ impl LlvmBackend {
     ) -> (String, String, String, String, String, String) {
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
-        let all_fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
+        let mut all_fields: Vec<(String, usize, String)> = self.ctx.field_index_map.iter()
             .map(|(n, &i)| (n.clone(), i, self.ctx.field_types[i].clone()))
             .collect();
+        // 2026-07-06: Sort by field name for deterministic phi header order.
+        all_fields.sort_by_key(|(n, _, _)| n.clone());
         let mut init_regs: HashMap<String, String> = HashMap::new();
         let mut counter_name = String::new();
         // Build lookup: is a field name a member of a vector group?
@@ -1147,7 +1151,12 @@ impl LlvmBackend {
                 vec_member_to_info.insert(member.clone(), (vec_phi, i));
             }
         }
-        for (name, phi_reg) in &self.fun.phi_field_regs {
+        // 2026-07-06: Sort phi_field_regs for deterministic ssa_old inserts.
+        let mut sorted_phi: Vec<(String, String)> = self.fun.phi_field_regs.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        sorted_phi.sort_by_key(|(k, _)| k.clone());
+        for (name, phi_reg) in &sorted_phi {
             let Some(&idx) = self.ctx.field_index_map.get(name) else { continue; };
             let ll_ty = &self.ctx.field_types[idx];
             if let Some((vec_phi, comp_idx)) = vec_member_to_info.get(name) {
@@ -1189,9 +1198,11 @@ impl LlvmBackend {
         // the step size (body is unrolled rotation_step times per trip).
         let inc = if rotation_step > 1 { rotation_step as i64 } else { 1 };
         writeln!(out, "  {} = add i64 {}, {}", pn_name, pi_name, inc).ok();
-        let backedge_entries: Vec<(String, String)> = self.fun.backedge_field_regs.iter()
+        // 2026-07-06: Sort backedge_field_regs for deterministic latch order.
+        let mut backedge_entries: Vec<(String, String)> = self.fun.backedge_field_regs.iter()
             .map(|(n, r)| (n.clone(), r.clone()))
             .collect();
+        backedge_entries.sort_by_key(|(n, _)| n.clone());
         let phi_entries: HashMap<String, String> = self.fun.phi_field_regs.iter()
             .map(|(n, r)| (n.clone(), r.clone()))
             .collect();
@@ -1631,7 +1642,12 @@ impl LlvmBackend {
         if !self.fun.last_val_temps.is_empty() {
             writeln!(out, "commit:").ok();
             let mut committed_vec: HashSet<String> = HashSet::new();
-            for (field_name, temp_reg) in &self.fun.last_val_temps {
+            // 2026-07-06: Sort last_val_temps for deterministic commit store order.
+            let mut sorted_commit: Vec<(String, String)> = self.fun.last_val_temps.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
+            sorted_commit.sort_by_key(|(k, _)| k.clone());
+            for (field_name, temp_reg) in &sorted_commit {
                 let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
                 let ty = &self.ctx.field_types[idx];
                 let phi_reg = self.fun.phi_field_regs.get(field_name)
@@ -2519,7 +2535,10 @@ impl LlvmBackend {
         // 2026-07-05: Track which vector phis have been loaded (one load serves
         // all members of the group via extractelement).
         let mut loaded_vec: HashSet<String> = HashSet::new();
-        for field_name in self.fun.done_needs_fields.iter() {
+        // 2026-07-06: Sort done_needs_fields for deterministic load order.
+        let mut sorted_done: Vec<String> = self.fun.done_needs_fields.iter().cloned().collect();
+        sorted_done.sort();
+        for field_name in &sorted_done {
             let Some(temp_reg) = self.fun.last_val_temps.get(field_name) else { continue; };
             let Some(&idx) = self.ctx.field_index_map.get(field_name) else { continue; };
             let ty = &self.ctx.field_types[idx];
