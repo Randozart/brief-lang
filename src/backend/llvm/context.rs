@@ -217,7 +217,31 @@ pub struct FunctionContext {
     pub reg_float_cache: HashMap<String, String>,
     pub reg_type_cache: HashMap<String, Type>,
 
-    // Phi/loop state
+    // ── ⚠  NON-DETERMINISM WARNING ⚠  ─────────────────────────────────
+    //
+    // Every HashMap below is iterated during LLVM IR emission (phi header
+    // creation, ssa_old cache setup, latch backedge, commit block stores,
+    // post-loop loads, etc.).  Rust's HashMap uses SipHash with a random
+    // seed per process, so iteration order differs EVERY COMPILATION.
+    //
+    // THIS IS A BUG if the iteration order determines LLVM IR instruction
+    // order.  LLVM's optimizer (SROA, GVN, vectorizer) is phi-order-sensitive
+    // — different phi node orderings produce different optimized code,
+    // causing up to ~9% benchmark-to-benchmark performance variation.
+    //
+    // If you add a new for-loop over any of these maps for code generation,
+    // you MUST sort the entries by key before iterating:
+    //
+    //   let mut sorted: Vec<_> = map.iter().map(|(k,v)| (k.clone(),v.clone())).collect();
+    //   sorted.sort_by_key(|(k,_)| k.clone());
+    //   for (key, val) in &sorted { ... }
+    //
+    // The same applies if you add a NEW HashMap that will be iterated for
+    // code emission.  HashMaps used solely for O(1) lookups are fine.
+    // See docs/plans/2026-07-06-ir-determinism-and-benchmark-strategy.md
+    // and commit 139c345 for the full fix history.
+    //
+    // ────────────────────────────────────────────────────────────────────
     pub ssa_old_int_regs: HashMap<String, String>,
     pub ssa_old_float_regs: HashMap<String, String>,
     pub pending_phi_backedge: HashMap<String, String>,

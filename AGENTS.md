@@ -151,6 +151,38 @@ fn emit_binop(builder: &mut LlvmBuilder, op: BinOp, lhs: Type, rhs: Type) -> Res
 
 This makes dependencies explicit, improves testability, and documents which data each function actually uses.
 
+### 7. HashMap Iteration Determinism
+
+Every HashMap iteration that produces LLVM IR instructions MUST be sorted by
+key before the loop. Rust's `HashMap` uses SipHash with a random seed per
+process — iteration order differs every compilation.
+
+**Wrong** (non-deterministic IR — up to ~9% performance variation):
+```rust
+for (name, reg) in &self.fun.phi_field_regs {
+    writeln!(out, "  {} = phi {} ...", reg, ty).ok();
+}
+```
+
+**Right** (deterministic IR — same machine code every compilation):
+```rust
+let mut sorted: Vec<(String, String)> = self.fun.phi_field_regs.iter()
+    .map(|(k, v)| (k.clone(), v.clone())).collect();
+sorted.sort_by_key(|(k, _)| k.clone());
+for (name, reg) in &sorted {
+    writeln!(out, "  {} = phi {} ...", reg, ty).ok();
+}
+```
+
+This applies to ALL HashMaps whose iteration order determines IR instruction
+order: `field_index_map`, `phi_field_regs`, `backedge_field_regs`, `last_val_temps`,
+`done_needs_fields`, `pending_phi_backedge`, `pending_phi_native_backedge`,
+`vector_phi_groups`, `vector_phi_current`, etc. HashMaps used solely for O(1)
+lookups (never iterated for emission) are fine.
+
+Reference: commit `139c345`, `docs/plans/2026-07-06-ir-determinism-and-benchmark-strategy.md`,
+and the warning comment at `src/backend/llvm/context.rs:223`.
+
 ## Commands
 
 - **Build**: `cargo build`
