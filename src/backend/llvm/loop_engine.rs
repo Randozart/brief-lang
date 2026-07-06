@@ -1552,7 +1552,9 @@ impl LlvmBackend {
         // 2026-07-05: Detect circular phi chains in rotation patterns
         // (fannkuch_redux 12-cycle).  Body unrolling + GEP reloads in the
         // latch break the cycle into independent SCEV-analyzable values.
-        let rotation_step = detect_rotation_ast(&filtered_body, &self.ctx.field_index_map);
+        let (rotation_step, _rotation_cycle_fields) = detect_rotation_ast(
+            &filtered_body, &self.ctx.field_index_map,
+        );
         // When rotation is active, use the ORIGINAL body (not filtered_body)
         // because filter_dead_assignments may remove the counter increment
         // (count is dead in liveness analysis when the terminating guard
@@ -4013,12 +4015,19 @@ fn gcd(a: usize, b: usize) -> usize {
 /// Scans the AST body (not emitted IR) to find circular phi chains where
 /// each field is assigned the value of another field (a rotation).
 /// Returns the optimal step size.  Returns 1 if no rotation is detected.
+/// 2026-07-06: Returns (step, rotation_cycle_fields) where step is the
+/// optimal unroll factor (1 = no rotation) and rotation_cycle_fields is
+/// the set of field names in the longest detected rotation cycle.
+/// The cycle fields enable future pure-rotation optimization (circular
+/// phi chain instead of GEP-reload).  Currently unused (step drives
+/// behavior), but the field set is returned for A/B experimentation.
+/// See docs/plans/2026-07-06-next-optimizations.md
 fn detect_rotation_ast(
     body: &[Statement],
     field_index_map: &HashMap<String, usize>,
-) -> usize {
+) -> (usize, HashSet<String>) {
     let n = field_index_map.len();
-    if n < 4 { return 1; }
+    if n < 4 { return (1, HashSet::new()); }
     // Build let-to-field mapping: if a let binding reads from a state field,
     // resolve it (e.g. let saved = p0 → "saved" → "p0"). This handles the
     // fannkuch pattern: &p11 = saved; where saved = p0.
@@ -4053,11 +4062,17 @@ fn detect_rotation_ast(
             }
         }
     }
-    if perm.len() < 4 { return 1; }
-    let cycles = find_permutation_cycles(&perm, n);
+    if perm.len() < 4 { return (1, HashSet::new()); }
+    let cycles: Vec<Vec<usize>> = find_permutation_cycles(&perm, n);
     let max_len = cycles.iter().map(|c| c.len()).max().unwrap_or(0);
-    if max_len <= 4 { return 1; }
-    optimal_step_for_cycle_length(max_len)
+    if max_len <= 4 { return (1, HashSet::new()); }
+    // Collect field names in the longest cycle for future pure-rotation use
+    let longest: &Vec<usize> = cycles.iter().max_by_key(|c| c.len()).unwrap();
+    let rotation_fields: HashSet<String> = longest.iter()
+        .filter_map(|&idx| field_index_map.iter().find(|(_, i)| **i == idx).map(|(n, _)| n.clone()))
+        .collect();
+    let step = optimal_step_for_cycle_length(max_len);
+    (step, rotation_fields)
 }
 
 /// 2026-07-05: Build vector phi groups for register pressure reduction.
