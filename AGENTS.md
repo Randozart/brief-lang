@@ -178,6 +178,13 @@ This makes dependencies explicit, improves testability, and documents which data
 - **Dynamic optimization path switching**: Choose layouts at compile time based on liveness evidence
 - **Transitive compatibility inference**: Each compatibility must be explicitly declared
 - **Weakening existing optimization paths**: Additional match arms only, never modify existing arms
+- **Blaming regressions on "system noise" or "HashMap iteration order" without a controlled A/B experiment**:
+  Every suspected regression must be investigated by running a controlled experiment
+  (old compiler vs new compiler on the full benchmark suite, same machine, same load).
+  Document the results in a plan or fix document before any corrective action.
+  "System noise" is not an excuse — if benchmarks are noisy, increase iterations or
+  switch to statistical comparison. Always refer to existing documentation
+  (`docs/plans/`, `docs/architecture/`, BUGS.md) when a regression is suspected.
 - **Old-style Expr match without BinaryOp normalization**: The parser creates `Expr::BinaryOp`/`Expr::UnaryOp`
   (new-style packed variants) for all operations. Any function matching `Expr::Add`, `Expr::Mul`, etc.
   (old-style variants) must first normalize via `expr.normalize_to_old()`. Missing this produces
@@ -552,11 +559,19 @@ one it targets.** Before committing an optimization:
    Only settle for a single strategy when runtime detection is impossible
    (e.g., property of the input data, not the program structure).
 
-4. **Benchmark both paths** before and after. Compare against C baseline. If
+4. **Always consult existing documentation** before attributing a regression.
+   Check `docs/plans/`, `docs/architecture/`, `BUGS.md`, and `git log` for
+   prior analysis. A regression that looks like "random noise" often has a
+   documented root cause from a previous investigation. Never blame "system
+   noise" or "HashMap iteration order" without first checking what changed
+   between the two compiler versions and running a controlled A/B experiment
+   on the full benchmark suite.
+
+5. **Benchmark both paths** before and after. Compare against C baseline. If
    the optimization helps benchmark A by 2× but hurts benchmark B by 0.1×,
    it may still be worth it — but the comment must explicitly state the cost.
 
-5. **Add a regression check**: When a heuristic chooses between two codegen
+6. **Add a regression check**: When a heuristic chooses between two codegen
    strategies, store a `bool` field on `LlvmBackend` that records which
    strategy was chosen per transaction. The field must be documented and the
    choice must be logged in `report_lines` so benchmark output shows which
