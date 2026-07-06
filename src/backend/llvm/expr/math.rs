@@ -23,15 +23,15 @@ macro_rules! emit_binop_dispatch {
 }
 
 pub fn emit_add(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Expr, indent: &str) -> TypedRegister {
-    emit_binop_dispatch!(backend, out, expr, Add, "add", "fadd", indent)
+    emit_binop_dispatch!(backend, out, expr, Add, "add nsw", "fadd", indent)
 }
 
 pub fn emit_sub(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Expr, indent: &str) -> TypedRegister {
-    emit_binop_dispatch!(backend, out, expr, Sub, "sub", "fsub", indent)
+    emit_binop_dispatch!(backend, out, expr, Sub, "sub nsw", "fsub", indent)
 }
 
 pub fn emit_mul(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Expr, indent: &str) -> TypedRegister {
-    emit_binop_dispatch!(backend, out, expr, Mul, "mul", "fmul", indent)
+    emit_binop_dispatch!(backend, out, expr, Mul, "mul nsw", "fmul", indent)
 }
 
 pub fn emit_div(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Expr, indent: &str) -> TypedRegister {
@@ -78,7 +78,7 @@ pub fn emit_neg(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Ex
             match inner.ty {
                 Type::Float => { writeln!(out, "{}{} = fneg float {}", indent, v, inner.name).ok(); }
                 Type::Float64 => { writeln!(out, "{}{} = fneg double {}", indent, v, inner.name).ok(); }
-                _ => { writeln!(out, "{}{} = sub i64 0, {}", indent, v, inner.name).ok(); }
+                _ => { writeln!(out, "{}{} = sub nsw i64 0, {}", indent, v, inner.name).ok(); }
             }
             backend.fun.expr_dedup_cache.insert(dedup_key, v.clone());
             TypedRegister { name: v, ty: inner.ty }

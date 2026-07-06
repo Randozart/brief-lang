@@ -151,10 +151,10 @@ impl ExprCodegenLLVM for BinaryOpExpr {
                     let b = ctx.emit_expr(out, &self.right, "");
                     return ctx.emit_inline_concat(out, "", &a, &b);
                 }
-                ctx.emit_binop(out, "", &self.left, &self.right, "add", "fadd")
+                ctx.emit_binop(out, "", &self.left, &self.right, "add nsw", "fadd")
             }
-            BinaryOpKind::Sub => ctx.emit_binop(out, "", &self.left, &self.right, "sub", "fsub"),
-            BinaryOpKind::Mul => ctx.emit_binop(out, "", &self.left, &self.right, "mul", "fmul"),
+            BinaryOpKind::Sub => ctx.emit_binop(out, "", &self.left, &self.right, "sub nsw", "fsub"),
+            BinaryOpKind::Mul => ctx.emit_binop(out, "", &self.left, &self.right, "mul nsw", "fmul"),
             BinaryOpKind::Div => ctx.emit_binop(out, "", &self.left, &self.right, "sdiv", "fdiv"),
             BinaryOpKind::Mod => {
                 let (a, b) = (ctx.emit_expr(out, &self.left, ""), ctx.emit_expr(out, &self.right, ""));

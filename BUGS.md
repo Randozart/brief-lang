@@ -1984,3 +1984,29 @@ logic unchanged.
 **Lesson**: `let_original_types` should not be treated as a boxed-type-specific
 cache. Any code that needs to look up the declared type of a variable must
 find it there — especially strategy dispatch for custom collection types.
+
+## 2026-07-06 — Vector group backedge uses stale insertelement (nbody_sqrt MISMATCH)
+
+**Issue**: `nbody_sqrt` produced `-0.170945078` instead of C reference
+`-0.169288993` (0.17% energy drift per iteration — energy not conserved).
+
+**Root Cause**: In A005c per-field phi dispatch, vector group backedges used
+`pending_phi_native_backedge[name]` — the insertelement for THAT SPECIFIC
+field only. Since the backedge dedup (`emitted_be`) emits the vector backedge
+only for the first field name encountered (HashMap iteration order is
+arbitrary), group members processed after the first had stale phi values
+(never advancing from initial).
+
+Example: if the backedge processed "vx0" first,
+`pending_phi_native_backedge["vx0"]` = insertelement setting only element 0
+(elements 1-3 from phi). The phi backedge for the entire vector group would
+carry element 0's update but elements 1-3 stagnate at initial values. Only
+the last-processed field (element 3) had ALL 4 elements correctly set.
+
+**Fix**: In `emit_countable_latch`, when processing a vector group backedge,
+read from `vector_phi_current[vec_phi]` (fully accumulated vector after all
+4 insertelements) instead of `pending_phi_native_backedge[name]`.
+
+**Lesson**: Vector phi backedges must always use the accumulator
+(`vector_phi_current`), never per-field pending maps. The same bug could
+appear in any path that touches vector group backedge emission.

@@ -860,7 +860,10 @@ impl LlvmBackend {
     /// 2026-06-29: Phase 7B — bridges emit_binop's string dispatch to
     /// the universe's operator→intrinsic mapping.
     fn op_str_to_rune(int_op: &str) -> OpRune {
-        match int_op {
+        // 2026-07-05: Strip "nsw " prefix added by expr/math.rs
+        // 2026-07-06: nsw now comes after opcode (LLVM 18 syntax: "add nsw")
+        let op = int_op.strip_suffix(" nsw").unwrap_or(int_op);
+        match op {
             "add" => OpRune::Add,
             "sub" => OpRune::Sub,
             "mul" => OpRune::Mul,
@@ -914,8 +917,11 @@ impl LlvmBackend {
         }
 
         // Peephole: constant-fold integer binops at compile time
+        // 2026-07-05: Strip "nsw " prefix for matching (added by expr/math.rs)
+        // 2026-07-06: nsw now comes after opcode (LLVM 18 syntax: "add nsw")
+        let int_op_clean = int_op.strip_suffix(" nsw").unwrap_or(int_op);
         if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
-            let result = match int_op {
+            let result = match int_op_clean {
                 "add" => Some(li.wrapping_add(*ri)),
                 "sub" => Some(li.wrapping_sub(*ri)),
                 "mul" => Some(li.wrapping_mul(*ri)),

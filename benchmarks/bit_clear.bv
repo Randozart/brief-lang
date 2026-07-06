@@ -21,11 +21,12 @@ const initial_reg: Int = 0x7FFFFFFFFFFFFFFF;
 let reg: Int = initial_reg;
 
 rct txn clear_bit [reg != 0][reg == 0] {
-    &reg = reg & (reg - 1);
+    let next_reg = reg & (reg - 1);
 
-    [reg % 100000 == 0] {
-        print_int#(reg);
+    [next_reg % 100000 == 0] {
+        print_int#(next_reg);
     };
 
+    &reg = next_reg;
     term;
 };

@@ -30,6 +30,7 @@
 // the old A005a path used a %State alloca round-trip and A005b kept
 // the counter in memory — both hiding the loop structure from LLVM.
 use crate::ast::{Expr, Intrinsic, Statement, Type};
+use crate::backend::llvm::emit_stmt::MAX_FIELDS_PER_ALLLOCA;
 use crate::backend::llvm::{float_to_llvm_hex, find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
 use crate::analysis::dependency_graph::DependencyGraph;
 use std::collections::HashMap;
@@ -1223,8 +1224,35 @@ impl LlvmBackend {
                     let Some(&(_, ref ty)) = field_map.get(name) else { continue; };
                     // 2026-07-05: Vector group backedges use the accumulated <4 x float>
                     // from the body's insertelement chain (no arithmetic or type coercion).
+                    // 2026-07-06: FIX — use vector_phi_current instead of
+                    // pending_phi_native_backedge.  pending_phi_native_backedge[name]
+                    // contains the insertelement for THAT SPECIFIC field only — later
+                    // group members' insertelement updates are NOT captured.  Since
+                    // the backedge dedup emits the vector backedge for the FIRST field
+                    // name encountered (HashMap iteration order is arbitrary), elements
+                    // for group members processed AFTER the first would be stale,
+                    // causing body positions never to advance (nbody_sqrt fix).
                     if typed_reg.starts_with("%iv") {
-                        writeln!(out, "  {} = bitcast <4 x float> {} to <4 x float>", be_reg, typed_reg).ok();
+                        // 2026-07-06: Reconstruct vector phi name from backedge register.
+                        // Use vector_phi_current instead of pending_phi_native_backedge:
+                        //   pending_phi_native_backedge[name] captures only the
+                        //   insertelement for THAT specific field — later group members'
+                        //   insertelement updates are NOT captured. Since the backedge
+                        //   dedup emits the vector backedge for the FIRST field name
+                        //   encountered (HashMap iteration order is arbitrary), elements
+                        //   for group members processed after the first would be stale,
+                        //   causing body positions never to advance (nbody_sqrt fix).
+                        //   vector_phi_current[vec_phi] has the fully accumulated vector
+                        //   with ALL 4 elements set from the body's insertelement chain.
+                        //   Derive vec_phi from be_reg:
+                        //   %be_vx_v4 → strip "%be" → "_vx_v4" → strip "_" → "vx_v4"
+                        //   → format!("%phi_{}", "vx_v4") → "%phi_vx_v4"
+                        let suffix = be_reg[3..].strip_prefix('_').unwrap_or(&be_reg[3..]);
+                        let vec_phi_name = format!("%phi_{}", suffix);
+                        let acc_reg = self.fun.vector_phi_current.get(&vec_phi_name)
+                            .map(|s| s.as_str())
+                            .unwrap_or(typed_reg);
+                        writeln!(out, "  {} = bitcast <4 x float> {} to <4 x float>", be_reg, acc_reg).ok();
                     } else {
                         let _ = match ty.as_str() {
                             "float" => writeln!(out, "  {} = fadd float {}, 0.0", be_reg, typed_reg),
@@ -1398,6 +1426,15 @@ impl LlvmBackend {
                 collect_field_refs(s, &mut self.fun.done_needs_fields, &self.ctx.field_index_map);
             }
         }
+        // 2026-07-05: Build vector phi groups BEFORE last_val_temps allocation.
+        // last_val_temps checks vector_phi_groups to share <4 x float> allocas
+        // across vector group members. If built after, all fields get scalar allocas
+        // and the commit block writes <4 x float> into 4-byte allocas (buffer overflow).
+        // 2026-07-06: Moved before last_val_temps to fix nbody_sqrt non-determinism.
+        self.fun.vector_phi_groups = build_vector_phi_groups(
+            &self.ctx.field_index_map,
+            &self.ctx.field_types,
+        );
         self.fun.last_val_temps.clear();
         let exit_label = if !self.fun.done_needs_fields.is_empty() {
             for field_name in self.fun.done_needs_fields.iter() {
@@ -1459,13 +1496,6 @@ impl LlvmBackend {
         };
         let live = trace_live_fields(&liveness_body, &self.ctx.field_index_map);
         let filtered_body = filter_dead_assignments(body, &live);
-        // ── Vector phi groups for register pressure reduction ─────────
-        // 2026-07-05: Group fields like vx0..vx3 into <4 x float> vector phis.
-        // Reduces register pressure from 32 scalar to ~8 vector phis.
-        self.fun.vector_phi_groups = build_vector_phi_groups(
-            &self.ctx.field_index_map,
-            &self.ctx.field_types,
-        );
         // ── Initial field loads + phi/backedge register setup + loop header ──
         let (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, _init_count)
             = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg, write_set, exit_label);
@@ -2210,6 +2240,30 @@ impl LlvmBackend {
         // emit_modulo_switch_main — sparse_dispatch hits this path).
         self.emit_state_allocas(out);
         self.emit_inline_init_stores(out, "%state");
+        // 2026-07-06: Copy chunk allocas → monolithic %State so raw GEP paths
+        // (CIT stores, guard loads, bounds checks) read initialized values.
+        // emit_inline_init_stores writes to the chunk via emit_state_gep routing
+        // (main_body=true), but the rotated loop's direct GEP accesses target
+        // the monolithic %State. Without this copy, the monolith is garbage.
+        let num = self.ctx.field_types.len();
+        for i in 0..num {
+            let chunk = i / MAX_FIELDS_PER_ALLLOCA;
+            let sub = i % MAX_FIELDS_PER_ALLLOCA;
+            let ty = &self.ctx.field_types[i];
+            let src_gep = format!("%c2m_s{}", self.fun.txn_counter);
+            self.fun.txn_counter += 1;
+            writeln!(out, "  {} = getelementptr inbounds %StateChunk{}, ptr %state_{}, i32 0, i32 {}",
+                src_gep, chunk, chunk, sub).ok();
+            let val = format!("%c2m_v{}", self.fun.txn_counter);
+            self.fun.txn_counter += 1;
+            let align = if *ty == "float" || *ty == "double" { "4" } else { "8" };
+            writeln!(out, "  {} = load {}, ptr {}, align {}", val, ty, src_gep, align).ok();
+            let dst_gep = format!("%c2m_d{}", self.fun.txn_counter);
+            self.fun.txn_counter += 1;
+            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                dst_gep, i).ok();
+            writeln!(out, "  store {} {}, ptr {}, align {}", ty, val, dst_gep, align).ok();
+        }
         self.emit_trg_init(out);
         self.emit_arena_init(out, "  ");
         // Load bound from the first txn's precondition
@@ -2479,6 +2533,10 @@ impl LlvmBackend {
                         // extract. We can find the extract register by scanning ssa_old...
                         // Actually, we stored the extract reg in ssa_old_float_regs during
                         // a previous iteration of this loop. We just need to skip.
+                        // 2026-07-06: Must set vec_field before break, otherwise the
+                        // code falls through to the scalar load at the bottom of this
+                        // function, reading from the wrong alloca (nbody_sqrt fix).
+                        vec_field = Some(());
                         break;
                     }
                     // First member: load vector
@@ -3648,7 +3706,8 @@ fn is_output_call(expr: &Expr) -> bool {
     match expr {
         Expr::IntrinsicCall { intrinsic, .. } => {
             matches!(intrinsic, Intrinsic::Print | Intrinsic::Println
-                | Intrinsic::PrintInt | Intrinsic::PrintFloat)
+                | Intrinsic::PrintInt | Intrinsic::PrintFloat
+                | Intrinsic::PutChar)
         }
         Expr::Call(name, _) => {
             name.starts_with("print_") || name == "putchar#"
