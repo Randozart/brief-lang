@@ -4,8 +4,22 @@
 
 Four benchmarks had pre-existing MISMATCHes against their C references.
 Three were fixed with benchmark-level changes, two with compiler-level changes.
-The final fix (nbody_sqrt vector phi backedge) revealed a correctness-sensitive
-interaction between HashMap iteration order and A005c's per-field phi dispatch.
+The final fix (nbody_sqrt vector phi backedge) corrected a latent bug where
+elements 1-3 of vector phis received stale (initial) values instead of
+updated values from the body's insertelement chain.
+
+## Performance Impact
+
+The backedge fix changed the latch backedge register source from
+`pending_phi_native_backedge[name]` (float register from last scalar GEP store)
+to `vector_phi_current[vec_phi]` (fully accumulated `<4 x float>` insertelement
+chain result). This gives LLVM correct values for all 4 elements instead of
+poison for elements 1-3. The correct values prevent SROA from fully decomposing
+vector phis into independent scalar phis, causing ~10% regression on
+nbody_sqrt_idio. This is the inherent cost of correctness.
+
+See `docs/plans/2026-07-06-isolate-extractelement-regression.md` for full
+experimental analysis including Config A/B/C/D comparisons.
 
 ## Bug 1: bit_clear — Live-value read races deferred store
 

@@ -167,20 +167,29 @@ adaptively based on transaction characteristics:
 ### A000c — Pure Counter Fold
 - For pure bodies with compile-time constant bounds — O(1) single store
 
-### Optimization Results (2026-07-05)
+### Optimization Results (2026-07-06)
 
 All measurements at BOUND=50000000, 5 iterations, CLOCK_MONOTONIC.
+Run-to-run variation is ~5-10%. Ranges show min/max across 3+ runs.
 
-| Benchmark | Before | After | Improvement | Commit |
-|-----------|--------|-------|-------------|--------|
-| nbody_newton | MISMATCH | **0.63x** (beats C 37%) | Phase C+E | `6529f29`+`a849b2d` |
-| nbody_sqrt | 1.25x | **0.79x** (beats C 21%) | Vector phi emission | `a849b2d` |
-| nbody_sqrt_idio | 0.82x | **0.67x** (beats C 33%) | Vector phi emission | `a849b2d` |
-| fannkuch_redux | 1.65x | **1.37x** | Rotation decomposition | `ca9f483` |
-| knucleotide | 0x (broken) | **0.99x** | Precomputation fix | `981819c` |
-| mandelbrot | SKIP | **1.10x** | IR bug fix | `2b2ef32` |
-| queue_drain | SKIP | **1.02x** | IR bug fix | `2b2ef32` |
-| float_math | MISMATCH | **0.83x** | Liveness fix | `6529f29` |
+| Benchmark | Best | Current | MISMATCH | Key change |
+|-----------|------|---------|----------|------------|
+| nbody_newton | **0.63x** | **0.68–0.74x** | Fixed | Phase C+E + vector phi |
+| nbody_sqrt | **0.79x** | **0.82–0.86x** | Fixed | Correct vector phi backedge |
+| nbody_sqrt_idio | **0.67x** | **0.70–0.81x** | Fixed | Correct vector phi backedge |
+| fannkuch_redux | **1.37x** | **1.14–1.31x** | MATCH | Rotation decomposition |
+| knucleotide | **0.99x** | **0.98–1.00x** | MATCH | Precomputation fix |
+| mandelbrot | **1.10x** | **0.99–1.00x** | MATCH | IR bug fix |
+| queue_drain | **1.02x** | **0.97–0.99x** | MATCH | IR bug fix |
+| float_math | **0.83x** | **0.81–0.84x** | MATCH | Liveness fix |
+| fasta | MISMATCH | **0.96–1.01x** | Fixed | PutChar FFI detection |
+| bit_clear | MISMATCH | **1.00–1.12x** | Fixed | Local variable fix |
+| sparse_dispatch | 0x (broken) | **1.33–1.37x** | Fixed | Copy loop + threshold |
+
+Note: ~10% regression on nbody_sqrt_idio from a849b2d (0.64x) to ae5b016 (0.70x)
+is the inherent cost of correct backedge values. The old code had poison/UB
+(elements 1-3 of vector phis were undefined). See
+`docs/plans/2026-07-06-isolate-extractelement-regression.md` for full analysis.
 
 Key architectural decisions:
 - **A005c over A005e** (`4ff9bde`): Per-field phis eliminate memory traffic
