@@ -144,7 +144,7 @@ build_bench() {
         gpu/*) gpu_flag="--gpu-offload" ;;
     esac
 
-    ./target/release/brief-compiler llvm "benchmarks/${name}.bv" \
+    ./target/release/brief-compiler build --llvm "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then

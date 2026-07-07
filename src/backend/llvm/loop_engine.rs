@@ -1699,7 +1699,16 @@ impl LlvmBackend {
                 self.fun.terminated = false;
                 self.fun.loop_exit_label = Some("done".into());
                 for s in emit_body {
+                    // 2026-07-07: Skip the terminating guard [count == N]
+                    // { term! -> print_int#(checksum) } in the hot path.  The
+                    // pre-check (count + step <= N-3) guarantees count + k < N
+                    // for k=0..3, so the guard can never fire here.  The swan
+                    // song is already hoisted to post_hoist by
+                    // hoist_terminating_guard (executes after loop exit).
                     if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+                        if let Statement::Guarded { statements: gs, .. } = s {
+                            if terminating_guard(gs) { continue; }
+                        }
                         self.emit_stmt(out, s, "  ");
                     }
                 }
@@ -1768,7 +1777,15 @@ impl LlvmBackend {
                 self.fun.terminated = false;
                 self.fun.loop_exit_label = Some("done".into());
                 for s in emit_body {
+                    // 2026-07-07: Skip the terminating guard (same rationale
+                    // as the hot path — the swan song is already hoisted to
+                    // post_hoist by hoist_terminating_guard).  The cold path's
+                    // own overflow guard (count >= bound -> latch) handles the
+                    // safe exit when the bound is reached.
                     if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+                        if let Statement::Guarded { statements: gs, .. } = s {
+                            if terminating_guard(gs) { continue; }
+                        }
                         self.emit_stmt(out, s, "  ");
                     }
                 }
