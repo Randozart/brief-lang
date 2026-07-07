@@ -558,9 +558,82 @@ impl<'a> Parser<'a> {
                         mods.push(h);
                     }
                 }
+                // 2026-07-07: Phase 1 — structured annotation syntax: <~ (name: expr, ...)
+                Some(Ok(Token::TildeArrow)) => {
+                    self.advance();
+                    self.expect(Token::LParen)?;
+                    loop {
+                        let name = self.expect_identifier()?;
+                        self.expect(Token::Colon)?;
+                        let value = self.parse_expression()?;
+                        mods.push(Hashtag {
+                            name,
+                            value: Some(format!("{:?}", value)),
+                            mandatory: false,
+                            speculative: false,
+                            fallback: Vec::new(),
+                            scoped: None,
+                        });
+                        if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                }
                 _ => return Ok(mods),
             }
         }
+    }
+
+    /// 2026-07-07: Phase 1 — prefix annotation syntax: (name: expr, ...) ~> [guard]
+    /// Parses parenthesized annotation tuples before guarded statements.
+    /// Returns None if the current token is not a LParen followed by identifiers and ~>.
+    fn parse_prefix_annotation(&mut self) -> Result<Option<Vec<Hashtag>>, SyntaxError> {
+        // Check if we have (name: ...) ~> pattern
+        if !matches!(self.current_token(), Some(Ok(Token::LParen))) {
+            return Ok(None);
+        }
+        // Peek: try to parse parenthesized annotations
+        let saved_pos = self.pos;
+        
+        self.advance(); // consume (
+        let name = match self.current_token() {
+            Some(Ok(Token::Identifier(n))) => n.clone(),
+            _ => { self.pos = saved_pos; return Ok(None); }
+        };
+        // Must be followed by : for annotation syntax
+        if !matches!(self.current_token(), Some(Ok(Token::Colon))) {
+            self.pos = saved_pos; return Ok(None);
+        }
+        
+        // We have annotation syntax — parse it
+        self.pos = saved_pos;
+        self.advance(); // consume (
+        
+        let mut mods = Vec::new();
+        loop {
+            let name = self.expect_identifier()?;
+            self.expect(Token::Colon)?;
+            let value = self.parse_expression()?;
+            mods.push(Hashtag {
+                name,
+                value: Some(format!("{:?}", value)),
+                mandatory: false,
+                speculative: false,
+                fallback: Vec::new(),
+                scoped: None,
+            });
+            if matches!(self.current_token(), Some(Ok(Token::Comma))) {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+        self.expect(Token::RParen)?;
+        self.expect(Token::TildeArrowRight)?; // consume ~>
+        Ok(Some(mods))
     }
 
     fn expect_type_identifier(&mut self) -> Result<String, crate::errors::SyntaxError> {
@@ -6222,6 +6295,32 @@ let span = self.current_span();
                 //     }
                 // }
                 // Expression statement or Assignment/Unification/Arrow
+                // 2026-07-07: Phase 1 — check for prefix annotations before expression
+                if let Some(prefix_mods) = self.parse_prefix_annotation()? {
+                    if !prefix_mods.is_empty() {
+                        // Prefix annotations before a guarded statement
+                        if let Some(Ok(Token::LBracket)) = self.current_token() {
+                            self.advance();
+                            let condition = self.parse_expression()?;
+                            self.expect(Token::RBracket)?;
+                            let statements = if let Some(Ok(Token::LBrace)) = self.current_token() {
+                                let mut body = Vec::new();
+                                self.advance();
+                                while !matches!(self.current_token(), Some(Ok(Token::RBrace))) {
+                                    body.push(self.parse_statement()?);
+                                }
+                                self.expect(Token::RBrace)?;
+                                self.expect(Token::Semicolon)?;
+                                body
+                            } else {
+                                vec![self.parse_statement()?]
+                            };
+                            return Ok(Statement::Guarded { condition, statements });
+                        } else {
+                            return self.spanned_err("Expected '[condition]' after prefix annotation".to_string());
+                        }
+                    }
+                }
                 let expr = self.parse_expression()?;
 
                 if let Some(Ok(Token::Eq)) = self.current_token() {
