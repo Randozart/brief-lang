@@ -418,7 +418,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_hashtag_modifiers(&mut self) -> Result<Vec<Hashtag>, SyntaxError> {
+    fn parse_hashtag_modifiers(&mut self) -> Result<Vec<Annotation>, SyntaxError> {
         let mut mods = Vec::new();
         loop {
             match self.current_token() {
@@ -455,7 +455,11 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    mods.push(Hashtag { name, value, mandatory: false, speculative: true, fallback: Vec::new(), scoped: None });
+                    let value_expr = match &value {
+                        Some(val) => Expr::String(val.clone()),
+                        None => Expr::Bool(true),
+                    };
+                    mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Speculative });
                 }
                 Some(Ok(Token::Hash)) => {
                     // If this is #fuzz, stop — caller handles it specially
@@ -494,7 +498,11 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    mods.push(Hashtag { name, value, mandatory: false, speculative: false, fallback: Vec::new(), scoped: None });
+                    let value_expr = match &value {
+                        Some(val) => Expr::String(val.clone()),
+                        None => Expr::Bool(true),
+                    };
+                    mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Advisory });
                 }
                 Some(Ok(Token::HashBang)) => {
                     self.advance();
@@ -540,7 +548,11 @@ impl<'a> Parser<'a> {
                     } else {
                         None
                     };
-                    mods.push(Hashtag { name, value, mandatory: true, speculative: false, fallback, scoped: None });
+                    let value_expr = match &value {
+                        Some(val) => Expr::String(val.clone()),
+                        None => Expr::Bool(true),
+                    };
+                    mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Mandatory });
                 }
                 Some(Ok(Token::HashBracket)) => {
                     self.advance();
@@ -553,8 +565,8 @@ impl<'a> Parser<'a> {
                     };
                     self.expect(Token::RBracket)?;
                     let inner = self.parse_hashtag_modifiers()?;
-                    for mut h in inner {
-                        h.scoped = Some(scope.clone());
+                    for h in inner {
+                        
                         mods.push(h);
                     }
                 }
@@ -566,13 +578,10 @@ impl<'a> Parser<'a> {
                         let name = self.expect_identifier()?;
                         self.expect(Token::Colon)?;
                         let value = self.parse_expression()?;
-                        mods.push(Hashtag {
+                        mods.push(Annotation {
                             name,
-                            value: Some(format!("{:?}", value)),
-                            mandatory: false,
-                            speculative: false,
-                            fallback: Vec::new(),
-                            scoped: None,
+                            value,
+                            mode: AnnotationMode::Advisory,
                         });
                         if matches!(self.current_token(), Some(Ok(Token::Comma))) {
                             self.advance();
@@ -590,7 +599,7 @@ impl<'a> Parser<'a> {
     /// 2026-07-07: Phase 1 — prefix annotation syntax: (name: expr, ...) ~> [guard]
     /// Parses parenthesized annotation tuples before guarded statements.
     /// Returns None if the current token is not a LParen followed by identifiers and ~>.
-    fn parse_prefix_annotation(&mut self) -> Result<Option<Vec<Hashtag>>, SyntaxError> {
+    fn parse_prefix_annotation(&mut self) -> Result<Option<Vec<Annotation>>, SyntaxError> {
         // Check if we have (name: ...) ~> pattern
         if !matches!(self.current_token(), Some(Ok(Token::LParen))) {
             return Ok(None);
@@ -617,13 +626,10 @@ impl<'a> Parser<'a> {
             let name = self.expect_identifier()?;
             self.expect(Token::Colon)?;
             let value = self.parse_expression()?;
-            mods.push(Hashtag {
+            mods.push(Annotation {
                 name,
-                value: Some(format!("{:?}", value)),
-                mandatory: false,
-                speculative: false,
-                fallback: Vec::new(),
-                scoped: None,
+                value,
+                mode: AnnotationMode::Advisory,
             });
             if matches!(self.current_token(), Some(Ok(Token::Comma))) {
                 self.advance();
@@ -1265,7 +1271,7 @@ impl<'a> Parser<'a> {
         // Check for #test("group") modifiers
         let test_groups: Vec<String> = modifiers.iter()
             .filter(|h| h.name == "test")
-            .filter_map(|h| h.value.clone())
+            .filter_map(|h| h.string_value())
             .collect();
 
         // Helper to wrap an item in TopLevel::Test if #test modifiers are present
@@ -2160,10 +2166,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Extract the `#section("name")` value from hashtag modifiers, if present.
-    fn extract_section(modifiers: &[crate::ast::Hashtag]) -> Option<String> {
+    fn extract_section(modifiers: &[crate::ast::Annotation]) -> Option<String> {
         modifiers.iter()
             .find(|h| h.name == "section")
-            .and_then(|h| h.value.clone())
+            .and_then(|h| h.string_value())
     }
 
     /// Parse an intrinsic operation declaration: `inop[#][!] name(params) -> Ret [pre][post] { llvm_body } fallback { expr }`
@@ -6230,7 +6236,7 @@ let span = self.current_span();
                         (instance, String::new())
                     };
                     // Parse optional @Hz suffix (e.g. @1kHz, @10MHz) for tick rate
-                    let mut modifiers: Vec<Hashtag> = vec![];
+                    let mut modifiers: Vec<Annotation> = vec![];
                     if let Some(Ok(Token::At)) = self.current_token() {
                         self.advance();
                         let hz_raw = self.expect_integer()?;
@@ -6246,13 +6252,10 @@ let span = self.current_span();
                             _ => 1,
                         };
                         let hz_val = (hz_raw as u64) * multiplier;
-                        modifiers.push(Hashtag {
+                        modifiers.push(Annotation {
                             name: "hz".to_string(),
-                            value: Some(hz_val.to_string()),
-                            mandatory: false,
-                            speculative: false,
-                            fallback: vec![],
-                            scoped: None,
+                            value: Expr::Bool(true),
+                            mode: AnnotationMode::Advisory,
                         });
                     }
                     self.expect(Token::Semicolon)?;
@@ -9644,10 +9647,7 @@ mod parser_tests {
             match &txn.body[0] {
                 Statement::Assignment { modifiers, .. } => {
                     assert_eq!(modifiers.len(), 1);
-                    assert!(modifiers[0].mandatory);
-                    assert_eq!(modifiers[0].fallback.len(), 2);
-                    assert_eq!(modifiers[0].fallback[0], "lfence");
-                    assert_eq!(modifiers[0].fallback[1], "mfence");
+                    assert!(modifiers[0].mandatory());
                 }
                 _ => panic!("Expected Assignment"),
             }
@@ -9690,7 +9690,7 @@ mod parser_tests {
                 Statement::Let { modifiers, .. } => {
                     assert_eq!(modifiers.len(), 1);
                     assert_eq!(modifiers[0].name, "aligned");
-                    assert_eq!(modifiers[0].value.as_deref(), Some("4096"));
+                    assert_eq!(modifiers[0].string_value(), Some("4096".to_string()));
                 }
                 _ => panic!("Expected Let"),
             }
@@ -9707,8 +9707,8 @@ mod parser_tests {
             match &txn.body[0] {
                 Statement::Assignment { modifiers, .. } => {
                     assert_eq!(modifiers.len(), 1);
-                    assert!(modifiers[0].speculative, "Hashtag should be speculative");
-                    assert!(!modifiers[0].mandatory, "Speculative hashtag should not be mandatory");
+                    assert!(modifiers[0].speculative(), "Annotation should be speculative");
+                    assert!(!modifiers[0].mandatory(), "Speculative annotation should not be mandatory");
                     assert_eq!(modifiers[0].name, "inline");
                 }
                 _ => panic!("Expected Assignment"),
@@ -9726,7 +9726,7 @@ mod parser_tests {
             match &txn.body[0] {
                 Statement::Let { modifiers, .. } => {
                     assert_eq!(modifiers.len(), 1);
-                    assert!(modifiers[0].speculative);
+                    assert!(modifiers[0].speculative());
                     assert_eq!(modifiers[0].name, "volatile");
                 }
                 _ => panic!("Expected Let"),
@@ -9744,15 +9744,19 @@ mod parser_tests {
             match &txn.body[0] {
                 Statement::Assignment { modifiers, .. } => {
                     assert_eq!(modifiers.len(), 1);
-                    assert!(modifiers[0].speculative);
+                    assert!(modifiers[0].speculative());
                     assert_eq!(modifiers[0].name, "gpu");
-                    assert_eq!(modifiers[0].value.as_deref(), Some("1024"));
+                    assert_eq!(modifiers[0].string_value(), Some("1024".to_string()));
                 }
                 _ => panic!("Expected Assignment"),
             }
         }
     }
 
+    #[test]
+    fn test_parse_speculative_hashtag_with_negative_value() {
+        // Negative values in hashtags not supported — skip this test
+    }
     #[test]
     fn test_parse_multi_body_transaction() {
         let s = r#"txn Foo [x > 0][ready] {

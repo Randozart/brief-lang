@@ -17,7 +17,7 @@
 // calls into the macro system. This keeps all language-specific logic in
 // Brief code that survives self-hosting.
 
-use crate::ast::{Hashtag, OutputType, Program, ResultType, TopLevel};
+use crate::ast::{Annotation, OutputType, Program, ResultType, TopLevel};
 use crate::features::macros::context::MacroContext;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -84,7 +84,7 @@ pub fn extract_bridge_info(program: &Program, name: &str) -> BridgeInfo {
     }
 }
 
-fn has_export_modifier(modifiers: &[Hashtag]) -> bool {
+fn has_export_modifier(modifiers: &[Annotation]) -> bool {
     modifiers.iter().any(|m| m.name == "export")
 }
 

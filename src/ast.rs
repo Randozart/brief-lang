@@ -2115,7 +2115,7 @@ pub enum Statement {
         lhs: Expr,
         expr: Expr,
         timeout: Option<(Expr, TimeUnit)>,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 
     // Unification: identifier(pattern) = expr;
@@ -2137,7 +2137,7 @@ pub enum Statement {
     Term {
         values: Vec<Option<Expr>>,
         swan_song: Option<Box<Statement>>,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 
     // TermBang statement: term! expr?, expr?, ...
@@ -2145,7 +2145,7 @@ pub enum Statement {
     TermBang {
         values: Vec<Option<Expr>>,
         swan_song: Option<Box<Statement>>,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 
     // Escape statement: escape expr?;
@@ -2164,7 +2164,7 @@ pub enum Statement {
         bit_range: Option<BitRange>,
         constraint: Option<Box<Expr>>,
         is_override: bool,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 
     // Inline assembly: asm "instruction" { "clobber1", "clobber2" };
@@ -2182,7 +2182,7 @@ pub enum Statement {
         ty: Option<Type>,         // optional explicit type annotation
         instance: Expr,           // expression yielding a component handle
         port: String,             // named output port on the component
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 
 
@@ -2200,7 +2200,7 @@ pub enum Statement {
         item: String,
         list: Box<Expr>,
         body: Vec<Statement>,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 
     // Proof oracle: ?#[handler] { body };
@@ -2216,13 +2216,13 @@ pub enum Statement {
     // Await: await call_expr; — blocking wait for a callable result
     Await {
         expr: Expr,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 
     // Async: async stmt; or async { body }; — fire-and-forget
     Async {
         body: Box<Statement>,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 
     // AsyncAwait: async await expr; or async await let x = expr;
@@ -2231,7 +2231,7 @@ pub enum Statement {
     AsyncAwait {
         body: Box<Statement>,
         lhs: Option<String>,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
 }
 
@@ -2375,7 +2375,7 @@ pub struct Definition {
     pub contract: Contract,
     pub body: Vec<Statement>,
     pub is_lambda: bool,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
     pub annotations: Vec<TypeBinding>,
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
 }
@@ -2393,7 +2393,7 @@ pub struct Transaction {
     pub is_lambda: bool,
     pub dependencies: Vec<String>,
     pub annotations: Vec<TypeBinding>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
     pub outputs: Vec<Type>,
     pub output_type: Option<OutputType>,
@@ -2441,7 +2441,7 @@ pub struct TriggerDeclaration {
     pub is_const: bool,
     pub span: Option<Span>,
     pub annotations: Vec<TypeBinding>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
 }
 
 #[derive(Debug, Clone)]
@@ -2528,7 +2528,7 @@ pub enum TopLevel {
         ty: Option<Type>,
         instance: Expr,
         port: String,
-        modifiers: Vec<Hashtag>,
+        modifiers: Vec<Annotation>,
     },
     /// `cell` / `cell!` — cybernetic cell with isolated state space.
     Cell(Box<CellDef>),
@@ -2694,7 +2694,7 @@ pub struct StructDefinition {
     pub transactions: Vec<Transaction>,
     pub view_html: Option<String>,
     pub span: Option<Span>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
     pub variants: Vec<StructVariant>,
 }
 
@@ -2735,7 +2735,7 @@ pub struct CellDef {
     /// Internal triggers (scoped to the cell, invisible outside)
     pub internal_triggers: Vec<TriggerDeclaration>,
     pub span: Option<Span>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
 }
 
 #[derive(Debug, Clone)]
@@ -2836,6 +2836,19 @@ pub struct Annotation {
     pub name: String,
     pub value: Expr,
     pub mode: AnnotationMode,
+}
+
+impl Annotation {
+    pub fn mandatory(&self) -> bool { self.mode == AnnotationMode::Mandatory }
+    pub fn speculative(&self) -> bool { self.mode == AnnotationMode::Speculative }
+    /// Convenience: extract string value for common patterns (was `Option<String>` on old Hashtag)
+    pub fn string_value(&self) -> Option<String> {
+        match &self.value {
+            Expr::String(s) => Some(s.clone()),
+            Expr::Integer(n) => Some(n.to_string()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

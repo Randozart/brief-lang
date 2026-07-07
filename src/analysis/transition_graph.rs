@@ -1,4 +1,4 @@
-use crate::ast::{ArrowDir, BracketOp, Expr, Hashtag, Intrinsic, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
+use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
 use crate::features::literal::LiteralExpr;
 use std::collections::{HashMap, HashSet};
 
@@ -109,12 +109,12 @@ impl ReactorTransitionGraph {
 
                     let assume_events: Vec<String> = txn.modifiers.iter()
                         .filter(|m| m.name == "assume_event")
-                        .filter_map(|m| m.value.clone())
+                        .filter_map(|m| m.string_value())
                         .collect();
 
                     let assume_shape_action = txn.modifiers.iter()
                         .find(|m| m.name == "assume_shape")
-                        .and_then(|m| m.value.as_ref())
+                        .and_then(|m| m.string_value())
                         .and_then(|v| {
                             let parts: Vec<&str> = v.splitn(2, ", ").collect();
                             if parts.len() == 2 {

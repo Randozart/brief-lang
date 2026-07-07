@@ -1,4 +1,4 @@
-use crate::ast::Hashtag;
+use crate::ast::{Annotation, AnnotationMode, Expr};
 
 // ── Directive Resolution ────────────────────────────────────────────
 //
@@ -55,7 +55,7 @@ pub enum DirectiveEffect {
 /// Resolve all applicable directives from a list of hashtags.
 /// Returns effects for the given context. Callers examine the effects
 /// and apply them to the emitted LLVM IR.
-pub fn resolve_directives(tags: &[Hashtag], context: DirectiveCtx) -> Vec<DirectiveEffect> {
+pub fn resolve_directives(tags: &[Annotation], context: DirectiveCtx) -> Vec<DirectiveEffect> {
     let mut effects = Vec::new();
 
     for tag in tags {
@@ -76,10 +76,10 @@ pub fn resolve_directives(tags: &[Hashtag], context: DirectiveCtx) -> Vec<Direct
 }
 
 /// Resolve #inline / #?inline / #!inline for the given context.
-fn resolve_inline(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> {
+fn resolve_inline(tag: &Annotation, context: DirectiveCtx) -> Option<DirectiveEffect> {
     match context {
         DirectiveCtx::Transaction | DirectiveCtx::CallableTxn => {
-            if tag.speculative {
+            if tag.speculative() {
                 Some(DirectiveEffect::FunctionAttribute("inlinehint".to_string()))
             } else {
                 Some(DirectiveEffect::FunctionAttribute("alwaysinline".to_string()))
@@ -90,10 +90,10 @@ fn resolve_inline(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffec
 }
 
 /// Resolve #unroll / #?unroll / #!unroll for the given context.
-fn resolve_unroll(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> {
+fn resolve_unroll(tag: &Annotation, context: DirectiveCtx) -> Option<DirectiveEffect> {
     match context {
         DirectiveCtx::Loop => {
-            if tag.speculative {
+            if tag.speculative() {
                 Some(DirectiveEffect::LoopMetadata(
                     "llvm.loop.unroll.enable".to_string(),
                     String::new(),
@@ -110,10 +110,10 @@ fn resolve_unroll(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffec
 }
 
 /// Resolve #vectorize / #?vectorize / #!vectorize for the given context.
-fn resolve_vectorize(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> {
+fn resolve_vectorize(tag: &Annotation, context: DirectiveCtx) -> Option<DirectiveEffect> {
     match context {
         DirectiveCtx::Loop => {
-            if tag.speculative {
+            if tag.speculative() {
                 Some(DirectiveEffect::LoopMetadata(
                     "llvm.loop.vectorize.enable".to_string(),
                     "true".to_string(),
@@ -130,11 +130,11 @@ fn resolve_vectorize(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEf
 }
 
 /// Resolve #gpu / #?gpu / #!gpu for the given context.
-fn resolve_gpu(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> {
+fn resolve_gpu(tag: &Annotation, context: DirectiveCtx) -> Option<DirectiveEffect> {
     match context {
         // GPU offloading is applicable to both loops and full transaction bodies.
         DirectiveCtx::Loop | DirectiveCtx::Transaction | DirectiveCtx::CallableTxn => {
-            Some(DirectiveEffect::GpuOffload(tag.value.clone()))
+            Some(DirectiveEffect::GpuOffload(tag.string_value()))
         }
         _ => None,
     }
@@ -143,10 +143,10 @@ fn resolve_gpu(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> 
 /// Resolve #export / #export("name") for the given context.
 /// Causes the function to be emitted as a dso_local global symbol
 /// with C calling convention, making it callable from other languages.
-fn resolve_export(tag: &Hashtag, context: DirectiveCtx) -> Option<DirectiveEffect> {
+fn resolve_export(tag: &Annotation, context: DirectiveCtx) -> Option<DirectiveEffect> {
     match context {
         DirectiveCtx::Transaction | DirectiveCtx::CallableTxn => {
-            let export_name = tag.value.clone().unwrap_or_else(|| tag.name.clone());
+            let export_name = tag.string_value().unwrap_or_else(|| tag.name.clone());
             Some(DirectiveEffect::Export(export_name))
         }
         _ => None,
@@ -242,12 +242,12 @@ impl OptimizationRemark {
 mod tests {
     use super::*;
 
-    fn tag(name: &str) -> Hashtag {
-        Hashtag { name: name.into(), value: None, mandatory: false, speculative: false, fallback: vec![], scoped: None }
+    fn tag(name: &str) -> Annotation {
+        Annotation { name: name.into(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }
     }
 
-    fn spec_tag(name: &str) -> Hashtag {
-        Hashtag { name: name.into(), value: None, mandatory: false, speculative: true, fallback: vec![], scoped: None }
+    fn spec_tag(name: &str) -> Annotation {
+        Annotation { name: name.into(), value: Expr::Bool(true), mode: AnnotationMode::Speculative }
     }
 
     #[test]
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_gpu_directive_with_value() {
-        let t = Hashtag { name: "gpu".into(), value: Some("threshold=1000".into()), mandatory: false, speculative: false, fallback: vec![], scoped: None };
+        let t = Annotation { name: "gpu".into(), value: Expr::String("threshold=1000".into()), mode: AnnotationMode::Advisory };
         let effects = resolve_directives(&[t], DirectiveCtx::Transaction);
         assert_eq!(effects.len(), 1);
         match &effects[0] {

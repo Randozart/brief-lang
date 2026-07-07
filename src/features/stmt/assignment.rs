@@ -2,7 +2,7 @@
 //
 // Phase 2/4: Pattern B feature struct with 4 trait implementations.
 
-use crate::ast::{Expr, Hashtag};
+use crate::ast::{Expr, Hashtag, Annotation};
 use crate::errors::TypeError;
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
@@ -11,7 +11,7 @@ pub struct AssignmentStmt {
     pub lhs: Expr,
     pub expr: Expr,
     pub timeout: Option<(Expr, crate::ast::TimeUnit)>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
 }
 
 impl StmtTypecheck for AssignmentStmt {

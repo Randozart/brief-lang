@@ -195,7 +195,7 @@ fn empty_program() -> Program {
         assert!(!output.is_empty());
     }
 
-    fn make_txn(name: &str, modifiers: Vec<Hashtag>) -> TopLevel {
+    fn make_txn(name: &str, modifiers: Vec<Annotation>) -> TopLevel {
         TopLevel::Transaction(Transaction {
             name: name.to_string(),
             parameters: vec![],
@@ -250,7 +250,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_txn("inline_txn", vec![Hashtag::new("inline".to_string())]),
+                make_txn("inline_txn", vec![Annotation { name: "inline".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -273,7 +273,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_txn("hinted_txn", vec![Hashtag::speculative("inline".to_string())]),
+                make_txn("hinted_txn", vec![Annotation { name: "inline".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Speculative }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -317,7 +317,7 @@ fn empty_program() -> Program {
         assert!(output.contains("alwaysinline"), "cycle-free txn should have alwaysinline by default");
     }
 
-    fn make_gpu_txn(name: &str, modifiers: Vec<Hashtag>) -> TopLevel {
+    fn make_gpu_txn(name: &str, modifiers: Vec<Annotation>) -> TopLevel {
         // GPU-eligible txn: pure assignment, no term/term!
         TopLevel::Transaction(Transaction {
             name: name.to_string(),
@@ -360,7 +360,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_gpu_txn("gpu_test", vec![Hashtag::new("gpu".to_string())]),
+                make_gpu_txn("gpu_test", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -384,7 +384,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_gpu_txn("embed_test", vec![Hashtag::new("gpu".to_string())]),
+                make_gpu_txn("embed_test", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -545,7 +545,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_gpu_txn("e2e_add", vec![Hashtag::new("gpu".to_string())]),
+                make_gpu_txn("e2e_add", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }]),
             ],
             comments: vec![],
             reactor_speed: None,

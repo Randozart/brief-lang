@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Hashtag, Statement, Type};
+use crate::ast::{Expr, Hashtag, Statement, Type, Annotation};
 use crate::errors::TypeError;
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
@@ -8,7 +8,7 @@ pub struct ForeachStmt {
     pub item: String,
     pub list: Box<Expr>,
     pub body: Vec<Statement>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
 }
 
 impl StmtTypecheck for ForeachStmt {
@@ -109,7 +109,7 @@ impl StmtCodegenLLVM for ForeachStmt {
         );
         // Emit optimization remarks for speculative loop directives.
         for tag in &self.modifiers {
-            if !tag.speculative { continue; }
+            if !tag.speculative() { continue; }
             match tag.name.as_str() {
                 "unroll" => {
                     let is_full = dir_effects.iter().any(|e| {

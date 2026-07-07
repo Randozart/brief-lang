@@ -12,7 +12,7 @@ pub struct LetBindingStmt {
     pub address_expr: Option<Box<Expr>>,
     pub bit_range: Option<crate::ast::BitRange>,
     pub is_override: bool,
-    pub modifiers: Vec<crate::ast::Hashtag>,
+    pub modifiers: Vec<crate::ast::Annotation>,
 }
 
 impl StmtTypecheck for LetBindingStmt {

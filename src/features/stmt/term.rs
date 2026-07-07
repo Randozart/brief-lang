@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Hashtag, Statement, Type};
+use crate::ast::{Expr, Hashtag, Statement, Type, Annotation};
 use crate::errors::TypeError;
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
@@ -7,13 +7,13 @@ use crate::typechecker::TypeChecker;
 pub struct TermStmt {
     pub values: Vec<Option<Expr>>,
     pub swan_song: Option<Box<Statement>>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
 }
 
 pub struct TermBangStmt {
     pub values: Vec<Option<Expr>>,
     pub swan_song: Option<Box<Statement>>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
 }
 
 impl StmtTypecheck for TermStmt {

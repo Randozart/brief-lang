@@ -2596,7 +2596,7 @@ impl Interpreter {
                 // Extract @Hz tick rate from modifiers (e.g., modifiers=[Hashtag{name:"hz", args:["1000"]}])
                 let tick_hz: Option<u64> = modifiers.iter()
                     .find(|m| m.name == "hz")
-                    .and_then(|m| m.value.as_ref())
+                    .and_then(|m| m.string_value())
                     .and_then(|s| s.parse().ok());
                 let value = match instance {
                     Expr::Call(callee, args) if self.cell_defs.contains_key(callee) => {

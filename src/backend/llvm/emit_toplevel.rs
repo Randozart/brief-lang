@@ -7,10 +7,10 @@ use std::fmt::Write;
 impl LlvmBackend {
     /// Check if any modifier has the given name and extract its export name.
     /// Returns Some(export_name) if #export or #export("name") was found.
-    pub fn get_export_name(modifiers: &[crate::ast::Hashtag]) -> Option<String> {
+    pub fn get_export_name(modifiers: &[crate::ast::Annotation]) -> Option<String> {
         for tag in modifiers {
             if tag.name == "export" {
-                let export_name = tag.value.clone().unwrap_or_else(|| tag.name.clone());
+                let export_name = tag.string_value().unwrap_or_else(|| tag.name.clone());
                 if export_name == "export" {
                     return None;
                 }
@@ -1203,7 +1203,7 @@ impl LlvmBackend {
                 }
             });
             // Emit remarks for speculative #?inline directives.
-            if txn.modifiers.iter().any(|m| m.name == "inline" && m.speculative) {
+            if txn.modifiers.iter().any(|m| m.name == "inline" && m.speculative()) {
                 let remark = match inline_attr {
                     Some("inlinehint") => {
                         super::directive::OptimizationRemark::applied("inline",
@@ -1226,16 +1226,16 @@ impl LlvmBackend {
         };
         let txn_attr = self.slp_attr(name, "#0");
 
-        let assume_action: Option<&str> = txn.modifiers.iter()
+        let assume_action: Option<String> = txn.modifiers.iter()
             .find(|m| m.name == "assume_shape")
-            .and_then(|m| m.value.as_ref())
+            .and_then(|m| m.string_value())
             .and_then(|v| {
                 let parts: Vec<&str> = v.splitn(2, ", ").collect();
                 if parts.len() == 2 {
                     let action = parts[1].trim();
-                    if action == "run" || action == "exit" { Some(action) } else { Some("escape") }
+                    if action == "run" || action == "exit" { Some(action.to_string()) } else { Some("escape".to_string()) }
                 } else {
-                    Some("escape")
+                    Some("escape".to_string())
                 }
             });
 
@@ -1282,7 +1282,7 @@ impl LlvmBackend {
                 writeln!(out, "  ret void").ok();
             }
             writeln!(out, "  rollback:").ok();
-            match action {
+            match action.as_str() {
                 "exit" => {
                     writeln!(out, "    call void @__exit(i64 1)").ok();
                     writeln!(out, "    unreachable").ok();
@@ -1334,7 +1334,7 @@ impl LlvmBackend {
         // Collect GPU kernel for this transaction if it has #gpu / #!gpu / #?gpu.
         if self.ctx.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
             let is_speculative = txn.modifiers.iter()
-                .any(|m| m.name == "gpu" && m.speculative);
+                .any(|m| m.name == "gpu" && m.speculative());
             self.collect_gpu_kernel(name, &txn.body, is_speculative);
         }
     }
@@ -1643,7 +1643,7 @@ impl LlvmBackend {
         // Collect GPU kernel for callable txns with #gpu directives.
         if self.ctx.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
             let is_speculative = txn.modifiers.iter()
-                .any(|m| m.name == "gpu" && m.speculative);
+                .any(|m| m.name == "gpu" && m.speculative());
             self.collect_gpu_kernel(name, &txn.body, is_speculative);
         }
     }
