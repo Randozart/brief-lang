@@ -150,7 +150,7 @@ impl LiteralExpr {
     }
 }
 
-#[cfg(kani)]
+#[cfg(feature = "kani")]
 mod kani_tests {
     use super::*;
     use crate::ast::Expr;
@@ -190,7 +190,7 @@ mod kani_tests {
 }
 
 // ── Full: format/float/string tests (may involve Display/formatting loops) ──
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
     use crate::ast::Expr;

@@ -16,7 +16,7 @@ pub mod reorder;
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani;
 
 pub use builder::LLVMBuilder;
@@ -774,7 +774,7 @@ pub struct LlvmBackend {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ChimeraInfo {
+pub struct ChimeraInfo {
     pub is_chimera: bool,
     pub backing_type: String,
 }
@@ -995,11 +995,11 @@ impl LlvmBackend {
                 .map(|(t, f)| *t.max(f)).max().unwrap_or(0);
             if max_count > 0 { Some(max_count) } else { None }
         } else { None };
-        let cost_N = pgo_bound.unwrap_or(0);
+        let cost_n = pgo_bound.unwrap_or(0);
 
         // Run cost model for speculative directives.
         if is_speculative {
-            let est = crate::analysis::gpu_cost::estimate(body, cost_N);
+            let est = crate::analysis::gpu_cost::estimate(body, cost_n);
             match est.recommended {
                 crate::analysis::gpu_cost::OffloadDecision::Cpu => {
                     self.push_remark(directive::OptimizationRemark::skipped("gpu",

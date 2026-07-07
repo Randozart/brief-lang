@@ -3090,7 +3090,7 @@ pub struct SigProjection {
     pub source_defn: String,
 }
 
-#[cfg(kani)]
+#[cfg(feature = "kani")]
 mod kani_tests {
     use super::*;
     use crate::features::literal::LiteralExpr;
@@ -3150,7 +3150,7 @@ mod kani_tests {
     }
 }
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
     use crate::features::literal::LiteralExpr;

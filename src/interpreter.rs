@@ -48,7 +48,7 @@ use std::thread;
 
 /// Metadata for a lazy-loaded DBVL table with key-offset index
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DbvlTableInner {
+pub struct DbvlTableInner {
     pub path: String,
     /// Key → byte offset(s) in the file (Vec supports duplicate keys)
     pub key_offsets: HashMap<String, Vec<usize>>,
@@ -11730,7 +11730,7 @@ mod tests {
     }
 }
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
 

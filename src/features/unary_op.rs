@@ -90,7 +90,7 @@ impl ExprCodegenWebstack for UnaryOpExpr {
 }
 
 // ── Fast Kani harnesses (pure match dispatch) ──
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
 

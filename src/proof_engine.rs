@@ -4807,7 +4807,7 @@ mod tests {
     }
 }
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_tests_fast {
     use super::*;
     use crate::features::literal::LiteralExpr;
@@ -4970,7 +4970,7 @@ mod kani_tests_fast {
 }
 
 // ── FULL: ProofEngine-based harnesses (bigger state) ──
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
     use crate::features::literal::LiteralExpr;

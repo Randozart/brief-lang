@@ -46,7 +46,7 @@ pub enum OffloadDecision {
 /// Run the cost model on a kernel body with the given iteration count.
 ///
 /// `N` is the iteration count (compile-time known or 0 for runtime).
-pub fn estimate(body: &[Statement], N: u64) -> GpuCostEstimate {
+pub fn estimate(body: &[Statement], n: u64) -> GpuCostEstimate {
     let total_ops = count_operations(body);
     let total_bytes = count_bytes_transferred(body);
     let intensity = if total_bytes > 0 {
@@ -60,12 +60,12 @@ pub fn estimate(body: &[Statement], N: u64) -> GpuCostEstimate {
     // Estimate per-iteration compute time (operations only, not data transfer).
     // Data transfer (PCIe) is a fixed overhead, not per-iteration.
     let per_iter_cpu_ns = (total_ops as f64) * CPU_CYCLE_NS;
-    let estimated_cpu_ns = (N as f64) * per_iter_cpu_ns;
+    let estimated_cpu_ns = (n as f64) * per_iter_cpu_ns;
 
     // Estimate GPU time: PCIe transfer (fixed) + parallel execution
     // GPU has ~256 cores, so per-iteration time = ops / cores * clock
     let per_iter_gpu_ns = (total_ops as f64) * GPU_CYCLE_NS / 256.0;
-    let estimated_gpu_ns = PCIE_LATENCY_NS + (N as f64) * per_iter_gpu_ns;
+    let estimated_gpu_ns = PCIE_LATENCY_NS + (n as f64) * per_iter_gpu_ns;
 
     // Crossover: GPU becomes faster when estimated_gpu_ns < estimated_cpu_ns
     // PCIE_LATENCY_NS + N * per_iter_gpu_ns < N * per_iter_cpu_ns
@@ -82,13 +82,13 @@ pub fn estimate(body: &[Statement], N: u64) -> GpuCostEstimate {
         u64::MAX
     };
 
-    let recommended = if N == 0 {
+    let recommended = if n == 0 {
         // Runtime-determined N — need runtime dispatch branch.
         OffloadDecision::Runtime
-    } else if N < MIN_ITERATIONS && arith_intensity < MIN_ARITHMETIC_INTENSITY {
+    } else if n < MIN_ITERATIONS && arith_intensity < MIN_ARITHMETIC_INTENSITY {
         // Small loop with low intensity — definitely CPU.
         OffloadDecision::Cpu
-    } else if N >= crossover || N >= MIN_ITERATIONS * 1000 {
+    } else if n >= crossover || n >= MIN_ITERATIONS * 1000 {
         // Large enough to justify GPU offload.
         OffloadDecision::Gpu
     } else if arith_intensity < MIN_ARITHMETIC_INTENSITY {
