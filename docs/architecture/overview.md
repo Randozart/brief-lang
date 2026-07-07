@@ -167,7 +167,7 @@ adaptively based on transaction characteristics:
 ### A000c — Pure Counter Fold
 - For pure bodies with compile-time constant bounds — O(1) single store
 
-### Optimization Results (2026-07-06)
+### Optimization Results (2026-07-07)
 
 All measurements at BOUND=50000000, 5 iterations, CLOCK_MONOTONIC.
 Run-to-run variation is ~5-10%. Ranges show min/max across 3+ runs.
@@ -177,14 +177,14 @@ Run-to-run variation is ~5-10%. Ranges show min/max across 3+ runs.
 | nbody_newton | **0.63x** | **0.68–0.74x** | Fixed | Phase C+E + vector phi |
 | nbody_sqrt | **0.79x** | **0.82–0.86x** | Fixed | Correct vector phi backedge |
 | nbody_sqrt_idio | **0.67x** | **0.70–0.81x** | Fixed | Correct vector phi backedge |
-| fannkuch_redux | **1.37x** | **1.14–1.31x** | MATCH | Rotation decomposition |
+| fannkuch_redux | **0.94x** | **0.94–1.02x** | MATCH | Hybrid rotation hot/cold path |
 | knucleotide | **0.99x** | **0.98–1.00x** | MATCH | Precomputation fix |
 | mandelbrot | **1.10x** | **0.99–1.00x** | MATCH | IR bug fix |
 | queue_drain | **1.02x** | **0.97–0.99x** | MATCH | IR bug fix |
 | float_math | **0.83x** | **0.81–0.84x** | MATCH | Liveness fix |
 | fasta | MISMATCH | **0.96–1.01x** | Fixed | PutChar FFI detection |
 | bit_clear | MISMATCH | **1.00–1.12x** | Fixed | Local variable fix |
-| sparse_dispatch | 0x (broken) | **1.33–1.37x** | Fixed | Copy loop + threshold |
+| sparse_dispatch | 0x (broken) | **0.08–0.10x** | Fixed | Dispatch collapse + modulo-switch |
 
 Note: ~10% regression on nbody_sqrt_idio from a849b2d (0.64x) to ae5b016 (0.70x)
 is the inherent cost of correct backedge values. The old code had poison/UB
@@ -202,5 +202,16 @@ Key architectural decisions:
 - **Rotation decomposition** (`ca9f483`): GEP-reload latch breaks 12-element
   circular phi chain for fannkuch_redux. Failed step-k approach documented
   in `docs/plans/2026-07-05-fannkuch-rotation-decomposition.md`.
+- **Dispatch collapse** (`d4e3e14`): When modulo-switch dispatch has exactly
+  8 cases matching `[count % 8 == 0..7]`, collapse to a single body with
+  `count += 8` and adjusted guard `(count + 8) % 8 == 0`. Eliminates 7/8
+  of dispatch overhead. sparse_dispatch: 1.35x → 0.09x. See
+  `docs/plans/2026-07-07-sparse-dispatch-collapse.md`.
+- **Hybrid rotation hot/cold path** (`0dba619`): When `rotation_step > 1`,
+  emit a pre-check `count + step <= bound` that branches to a straight-line
+  hot path (no exit checks for step-1 copies) or an exit-check cold path
+  (final partial trip). Saves ~3 exit checks per full trip for step=4,
+  reducing fannkuch_redux from 1.29x to 0.94x. See
+  `docs/plans/2026-07-07-fannkuch-straight-line-rotation.md`.
 
 See `docs/architecture/backend-refactor.md` for the full architecture guide.

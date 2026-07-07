@@ -75,10 +75,19 @@ with 4+ same-prefix members (e.g., vx0..vx3) emit `<4 x float>` phis instead
 of scalar float phis. Reduces register pressure: 32 scalar phis → ~14 phis,
 fitting in 16 XMM registers without spills. nbody_sqrt: 1.25x → 0.79x.
 
-**Rotation decomposition** (`ca9f483`): When the body's field assignments form
-a circular permutation chain (e.g., p0←p1←...←p11←p0), the latch emits
-GEP reloads from %State instead of pending_phi_native_backedge values.
-Breaks the 12-cycle for SCEV analysis. fannkuch_redux: 1.65x → 1.37x.
+**Rotation decomposition** (`ca9f483`): Detects circular permutation chains
+(e.g., p0←p1←...←p11←p0) and uses GEP-reload from %State in the latch
+instead of `pending_phi_native_backedge` values. Breaks the 12-cycle for
+SCEV analysis. fannkuch_redux: 1.65x → 1.37x.
+
+**Hybrid rotation hot/cold path** (`0dba619`): Extends rotation to emit
+a pre-check `count + step <= bound` before the unrolling loop. When the
+full trip fits, a straight-line basic block executes step-1 copies
+without exit checks — eliminating ~3 branches per trip (step=4). When
+only a partial trip fits (final trip), the cold path preserves per-copy
+exit checks. `pending_phi_native_backedge` is saved before the hot path
+and restored before the cold path to maintain SSA dominance. fannkuch_redux:
+1.29x → 0.94x.
 
 **Dual-path architecture** (controlled by `needs_state_stores_in_body`):
 
@@ -130,6 +139,7 @@ in the hot loop body (Path B) — the other fields are skipped. See
 | Precomputation fix | `981819c` | All programs | knucleotide, fasta, cancel_math |
 | Dead-field liveness | `6529f29` | All A005c loops | nbody_newton, float_math |
 | Rotation decomposition | `ca9f483` | 12+ cycle detected | fannkuch_redux |
+| Hybrid rotation hot/cold | `0dba619` | rotation_step > 1, no body FFI | fannkuch_redux |
 | Vector phi emission | `a849b2d` | 4+ float fields per group | nbody_sqrt, nbody_newton, nbody_sqrt_idio |
 
 ## Performance Results (2026-07-05, BOUND=50000000)
@@ -139,7 +149,7 @@ in the hot loop body (Path B) — the other fields are skipped. See
 | nbody_newton | 1.41x | 0.89x | **0.63x** | -37% |
 | nbody_sqrt | 1.29x | 1.25x | **0.79x** | -37% |
 | nbody_sqrt_idio | 0.96x | 0.82x | **0.67x** | -18% |
-| fannkuch_redux | 2.16x | 1.65x | **1.37x** | -18% |
+| fannkuch_redux | 2.16x | 1.65x | **0.94x** | -38% |
 | knucleotide | 1.00x | 1.00x | **0.99x** | tied |
 | float_math | 0.83x | 0.86x | **0.83x** | tied |
 
