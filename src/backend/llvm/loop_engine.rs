@@ -1609,17 +1609,55 @@ impl LlvmBackend {
             // is empty for non-rotation cases, so all fields are added above).
             self.fun.needs_state_stores_in_body = true;
         }
+        // ── Save counter phi reg before emit_countable_body clears ssa_old ──
+        // 2026-07-07: emit_countable_body clears ssa_old_int_regs (line 1132),
+        // which makes the counter register unavailable for the hot path pre-check.
+        // Save the phi register name from phi_field_regs (which is not cleared).
+        let count_phi_reg = self.fun.phi_field_regs.get(&counter_name).cloned();
         // ── Emit body (possibly unrolled for rotation) ────────────────
         self.emit_countable_body(out, emit_body);
         if rotation_step > 1 {
-            // Unroll additional body copies.  GEP-reload rotation fields
-            // between copies so each sees the previous copy's computed values.
-            // Overflow guard after each copy handles non-divisible bounds.
+            // 2026-07-07: Hybrid rotation unrolling.
+            //
+            // For FULL trips (count + step <= N), take the straight-line
+            // hot path — all step copies in one basic block, no per-copy
+            // exit checks.  For PARTIAL trips (final trip when N % step
+            // != 0), take the cold path with individual exit checks between
+            // copies to avoid over-processing.
+            //
+            // The hot path eliminates ~3 exit checks per trip (for step=4),
+            // saving ~25M branches over N=50M.  The cold path is taken at
+            // most once (the final partial trip).
+            //
+            // After the cold path, the loop always exits (count+step >= N),
+            // so the cold path's backedge phi values are dead.  We save
+            // pending_phi_native_backedge from the hot path and restore it
+            // before emit_countable_latch so the latch uses hot-path values
+            // (which feed the next full trip).
+            let mut hot_backedge: Option<HashMap<String, String>> = None;
+            // ── Hot path: straight-line copies (no exit checks) ────────
+            // First, emit the pre-check for full vs partial trip.
+            // Use the saved phi register %phi_count (count at loop header entry),
+            // not the body output (which is phi_count + 1).  ssa_old_int_regs
+            // was cleared by emit_countable_body, so we saved count_phi_reg above.
+            if let Some(creg) = count_phi_reg {
+                let full_chk_reg = format!("%full_chk_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                let full_chk_next = format!("%full_next_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "  {} = add i64 {}, {}", full_chk_next, creg, rotation_step).ok();
+                writeln!(out, "  {} = icmp sle i64 {}, {}", full_chk_reg, full_chk_next, bound_reg).ok();
+                writeln!(out, "  br i1 {}, label %rot_full, label %rot_cold", full_chk_reg).ok();
+            } else {
+                writeln!(out, "  br label %rot_full").ok();
+            }
+            // 2026-07-07: Save original body backedge values BEFORE the hot path
+            // emits body copies (which overwrite pending_phi_native_backedge with
+            // rot_full-block registers).  The cold path needs body-block registers
+            // that dominate rot_cold:.
+            let pre_hot_backedge = self.fun.pending_phi_native_backedge.clone();
+            writeln!(out, "rot_full:").ok();
             for i in 1..rotation_step {
-                // 2026-07-07: For rotation cycle fields, advance ssa_old from
-                // pending_phi_native_backedge between copies so the next copy sees
-                // rotated values.  Non-rotation fields are still GEP-reloaded.
-                if rotation_step > 1 && !rotation_cycle.is_empty() {
+                // Advance ssa_old for rotation cycle fields
+                if !rotation_cycle.is_empty() {
                     let rot_set: HashSet<String> = rotation_cycle.iter().cloned().collect();
                     for (fname, val) in &self.fun.pending_phi_native_backedge {
                         if rot_set.contains(fname) {
@@ -1628,7 +1666,7 @@ impl LlvmBackend {
                         }
                     }
                 }
-                // GEP-reload rotation fields into ssa_old caches.
+                // GEP-reload rotation fields into ssa_old caches
                 let rot_fields: Vec<String> = self.fun.rotation_fields.iter().cloned().collect();
                 for fname in &rot_fields {
                     let Some(&idx) = self.ctx.field_index_map.get(fname) else { continue; };
@@ -1642,8 +1680,7 @@ impl LlvmBackend {
                         self.fun.ssa_old_int_regs.insert(fname.clone(), ld.clone());
                     }
                 }
-                // GEP-reload count field too (emit_countable_body clears ssa_old,
-                // so count is lost after the first body copy).
+                // GEP-reload count field
                 if let Some(&cnt_idx) = self.ctx.field_index_map.get("count") {
                     let cnt_gep = self.emit_state_gep(out, "  ", "rc", "%state", cnt_idx);
                     let cnt_ld = format!("%rlc_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -1653,16 +1690,7 @@ impl LlvmBackend {
                         self.fun.ssa_old_int_regs.insert(counter_name.clone(), cnt_ld);
                     }
                 }
-                // Overflow guard: if count >= bound, exit to done.
-                let count_reg = self.fun.ssa_old_int_regs.get("count")
-                    .or_else(|| self.fun.ssa_old_int_regs.get(&counter_name)).cloned();
-                if let Some(creg) = count_reg {
-                    let chk = format!("%ro_chk_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                    writeln!(out, "  {} = icmp sge i64 {}, {}", chk, creg, bound_reg).ok();
-                    writeln!(out, "  br i1 {}, label %latch, label %body_rot{}", chk, i).ok();
-                    writeln!(out, "body_rot{}:", i).ok();
-                }
-                // Emit body copy (preserves ssa_old from GEP reloads).
+                // Emit body copy (no exit check — straight-line)
                 self.fun.let_bindings.clear();
                 self.fun.let_binding_types.clear();
                 self.fun.reg_float_cache.clear();
@@ -1676,6 +1704,81 @@ impl LlvmBackend {
                     }
                 }
                 self.fun.loop_exit_label = None;
+            }
+            writeln!(out, "  br label %latch").ok();
+            // Save hot path's pending_phi_native_backedge for latch restoration.
+            hot_backedge = Some(self.fun.pending_phi_native_backedge.clone());
+            // ── Cold path: exit-check copies (for partial final trip) ──
+            // 2026-07-07: Restore original body backedge values.
+            // The cold path's ssa_old advance must use body-block registers
+            // that dominate rot_cold:, not rot_full-block registers from the
+            // hot path body copies.
+            self.fun.pending_phi_native_backedge = pre_hot_backedge;
+            writeln!(out, "rot_cold:").ok();
+            for i in 1..rotation_step {
+                // Advance ssa_old for rotation cycle fields
+                if !rotation_cycle.is_empty() {
+                    let rot_set: HashSet<String> = rotation_cycle.iter().cloned().collect();
+                    for (fname, val) in &self.fun.pending_phi_native_backedge {
+                        if rot_set.contains(fname) {
+                            self.fun.ssa_old_int_regs.insert(fname.clone(), val.clone());
+                            self.fun.ssa_old_float_regs.insert(fname.clone(), val.clone());
+                        }
+                    }
+                }
+                // GEP-reload rotation fields into ssa_old caches
+                let rot_fields: Vec<String> = self.fun.rotation_fields.iter().cloned().collect();
+                for fname in &rot_fields {
+                    let Some(&idx) = self.ctx.field_index_map.get(fname) else { continue; };
+                    let ty = self.ctx.field_types[idx].clone();
+                    let gep = self.emit_state_gep(out, "  ", "rr", "%state", idx);
+                    let ld = format!("%rld_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = load {}, ptr {}, align {}", ld, ty, gep, self.align_of(&ty)).ok();
+                    if ty == "float" || ty == "double" {
+                        self.fun.ssa_old_float_regs.insert(fname.clone(), ld.clone());
+                    } else {
+                        self.fun.ssa_old_int_regs.insert(fname.clone(), ld.clone());
+                    }
+                }
+                // GEP-reload count field
+                if let Some(&cnt_idx) = self.ctx.field_index_map.get("count") {
+                    let cnt_gep = self.emit_state_gep(out, "  ", "rc", "%state", cnt_idx);
+                    let cnt_ld = format!("%rlc_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = load i64, ptr {}, align 8", cnt_ld, cnt_gep).ok();
+                    self.fun.ssa_old_int_regs.insert("count".to_string(), cnt_ld.clone());
+                    if counter_name != "count" {
+                        self.fun.ssa_old_int_regs.insert(counter_name.clone(), cnt_ld);
+                    }
+                }
+                // Overflow guard: if count >= bound, exit to latch
+                let count_reg = self.fun.ssa_old_int_regs.get("count")
+                    .or_else(|| self.fun.ssa_old_int_regs.get(&counter_name)).cloned();
+                if let Some(creg) = count_reg {
+                    let chk = format!("%ro_chk_{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = icmp sge i64 {}, {}", chk, creg, bound_reg).ok();
+                    writeln!(out, "  br i1 {}, label %latch, label %body_rot{}", chk, i).ok();
+                    writeln!(out, "body_rot{}:", i).ok();
+                }
+                // Emit body copy
+                self.fun.let_bindings.clear();
+                self.fun.let_binding_types.clear();
+                self.fun.reg_float_cache.clear();
+                self.fun.reg_type_cache.clear();
+                self.fun.expr_dedup_cache.clear();
+                self.fun.terminated = false;
+                self.fun.loop_exit_label = Some("done".into());
+                for s in emit_body {
+                    if !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+                        self.emit_stmt(out, s, "  ");
+                    }
+                }
+                self.fun.loop_exit_label = None;
+            }
+            // Restore hot path's pending_phi_native_backedge for the latch.
+            // The cold path's backedge values are dead (loop exits after
+            // any partial trip).
+            if let Some(hot) = hot_backedge {
+                self.fun.pending_phi_native_backedge = hot;
             }
         }
         // ── Latch: increment counter, reload modified fields ─────────
