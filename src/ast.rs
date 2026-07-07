@@ -2800,6 +2800,10 @@ pub struct FuzzCase {
     pub span: Option<crate::errors::Span>,
 }
 
+/// 2026-07-07: Phase 1 — unified annotation system
+/// Replaces Hashtag { name, value: Option<String>, mandatory, speculative, fallback, scoped }
+/// with a single Annotation type. Hash forms (#, #!, #?) desugar to this.
+/// Structured forms (<~, ~>) allow arbitrary expression values.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hashtag {
     pub name: String,
@@ -2814,14 +2818,31 @@ impl Hashtag {
     pub fn new(name: String) -> Self {
         Hashtag { name, value: None, mandatory: false, speculative: false, fallback: Vec::new(), scoped: None }
     }
-
     pub fn mandatory(name: String) -> Self {
         Hashtag { name, value: None, mandatory: true, speculative: false, fallback: Vec::new(), scoped: None }
     }
-
     pub fn speculative(name: String) -> Self {
         Hashtag { name, value: None, mandatory: false, speculative: true, fallback: Vec::new(), scoped: None }
     }
+}
+
+/// 2026-07-07: Phase 1 — unified annotation system
+/// A single annotation: `#name`, `#!name`, `#?name`, or `name: expr` in a `<~ (...)` or `(...) ~>` block.
+/// The `mode` field corresponds to the hash prefix: Advisory (#), Mandatory (#!), Speculative (#?).
+/// `name` is dotted for scoped annotations (e.g., "llvm.inline" for `#[llvm] #inline`).
+/// `value` can be any expression (Bool(true) for bare #name flags).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Annotation {
+    pub name: String,
+    pub value: Expr,
+    pub mode: AnnotationMode,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnnotationMode {
+    Advisory,    // #name — try this if supported
+    Mandatory,   // #!name — error if unsupported
+    Speculative, // #?name — try, silently skip if unsupported
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
