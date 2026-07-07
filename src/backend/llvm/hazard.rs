@@ -92,8 +92,6 @@ fn stmt_refs_name(stmt: &Statement, name: &str) -> bool {
                 || expr_refs_name(expr, name)
         }
         Statement::SyncBlock { body } => body.iter().any(|s| stmt_refs_name(s, name)),
-        Statement::LocalTrigger { expr: Some(e), .. } => expr_refs_name(e, name),
-        Statement::LocalTrigger { expr: None, .. } => false,
         _ => false,
     }
 }

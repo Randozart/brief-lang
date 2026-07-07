@@ -625,8 +625,6 @@ mod tests {
                     | Statement::Term { .. } | Statement::TermBang { .. }
                     | Statement::Escape(_)
                     | Statement::Expression(_)
-                    | Statement::Alka(_)
-                    | Statement::OnExit { .. }
             );
             prop_assert!(is_valid, "Generated invalid statement type: {:?}", stmt);
         }

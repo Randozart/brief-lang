@@ -252,7 +252,6 @@ impl<'a> Parser<'a> {
             Token::None => "None".into(),
             Token::Bank => "bank".into(),
             Token::Trg => "trg".into(),
-            Token::TrgBang => "trg!".into(),
             Token::Link => "link".into(),
             Token::Asm => "asm".into(),
             Token::Ellipsis => "'...'".into(),
@@ -321,30 +320,13 @@ impl<'a> Parser<'a> {
             Some(Ok(Token::Const)) => { self.advance(); Ok("const".to_string()) }
             Some(Ok(Token::BoolTrue)) => { self.advance(); Ok("true".to_string()) }
             Some(Ok(Token::BoolFalse)) => { self.advance(); Ok("false".to_string()) }
-            Some(Ok(Token::Unification)) => { self.advance(); Ok("uni".to_string()) }
+            Some(Ok(Token::Uni)) => { self.advance(); Ok("uni".to_string()) }
             Some(Ok(Token::Escape)) => { self.advance(); Ok("escape".to_string()) }
             Some(Ok(Token::Async)) => { self.advance(); Ok("async".to_string()) }
             Some(Ok(Token::Await)) => { self.advance(); Ok("await".to_string()) }
             Some(Ok(Token::From)) => { self.advance(); Ok("from".to_string()) }
             Some(Ok(Token::As)) => { self.advance(); Ok("as".to_string()) }
-            Some(Ok(Token::Registry)) => { self.advance(); Ok("reg".to_string()) }
-            Some(Ok(Token::Rstruct)) => { self.advance(); Ok("rstruct".to_string()) }
-            Some(Ok(Token::Render)) => { self.advance(); Ok("render".to_string()) }
-            Some(Ok(Token::Trg)) => { self.advance(); Ok("trg".to_string()) }
-            Some(Ok(Token::TrgBang)) => { self.advance(); Ok("trg!".to_string()) }
-            Some(Ok(Token::Link)) => { self.advance(); Ok("link".to_string()) }
-            Some(Ok(Token::Asm)) => { self.advance(); Ok("asm".to_string()) }
-            Some(Ok(Token::Stage)) => { self.advance(); Ok("stage".to_string()) }
-            Some(Ok(Token::On)) => { self.advance(); Ok("on".to_string()) }
-            Some(Ok(Token::Within)) => { self.advance(); Ok("within".to_string()) }
-            Some(Ok(Token::Bank)) => { self.advance(); Ok("bank".to_string()) }
-            Some(Ok(Token::Match)) => { self.advance(); Ok("match".to_string()) }
-            Some(Ok(Token::PtrBang)) => { self.advance(); Ok("Ptr!".to_string()) }
-            Some(Ok(Token::FrgnBang)) => { self.advance(); Ok("frgn!".to_string()) }
-            Some(Ok(Token::Syscall)) => { self.advance(); Ok("syscall".to_string()) }
-            Some(Ok(Token::SyscallBang)) => { self.advance(); Ok("syscall!".to_string()) }
-            Some(Ok(Token::Resource)) => { self.advance(); Ok("resource".to_string()) }
-            Some(Ok(Token::Rsrc)) => { self.advance(); Ok("rsrc".to_string()) }
+            Some(Ok(Token::Reg)) => { self.advance(); Ok("reg".to_string()) }
             Some(Ok(Token::Is)) => { self.advance(); Ok("is".to_string()) }
             Some(Ok(Token::Like)) => { self.advance(); Ok("like".to_string()) }
             Some(Ok(Token::Cycles)) => { self.advance(); Ok("cycles".to_string()) }
@@ -1342,7 +1324,7 @@ impl<'a> Parser<'a> {
                 let meld = self.parse_meld_decl()?;
                 Ok(wrap_test(TopLevel::Meld(meld), &test_groups))
             }
-            Some(Ok(Token::Resource)) | Some(Ok(Token::Rsrc)) | Some(Ok(Token::Registry)) => {
+            Some(Ok(Token::Reg)) => {
                 let resource = self.parse_resource()?;
                 Ok(wrap_test(resource, &test_groups))
             }
@@ -4842,11 +4824,6 @@ let span = self.current_span();
                     let trg = self.parse_trigger_body(false)?;
                     internal_triggers.push(trg);
                 }
-                Ok(Token::TrgBang) => {
-                    self.advance();
-                    let trg = self.parse_trigger_body(false)?;
-                    internal_triggers.push(trg);
-                }
                 _ => {
                     // Try to parse as a state field: name: Type = init;
                     let field_name = self.expect_identifier()?;
@@ -5910,7 +5887,7 @@ let span = self.current_span();
                     span: None,
                 })
             }
-            Some(Ok(Token::Unification)) => {
+            Some(Ok(Token::Uni)) => {
                 // Three syntaxes supported:
                 // 1. uni variable(Pattern) = result; (library pattern match)
                 // 2. uni expr[Index](Pattern) = result; (indexed pattern match)
@@ -5969,12 +5946,11 @@ let span = self.current_span();
                         Some(Ok(Token::Rct)) => "KeywordRct".to_string(),
                         Some(Ok(Token::Async)) => "KeywordAsync".to_string(),
                         Some(Ok(Token::Escape)) => "KeywordEscape".to_string(),
-                        Some(Ok(Token::Unification)) => "KeywordUnification".to_string(),
+                        Some(Ok(Token::Uni)) => "KeywordUni".to_string(),
                         Some(Ok(Token::Render)) => "KeywordRender".to_string(),
                         Some(Ok(Token::Rstruct)) => "KeywordRstruct".to_string(),
-                        Some(Ok(Token::Registry)) => "KeywordRegistry".to_string(),
+                        Some(Ok(Token::Reg)) => "KeywordReg".to_string(),
                         Some(Ok(Token::Trg)) => "KeywordTrg".to_string(),
-                        Some(Ok(Token::TrgBang)) => "KeywordTrgBang".to_string(),
                         Some(Ok(Token::Link)) => "KeywordLink".to_string(),
                         Some(Ok(Token::Asm)) => "KeywordAsm".to_string(),
                         Some(Ok(Token::Bank)) => "KeywordBank".to_string(),
@@ -6157,27 +6133,6 @@ let span = self.current_span();
                         statements: vec![statement],
                     })
                 }
-            }
-            Some(Ok(Token::TrgBang)) => {
-                // Deprecation warning: trg! inside transactions is a stub.
-                // Use top-level `trg name: Type @ link sym;` + `rct txn [name] { ... }` instead.
-                // See docs: specs/EVENT-MODEL.md
-                let prev_span = self.current_span();
-                if let Some(s) = &prev_span {
-                    eprintln!("deprecation:{}:{}: trg! is deprecated — use top-level trg + rct txn instead (see specs/EVENT-MODEL.md)", s.line, s.column);
-                }
-                self.advance();
-                let name = self.expect_identifier()?;
-                self.expect(Token::Colon)?;
-                let ty = self.parse_type()?;
-                let expr = if let Some(Ok(Token::Eq)) = self.current_token() {
-                    self.advance();
-                    Some(self.parse_expression()?)
-                } else {
-                    None
-                };
-                self.expect(Token::Semicolon)?;
-                Ok(Statement::LocalTrigger { name, ty, expr, span: prev_span })
             }
             Some(Ok(Token::Trg)) => {
                 // Phase 3: trg name: Type @ cell!(args).port  — trigger binding
@@ -8884,7 +8839,7 @@ let span = self.current_span();
             Token::Const => Some("const"),
             Token::BoolTrue => Some("true"),
             Token::BoolFalse => Some("false"),
-            Token::Unification => Some("uni"),
+            Token::Uni => Some("uni"),
             Token::Escape => Some("escape"),
             Token::Async => Some("async"),
             Token::Await => Some("await"),
@@ -9457,61 +9412,6 @@ mod parser_tests {
         }
     }
 
-    #[test]
-    fn test_parse_local_trigger_bang() {
-        // Test trg! inside transaction
-        let s = r#"txn Foo [true][n >= 0] { trg! resp: Int = fetch(); term; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse trg! inside transaction: {:?}", result.err());
-        if let TopLevel::Transaction(txn) = &result.unwrap().items[0] {
-            assert_eq!(txn.body.len(), 2);
-            match &txn.body[0] {
-                Statement::LocalTrigger { name, ty, expr, .. } => {
-                    assert_eq!(name, "resp");
-                    assert!(matches!(ty, Type::Int));
-                    assert!(expr.is_some());
-                }
-                _ => panic!("Expected LocalTrigger statement"),
-            }
-        } else {
-            panic!("Expected Transaction item");
-        }
-    }
-
-    #[test]
-    fn test_parse_local_trigger_bang_aliases() {
-        // Test trigger! alias
-        let s = r#"txn Foo [true][n >= 0] { trigger! resp: Bool = check(); term; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse trigger! inside transaction: {:?}", result.err());
-
-        // Test trg! and trigger! (canonical and alias, both lowercase)
-        let s = r#"txn Foo [true][n >= 0] { trg! resp: UInt = read(); term; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse trg! inside transaction: {:?}", result.err());
-
-        let s = r#"txn Foo [true][n >= 0] { trigger! resp: String = get(); term; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse trigger! inside transaction: {:?}", result.err());
-    }
-
-    #[test]
-    fn test_parse_local_trigger_without_bang_errors() {
-        // Test that plain trg inside transaction gives helpful error
-        let s = r#"txn Foo [true][n >= 0] { trg resp: Int = fetch(); term; };"#;
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_err(), "Should error on plain trg inside transaction");
-        if let Err(e) = result {
-            let msg = format!("{}", e);
-            assert!(msg.contains("trg!"), "Error should mention trg!: {}", msg);
-            assert!(msg.contains("rollback"), "Error should mention rollback risk: {}", msg);
-        }
-    }
 
     #[test]
     fn test_parse_top_level_trigger_without_bang() {
@@ -11147,7 +11047,7 @@ defn fallback() -> Int { term 0; };
 
     #[test]
     fn test_parse_trigger_with_annotations() {
-        let src = "trigger tick: Int <~ period: 100, #critical @timer#(1000);";
+        let src = "trg tick: Int <~ period: 100, #critical @timer#(1000);";
         let mut parser = Parser::new(src);
         let prog = parser.parse().unwrap();
         match &prog.items[0] {

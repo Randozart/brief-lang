@@ -28,14 +28,10 @@ use logos::Logos;
 pub enum Token {
     // Sig aliases: sig, sign, signature (lowercase and UPPERCASE)
     #[token("sig")]
-    #[token("sign")]
-    #[token("signature")]
     Sig,
 
     // Defn aliases: defn, def, definition (lowercase and UPPERCASE)
     #[token("defn")]
-    #[token("def")]
-    #[token("definition")]
     Defn,
 
     #[token("let")]
@@ -43,13 +39,10 @@ pub enum Token {
 
     // Const aliases: const, constant (lowercase and UPPERCASE)
     #[token("const")]
-    #[token("constant")]
     Const,
 
     // Txn aliases: txn, transact, transaction (lowercase and UPPERCASE)
     #[token("txn")]
-    #[token("transact")]
-    #[token("transaction")]
     Txn,
 
     #[token("rct")]
@@ -67,10 +60,8 @@ pub enum Token {
     TermBang,
     #[token("escape")]
     Escape,
-    #[token("unification")]
-    #[token("unify")]
     #[token("uni")]
-    Unification,
+    Uni,
     #[token("is")]
     Is,
     #[token("like")]
@@ -97,13 +88,8 @@ pub enum Token {
     Syscall,
     #[token("syscall!")]
     SyscallBang,
-    #[token("resource")]
-    Resource,
-    #[token("rsrc")]
-    Rsrc,
     #[token("reg")]
-    #[token("registry")]
-    Registry,
+    Reg,
     #[token("op")]
     Op,
     #[token("type")]
@@ -119,11 +105,7 @@ pub enum Token {
     Render,
     #[token("enum")]
     Enum,
-    #[token("trg!")]
-    #[token("trigger!")]
-    TrgBang,
     #[token("trg")]
-    #[token("trigger")]
     Trg,
     #[token("link")]
     Link,
@@ -163,11 +145,9 @@ pub enum Token {
 
     // Visibility: pvt / private (struct boundary), sed / sedentary (file boundary)
     #[token("pvt")]
-    #[token("private")]
     Pvt,
 
     #[token("sed")]
-    #[token("sedentary")]
     Sed,
 
     #[token("sync")]
@@ -523,7 +503,7 @@ impl std::fmt::Display for Token {
             Token::Term => write!(f, "term"),
             Token::TermBang => write!(f, "term!"),
             Token::Escape => write!(f, "escape"),
-            Token::Unification => write!(f, "unification"),
+            Token::Uni => write!(f, "uni"),
             Token::Is => write!(f, "is"),
             Token::Like => write!(f, "like"),
             Token::Import => write!(f, "import"),
@@ -536,9 +516,7 @@ impl std::fmt::Display for Token {
             Token::Meld => write!(f, "meld"),
             Token::Syscall => write!(f, "syscall"),
             Token::SyscallBang => write!(f, "syscall!"),
-            Token::Resource => write!(f, "resource"),
-            Token::Rsrc => write!(f, "rsrc"),
-            Token::Registry => write!(f, "reg"),
+            Token::Reg => write!(f, "reg"),
             Token::Op => write!(f, "op"),
             Token::Type => write!(f, "type"),
             Token::Cell => write!(f, "cell"),
@@ -546,7 +524,7 @@ impl std::fmt::Display for Token {
             Token::Rstruct => write!(f, "rstruct"),
             Token::Render => write!(f, "render"),
             Token::Enum => write!(f, "enum"),
-            Token::TrgBang => write!(f, "trg!"),
+            Token::Trg => write!(f, "trg!"),
             Token::Trg => write!(f, "trg"),
             Token::Link => write!(f, "link"),
             Token::Asm => write!(f, "asm"),

@@ -319,9 +319,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         Statement::Unification { expr, .. } => { collect_strings_expr(expr, seen, out); }
         Statement::Escape(Some(e)) => { collect_strings_expr(e, seen, out); }
         Statement::Escape(None) => {}
-        Statement::LocalTrigger { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
         Statement::SyncBlock { body } => { for s in body { collect_strings_stmt(s, seen, out); } }
-        Statement::Alka { .. } | Statement::OnExit { .. } | Statement::InlineAsm { .. } => {}
         Statement::Foreach { list, body, .. } => {
             collect_strings_expr(list, seen, out);
             for s in body { collect_strings_stmt(s, seen, out); }
@@ -334,6 +332,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         Statement::Async { body, .. } => { collect_strings_stmt(body, seen, out); }
         Statement::AsyncAwait { body, .. } => { collect_strings_stmt(body, seen, out); }
         Statement::TrgBinding { .. } => {}
+        Statement::InlineAsm { .. } => {}
     }
 }
 

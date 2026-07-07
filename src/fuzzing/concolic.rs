@@ -78,16 +78,6 @@ fn collect_constraints_recursive(
                 new_path.push(condition.clone());
                 collect_constraints_recursive(statements, constraints, new_path);
             }
-            Statement::LocalTrigger { expr, .. } => {
-                if let Some(e) = expr {
-                    constraints.push(PathConstraintInfo {
-                        condition: e.clone(),
-                        depth: path.len(),
-                        kind: ConstraintKind::TriggerExpr,
-                        involves_trigger: expr_involves_trigger(e),
-                    });
-                }
-            }
             _ => {}
         }
     }

@@ -784,20 +784,6 @@ impl WebstackGenerator {
             Statement::InlineAsm { .. } => {
                 out.push_str("// asm: not applicable to TS\n");
             }
-            Statement::LocalTrigger { name, .. } => {
-                out.push_str(&format!("// local trigger: {} (omitted in TS)\n", name));
-            }
-            Statement::Alka(alka) => {
-                out.push_str("// alka block (hardware construct, omitted)\n");
-                let _ = alka;
-            }
-            Statement::OnExit { body, .. } => {
-                out.push_str("try {\n");
-                for s in body {
-                    self.statement_to_ts(out, s);
-                }
-                out.push_str("} catch (__exit_err) { /* on_exit handler */ }\n");
-            }
             Statement::SyncBlock { body } => {
                 // sync block: emitted sequentially in TS (structural concurrency hint)
                 for s in body {
@@ -1220,19 +1206,6 @@ impl WebstackGenerator {
             }
             Statement::InlineAsm { asm_string, .. } => {
                 out.push_str(&format!("core::arch::asm!(\"{}\");\n", asm_string));
-            }
-            Statement::LocalTrigger { name, .. } => {
-                out.push_str(&format!("// local trigger: {}\n", name));
-            }
-            Statement::Alka(alka) => {
-                out.push_str("// alka block (hardware construct)\n");
-                let _ = alka;
-            }
-            Statement::OnExit { body, .. } => {
-                out.push_str("// on_exit block\n");
-                for s in body {
-                    self.statement_to_rust(out, s);
-                }
             }
             Statement::SyncBlock { body } => {
                 for s in body {

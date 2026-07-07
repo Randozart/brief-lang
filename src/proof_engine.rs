@@ -925,8 +925,7 @@ impl SymbolicExecutor {
                     terminated = true;
                     path_kind = PathKind::Escape;
                 }
-                Statement::Expression(_) | Statement::Unification { .. } | Statement::SyncBlock { .. } | Statement::LocalTrigger { .. } => {}
-                Statement::Alka(_) | Statement::OnExit { .. } => {}
+                Statement::Expression(_) | Statement::Unification { .. } | Statement::SyncBlock { .. } => {}
                 Statement::Foreach { body, .. } => {
                     self.enumerate_paths_recursive(body, current_state.clone(), paths);
                 }
@@ -3262,8 +3261,8 @@ impl ProofEngine {
             }
             Statement::SyncBlock { .. } => {}
             Statement::Unification { .. } => {}
-            Statement::LocalTrigger { .. } => {}
-            Statement::Alka(_) | Statement::OnExit { .. } => {}
+            
+            
             Statement::Foreach { body, .. } => {
                 for stmt in body {
                     self.collect_write_vars(stmt, vars);
@@ -4062,7 +4061,6 @@ pub(crate) fn contains_call_to(stmt: &Statement, name: &str) -> bool {
         }
         Statement::SyncBlock { body } => body.iter().any(|s| contains_call_to(s, name)),
         Statement::Unification { expr, .. } => expr_contains_call_to(expr, name),
-        Statement::OnExit { body, .. } => body.iter().any(|s| contains_call_to(s, name)),
         Statement::Await { expr, .. } => expr_contains_call_to(expr, name),
         Statement::Async { body, .. } => contains_call_to(body, name),
         Statement::AsyncAwait { body, .. } => contains_call_to(body, name),
@@ -4126,7 +4124,6 @@ fn check_decreasing_arg(stmt: &Statement, fn_name: &str, param_name: &str) -> bo
         }
         Statement::SyncBlock { body } => body.iter().all(|s| check_decreasing_arg(s, fn_name, param_name)),
         Statement::Unification { expr, .. } => check_decreasing_arg_expr(expr, fn_name, param_name),
-        Statement::OnExit { body, .. } => body.iter().all(|s| check_decreasing_arg(s, fn_name, param_name)),
         _ => true,
     }
 }

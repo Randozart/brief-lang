@@ -2296,23 +2296,12 @@ impl Interpreter {
                 clobbers: clobbers.clone(),
                 span: *span,
             },
-            Statement::LocalTrigger { name, ty, expr, span } => Statement::LocalTrigger {
-                name: name.clone(),
-                ty: ty.clone(),
-                expr: expr.as_ref().map(|e| self.rewrite_identifiers(e, uid, cell_name)),
-                span: *span,
-            },
             Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
                 name: name.clone(),
                 ty: ty.clone(),
                 instance: self.rewrite_identifiers(instance, uid, cell_name),
                 port: port.clone(),
                 modifiers: modifiers.clone(),
-            },
-            Statement::Alka(alka) => Statement::Alka(alka.clone()),
-            Statement::OnExit { body, span } => Statement::OnExit {
-                body: body.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
-                span: *span,
             },
             Statement::SyncBlock { body } => Statement::SyncBlock {
                 body: body.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
@@ -2716,16 +2705,6 @@ impl Interpreter {
                     } else { self.eval_expr(expr)?; }
                 }
             }
-            Statement::LocalTrigger { name, expr, .. } => {
-                // Local trigger: await async event inside transaction
-                // For now, evaluate the expression if present and store the result
-                if let Some(e) = expr {
-                    let value = self.eval_expr(e)?;
-                    self.state.insert(name.clone(), value);
-                }
-                // TODO: Full async yield/await semantics with rollback support
-            }
-            Statement::Alka(_) | Statement::OnExit { .. } => {}
             Statement::Await { expr, .. } => {
                 let value = self.eval_expr(expr)?;
                 self.return_value = Some(value);

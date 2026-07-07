@@ -813,7 +813,6 @@ fn is_pure_body(
                 }
             }
             Statement::Escape(_) => return false,
-            Statement::OnExit { .. } => return false,
             Statement::Guarded { condition, statements } => {
                 if references_triggers_or_ffi_with_decls(condition, inop_decls) {
                     return false;

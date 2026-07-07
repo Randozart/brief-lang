@@ -1027,8 +1027,7 @@ impl RegionAnalyzer {
                     true
                 } else { false }
             }
-            Statement::Term { .. } | Statement::TermBang { .. } | Statement::InlineAsm { .. }
-            | Statement::Alka(_) => false,
+            Statement::Term { .. } | Statement::TermBang { .. } | Statement::InlineAsm { .. } => false,
             _ => true,
         }
     }
@@ -1382,9 +1381,6 @@ fn count_statements_recursive(body: &[Statement]) -> usize {
             Statement::Guarded { statements, .. } => {
                 work.extend(statements.iter().rev());
             }
-            Statement::OnExit { body: inner, .. } => {
-                work.extend(inner.iter().rev());
-            }
             Statement::SyncBlock { body: inner } => {
                 work.extend(inner.iter().rev());
             }
@@ -1414,7 +1410,7 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
     while let Some(s) = work.pop() {
         match s {
             Statement::Term { .. } | Statement::TermBang { .. }
-            | Statement::InlineAsm { .. } | Statement::Alka(_) => return true,
+            | Statement::InlineAsm { .. } => return true,
             Statement::Assignment { expr, .. } if expr_has_call(expr) => return true,
             Statement::Let { expr, .. } => {
                 if let Some(e) = expr { if expr_has_call(e) { return true; } }
@@ -1425,9 +1421,6 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
                 work.extend(statements.iter().rev());
             }
             Statement::Unification { expr, .. } if expr_has_call(expr) => return true,
-            Statement::OnExit { body, .. } => {
-                work.extend(body.iter().rev());
-            }
             Statement::Foreach { body, .. } => {
                 work.extend(body.iter().rev());
             }
@@ -1455,7 +1448,7 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, trigger_vars: &HashSet<String>) -> 
     while let Some(s) = work.pop() {
         match s {
             Statement::Term { .. } | Statement::TermBang { .. }
-            | Statement::InlineAsm { .. } | Statement::Alka(_) => return true,
+            | Statement::InlineAsm { .. } => return true,
             Statement::Assignment { lhs, expr, .. } => {
                 if expr_has_call(expr) { return true; }
                 // Also check if lhs references a trigger variable
@@ -1472,9 +1465,6 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, trigger_vars: &HashSet<String>) -> 
                 work.extend(statements.iter().rev());
             }
             Statement::Unification { expr, .. } if expr_has_call(expr) => return true,
-            Statement::OnExit { body, .. } => {
-                work.extend(body.iter().rev());
-            }
             Statement::Foreach { body, .. } => {
                 work.extend(body.iter().rev());
             }
@@ -1562,7 +1552,6 @@ fn has_term_or_unify_escape(body: &[Statement]) -> bool {
     body.iter().any(|s| matches!(s,
         Statement::Term { .. } | Statement::TermBang { .. } | Statement::Unification { .. }
         | Statement::Escape(_) | Statement::InlineAsm { .. }
-        | Statement::Alka(_)
     ))
 }
 
@@ -1674,12 +1663,6 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
                 variant: variant.clone(),
                 fields: fields.clone(),
                 expr: substitute_expr(expr, old_var, new_expr),
-            }
-        }
-        Statement::OnExit { body, span } => {
-            Statement::OnExit {
-                body: substitute_var(body, old_var, new_expr),
-                span: *span,
             }
         }
         other => other.clone(),

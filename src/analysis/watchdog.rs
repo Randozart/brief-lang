@@ -177,9 +177,6 @@ fn collect_writes_from_body(body: &[Statement], writes: &mut HashSet<String>) {
                     writes.insert(name.clone());
                 }
             }
-            Statement::LocalTrigger { name, .. } => {
-                writes.insert(name.clone());
-            }
             Statement::Guarded { statements, .. } => {
                 collect_writes_from_body(statements, writes);
             }

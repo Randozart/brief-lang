@@ -140,16 +140,6 @@ impl Reactor {
                 }
                 false
             }
-            Statement::LocalTrigger { expr, .. } => {
-                // Check if the trigger expression's result would trigger an escape
-                // For now, just check the expression itself
-                if let Some(e) = expr {
-                    if self.contains_escape_in_expr(e, interp) {
-                        return true;
-                    }
-                }
-                false
-            }
             _ => false,
         }
     }
@@ -348,20 +338,10 @@ impl Reactor {
                 }
             }
             Statement::Unification { .. } => Ok(StmtResult::Continue),
-            Statement::LocalTrigger { name, expr, .. } => {
-                // Local trigger: evaluate expression if present, store result
-                if let Some(e) = expr {
-                    let value = interp.eval_expr(e)?;
-                    interp.state.insert(name.clone(), value);
-                }
-                // TODO: Full async yield/await semantics with rollback support
-                Ok(StmtResult::Continue)
-            }
             Statement::SyncBlock { .. } => {
                 interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::Alka(_) | Statement::OnExit { .. } => Ok(StmtResult::Continue),
             Statement::Foreach { item, list, body, .. } => {
                 let list_val = interp.eval_expr(list)?;
                 if let Value::List(items) = list_val {

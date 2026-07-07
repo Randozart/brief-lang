@@ -368,23 +368,12 @@ impl LlvmBackend {
                 clobbers: clobbers.clone(),
                 span: *span,
             },
-            Statement::LocalTrigger { name, ty, expr, span } => Statement::LocalTrigger {
-                name: name.clone(),
-                ty: ty.clone(),
-                expr: expr.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
-                span: *span,
-            },
             Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
                 name: name.clone(),
                 ty: ty.clone(),
                 instance: Self::rewrite_cell_identifiers(instance, cell_name),
                 port: port.clone(),
                 modifiers: modifiers.clone(),
-            },
-            Statement::Alka(alka) => Statement::Alka(alka.clone()),
-            Statement::OnExit { body, span } => Statement::OnExit {
-                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                span: *span,
             },
             Statement::SyncBlock { body } => Statement::SyncBlock {
                 body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),

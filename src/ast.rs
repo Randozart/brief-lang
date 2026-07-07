@@ -2174,14 +2174,6 @@ pub enum Statement {
         span: Option<Span>,
     },
 
-    // Local trigger declaration (inside transactions): trg! name: Type = expr;
-    // The ! suffix is a psychological speedbump warning of async rollback risk
-    LocalTrigger {
-        name: String,
-        ty: Type,
-        expr: Option<Expr>,
-        span: Option<Span>,
-    },
 
     /// `trg name @ instance.port;` — bind a trigger to a component's output port.
     /// The trigger fires when the component writes to that output variable.
@@ -2193,16 +2185,6 @@ pub enum Statement {
         modifiers: Vec<Hashtag>,
     },
 
-    // PERMANENTLY ABANDONED — alka { ... }; or alka! { ... };
-    // Code left as historical artifact. No revisit planned.
-    Alka(AlkaBlock),
-
-    // PERMANENTLY ABANDONED — #on_exit { ... };
-    // Code left as historical artifact. No revisit planned.
-    OnExit {
-        body: Vec<Statement>,
-        span: Option<Span>,
-    },
 
     // Sync block: sync { stmt1; stmt2; ... };
     // Fork-join barrier — all statements start and finish simultaneously.
@@ -2251,13 +2233,6 @@ pub enum Statement {
         lhs: Option<String>,
         modifiers: Vec<Hashtag>,
     },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct AlkaBlock {
-    pub dangerous: bool,
-    pub content: String,
-    pub span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]

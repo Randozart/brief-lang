@@ -1095,9 +1095,6 @@ impl LlvmBackend {
                 self.fun.let_binding_types = saved_types;
             }
             Statement::Expression(e) => { let _ = self.emit_expr(out, e, indent); }
-            Statement::LocalTrigger { .. } => { writeln!(out, "{}; trg!", indent).ok(); }
-            Statement::OnExit { body, .. } => { self.fun.pending_cleanup.extend(body.iter().cloned()); }
-            Statement::Alka(b) => { for l in b.content.lines() { let _ = writeln!(out, "{}{}", indent, l); } }
             Statement::InlineAsm { asm_string, .. } => { writeln!(out, "{}{}", indent, asm_string).ok(); }
             Statement::Foreach { item, list, body, modifiers } => {
                 crate::features::stmt::foreach::ForeachStmt {

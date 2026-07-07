@@ -1023,7 +1023,6 @@ impl TypeChecker {
             }
             Statement::Unification { expr, .. } => self.check_cell_expr_isolation(expr, local_names, cell_name),
             Statement::Escape(Some(e)) => self.check_cell_expr_isolation(e, local_names, cell_name),
-            Statement::LocalTrigger { expr: Some(e), .. } => self.check_cell_expr_isolation(e, local_names, cell_name),
             Statement::Foreach { list, body, .. } => {
                 self.check_cell_expr_isolation(list, local_names, cell_name);
                 for s in body { self.check_cell_stmt_isolation(s, local_names, cell_name); }
@@ -1896,29 +1895,6 @@ impl TypeChecker {
                     self.check_statement(s, is_async);
                 }
             }
-            Statement::LocalTrigger { name, ty, expr, .. } => {
-                // Local trigger: trg! name: Type = expr;
-                // Type-check the expression if present
-                if let Some(e) = expr {
-                    self.check_expr_for_ffi_errors(e);
-                    let expr_ty = self.infer_expression(e);
-                    if !self.types_compatible(&expr_ty, ty) {
-                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                            expected: self.type_to_string(ty),
-                            found: self.type_to_string(&expr_ty),
-                            context: format!("trg! {} (local trigger)", name),
-                        });
-                    }
-                }
-                // Declare the trigger variable in the local transaction scope
-                self.declare_variable(name, ty.clone());
-            }
-            Statement::OnExit { body, .. } => {
-                for stmt in body {
-                    self.check_statement(stmt, is_async);
-                }
-            }
-            Statement::Alka(_) => {} // opaque passthrough, no validation
             Statement::Await { expr, .. } => {
                 self.check_async_await_callable(expr);
                 self.infer_expression(expr);

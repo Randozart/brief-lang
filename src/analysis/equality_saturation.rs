@@ -474,11 +474,6 @@ fn simplify_stmt(stmt: &mut crate::ast::Statement, cache: &mut SimplifyCache) {
                 if let Some(s) = simplify_cached(inner, cache) { *inner = s; }
             }
         }
-        Statement::LocalTrigger { expr, .. } => {
-            if let Some(e) = expr.as_mut() {
-                if let Some(s) = simplify_cached(e, cache) { *e = s; }
-            }
-        }
         Statement::SyncBlock { body } => {
             for st in body { simplify_stmt(st, cache); }
         }

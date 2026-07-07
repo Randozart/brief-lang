@@ -163,7 +163,6 @@ fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Hashtag> {
             Statement::Let { modifiers, .. } => tags.extend(modifiers.clone()),
             Statement::Term { modifiers, .. } | Statement::TermBang { modifiers, .. } => tags.extend(modifiers.clone()),
             Statement::Guarded { statements, .. } => tags.extend(collect_hashtags_from_body(statements)),
-            Statement::OnExit { body, .. } => tags.extend(collect_hashtags_from_body(body)),
             _ => {}
         }
     }

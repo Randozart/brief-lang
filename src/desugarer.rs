@@ -1183,20 +1183,6 @@ impl Desugarer {
                 fields,
                 expr: self.desugar_expr(expr),
             },
-            Statement::LocalTrigger {
-                name,
-                ty,
-                expr,
-                span,
-            } => Statement::LocalTrigger {
-                name,
-                ty,
-                expr: expr.map(|e| self.desugar_expr(e)),
-                span,
-            },
-            Statement::OnExit { body, span } => {
-                Statement::OnExit { body: body.into_iter().map(|s| self.desugar_stmt(s)).collect(), span }
-            }
             Statement::Oracle { handler, body, span } => Statement::Oracle {
                 handler: handler.into_iter().map(|s| self.desugar_stmt(s)).collect(),
                 body: body.into_iter().map(|s| self.desugar_stmt(s)).collect(),
@@ -1215,7 +1201,6 @@ impl Desugarer {
                 lhs,
                 modifiers,
             },
-            Statement::InlineAsm { .. } | Statement::Alka(_) => stmt,
             Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
                 name,
                 ty,
@@ -1223,6 +1208,7 @@ impl Desugarer {
                 port,
                 modifiers,
             },
+            Statement::InlineAsm { .. } => stmt,
         }
     }
 

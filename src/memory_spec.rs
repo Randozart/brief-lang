@@ -151,25 +151,6 @@ impl MemorySpec {
     }
 
     fn add_transaction(&mut self, txn: &Transaction) {
-        // Collect local triggers inside transactions
-        for stmt in &txn.body {
-            if let Statement::LocalTrigger { name, ty, expr, .. } = stmt {
-                let type_name = format!("trg! {}", format_type(ty));
-                let size = estimate_type_size(ty);
-
-                self.allocations.insert(
-                    format!("{}.{}", txn.name, name),
-                    Allocation {
-                        type_name,
-                        address: None, // Local triggers don't have fixed addresses
-                        size_bytes: size,
-                        bit_range: None,
-                        stage: None,
-                        is_trigger: true,
-                    },
-                );
-            }
-        }
     }
 
     /// Serialize to JSON string

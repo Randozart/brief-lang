@@ -275,16 +275,8 @@ impl<'a> DataflowAnalyzer<'a> {
             Statement::Escape(expr) => {
                 if let Some(e) = expr { self.extract_ids_recursive(e, ids); }
             }
-            Statement::LocalTrigger { expr, .. } => {
-                if let Some(e) = expr { self.extract_ids_recursive(e, ids); }
-            }
-            Statement::OnExit { body, .. } => {
-                for s in body {
-                    self.extract_ids_from_statement(s, ids);
-                }
-            }
-            Statement::InlineAsm { .. } | Statement::Alka(_) => {}
             Statement::SyncBlock { .. } => {}
+            Statement::InlineAsm { .. } => {}
             Statement::Foreach { list, body, .. } => {
                 self.extract_ids_recursive(list, ids);
                 for s in body {
