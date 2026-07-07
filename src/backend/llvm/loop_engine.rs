@@ -2031,7 +2031,11 @@ impl LlvmBackend {
         let done_l = format!("done_{}", name);
         writeln!(out, "  br i1 {}, label %{}, label %{}", i1, body_l, done_l).ok();
         writeln!(out, "  {}:", body_l).ok();
-        if self.fun.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
+        // 2026-07-07: Skip any_fired store when exit_condition is set
+        // (the footer uses exit_condition, not any_fired).
+        if self.fun.phi_induction_reg.is_none() && self.ctx.exit_condition.is_none() {
+            writeln!(out, "  store i8 1, ptr %any_fired").ok();
+        }
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear();
         self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
         self.fun.expr_dedup_cache.clear();
@@ -2073,7 +2077,11 @@ impl LlvmBackend {
             self.fun.ssa_old_int_regs.insert(cname.clone(), pi_reg.clone());
         }
         self.fun.loop_exit_label = Some("done".into());
-        if self.fun.phi_induction_reg.is_none() { writeln!(out, "  store i8 1, ptr %any_fired").ok(); }
+        // 2026-07-07: Skip any_fired store when exit_condition is set
+        // (the footer uses exit_condition, not any_fired).
+        if self.fun.phi_induction_reg.is_none() && self.ctx.exit_condition.is_none() {
+            writeln!(out, "  store i8 1, ptr %any_fired").ok();
+        }
         for s in body_stmts { self.emit_stmt(out, s, "  "); }
         self.fun.loop_exit_label = None;
         self.fun.ssa_old_float_regs.clear();
@@ -2201,12 +2209,20 @@ impl LlvmBackend {
             // for push targets and preallocate if a bound is available from
             // any txn's contract (e.g., shared [count < N] across txns).
             self.emit_ssa_mt_prealloc(out, txns);
-            writeln!(out, "  %any_fired = alloca i8, align 1").ok();
-            writeln!(out, "  store i8 0, ptr %any_fired").ok();
+            // 2026-07-07: Skip any_fired and cycle_count when exit_condition
+            // is set (#!exit pragma). The exit condition at the loop footer
+            // handles backedge decisions — any_fired is written but never read.
+            // Saves ~6 ops per iteration for programs like bit_clear.
+            if self.ctx.exit_condition.is_none() {
+                writeln!(out, "  %any_fired = alloca i8, align 1").ok();
+                writeln!(out, "  store i8 0, ptr %any_fired").ok();
+            }
             writeln!(out, "  br label %tick").ok();
             writeln!(out, "  tick:").ok();
-            emit_cycle_count_increment(self, out);
-            writeln!(out, "  store i8 0, ptr %any_fired").ok();
+            if self.ctx.exit_condition.is_none() {
+                emit_cycle_count_increment(self, out);
+                writeln!(out, "  store i8 0, ptr %any_fired").ok();
+            }
         }
         self.fun.ssa_state_reg = None;
 
