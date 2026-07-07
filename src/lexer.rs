@@ -28,189 +28,129 @@ use logos::Logos;
 pub enum Token {
     // Sig aliases: sig, sign, signature (lowercase and UPPERCASE)
     #[token("sig")]
-    #[token("SIG")]
     #[token("sign")]
-    #[token("SIGN")]
     #[token("signature")]
-    #[token("SIGNATURE")]
     Sig,
 
     // Defn aliases: defn, def, definition (lowercase and UPPERCASE)
     #[token("defn")]
-    #[token("DEFN")]
     #[token("def")]
-    #[token("DEF")]
     #[token("definition")]
-    #[token("DEFINITION")]
     Defn,
 
     #[token("let")]
-    #[token("LET")]
     Let,
 
     // Const aliases: const, constant (lowercase and UPPERCASE)
     #[token("const")]
-    #[token("CONST")]
     #[token("constant")]
-    #[token("CONSTANT")]
     Const,
 
     // Txn aliases: txn, transact, transaction (lowercase and UPPERCASE)
     #[token("txn")]
-    #[token("TXN")]
     #[token("transact")]
-    #[token("TRANSACT")]
     #[token("transaction")]
-    #[token("TRANSACTION")]
     Txn,
 
     #[token("rct")]
-    #[token("RCT")]
     Rct,
 
     #[token("async")]
-    #[token("ASYNC")]
     Async,
 
     #[token("await")]
-    #[token("AWAIT")]
     Await,
 
     #[token("term")]
-    #[token("TERM")]
     Term,
     #[token("term!")]
-    #[token("TERM!")]
     TermBang,
     #[token("escape")]
-    #[token("ESCAPE")]
     Escape,
     #[token("unification")]
-    #[token("UNIFICATION")]
     #[token("unify")]
-    #[token("UNIFY")]
     #[token("uni")]
-    #[token("UNI")]
     Unification,
     #[token("is")]
-    #[token("IS")]
     Is,
     #[token("like")]
-    #[token("LIKE")]
     Like,
     #[token("import")]
-    #[token("IMPORT")]
     Import,
     #[token("from")]
-    #[token("FROM")]
     From,
     #[token("as")]
-    #[token("AS")]
     As,
     #[token("frgn")]
-    #[token("FRGN")]
     Frgn,
     #[token("frgn!")]
-    #[token("FRGN!")]
     FrgnBang,
     #[token("inop")]
-    #[token("INOP")]
     #[token("inop#")]
     Inop,
     #[token("inop!")]
-    #[token("INOP!")]
     #[token("inop#!")]
     InopBang,
     #[token("meld")]
-    #[token("MELD")]
     Meld,
     #[token("syscall")]
-    #[token("SYSCALL")]
     Syscall,
     #[token("syscall!")]
-    #[token("SYSCALL!")]
     SyscallBang,
     #[token("resource")]
-    #[token("RESOURCE")]
     Resource,
     #[token("rsrc")]
-    #[token("RSRC")]
     Rsrc,
     #[token("reg")]
-    #[token("REG")]
     #[token("registry")]
-    #[token("REGISTRY")]
     Registry,
     #[token("op")]
-    #[token("OP")]
     Op,
     #[token("type")]
-    #[token("TYPE")]
     Type,
 
     #[token("cell")]
-    #[token("CELL")]
     Cell,
     #[token("struct")]
-    #[token("STRUCT")]
     Struct,
     #[token("rstruct")]
-    #[token("RSTRUCT")]
     Rstruct,
     #[token("render")]
-    #[token("RENDER")]
     Render,
     #[token("enum")]
-    #[token("ENUM")]
     Enum,
     #[token("trg!")]
-    #[token("TRG!")]
     #[token("trigger!")]
-    #[token("TRIGGER!")]
     TrgBang,
     #[token("trg")]
-    #[token("TRG")]
     #[token("trigger")]
-    #[token("TRIGGER")]
     Trg,
     #[token("link")]
-    #[token("LINK")]
     Link,
     #[token("asm")]
-    #[token("ASM")]
     Asm,
     #[token("stage")]
-    #[token("STAGE")]
     Stage,
     #[token("on")]
-    #[token("ON")]
     On,
     #[token("within")]
-    #[token("WITHIN")]
     Within,
     #[token("bank")]
-    #[token("BANK")]
     Bank,
     #[token("Ptr!")]
     PtrBang,
     #[token("Ok")]
-    #[token("OK")]
     Ok,
     #[token("Err")]
-    #[token("ERR")]
     Err,
     #[token("match")]
-    #[token("MATCH")]
     Match,
 
     #[token("template")]
-    #[token("TEMPLATE")]
     Template,
     #[token("macro")]
-    #[token("MACRO")]
     Macro,
     #[token("quote")]
-    #[token("QUOTE")]
     Quote,
 
     #[token("$")]
@@ -219,65 +159,47 @@ pub enum Token {
     DollarBang,
 
     #[token("foreach")]
-    #[token("FOREACH")]
     Foreach,
 
     // Visibility: pvt / private (struct boundary), sed / sedentary (file boundary)
     #[token("pvt")]
-    #[token("PVT")]
     #[token("private")]
-    #[token("PRIVATE")]
     Pvt,
 
     #[token("sed")]
-    #[token("SED")]
     #[token("sedentary")]
-    #[token("SEDENTARY")]
     Sed,
 
     #[token("sync")]
-    #[token("SYNC")]
     Sync,
 
     #[token("some")]
-    #[token("SOME")]
     #[token("Some")]
     Some,
     #[token("none")]
-    #[token("NONE")]
     #[token("None")]
     None,
 
     #[token("true")]
-    #[token("TRUE")]
     BoolTrue,
     #[token("false")]
-    #[token("FALSE")]
     BoolFalse,
 
     // Time units (lowercase and UPPERCASE)
     #[token("cycles")]
-    #[token("CYCLES")]
     Cycles,
     #[token("cyc")]
-    #[token("CYC")]
     Cyc,
     #[token("ms")]
-    #[token("MS")]
     Ms,
     #[token("sec")]
-    #[token("SEC")]
     #[token("seconds")]
-    #[token("SECONDS")]
     Seconds,
     #[token("minute")]
-    #[token("MINUTE")]
     Minute,
     #[token("minutes")]
-    #[token("MINUTES")]
     Minutes,
     #[token("nanoseconds")]
-    #[token("NANOSECONDS")]
     Nanoseconds,
 
     // Operators

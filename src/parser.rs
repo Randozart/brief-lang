@@ -9487,17 +9487,16 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse trigger! inside transaction: {:?}", result.err());
 
-        // Test TRG! uppercase
-        let s = r#"txn Foo [true][n >= 0] { TRG! resp: UInt = read(); term; };"#;
+        // Test trg! and trigger! (canonical and alias, both lowercase)
+        let s = r#"txn Foo [true][n >= 0] { trg! resp: UInt = read(); term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_ok(), "Should parse TRG! inside transaction: {:?}", result.err());
+        assert!(result.is_ok(), "Should parse trg! inside transaction: {:?}", result.err());
 
-        // Test TRIGGER! uppercase
-        let s = r#"txn Foo [true][n >= 0] { TRIGGER! resp: String = get(); term; };"#;
+        let s = r#"txn Foo [true][n >= 0] { trigger! resp: String = get(); term; };"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
-        assert!(result.is_ok(), "Should parse TRIGGER! inside transaction: {:?}", result.err());
+        assert!(result.is_ok(), "Should parse trigger! inside transaction: {:?}", result.err());
     }
 
     #[test]
