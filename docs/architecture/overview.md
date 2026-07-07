@@ -177,7 +177,7 @@ Run-to-run variation is ~5-10%. Ranges show min/max across 3+ runs.
 | nbody_newton | **0.63x** | **0.68–0.74x** | Fixed | Phase C+E + vector phi |
 | nbody_sqrt | **0.79x** | **0.82–0.86x** | Fixed | Correct vector phi backedge |
 | nbody_sqrt_idio | **0.67x** | **0.70–0.81x** | Fixed | Correct vector phi backedge |
-| fannkuch_redux | **0.94x** | **0.94–1.02x** | MATCH | Hybrid rotation hot/cold path |
+| fannkuch_redux | **0.99x** | **0.95–1.02x** | MATCH | Hybrid rotation + terminating guard filter |
 | knucleotide | **0.99x** | **0.98–1.00x** | MATCH | Precomputation fix |
 | mandelbrot | **1.10x** | **0.99–1.00x** | MATCH | IR bug fix |
 | queue_drain | **1.02x** | **0.97–0.99x** | MATCH | IR bug fix |
@@ -212,6 +212,16 @@ Key architectural decisions:
   hot path (no exit checks for step-1 copies) or an exit-check cold path
   (final partial trip). Saves ~3 exit checks per full trip for step=4,
   reducing fannkuch_redux from 1.29x to 0.94x. See
+  `docs/plans/2026-07-07-fannkuch-straight-line-rotation.md`.
+- **Terminating guard filter in rotation copies** (`2cbcfe3`): The hybrid
+  rotation hot path re-emits body copies from the original txn body, which
+  still contains the `[count == N] { term! -> print_int#(checksum) }`
+  terminating guard. Although the guard was already hoisted to post_hoist
+  by `hoist_terminating_guard`, the rotation copies were not filtering
+  `Statement::Guarded` containing a `TermBang` — generating 4 dead
+  `icmp eq` + `br i1` per 4-iteration batch (~50M branches for N=50M).
+  Skip them with the same `terminating_guard()` check used elsewhere.
+  fannkuch_redux: 1.14x → 0.99x. See
   `docs/plans/2026-07-07-fannkuch-straight-line-rotation.md`.
 
 See `docs/architecture/backend-refactor.md` for the full architecture guide.

@@ -89,6 +89,21 @@ exit checks. `pending_phi_native_backedge` is saved before the hot path
 and restored before the cold path to maintain SSA dominance. fannkuch_redux:
 1.29x → 0.94x.
 
+**Terminating guard filter in rotation copies** (`2cbcfe3`): The hot and
+cold path body copies re-emit the original txn body, which still contains
+the `[count == N] { term! -> print_int#(checksum) }` terminating guard.
+Although `hoist_terminating_guard` already extracted this into
+`pending_post_hoist` for post-loop emission, the rotation body copy loops
+at `loop_engine.rs:1701,1770` only filtered `Statement::Term` /
+`Statement::TermBang`, leaving the `Statement::Guarded` wrapper intact.
+Each rotation copy emitted a dead `icmp eq count, N` + `br i1` — 4 per
+4-iteration batch = ~50M dead branches for N=50M.
+
+Fix: filter `Statement::Guarded{statements}` where `terminating_guard()`
+returns true, using the existing helper. The swan song print is safely
+handled by `emit_hoisted_post_loop_prints` after the loop exits naturally.
+fannkuch_redux: 1.14x → 0.99x. See `docs/plans/2026-07-07-fannkuch-straight-line-rotation.md`.
+
 **Dual-path architecture** (controlled by `needs_state_stores_in_body`):
 
 | Path | Flag | Stores in body | Use case |
@@ -140,6 +155,7 @@ in the hot loop body (Path B) — the other fields are skipped. See
 | Dead-field liveness | `6529f29` | All A005c loops | nbody_newton, float_math |
 | Rotation decomposition | `ca9f483` | 12+ cycle detected | fannkuch_redux |
 | Hybrid rotation hot/cold | `0dba619` | rotation_step > 1, no body FFI | fannkuch_redux |
+| Terminating guard filter | `2cbcfe3` | rotation_step > 1, terminating Guarded present | fannkuch_redux |
 | Vector phi emission | `a849b2d` | 4+ float fields per group | nbody_sqrt, nbody_newton, nbody_sqrt_idio |
 
 ## Performance Results (2026-07-05, BOUND=50000000)
@@ -149,7 +165,7 @@ in the hot loop body (Path B) — the other fields are skipped. See
 | nbody_newton | 1.41x | 0.89x | **0.63x** | -37% |
 | nbody_sqrt | 1.29x | 1.25x | **0.79x** | -37% |
 | nbody_sqrt_idio | 0.96x | 0.82x | **0.67x** | -18% |
-| fannkuch_redux | 2.16x | 1.65x | **0.94x** | -38% |
+| fannkuch_redux | 2.16x | 1.65x | **0.99x** | -41% |
 | knucleotide | 1.00x | 1.00x | **0.99x** | tied |
 | float_math | 0.83x | 0.86x | **0.83x** | tied |
 
