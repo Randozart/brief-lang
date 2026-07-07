@@ -49,6 +49,27 @@ proven at compile time, not `unsafe` blocks.
     the work. All of it. If unsure, ask — do not decide. If prereqs are missing,
     implement them first.
 
+11. **PLAN WITH BENCHMARKS**: Every performance optimization plan MUST include
+    a baseline table of ALL benchmark results (ratios, Brief times, C times,
+    correctness status) at the current commit BEFORE any changes. After
+    implementation, the plan MUST be updated with the new results for
+    comparison. This prevents "optimizations" that fix one benchmark while
+    silently regressing others. The baseline must be from a clean `cargo build
+    --release` + `bash benchmarks/build_and_bench.sh --runtime` run.
+
+12. **DOCUMENTATION MAINTENANCE IN PLANS**: Every optimization plan MUST
+    include a "Documentation" section that specifies:
+    - Which `///` doc comments need updating (function signatures, new params)
+    - Which rationale comments (`// 2026-07-DD: ...`) need adding at each
+      modified code site, explaining WHY the change exists and what pattern
+      it targets
+    - Which architecture docs (`docs/architecture/`) need updating if the
+      optimization changes a dispatch decision or codegen strategy
+    - How to preserve existing commentary when refactoring (never delete
+      rationale comments — rewrite them to explain the new structure instead)
+    Rationale comments are institutional memory. A plan without a documentation
+    strategy will produce unmaintainable code.
+
 ## Coding Standards
 
 ### 1. Flat Control Flow — Max 2 Levels Deep
