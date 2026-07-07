@@ -175,15 +175,15 @@ Run-to-run variation is ~5-10%. Ranges show min/max across 3+ runs.
 | Benchmark | Best | Current | MISMATCH | Key change |
 |-----------|------|---------|----------|------------|
 | nbody_newton | **0.63x** | **0.68–0.74x** | Fixed | Phase C+E + vector phi |
-| nbody_sqrt | **0.79x** | **0.82–0.86x** | Fixed | Correct vector phi backedge |
-| nbody_sqrt_idio | **0.67x** | **0.70–0.81x** | Fixed | Correct vector phi backedge |
+| nbody_sqrt | **0.72x** | **0.72–0.86x** | Fixed | Vector phi + flexible base extraction |
+| nbody_sqrt_idio | **0.72x** | **0.70–0.81x** | Fixed | Vector phi + flexible base extraction |
 | fannkuch_redux | **0.99x** | **0.95–1.02x** | MATCH | Hybrid rotation + terminating guard filter |
 | knucleotide | **0.99x** | **0.98–1.00x** | MATCH | Precomputation fix |
 | mandelbrot | **1.10x** | **0.99–1.00x** | MATCH | IR bug fix |
 | queue_drain | **1.02x** | **0.97–0.99x** | MATCH | IR bug fix |
 | float_math | **0.83x** | **0.81–0.84x** | MATCH | Liveness fix |
 | fasta | MISMATCH | **0.96–1.01x** | Fixed | PutChar FFI detection |
-| bit_clear | MISMATCH | **1.00–1.12x** | Fixed | Local variable fix |
+| bit_clear | MISMATCH | **1.00–1.20x** | Fixed | Expr::Ne + A005c decreasing support |
 | sparse_dispatch | 0x (broken) | **0.08–0.10x** | Fixed | Dispatch collapse + modulo-switch |
 
 Note: ~10% regression on nbody_sqrt_idio from a849b2d (0.64x) to ae5b016 (0.70x)
@@ -223,5 +223,27 @@ Key architectural decisions:
   Skip them with the same `terminating_guard()` check used elsewhere.
   fannkuch_redux: 1.14x → 0.99x. See
   `docs/plans/2026-07-07-fannkuch-straight-line-rotation.md`.
+- **Expr::Ne in extract_bounded_pre + A005c decreasing support** (`82752a0`):
+  The precondition `[reg != 0]` (popcount decay) was not recognized as a
+  bounded-pre expression because `extract_bounded_pre` did not handle
+  `Expr::Ne`.  Added the match arm; the variable's direction is validated
+  by `extract_valid_bounded_pre` against `IncrementInfo`.  The A005c
+  per-field phi path previously only supported `icmp slt` (increasing)
+  in its header exit check.  Added `is_decreasing` parameter; emit `icmp
+  sgt` when true.  The dispatch gate was also extended to accept
+  `bound_literal` programs (which have no state field or constant for
+  the bound).  bit_clear now routes through A005c instead of A006,
+  eliminating `any_fired`/`cycle_count` overhead from the hot loop.
+- **Vector phi grouping with flexible base extraction** (`82752a0`):
+  `build_vector_phi_groups` previously required field names matching
+  `[a-z][a-z][0-9]+` (exactly two letters then digits).  Now strips
+  trailing digits from any field name and groups by the base (e.g.,
+  `vel_x_0` → base `vel_x_`, `vx0` → `vx`, `x0` → `x`).  A sequential-
+  index guard (first 4 members must have indices 0, 1, 2, 3) prevents
+  false positives from matrix fields (p00/p01 vs p10/p11 all sharing
+  base `p`).  No expression-shape consistency check is required because
+  the vector phi is register-storage aggregation, not SIMD arithmetic.
+  nbody_sqrt: 0.72x (best known).  kalman_filter: 0.99x (no false
+  positive from matrix fields).
 
 See `docs/architecture/backend-refactor.md` for the full architecture guide.

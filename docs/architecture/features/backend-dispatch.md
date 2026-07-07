@@ -1,6 +1,6 @@
 # Backend Dispatch (Optimization Path Selection)
 
-**Date:** 2026-07-05 (updated — A005a re-added, vector phis, rotation decomposition)
+**Date:** 2026-07-07 (updated — is_decreasing in A005c, flexible base extraction for vector phis)
 **Status:** Current
 
 ## Purpose
@@ -70,10 +70,30 @@ One phi per state field at the loop header. LLVM sees a canonical
 `phi + icmp + add` structure for each field — enabling induction
 variable analysis, SROA, and loop vectorization.
 
-**Vector phi grouping** (`a849b2d`): Fields matching pattern `[a-z][a-z][0-9]+`
-with 4+ same-prefix members (e.g., vx0..vx3) emit `<4 x float>` phis instead
-of scalar float phis. Reduces register pressure: 32 scalar phis → ~14 phis,
-fitting in 16 XMM registers without spills. nbody_sqrt: 1.25x → 0.79x.
+**is_decreasing support** (`82752a0`): A005c previously only supported
+increasing counters (`icmp slt` in the header exit check).  For decreasing
+counters (e.g., popcount decay: `reg > 0` via `[reg != 0]` precondition),
+the header now emits `icmp sgt` when `is_decreasing` is true.  The latch
+handles modified fields via GEP-reload from `%State`, so no latch arithmetic
+change is needed.  The dispatch gate at `mod.rs:2183` was extended to accept
+`bound_literal` programs (no field or constant for the bound).
+
+**Expr::Ne in extract_bounded_pre** (`82752a0`): `[reg != 0]` preconditions
+normalize to `Expr::Ne`, which `extract_bounded_pre` did not handle — the
+program fell through to A006 (direct SSA loop with `any_fired`/`cycle_count`
+overhead).  Now matched as decreasing convergence toward the literal bound,
+validated by `extract_valid_bounded_pre` against `IncrementInfo`.  bit_clear:
+routes through A005c per-field phi instead of A006.
+
+**Vector phi grouping** (`82752a0`): Replaced the naming-convention regex
+`[a-z][a-z][0-9]+` with flexible base extraction — strips trailing digits
+from any field name and groups by the base (e.g., `vel_x_0` → `vel_x_`,
+`vx0` → `vx`, `x0` → `x`).  A sequential-index guard (first 4 members
+must have indices 0, 1, 2, 3) prevents false positives from matrix fields
+(p00/p01 vs p10/p11 sharing base `p`).  No expression-shape consistency
+check is required because the vector phi is register-storage aggregation,
+not SIMD arithmetic.  nbody_sqrt: 0.72x (best known).  kalman_filter:
+0.99x (no false positive from matrix fields).
 
 **Rotation decomposition** (`ca9f483`): Detects circular permutation chains
 (e.g., p0←p1←...←p11←p0) and uses GEP-reload from %State in the latch
@@ -157,14 +177,17 @@ in the hot loop body (Path B) — the other fields are skipped. See
 | Hybrid rotation hot/cold | `0dba619` | rotation_step > 1, no body FFI | fannkuch_redux |
 | Terminating guard filter | `2cbcfe3` | rotation_step > 1, terminating Guarded present | fannkuch_redux |
 | Vector phi emission | `a849b2d` | 4+ float fields per group | nbody_sqrt, nbody_newton, nbody_sqrt_idio |
+| Vector phi flexible base | `82752a0` | Any field name with trailing digits | nbody_sqrt, nbody_newton, nbody_sqrt_idio |
+| Decreasing counter A005c | `82752a0` | bound_literal + is_decreasing | bit_clear |
+| Expr::Ne in bounded_pre | `82752a0` | Precondition `[var != N]` | bit_clear |
 
 ## Performance Results (2026-07-05, BOUND=50000000)
 
 | Benchmark | Before A005e | Best A005c | After | Improvement |
 |-----------|-------------|-----------|-------|-------------|
 | nbody_newton | 1.41x | 0.89x | **0.63x** | -37% |
-| nbody_sqrt | 1.29x | 1.25x | **0.79x** | -37% |
-| nbody_sqrt_idio | 0.96x | 0.82x | **0.67x** | -18% |
+| nbody_sqrt | 1.29x | 1.25x | **0.72x** | -39% |
+| nbody_sqrt_idio | 0.96x | 0.82x | **0.72x** | -14% |
 | fannkuch_redux | 2.16x | 1.65x | **0.99x** | -41% |
 | knucleotide | 1.00x | 1.00x | **0.99x** | tied |
 | float_math | 0.83x | 0.86x | **0.83x** | tied |
