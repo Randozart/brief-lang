@@ -984,6 +984,7 @@ impl LlvmBackend {
         bound_reg: &str,
         write_set: &HashSet<String>,
         exit_label: &str,
+        is_decreasing: bool,
     ) -> (String, String, String, String, String, String) {
         self.fun.phi_field_regs.clear();
         self.fun.backedge_field_regs.clear();
@@ -1093,10 +1094,15 @@ impl LlvmBackend {
         // Counter phi
         let ty_counter = &self.ctx.field_types[counter_idx];
         writeln!(out, "  {} = phi {} [ {}, %pre_phi ], [ {}, %latch ]", count_phi_reg, ty_counter, init_count, count_be_reg).ok();
-        // Exit check
+        // Exit check: icmp sgt for decreasing counters (reg > N), icmp slt
+        // for increasing counters (reg < N)
         let cmp_reg = format!("%cmp_hdr_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
-        writeln!(out, "  {} = icmp slt i64 {}, {}", cmp_reg, pi_name, bound_reg).ok();
+        if is_decreasing {
+            writeln!(out, "  {} = icmp sgt i64 {}, {}", cmp_reg, pi_name, bound_reg).ok();
+        } else {
+            writeln!(out, "  {} = icmp slt i64 {}, {}", cmp_reg, pi_name, bound_reg).ok();
+        }
         writeln!(out, "  br i1 {}, label %body, label %{}", cmp_reg, exit_label).ok();
         (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, init_count)
     }
@@ -1428,6 +1434,7 @@ impl LlvmBackend {
         total_const_name: Option<&str>,
         body: &[Statement],
         write_set: &HashSet<String>,
+        is_decreasing: bool,
     ) {
         let c0 = self.fun.txn_counter;
         self.fun.expr_dedup_cache.clear();
@@ -1528,7 +1535,7 @@ impl LlvmBackend {
         let filtered_body = filter_dead_assignments(body, &live);
         // ── Initial field loads + phi/backedge register setup + loop header ──
         let (counter_name, count_phi_reg, count_be_reg, pi_name, pn_name, _init_count)
-            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg, write_set, exit_label);
+            = self.emit_countable_setup_phis_and_header(out, counter_idx, &bound_reg, write_set, exit_label, is_decreasing);
         // ── Body: load phi regs into ssa_old, emit statements ─────────
         writeln!(out, "body:").ok();
         self.fun.ssa_state_reg = None; // memory mode: writes go through GEP+store
@@ -4347,35 +4354,38 @@ fn build_vector_phi_groups(
     field_index_map: &HashMap<String, usize>,
     field_types: &[String],
 ) -> HashMap<String, Vec<String>> {
-    let mut groups: HashMap<String, Vec<(usize, String)>> = HashMap::new();
+    // Group float/double fields with sequential numeric suffixes into <4 x float>
+    // vector phis.  Any naming convention works (vx0, vel_x_0, col_3) — we strip
+    // trailing digits and group by the base name.  To avoid false positives
+    // (matrix fields like p00/p01 grouped with p10/p11), we verify the first
+    // 4 members have indices 0..3.  The vector phi is register-storage
+    // aggregation (reducing phi count for lower register pressure), not SIMD
+    // arithmetic — so expression-shape consistency is NOT required.
+    let mut groups: HashMap<String, Vec<(usize, String, usize)>> = HashMap::new();
     for (name, &idx) in field_index_map.iter() {
         if idx >= field_types.len() { continue; }
-        let ty = &field_types[idx];
-        if ty != "float" && ty != "double" { continue; }
-        let bytes = name.as_bytes();
-        if bytes.len() < 3 { continue; }
-        // Pattern: [a-z][a-z][0-9]  e.g., vx0, by3, bz4
-        let c0 = bytes[0] as char;
-        let c1 = bytes[1] as char;
-        let rest = &name[2..];
-        let digit: usize = match rest.parse() {
-            Ok(d) => d,
-            Err(_) => continue,
-        };
-        if !c0.is_ascii_lowercase() || !c1.is_ascii_lowercase() { continue; }
-        // Group key: "{base}{component}" e.g., "vx" for vx0..vx4
-        let key = format!("{}{}", c0, c1);
-        groups.entry(key).or_default().push((idx, name.clone()));
+        if field_types[idx] != "float" && field_types[idx] != "double" { continue; }
+        let digits_start = name.rfind(|c: char| !c.is_ascii_digit())
+            .map(|p| p + 1).unwrap_or(0);
+        if digits_start == 0 || digits_start >= name.len() { continue; }
+        let (base, suffix) = name.split_at(digits_start);
+        let index: usize = match suffix.parse() { Ok(d) => d, _ => continue };
+        groups.entry(base.to_string())
+            .or_default()
+            .push((idx, name.clone(), index));
     }
     let mut result: HashMap<String, Vec<String>> = HashMap::new();
-    for (key, mut members) in groups {
+    for (base, mut members) in groups {
         if members.len() < 4 { continue; }
-        // Sort by field index for stable ordering
-        members.sort_by_key(|(idx, _)| *idx);
-        // Take first 4 for the vector phi; remaining stay scalar
-        let names: Vec<String> = members.into_iter().take(4).map(|(_, n)| n).collect();
-        // Vector phi register name: %phi_{key}_v4
-        let vec_phi_name = format!("%phi_{}_v4", key);
+        members.sort_by_key(|(_, _, idx)| *idx);
+        // Verify indices are 0..3.  This prevents matrix fields (p00+p01+p10+p11)
+        // from being grouped as if they were vector fields (vx0..vx3).
+        let indices: Vec<usize> = members.iter().take(4).map(|(_, _, i)| *i).collect();
+        if indices != vec![0, 1, 2, 3] { continue; }
+        let names: Vec<String> = members.into_iter().take(4).map(|(_, n, _)| n).collect();
+        let sanitized: String = base.chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' }).collect();
+        let vec_phi_name = format!("%phi_{}_v4", sanitized);
         result.insert(vec_phi_name, names);
     }
     result

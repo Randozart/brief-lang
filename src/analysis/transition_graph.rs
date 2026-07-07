@@ -247,6 +247,21 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                 _ => None,
             }
         }
+        // reg != N — treat as reg > N (decreasing toward N) or reg < N
+        // (increasing toward N). Decreasing is the common case (popcount
+        // decay toward 0). Direction is validated by
+        // extract_valid_bounded_pre against IncrementInfo.
+        Expr::Ne(l, r) => {
+            match (l.as_ref(), r.as_ref()) {
+                (Expr::Identifier(var), Expr::Integer(n)) => Some(BoundedPre {
+                    var: var.clone(),
+                    bound_var: format!("__lit__{}", var),
+                    direction: ConvergeDirection::Decreasing,
+                    bound_literal: Some(*n),
+                }),
+                _ => None,
+            }
+        }
         Expr::And(l, r) => {
             extract_bounded_pre(l).or_else(|| extract_bounded_pre(r))
         }

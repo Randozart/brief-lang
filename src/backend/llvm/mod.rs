@@ -2180,7 +2180,7 @@ self.emit_declares(&mut out);
                             Some(bp.bound_var.as_str())
                         } else { None }
                     } else { None };
-                    if total_idx.is_some() || total_const_name.is_some() {
+                    if total_idx.is_some() || total_const_name.is_some() || bp.bound_literal.is_some() {
                         // 2026-07-03: Swan song check — terminating guards with FFI
                         // (e.g. term! -> print_int#) are hoisted by hoist_terminating_guard.
                         // If a swan song exists, the body is treated as non-pure.
@@ -2276,7 +2276,8 @@ self.emit_declares(&mut out);
                                 self.fun.pending_post_hoist = post_hoist;
                                 let num_fields = node.write_set.len().max(2);
                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                                let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing);
                                 true
                             }
                             }
@@ -2304,7 +2305,8 @@ self.emit_declares(&mut out);
                                 self.fun.pending_post_hoist = post_hoist;
                                 let num_fields = node.write_set.len().max(2);
                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set);
+                                let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing);
                                 true
                             }
                         }
