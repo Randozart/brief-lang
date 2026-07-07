@@ -1191,6 +1191,7 @@ impl LlvmBackend {
         count_be_reg: &str,
         counter_name: &str,
         rotation_step: usize,
+        rotation_cycle: &[String],
     ) {
         writeln!(out, "  br label %latch").ok();
         writeln!(out, "latch:").ok();
@@ -1227,6 +1228,24 @@ impl LlvmBackend {
                     let gep_reload = self.emit_state_gep(out, "  ", "be", "%state", idx);
                     writeln!(out, "  {} = load {}, ptr {}, align {}",
                         be_reg, ty, gep_reload, self.align_of(ty)).ok();
+                // 2026-07-07: Rotation cycle fields use circular phi chain.
+                // The backedge for field at position N references the phi register
+                // of field at position (N + step) % cycle.len().  Phi registers
+                // are defined in the header which dominates the latch — safe.
+                } else if rotation_step > 1 && !rotation_cycle.is_empty() {
+                    let Some(&(_, ref ty)) = field_map.get(name) else { continue; };
+                    if let Some(pos) = rotation_cycle.iter().position(|f| f == name) {
+                        let target_idx = (pos + rotation_step) % rotation_cycle.len();
+                        let target_name = &rotation_cycle[target_idx];
+                        let target_phi = phi_entries.get(target_name).cloned().unwrap_or_default();
+                        if !target_phi.is_empty() {
+                            let _ = match ty.as_str() {
+                                "float" => writeln!(out, "  {} = fadd float {}, 0.0", be_reg, target_phi),
+                                "double" => writeln!(out, "  {} = fadd double {}, 0.0", be_reg, target_phi),
+                                _ => writeln!(out, "  {} = add i64 0, {}", be_reg, target_phi),
+                            };
+                        }
+                    }
                 // 2026-07-03: If the body stored a native-typed value, use it
                 // directly as the phi backedge instead of reloading from %State.
                 // This eliminates the store→GEP→load roundtrip per field.
@@ -1552,7 +1571,7 @@ impl LlvmBackend {
         // 2026-07-05: Detect circular phi chains in rotation patterns
         // (fannkuch_redux 12-cycle).  Body unrolling + GEP reloads in the
         // latch break the cycle into independent SCEV-analyzable values.
-        let (rotation_step, _rotation_cycle_fields) = detect_rotation_ast(
+        let (rotation_step, rotation_cycle) = detect_rotation_ast(
             &filtered_body, &self.ctx.field_index_map,
         );
         // When rotation is active, use the ORIGINAL body (not filtered_body)
@@ -1563,20 +1582,31 @@ impl LlvmBackend {
         if rotation_step > 1 {
             // Build rotation_fields set — forces body stores to %State so
             // the latch can GEP-reload them (breaking the phi chain).
+            // 2026-07-07: Rotation cycle fields are EXCLUDED from rotation_fields
+            // (no stores + GEP-reload needed).  The circular phi chain via
+            // pending_phi_native_backedge handles rotation naturally using phi
+            // registers (which dominate the latch).  Non-rotation fields still
+            // need stores + GEP-reload (their pending values are body-computed
+            // registers that don't dominate the latch).
             for s in emit_body {
                 if let Statement::Assignment { lhs, .. } = s {
                     if let Some(fname) = target_field_name(lhs) {
                         if self.fun.phi_field_regs.contains_key(&fname) {
-                            self.fun.rotation_fields.insert(fname.clone());
-                            self.fun.parallel_safe_exempt_fields.insert(fname.clone());
+                            // 2026-07-07: Rotation cycle fields are excluded from
+                            // rotation_fields — they use circular phi chain via
+                            // phi_field_regs in the latch instead of GEP-reload.
+                            if !rotation_cycle.contains(&fname) {
+                                self.fun.rotation_fields.insert(fname.clone());
+                                self.fun.parallel_safe_exempt_fields.insert(fname.clone());
+                            }
                         }
                     }
                 }
             }
             // Must force stores for rotation fields (latch needs fresh values).
-            // Keep done_needs_fields intact (commit block ensures done: reads
-            // correct field values from last_val_temps, not from monolithic
-            // %State which is never written by the chunk-based body stores).
+            // Pure rotations: stores for non-rotation fields only.
+            // Non-pure rotations: stores for ALL modified fields (rotation_cycle
+            // is empty for non-rotation cases, so all fields are added above).
             self.fun.needs_state_stores_in_body = true;
         }
         // ── Emit body (possibly unrolled for rotation) ────────────────
@@ -1586,6 +1616,18 @@ impl LlvmBackend {
             // between copies so each sees the previous copy's computed values.
             // Overflow guard after each copy handles non-divisible bounds.
             for i in 1..rotation_step {
+                // 2026-07-07: For rotation cycle fields, advance ssa_old from
+                // pending_phi_native_backedge between copies so the next copy sees
+                // rotated values.  Non-rotation fields are still GEP-reloaded.
+                if rotation_step > 1 && !rotation_cycle.is_empty() {
+                    let rot_set: HashSet<String> = rotation_cycle.iter().cloned().collect();
+                    for (fname, val) in &self.fun.pending_phi_native_backedge {
+                        if rot_set.contains(fname) {
+                            self.fun.ssa_old_int_regs.insert(fname.clone(), val.clone());
+                            self.fun.ssa_old_float_regs.insert(fname.clone(), val.clone());
+                        }
+                    }
+                }
                 // GEP-reload rotation fields into ssa_old caches.
                 let rot_fields: Vec<String> = self.fun.rotation_fields.iter().cloned().collect();
                 for fname in &rot_fields {
@@ -1637,7 +1679,7 @@ impl LlvmBackend {
             }
         }
         // ── Latch: increment counter, reload modified fields ─────────
-        self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name, rotation_step);
+        self.emit_countable_latch(out, &pi_name, &pn_name, &count_be_reg, &counter_name, rotation_step, &rotation_cycle);
         // ── Commit block: store phi final values to last-value allocas ──
         // Runs ONCE at loop exit (when the header branches to %commit instead
         // of %done).  done: loads from these allocas — no per-iteration stores.
@@ -4015,19 +4057,19 @@ fn gcd(a: usize, b: usize) -> usize {
 /// Scans the AST body (not emitted IR) to find circular phi chains where
 /// each field is assigned the value of another field (a rotation).
 /// Returns the optimal step size.  Returns 1 if no rotation is detected.
-/// 2026-07-06: Returns (step, rotation_cycle_fields) where step is the
-/// optimal unroll factor (1 = no rotation) and rotation_cycle_fields is
-/// the set of field names in the longest detected rotation cycle.
-/// The cycle fields enable future pure-rotation optimization (circular
-/// phi chain instead of GEP-reload).  Currently unused (step drives
-/// behavior), but the field set is returned for A/B experimentation.
-/// See docs/plans/2026-07-06-next-optimizations.md
+/// 2026-07-07: Returns (step, rotation_cycle) where step is the optimal
+/// unroll factor (1 = no rotation) and rotation_cycle is the ordered list
+/// of field names in the longest detected rotation cycle (e.g. [p0, p1,
+/// ..., p11] for fannkuch).  The cycle order is used by the pure-rotation
+/// latch backedge: rotation field at index N gets its backedge from the
+/// field at index (N + step) % cycle.len().
+/// See docs/plans/2026-07-07-optimization-plan.md
 fn detect_rotation_ast(
     body: &[Statement],
     field_index_map: &HashMap<String, usize>,
-) -> (usize, HashSet<String>) {
+) -> (usize, Vec<String>) {
     let n = field_index_map.len();
-    if n < 4 { return (1, HashSet::new()); }
+    if n < 4 { return (1, Vec::new()); }
     // Build let-to-field mapping: if a let binding reads from a state field,
     // resolve it (e.g. let saved = p0 → "saved" → "p0"). This handles the
     // fannkuch pattern: &p11 = saved; where saved = p0.
@@ -4062,17 +4104,17 @@ fn detect_rotation_ast(
             }
         }
     }
-    if perm.len() < 4 { return (1, HashSet::new()); }
+    if perm.len() < 4 { return (1, Vec::new()); }
     let cycles: Vec<Vec<usize>> = find_permutation_cycles(&perm, n);
     let max_len = cycles.iter().map(|c| c.len()).max().unwrap_or(0);
-    if max_len <= 4 { return (1, HashSet::new()); }
-    // Collect field names in the longest cycle for future pure-rotation use
+    if max_len <= 4 { return (1, Vec::new()); }
+    // Collect field names in the longest cycle (PRESERVES ORDER for latch backedge offset)
     let longest: &Vec<usize> = cycles.iter().max_by_key(|c| c.len()).unwrap();
-    let rotation_fields: HashSet<String> = longest.iter()
+    let rotation_cycle: Vec<String> = longest.iter()
         .filter_map(|&idx| field_index_map.iter().find(|(_, i)| **i == idx).map(|(n, _)| n.clone()))
         .collect();
     let step = optimal_step_for_cycle_length(max_len);
-    (step, rotation_fields)
+    (step, rotation_cycle)
 }
 
 /// 2026-07-05: Build vector phi groups for register pressure reduction.
