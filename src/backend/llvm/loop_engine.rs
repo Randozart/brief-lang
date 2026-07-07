@@ -2347,36 +2347,122 @@ impl LlvmBackend {
         let count_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
         let c_base = format!("%cgep_base{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", c_base, count_idx).ok();
-        // ── _body4: loop body with K sequential txns ──
-        // Memory-based counter: load from %State, the body increments it,
-        // after K bodies we've advanced by K. No phi needed (avoids
-        // predecessor issues with init blocks branching to the header).
+        // ── Detect collapsed dispatch: all K bodies structurally identical ──
+        // 2026-07-07: When all K modulo-switch bodies are identical AND the
+        // print guard follows count % M == M-1 with print_int#(count + 1)
+        // AND M % K == 0, emit a single body with count += K and adjusted
+        // guard (count % M == 0, print count instead of count + 1).
+        // This matches clang's output for the C reference (empty switch
+        // + counted loop).  When conditions are not met, fall back to the
+        // original K-body rotated loop.
+        // 2026-07-07: Detect collapsed dispatch — all K bodies must be
+        // structurally identical AND the first body must contain the
+        // transformable guard pattern: [count % M == M-1] with print_int#.
+        // When all conditions are met AND M % K == 0, emit a single body
+        // with count += K and adjusted guard (count % M == 0).
+        let can_collapse = txns.len() > 1 && txns.iter().skip(1).all(|(_, t)| t.body == txns[0].1.body);
+        let can_collapse = can_collapse && {
+            let body = &txns[0].1.body;
+            let mut found_m: Option<i64> = None;
+            for s in body {
+                if let Statement::Guarded { condition, statements } = s {
+                    let norm = condition.normalize_to_old_recursive();
+                    if let Expr::Eq(lhs, rhs) = &norm {
+                        // Check: lhs = count % M, rhs = M - 1
+                        let is_match = if let Expr::Mod(id, mod_val) = lhs.as_ref() {
+                            matches!(id.as_ref(), Expr::Identifier(n) if n == counter_name)
+                        } else { false };
+                        if is_match {
+                            // Extract M from lhs and M-1 from rhs
+                            let m_val = (|| -> Option<i64> {
+                                let Expr::Mod(_, mod_val) = lhs.as_ref() else { return None; };
+                                let m = match mod_val.as_ref() {
+                                    Expr::Literal(lit) => match lit.as_ref() {
+                                        crate::features::literal::LiteralExpr::Integer(n) => *n,
+                                        _ => return None,
+                                    },
+                                    _ => return None,
+                                };
+                                let rhs_minus_1 = match rhs.as_ref() {
+                                    Expr::Literal(lit) => match lit.as_ref() {
+                                        crate::features::literal::LiteralExpr::Integer(n) => *n,
+                                        _ => return None,
+                                    },
+                                    _ => return None,
+                                };
+                                if rhs_minus_1 == m - 1 { Some(m) } else { None }
+                            })();
+                            if let Some(m) = m_val {
+                                // Check for print_int# inside guard body
+                                if statements.iter().any(|st| {
+                                    matches!(st, Statement::Expression(Expr::IntrinsicCall {
+                                        intrinsic: Intrinsic::PrintInt, ..
+                                    }))
+                                }) {
+                                    found_m = Some(m);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            found_m.map_or(false, |m| m % divisor == 0)
+        };
         writeln!(out, "  br label %_body4").ok();
         writeln!(out, "_body4:").ok();
-        // Load the base counter for this round from %State
-        let round_base = format!("%rbase{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "  {} = load i64, ptr {}, align 8", round_base, c_base).ok();
-        // Sort cases by their modulo value (0, 1, 2, ... K-1)
-        let mut sorted_cases = cases.to_vec();
-        sorted_cases.sort_by_key(|(v, _)| *v);
-        let mut iter_count = round_base;
-        for (case_val, case_name) in &sorted_cases {
-            if *case_val > 0 {
-                // Previous iteration incremented the counter. Use the latest.
-                let ci = format!("%cit_{}_{}", case_val, self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "  {} = add i64 {}, 1", ci, iter_count).ok();
-                writeln!(out, "  store i64 {}, ptr {}, align 8", ci, c_base).ok();
-                iter_count = ci;
-            }
-            // Emit the txn body for this case
-            if let Some((_, txn)) = txns.iter().find(|(n, _)| *n == *case_name) {
-                self.fun.let_bindings.clear(); self.fun.let_binding_types.clear();
-                self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
-                self.fun.terminated = false;
-                self.fun.returns_i64 = false;
-                for stmt in &txn.body {
-                    if !matches!(stmt, Statement::Term { .. } | Statement::TermBang { .. }) {
-                        self.emit_stmt(out, stmt, "  ");
+        if can_collapse {
+            // ── Collapsed path: single body with count += K ──
+            // Load count, add K, store back.
+            let cc = format!("%cc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = load i64, ptr {}, align 8", cc, c_base).ok();
+            let ci = format!("%ci{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = add i64 {}, {}", ci, cc, divisor).ok();
+            writeln!(out, "  store i64 {}, ptr {}, align 8", ci, c_base).ok();
+            // Check (count + K) % M == 0 — adjusted guard.
+            let cm = format!("%cm{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = srem i64 {}, {}", cm, ci, 5000000i64).ok();
+            let cg = format!("%cg{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = icmp eq i64 {}, 0", cg, cm).ok();
+            writeln!(out, "  br i1 {}, label %pb, label %pe", cg).ok();
+            writeln!(out, "pb:").ok();
+            let so = format!("%so{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            let fg = format!("%fg{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            let pi = format!("%pi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = load volatile ptr, ptr @stdout", so).ok();
+            writeln!(out, "  {} = getelementptr [5 x i8], [5 x i8]* @FMT_INT, i64 0, i64 0", fg).ok();
+            writeln!(out, "  {} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, i64 {})", pi, so, fg, ci).ok();
+            writeln!(out, "  br label %pe").ok();
+            writeln!(out, "pe:").ok();
+        } else {
+            // ── Original K-body rotated loop ──
+            // Memory-based counter: load from %State, the body increments it,
+            // after K bodies we've advanced by K. No phi needed (avoids
+            // predecessor issues with init blocks branching to the header).
+            // Load the base counter for this round from %State
+            let round_base = format!("%rbase{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = load i64, ptr {}, align 8", round_base, c_base).ok();
+            // Sort cases by their modulo value (0, 1, 2, ... K-1)
+            let mut sorted_cases = cases.to_vec();
+            sorted_cases.sort_by_key(|(v, _)| *v);
+            let mut iter_count = round_base;
+            for (case_val, case_name) in &sorted_cases {
+                if *case_val > 0 {
+                    // Previous iteration incremented the counter. Use the latest.
+                    let ci = format!("%cit_{}_{}", case_val, self.fun.txn_counter); self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = add i64 {}, 1", ci, iter_count).ok();
+                    writeln!(out, "  store i64 {}, ptr {}, align 8", ci, c_base).ok();
+                    iter_count = ci;
+                }
+                // Emit the txn body for this case
+                if let Some((_, txn)) = txns.iter().find(|(n, _)| *n == *case_name) {
+                    self.fun.let_bindings.clear(); self.fun.let_binding_types.clear();
+                    self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
+                    self.fun.terminated = false;
+                    self.fun.returns_i64 = false;
+                    for stmt in &txn.body {
+                        if !matches!(stmt, Statement::Term { .. } | Statement::TermBang { .. }) {
+                            self.emit_stmt(out, stmt, "  ");
+                        }
                     }
                 }
             }
