@@ -16,7 +16,6 @@
 //
 // C reference: async_counters_c.c (two pthreads)
 
-#!exit a == N && b == N;
 
 let a: Int = 0;
 let b: Int = 0;

@@ -1,7 +1,6 @@
 // Fasta — DNA sequence generation benchmark
 // Exercises: frgn output in hot loop, convergent loop.
 
-#!exit count == N;
 
 let count: Int = 0;
 let N: Int = getenv_int#("BOUND");

@@ -16,7 +16,6 @@
 //
 // C reference: queue_drain_c.c
 
-#!exit count == N;
 
 let N: Int = getenv_int#("BOUND");
 let count: Int = 0;

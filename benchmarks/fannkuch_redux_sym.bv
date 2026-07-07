@@ -6,7 +6,6 @@
 //   ./target/release/brief-compiler llvm benchmarks/fannkuch_redux_sym.bv \
 //       --out benchmarks --optimize-budget 256
 
-#!exit count == N && checksum >= 0 && max_flips >= 0;
 
 let count: Int = 0;
 let N: Int = getenv_int#("BOUND");

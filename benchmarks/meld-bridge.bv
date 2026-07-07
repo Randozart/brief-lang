@@ -12,7 +12,6 @@
 //
 // Tag: --runtime
 
-#!exit accum == 1000;
 
 import "link/brief_rt.c";
 

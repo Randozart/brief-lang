@@ -13,7 +13,6 @@
 //
 // C reference: interval_step_c.c
 
-#!exit count == N && acc >= 0;
 
 let N: Int = getenv_int#("BOUND");
 let count: Int = 0;

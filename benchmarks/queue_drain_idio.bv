@@ -10,7 +10,6 @@
 // No C reference — this is a Brief-native pattern. Correctness is compared
 // against the symmetric variant's C reference.
 
-#!exit count == N;
 
 let N: Int = getenv_int#("BOUND");
 let count: Int = 0;

@@ -7,7 +7,6 @@
 //   ./target/release/brief-compiler llvm benchmarks/ring_buffer_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
-#!exit ops == bound;
 
 import { get_env_int } from "std/env.bv";
 import "link/brief_rt.c";

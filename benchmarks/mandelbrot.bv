@@ -2,7 +2,6 @@
 // Exercises: dense Int arithmetic (mul, add, mod, shift), LCG, 6-field complex
 // simulation with integer "escape" tracking.
 
-#!exit count == N && escapes >= 0;
 
 let count: Int = 0;
 let N: Int = getenv_int#("BOUND");

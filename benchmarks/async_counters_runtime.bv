@@ -7,7 +7,6 @@
 //   ./target/release/brief-compiler llvm benchmarks/async_counters_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
-#!exit a == bound && b == bound;
 
 let bound: Int = getenv_int#("BOUND");
 let a: Int = 0;

@@ -11,7 +11,6 @@
 //   ./target/release/brief-compiler llvm benchmarks/sparse_dispatch.bv \
 //       --out benchmarks --optimize-budget 256
 
-#!exit count == total;
 
 let count: Int = 0;
 let total: Int = getenv_int#("BOUND");

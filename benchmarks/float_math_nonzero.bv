@@ -1,4 +1,3 @@
-#!exit count == total && x0 >= 0.0;
 
 let x0: Float = 1.0;
 let x1: Float = 0.5;

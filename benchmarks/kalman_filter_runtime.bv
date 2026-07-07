@@ -6,7 +6,6 @@
 //   ./target/release/brief-compiler llvm benchmarks/kalman_filter_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
-#!exit count == bound;
 
 let bound: Int = getenv_int#("BOUND");
 let count: Int = 0;

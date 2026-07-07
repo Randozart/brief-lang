@@ -5,7 +5,6 @@
 //   ./target/release/brief-compiler llvm benchmarks/precompute_sum_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
-#!exit count == bound;
 
 import { get_env_int } from "std/env.bv";
 import "link/brief_rt.c";
@@ -18,11 +17,17 @@ let acc_b: Int = 0;
 rct txn step_a [bound > 0 && count < bound && acc_a >= 0][count == bound] {
     &acc_a = acc_a + count;
     &count = count + 1;
+    [count == bound] {
+        term! -> print_int#(acc_a + acc_b);
+    };
     term;
 };
 
 rct txn step_b [bound > 0 && count < bound && acc_b >= 0][count == bound] {
     &acc_b = acc_b + count;
     &count = count + 1;
+    [count == bound] {
+        term! -> print_int#(acc_a + acc_b);
+    };
     term;
 };

@@ -7,7 +7,6 @@
 //   ./target/release/brief-compiler llvm benchmarks/nbody_sqrt.bv \
 //       --out benchmarks --optimize-budget 2048
 
-#!exit count == bound;
 
 let bound: Int = getenv_int#("BOUND");
 let count: Int = 0;

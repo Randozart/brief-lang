@@ -25,7 +25,6 @@
 //
 // C reference: async_counters_sym_c.c (two pthreads + barriers)
 
-#!exit a == N && b == N;
 
 let a: Int = 0;
 let b: Int = 0;

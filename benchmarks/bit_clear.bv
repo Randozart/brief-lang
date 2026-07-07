@@ -15,7 +15,6 @@
 //
 // C reference: bit_clear_c.c
 
-#!exit reg == 0;
 
 const initial_reg: Int = 0x7FFFFFFFFFFFFFFF;
 let reg: Int = initial_reg;

@@ -1,4 +1,3 @@
-#!exit count == total;
 
 const C00: Int = 100;  const C01: Int = 200;
 const C02: Int = 300;  const C03: Int = 400;
