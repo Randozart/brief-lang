@@ -377,6 +377,11 @@ mod tests {
             guards: vec![],
             operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
+            // 2026-07-08: Phase 2B — test defaults
+            default_params: vec![],
+            commuting: true,
+            constant_time: false,
+            struct_layout: None,
             source: TypeDef {
                 name: name.to_string(),
                 type_params: vec![],

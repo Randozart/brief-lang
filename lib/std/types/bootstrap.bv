@@ -4,8 +4,8 @@
 // Annotation Arrow (<~) syntax. These form the prelude — always
 // implicitly imported into every .bv compilation.
 //
-// The `:` bindings are runtime fields; `<~` annotations are
-// compile-time codegen properties.
+// 2026-07-08: Phase 2B — added default_width, commuting, and
+// operator declarations for universe-driven codegen dispatch.
 
 type Int <: Bits {
     bytes <~ 8;
@@ -13,6 +13,20 @@ type Int <: Bits {
     llvm <~ "i64";
     storage <~ "Boxed";
     tbaa <~ "Int";
+    default_width <~ 64;
+    commuting <~ true;
+    op Add(Int) -> Int = "add nsw";
+    op Sub(Int) -> Int = "sub nsw";
+    op Mul(Int) -> Int = "mul nsw";
+    op Div(Int) -> Int = "sdiv";
+    op Mod(Int) -> Int = "srem";
+    op Neg() -> Int = "neg";
+    op Eq(Int) -> Bool = "icmp eq";
+    op Ne(Int) -> Bool = "icmp ne";
+    op Lt(Int) -> Bool = "icmp slt";
+    op Le(Int) -> Bool = "icmp sle";
+    op Gt(Int) -> Bool = "icmp sgt";
+    op Ge(Int) -> Bool = "icmp sge";
 };
 
 type UInt <: Bits {
@@ -21,6 +35,19 @@ type UInt <: Bits {
     llvm <~ "i64";
     storage <~ "Boxed";
     tbaa <~ "Int";
+    default_width <~ 64;
+    commuting <~ true;
+    op Add(UInt) -> UInt = "add";
+    op Sub(UInt) -> UInt = "sub";
+    op Mul(UInt) -> UInt = "mul";
+    op Div(UInt) -> UInt = "udiv";
+    op Mod(UInt) -> UInt = "urem";
+    op Eq(UInt) -> Bool = "icmp eq";
+    op Ne(UInt) -> Bool = "icmp ne";
+    op Lt(UInt) -> Bool = "icmp ult";
+    op Le(UInt) -> Bool = "icmp ule";
+    op Gt(UInt) -> Bool = "icmp ugt";
+    op Ge(UInt) -> Bool = "icmp uge";
 };
 
 type Int8 <: Bits {
@@ -31,6 +58,20 @@ type Int8 <: Bits {
     tbaa <~ "Int";
     box <~ "sext.i8.to.i64#";
     unbox <~ "trunc.i64.to.i8#";
+    default_width <~ 8;
+    commuting <~ true;
+    op Add(Int8) -> Int8 = "add nsw";
+    op Sub(Int8) -> Int8 = "sub nsw";
+    op Mul(Int8) -> Int8 = "mul nsw";
+    op Div(Int8) -> Int8 = "sdiv";
+    op Mod(Int8) -> Int8 = "srem";
+    op Neg() -> Int8 = "neg";
+    op Eq(Int8) -> Bool = "icmp eq";
+    op Ne(Int8) -> Bool = "icmp ne";
+    op Lt(Int8) -> Bool = "icmp slt";
+    op Le(Int8) -> Bool = "icmp sle";
+    op Gt(Int8) -> Bool = "icmp sgt";
+    op Ge(Int8) -> Bool = "icmp sge";
 };
 
 type UInt8 <: Bits {
@@ -41,6 +82,19 @@ type UInt8 <: Bits {
     tbaa <~ "Int";
     box <~ "zext.i8.to.i64#";
     unbox <~ "trunc.i64.to.i8#";
+    default_width <~ 8;
+    commuting <~ true;
+    op Add(UInt8) -> UInt8 = "add";
+    op Sub(UInt8) -> UInt8 = "sub";
+    op Mul(UInt8) -> UInt8 = "mul";
+    op Div(UInt8) -> UInt8 = "udiv";
+    op Mod(UInt8) -> UInt8 = "urem";
+    op Eq(UInt8) -> Bool = "icmp eq";
+    op Ne(UInt8) -> Bool = "icmp ne";
+    op Lt(UInt8) -> Bool = "icmp ult";
+    op Le(UInt8) -> Bool = "icmp ule";
+    op Gt(UInt8) -> Bool = "icmp ugt";
+    op Ge(UInt8) -> Bool = "icmp uge";
 };
 
 type Int16 <: Bits {
@@ -51,6 +105,20 @@ type Int16 <: Bits {
     tbaa <~ "Int";
     box <~ "sext.i16.to.i64#";
     unbox <~ "trunc.i64.to.i16#";
+    default_width <~ 16;
+    commuting <~ true;
+    op Add(Int16) -> Int16 = "add nsw";
+    op Sub(Int16) -> Int16 = "sub nsw";
+    op Mul(Int16) -> Int16 = "mul nsw";
+    op Div(Int16) -> Int16 = "sdiv";
+    op Mod(Int16) -> Int16 = "srem";
+    op Neg() -> Int16 = "neg";
+    op Eq(Int16) -> Bool = "icmp eq";
+    op Ne(Int16) -> Bool = "icmp ne";
+    op Lt(Int16) -> Bool = "icmp slt";
+    op Le(Int16) -> Bool = "icmp sle";
+    op Gt(Int16) -> Bool = "icmp sgt";
+    op Ge(Int16) -> Bool = "icmp sge";
 };
 
 type UInt16 <: Bits {
@@ -61,6 +129,19 @@ type UInt16 <: Bits {
     tbaa <~ "Int";
     box <~ "zext.i16.to.i64#";
     unbox <~ "trunc.i64.to.i16#";
+    default_width <~ 16;
+    commuting <~ true;
+    op Add(UInt16) -> UInt16 = "add";
+    op Sub(UInt16) -> UInt16 = "sub";
+    op Mul(UInt16) -> UInt16 = "mul";
+    op Div(UInt16) -> UInt16 = "udiv";
+    op Mod(UInt16) -> UInt16 = "urem";
+    op Eq(UInt16) -> Bool = "icmp eq";
+    op Ne(UInt16) -> Bool = "icmp ne";
+    op Lt(UInt16) -> Bool = "icmp ult";
+    op Le(UInt16) -> Bool = "icmp ule";
+    op Gt(UInt16) -> Bool = "icmp ugt";
+    op Ge(UInt16) -> Bool = "icmp uge";
 };
 
 type Int32 <: Bits {
@@ -71,6 +152,20 @@ type Int32 <: Bits {
     tbaa <~ "Int";
     box <~ "sext.i32.to.i64#";
     unbox <~ "trunc.i64.to.i32#";
+    default_width <~ 32;
+    commuting <~ true;
+    op Add(Int32) -> Int32 = "add nsw";
+    op Sub(Int32) -> Int32 = "sub nsw";
+    op Mul(Int32) -> Int32 = "mul nsw";
+    op Div(Int32) -> Int32 = "sdiv";
+    op Mod(Int32) -> Int32 = "srem";
+    op Neg() -> Int32 = "neg";
+    op Eq(Int32) -> Bool = "icmp eq";
+    op Ne(Int32) -> Bool = "icmp ne";
+    op Lt(Int32) -> Bool = "icmp slt";
+    op Le(Int32) -> Bool = "icmp sle";
+    op Gt(Int32) -> Bool = "icmp sgt";
+    op Ge(Int32) -> Bool = "icmp sge";
 };
 
 type UInt32 <: Bits {
@@ -81,6 +176,19 @@ type UInt32 <: Bits {
     tbaa <~ "Int";
     box <~ "zext.i32.to.i64#";
     unbox <~ "trunc.i64.to.i32#";
+    default_width <~ 32;
+    commuting <~ true;
+    op Add(UInt32) -> UInt32 = "add";
+    op Sub(UInt32) -> UInt32 = "sub";
+    op Mul(UInt32) -> UInt32 = "mul";
+    op Div(UInt32) -> UInt32 = "udiv";
+    op Mod(UInt32) -> UInt32 = "urem";
+    op Eq(UInt32) -> Bool = "icmp eq";
+    op Ne(UInt32) -> Bool = "icmp ne";
+    op Lt(UInt32) -> Bool = "icmp ult";
+    op Le(UInt32) -> Bool = "icmp ule";
+    op Gt(UInt32) -> Bool = "icmp ugt";
+    op Ge(UInt32) -> Bool = "icmp uge";
 };
 
 type Float <: Bits {
@@ -91,6 +199,20 @@ type Float <: Bits {
     tbaa <~ "Float";
     box <~ "bitcast.f32.to.i64#";
     unbox <~ "bitcast.i64.to.f32#";
+    default_width <~ 32;
+    commuting <~ true;
+    op Add(Float) -> Float = "fadd fast";
+    op Sub(Float) -> Float = "fsub fast";
+    op Mul(Float) -> Float = "fmul fast";
+    op Div(Float) -> Float = "fdiv fast";
+    op Mod(Float) -> Float = "frem fast";
+    op Neg() -> Float = "fneg";
+    op Eq(Float) -> Bool = "fcmp oeq";
+    op Ne(Float) -> Bool = "fcmp one";
+    op Lt(Float) -> Bool = "fcmp olt";
+    op Le(Float) -> Bool = "fcmp ole";
+    op Gt(Float) -> Bool = "fcmp ogt";
+    op Ge(Float) -> Bool = "fcmp oge";
 };
 
 type Float64 <: Bits {
@@ -101,6 +223,20 @@ type Float64 <: Bits {
     tbaa <~ "Float";
     box <~ "bitcast.f64.to.i64#";
     unbox <~ "bitcast.i64.to.f64#";
+    default_width <~ 64;
+    commuting <~ true;
+    op Add(Float64) -> Float64 = "fadd fast";
+    op Sub(Float64) -> Float64 = "fsub fast";
+    op Mul(Float64) -> Float64 = "fmul fast";
+    op Div(Float64) -> Float64 = "fdiv fast";
+    op Mod(Float64) -> Float64 = "frem fast";
+    op Neg() -> Float64 = "fneg";
+    op Eq(Float64) -> Bool = "fcmp oeq";
+    op Ne(Float64) -> Bool = "fcmp one";
+    op Lt(Float64) -> Bool = "fcmp olt";
+    op Le(Float64) -> Bool = "fcmp ole";
+    op Gt(Float64) -> Bool = "fcmp ogt";
+    op Ge(Float64) -> Bool = "fcmp oge";
 };
 
 type Bool <: Bits {
@@ -111,6 +247,13 @@ type Bool <: Bits {
     tbaa <~ "Bool";
     box <~ "zext.i1.to.i64#";
     unbox <~ "trunc.i64.to.i1#";
+    default_width <~ 1;
+    commuting <~ true;
+    op Eq(Bool) -> Bool = "icmp eq";
+    op Ne(Bool) -> Bool = "icmp ne";
+    op And(Bool) -> Bool = "and";
+    op Or(Bool) -> Bool = "or";
+    op Not() -> Bool = "not";
 };
 
 type Char <: Bits {
@@ -121,6 +264,7 @@ type Char <: Bits {
     tbaa <~ "Char";
     box <~ "zext.i32.to.i64#";
     unbox <~ "trunc.i64.to.i32#";
+    default_width <~ 32;
 };
 
 type String <: Bits {

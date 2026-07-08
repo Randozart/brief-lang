@@ -631,6 +631,37 @@ impl OpRune {
     }
 }
 
+/// 2026-07-08: Phase 2B — map an operator name string to OpRune.
+/// Supports both lowercase (add, sub) and CapitalCase (Add, Sub) names.
+pub fn rune_from_name(name: &str) -> OpRune {
+    let upper = name.to_lowercase();
+    match upper.as_str() {
+        "add" => OpRune::Add,
+        "sub" => OpRune::Sub,
+        "mul" => OpRune::Mul,
+        "div" => OpRune::Div,
+        "mod" => OpRune::Mod,
+        "neg" => OpRune::Neg,
+        "eq" => OpRune::Eq,
+        "ne" => OpRune::Ne,
+        "lt" => OpRune::Lt,
+        "le" => OpRune::Le,
+        "gt" => OpRune::Gt,
+        "ge" => OpRune::Ge,
+        "and" => OpRune::And,
+        "or" => OpRune::Or,
+        "not" => OpRune::Not,
+        "index" => OpRune::Index,
+        "slice" => OpRune::Slice,
+        "cast" => OpRune::Cast,
+        "box" => OpRune::Box,
+        "unbox" => OpRune::Unbox,
+        "arrowpush" => OpRune::ArrowPush,
+        "arrowpop" => OpRune::ArrowPop,
+        _ => OpRune::Add, // fallback
+    }
+}
+
 /// An operator declaration inside a type body.
 /// 2026-06-29: Phase 7B.
 #[derive(Debug, Clone)]
