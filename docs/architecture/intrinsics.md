@@ -35,9 +35,28 @@ user-defined function or a `frgn` import.
 3. **Type dispatch** — `sqrt#(Float)` → 32-bit sqrt, `sqrt#(Float64)` → 64-bit sqrt
 4. **Replaces `as intrinsic`** — no more `frgn sqrt_f32(x: Float) -> Float as intrinsic "llvm.sqrt.f32"`
 
-## Intrinsic Table (29 total)
+## Intrinsic Table (~40 compiler-known, ~80 relocated to std/os/)
 
-### Math & Bitwise (10)
+### 2026-07-08: Phase 3 — Intrinsic Reduction
+
+~80 intrinsics were relocated from compiler `Intrinsic` enum entries to
+`inop`/`frgn` declarations in `lib/std/os/*.bv` (auto-imported via prelude).
+
+**How the relocation works:**
+- The old `Intrinsic::Open` variant still exists in the enum (for ABI compat)
+- `Intrinsic::from_name("open")` now returns `None`
+- The parser creates `Intrinsic::UserDefined("open")`
+- The typechecker resolves `UserDefined("open")` to the `frgn __open(...)` declaration
+- The backend emits `call i64 @__open(...)` (via the frgn body)
+
+**To use:** Simply call `open#("file.txt", 0, 0)` as before — same syntax.
+The difference is that the implementation now lives in Brief source code
+(`lib/std/os/fs.bv`) instead of Rust compiler code (`src/backend/llvm/expr/intrinsics.rs`).
+
+### Remaining Compiler Intrinsics (~40)
+
+These are genuinely compiler-known and cannot be expressed as frgn/inop
+declarations.
 
 | Intrinsic | Args | Returns | Description | LLVM mapping |
 |---|---|---|---|---|
@@ -221,3 +240,34 @@ if let Some(Ok(Token::Hash)) = self.peek() {
     };
 }
 ```
+
+## Phase 3: Relocated Intrinsics (to `std/os/`)
+
+These ~80 intrinsics were moved from compiler code to `lib/std/os/*.bv` files.
+They are auto-imported via the prelude. Same call syntax (`open#(...)`),
+but the implementation lives in Brief source now.
+
+| Group | File | Intrinsics |
+|-------|------|------------|
+| File I/O | `std/os/fs.bv` | `open`, `close`, `read`, `write`, `lseek`, `pread`, `pwrite`, `stat`, `fstat`, `ftruncate`, `fsync`, `dup`, `dup2`, `fcntl` |
+| Networking | `std/os/net.bv` | `socket`, `bind`, `listen`, `accept`, `connect`, `send`, `recv`, `sendto`, `recvfrom`, `setsockopt`, `getsockopt`, `shutdown`, `getaddrinfo` |
+| Directory | `std/os/dir.bv` | `mkdir`, `rmdir`, `unlink`, `rename`, `symlink`, `readlink`, `link_path`, `getcwd`, `chdir`, `readdir`, `chmod`, `chown`, `umask`, `access` |
+| Memory | `std/os/mem.bv` | `mmap`, `munmap`, `mprotect`, `brk`, `mlock` |
+| Process | `std/os/process.bv` | `spawn_with_output`, `spawn`, `getpid`, `getppid`, `argv`, `exit`, `abort`, `sleep` |
+| Signals | `std/os/signal.bv` | `sigaction`, `sigprocmask`, `kill`, `signalfd`, `timerfd_create` |
+| IPC | `std/os/ipc.bv` | `pipe`, `shm_open`, `shm_unlink`, `sem_open`, `sem_wait`, `sem_post` |
+| Threading | `std/os/thread.bv` | `thread_create`, `thread_join`, `thread_exit`, `mutex_lock`, `mutex_unlock`, `condvar_wait`, `condvar_signal`, `condvar_broadcast` |
+| TTY | `std/os/tty.bv` | `tty_raw_mode`, `tty_size`, `tty_read_key`, `ttyname`, `ioctl`, `isatty` |
+| Time | `std/os/time.bv` | `clock_gettime`, `nanosleep`, `time` |
+| User/Group | `std/os/user.bv` | `getuid`, `geteuid`, `getgid`, `getegid`, `getpwuid`, `getgrgid` |
+| Scheduling | `std/os/sched.bv` | `sched_yield`, `getpriority`, `setpriority` |
+| Resources | `std/os/resource.bv` | `getrlimit`, `setrlimit` |
+| System info | `std/os/sysinfo.bv` | `uname`, `hostname`, `realpath`, `pagesize`, `cpu_count`, `strerror`, `strsignal` |
+| Core I/O | `std/os/io.bv` | `print`, `println`, `readln`, `getenv`, `setenv`, `unsetenv`, `set_stdout_buf` |
+| Random | `std/os/rand.bv` | `errno`, `getrandom` |
+| Debug | `std/os/debug.bv` | `backtrace`, `halt` |
+| Atomics | `std/os/atomic.bv` | `atomic_load`, `atomic_store`, `atomic_cas`, `atomic_xchg`, `atomic_add`, `fence`, `futex` |
+| Temp | `std/os/temp.bv` | `mkstemp`, `mkdtemp` |
+| Dynlib | `std/os/dynlib.bv` | `dlopen`, `dlsym`, `dlclose` |
+| Ring buffer | `std/os/ring.bv` | `ring_push`, `ring_pop` |
+| String (stdlib) | `lib/std/string.bv` | `trim_left`, `trim_right`, `to_lower`, `contains_at`, `find_from`, `splitn`, `str_bytes` |

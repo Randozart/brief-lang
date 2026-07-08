@@ -182,11 +182,10 @@ fn format_type_errors(errors: &[typechecker::TypeError], file_name: &str) -> Str
                 ));
             }
             typechecker::TypeError::FFIError { message } => {
-                output.push_str(&format!(
-                    "error[F001]: FFI error\n --> {}:?:?\n  |\n",
-                    file_name
-                ));
-                output.push_str(&format!("  = {}\n", message));
+                eprintln!("  ⚠ {}", message);
+            }
+            typechecker::TypeError::RemovedIntrinsic { name, module } => {
+                eprintln!("  ⚠ intrinsic '{}' moved to {} (auto-imported via prelude).", name, module);
             }
         }
         output.push('\n');

@@ -1192,7 +1192,7 @@ impl Intrinsic {
             "pwrite" => None, // Phase 3: replaced by std/os/ inop
             "stat" => None, // Phase 3: replaced by std/os/ inop
             "fstat" => None, // Phase 3: replaced by std/os/ inop
-            "truncate" => Some(Intrinsic::FTruncate),
+            "truncate" => None, // Phase 3: replaced by std/os/ inop
             "ftruncate" => None, // Phase 3: replaced by std/os/ inop
             "fsync" => None, // Phase 3: replaced by std/os/ inop
             "dup" => None, // Phase 3: replaced by std/os/ inop

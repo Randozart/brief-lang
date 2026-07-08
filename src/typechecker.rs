@@ -2271,6 +2271,8 @@ impl TypeChecker {
                                 Type::Void
                             }
                         } else {
+                            // 2026-07-08: Phase 5 — check for relocated intrinsics
+                            self.check_removed_intrinsic(name);
                             Type::Void
                         }
                     }
@@ -3722,6 +3724,46 @@ Expr::ObjectLiteral(fields) => {
             ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Custom("Int".to_string()), Type::Custom("Int".to_string())]),
             _ => unreachable!("non-Fn* target passed to infer_fn_projection"),
         }
+    }
+
+    /// 2026-07-08: Phase 5 — emit helpful error for relocated intrinsics.
+    fn check_removed_intrinsic(&self, name: &str) {
+        let module = match name {
+            "open" | "close" | "read" | "write" | "lseek" | "pread" | "pwrite"
+            | "stat" | "fstat" | "ftruncate" | "fsync" | "dup" | "dup2" | "fcntl" => "std/os/fs.bv",
+            "socket" | "bind" | "listen" | "accept" | "connect" | "send" | "recv"
+            | "sendto" | "recvfrom" | "setsockopt" | "getsockopt" | "shutdown" | "getaddrinfo" => "std/os/net.bv",
+            "mkdir" | "rmdir" | "unlink" | "rename" | "symlink" | "readlink"
+            | "getcwd" | "chdir" | "readdir" | "chmod" | "chown" | "umask" | "access" => "std/os/dir.bv",
+            "mmap" | "munmap" | "mprotect" | "brk" | "mlock" => "std/os/mem.bv",
+            "spawn_with_output" | "spawn" | "getpid" | "getppid" | "argv"
+            | "exit" | "abort" | "sleep" => "std/os/process.bv",
+            "sigaction" | "sigprocmask" | "kill" | "signalfd" | "timerfd_create" => "std/os/signal.bv",
+            "pipe" | "shm_open" | "shm_unlink" | "sem_open" | "sem_wait" | "sem_post" => "std/os/ipc.bv",
+            "thread_create" | "thread_join" | "thread_exit" | "mutex_lock"
+            | "mutex_unlock" | "condvar_wait" | "condvar_signal" | "condvar_broadcast" => "std/os/thread.bv",
+            "tty_raw_mode" | "tty_size" | "tty_read_key" | "ttyname" | "ioctl" | "isatty" => "std/os/tty.bv",
+            "clock_gettime" | "nanosleep" | "time" => "std/os/time.bv",
+            "getuid" | "geteuid" | "getgid" | "getegid" | "getpwuid" | "getgrgid" => "std/os/user.bv",
+            "sched_yield" | "getpriority" | "setpriority" => "std/os/sched.bv",
+            "getrlimit" | "setrlimit" => "std/os/resource.bv",
+            "uname" | "hostname" | "realpath" | "pagesize" | "cpu_count"
+            | "strerror" | "strsignal" => "std/os/sysinfo.bv",
+            "print" | "println" | "readln" | "getenv" | "setenv"
+            | "unsetenv" | "set_stdout_buf" => "std/os/io.bv",
+            "errno" | "getrandom" => "std/os/rand.bv",
+            "backtrace" | "halt" => "std/os/debug.bv",
+            "atomic_load" | "atomic_store" | "atomic_cas" | "atomic_xchg"
+            | "atomic_add" | "fence" | "futex" => "std/os/atomic.bv",
+            "mkstemp" | "mkdtemp" => "std/os/temp.bv",
+            "dlopen" | "dlsym" | "dlclose" => "std/os/dynlib.bv",
+            "ring_push" | "ring_pop" => "std/os/ring.bv",
+            _ => return,
+        };
+        self.errors.borrow_mut().push(crate::errors::TypeError::RemovedIntrinsic {
+            name: name.to_string(),
+            module: module.to_string(),
+        });
     }
 }
 
