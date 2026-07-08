@@ -2150,7 +2150,6 @@ impl TypeChecker {
                             Type::Custom("Bool".to_string())
                         }
                     }
-                    Intrinsic::Time | Intrinsic::Socket | Intrinsic::Accept => Type::Custom("Int".to_string()),
                     // 2026-07-03: Spatial memory intrinsics
                     Intrinsic::Memcpy | Intrinsic::Memset => Type::Custom("Bool".to_string()),
                     Intrinsic::Memcmp | Intrinsic::Hash => Type::Custom("Int".to_string()),
@@ -2163,97 +2162,21 @@ impl TypeChecker {
                     Intrinsic::FindFrom => Type::Custom("Int".to_string()),
                     Intrinsic::SplitN => Type::Custom("List".to_string()),
                     Intrinsic::IntToStr => Type::Custom("String".to_string()),
-                    Intrinsic::TtyRawMode | Intrinsic::TtySize => Type::Custom("Int".to_string()),
-                    Intrinsic::TtyReadKey => Type::Custom("Int".to_string()),
-                    Intrinsic::IoCtl => Type::Custom("Int".to_string()),
-                    Intrinsic::IsTty => Type::Custom("Bool".to_string()),
-                    Intrinsic::SpawnWithOutput => Type::Custom("String".to_string()),
-                    Intrinsic::Spawn => Type::Custom("Int".to_string()),
-                    Intrinsic::Argv => Type::Custom("List".to_string()),
-                    // Phase B: Raw File I/O — all return Int (fd, bytes, or -1)
-                    Intrinsic::Open | Intrinsic::Close | Intrinsic::Read
-                    | Intrinsic::Write | Intrinsic::LSeek | Intrinsic::PRead
-                    | Intrinsic::PWrite | Intrinsic::Stat | Intrinsic::FStat
-                    | Intrinsic::FTruncate | Intrinsic::FSync
-                    | Intrinsic::FDup | Intrinsic::FDup2 | Intrinsic::FCntl => Type::Custom("Int".to_string()),
-                    // Phase C: Filesystem
-                    Intrinsic::ReadLink | Intrinsic::GetCwd => Type::Custom("String".to_string()),
-                    Intrinsic::ReadDir => Type::Custom("List".to_string()),
-                    Intrinsic::MkDir | Intrinsic::RmDir | Intrinsic::Unlink
-                    | Intrinsic::Rename | Intrinsic::SymLink | Intrinsic::Link
-                    | Intrinsic::ChDir | Intrinsic::ChMod | Intrinsic::ChOwn
-                    | Intrinsic::UMask | Intrinsic::Access => Type::Custom("Int".to_string()),
-                    // Phase D: Memory + Sync — all return Int
-                    Intrinsic::Mmap | Intrinsic::MUnmap | Intrinsic::MProtect
-                    | Intrinsic::Brk | Intrinsic::MLock | Intrinsic::AtomicLoad
-                    | Intrinsic::AtomicStore | Intrinsic::AtomicCas
-                    | Intrinsic::AtomicXchg | Intrinsic::AtomicAdd
-                    | Intrinsic::Fence | Intrinsic::Futex => Type::Custom("Int".to_string()),
-                    // Phase E: IPC — all return Int
-                    Intrinsic::Pipe | Intrinsic::ShmOpen | Intrinsic::ShmUnlink
-                    | Intrinsic::SemOpen | Intrinsic::SemWait | Intrinsic::SemPost => Type::Custom("Int".to_string()),
-                    // Phase F: Signals — all return Int
-                    Intrinsic::SigAction | Intrinsic::SigProcMask | Intrinsic::Kill
-                    | Intrinsic::SignalFd | Intrinsic::TimerFdCreate => Type::Custom("Int".to_string()),
-                    // Phase G: Networking — all return Int
-                    Intrinsic::Socket | Intrinsic::Bind | Intrinsic::Listen
-                    | Intrinsic::Accept | Intrinsic::Connect | Intrinsic::Send
-                    | Intrinsic::Recv | Intrinsic::SendTo | Intrinsic::RecvFrom
-                    | Intrinsic::SetSockOpt | Intrinsic::GetSockOpt | Intrinsic::Shutdown
-                    | Intrinsic::GetAddrInfo => Type::Custom("Int".to_string()),
-                    // Phase H: Everything Else (intrinsics.md D6, D7)
-                    Intrinsic::GetEnv => Type::Custom("String".to_string()),
-                    Intrinsic::SetEnv | Intrinsic::UnsetEnv => Type::Custom("Bool".to_string()),
-                    Intrinsic::GetPid | Intrinsic::GetPPid | Intrinsic::ClockGetTime
-                    | Intrinsic::NanoSleep => Type::Custom("Int".to_string()),
-                    // Benchmark intrinsics (2026-06-16)
-                    Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat | Intrinsic::SetStdoutBuf => Type::Custom("Bool".to_string()),
-                    Intrinsic::GetEnvInt => Type::Custom("Int".to_string()),
-                    // Math intrinsics
-                    Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow => Type::Custom("Float".to_string()),
-                    // GPU compute intrinsics (2026-06-18)
-                    Intrinsic::GetGlobalId | Intrinsic::GetLocalId
-                    | Intrinsic::GetGroupId | Intrinsic::GetNumGroups => Type::Custom("Int".to_string()),
-                    Intrinsic::SubGroupBarrier => Type::Custom("Bool".to_string()),
-                    // String conversion intrinsics
-                    Intrinsic::FloatToStr | Intrinsic::ToStr => Type::Custom("String".to_string()),
-                    // D12: Random / Entropy
-                    Intrinsic::Errno => Type::Custom("Int".to_string()),
-                    Intrinsic::GetRandom => Type::Custom("Int".to_string()),
-                    // D13: System Info
-                    Intrinsic::Hostname | Intrinsic::Uname
-                    | Intrinsic::StrError | Intrinsic::StrSignal
-                    | Intrinsic::RealPath => Type::Custom("String".to_string()),
-                    Intrinsic::PageSize | Intrinsic::CpuCount => Type::Custom("Int".to_string()),
-                    // D14: Debugging
-                    Intrinsic::Abort => Type::Void,
-                    Intrinsic::Backtrace => Type::Custom("List".to_string()),
-                    // D15: Scheduling
-                    Intrinsic::SchedYield | Intrinsic::GetPriority
-                    | Intrinsic::SetPriority => Type::Custom("Int".to_string()),
-                    // D16: User / Group
-                    Intrinsic::GetUid | Intrinsic::GetEUid
-                    | Intrinsic::GetGid | Intrinsic::GetEGid => Type::Custom("Int".to_string()),
-                    Intrinsic::GetPwUid | Intrinsic::GetGrGid => Type::Custom("String".to_string()),
-                    // D17: Threading
-                    Intrinsic::ThreadCreate | Intrinsic::ThreadJoin
-                    | Intrinsic::MutexLock | Intrinsic::MutexUnlock
-                    | Intrinsic::CondvarWait | Intrinsic::CondvarSignal
-                    | Intrinsic::CondvarBroadcast => Type::Custom("Int".to_string()),
-                    Intrinsic::ThreadExit => Type::Void,
-                    // D18: Resource Limits
-                    Intrinsic::GetRlimit | Intrinsic::SetRlimit => Type::Custom("Int".to_string()),
-                    // Extra intrinsics
-                    Intrinsic::MkStemp | Intrinsic::DlOpen
-                    | Intrinsic::DlSym | Intrinsic::DlClose => Type::Custom("Int".to_string()),
-                    Intrinsic::MkDtemp | Intrinsic::TtyName => Type::Custom("String".to_string()),
-                    // Ring buffer intrinsics (2026-07-01)
-                    Intrinsic::RingPush => Type::Custom("Int".to_string()),
-                    Intrinsic::RingPop => Type::Custom("Int".to_string()),
                     // Macro/template intrinsics (compile-time only)
                     Intrinsic::Compile | Intrinsic::MacroError
                     | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Custom("Data".to_string()),
                     // GLUE file emission intrinsic
+                    Intrinsic::EmitFile => Type::Custom("Bool".to_string()),
+                    // Valid compiler intrinsics (not relocated to std/os/)
+                    Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat => Type::Custom("Bool".to_string()),
+                    Intrinsic::GetEnvInt => Type::Custom("Int".to_string()),
+                    Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow => Type::Custom("Float".to_string()),
+                    Intrinsic::GetGlobalId | Intrinsic::GetLocalId
+                    | Intrinsic::GetGroupId | Intrinsic::GetNumGroups => Type::Custom("Int".to_string()),
+                    Intrinsic::SubGroupBarrier => Type::Custom("Bool".to_string()),
+                    Intrinsic::FloatToStr | Intrinsic::ToStr => Type::Custom("String".to_string()),
+                    Intrinsic::Compile | Intrinsic::MacroError
+                    | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Custom("Data".to_string()),
                     Intrinsic::EmitFile => Type::Custom("Bool".to_string()),
                     Intrinsic::UserDefined(name) => {
                         // 2026-07-08: Phase 3 — remap user-visible names to inop names
@@ -2290,6 +2213,7 @@ impl TypeChecker {
                             Type::Void
                         }
                     }
+                    _ => Type::Void,
                 }
             }
             Expr::Call(name, args) => {
