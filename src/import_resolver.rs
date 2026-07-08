@@ -188,6 +188,38 @@ impl ImportResolver {
                 }));
             }
 
+            // 2026-07-08: Phase 3 — auto-import OS module prelude
+            // These inop declarations replace the old Intrinsic variants.
+            // Use --no-std to disable.
+            let prelude_modules = [
+                "std/os/fs.bv", "std/os/net.bv", "std/os/signal.bv",
+                "std/os/ipc.bv", "std/os/thread.bv", "std/os/dir.bv",
+                "std/os/process.bv", "std/os/tty.bv", "std/os/user.bv",
+                "std/os/time.bv", "std/os/mem.bv", "std/os/rand.bv",
+                "std/os/sched.bv", "std/os/resource.bv", "std/os/sysinfo.bv",
+                "std/os/temp.bv", "std/os/dynlib.bv", "std/os/debug.bv",
+                "std/os/ring.bv", "std/os/atomic.bv", "std/os/io.bv",
+            ];
+            for module_path in &prelude_modules {
+                let has_import = items.iter().any(|item| {
+                    if let TopLevel::Import(imp) = item {
+                        imp.is_magic && imp.path.iter()
+                            .cloned().collect::<Vec<_>>().join("/") == *module_path
+                    } else {
+                        false
+                    }
+                });
+                if !has_import {
+                    let path_parts: Vec<String> = module_path.split('/').map(|s| s.to_string()).collect();
+                    items.push(TopLevel::Import(Import {
+                        is_magic: true,
+                        path: path_parts,
+                        items: vec![],
+                        target: crate::ast::ImportTarget::Native,
+                    }));
+                }
+            }
+
             let has_core_imports = items.iter().any(|item| {
                 if let TopLevel::Import(imp) = item {
                     imp.is_magic
@@ -1213,6 +1245,15 @@ mod tests {
         fs::write(core_dir.join("string_builder.bv"), "defn s_fn -> Int { term 0; };").unwrap();
         // Bootstrap types needed for auto-import of bootstrap.bv prelude
         fs::write(types_dir.join("bootstrap.bv"), "type Int <: Bits { bytes <~ 8; }; type Float <: Bits { bytes <~ 4; };").unwrap();
+        // Create std/os/ directory for prelude auto-import
+        let os_dir = stdlib_root.join("std").join("os");
+        fs::create_dir_all(&os_dir).unwrap();
+        for module in &["fs.bv", "net.bv", "signal.bv", "ipc.bv", "thread.bv", "dir.bv",
+                        "process.bv", "tty.bv", "user.bv", "time.bv", "mem.bv", "rand.bv",
+                        "sched.bv", "resource.bv", "sysinfo.bv", "temp.bv", "dynlib.bv",
+                        "debug.bv", "ring.bv", "atomic.bv", "io.bv"] {
+            fs::write(os_dir.join(module), "").unwrap();
+        }
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
