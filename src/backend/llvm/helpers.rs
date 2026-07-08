@@ -1049,11 +1049,15 @@ impl LlvmBackend {
     // Falls back to identity (no-op) if unimplemented.
 
     /// Emit a call to a resolved operator's implementation.
-    /// Called from emit_binop when a universe type has an operator mapping.
+    /// 2026-07-08: Phase 2B — fixed register name double-wrap (%t%t8 bug),
+    /// added string literal handler, and added universe-driven LLVM type
+    /// selection (i64 for Boxed, float/double for Native).
     fn emit_operator_call(&mut self, out: &mut String, indent: &str,
                           a: &TypedRegister, b: &TypedRegister,
                           op: &OpDeclaration) -> TypedRegister {
-        let v = format!("%t{}", self.fun.next_reg());
+        let v = self.fun.next_reg();
+        // 2026-07-08: Determine LLVM type from operand's type storage.
+        let llvm_ty = self.operator_llvm_type(&a.ty);
         match &op.implementation.as_ref() {
             // Intrinsic call: emit via the intrinsic name
             Expr::IntrinsicCall { intrinsic, .. } => {
@@ -1065,12 +1069,41 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
                          indent, v, name, a.name, b.name).ok();
             }
+            // 2026-07-08: String literal → LLVM opcode, e.g. "add nsw" → add nsw i64 %a, %b
+            Expr::String(llvm_op) => {
+                writeln!(out, "{}{} = {} {} {}, {}",
+                         indent, v, llvm_op, llvm_ty, a.name, b.name).ok();
+            }
+            Expr::Literal(lit) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
+                if let crate::features::literal::LiteralExpr::String(llvm_op) = lit.as_ref() {
+                    writeln!(out, "{}{} = {} {} {}, {}",
+                             indent, v, llvm_op, llvm_ty, a.name, b.name).ok();
+                }
+            }
             // Fallback: identity
             _ => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, v, a.name).ok();
+                writeln!(out, "{}{} = {} 0, {}", indent, v, llvm_ty, a.name).ok();
             }
         }
         TypedRegister { name: v, ty: a.ty.clone() }
+    }
+
+    /// 2026-07-08: Look up the LLVM codegen type for a Brief type.
+    /// Returns "float" for Native storage types ≤32 bits, "double" for >32,
+    /// and "i64" for Boxed or unknown types (boxed to native register).
+    fn operator_llvm_type(&self, ty: &Type) -> &'static str {
+        if let Some(ref universe) = self.ctx.type_universe {
+            if let Some(rt) = universe.get_by_type(ty) {
+                return match rt.storage.as_str() {
+                    "Native" => match ty.bit_width() {
+                        Some(w) if w <= 32 => "float",
+                        _ => "double",
+                    },
+                    _ => "i64",
+                };
+            }
+        }
+        "i64"
     }
 
     pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, cond: &str) -> TypedRegister {
