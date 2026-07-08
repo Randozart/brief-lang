@@ -189,10 +189,11 @@ impl ImportResolver {
             }
 
             // 2026-07-08: Phase 3 — auto-import OS module prelude
-            // DISABLED: frgn declarations conflict with libc symbols.
-            // Re-enabled after brief_rt.c updates for __prefixed names.
-            // let prelude_modules = [ ...
-            // ]; // prelude auto-import disabled — see brief_rt.c TODO
+            // 2026-07-08: Phase 3 — auto-import OS module prelude
+            // DISABLED: inop declarations call brief_* C functions which need
+            // frgn declarations in the preamble. Enable after updating
+            // src/backend/llvm/mod.rs line 1727-1744 to declare brief_* functions.
+            // let prelude_modules = [ ... ];
 
             let has_core_imports = items.iter().any(|item| {
                 if let TopLevel::Import(imp) = item {

@@ -1,9 +1,27 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 
-frgn pipe(pipefd: Ptr<Int>) -> Int ;
-frgn shm_open(name: Ptr<Byte>, oflag: Int, mode_val: Int) -> Int ;
-frgn shm_unlink(name: Ptr<Byte>) -> Int ;
-frgn sem_open(name: Ptr<Byte>, oflag: Int, mode_val: Int, value: Int) -> Int ;
-frgn sem_wait(sem: Ptr<Byte>) -> Int ;
-frgn sem_post(sem: Ptr<Byte>) -> Int ;
+inop pipe(pipefd: Ptr<Int>) -> Int {
+    %r = call i64 @brief_pipe(i64 %pipefd)
+    ret i64 %r;
+};
+inop shm_open(name: Ptr<Byte>, oflag: Int, mode_val: Int) -> Int {
+    %r = call i64 @brief_shm_open(i64 %name, i64 %oflag, i64 %mode_val)
+    ret i64 %r;
+};
+inop shm_unlink(name: Ptr<Byte>) -> Int {
+    %r = call i64 @brief_shm_unlink(i64 %name)
+    ret i64 %r;
+};
+inop sem_open(name: Ptr<Byte>, oflag: Int, mode_val: Int, value: Int) -> Int {
+    %r = call i64 @brief_sem_open(i64 %name, i64 %oflag, i64 %mode_val, i64 %value)
+    ret i64 %r;
+};
+inop sem_wait(sem: Ptr<Byte>) -> Int {
+    %r = call i64 @brief_sem_wait(i64 %sem)
+    ret i64 %r;
+};
+inop sem_post(sem: Ptr<Byte>) -> Int {
+    %r = call i64 @brief_sem_post(i64 %sem)
+    ret i64 %r;
+};

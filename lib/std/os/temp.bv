@@ -1,5 +1,11 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 
-frgn mkstemp(PtrTmpl: Ptr<Byte>) -> Int ;
-frgn mkdtemp(PtrTmpl: Ptr<Byte>) -> Int ;
+inop __sys_mkstemp(tmpl: Ptr<Byte>) -> Int {
+    %r = call i64 @mkstemp(i64 %tmpl)
+    ret i64 %r;
+};
+inop __sys_mkdtemp(tmpl: Ptr<Byte>) -> Int {
+    %r = call i64 @mkdtemp(i64 %tmpl)
+    ret i64 %r;
+};

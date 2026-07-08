@@ -1,5 +1,12 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+// 
 
-frgn getrandom(buf: Ptr<Byte>, len: Int, flag_bits: Int) -> Int ;
-frgn errno() -> Int ;
+inop __sys_getrandom(buf: Ptr<Byte>, len: Int, flag_bits: Int) -> Int {
+    %r = call i64 @__getrandom__(i64 %buf, i64 %len, i64 %flag_bits)
+    ret i64 %r;
+};
+inop errno() -> Int {
+    %r = call i64 @__errno__()
+    ret i64 %r;
+};

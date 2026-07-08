@@ -1,8 +1,32 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+// 
 
-frgn mmap(addr: Ptr<Byte>, length: Int, prot_val: Int, flag_bits: Int, fd: Int, offset: Int) -> Int ;
-frgn munmap(addr: Ptr<Byte>, length: Int) -> Int ;
-frgn mprotect(addr: Ptr<Byte>, length: Int, prot_val: Int) -> Int ;
-frgn brk(addr: Ptr<Byte>) -> Int ;
-frgn mlock(addr: Ptr<Byte>, length: Int) -> Int ;
+
+// C function declarations (brief_rt.c provides brief_* wrappers)
+frgn brief_mmap(addr: Ptr<Byte>, length: Int, prot_val: Int, flag_bits: Int, fd: Int, offset: Int) -> Int ;
+frgn brief_munmap(addr: Ptr<Byte>, length: Int) -> Int ;
+frgn brief_mprotect(addr: Ptr<Byte>, length: Int, prot_val: Int) -> Int ;
+frgn brief_brk(addr: Ptr<Byte>) -> Int ;
+frgn brief_mlock(addr: Ptr<Byte>, length: Int) -> Int ;
+
+inop mmap(addr: Ptr<Byte>, length: Int, prot_val: Int, flag_bits: Int, fd: Int, offset: Int) -> Int {
+    %r = call i64 @brief_mmap(i64 %addr, i64 %length, i64 %prot_val, i64 %flag_bits, i64 %fd, i64 %offset)
+    ret i64 %r;
+};
+inop munmap(addr: Ptr<Byte>, length: Int) -> Int {
+    %r = call i64 @brief_munmap(i64 %addr, i64 %length)
+    ret i64 %r;
+};
+inop mprotect(addr: Ptr<Byte>, length: Int, prot_val: Int) -> Int {
+    %r = call i64 @brief_mprotect(i64 %addr, i64 %length, i64 %prot_val)
+    ret i64 %r;
+};
+inop brk(addr: Ptr<Byte>) -> Int {
+    %r = call i64 @brief_brk(i64 %addr)
+    ret i64 %r;
+};
+inop mlock(addr: Ptr<Byte>, length: Int) -> Int {
+    %r = call i64 @brief_mlock(i64 %addr, i64 %length)
+    ret i64 %r;
+};

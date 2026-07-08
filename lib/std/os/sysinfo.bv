@@ -1,10 +1,32 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+// 
 
-frgn uname() -> Int ;
-frgn hostname() -> Int ;
-frgn realpath(path: Ptr<Byte>, resolved: Ptr<Byte>) -> Int ;
-frgn pagesize() -> Int ;
-frgn cpu_count() -> Int ;
-frgn strerror(errnum: Int) -> Int ;
-frgn strsignal(sig_num: Int) -> Int ;
+inop uname() -> Int {
+    %r = call i64 @__uname__()
+    ret i64 %r;
+};
+inop hostname() -> Int {
+    %r = call i64 @__hostname__()
+    ret i64 %r;
+};
+inop realpath(path: Ptr<Byte>, resolved: Ptr<Byte>) -> Int {
+    %r = call i64 @__realpath__(i64 %path, i64 %resolved)
+    ret i64 %r;
+};
+inop __sys_pagesize() -> Int {
+    %r = call i64 @pagesize()
+    ret i64 %r;
+};
+inop __sys_cpu_count() -> Int {
+    %r = call i64 @cpu_count()
+    ret i64 %r;
+};
+inop strerror(errnum: Int) -> Int {
+    %r = call i64 @__strerror__(i64 %errnum)
+    ret i64 %r;
+};
+inop strsignal(sig_val: Int) -> Int {
+    %r = call i64 @__strsignal__(i64 %sig_val)
+    ret i64 %r;
+};

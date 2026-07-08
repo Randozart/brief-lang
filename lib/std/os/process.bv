@@ -1,11 +1,41 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+// 
 
-frgn __spawn_with_output(cmd: Ptr<Byte>, args: Ptr<Byte>) -> Int ;
-frgn __spawn(cmd: Ptr<Byte>, args: Ptr<Byte>) -> Int ;
-frgn __getpid() -> Int ;
-frgn __getppid() -> Int ;
-frgn __argv() -> Int ;
-frgn __exit_process(code: Int) -> Int ;
-frgn __abort_process() -> Int ;
-frgn __sleep(secs: Int) -> Int ;
+
+// C function declarations
+frgn brief_getpid() -> Int ;
+frgn brief_getppid() -> Int ;
+
+inop spawn_with_output(cmd: Ptr<Byte>, args: Ptr<Byte>) -> Int {
+    %r = call i64 @__spawn_with_output__(i64 %cmd, i64 %args)
+    ret i64 %r;
+};
+inop spawn(cmd: Ptr<Byte>, args: Ptr<Byte>) -> Int {
+    %r = call i64 @__spawn__(i64 %cmd, i64 %args)
+    ret i64 %r;
+};
+inop __sys_getpid() -> Int {
+    %r = call i64 @brief_getpid()
+    ret i64 %r;
+};
+inop __sys_getppid() -> Int {
+    %r = call i64 @brief_getppid()
+    ret i64 %r;
+};
+inop argv() -> Int {
+    %r = call i64 @argv()
+    ret i64 %r;
+};
+inop __sys_exit(code: Int) -> Int {
+    %r = call i64 @__exit(i64 %code)
+    ret i64 %r;
+};
+inop __sys_abort() -> Int {
+    %r = call i64 @abort()
+    ret i64 %r;
+};
+inop __sys_sleep(secs: Int) -> Int {
+    %r = call i64 @sleep(i64 %secs)
+    ret i64 %r;
+};

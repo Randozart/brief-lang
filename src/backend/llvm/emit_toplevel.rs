@@ -1856,7 +1856,10 @@ impl LlvmBackend {
         self.fun.fn_ret_ty = ll_ret_ty.clone();
         self.fun.returns_i64 = !is_float_fn && !is_multi_output;
 
-        write!(out, "define {} @{}(", ll_ret_ty, inop.name).ok();
+        // 2026-07-08: Phase 3 — internal linkage avoids libc symbol conflicts.
+    // inops generate `define internal i64 @name(...)` so they don't interfere
+    // with libc functions of the same name (open, read, write, etc.).
+    write!(out, "define internal {} @{}(", ll_ret_ty, inop.name).ok();
         if inop.has_state_access {
             write!(out, "ptr noalias nocapture align 8 %state").ok();
         }

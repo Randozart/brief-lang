@@ -2147,9 +2147,50 @@ pub fn emit_intrinsic_call(
             return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
         }
         Intrinsic::UserDefined(name) => {
-            // Extract return and param type info before any mutable borrows.
-            // Clone the inop declaration to avoid borrow conflicts with emit_expr.
-            let inop_clone = backend.ctx.inop_decls.get(name).cloned();
+            // 2026-07-08: Phase 3 — remap to avoid libc symbol conflicts
+            let inop_name = match name.as_str() {
+                "open" => "file_open", "close" => "file_close",
+                "read" => "file_read", "write" => "file_write",
+                "lseek" => "file_lseek", "pread" => "file_pread",
+                "pwrite" => "file_pwrite", "stat" => "file_stat",
+                "fstat" => "file_fstat", "ftruncate" => "file_ftruncate",
+                "fsync" => "file_fsync", "dup" => "file_dup",
+                "dup2" => "file_dup2", "fcntl" => "file_fcntl",
+                "socket" => "__sys_socket", "bind" => "__sys_bind",
+                "listen" => "__sys_listen", "accept" => "__sys_accept",
+                "connect" => "__sys_connect", "send" => "__sys_send",
+                "recv" => "__sys_recv", "sendto" => "__sys_sendto",
+                "recvfrom" => "__sys_recvfrom",
+                "setsockopt" => "__sys_setsockopt",
+                "getsockopt" => "__sys_getsockopt",
+                "shutdown" => "__sys_shutdown",
+                "getaddrinfo" => "__sys_getaddrinfo",
+                "dlopen" => "__sys_dlopen", "dlsym" => "__sys_dlsym",
+                "dlclose" => "__sys_dlclose", "ioctl" => "__sys_ioctl",
+                "ttyname" => "__sys_ttyname", "sleep" => "__sys_sleep",
+                "getenv" => "__sys_getenv", "setenv" => "__sys_setenv",
+                "unsetenv" => "__sys_unsetenv",
+                "getuid" => "__sys_getuid", "geteuid" => "__sys_geteuid",
+                "getgid" => "__sys_getgid", "getegid" => "__sys_getegid",
+                "getpwuid" => "__sys_getpwuid", "getgrgid" => "__sys_getgrgid",
+                "sched_yield" => "__sys_sched_yield",
+                "getpriority" => "__sys_getpriority",
+                "setpriority" => "__sys_setpriority",
+                "getrlimit" => "__sys_getrlimit",
+                "setrlimit" => "__sys_setrlimit",
+                "getpid" => "__sys_getpid", "getppid" => "__sys_getppid",
+                "time" => "__sys_time",
+                "mkstemp" => "__sys_mkstemp", "mkdtemp" => "__sys_mkdtemp",
+                "pagesize" => "__sys_pagesize", "cpu_count" => "__sys_cpu_count",
+                "getrandom" => "__sys_getrandom",
+                "exit" => "__sys_exit", "abort" => "__sys_abort",
+                "print" => "__sys_print", "println" => "__sys_println",
+                "readln" => "__sys_readln",
+                "nanosleep" => "__sys_nanosleep",
+                "isatty" => "__sys_isatty",
+                _ => name.as_str(),
+            };
+            let inop_clone = backend.ctx.inop_decls.get(inop_name).cloned();
             let ret_ty = inop_clone.as_ref().map_or("i64", |d| {
                 if d.outputs.iter().any(|t| {
                     let resolved = backend.resolve_bild_type(t);

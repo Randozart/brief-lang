@@ -1,6 +1,11 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 
-frgn backtrace() -> Int ;
-frgn abort_process() -> Int ;
-frgn halt() -> Int ;
+inop backtrace() -> Int {
+    %r = call i64 @__backtrace__()
+    ret i64 %r;
+};
+inop halt() -> Int {
+    %r = call i64 @halt()
+    ret i64 %r;
+};

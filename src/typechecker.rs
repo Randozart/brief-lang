@@ -2245,7 +2245,10 @@ impl TypeChecker {
                     // GLUE file emission intrinsic
                     Intrinsic::EmitFile => Type::Custom("Bool".to_string()),
                     Intrinsic::UserDefined(name) => {
-                        if let Some(inop) = self.inop_decls.get(name) {
+                        // 2026-07-08: Phase 3 — remap user-visible names to inop names
+                        // to avoid conflicts with libc functions declared in the preamble.
+                        let inop_name = self.remap_intrinsic_name(name);
+                        if let Some(inop) = self.inop_decls.get(&inop_name) {
                             if inop.outputs.len() > 1 {
                                 Type::Tuple(inop.outputs.clone())
                             } else if let Some(ret_ty) = inop.outputs.first() {
@@ -3723,6 +3726,43 @@ Expr::ObjectLiteral(fields) => {
             ProjectionTarget::IsPure => Type::Custom("Bool".to_string()),
             ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Custom("Int".to_string()), Type::Custom("Int".to_string())]),
             _ => unreachable!("non-Fn* target passed to infer_fn_projection"),
+        }
+    }
+
+    /// 2026-07-08: Phase 3 — remap user-visible intrinsic names to inop names.
+    /// Avoids conflicts with libc functions declared in the runtime preamble.
+    fn remap_intrinsic_name(&self, name: &str) -> String {
+        match name {
+            // File I/O
+            "open" | "close" | "read" | "write" | "lseek" | "pread" | "pwrite"
+            | "stat" | "fstat" | "ftruncate" | "fsync" | "dup" | "dup2" | "fcntl"
+                => format!("file_{}", name),
+            // Networking
+            "socket" | "bind" | "listen" | "accept" | "connect" | "send" | "recv"
+            | "sendto" | "recvfrom" | "setsockopt" | "getsockopt" | "shutdown"
+            | "getaddrinfo" | "dlopen" | "dlsym" | "dlclose" | "ioctl" | "ttyname"
+            | "sleep" | "getenv" | "setenv" | "unsetenv"
+                => format!("__sys_{}", name),
+            // User/Group
+            "getuid" | "geteuid" | "getgid" | "getegid" | "getpwuid" | "getgrgid"
+            | "sched_yield" | "getpriority" | "setpriority"
+            |             "getrlimit" | "setrlimit"
+            | "getpid" | "getppid"
+            | "time"
+            | "mkstemp" | "mkdtemp"
+            | "pagesize" | "cpu_count"
+            | "getrandom"
+            | "isatty"
+                => format!("__sys_{}", name),
+            // Process
+            "exit" => "__sys_exit".to_string(),
+            "abort" => "__sys_abort".to_string(),
+            // Time
+            "nanosleep" => "__sys_nanosleep".to_string(),
+            // I/O
+            "print" | "println" => format!("__sys_{}", name),
+            "readln" => "__sys_readln".to_string(),
+            _ => name.to_string(),
         }
     }
 

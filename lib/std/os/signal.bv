@@ -1,8 +1,32 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+// 
 
-frgn sig_action(sig_num: Int, action: Ptr<Byte>, old_action: Ptr<Byte>) -> Int ;
-frgn sig_procmask(how_val: Int, set_val: Ptr<Byte>, old_set: Ptr<Byte>) -> Int ;
-frgn kill(pid: Int, sig_val: Int) -> Int ;
-frgn sig_fd(fd: Int, mask_val: Ptr<Byte>, flag_bits: Int) -> Int ;
-frgn timer_fd_create(clockid: Int, flag_bits: Int) -> Int ;
+
+// Built-in preamble provides: @signalfd, @timerfd_create.
+// @kill is provided by libc.
+
+
+// C function declarations
+frgn brief_kill(pid: Int, code: Int) -> Int ;
+
+inop sig_action(sig_num: Int, action_val: Ptr<Byte>, old_action: Ptr<Byte>) -> Int {
+    %r = call i64 @__sigaction__(i64 %sig_num, i64 %action_val, i64 %old_action)
+    ret i64 %r;
+};
+inop sig_procmask(how_val: Int, set_val: Ptr<Byte>, old_set: Ptr<Byte>) -> Int {
+    %r = call i64 @__sigprocmask__(i64 %how_val, i64 %set_val, i64 %old_set)
+    ret i64 %r;
+};
+inop kill(pid: Int, code: Int) -> Int {
+    %r = call i64 @kill(i64 %pid, i64 %code)
+    ret i64 %r;
+};
+inop sig_fd(flag_bits: Int) -> Int {
+    %r = call i64 @signalfd(i64 %flag_bits)
+    ret i64 %r;
+};
+inop timer_fd_create(clockid: Int, flag_bits: Int) -> Int {
+    %r = call i64 @timerfd_create(i64 %clockid, i64 %flag_bits)
+    ret i64 %r;
+};

@@ -1,10 +1,1 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
-
-frgn print(s: Ptr<Byte>) -> Int ;
-frgn println(s: Ptr<Byte>) -> Int ;
-frgn readln(buf: Ptr<Byte>, size: Int) -> Int ;
-frgn getenv(name: Ptr<Byte>, buf: Ptr<Byte>, size: Int) -> Int ;
-frgn setenv(name: Ptr<Byte>, value: Ptr<Byte>, overwrite: Int) -> Int ;
-frgn unsetenv(name: Ptr<Byte>) -> Int ;
-frgn set_stdout_buf(mode_val: Int) -> Int ;
+frgn __print(s: Ptr<Byte>) -> Int ;

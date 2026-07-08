@@ -1,11 +1,35 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 
-frgn thread_create(fn_ptr: Int, arg: Int) -> Int ;
-frgn thread_join(thread: Int) -> Int ;
-frgn thread_exit(code: Int) -> Int ;
-frgn mutex_lock(mptr: Int) -> Int ;
-frgn mutex_unlock(mptr: Int) -> Int ;
-frgn condvar_wait(cptr: Int, mptr: Int) -> Int ;
-frgn condvar_signal(cptr: Int) -> Int ;
-frgn condvar_broadcast(cptr: Int) -> Int ;
+inop thread_create(fn_ptr: Int, arg: Int) -> Int {
+    %r = call i64 @thread_create(i64 %fn_ptr, i64 %arg)
+    ret i64 %r;
+};
+inop thread_join(thread: Int) -> Int {
+    %r = call i64 @thread_join(i64 %thread)
+    ret i64 %r;
+};
+inop thread_exit(code: Int) -> Int {
+    %r = call i64 @thread_exit(i64 %code)
+    ret i64 %r;
+};
+inop mutex_lock(mptr: Int) -> Int {
+    %r = call i64 @mutex_lock(i64 %mptr)
+    ret i64 %r;
+};
+inop mutex_unlock(mptr: Int) -> Int {
+    %r = call i64 @mutex_unlock(i64 %mptr)
+    ret i64 %r;
+};
+inop condvar_wait(cptr: Int, mptr: Int) -> Int {
+    %r = call i64 @condvar_wait(i64 %cptr, i64 %mptr)
+    ret i64 %r;
+};
+inop condvar_signal(cptr: Int) -> Int {
+    %r = call i64 @condvar_signal(i64 %cptr)
+    ret i64 %r;
+};
+inop condvar_broadcast(cptr: Int) -> Int {
+    %r = call i64 @condvar_broadcast(i64 %cptr)
+    ret i64 %r;
+};

@@ -1,10 +1,31 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 
-frgn atomic_load(ptr: Ptr<Byte>) -> Int ;
-frgn atomic_store(ptr: Ptr<Byte>, val: Int) -> Int ;
-frgn atomic_cas(ptr: Ptr<Byte>, expected: Int, desired: Int) -> Int ;
-frgn atomic_xchg(ptr: Ptr<Byte>, val: Int) -> Int ;
-frgn atomic_add(ptr: Ptr<Byte>, val: Int) -> Int ;
-frgn fence() -> Int ;
-frgn futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int ;
+inop atomic_load(ptr: Ptr<Byte>) -> Int {
+    %r = call i64 @atomic_load(i64 %ptr)
+    ret i64 %r;
+};
+inop atomic_store(ptr: Ptr<Byte>, val: Int) -> Int {
+    %r = call i64 @atomic_store(i64 %ptr, i64 %val)
+    ret i64 %r;
+};
+inop atomic_cas(ptr: Ptr<Byte>, expected: Int, desired: Int) -> Int {
+    %r = call i64 @atomic_cas(i64 %ptr, i64 %expected, i64 %desired)
+    ret i64 %r;
+};
+inop atomic_xchg(ptr: Ptr<Byte>, val: Int) -> Int {
+    %r = call i64 @atomic_xchg(i64 %ptr, i64 %val)
+    ret i64 %r;
+};
+inop atomic_add(ptr: Ptr<Byte>, val: Int) -> Int {
+    %r = call i64 @atomic_add(i64 %ptr, i64 %val)
+    ret i64 %r;
+};
+inop fence() -> Int {
+    %r = call i64 @fence()
+    ret i64 %r;
+};
+inop futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int {
+    %r = call i64 @brief_futex(i64 %uaddr, i64 %opcode, i64 %val, i64 %timeout, i64 %uaddr2, i64 %val3)
+    ret i64 %r;
+};
