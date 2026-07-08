@@ -1,18 +1,17 @@
-// File I/O intrinsics
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 
-inop open#(path: Ptr<Byte>, flags: Int, mode: Int) -> Int;
-inop close#(fd: Int) -> Int;
-inop read#(fd: Int, buf: Ptr<Byte>, count: Int) -> Int;
-inop write#(fd: Int, buf: Ptr<Byte>, count: Int) -> Int;
-inop lseek#(fd: Int, offset: Int, whence: Int) -> Int;
-inop pread#(fd: Int, buf: Ptr<Byte>, count: Int, offset: Int) -> Int;
-inop pwrite#(fd: Int, buf: Ptr<Byte>, count: Int, offset: Int) -> Int;
-inop stat#(path: Ptr<Byte>, buf: Ptr<Byte>) -> Int;
-inop fstat#(fd: Int, buf: Ptr<Byte>) -> Int;
-inop ftruncate#(fd: Int, length: Int) -> Int;
-inop fsync#(fd: Int) -> Int;
-inop dup#(fd: Int) -> Int;
-inop dup2#(oldfd: Int, newfd: Int) -> Int;
-inop fcntl#(fd: Int, cmd: Int, arg: Int) -> Int;
+frgn open(path: Ptr<Byte>, flag_bits: Int, mode_val: Int) -> Int ;
+frgn close(fd: Int) -> Int ;
+frgn read(fd: Int, buf: Ptr<Byte>, count: Int) -> Int ;
+frgn write(fd: Int, buf: Ptr<Byte>, count: Int) -> Int ;
+frgn lseek(fd: Int, offset: Int, whence_val: Int) -> Int ;
+frgn pread(fd: Int, buf: Ptr<Byte>, count: Int, offset: Int) -> Int ;
+frgn pwrite(fd: Int, buf: Ptr<Byte>, count: Int, offset: Int) -> Int ;
+frgn stat(path: Ptr<Byte>, buf: Ptr<Byte>) -> Int ;
+frgn fstat(fd: Int, buf: Ptr<Byte>) -> Int ;
+frgn ftruncate(fd: Int, length: Int) -> Int ;
+frgn fsync(fd: Int) -> Int ;
+frgn dup(fd: Int) -> Int ;
+frgn dup2(oldfd: Int, newfd: Int) -> Int ;
+frgn fcntl(fd: Int, cmd: Int, arg: Int) -> Int ;

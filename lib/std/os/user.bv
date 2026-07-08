@@ -1,9 +1,9 @@
-// User/group intrinsics
-// Phase 3: relocated from compiler Intrinsic enum
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
 
-inop getuid#() -> Int;
-inop geteuid#() -> Int;
-inop getgid#() -> Int;
-inop getegid#() -> Int;
-inop getpwuid#(uid: Int) -> String;
-inop getgrgid#(gid: Int) -> String;
+frgn getuid() -> Int ;
+frgn geteuid() -> Int ;
+frgn getgid() -> Int ;
+frgn getegid() -> Int ;
+frgn getpwuid(uid: Int) -> Int ;
+frgn getgrgid(gid: Int) -> Int ;

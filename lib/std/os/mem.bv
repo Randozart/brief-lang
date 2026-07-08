@@ -1,8 +1,8 @@
-// Memory management intrinsics
-// Phase 3: relocated from compiler Intrinsic enum
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
 
-inop mmap#(addr: Ptr<Byte>, length: Int, prot: Int, flags: Int, fd: Int, offset: Int) -> Int;
-inop munmap#(addr: Ptr<Byte>, length: Int) -> Int;
-inop mprotect#(addr: Ptr<Byte>, length: Int, prot: Int) -> Int;
-inop brk#(addr: Ptr<Byte>) -> Int;
-inop mlock#(addr: Ptr<Byte>, length: Int) -> Int;
+frgn mmap(addr: Ptr<Byte>, length: Int, prot_val: Int, flag_bits: Int, fd: Int, offset: Int) -> Int ;
+frgn munmap(addr: Ptr<Byte>, length: Int) -> Int ;
+frgn mprotect(addr: Ptr<Byte>, length: Int, prot_val: Int) -> Int ;
+frgn brk(addr: Ptr<Byte>) -> Int ;
+frgn mlock(addr: Ptr<Byte>, length: Int) -> Int ;

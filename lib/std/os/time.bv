@@ -1,6 +1,6 @@
-// Time intrinsics
-// Phase 3: relocated from compiler Intrinsic enum
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
 
-inop clock_gettime#(clock_id: Int, tp: Ptr<Byte>) -> Int;
-inop nanosleep#(req: Ptr<Byte>, rem: Ptr<Byte>) -> Int;
-inop time#(tloc: Ptr<Int>) -> Int;
+frgn clock_gettime(clock_id: Int, tp: Ptr<Byte>) -> Int ;
+frgn nanosleep(req: Ptr<Byte>, rem: Ptr<Byte>) -> Int ;
+frgn time(tloc: Ptr<Int>) -> Int ;

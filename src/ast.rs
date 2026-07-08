@@ -1142,17 +1142,17 @@ impl Intrinsic {
             "contains" => Some(Intrinsic::Contains),
             "keys" => Some(Intrinsic::Keys),
             "values" => Some(Intrinsic::Values),
-            "println" => Some(Intrinsic::Println),
-            "readln" => Some(Intrinsic::Readln),
-            "exit" => Some(Intrinsic::Exit),
-            "time" => Some(Intrinsic::Time),
-            "read_file" => Some(Intrinsic::ReadFile),
-            "write_file" => Some(Intrinsic::WriteFile),
-            "sleep" => Some(Intrinsic::Sleep),
+            "println" => None, // Phase 3: replaced by std/os/ inop
+            "readln" => None, // Phase 3: replaced by std/os/ inop
+            "exit" => None, // Phase 3: replaced by std/os/ inop
+            "time" => None, // Phase 3: replaced by std/os/ inop
+            "read_file" => None, // Phase 3: replaced by std/os/ inop
+            "write_file" => None, // Phase 3: replaced by std/os/ inop
+            "sleep" => None, // Phase 3: replaced by std/os/ inop
             "sort" => Some(Intrinsic::Sort),
             "reverse" => Some(Intrinsic::Reverse),
             "range" => Some(Intrinsic::Range),
-            "print" => Some(Intrinsic::Print),
+            "print" => None, // Phase 3: replaced by std/os/ inop
             "trim_left" => Some(Intrinsic::TrimLeft),
             "trim_right" => Some(Intrinsic::TrimRight),
             "to_lower" => Some(Intrinsic::ToLower),
@@ -1173,147 +1173,147 @@ impl Intrinsic {
             "float_to_str" => Some(Intrinsic::FloatToStr),
             "to_str" => Some(Intrinsic::ToStr),
             // Phase A: Terminal
-            "tty_raw_mode" => Some(Intrinsic::TtyRawMode),
-            "tty_size" => Some(Intrinsic::TtySize),
-            "tty_read_key" => Some(Intrinsic::TtyReadKey),
-            "ioctl" => Some(Intrinsic::IoCtl),
-            "isatty" => Some(Intrinsic::IsTty),
+            "tty_raw_mode" => None, // Phase 3: replaced by std/os/ inop
+            "tty_size" => None, // Phase 3: replaced by std/os/ inop
+            "tty_read_key" => None, // Phase 3: replaced by std/os/ inop
+            "ioctl" => None, // Phase 3: replaced by std/os/ inop
+            "isatty" => None, // Phase 3: replaced by std/os/ inop
             // Phase A: Process
-            "spawn_with_output" => Some(Intrinsic::SpawnWithOutput),
-            "spawn" => Some(Intrinsic::Spawn),
-            "argv" => Some(Intrinsic::Argv),
+            "spawn_with_output" => None, // Phase 3: replaced by std/os/ inop
+            "spawn" => None, // Phase 3: replaced by std/os/ inop
+            "argv" => None, // Phase 3: replaced by std/os/ inop
             // Phase B: Raw File I/O
-            "open" => Some(Intrinsic::Open),
-            "close" => Some(Intrinsic::Close),
-            "read" => Some(Intrinsic::Read),
-            "write" => Some(Intrinsic::Write),
-            "lseek" => Some(Intrinsic::LSeek),
-            "pread" => Some(Intrinsic::PRead),
-            "pwrite" => Some(Intrinsic::PWrite),
-            "stat" => Some(Intrinsic::Stat),
-            "fstat" => Some(Intrinsic::FStat),
+            "open" => None, // Phase 3: replaced by std/os/ inop
+            "close" => None, // Phase 3: replaced by std/os/ inop
+            "read" => None, // Phase 3: replaced by std/os/ inop
+            "write" => None, // Phase 3: replaced by std/os/ inop
+            "lseek" => None, // Phase 3: replaced by std/os/ inop
+            "pread" => None, // Phase 3: replaced by std/os/ inop
+            "pwrite" => None, // Phase 3: replaced by std/os/ inop
+            "stat" => None, // Phase 3: replaced by std/os/ inop
+            "fstat" => None, // Phase 3: replaced by std/os/ inop
             "truncate" => Some(Intrinsic::FTruncate),
-            "ftruncate" => Some(Intrinsic::FTruncate),
-            "fsync" => Some(Intrinsic::FSync),
-            "dup" => Some(Intrinsic::FDup),
-            "dup2" => Some(Intrinsic::FDup2),
-            "fcntl" => Some(Intrinsic::FCntl),
+            "ftruncate" => None, // Phase 3: replaced by std/os/ inop
+            "fsync" => None, // Phase 3: replaced by std/os/ inop
+            "dup" => None, // Phase 3: replaced by std/os/ inop
+            "dup2" => None, // Phase 3: replaced by std/os/ inop
+            "fcntl" => None, // Phase 3: replaced by std/os/ inop
             // Phase C: Filesystem
-            "mkdir" => Some(Intrinsic::MkDir),
-            "rmdir" => Some(Intrinsic::RmDir),
-            "unlink" => Some(Intrinsic::Unlink),
-            "rename" => Some(Intrinsic::Rename),
-            "symlink" => Some(Intrinsic::SymLink),
-            "readlink" => Some(Intrinsic::ReadLink),
-            "link" => Some(Intrinsic::Link),
-            "getcwd" => Some(Intrinsic::GetCwd),
-            "chdir" => Some(Intrinsic::ChDir),
-            "readdir" => Some(Intrinsic::ReadDir),
-            "chmod" => Some(Intrinsic::ChMod),
-            "chown" => Some(Intrinsic::ChOwn),
-            "umask" => Some(Intrinsic::UMask),
-            "access" => Some(Intrinsic::Access),
+            "mkdir" => None, // Phase 3: replaced by std/os/ inop
+            "rmdir" => None, // Phase 3: replaced by std/os/ inop
+            "unlink" => None, // Phase 3: replaced by std/os/ inop
+            "rename" => None, // Phase 3: replaced by std/os/ inop
+            "symlink" => None, // Phase 3: replaced by std/os/ inop
+            "readlink" => None, // Phase 3: replaced by std/os/ inop
+            "link" => None, // Phase 3: replaced by std/os/ inop
+            "getcwd" => None, // Phase 3: replaced by std/os/ inop
+            "chdir" => None, // Phase 3: replaced by std/os/ inop
+            "readdir" => None, // Phase 3: replaced by std/os/ inop
+            "chmod" => None, // Phase 3: replaced by std/os/ inop
+            "chown" => None, // Phase 3: replaced by std/os/ inop
+            "umask" => None, // Phase 3: replaced by std/os/ inop
+            "access" => None, // Phase 3: replaced by std/os/ inop
             // Phase D: Memory
-            "mmap" => Some(Intrinsic::Mmap),
-            "munmap" => Some(Intrinsic::MUnmap),
-            "mprotect" => Some(Intrinsic::MProtect),
-            "brk" => Some(Intrinsic::Brk),
-            "mlock" => Some(Intrinsic::MLock),
+            "mmap" => None, // Phase 3: replaced by std/os/ inop
+            "munmap" => None, // Phase 3: replaced by std/os/ inop
+            "mprotect" => None, // Phase 3: replaced by std/os/ inop
+            "brk" => None, // Phase 3: replaced by std/os/ inop
+            "mlock" => None, // Phase 3: replaced by std/os/ inop
             // Phase D: Synchronization
-            "atomic_load" => Some(Intrinsic::AtomicLoad),
-            "atomic_store" => Some(Intrinsic::AtomicStore),
-            "atomic_cas" => Some(Intrinsic::AtomicCas),
-            "atomic_xchg" => Some(Intrinsic::AtomicXchg),
-            "atomic_add" => Some(Intrinsic::AtomicAdd),
-            "fence" => Some(Intrinsic::Fence),
-            "futex" => Some(Intrinsic::Futex),
+            "atomic_load" => None, // Phase 3: replaced by std/os/ inop
+            "atomic_store" => None, // Phase 3: replaced by std/os/ inop
+            "atomic_cas" => None, // Phase 3: replaced by std/os/ inop
+            "atomic_xchg" => None, // Phase 3: replaced by std/os/ inop
+            "atomic_add" => None, // Phase 3: replaced by std/os/ inop
+            "fence" => None, // Phase 3: replaced by std/os/ inop
+            "futex" => None, // Phase 3: replaced by std/os/ inop
             // Phase E: IPC
-            "pipe" => Some(Intrinsic::Pipe),
-            "shm_open" => Some(Intrinsic::ShmOpen),
-            "shm_unlink" => Some(Intrinsic::ShmUnlink),
-            "sem_open" => Some(Intrinsic::SemOpen),
-            "sem_wait" => Some(Intrinsic::SemWait),
-            "sem_post" => Some(Intrinsic::SemPost),
+            "pipe" => None, // Phase 3: replaced by std/os/ inop
+            "shm_open" => None, // Phase 3: replaced by std/os/ inop
+            "shm_unlink" => None, // Phase 3: replaced by std/os/ inop
+            "sem_open" => None, // Phase 3: replaced by std/os/ inop
+            "sem_wait" => None, // Phase 3: replaced by std/os/ inop
+            "sem_post" => None, // Phase 3: replaced by std/os/ inop
             // Phase F: Signals
-            "sigaction" => Some(Intrinsic::SigAction),
-            "sigprocmask" => Some(Intrinsic::SigProcMask),
-            "kill" => Some(Intrinsic::Kill),
-            "signalfd" => Some(Intrinsic::SignalFd),
-            "timerfd_create" => Some(Intrinsic::TimerFdCreate),
+            "sigaction" => None, // Phase 3: replaced by std/os/ inop
+            "sigprocmask" => None, // Phase 3: replaced by std/os/ inop
+            "kill" => None, // Phase 3: replaced by std/os/ inop
+            "signalfd" => None, // Phase 3: replaced by std/os/ inop
+            "timerfd_create" => None, // Phase 3: replaced by std/os/ inop
             // Phase G: Networking (intrinsics.md D10)
-            "socket" => Some(Intrinsic::Socket),
-            "bind" => Some(Intrinsic::Bind),
-            "listen" => Some(Intrinsic::Listen),
-            "accept" => Some(Intrinsic::Accept),
-            "connect" => Some(Intrinsic::Connect),
-            "send" => Some(Intrinsic::Send),
-            "recv" => Some(Intrinsic::Recv),
-            "sendto" => Some(Intrinsic::SendTo),
-            "recvfrom" => Some(Intrinsic::RecvFrom),
-            "setsockopt" => Some(Intrinsic::SetSockOpt),
-            "getsockopt" => Some(Intrinsic::GetSockOpt),
-            "shutdown" => Some(Intrinsic::Shutdown),
-            "getaddrinfo" => Some(Intrinsic::GetAddrInfo),
+            "socket" => None, // Phase 3: replaced by std/os/ inop
+            "bind" => None, // Phase 3: replaced by std/os/ inop
+            "listen" => None, // Phase 3: replaced by std/os/ inop
+            "accept" => None, // Phase 3: replaced by std/os/ inop
+            "connect" => None, // Phase 3: replaced by std/os/ inop
+            "send" => None, // Phase 3: replaced by std/os/ inop
+            "recv" => None, // Phase 3: replaced by std/os/ inop
+            "sendto" => None, // Phase 3: replaced by std/os/ inop
+            "recvfrom" => None, // Phase 3: replaced by std/os/ inop
+            "setsockopt" => None, // Phase 3: replaced by std/os/ inop
+            "getsockopt" => None, // Phase 3: replaced by std/os/ inop
+            "shutdown" => None, // Phase 3: replaced by std/os/ inop
+            "getaddrinfo" => None, // Phase 3: replaced by std/os/ inop
             // Phase H: Everything Else (intrinsics.md D6, D7)
-            "getenv" => Some(Intrinsic::GetEnv),
-            "setenv" => Some(Intrinsic::SetEnv),
-            "unsetenv" => Some(Intrinsic::UnsetEnv),
-            "getpid" => Some(Intrinsic::GetPid),
-            "getppid" => Some(Intrinsic::GetPPid),
-            "clock_gettime" => Some(Intrinsic::ClockGetTime),
-            "nanosleep" => Some(Intrinsic::NanoSleep),
+            "getenv" => None, // Phase 3: replaced by std/os/ inop
+            "setenv" => None, // Phase 3: replaced by std/os/ inop
+            "unsetenv" => None, // Phase 3: replaced by std/os/ inop
+            "getpid" => None, // Phase 3: replaced by std/os/ inop
+            "getppid" => None, // Phase 3: replaced by std/os/ inop
+            "clock_gettime" => None, // Phase 3: replaced by std/os/ inop
+            "nanosleep" => None, // Phase 3: replaced by std/os/ inop
             "print_int" => Some(Intrinsic::PrintInt),
             "putchar" => Some(Intrinsic::PutChar),
             "print_float" => Some(Intrinsic::PrintFloat),
             "getenv_int" => Some(Intrinsic::GetEnvInt),
-            "set_stdout_buf" => Some(Intrinsic::SetStdoutBuf),
+            "set_stdout_buf" => None, // Phase 3: replaced by std/os/ inop
             // D12: Random / Entropy
-            "errno" => Some(Intrinsic::Errno),
-            "getrandom" => Some(Intrinsic::GetRandom),
+            "errno" => None, // Phase 3: replaced by std/os/ inop
+            "getrandom" => None, // Phase 3: replaced by std/os/ inop
             // D13: System Info
-            "uname" => Some(Intrinsic::Uname),
-            "pagesize" => Some(Intrinsic::PageSize),
-            "cpu_count" => Some(Intrinsic::CpuCount),
-            "hostname" => Some(Intrinsic::Hostname),
-            "strerror" => Some(Intrinsic::StrError),
-            "strsignal" => Some(Intrinsic::StrSignal),
-            "realpath" => Some(Intrinsic::RealPath),
+            "uname" => None, // Phase 3: replaced by std/os/ inop
+            "pagesize" => None, // Phase 3: replaced by std/os/ inop
+            "cpu_count" => None, // Phase 3: replaced by std/os/ inop
+            "hostname" => None, // Phase 3: replaced by std/os/ inop
+            "strerror" => None, // Phase 3: replaced by std/os/ inop
+            "strsignal" => None, // Phase 3: replaced by std/os/ inop
+            "realpath" => None, // Phase 3: replaced by std/os/ inop
             // D14: Debugging
-            "abort" => Some(Intrinsic::Abort),
-            "backtrace" => Some(Intrinsic::Backtrace),
-            "halt" => Some(Intrinsic::Halt),
+            "abort" => None, // Phase 3: replaced by std/os/ inop
+            "backtrace" => None, // Phase 3: replaced by std/os/ inop
+            "halt" => None, // Phase 3: replaced by std/os/ inop
             "volatile_load" => Some(Intrinsic::VolatileLoad),
             "volatile_store" => Some(Intrinsic::VolatileStore),
             // D15: Scheduling
-            "sched_yield" => Some(Intrinsic::SchedYield),
-            "getpriority" => Some(Intrinsic::GetPriority),
-            "setpriority" => Some(Intrinsic::SetPriority),
+            "sched_yield" => None, // Phase 3: replaced by std/os/ inop
+            "getpriority" => None, // Phase 3: replaced by std/os/ inop
+            "setpriority" => None, // Phase 3: replaced by std/os/ inop
             // D16: User / Group
-            "getuid" => Some(Intrinsic::GetUid),
-            "geteuid" => Some(Intrinsic::GetEUid),
-            "getgid" => Some(Intrinsic::GetGid),
-            "getegid" => Some(Intrinsic::GetEGid),
-            "getpwuid" => Some(Intrinsic::GetPwUid),
-            "getgrgid" => Some(Intrinsic::GetGrGid),
+            "getuid" => None, // Phase 3: replaced by std/os/ inop
+            "geteuid" => None, // Phase 3: replaced by std/os/ inop
+            "getgid" => None, // Phase 3: replaced by std/os/ inop
+            "getegid" => None, // Phase 3: replaced by std/os/ inop
+            "getpwuid" => None, // Phase 3: replaced by std/os/ inop
+            "getgrgid" => None, // Phase 3: replaced by std/os/ inop
             // D17: Threading
-            "thread_create" => Some(Intrinsic::ThreadCreate),
-            "thread_join" => Some(Intrinsic::ThreadJoin),
-            "thread_exit" => Some(Intrinsic::ThreadExit),
-            "mutex_lock" => Some(Intrinsic::MutexLock),
-            "mutex_unlock" => Some(Intrinsic::MutexUnlock),
-            "condvar_wait" => Some(Intrinsic::CondvarWait),
-            "condvar_signal" => Some(Intrinsic::CondvarSignal),
-            "condvar_broadcast" => Some(Intrinsic::CondvarBroadcast),
+            "thread_create" => None, // Phase 3: replaced by std/os/ inop
+            "thread_join" => None, // Phase 3: replaced by std/os/ inop
+            "thread_exit" => None, // Phase 3: replaced by std/os/ inop
+            "mutex_lock" => None, // Phase 3: replaced by std/os/ inop
+            "mutex_unlock" => None, // Phase 3: replaced by std/os/ inop
+            "condvar_wait" => None, // Phase 3: replaced by std/os/ inop
+            "condvar_signal" => None, // Phase 3: replaced by std/os/ inop
+            "condvar_broadcast" => None, // Phase 3: replaced by std/os/ inop
             // D18: Resource Limits
-            "getrlimit" => Some(Intrinsic::GetRlimit),
-            "setrlimit" => Some(Intrinsic::SetRlimit),
+            "getrlimit" => None, // Phase 3: replaced by std/os/ inop
+            "setrlimit" => None, // Phase 3: replaced by std/os/ inop
             // Extra intrinsics
-            "mkstemp" => Some(Intrinsic::MkStemp),
-            "mkdtemp" => Some(Intrinsic::MkDtemp),
-            "dlopen" => Some(Intrinsic::DlOpen),
-            "dlsym" => Some(Intrinsic::DlSym),
-            "dlclose" => Some(Intrinsic::DlClose),
-            "ttyname" => Some(Intrinsic::TtyName),
+            "mkstemp" => None, // Phase 3: replaced by std/os/ inop
+            "mkdtemp" => None, // Phase 3: replaced by std/os/ inop
+            "dlopen" => None, // Phase 3: replaced by std/os/ inop
+            "dlsym" => None, // Phase 3: replaced by std/os/ inop
+            "dlclose" => None, // Phase 3: replaced by std/os/ inop
+            "ttyname" => None, // Phase 3: replaced by std/os/ inop
             // Macro/template intrinsics (compile-time only)
             "compile" => Some(Intrinsic::Compile),
             "error" => Some(Intrinsic::MacroError),
@@ -1321,8 +1321,8 @@ impl Intrinsic {
             "gensym" => Some(Intrinsic::MacroGenSym),
             "emit_file" => Some(Intrinsic::EmitFile),
             // Ring buffer intrinsics
-            "ring_push" => Some(Intrinsic::RingPush),
-            "ring_pop" => Some(Intrinsic::RingPop),
+            "ring_push" => None, // Phase 3: replaced by std/os/ inop
+            "ring_pop" => None, // Phase 3: replaced by std/os/ inop
             // 2026-07-03: Spatial memory intrinsics
             "__memcpy" => Some(Intrinsic::Memcpy),
             "__memcmp" => Some(Intrinsic::Memcmp),
@@ -3381,691 +3381,691 @@ mod tests {
 
     #[test]
     fn test_intrinsic_from_name_tty_raw_mode() {
-        assert_eq!(Intrinsic::from_name("tty_raw_mode"), Some(Intrinsic::TtyRawMode));
+        assert_eq!(Intrinsic::from_name("tty_raw_mode"), None);
         assert_eq!(Intrinsic::TtyRawMode.name(), "tty_raw_mode");
     }
 
     #[test]
     fn test_intrinsic_from_name_tty_size() {
-        assert_eq!(Intrinsic::from_name("tty_size"), Some(Intrinsic::TtySize));
+        assert_eq!(Intrinsic::from_name("tty_size"), None);
         assert_eq!(Intrinsic::TtySize.name(), "tty_size");
     }
 
     #[test]
     fn test_intrinsic_from_name_tty_read_key() {
-        assert_eq!(Intrinsic::from_name("tty_read_key"), Some(Intrinsic::TtyReadKey));
+        assert_eq!(Intrinsic::from_name("tty_read_key"), None);
         assert_eq!(Intrinsic::TtyReadKey.name(), "tty_read_key");
     }
 
     #[test]
     fn test_intrinsic_from_name_ioctl() {
-        assert_eq!(Intrinsic::from_name("ioctl"), Some(Intrinsic::IoCtl));
+        assert_eq!(Intrinsic::from_name("ioctl"), None);
         assert_eq!(Intrinsic::IoCtl.name(), "ioctl");
     }
 
     #[test]
     fn test_intrinsic_from_name_isatty() {
-        assert_eq!(Intrinsic::from_name("isatty"), Some(Intrinsic::IsTty));
+        assert_eq!(Intrinsic::from_name("isatty"), None);
         assert_eq!(Intrinsic::IsTty.name(), "isatty");
     }
 
     #[test]
     fn test_intrinsic_from_name_spawn_with_output() {
-        assert_eq!(Intrinsic::from_name("spawn_with_output"), Some(Intrinsic::SpawnWithOutput));
+        assert_eq!(Intrinsic::from_name("spawn_with_output"), None);
         assert_eq!(Intrinsic::SpawnWithOutput.name(), "spawn_with_output");
     }
 
     #[test]
     fn test_intrinsic_from_name_spawn() {
-        assert_eq!(Intrinsic::from_name("spawn"), Some(Intrinsic::Spawn));
+        assert_eq!(Intrinsic::from_name("spawn"), None);
         assert_eq!(Intrinsic::Spawn.name(), "spawn");
     }
 
     #[test]
     fn test_intrinsic_from_name_open() {
-        assert_eq!(Intrinsic::from_name("open"), Some(Intrinsic::Open));
+        assert_eq!(Intrinsic::from_name("open"), None);
         assert_eq!(Intrinsic::Open.name(), "open");
     }
 
     #[test]
     fn test_intrinsic_from_name_close() {
-        assert_eq!(Intrinsic::from_name("close"), Some(Intrinsic::Close));
+        assert_eq!(Intrinsic::from_name("close"), None);
         assert_eq!(Intrinsic::Close.name(), "close");
     }
 
     #[test]
     fn test_intrinsic_from_name_read() {
-        assert_eq!(Intrinsic::from_name("read"), Some(Intrinsic::Read));
+        assert_eq!(Intrinsic::from_name("read"), None);
         assert_eq!(Intrinsic::Read.name(), "read");
     }
 
     #[test]
     fn test_intrinsic_from_name_write() {
-        assert_eq!(Intrinsic::from_name("write"), Some(Intrinsic::Write));
+        assert_eq!(Intrinsic::from_name("write"), None);
         assert_eq!(Intrinsic::Write.name(), "write");
     }
 
     #[test]
     fn test_intrinsic_from_name_lseek() {
-        assert_eq!(Intrinsic::from_name("lseek"), Some(Intrinsic::LSeek));
+        assert_eq!(Intrinsic::from_name("lseek"), None);
         assert_eq!(Intrinsic::LSeek.name(), "lseek");
     }
 
     #[test]
     fn test_intrinsic_from_name_pread() {
-        assert_eq!(Intrinsic::from_name("pread"), Some(Intrinsic::PRead));
+        assert_eq!(Intrinsic::from_name("pread"), None);
         assert_eq!(Intrinsic::PRead.name(), "pread");
     }
 
     #[test]
     fn test_intrinsic_from_name_pwrite() {
-        assert_eq!(Intrinsic::from_name("pwrite"), Some(Intrinsic::PWrite));
+        assert_eq!(Intrinsic::from_name("pwrite"), None);
         assert_eq!(Intrinsic::PWrite.name(), "pwrite");
     }
 
     #[test]
     fn test_intrinsic_from_name_stat() {
-        assert_eq!(Intrinsic::from_name("stat"), Some(Intrinsic::Stat));
+        assert_eq!(Intrinsic::from_name("stat"), None);
         assert_eq!(Intrinsic::Stat.name(), "stat");
     }
 
     #[test]
     fn test_intrinsic_from_name_fstat() {
-        assert_eq!(Intrinsic::from_name("fstat"), Some(Intrinsic::FStat));
+        assert_eq!(Intrinsic::from_name("fstat"), None);
         assert_eq!(Intrinsic::FStat.name(), "fstat");
     }
 
     #[test]
     fn test_intrinsic_from_name_truncate() {
-        assert_eq!(Intrinsic::from_name("truncate"), Some(Intrinsic::FTruncate));
+        assert_eq!(Intrinsic::from_name("truncate"), None);
         assert_eq!(Intrinsic::FTruncate.name(), "ftruncate");
     }
 
     #[test]
     fn test_intrinsic_from_name_ftruncate() {
-        assert_eq!(Intrinsic::from_name("ftruncate"), Some(Intrinsic::FTruncate));
+        assert_eq!(Intrinsic::from_name("ftruncate"), None);
         assert_eq!(Intrinsic::FTruncate.name(), "ftruncate");
     }
 
     #[test]
     fn test_intrinsic_from_name_fsync() {
-        assert_eq!(Intrinsic::from_name("fsync"), Some(Intrinsic::FSync));
+        assert_eq!(Intrinsic::from_name("fsync"), None);
         assert_eq!(Intrinsic::FSync.name(), "fsync");
     }
 
     #[test]
     fn test_intrinsic_from_name_dup() {
-        assert_eq!(Intrinsic::from_name("dup"), Some(Intrinsic::FDup));
+        assert_eq!(Intrinsic::from_name("dup"), None);
         assert_eq!(Intrinsic::FDup.name(), "dup");
     }
 
     #[test]
     fn test_intrinsic_from_name_dup2() {
-        assert_eq!(Intrinsic::from_name("dup2"), Some(Intrinsic::FDup2));
+        assert_eq!(Intrinsic::from_name("dup2"), None);
         assert_eq!(Intrinsic::FDup2.name(), "dup2");
     }
 
     #[test]
     fn test_intrinsic_from_name_fcntl() {
-        assert_eq!(Intrinsic::from_name("fcntl"), Some(Intrinsic::FCntl));
+        assert_eq!(Intrinsic::from_name("fcntl"), None);
         assert_eq!(Intrinsic::FCntl.name(), "fcntl");
     }
 
     #[test]
     fn test_intrinsic_from_name_mkdir() {
-        assert_eq!(Intrinsic::from_name("mkdir"), Some(Intrinsic::MkDir));
+        assert_eq!(Intrinsic::from_name("mkdir"), None);
         assert_eq!(Intrinsic::MkDir.name(), "mkdir");
     }
 
     #[test]
     fn test_intrinsic_from_name_rmdir() {
-        assert_eq!(Intrinsic::from_name("rmdir"), Some(Intrinsic::RmDir));
+        assert_eq!(Intrinsic::from_name("rmdir"), None);
         assert_eq!(Intrinsic::RmDir.name(), "rmdir");
     }
 
     #[test]
     fn test_intrinsic_from_name_unlink() {
-        assert_eq!(Intrinsic::from_name("unlink"), Some(Intrinsic::Unlink));
+        assert_eq!(Intrinsic::from_name("unlink"), None);
         assert_eq!(Intrinsic::Unlink.name(), "unlink");
     }
 
     #[test]
     fn test_intrinsic_from_name_rename() {
-        assert_eq!(Intrinsic::from_name("rename"), Some(Intrinsic::Rename));
+        assert_eq!(Intrinsic::from_name("rename"), None);
         assert_eq!(Intrinsic::Rename.name(), "rename");
     }
 
     #[test]
     fn test_intrinsic_from_name_symlink() {
-        assert_eq!(Intrinsic::from_name("symlink"), Some(Intrinsic::SymLink));
+        assert_eq!(Intrinsic::from_name("symlink"), None);
         assert_eq!(Intrinsic::SymLink.name(), "symlink");
     }
 
     #[test]
     fn test_intrinsic_from_name_readlink() {
-        assert_eq!(Intrinsic::from_name("readlink"), Some(Intrinsic::ReadLink));
+        assert_eq!(Intrinsic::from_name("readlink"), None);
         assert_eq!(Intrinsic::ReadLink.name(), "readlink");
     }
 
     #[test]
     fn test_intrinsic_from_name_link() {
-        assert_eq!(Intrinsic::from_name("link"), Some(Intrinsic::Link));
+        assert_eq!(Intrinsic::from_name("link"), None);
         assert_eq!(Intrinsic::Link.name(), "link");
     }
 
     #[test]
     fn test_intrinsic_from_name_getcwd() {
-        assert_eq!(Intrinsic::from_name("getcwd"), Some(Intrinsic::GetCwd));
+        assert_eq!(Intrinsic::from_name("getcwd"), None);
         assert_eq!(Intrinsic::GetCwd.name(), "getcwd");
     }
 
     #[test]
     fn test_intrinsic_from_name_chdir() {
-        assert_eq!(Intrinsic::from_name("chdir"), Some(Intrinsic::ChDir));
+        assert_eq!(Intrinsic::from_name("chdir"), None);
         assert_eq!(Intrinsic::ChDir.name(), "chdir");
     }
 
     #[test]
     fn test_intrinsic_from_name_readdir() {
-        assert_eq!(Intrinsic::from_name("readdir"), Some(Intrinsic::ReadDir));
+        assert_eq!(Intrinsic::from_name("readdir"), None);
         assert_eq!(Intrinsic::ReadDir.name(), "readdir");
     }
 
     #[test]
     fn test_intrinsic_from_name_chmod() {
-        assert_eq!(Intrinsic::from_name("chmod"), Some(Intrinsic::ChMod));
+        assert_eq!(Intrinsic::from_name("chmod"), None);
         assert_eq!(Intrinsic::ChMod.name(), "chmod");
     }
 
     #[test]
     fn test_intrinsic_from_name_chown() {
-        assert_eq!(Intrinsic::from_name("chown"), Some(Intrinsic::ChOwn));
+        assert_eq!(Intrinsic::from_name("chown"), None);
         assert_eq!(Intrinsic::ChOwn.name(), "chown");
     }
 
     #[test]
     fn test_intrinsic_from_name_umask() {
-        assert_eq!(Intrinsic::from_name("umask"), Some(Intrinsic::UMask));
+        assert_eq!(Intrinsic::from_name("umask"), None);
         assert_eq!(Intrinsic::UMask.name(), "umask");
     }
 
     #[test]
     fn test_intrinsic_from_name_access() {
-        assert_eq!(Intrinsic::from_name("access"), Some(Intrinsic::Access));
+        assert_eq!(Intrinsic::from_name("access"), None);
         assert_eq!(Intrinsic::Access.name(), "access");
     }
 
     #[test]
     fn test_intrinsic_from_name_mmap() {
-        assert_eq!(Intrinsic::from_name("mmap"), Some(Intrinsic::Mmap));
+        assert_eq!(Intrinsic::from_name("mmap"), None);
         assert_eq!(Intrinsic::Mmap.name(), "mmap");
     }
 
     #[test]
     fn test_intrinsic_from_name_munmap() {
-        assert_eq!(Intrinsic::from_name("munmap"), Some(Intrinsic::MUnmap));
+        assert_eq!(Intrinsic::from_name("munmap"), None);
         assert_eq!(Intrinsic::MUnmap.name(), "munmap");
     }
 
     #[test]
     fn test_intrinsic_from_name_mprotect() {
-        assert_eq!(Intrinsic::from_name("mprotect"), Some(Intrinsic::MProtect));
+        assert_eq!(Intrinsic::from_name("mprotect"), None);
         assert_eq!(Intrinsic::MProtect.name(), "mprotect");
     }
 
     #[test]
     fn test_intrinsic_from_name_brk() {
-        assert_eq!(Intrinsic::from_name("brk"), Some(Intrinsic::Brk));
+        assert_eq!(Intrinsic::from_name("brk"), None);
         assert_eq!(Intrinsic::Brk.name(), "brk");
     }
 
     #[test]
     fn test_intrinsic_from_name_mlock() {
-        assert_eq!(Intrinsic::from_name("mlock"), Some(Intrinsic::MLock));
+        assert_eq!(Intrinsic::from_name("mlock"), None);
         assert_eq!(Intrinsic::MLock.name(), "mlock");
     }
 
     #[test]
     fn test_intrinsic_from_name_atomic_load() {
-        assert_eq!(Intrinsic::from_name("atomic_load"), Some(Intrinsic::AtomicLoad));
+        assert_eq!(Intrinsic::from_name("atomic_load"), None);
         assert_eq!(Intrinsic::AtomicLoad.name(), "atomic_load");
     }
 
     #[test]
     fn test_intrinsic_from_name_atomic_store() {
-        assert_eq!(Intrinsic::from_name("atomic_store"), Some(Intrinsic::AtomicStore));
+        assert_eq!(Intrinsic::from_name("atomic_store"), None);
         assert_eq!(Intrinsic::AtomicStore.name(), "atomic_store");
     }
 
     #[test]
     fn test_intrinsic_from_name_atomic_cas() {
-        assert_eq!(Intrinsic::from_name("atomic_cas"), Some(Intrinsic::AtomicCas));
+        assert_eq!(Intrinsic::from_name("atomic_cas"), None);
         assert_eq!(Intrinsic::AtomicCas.name(), "atomic_cas");
     }
 
     #[test]
     fn test_intrinsic_from_name_atomic_xchg() {
-        assert_eq!(Intrinsic::from_name("atomic_xchg"), Some(Intrinsic::AtomicXchg));
+        assert_eq!(Intrinsic::from_name("atomic_xchg"), None);
         assert_eq!(Intrinsic::AtomicXchg.name(), "atomic_xchg");
     }
 
     #[test]
     fn test_intrinsic_from_name_atomic_add() {
-        assert_eq!(Intrinsic::from_name("atomic_add"), Some(Intrinsic::AtomicAdd));
+        assert_eq!(Intrinsic::from_name("atomic_add"), None);
         assert_eq!(Intrinsic::AtomicAdd.name(), "atomic_add");
     }
 
     #[test]
     fn test_intrinsic_from_name_fence() {
-        assert_eq!(Intrinsic::from_name("fence"), Some(Intrinsic::Fence));
+        assert_eq!(Intrinsic::from_name("fence"), None);
         assert_eq!(Intrinsic::Fence.name(), "fence");
     }
 
     #[test]
     fn test_intrinsic_from_name_futex() {
-        assert_eq!(Intrinsic::from_name("futex"), Some(Intrinsic::Futex));
+        assert_eq!(Intrinsic::from_name("futex"), None);
         assert_eq!(Intrinsic::Futex.name(), "futex");
     }
 
     #[test]
     fn test_intrinsic_from_name_pipe() {
-        assert_eq!(Intrinsic::from_name("pipe"), Some(Intrinsic::Pipe));
+        assert_eq!(Intrinsic::from_name("pipe"), None);
         assert_eq!(Intrinsic::Pipe.name(), "pipe");
     }
 
     #[test]
     fn test_intrinsic_from_name_shm_open() {
-        assert_eq!(Intrinsic::from_name("shm_open"), Some(Intrinsic::ShmOpen));
+        assert_eq!(Intrinsic::from_name("shm_open"), None);
         assert_eq!(Intrinsic::ShmOpen.name(), "shm_open");
     }
 
     #[test]
     fn test_intrinsic_from_name_shm_unlink() {
-        assert_eq!(Intrinsic::from_name("shm_unlink"), Some(Intrinsic::ShmUnlink));
+        assert_eq!(Intrinsic::from_name("shm_unlink"), None);
         assert_eq!(Intrinsic::ShmUnlink.name(), "shm_unlink");
     }
 
     #[test]
     fn test_intrinsic_from_name_sem_open() {
-        assert_eq!(Intrinsic::from_name("sem_open"), Some(Intrinsic::SemOpen));
+        assert_eq!(Intrinsic::from_name("sem_open"), None);
         assert_eq!(Intrinsic::SemOpen.name(), "sem_open");
     }
 
     #[test]
     fn test_intrinsic_from_name_sem_wait() {
-        assert_eq!(Intrinsic::from_name("sem_wait"), Some(Intrinsic::SemWait));
+        assert_eq!(Intrinsic::from_name("sem_wait"), None);
         assert_eq!(Intrinsic::SemWait.name(), "sem_wait");
     }
 
     #[test]
     fn test_intrinsic_from_name_sem_post() {
-        assert_eq!(Intrinsic::from_name("sem_post"), Some(Intrinsic::SemPost));
+        assert_eq!(Intrinsic::from_name("sem_post"), None);
         assert_eq!(Intrinsic::SemPost.name(), "sem_post");
     }
 
     #[test]
     fn test_intrinsic_from_name_sigaction() {
-        assert_eq!(Intrinsic::from_name("sigaction"), Some(Intrinsic::SigAction));
+        assert_eq!(Intrinsic::from_name("sigaction"), None);
         assert_eq!(Intrinsic::SigAction.name(), "sigaction");
     }
 
     #[test]
     fn test_intrinsic_from_name_sigprocmask() {
-        assert_eq!(Intrinsic::from_name("sigprocmask"), Some(Intrinsic::SigProcMask));
+        assert_eq!(Intrinsic::from_name("sigprocmask"), None);
         assert_eq!(Intrinsic::SigProcMask.name(), "sigprocmask");
     }
 
     #[test]
     fn test_intrinsic_from_name_kill() {
-        assert_eq!(Intrinsic::from_name("kill"), Some(Intrinsic::Kill));
+        assert_eq!(Intrinsic::from_name("kill"), None);
         assert_eq!(Intrinsic::Kill.name(), "kill");
     }
 
     #[test]
     fn test_intrinsic_from_name_signalfd() {
-        assert_eq!(Intrinsic::from_name("signalfd"), Some(Intrinsic::SignalFd));
+        assert_eq!(Intrinsic::from_name("signalfd"), None);
         assert_eq!(Intrinsic::SignalFd.name(), "signalfd");
     }
 
     #[test]
     fn test_intrinsic_from_name_timerfd_create() {
-        assert_eq!(Intrinsic::from_name("timerfd_create"), Some(Intrinsic::TimerFdCreate));
+        assert_eq!(Intrinsic::from_name("timerfd_create"), None);
         assert_eq!(Intrinsic::TimerFdCreate.name(), "timerfd_create");
     }
 
     #[test]
     fn test_intrinsic_from_name_socket() {
-        assert_eq!(Intrinsic::from_name("socket"), Some(Intrinsic::Socket));
+        assert_eq!(Intrinsic::from_name("socket"), None);
         assert_eq!(Intrinsic::Socket.name(), "socket");
     }
 
     #[test]
     fn test_intrinsic_from_name_bind() {
-        assert_eq!(Intrinsic::from_name("bind"), Some(Intrinsic::Bind));
+        assert_eq!(Intrinsic::from_name("bind"), None);
         assert_eq!(Intrinsic::Bind.name(), "bind");
     }
 
     #[test]
     fn test_intrinsic_from_name_listen() {
-        assert_eq!(Intrinsic::from_name("listen"), Some(Intrinsic::Listen));
+        assert_eq!(Intrinsic::from_name("listen"), None);
         assert_eq!(Intrinsic::Listen.name(), "listen");
     }
 
     #[test]
     fn test_intrinsic_from_name_accept() {
-        assert_eq!(Intrinsic::from_name("accept"), Some(Intrinsic::Accept));
+        assert_eq!(Intrinsic::from_name("accept"), None);
         assert_eq!(Intrinsic::Accept.name(), "accept");
     }
 
     #[test]
     fn test_intrinsic_from_name_connect() {
-        assert_eq!(Intrinsic::from_name("connect"), Some(Intrinsic::Connect));
+        assert_eq!(Intrinsic::from_name("connect"), None);
         assert_eq!(Intrinsic::Connect.name(), "connect");
     }
 
     #[test]
     fn test_intrinsic_from_name_send() {
-        assert_eq!(Intrinsic::from_name("send"), Some(Intrinsic::Send));
+        assert_eq!(Intrinsic::from_name("send"), None);
         assert_eq!(Intrinsic::Send.name(), "send");
     }
 
     #[test]
     fn test_intrinsic_from_name_recv() {
-        assert_eq!(Intrinsic::from_name("recv"), Some(Intrinsic::Recv));
+        assert_eq!(Intrinsic::from_name("recv"), None);
         assert_eq!(Intrinsic::Recv.name(), "recv");
     }
 
     #[test]
     fn test_intrinsic_from_name_sendto() {
-        assert_eq!(Intrinsic::from_name("sendto"), Some(Intrinsic::SendTo));
+        assert_eq!(Intrinsic::from_name("sendto"), None);
         assert_eq!(Intrinsic::SendTo.name(), "sendto");
     }
 
     #[test]
     fn test_intrinsic_from_name_recvfrom() {
-        assert_eq!(Intrinsic::from_name("recvfrom"), Some(Intrinsic::RecvFrom));
+        assert_eq!(Intrinsic::from_name("recvfrom"), None);
         assert_eq!(Intrinsic::RecvFrom.name(), "recvfrom");
     }
 
     #[test]
     fn test_intrinsic_from_name_setsockopt() {
-        assert_eq!(Intrinsic::from_name("setsockopt"), Some(Intrinsic::SetSockOpt));
+        assert_eq!(Intrinsic::from_name("setsockopt"), None);
         assert_eq!(Intrinsic::SetSockOpt.name(), "setsockopt");
     }
 
     #[test]
     fn test_intrinsic_from_name_getsockopt() {
-        assert_eq!(Intrinsic::from_name("getsockopt"), Some(Intrinsic::GetSockOpt));
+        assert_eq!(Intrinsic::from_name("getsockopt"), None);
         assert_eq!(Intrinsic::GetSockOpt.name(), "getsockopt");
     }
 
     #[test]
     fn test_intrinsic_from_name_shutdown() {
-        assert_eq!(Intrinsic::from_name("shutdown"), Some(Intrinsic::Shutdown));
+        assert_eq!(Intrinsic::from_name("shutdown"), None);
         assert_eq!(Intrinsic::Shutdown.name(), "shutdown");
     }
 
     #[test]
     fn test_intrinsic_from_name_getaddrinfo() {
-        assert_eq!(Intrinsic::from_name("getaddrinfo"), Some(Intrinsic::GetAddrInfo));
+        assert_eq!(Intrinsic::from_name("getaddrinfo"), None);
         assert_eq!(Intrinsic::GetAddrInfo.name(), "getaddrinfo");
     }
 
     #[test]
     fn test_intrinsic_from_name_getenv() {
-        assert_eq!(Intrinsic::from_name("getenv"), Some(Intrinsic::GetEnv));
+        assert_eq!(Intrinsic::from_name("getenv"), None);
         assert_eq!(Intrinsic::GetEnv.name(), "getenv");
     }
 
     #[test]
     fn test_intrinsic_from_name_setenv() {
-        assert_eq!(Intrinsic::from_name("setenv"), Some(Intrinsic::SetEnv));
+        assert_eq!(Intrinsic::from_name("setenv"), None);
         assert_eq!(Intrinsic::SetEnv.name(), "setenv");
     }
 
     #[test]
     fn test_intrinsic_from_name_unsetenv() {
-        assert_eq!(Intrinsic::from_name("unsetenv"), Some(Intrinsic::UnsetEnv));
+        assert_eq!(Intrinsic::from_name("unsetenv"), None);
         assert_eq!(Intrinsic::UnsetEnv.name(), "unsetenv");
     }
 
     #[test]
     fn test_intrinsic_from_name_getpid() {
-        assert_eq!(Intrinsic::from_name("getpid"), Some(Intrinsic::GetPid));
+        assert_eq!(Intrinsic::from_name("getpid"), None);
         assert_eq!(Intrinsic::GetPid.name(), "getpid");
     }
 
     #[test]
     fn test_intrinsic_from_name_getppid() {
-        assert_eq!(Intrinsic::from_name("getppid"), Some(Intrinsic::GetPPid));
+        assert_eq!(Intrinsic::from_name("getppid"), None);
         assert_eq!(Intrinsic::GetPPid.name(), "getppid");
     }
 
     #[test]
     fn test_intrinsic_from_name_clock_gettime() {
-        assert_eq!(Intrinsic::from_name("clock_gettime"), Some(Intrinsic::ClockGetTime));
+        assert_eq!(Intrinsic::from_name("clock_gettime"), None);
         assert_eq!(Intrinsic::ClockGetTime.name(), "clock_gettime");
     }
 
     #[test]
     fn test_intrinsic_from_name_nanosleep() {
-        assert_eq!(Intrinsic::from_name("nanosleep"), Some(Intrinsic::NanoSleep));
+        assert_eq!(Intrinsic::from_name("nanosleep"), None);
         assert_eq!(Intrinsic::NanoSleep.name(), "nanosleep");
     }
 
     #[test]
     fn test_intrinsic_from_name_d12_errno() {
-        assert_eq!(Intrinsic::from_name("errno"), Some(Intrinsic::Errno));
+        assert_eq!(Intrinsic::from_name("errno"), None);
         assert_eq!(Intrinsic::Errno.name(), "errno");
     }
 
     #[test]
     fn test_intrinsic_from_name_d12_getrandom() {
-        assert_eq!(Intrinsic::from_name("getrandom"), Some(Intrinsic::GetRandom));
+        assert_eq!(Intrinsic::from_name("getrandom"), None);
         assert_eq!(Intrinsic::GetRandom.name(), "getrandom");
     }
 
     #[test]
     fn test_intrinsic_from_name_d13_uname() {
-        assert_eq!(Intrinsic::from_name("uname"), Some(Intrinsic::Uname));
+        assert_eq!(Intrinsic::from_name("uname"), None);
         assert_eq!(Intrinsic::Uname.name(), "uname");
     }
 
     #[test]
     fn test_intrinsic_from_name_d13_pagesize() {
-        assert_eq!(Intrinsic::from_name("pagesize"), Some(Intrinsic::PageSize));
+        assert_eq!(Intrinsic::from_name("pagesize"), None);
         assert_eq!(Intrinsic::PageSize.name(), "pagesize");
     }
 
     #[test]
     fn test_intrinsic_from_name_d13_cpu_count() {
-        assert_eq!(Intrinsic::from_name("cpu_count"), Some(Intrinsic::CpuCount));
+        assert_eq!(Intrinsic::from_name("cpu_count"), None);
         assert_eq!(Intrinsic::CpuCount.name(), "cpu_count");
     }
 
     #[test]
     fn test_intrinsic_from_name_d13_hostname() {
-        assert_eq!(Intrinsic::from_name("hostname"), Some(Intrinsic::Hostname));
+        assert_eq!(Intrinsic::from_name("hostname"), None);
         assert_eq!(Intrinsic::Hostname.name(), "hostname");
     }
 
     #[test]
     fn test_intrinsic_from_name_d13_strerror() {
-        assert_eq!(Intrinsic::from_name("strerror"), Some(Intrinsic::StrError));
+        assert_eq!(Intrinsic::from_name("strerror"), None);
         assert_eq!(Intrinsic::StrError.name(), "strerror");
     }
 
     #[test]
     fn test_intrinsic_from_name_d13_strsignal() {
-        assert_eq!(Intrinsic::from_name("strsignal"), Some(Intrinsic::StrSignal));
+        assert_eq!(Intrinsic::from_name("strsignal"), None);
         assert_eq!(Intrinsic::StrSignal.name(), "strsignal");
     }
 
     #[test]
     fn test_intrinsic_from_name_d13_realpath() {
-        assert_eq!(Intrinsic::from_name("realpath"), Some(Intrinsic::RealPath));
+        assert_eq!(Intrinsic::from_name("realpath"), None);
         assert_eq!(Intrinsic::RealPath.name(), "realpath");
     }
 
     #[test]
     fn test_intrinsic_from_name_d14_abort() {
-        assert_eq!(Intrinsic::from_name("abort"), Some(Intrinsic::Abort));
+        assert_eq!(Intrinsic::from_name("abort"), None);
         assert_eq!(Intrinsic::Abort.name(), "abort");
     }
 
     #[test]
     fn test_intrinsic_from_name_d14_backtrace() {
-        assert_eq!(Intrinsic::from_name("backtrace"), Some(Intrinsic::Backtrace));
+        assert_eq!(Intrinsic::from_name("backtrace"), None);
         assert_eq!(Intrinsic::Backtrace.name(), "backtrace");
     }
 
     #[test]
     fn test_intrinsic_from_name_d15_sched_yield() {
-        assert_eq!(Intrinsic::from_name("sched_yield"), Some(Intrinsic::SchedYield));
+        assert_eq!(Intrinsic::from_name("sched_yield"), None);
         assert_eq!(Intrinsic::SchedYield.name(), "sched_yield");
     }
 
     #[test]
     fn test_intrinsic_from_name_d15_getpriority() {
-        assert_eq!(Intrinsic::from_name("getpriority"), Some(Intrinsic::GetPriority));
+        assert_eq!(Intrinsic::from_name("getpriority"), None);
         assert_eq!(Intrinsic::GetPriority.name(), "getpriority");
     }
 
     #[test]
     fn test_intrinsic_from_name_d15_setpriority() {
-        assert_eq!(Intrinsic::from_name("setpriority"), Some(Intrinsic::SetPriority));
+        assert_eq!(Intrinsic::from_name("setpriority"), None);
         assert_eq!(Intrinsic::SetPriority.name(), "setpriority");
     }
 
     #[test]
     fn test_intrinsic_from_name_d16_getuid() {
-        assert_eq!(Intrinsic::from_name("getuid"), Some(Intrinsic::GetUid));
+        assert_eq!(Intrinsic::from_name("getuid"), None);
         assert_eq!(Intrinsic::GetUid.name(), "getuid");
     }
 
     #[test]
     fn test_intrinsic_from_name_d16_geteuid() {
-        assert_eq!(Intrinsic::from_name("geteuid"), Some(Intrinsic::GetEUid));
+        assert_eq!(Intrinsic::from_name("geteuid"), None);
         assert_eq!(Intrinsic::GetEUid.name(), "geteuid");
     }
 
     #[test]
     fn test_intrinsic_from_name_d16_getgid() {
-        assert_eq!(Intrinsic::from_name("getgid"), Some(Intrinsic::GetGid));
+        assert_eq!(Intrinsic::from_name("getgid"), None);
         assert_eq!(Intrinsic::GetGid.name(), "getgid");
     }
 
     #[test]
     fn test_intrinsic_from_name_d16_getegid() {
-        assert_eq!(Intrinsic::from_name("getegid"), Some(Intrinsic::GetEGid));
+        assert_eq!(Intrinsic::from_name("getegid"), None);
         assert_eq!(Intrinsic::GetEGid.name(), "getegid");
     }
 
     #[test]
     fn test_intrinsic_from_name_d16_getpwuid() {
-        assert_eq!(Intrinsic::from_name("getpwuid"), Some(Intrinsic::GetPwUid));
+        assert_eq!(Intrinsic::from_name("getpwuid"), None);
         assert_eq!(Intrinsic::GetPwUid.name(), "getpwuid");
     }
 
     #[test]
     fn test_intrinsic_from_name_d16_getgrgid() {
-        assert_eq!(Intrinsic::from_name("getgrgid"), Some(Intrinsic::GetGrGid));
+        assert_eq!(Intrinsic::from_name("getgrgid"), None);
         assert_eq!(Intrinsic::GetGrGid.name(), "getgrgid");
     }
 
     #[test]
     fn test_intrinsic_from_name_d17_thread_create() {
-        assert_eq!(Intrinsic::from_name("thread_create"), Some(Intrinsic::ThreadCreate));
+        assert_eq!(Intrinsic::from_name("thread_create"), None);
         assert_eq!(Intrinsic::ThreadCreate.name(), "thread_create");
     }
 
     #[test]
     fn test_intrinsic_from_name_d17_thread_join() {
-        assert_eq!(Intrinsic::from_name("thread_join"), Some(Intrinsic::ThreadJoin));
+        assert_eq!(Intrinsic::from_name("thread_join"), None);
         assert_eq!(Intrinsic::ThreadJoin.name(), "thread_join");
     }
 
     #[test]
     fn test_intrinsic_from_name_d17_thread_exit() {
-        assert_eq!(Intrinsic::from_name("thread_exit"), Some(Intrinsic::ThreadExit));
+        assert_eq!(Intrinsic::from_name("thread_exit"), None);
         assert_eq!(Intrinsic::ThreadExit.name(), "thread_exit");
     }
 
     #[test]
     fn test_intrinsic_from_name_d17_mutex_lock() {
-        assert_eq!(Intrinsic::from_name("mutex_lock"), Some(Intrinsic::MutexLock));
+        assert_eq!(Intrinsic::from_name("mutex_lock"), None);
         assert_eq!(Intrinsic::MutexLock.name(), "mutex_lock");
     }
 
     #[test]
     fn test_intrinsic_from_name_d17_mutex_unlock() {
-        assert_eq!(Intrinsic::from_name("mutex_unlock"), Some(Intrinsic::MutexUnlock));
+        assert_eq!(Intrinsic::from_name("mutex_unlock"), None);
         assert_eq!(Intrinsic::MutexUnlock.name(), "mutex_unlock");
     }
 
     #[test]
     fn test_intrinsic_from_name_d17_condvar_wait() {
-        assert_eq!(Intrinsic::from_name("condvar_wait"), Some(Intrinsic::CondvarWait));
+        assert_eq!(Intrinsic::from_name("condvar_wait"), None);
         assert_eq!(Intrinsic::CondvarWait.name(), "condvar_wait");
     }
 
     #[test]
     fn test_intrinsic_from_name_d17_condvar_signal() {
-        assert_eq!(Intrinsic::from_name("condvar_signal"), Some(Intrinsic::CondvarSignal));
+        assert_eq!(Intrinsic::from_name("condvar_signal"), None);
         assert_eq!(Intrinsic::CondvarSignal.name(), "condvar_signal");
     }
 
     #[test]
     fn test_intrinsic_from_name_d17_condvar_broadcast() {
-        assert_eq!(Intrinsic::from_name("condvar_broadcast"), Some(Intrinsic::CondvarBroadcast));
+        assert_eq!(Intrinsic::from_name("condvar_broadcast"), None);
         assert_eq!(Intrinsic::CondvarBroadcast.name(), "condvar_broadcast");
     }
 
     #[test]
     fn test_intrinsic_from_name_d18_getrlimit() {
-        assert_eq!(Intrinsic::from_name("getrlimit"), Some(Intrinsic::GetRlimit));
+        assert_eq!(Intrinsic::from_name("getrlimit"), None);
         assert_eq!(Intrinsic::GetRlimit.name(), "getrlimit");
     }
 
     #[test]
     fn test_intrinsic_from_name_d18_setrlimit() {
-        assert_eq!(Intrinsic::from_name("setrlimit"), Some(Intrinsic::SetRlimit));
+        assert_eq!(Intrinsic::from_name("setrlimit"), None);
         assert_eq!(Intrinsic::SetRlimit.name(), "setrlimit");
     }
 
     #[test]
     fn test_intrinsic_from_name_extra_mkstemp() {
-        assert_eq!(Intrinsic::from_name("mkstemp"), Some(Intrinsic::MkStemp));
+        assert_eq!(Intrinsic::from_name("mkstemp"), None);
         assert_eq!(Intrinsic::MkStemp.name(), "mkstemp");
     }
 
     #[test]
     fn test_intrinsic_from_name_extra_mkdtemp() {
-        assert_eq!(Intrinsic::from_name("mkdtemp"), Some(Intrinsic::MkDtemp));
+        assert_eq!(Intrinsic::from_name("mkdtemp"), None);
         assert_eq!(Intrinsic::MkDtemp.name(), "mkdtemp");
     }
 
     #[test]
     fn test_intrinsic_from_name_extra_dlopen() {
-        assert_eq!(Intrinsic::from_name("dlopen"), Some(Intrinsic::DlOpen));
+        assert_eq!(Intrinsic::from_name("dlopen"), None);
         assert_eq!(Intrinsic::DlOpen.name(), "dlopen");
     }
 
     #[test]
     fn test_intrinsic_from_name_extra_dlsym() {
-        assert_eq!(Intrinsic::from_name("dlsym"), Some(Intrinsic::DlSym));
+        assert_eq!(Intrinsic::from_name("dlsym"), None);
         assert_eq!(Intrinsic::DlSym.name(), "dlsym");
     }
 
     #[test]
     fn test_intrinsic_from_name_extra_dlclose() {
-        assert_eq!(Intrinsic::from_name("dlclose"), Some(Intrinsic::DlClose));
+        assert_eq!(Intrinsic::from_name("dlclose"), None);
         assert_eq!(Intrinsic::DlClose.name(), "dlclose");
     }
 
     #[test]
     fn test_intrinsic_from_name_extra_ttyname() {
-        assert_eq!(Intrinsic::from_name("ttyname"), Some(Intrinsic::TtyName));
+        assert_eq!(Intrinsic::from_name("ttyname"), None);
         assert_eq!(Intrinsic::TtyName.name(), "ttyname");
     }
 

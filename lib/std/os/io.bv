@@ -1,10 +1,10 @@
-// Core I/O intrinsics (user-facing)
-// Phase 3: relocated from compiler Intrinsic enum
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
 
-inop print#(s: Ptr<Byte>) -> Int;
-inop println#(s: Ptr<Byte>) -> Int;
-inop readln#(buf: Ptr<Byte>, size: Int) -> Int;
-inop getenv#(name: Ptr<Byte>, buf: Ptr<Byte>, size: Int) -> Int;
-inop setenv#(name: Ptr<Byte>, value: Ptr<Byte>, overwrite: Int) -> Int;
-inop unsetenv#(name: Ptr<Byte>) -> Int;
-inop set_stdout_buf#(mode: Int) -> Bool;
+frgn print(s: Ptr<Byte>) -> Int ;
+frgn println(s: Ptr<Byte>) -> Int ;
+frgn readln(buf: Ptr<Byte>, size: Int) -> Int ;
+frgn getenv(name: Ptr<Byte>, buf: Ptr<Byte>, size: Int) -> Int ;
+frgn setenv(name: Ptr<Byte>, value: Ptr<Byte>, overwrite: Int) -> Int ;
+frgn unsetenv(name: Ptr<Byte>) -> Int ;
+frgn set_stdout_buf(mode_val: Int) -> Int ;

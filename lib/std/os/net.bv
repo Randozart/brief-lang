@@ -1,16 +1,16 @@
-// Network socket intrinsics
-// Phase 3: relocated from compiler Intrinsic enum
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
 
-inop socket#(domain: Int, type_: Int, protocol: Int) -> Int;
-inop bind#(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int;
-inop listen#(fd: Int, backlog: Int) -> Int;
-inop accept#(fd: Int, addr: Ptr<Byte>, addrlen: Ptr<Int>) -> Int;
-inop connect#(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int;
-inop send#(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int) -> Int;
-inop recv#(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int) -> Int;
-inop sendto#(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int, dest: Ptr<Byte>, destlen: Int) -> Int;
-inop recvfrom#(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int, src: Ptr<Byte>, srclen: Ptr<Int>) -> Int;
-inop setsockopt#(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Int) -> Int;
-inop getsockopt#(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Ptr<Int>) -> Int;
-inop shutdown#(fd: Int, how: Int) -> Int;
-inop getaddrinfo#(node: Ptr<Byte>, service: Ptr<Byte>, hints: Ptr<Byte>, result: Ptr<Byte>) -> Int;
+frgn socket(domain: Int, type_: Int, protocol: Int) -> Int ;
+frgn bind(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int ;
+frgn listen(fd: Int, backlog: Int) -> Int ;
+frgn accept(fd: Int, addr: Ptr<Byte>, addrlen: Ptr<Int>) -> Int ;
+frgn connect(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int ;
+frgn send(fd: Int, buf: Ptr<Byte>, len: Int, flag_bits: Int) -> Int ;
+frgn recv(fd: Int, buf: Ptr<Byte>, len: Int, flag_bits: Int) -> Int ;
+frgn sendto(fd: Int, buf: Ptr<Byte>, len: Int, flag_bits: Int, dest: Ptr<Byte>, destlen: Int) -> Int ;
+frgn recvfrom(fd: Int, buf: Ptr<Byte>, len: Int, flag_bits: Int, src: Ptr<Byte>, srclen: Ptr<Int>) -> Int ;
+frgn setsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Int) -> Int ;
+frgn getsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Ptr<Int>) -> Int ;
+frgn shutdown(fd: Int, how_val: Int) -> Int ;
+frgn getaddrinfo(node: Ptr<Byte>, service: Ptr<Byte>, hints: Ptr<Byte>, result: Ptr<Byte>) -> Int ;
