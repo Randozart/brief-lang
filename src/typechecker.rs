@@ -2759,6 +2759,13 @@ impl TypeChecker {
                     ProjectionTarget::UserDefinedWithArg(name, _) => {
                         self.resolve_user_projection_type(&src_ty, name)
                     }
+                    // ── Phase 2F: Metadata projections ──────────
+                    ProjectionTarget::Width | ProjectionTarget::Ops => {
+                        Type::Custom("Int".to_string())
+                    }
+                    ProjectionTarget::Endian | ProjectionTarget::Codec => {
+                        Type::Custom("String".to_string())
+                    }
                 }
             }
             Expr::PatternMatch { .. } => Type::Custom("Bool".to_string()),

@@ -269,6 +269,19 @@ impl ExprEval for ProjectionExpr {
                     "user-defined projection '{}' is not supported at runtime", name
                 )))
             }
+            // ── Phase 2F: Metadata projections ──────────────────
+            ProjectionTarget::Width => {
+                let w = match &source_val {
+                    Value::Int(_) | Value::Float(_) => 64i64,
+                    Value::Bool(_) => 1,
+                    Value::Char(_) => 32,
+                    _ => 64,
+                };
+                Ok(Value::Int(w))
+            }
+            ProjectionTarget::Endian => Ok(Value::String("little".to_string())),
+            ProjectionTarget::Codec => Ok(Value::String("none".to_string())),
+            ProjectionTarget::Ops => Ok(Value::Int(0)),
         }
     }
 }

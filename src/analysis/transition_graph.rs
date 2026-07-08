@@ -1004,6 +1004,11 @@ pub fn projection_target_name(target: &crate::ast::ProjectionTarget) -> String {
         ProjectionTarget::Module => "Module".into(),
         ProjectionTarget::IsPure => "IsPure".into(),
         ProjectionTarget::FnSpan => "FnSpan".into(),
+        // ── Phase 2F: Metadata projections ──────────────────────
+        ProjectionTarget::Width => "Width".into(),
+        ProjectionTarget::Endian => "Endian".into(),
+        ProjectionTarget::Codec => "Codec".into(),
+        ProjectionTarget::Ops => "Ops".into(),
     }
 }
 

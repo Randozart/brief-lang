@@ -7378,6 +7378,11 @@ let span = self.current_span();
             "Elements" => Ok(ProjectionTarget::Elements),
             "AsStack" => Ok(ProjectionTarget::AsStack),
             "AsQueue" => Ok(ProjectionTarget::AsQueue),
+            // Phase 2F: Metadata projections
+            "Width" => Ok(ProjectionTarget::Width),
+            "Endian" => Ok(ProjectionTarget::Endian),
+            "Codec" => Ok(ProjectionTarget::Codec),
+            "Ops" => Ok(ProjectionTarget::Ops),
             "Address" => Ok(ProjectionTarget::Address),
             "Name" => Ok(ProjectionTarget::Name),
             "Params" => Ok(ProjectionTarget::Params),

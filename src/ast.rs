@@ -705,6 +705,15 @@ pub enum ProjectionTarget {
     BitReverse,
     Type,
     PtrBang,
+    // ── Phase 2F: Metadata projections ────────────────────────
+    /// Returns the bit width of a type: `Int<8> :> width` → 8
+    Width,
+    /// Returns the endianness annotation: `x :> endian` → "little" | "big"
+    Endian,
+    /// Returns the codec annotation: `s :> codec` → "utf8" | "utf16"
+    Codec,
+    /// Returns the registered operator set: `Int :> ops` → ["add", "sub", ...]
+    Ops,
     /// Returns a List of all keys in a HashMap: `map :> Keys`
     Keys,
     /// Returns a List of all values in a HashMap: `map :> Values`
