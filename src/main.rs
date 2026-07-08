@@ -24,7 +24,7 @@
 
 use brief_compiler::{
     analysis, annotator, ast, backend, dbrief, desugarer, errors, fuzz_checker, hardware, hardware_validator, import_resolver, interpreter,
-    linkage, lsp, manifest, memory_spec, parser, proof_engine, rbv, typechecker, type_universe, view_compiler,
+    linkage, lsp, manifest, memory_spec, normalize_types, parser, proof_engine, rbv, typechecker, type_universe, view_compiler,
     target_spec::{self, TargetSpec},
 };
 use brief_compiler::backend::llvm::EmbeddedConfig;
@@ -2560,6 +2560,9 @@ fn link_and_optimize(
 
     // Phase 3.5: Build the Type Universe for projection resolution
     let tu = type_universe::TypeUniverse::build(&program);
+
+    // Phase 3.6: Normalize types (resolve defaults, desugar string literals)
+    normalize_types::normalize_types(&mut program, &tu);
 
     let comp_target = if is_embedded {
         typechecker::CompilationTarget::Embedded
