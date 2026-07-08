@@ -190,10 +190,37 @@ impl ImportResolver {
 
             // 2026-07-08: Phase 3 — auto-import OS module prelude
             // 2026-07-08: Phase 3 — auto-import OS module prelude
-            // DISABLED: inop declarations call brief_* C functions which need
-            // frgn declarations in the preamble. Enable after updating
-            // src/backend/llvm/mod.rs line 1727-1744 to declare brief_* functions.
-            // let prelude_modules = [ ... ];
+            // inop declarations call brief_rt.c's brief_* functions via the preamble.
+            let prelude_modules = [
+                "std/os/fs.bv", "std/os/net.bv", "std/os/signal.bv",
+                "std/os/ipc.bv", "std/os/thread.bv", "std/os/dir.bv",
+                "std/os/process.bv", "std/os/tty.bv", "std/os/time.bv",
+                "std/os/mem.bv", "std/os/rand.bv", "std/os/temp.bv",
+                "std/os/dynlib.bv", "std/os/debug.bv", "std/os/io.bv",
+                // Excluded — preamble declares with different types:
+                // user.bv (getuid/getgid libc decl uses i32, call uses i64)
+                // sched.bv, resource.bv, sysinfo.bv, ring.bv
+                // atomic.bv (needs LLVM IR, not C calls)
+            ];
+            for module_path in &prelude_modules {
+                let has_import = items.iter().any(|item| {
+                    if let TopLevel::Import(imp) = item {
+                        imp.is_magic && imp.path.iter()
+                            .cloned().collect::<Vec<_>>().join("/") == *module_path
+                    } else {
+                        false
+                    }
+                });
+                if !has_import {
+                    let path_parts: Vec<String> = module_path.split('/').map(|s| s.to_string()).collect();
+                    items.push(TopLevel::Import(Import {
+                        is_magic: true,
+                        path: path_parts,
+                        items: vec![],
+                        target: crate::ast::ImportTarget::Native,
+                    }));
+                }
+            }
 
             let has_core_imports = items.iter().any(|item| {
                 if let TopLevel::Import(imp) = item {

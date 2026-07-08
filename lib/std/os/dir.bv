@@ -1,74 +1,73 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
-// 
 
-
-// C function declarations (brief_rt.c provides brief_* wrappers)
-frgn brief_mkdir(path: Ptr<Byte>, mode_val: Int) -> Int ;
-frgn brief_rmdir(path: Ptr<Byte>) -> Int ;
-frgn brief_unlink(path: Ptr<Byte>) -> Int ;
-frgn brief_rename(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int ;
-frgn brief_symlink(target: Ptr<Byte>, linkpath: Ptr<Byte>) -> Int ;
-frgn brief_link(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int ;
-frgn brief_chdir(path: Ptr<Byte>) -> Int ;
-frgn brief_chmod(path: Ptr<Byte>, mode_val: Int) -> Int ;
-frgn brief_chown(path: Ptr<Byte>, owner: Int, group: Int) -> Int ;
-frgn brief_umask(mask_val: Int) -> Int ;
-frgn brief_access(path: Ptr<Byte>, mode_val: Int) -> Int ;
-
-inop mkdir(path: Ptr<Byte>, mode_val: Int) -> Int {
-    %r = call i64 @brief_mkdir(i64 %path, i64 %mode_val)
+inop mkdir(path: Ptr<Byte>, mode: Int) -> Int {
+    %r = call i64 @brief_mkdir(i64 %path, i64 %mode);
     ret i64 %r;
 };
+
 inop rmdir(path: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_rmdir(i64 %path)
+    %r = call i64 @brief_rmdir(i64 %path);
     ret i64 %r;
 };
+
 inop unlink(path: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_unlink(i64 %path)
+    %r = call i64 @brief_unlink(i64 %path);
     ret i64 %r;
 };
+
 inop rename(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_rename(i64 %oldpath, i64 %newpath)
+    %r = call i64 @brief_rename(i64 %oldpath, i64 %newpath);
     ret i64 %r;
 };
+
 inop symlink(target: Ptr<Byte>, linkpath: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_symlink(i64 %target, i64 %linkpath)
+    %r = call i64 @brief_symlink(i64 %target, i64 %linkpath);
     ret i64 %r;
 };
+
 inop read_link(path: Ptr<Byte>, buf: Ptr<Byte>, bufsiz: Int) -> Int {
-    %r = call i64 @__readlink__(i64 %path, i64 %buf, i64 %bufsiz)
+    %r = call i64 @__readlink__(i64 %path, i64 %buf, i64 %bufsiz);
     ret i64 %r;
 };
+
 inop link_path(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_link(i64 %oldpath, i64 %newpath)
+    %r = call i64 @brief_link(i64 %oldpath, i64 %newpath);
     ret i64 %r;
 };
+
 inop getcwd(buf: Ptr<Byte>, size: Int) -> Int {
-    %r = call i64 @__getcwd__(i64 %buf, i64 %size)
+    %r = call i64 @__getcwd__(i64 %buf, i64 %size);
     ret i64 %r;
 };
+
 inop chdir(path: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_chdir(i64 %path)
+    %r = call i64 @brief_chdir(i64 %path);
     ret i64 %r;
 };
+
 inop readdir(dirp: Int, buf: Ptr<Byte>) -> Int {
-    %r = call i64 @__readdir__(i64 %dirp, i64 %buf)
+    %r = call i64 @__readdir__(i64 %dirp, i64 %buf);
     ret i64 %r;
 };
-inop chmod(path: Ptr<Byte>, mode_val: Int) -> Int {
-    %r = call i64 @brief_chmod(i64 %path, i64 %mode_val)
+
+inop chmod(path: Ptr<Byte>, mode: Int) -> Int {
+    %r = call i64 @brief_chmod(i64 %path, i64 %mode);
     ret i64 %r;
 };
+
 inop chown(path: Ptr<Byte>, owner: Int, group: Int) -> Int {
-    %r = call i64 @brief_chown(i64 %path, i64 %owner, i64 %group)
+    %r = call i64 @brief_chown(i64 %path, i64 %owner, i64 %group);
     ret i64 %r;
 };
-inop umask(mask_val: Int) -> Int {
-    %r = call i64 @brief_umask(i64 %mask_val)
+
+inop umask(mask: Int) -> Int {
+    %r = call i64 @brief_umask(i64 %mask);
     ret i64 %r;
 };
-inop access(path: Ptr<Byte>, mode_val: Int) -> Int {
-    %r = call i64 @brief_access(i64 %path, i64 %mode_val)
+
+inop access(path: Ptr<Byte>, mode: Int) -> Int {
+    %r = call i64 @brief_access(i64 %path, i64 %mode);
     ret i64 %r;
 };
+

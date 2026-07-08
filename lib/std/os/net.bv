@@ -1,75 +1,63 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
-// 
-
-
-// Networking functions (socket, bind, etc.) are declared by the preamble.
-// __getaddrinfo__ is also in the preamble.
-
-
-// C function declarations (brief_rt.c provides brief_* wrappers)
-frgn brief_socket(domain: Int, type_: Int, protocol: Int) -> Int ;
-frgn brief_bind(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int ;
-frgn brief_listen(fd: Int, backlog: Int) -> Int ;
-frgn brief_accept(fd: Int, addr: Ptr<Byte>, addrlen: Ptr<Int>) -> Int ;
-frgn brief_connect(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int ;
-frgn brief_send(fd: Int, buf: Ptr<Byte>, len: Int, flag_bits: Int) -> Int ;
-frgn brief_recv(fd: Int, buf: Ptr<Byte>, len: Int, flag_bits: Int) -> Int ;
-frgn brief_sendto(fd: Int, buf: Ptr<Byte>, len: Int, flag_bits: Int, dest: Ptr<Byte>, destlen: Int) -> Int ;
-frgn brief_recvfrom(fd: Int, buf: Ptr<Byte>, len: Int, flag_bits: Int, src: Ptr<Byte>, srclen: Ptr<Int>) -> Int ;
-frgn brief_setsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Int) -> Int ;
-frgn brief_getsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Ptr<Int>) -> Int ;
-frgn brief_shutdown(fd: Int, how_val: Int) -> Int ;
 
 inop __sys_socket(domain: Int, type_: Int, protocol: Int) -> Int {
-    %r = call i64 @brief_socket(i64 %domain, i64 %type_, i64 %protocol)
+    %r = call i64 @brief_socket(i64 %domain, i64 %type_, i64 %protocol);
     ret i64 %r;
 };
+
 inop __sys_bind(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int {
-    %r = call i64 @brief_bind(i64 %fd, i64 %addr, i64 %addrlen)
+    %r = call i64 @brief_bind(i64 %fd, i64 %addr, i64 %addrlen);
     ret i64 %r;
 };
+
 inop __sys_listen(fd: Int, backlog: Int) -> Int {
-    %r = call i64 @brief_listen(i64 %fd, i64 %backlog)
+    %r = call i64 @brief_listen(i64 %fd, i64 %backlog);
     ret i64 %r;
 };
+
 inop __sys_accept(fd: Int, addr: Ptr<Byte>, addrlen: Ptr<Int>) -> Int {
-    %r = call i64 @brief_accept(i64 %fd, i64 %addr, i64 %addrlen)
+    %r = call i64 @brief_accept(i64 %fd, i64 %addr, i64 %addrlen);
     ret i64 %r;
 };
+
 inop __sys_connect(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int {
-    %r = call i64 @brief_connect(i64 %fd, i64 %addr, i64 %addrlen)
+    %r = call i64 @brief_connect(i64 %fd, i64 %addr, i64 %addrlen);
     ret i64 %r;
 };
+
 inop __sys_send(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
-    %r = call i64 @brief_send(i64 %fd, i64 %buf, i64 %len, i64 %flags)
+    %r = call i64 @brief_send(i64 %fd, i64 %buf, i64 %len, i64 %flags);
     ret i64 %r;
 };
+
 inop __sys_recv(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
-    %r = call i64 @brief_recv(i64 %fd, i64 %buf, i64 %len, i64 %flags)
+    %r = call i64 @brief_recv(i64 %fd, i64 %buf, i64 %len, i64 %flags);
     ret i64 %r;
 };
+
 inop __sys_sendto(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int, dest: Ptr<Byte>, destlen: Int) -> Int {
-    %r = call i64 @brief_sendto(i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %dest, i64 %destlen)
+    %r = call i64 @brief_sendto(i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %dest, i64 %destlen);
     ret i64 %r;
 };
+
 inop __sys_recvfrom(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int, src: Ptr<Byte>, srclen: Ptr<Int>) -> Int {
-    %r = call i64 @brief_recvfrom(i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %src, i64 %srclen)
+    %r = call i64 @brief_recvfrom(i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %src, i64 %srclen);
     ret i64 %r;
 };
+
 inop __sys_setsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Int) -> Int {
-    %r = call i64 @brief_setsockopt(i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen)
+    %r = call i64 @brief_setsockopt(i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen);
     ret i64 %r;
 };
+
 inop __sys_getsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Ptr<Int>) -> Int {
-    %r = call i64 @brief_getsockopt(i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen)
+    %r = call i64 @brief_getsockopt(i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen);
     ret i64 %r;
 };
+
 inop __sys_shutdown(fd: Int, how: Int) -> Int {
-    %r = call i64 @brief_shutdown(i64 %fd, i64 %how)
+    %r = call i64 @brief_shutdown(i64 %fd, i64 %how);
     ret i64 %r;
 };
-inop __sys_getaddrinfo(node: Ptr<Byte>, service: Ptr<Byte>, hints: Ptr<Byte>, result: Ptr<Byte>) -> Int {
-    %r = call i64 @__getaddrinfo__(i64 %node, i64 %service, i64 %hints, i64 %result)
-    ret i64 %r;
-};
+

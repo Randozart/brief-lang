@@ -1,36 +1,28 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
-// 
 
-
-// Built-in preamble provides: @isatty, @ioctl (libc types).
-// All other functions used below are declared by the preamble.
-
-
-// C function declarations
-frgn __ioctl__(fd: Int, request: Int, argp: Ptr<Byte>) -> Int ;
-
-inop tty_raw_mode(enable: Int) -> Int {
-    %r = call i64 @__tty_raw_mode__(i64 %enable)
+inop __sys_tty_raw_mode(enable: Int) -> Int {
+    %r = call i64 @__tty_raw_mode__(i64 %enable);
     ret i64 %r;
 };
-inop tty_size() -> Int {
-    %r = call i64 @__tty_size__()
+
+inop __sys_tty_size() -> Int {
+    %r = call i64 @__tty_size__();
     ret i64 %r;
 };
-inop tty_read_key(fd: Int) -> Int {
-    %r = call i64 @__tty_read_key__(i64 %fd)
+
+inop __sys_tty_read_key(fd: Int) -> Int {
+    %r = call i64 @__tty_read_key__(i64 %fd);
     ret i64 %r;
 };
-inop __sys_ttyname(fd: Int) -> Int {
-    %r = call i64 @ttyname(i64 %fd)
-    ret i64 %r;
-};
+
 inop __sys_ioctl(fd: Int, request: Int, argp: Ptr<Byte>) -> Int {
-    %r = call i64 @__ioctl__(i64 %fd, i64 %request, i64 %argp)
+    %r = call i64 @__ioctl__(i64 %fd, i64 %request, i64 %argp);
     ret i64 %r;
 };
+
 inop __sys_isatty(fd: Int) -> Int {
-    %r = call i64 @__isatty__(i64 %fd)
+    %r = call i64 @__isatty__(i64 %fd);
     ret i64 %r;
 };
+

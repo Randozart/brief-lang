@@ -1,81 +1,73 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
-// 
-
-
-// All C functions (brief_open, brief_read, etc.) are declared by the preamble.
-// See emit_declares() in mod.rs for the full list.
-
-
-// C function declarations (brief_rt.c provides brief_* wrappers)
-frgn brief_open(path: Ptr<Byte>, flags: Int, mode_val: Int) -> Int ;
-frgn brief_close(fd: Int) -> Int ;
-frgn brief_read(fd: Int, buf: Ptr<Byte>, count: Int) -> Int ;
-frgn brief_write(fd: Int, buf: Ptr<Byte>, count: Int) -> Int ;
-frgn brief_lseek(fd: Int, offset: Int, whence_val: Int) -> Int ;
-frgn brief_pread(fd: Int, buf: Ptr<Byte>, count: Int, offset: Int) -> Int ;
-frgn brief_pwrite(fd: Int, buf: Ptr<Byte>, count: Int, offset: Int) -> Int ;
-frgn brief_stat(path: Ptr<Byte>, buf: Ptr<Byte>) -> Int ;
-frgn brief_fstat(fd: Int, buf: Ptr<Byte>) -> Int ;
-frgn brief_ftruncate(fd: Int, length: Int) -> Int ;
-frgn brief_fsync(fd: Int) -> Int ;
-frgn brief_dup(fd: Int) -> Int ;
-frgn brief_dup2(oldfd: Int, newfd: Int) -> Int ;
-frgn brief_fcntl(fd: Int, cmd: Int, arg: Int) -> Int ;
 
 inop file_open(path: Ptr<Byte>, flags: Int, mode: Int) -> Int {
-    %r = call i64 @brief_open(i64 %path, i64 %flags, i64 %mode)
+    %r = call i64 @brief_open(i64 %path, i64 %flags, i64 %mode);
     ret i64 %r;
 };
+
 inop file_close(fd: Int) -> Int {
-    %r = call i64 @brief_close(i64 %fd)
+    %r = call i64 @brief_close(i64 %fd);
     ret i64 %r;
 };
+
 inop file_read(fd: Int, buf: Ptr<Byte>, count: Int) -> Int {
-    %r = call i64 @brief_read(i64 %fd, i64 %buf, i64 %count)
+    %r = call i64 @brief_read(i64 %fd, i64 %buf, i64 %count);
     ret i64 %r;
 };
+
 inop file_write(fd: Int, buf: Ptr<Byte>, count: Int) -> Int {
-    %r = call i64 @brief_write(i64 %fd, i64 %buf, i64 %count)
+    %r = call i64 @brief_write(i64 %fd, i64 %buf, i64 %count);
     ret i64 %r;
 };
+
 inop file_lseek(fd: Int, offset: Int, whence: Int) -> Int {
-    %r = call i64 @brief_lseek(i64 %fd, i64 %offset, i64 %whence)
+    %r = call i64 @brief_lseek(i64 %fd, i64 %offset, i64 %whence);
     ret i64 %r;
 };
+
 inop file_pread(fd: Int, buf: Ptr<Byte>, count: Int, offset: Int) -> Int {
-    %r = call i64 @brief_pread(i64 %fd, i64 %buf, i64 %count, i64 %offset)
+    %r = call i64 @brief_pread(i64 %fd, i64 %buf, i64 %count, i64 %offset);
     ret i64 %r;
 };
+
 inop file_pwrite(fd: Int, buf: Ptr<Byte>, count: Int, offset: Int) -> Int {
-    %r = call i64 @brief_pwrite(i64 %fd, i64 %buf, i64 %count, i64 %offset)
+    %r = call i64 @brief_pwrite(i64 %fd, i64 %buf, i64 %count, i64 %offset);
     ret i64 %r;
 };
+
 inop file_stat(path: Ptr<Byte>, buf: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_stat(i64 %path, i64 %buf)
+    %r = call i64 @brief_stat(i64 %path, i64 %buf);
     ret i64 %r;
 };
+
 inop file_fstat(fd: Int, buf: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_fstat(i64 %fd, i64 %buf)
+    %r = call i64 @brief_fstat(i64 %fd, i64 %buf);
     ret i64 %r;
 };
+
 inop file_ftruncate(fd: Int, length: Int) -> Int {
-    %r = call i64 @brief_ftruncate(i64 %fd, i64 %length)
+    %r = call i64 @brief_ftruncate(i64 %fd, i64 %length);
     ret i64 %r;
 };
+
 inop file_fsync(fd: Int) -> Int {
-    %r = call i64 @brief_fsync(i64 %fd)
+    %r = call i64 @brief_fsync(i64 %fd);
     ret i64 %r;
 };
+
 inop file_dup(fd: Int) -> Int {
-    %r = call i64 @brief_dup(i64 %fd)
+    %r = call i64 @brief_dup(i64 %fd);
     ret i64 %r;
 };
+
 inop file_dup2(oldfd: Int, newfd: Int) -> Int {
-    %r = call i64 @brief_dup2(i64 %oldfd, i64 %newfd)
+    %r = call i64 @brief_dup2(i64 %oldfd, i64 %newfd);
     ret i64 %r;
 };
+
 inop file_fcntl(fd: Int, cmd: Int, arg: Int) -> Int {
-    %r = call i64 @brief_fcntl(i64 %fd, i64 %cmd, i64 %arg)
+    %r = call i64 @brief_fcntl(i64 %fd, i64 %cmd, i64 %arg);
     ret i64 %r;
 };
+

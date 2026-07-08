@@ -2,10 +2,12 @@
 // Auto-imported via prelude.
 
 inop __sys_mkstemp(tmpl: Ptr<Byte>) -> Int {
-    %r = call i64 @mkstemp(i64 %tmpl)
+    %r = call i64 @__mkstemp__(i64 %tmpl);
     ret i64 %r;
 };
+
 inop __sys_mkdtemp(tmpl: Ptr<Byte>) -> Int {
-    %r = call i64 @mkdtemp(i64 %tmpl)
+    %r = call i64 @__mkdtemp__(i64 %tmpl);
     ret i64 %r;
 };
+

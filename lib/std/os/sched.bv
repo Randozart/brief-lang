@@ -2,14 +2,7 @@
 // Auto-imported via prelude.
 
 inop __sys_sched_yield() -> Int {
-    %r = call i64 @sched_yield()
+    %r = call i64 @sched_yield();
     ret i64 %r;
 };
-inop __sys_getpriority(which: Int, who: Int) -> Int {
-    %r = call i64 @getpriority(i64 %which, i64 %who)
-    ret i64 %r;
-};
-inop __sys_setpriority(which: Int, who: Int, prio: Int) -> Int {
-    %r = call i64 @setpriority(i64 %which, i64 %who, i64 %prio)
-    ret i64 %r;
-};
+

@@ -1,1 +1,8 @@
-frgn __print(s: Ptr<Byte>) -> Int ;
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_print(s: Ptr<Byte>) -> Int {
+    %r = call i64 @__print(i64 %s);
+    ret i64 %r;
+};
+

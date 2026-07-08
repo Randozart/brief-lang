@@ -2,26 +2,22 @@
 // Auto-imported via prelude.
 
 inop __sys_getuid() -> Int {
-    %r = call i64 @getuid()
+    %r = call i64 @getuid();
     ret i64 %r;
 };
+
 inop __sys_geteuid() -> Int {
-    %r = call i64 @geteuid()
+    %r = call i64 @geteuid();
     ret i64 %r;
 };
+
 inop __sys_getgid() -> Int {
-    %r = call i64 @getgid()
+    %r = call i64 @getgid();
     ret i64 %r;
 };
+
 inop __sys_getegid() -> Int {
-    %r = call i64 @getegid()
+    %r = call i64 @getegid();
     ret i64 %r;
 };
-inop __sys_getpwuid(uid: Int) -> Int {
-    %r = call i64 @__getpwuid__(i64 %uid)
-    ret i64 %r;
-};
-inop __sys_getgrgid(gid: Int) -> Int {
-    %r = call i64 @__getgrgid__(i64 %gid)
-    ret i64 %r;
-};
+

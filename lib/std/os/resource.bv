@@ -2,10 +2,12 @@
 // Auto-imported via prelude.
 
 inop __sys_getrlimit(resource: Int) -> Int {
-    %r = call i64 @getrlimit(i64 %resource)
+    %r = call i64 @__getrlimit__(i64 %resource);
     ret i64 %r;
 };
+
 inop __sys_setrlimit(resource: Int, packed: Int) -> Int {
-    %r = call i64 @setrlimit(i64 %resource, i64 %packed)
+    %r = call i64 @__setrlimit__(i64 %resource, i64 %packed);
     ret i64 %r;
 };
+
