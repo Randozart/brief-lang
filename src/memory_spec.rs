@@ -174,6 +174,8 @@ fn format_type(ty: &Type) -> String {
         Type::UInt8 => "UInt8".to_string(),
         Type::UInt16 => "UInt16".to_string(),
         Type::UInt32 => "UInt32".to_string(),
+        Type::Bits { width, .. } => format!("Bits<{}>", width),
+        Type::Width(n) => format!("Width({})", n),
         Type::Float => "Float".to_string(),
         Type::Float64 => "Float64".to_string(),
         Type::Bool => "Bool".to_string(),
@@ -256,7 +258,7 @@ fn estimate_type_size(ty: &Type) -> usize {
         Type::Constrained(_, BitRange::Any(n)) => (*n + 7) / 8,
         Type::Constrained(_, BitRange::Range(start, end)) => (end - start + 1 + 7) / 8,
         // 2026-07-03: Layout-constrained pointer — value is always pointer-width (8 bytes on x86_64)
-        Type::LayoutPtr(_) => 8,
+        Type::LayoutPtr(_) | Type::Bits { .. } | Type::Width(_) => 8,
     }
 }
 

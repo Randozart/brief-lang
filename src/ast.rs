@@ -166,6 +166,30 @@ pub enum Type {
     /// Carries byte size and alignment for the pointee. Operations are spatial-only
     /// when the pointee is `Bits` — no semantic interpretation (add, field access, etc.).
     LayoutPtr(LayoutConstraint),
+    // 2026-07-07: Phase 2 — Bits thesis type system
+    /// Raw bits with explicit width and interpretation lens.
+    /// The canonical form all numeric types normalize to.
+    Bits { width: u64, interpretation: Interpretation },
+    /// Type-level width literal: `Int<8>` uses `Applied("Int", [Width(8)])`.
+    Width(u64),
+}
+
+/// 2026-07-07: Phase 2 — Bits thesis interpretation lens
+#[derive(Debug, Clone, PartialEq)]
+pub enum Interpretation {
+    SignedInt,
+    UnsignedInt,
+    Ieee754Float,
+    Boolean,
+    UnicodeScalar,
+    RawData,
+}
+
+/// 2026-07-07: Phase 2 — result of Type::to_bits()
+#[derive(Debug, Clone, PartialEq)]
+pub struct BitsInfo {
+    pub width: u64,
+    pub interpretation: Interpretation,
 }
 
 // 2026-06-29: Fixed-width type helpers for the explicit-width types feature
@@ -182,6 +206,7 @@ impl Type {
             Type::Int | Type::UInt => Some(64),
             Type::Float => Some(32),
             Type::Float64 => Some(64),
+            Type::Bits { width, .. } => Some(*width),
             _ => None,
         }
     }
@@ -191,6 +216,11 @@ impl Type {
             Type::Int8 | Type::Int16 | Type::Int32 | Type::Int => Some(true),
             Type::UInt8 | Type::UInt16 | Type::UInt32 | Type::UInt => Some(false),
             Type::Float | Type::Float64 => Some(true), // floats are signed in representation
+            Type::Bits { interpretation, .. } => match interpretation {
+                Interpretation::SignedInt | Interpretation::Ieee754Float => Some(true),
+                Interpretation::UnsignedInt | Interpretation::Boolean
+                | Interpretation::UnicodeScalar | Interpretation::RawData => Some(false),
+            },
             _ => None,
         }
     }
@@ -201,19 +231,41 @@ impl Type {
         matches!(self,
             Type::Int8 | Type::Int16 | Type::Int32 | Type::Int |
             Type::UInt8 | Type::UInt16 | Type::UInt32 | Type::UInt
-        )
+        ) || matches!(self, Type::Bits { interpretation: Interpretation::SignedInt | Interpretation::UnsignedInt, .. })
     }
 
     // 2026-06-29: Returns true for any fixed-width float type
     // Used by typechecker's is_cast_valid to allow float↔float casts
     pub fn is_float_type(&self) -> bool {
-        matches!(self, Type::Float | Type::Float64)
+        matches!(self, Type::Float | Type::Float64) ||
+        matches!(self, Type::Bits { interpretation: Interpretation::Ieee754Float, .. })
     }
 
     // 2026-06-29: Returns true for any numeric type (integer or float)
     // Used by typechecker's is_cast_valid to allow cross-family casts
     pub fn is_numeric(&self) -> bool {
         self.is_integral() || self.is_float_type()
+    }
+
+    /// 2026-07-07: Phase 2 — canoncial Bits form
+    /// Returns None for non-Bits types (Void, String, Data, custom types, etc.).
+    pub fn to_bits(&self) -> Option<BitsInfo> {
+        match self {
+            Type::Int8 => Some(BitsInfo { width: 8, interpretation: Interpretation::SignedInt }),
+            Type::Int16 => Some(BitsInfo { width: 16, interpretation: Interpretation::SignedInt }),
+            Type::Int32 => Some(BitsInfo { width: 32, interpretation: Interpretation::SignedInt }),
+            Type::Int => Some(BitsInfo { width: 64, interpretation: Interpretation::SignedInt }),
+            Type::UInt8 => Some(BitsInfo { width: 8, interpretation: Interpretation::UnsignedInt }),
+            Type::UInt16 => Some(BitsInfo { width: 16, interpretation: Interpretation::UnsignedInt }),
+            Type::UInt32 => Some(BitsInfo { width: 32, interpretation: Interpretation::UnsignedInt }),
+            Type::UInt => Some(BitsInfo { width: 64, interpretation: Interpretation::UnsignedInt }),
+            Type::Float => Some(BitsInfo { width: 32, interpretation: Interpretation::Ieee754Float }),
+            Type::Float64 => Some(BitsInfo { width: 64, interpretation: Interpretation::Ieee754Float }),
+            Type::Bool => Some(BitsInfo { width: 1, interpretation: Interpretation::Boolean }),
+            Type::Char => Some(BitsInfo { width: 32, interpretation: Interpretation::UnicodeScalar }),
+            Type::Bits { width, interpretation } => Some(BitsInfo { width: *width, interpretation: interpretation.clone() }),
+            _ => None,
+        }
     }
 
     // ── Phase 7A: Canonical universe key for backend property lookups ──
@@ -245,11 +297,24 @@ impl Type {
             Type::Custom(name) => name.as_str(),
             Type::Enum(name) => name.as_str(),
             Type::Sig(name) => name.as_str(),
+            // 2026-07-07: Phase 2 — Bits thesis types
+            Type::Bits { interpretation: Interpretation::SignedInt, width: 64 } => "Int",
+            Type::Bits { interpretation: Interpretation::UnsignedInt, width: 64 } => "UInt",
+            Type::Bits { interpretation: Interpretation::SignedInt, width: 8 } => "Int8",
+            Type::Bits { interpretation: Interpretation::UnsignedInt, width: 8 } => "UInt8",
+            Type::Bits { interpretation: Interpretation::SignedInt, width: 16 } => "Int16",
+            Type::Bits { interpretation: Interpretation::UnsignedInt, width: 16 } => "UInt16",
+            Type::Bits { interpretation: Interpretation::SignedInt, width: 32 } => "Int32",
+            Type::Bits { interpretation: Interpretation::UnsignedInt, width: 32 } => "UInt32",
+            Type::Bits { interpretation: Interpretation::Ieee754Float, width: 32 } => "Float",
+            Type::Bits { interpretation: Interpretation::Ieee754Float, width: 64 } => "Float64",
+            Type::Bits { interpretation: Interpretation::Boolean, .. } => "Bool",
+            Type::Bits { interpretation: Interpretation::UnicodeScalar, .. } => "Char",
             // Compound types without universe entries: use Int as safe default
             Type::Union(_) | Type::Tuple(_) | Type::TypeVar(_)
             | Type::Generic(_, _) | Type::Applied(_, _)
             | Type::Vector(_, _) | Type::Constrained(_, _)
-            | Type::LayoutPtr(_) => "Int",
+            | Type::LayoutPtr(_) | Type::Width(_) | Type::Bits { .. } => "Int",
         }
     }
 

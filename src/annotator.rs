@@ -168,6 +168,8 @@ impl Annotator {
             Type::Bool => "Bool".to_string(),
             Type::Data => "Data".to_string(),
             Type::Void => "Void".to_string(),
+            Type::Bits { width, interpretation } => format!("Bits<{}>{:?}", width, interpretation),
+            Type::Width(n) => format!("Width({})", n),
             Type::Custom(name) => name.clone(),
             Type::Sig(name) => format!("sig {}", name),
             Type::TypeVar(name) => name.clone(),

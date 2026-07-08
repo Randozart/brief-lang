@@ -2886,6 +2886,8 @@ impl ProofEngine {
             Type::Int8 => "Int8".to_string(),
             Type::Int16 => "Int16".to_string(),
             Type::Int32 => "Int32".to_string(),
+            Type::Bits { width, .. } => format!("Bits<{}>", width),
+            Type::Width(n) => format!("Width({})", n),
             Type::Float => "Float".to_string(),
             Type::Float64 => "Float64".to_string(),
             Type::String => "String".to_string(),
