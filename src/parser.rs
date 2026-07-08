@@ -6744,10 +6744,11 @@ let span = self.current_span();
                         "Void" => Type::Void,
                         _ => Type::Custom(name),
                     },
-                    Expr::Integer(n) => Type::Custom(format!("Literal({})", n)),
+                    // 2026-07-08: Phase 2b — use Width(n) instead of Custom("Literal(n)")
+                    Expr::Integer(n) => Type::Width(n as u64),
                     Expr::Literal(lit) => match lit.as_ref() {
                         crate::features::literal::LiteralExpr::Integer(n) => {
-                            Type::Custom(format!("Literal({})", n))
+                            Type::Width(*n as u64)
                         }
                         _ => return self.spanned_err(
                             "Invalid generic type argument. Use a type name (e.g. `Option[Int]`) or integer (e.g. `Byte[4096]`). \
@@ -6761,11 +6762,17 @@ let span = self.current_span();
                             .to_string(),
                     ),
                 };
-                let base_name = match &ty {
-                    Type::Custom(name) => name.clone(),
-                    _ => return self.spanned_err("Generic type must have a base name".to_string()),
+                // 2026-07-08: Phase 2b — use type_to_base_name for keyword types too
+                let base_name = match Self::type_to_base_name(&ty) {
+                    Some(n) => n,
+                    None => return self.spanned_err("Generic type must have a base name".to_string()),
                 };
-                ty = Type::Applied(base_name, vec![arg_type]);
+                // 2026-07-08: Phase 2b — try Bits resolution for known keyword + Width
+                if let Some(bits) = Self::resolve_bits_type(&base_name, &[arg_type.clone()]) {
+                    ty = bits;
+                } else {
+                    ty = Type::Applied(base_name, vec![arg_type]);
+                }
             }
         }
 
@@ -6807,21 +6814,24 @@ let span = self.current_span();
                 }
             }
             
+            // 2026-07-08: Phase 2b — use parse_type_arg for integer token → Width(n)
             // Standard generic type parsing
             let mut type_args = Vec::new();
             loop {
-                type_args.push(self.parse_type()?);
+                type_args.push(self.parse_type_arg()?);
                 // Check if child level consumed Shr as Gt
                 if self.shr_consumed_as_gt {
                     // Child consumed >> which serves as our closing > too
                     self.shr_consumed_as_gt = false;
-                    ty = Type::Applied(
-                        match &ty {
-                            Type::Custom(name) => name.clone(),
-                            _ => return self.spanned_err("Generic type must have a base name".to_string()),
-                        },
-                        type_args,
-                    );
+                    let base_name = match Self::type_to_base_name(&ty) {
+                        Some(n) => n,
+                        None => return self.spanned_err("Generic type must have a base name".to_string()),
+                    };
+                    // 2026-07-08: Phase 2b — try Bits resolution for known keyword + Width
+                    if let Some(bits) = Self::resolve_bits_type(&base_name, &type_args) {
+                        return Ok(bits);
+                    }
+                    ty = Type::Applied(base_name, type_args);
                     return Ok(ty);
                 }
                 if let Some(Ok(Token::Comma)) = self.current_token() {
@@ -6842,48 +6852,25 @@ let span = self.current_span();
                 return self.spanned_err("Expected '>' to close generic type arguments".to_string());
             }
             
+            // 2026-07-08: Phase 2b — extract base name from keyword types too
+            let base_name = match Self::type_to_base_name(&ty) {
+                Some(n) => n,
+                None => return self.spanned_err("Generic type must have a base name".to_string()),
+            };
+            
+            // 2026-07-08: Phase 2b — try Bits resolution for known keyword + Width
+            if let Some(bits) = Self::resolve_bits_type(&base_name, &type_args) {
+                ty = bits;
             // Special handling for Vector<T, dim1, dim2, ...> syntax
-            if let Type::Custom(name) = &ty {
-                if name == "Vector" && type_args.len() >= 2 {
-                    // First arg is element type, rest are dimensions
-                    let inner = Box::new(type_args[0].clone());
-                    let mut dimensions = Vec::new();
-                    for arg in &type_args[1..] {
-                        match arg {
-                            Type::Custom(dim_name) => {
-                                // Named dimension: name:size - but we need to parse this differently
-                                // For now, treat as anonymous with size from a constant
-                                return self.spanned_err("Named dimensions must be in 'name:size' format".to_string());
-                            }
-                            _ => {
-                                // Extract size from type - should be an integer literal type
-                                // For simplicity, we'll handle this in a helper
-                                if let Some(size) = Self::extract_dimension_size(arg) {
-                                    dimensions.push(crate::ast::Dimension::Anonymous(size));
-                                } else {
-                                    return self.spanned_err("Vector dimension must be an integer".to_string());
-                                }
-                            }
-                        }
-                    }
-                    ty = Type::Vector(inner, dimensions);
-                } else {
-                    ty = Type::Applied(
-                        match &ty {
-                            Type::Custom(name) => name.clone(),
-                            _ => return self.spanned_err("Generic type must have a base name".to_string()),
-                        },
-                        type_args,
-                    );
-                }
+            } else if base_name == "Vector" && type_args.len() >= 2 {
+                let inner = Box::new(type_args[0].clone());
+                let dimensions = match Self::parse_vector_dimensions(&type_args) {
+                    Ok(d) => d,
+                    Err(e) => return self.spanned_err(e),
+                };
+                ty = Type::Vector(inner, dimensions);
             } else {
-                ty = Type::Applied(
-                    match &ty {
-                        Type::Custom(name) => name.clone(),
-                        _ => return self.spanned_err("Generic type must have a base name".to_string()),
-                    },
-                    type_args,
-                );
+                ty = Type::Applied(base_name, type_args);
             }
         }
 
@@ -8736,9 +8723,110 @@ let span = self.current_span();
     }
 
     /// Extract dimension size from a Type for Vector parsing
+    // 2026-07-08: Phase 2b — extract base name from both Custom and keyword types
+    // Returns the canonical string name of a type for generic application resolution.
+    // Handles keyword types (Int, UInt, Float, Bool, etc.) in addition to Custom types.
+    // This enables `Int<8>` parses as Applied("Int", [Width(8)]) → Bits.
+    fn type_to_base_name(ty: &Type) -> Option<String> {
+        let name = match ty {
+            Type::Custom(name) => name.clone(),
+            Type::Int => "Int".into(),
+            Type::UInt => "UInt".into(),
+            Type::Float => "Float".into(),
+            Type::Bool => "Bool".into(),
+            Type::String => "String".into(),
+            Type::Char => "Char".into(),
+            Type::Data => "Data".into(),
+            Type::Void => "void".into(),
+            Type::Int8 => "Int8".into(),
+            Type::Int16 => "Int16".into(),
+            Type::Int32 => "Int32".into(),
+            Type::UInt8 => "UInt8".into(),
+            Type::UInt16 => "UInt16".into(),
+            Type::UInt32 => "UInt32".into(),
+            Type::Float64 => "Float64".into(),
+            _ => return None,
+        };
+        Some(name)
+    }
+
+    // 2026-07-08: Phase 2b — resolve well-known type + Width(N) to Bits
+    // Enables `Int<8>`, `UInt<16>`, `Float<32>`, `Bits<64>` etc.
+    // Returns Some(Type::Bits) if base_name + type_args forms a known Bits type.
+    // Returns None for non-Bits types (HashMap, List, Ptr, etc.) or invalid widths.
+    // Only handles single Width(N) arguments — generic types like HashMap<Int, String>
+    // fall through to the standard Applied type path.
+    fn resolve_bits_type(base_name: &str, type_args: &[Type]) -> Option<Type> {
+        let width = match type_args {
+            [Type::Width(n)] => *n,
+            _ => return None,
+        };
+        let bits = match base_name {
+            "Int" | "i8" | "i16" | "i32" | "i64" => {
+                Type::Bits { width, interpretation: Interpretation::SignedInt }
+            }
+            "UInt" | "u8" | "u16" | "u32" | "u64" => {
+                Type::Bits { width, interpretation: Interpretation::UnsignedInt }
+            }
+            "Float" | "f32" => {
+                Type::Bits { width: 32.max(width), interpretation: Interpretation::Ieee754Float }
+            }
+            "f64" | "Float64" | "Double" => {
+                Type::Bits { width: 64.max(width), interpretation: Interpretation::Ieee754Float }
+            }
+            "Bool" => {
+                Type::Bits { width: 1, interpretation: Interpretation::Boolean }
+            }
+            "Bits" => {
+                Type::Bits { width, interpretation: Interpretation::RawData }
+            }
+            "Char" => {
+                Type::Bits { width: 32.max(width), interpretation: Interpretation::UnicodeScalar }
+            }
+            _ => return None,
+        };
+        Some(bits)
+    }
+
+    // 2026-07-08: Phase 2b — parse integer token as Type::Width(n) inside generic type arguments
+    // This is called from the generic <...> argument loop when the current token is an integer.
+    // Converts `Int<8>` to use Width(8) as the type argument, which resolve_bits_type then
+    // converts to Type::Bits.
+    fn parse_type_arg(&mut self) -> Result<Type, SyntaxError> {
+        if let Some(Ok(Token::Integer(n))) = self.current_token() {
+            let n = *n as u64;
+            self.advance();
+            return Ok(Type::Width(n));
+        }
+        self.parse_type()
+    }
+
+    // 2026-07-08: Phase 2b — extract vector dimensions from type args after the element type
+    // Converts Width(n) and integer-parsable Custom types into Dimension::Anonymous.
+    // Returns an error if any arg after the first is not a valid dimension.
+    fn parse_vector_dimensions(type_args: &[Type]) -> Result<Vec<crate::ast::Dimension>, String> {
+        let mut dimensions = Vec::new();
+        for arg in &type_args[1..] {
+            let size = Self::parse_dimension_size(arg)?;
+            dimensions.push(crate::ast::Dimension::Anonymous(size));
+        }
+        Ok(dimensions)
+    }
+
+    // 2026-07-08: Phase 2b — extract usize from a dimension type arg
+    fn parse_dimension_size(ty: &Type) -> Result<usize, String> {
+        match ty {
+            Type::Width(n) => Ok(*n as usize),
+            Type::Custom(s) => s.parse::<usize>().map_err(|_| format!("Invalid vector dimension: {}", s)),
+            _ => Err("Vector dimension must be an integer".to_string()),
+        }
+    }
+
+    // 2026-07-08: Phase 2b — handle Width(n) from integer token type args
     fn extract_dimension_size(ty: &Type) -> Option<usize> {
         match ty {
             Type::Custom(s) => s.parse::<usize>().ok(),
+            Type::Width(n) => Some(*n as usize),
             _ => None,
         }
     }
@@ -9471,6 +9559,79 @@ mod parser_tests {
         assert!(result.is_ok(), "Should parse i64 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
             assert!(matches!(&decl.ty, Type::Int), "Expected Int, got {:?}", decl.ty);
+        }
+    }
+
+    #[test]
+    fn test_parse_angle_bracket_bits_types() {
+        // Test Int<8> → Type::Bits { 8, SignedInt }
+        let s = r#"let x: Int<8> = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse Int<8>");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Bits { width: 8, interpretation: Interpretation::SignedInt }),
+                "Expected Bits<8> SignedInt, got {:?}", decl.ty);
+        }
+
+        // Test UInt<16> → Type::Bits { 16, UnsignedInt }
+        let s = r#"let y: UInt<16> = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse UInt<16>");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Bits { width: 16, interpretation: Interpretation::UnsignedInt }),
+                "Expected Bits<16> UnsignedInt, got {:?}", decl.ty);
+        }
+
+        // Test Float<32> → Type::Bits { 32, Ieee754Float }
+        let s = r#"let z: Float<32> = 0.0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse Float<32>");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Bits { width: 32, interpretation: Interpretation::Ieee754Float }),
+                "Expected Bits<32> Ieee754Float, got {:?}", decl.ty);
+        }
+
+        // Test Float<64> → Type::Bits { 64, Ieee754Float }
+        let s = r#"let w: Float<64> = 0.0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse Float<64>");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Bits { width: 64, interpretation: Interpretation::Ieee754Float }),
+                "Expected Bits<64> Ieee754Float, got {:?}", decl.ty);
+        }
+
+        // Test Bits<64> → Type::Bits { 64, RawData }
+        let s = r#"let d: Bits<64> = 0;"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse Bits<64>");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Bits { width: 64, interpretation: Interpretation::RawData }),
+                "Expected Bits<64> RawData, got {:?}", decl.ty);
+        }
+
+        // Test HashMap<String, Int> still works unchanged
+        let s = r#"let m: HashMap<String, Int> = HashMap.new();"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse HashMap<String, Int>");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Applied(n, _) if n == "HashMap"),
+                "Expected Applied(HashMap, ..), got {:?}", decl.ty);
+        }
+
+        // Test List<Int<8>> — nested Bits resolution
+        let s = r#"let v: List<Int<8>> = [1, 2, 3];"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse List<Int<8>>");
+        if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
+            assert!(matches!(&decl.ty, Type::Applied(n, args) if n == "List" && args.len() == 1),
+                "Expected Applied(List, [Bits<8>]), got {:?}", decl.ty);
         }
     }
 
