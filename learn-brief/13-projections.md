@@ -287,6 +287,10 @@ let v = read_i64(p, 0);            // Bounds-checked by contract
 | `TrailingZeros` | Int | Int | `@llvm.cttz` | `std/bits` |
 | `Absolute` | Int, Float | Int/Float | `@llvm.abs` / `@llvm.fabs` | `std/bits` |
 | `BitReverse` | Int | Int | `@llvm.bitreverse` | `std/bits` |
+| `Width` | Any | Int | Constant (bit width) | — |
+| `Endian` | Any | String (0/1) | Constant | — |
+| `Codec` | String | String | Constant | — |
+| `Ops` | Any | Int | Constant (count) | — |
 | `Type` | Any | Int | Constant | — |
 | `Ptr!` | Any | Int | Header load | — |
 | `Keys` | HashMap | `List<K>` | Iteration | — |
