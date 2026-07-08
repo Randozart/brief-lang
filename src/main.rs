@@ -2562,7 +2562,10 @@ fn link_and_optimize(
     let tu = type_universe::TypeUniverse::build(&program);
 
     // Phase 3.6: Normalize types (resolve defaults, desugar string literals)
-    normalize_types::normalize_types(&mut program, &tu);
+    // DEFERRED: blocked on Phase 2E (typechecker must understand applied types).
+    // When activated, the typechecker needs to produce applied types for literals
+    // (e.g., Applied("Float", [Width(32)]) instead of Custom("Float")).
+    // normalize_types::normalize_types(&mut program, &tu);
 
     let comp_target = if is_embedded {
         typechecker::CompilationTarget::Embedded

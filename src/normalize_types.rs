@@ -1,6 +1,18 @@
 // 2026-07-08: Phase 2C — type normalization pass
 // Resolves Custom/Applied types to their concrete Bits widths using
 // universe defaults. Runs after parsing, before typechecking and codegen.
+//
+// NOTE: Currently NOT wired into the compilation pipeline because the
+// typechecker doesn't yet understand Applied("Float", [Width(32)]) vs
+// Custom("Float"). The pass is ready for activation once Phase 2E
+// (typechecker migration) is complete. To activate, uncomment the
+// normalize_types call in main.rs after universe build.
+// 
+// To activate:
+//   1. Add `normalize_types::normalize_types(&mut program, &tu)` after
+//      universe build in main.rs (currently commented out)
+//   2. Update typechecker's literal type inference to produce applied types
+//   3. Update all expression type-checks to handle applied types
 
 use crate::ast::*;
 use crate::type_universe::TypeUniverse;

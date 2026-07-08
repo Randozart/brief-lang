@@ -214,19 +214,38 @@ impl LlvmBackend {
         writeln!(out, "declare i32 @getsockopt(i32, i32, i32, ptr, ptr)").ok();
     }
 
+    /// 2026-07-08: Phase 2D — fallback uses bit_width() bridge table
+    /// instead of listing every Custom type by name. Kept as fallback for
+    /// types not in the universe (test code, custom types before registration).
+    /// Note: Bool→"i8" (stored as 1 byte, not 1 bit) and Char→"i32" are
+    /// special cases where LLVM storage type != to_bits().
     fn fallback_llvm_type(ty: &Type) -> &'static str {
+        if ty.is_float_type() {
+            return match ty.to_bits() {
+                Some(64) => "double",
+                _ => "float",
+            };
+        }
         match ty {
-            Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
-            Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => "i8",
-            Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => "i16",
-            Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => "i32",
             Type::Custom(__t) if __t == "Bool" => "i8",
-            Type::Custom(__t) if __t == "Float" => "float",
-            Type::Custom(__t) if __t == "Float64" => "double",
             Type::Custom(__t) if __t == "Char" => "i32",
             Type::Custom(__t) if __t == "String" || __t == "Data" => "i8*",
             Type::Void => "void",
-            _ => "i64",
+            Type::Bits(w) => match w {
+                1 => "i8",
+                8 => "i8",
+                16 => "i16",
+                32 => "i32",
+                64 => "i64",
+                _ => "i64",
+            },
+            _ => match ty.to_bits() {
+                Some(w) if w <= 8 => "i8",
+                Some(16) => "i16",
+                Some(32) => "i32",
+                Some(64) => "i64",
+                _ => "i64",
+            },
         }
     }
 
