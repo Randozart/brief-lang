@@ -182,6 +182,7 @@ impl Type {
             "Float64" | "F64" | "f64" | "Double" => Some(64),
             "Bool" => Some(1),
             "Char" => Some(32),
+            "String" | "Data" => Some(64),
             _ => None,
         }
     }

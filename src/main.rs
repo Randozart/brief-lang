@@ -2560,8 +2560,8 @@ fn link_and_optimize(
     // Phase 3.5: Build the Type Universe for projection resolution
     let tu = type_universe::TypeUniverse::build(&program);
 
-    // Phase 3.6: Normalize types (resolve defaults, desugar string literals)
-    // DEFERRED: full normalize_types blocked on Phase 2E (typechecker).
+    // Phase 3.6: Normalize types (resolve defaults for user-defined types)
+    normalize_types::normalize_types(&mut program, &tu);
     normalize_types::desugar_string_literals(&mut program, &tu);
 
     let comp_target = if is_embedded {

@@ -73,6 +73,17 @@ pub struct TypeChecker {
 }
 
 impl TypeChecker {
+    /// Check if two types are equal, with Applied/Custom normalization for
+    /// Phase 2C NormalizeTypes compatibility. Applied("Int", [Width(64)]) is
+    /// treated as equal to Custom("Int") for type checking purposes.
+    fn types_are_equal(&self, a: &Type, b: &Type) -> bool {
+        if a == b { return true; }
+        match (a, b) {
+            (Type::Applied(an, _), Type::Custom(bn))
+            | (Type::Custom(an), Type::Applied(bn, _)) => an == bn,
+            _ => false,
+        }
+    }
     pub fn new() -> Self {
         TypeChecker {
             scopes: vec![HashMap::new()],
