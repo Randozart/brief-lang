@@ -889,13 +889,17 @@ impl LlvmBackend {
             // SSA violations (nbody %bfr errors). Integer types have no
             // such cache dependency — saving and reusing their registers
             // avoids the O(2^depth) double-emission (const_heavy fix).
-            if l_reg.ty != Type::Custom("Float".to_string()) && l_reg.ty != Type::Custom("Float64".to_string()) {
+            // 2026-07-08: Phase 2D — use universe storage check for
+            // native type detection instead of hardcoded name matching.
+            let l_is_native = universe.get(&l_key).map(|r| r.storage == "Native").unwrap_or(false);
+            if !l_is_native {
                 phase7b_l = Some(l_reg.clone());
             }
             if universe.types.contains_key(&l_key) {
                 let r_reg = self.emit_expr(out, r, indent);
                 let r_key = r_reg.ty.universe_key().to_string();
-                if r_reg.ty != Type::Custom("Float".to_string()) && r_reg.ty != Type::Custom("Float64".to_string()) {
+                let r_is_native = universe.get(&r_key).map(|r| r.storage == "Native").unwrap_or(false);
+                if !r_is_native {
                     phase7b_r = Some(r_reg.clone());
                 }
                 let rune = Self::op_str_to_rune(int_op);
@@ -941,16 +945,24 @@ impl LlvmBackend {
             phase7b_r.unwrap_or_else(|| self.emit_expr(out, r, indent)),
         );
 
+        // 2026-07-08: Phase 2D — universe storage check for native types.
+        // Falls back to name-based Float/Float64 check when universe is absent (tests).
+        let a_is_native = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(&a.ty))
+            .map(|r| r.storage == "Native")
+            .unwrap_or_else(|| a.ty == Type::Custom("Float".to_string()) || a.ty == Type::Custom("Float64".to_string()));
+        let b_is_native = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(&b.ty))
+            .map(|r| r.storage == "Native")
+            .unwrap_or_else(|| b.ty == Type::Custom("Float".to_string()) || b.ty == Type::Custom("Float64".to_string()));
+
         // ── Expression hash-consing dedup cache lookup ─────────────
         // 2026-07-01: Check if we already emitted this (op, lhs, rhs) within
-        // the current body scope. Only caches ops with string ≥ 3 chars
-        // (fadd, fmul, fsub, fdiv, sdiv, srem) — cheap integer ops like "add",
-        // "sub", "mul" on i64 are not cached since the HashMap lookup + insert
-        // (~50ns) exceeds the recomputation cost (~0.5ns for a single i64 add).
+        // the current body scope. ...
         // For float ops the benefit is in IR compactness: fewer instructions
         // means LLVM can find SIMD vectorization patterns more easily.
-        let dedup_op = if a.ty == Type::Custom("Float64".to_string()) || a.ty == Type::Custom("Float".to_string())
-            || b.ty == Type::Custom("Float64".to_string()) || b.ty == Type::Custom("Float".to_string()) {
+        // 2026-07-08: Phase 2D — use universe storage query instead of name matching.
+        let dedup_op = if a_is_native || b_is_native {
             float_op
         } else {
             int_op
@@ -962,9 +974,7 @@ impl LlvmBackend {
         };
         if let Some(ref key) = dedup_key {
             if let Some(cached) = self.fun.expr_dedup_cache.get(key) {
-                let result_ty = if a.ty == Type::Custom("Float64".to_string()) { Type::Custom("Float64".to_string()) }
-                                else if a.ty == Type::Custom("Float".to_string()) { Type::Custom("Float".to_string()) }
-                                else { a.ty.clone() };
+                let result_ty = a.ty.clone();
                 return TypedRegister { name: cached.clone(), ty: result_ty };
             }
         }
@@ -977,34 +987,26 @@ impl LlvmBackend {
         let ptr_ty = if is_a_ptr { Some(a.ty.clone()) }
                      else if is_b_ptr { Some(b.ty.clone()) }
                      else { None };
-        // 2026-06-29: Handle Float64 binary ops (fadd/fsub/fmul/fdiv double)
-        if a.ty == Type::Custom("Float64".to_string()) && b.ty == Type::Custom("Float64".to_string()) {
+        // Handle Native storage types (float/double) via universe query
+        if a_is_native && b_is_native && a.ty == b.ty {
             let fa = self.ensure_float_reg(out, indent, &a);
             let fb = self.ensure_float_reg(out, indent, &b);
+            let llvm_ty = self.operator_llvm_type(&a.ty);
             let fr = format!("%bfr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = {} fast double {}, {}", indent, fr, float_op, fa, fb).ok();
+            writeln!(out, "{}{} = {} fast {} {}, {}", indent, fr, float_op, llvm_ty, fa, fb).ok();
+            self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
             if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), fr.clone()); }
-            return TypedRegister { name: fr, ty: Type::Custom("Float64".to_string()) };
+            return TypedRegister { name: fr, ty: a.ty.clone() };
         }
-        if a.ty == Type::Custom("Float".to_string()) || b.ty == Type::Custom("Float".to_string()) {
-            // 2026-06-17: Skip float path if either operand is String/Data
-            // (prevents pointer→float corruption, e.g. String + Float).
-            if a.ty == Type::Custom("String".to_string()) || a.ty == Type::Custom("Data".to_string()) || b.ty == Type::Custom("String".to_string()) || b.ty == Type::Custom("Data".to_string()) {
-                let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let a_i64 = self.adapt_to_i64(out, indent, &a);
-                let b_i64 = self.adapt_to_i64(out, indent, &b);
-                writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
-                if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
-                return TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Custom("Int".to_string())) };
-            } else {
-                let fa = self.ensure_float_reg(out, indent, &a);
-                let fb = self.ensure_float_reg(out, indent, &b);
-                let fr = format!("%bfr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = {} fast float {}, {}", indent, fr, float_op, fa, fb).ok();
-                self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
-                if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), fr.clone()); }
-                return TypedRegister { name: fr, ty: Type::Custom("Float".to_string()) };
-            }
+        if a_is_native || b_is_native {
+            // Mixed: one operand is native float, the other is boxed.
+            // Box both to i64 and emit integer operation.
+            let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            let a_i64 = self.adapt_to_i64(out, indent, &a);
+            let b_i64 = self.adapt_to_i64(out, indent, &b);
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
+            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
+            return TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Custom("Int".to_string())) };
         }
         // 2026-06-29: Fixed-width integer same-type arithmetic (native width, no boxing)
         if a.ty.is_integral() && a.ty == b.ty {
@@ -1049,40 +1051,56 @@ impl LlvmBackend {
     // Falls back to identity (no-op) if unimplemented.
 
     /// Emit a call to a resolved operator's implementation.
-    /// 2026-07-08: Phase 2B — fixed register name double-wrap (%t%t8 bug),
-    /// added string literal handler, and added universe-driven LLVM type
-    /// selection (i64 for Boxed, float/double for Native).
+    /// 2026-07-08: Phase 2D — handles Native storage (float/double) by
+    /// calling ensure_float_reg on operands before emitting the opcode.
     fn emit_operator_call(&mut self, out: &mut String, indent: &str,
                           a: &TypedRegister, b: &TypedRegister,
                           op: &OpDeclaration) -> TypedRegister {
         let v = self.fun.next_reg();
         // 2026-07-08: Determine LLVM type from operand's type storage.
+        // For Native storage (float/double), ensure operands are in native form.
+        let is_native = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(&a.ty))
+            .map(|r| r.storage == "Native")
+            .unwrap_or(false);
+        let (op_a, op_b) = if is_native {
+            (self.ensure_float_reg(out, indent, a), self.ensure_float_reg(out, indent, b))
+        } else {
+            (a.name.clone(), b.name.clone())
+        };
         let llvm_ty = self.operator_llvm_type(&a.ty);
         match &op.implementation.as_ref() {
             // Intrinsic call: emit via the intrinsic name
             Expr::IntrinsicCall { intrinsic, .. } => {
                 writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
-                         indent, v, intrinsic.name(), a.name, b.name).ok();
+                         indent, v, intrinsic.name(), op_a, op_b).ok();
             }
             // Identifier → function call: call i64 @name(i64, i64)
             Expr::Identifier(name) => {
                 writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
-                         indent, v, name, a.name, b.name).ok();
+                         indent, v, name, op_a, op_b).ok();
             }
             // 2026-07-08: String literal → LLVM opcode, e.g. "add nsw" → add nsw i64 %a, %b
+            // For Native storage: "fadd fast" + ensure_float_reg operands → fadd fast float %fa, %fb
             Expr::String(llvm_op) => {
                 writeln!(out, "{}{} = {} {} {}, {}",
-                         indent, v, llvm_op, llvm_ty, a.name, b.name).ok();
+                         indent, v, llvm_op, llvm_ty, op_a, op_b).ok();
+                if is_native {
+                    self.fun.reg_float_cache.insert(v.clone(), v.clone());
+                }
             }
             Expr::Literal(lit) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
                 if let crate::features::literal::LiteralExpr::String(llvm_op) = lit.as_ref() {
                     writeln!(out, "{}{} = {} {} {}, {}",
-                             indent, v, llvm_op, llvm_ty, a.name, b.name).ok();
+                             indent, v, llvm_op, llvm_ty, op_a, op_b).ok();
+                    if is_native {
+                        self.fun.reg_float_cache.insert(v.clone(), v.clone());
+                    }
                 }
             }
             // Fallback: identity
             _ => {
-                writeln!(out, "{}{} = {} 0, {}", indent, v, llvm_ty, a.name).ok();
+                writeln!(out, "{}{} = {} 0, {}", indent, v, llvm_ty, op_a).ok();
             }
         }
         TypedRegister { name: v, ty: a.ty.clone() }
@@ -1091,6 +1109,7 @@ impl LlvmBackend {
     /// 2026-07-08: Look up the LLVM codegen type for a Brief type.
     /// Returns "float" for Native storage types ≤32 bits, "double" for >32,
     /// and "i64" for Boxed or unknown types (boxed to native register).
+    /// Falls back to name-based Float/Float64 check when universe is absent.
     fn operator_llvm_type(&self, ty: &Type) -> &'static str {
         if let Some(ref universe) = self.ctx.type_universe {
             if let Some(rt) = universe.get_by_type(ty) {
@@ -1103,7 +1122,10 @@ impl LlvmBackend {
                 };
             }
         }
-        "i64"
+        // Fallback for tests without universe
+        if ty == &Type::Custom("Float".to_string()) { "float" }
+        else if ty == &Type::Custom("Float64".to_string()) { "double" }
+        else { "i64" }
     }
 
     pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, cond: &str) -> TypedRegister {
