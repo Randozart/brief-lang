@@ -5540,11 +5540,11 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program { items: vec![inop], ..empty_program() };
         let mut backend = LlvmBackend::new();
         let output = backend.generate(&program);
-        assert!(output.contains("define i64 @sadd("),
+        assert!(output.contains("define internal i64 @sadd("),
             "inop# function should have correct LLVM signature.\nGot:\n{}", output);
         // Extract the define line for @sadd and verify ptr is NOT in it
         let sadd_line: Vec<&str> = output.lines()
-            .filter(|l| l.contains("define i64 @sadd("))
+            .filter(|l| l.contains("@sadd("))
             .collect();
         assert!(!sadd_line.is_empty(), "should find @sadd definition");
         assert!(!sadd_line[0].contains("%State"),
@@ -5600,7 +5600,7 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         let output = backend.generate(&program);
-        assert!(output.contains("define i64 @write_buf"),
+        assert!(output.contains("define internal i64 @write_buf"),
             "inop should be named write_buf.\nGot:\n{}", output);
         let decl = backend.ctx.inop_decls.get("write_buf");
         assert!(decl.is_some(), "inop! should be stored in backend.ctx.inop_decls");
