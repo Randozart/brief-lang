@@ -2,7 +2,7 @@
 // Auto-imported via prelude.
 
 inop __sys_sched_yield() -> Int {
-    %r = call i64 @sched_yield();
+    %r = call i64 @brief_sched_yield();
     ret i64 %r;
 };
 

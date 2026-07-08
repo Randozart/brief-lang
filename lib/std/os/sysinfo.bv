@@ -12,12 +12,12 @@ inop __sys_hostname() -> Int {
 };
 
 inop __sys_pagesize() -> Int {
-    %r = call i64 @pagesize();
+    %r = call i64 @brief_pagesize();
     ret i64 %r;
 };
 
 inop __sys_cpu_count() -> Int {
-    %r = call i64 @cpu_count();
+    %r = call i64 @brief_cpu_count();
     ret i64 %r;
 };
 

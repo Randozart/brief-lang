@@ -194,13 +194,12 @@ impl ImportResolver {
             let prelude_modules = [
                 "std/os/fs.bv", "std/os/net.bv", "std/os/signal.bv",
                 "std/os/ipc.bv", "std/os/thread.bv", "std/os/dir.bv",
-                "std/os/process.bv", "std/os/tty.bv", "std/os/time.bv",
-                "std/os/mem.bv", "std/os/rand.bv", "std/os/temp.bv",
-                "std/os/dynlib.bv", "std/os/debug.bv", "std/os/io.bv",
-                // Excluded — preamble declares with different types:
-                // user.bv (getuid/getgid libc decl uses i32, call uses i64)
-                // sched.bv, resource.bv, sysinfo.bv, ring.bv
-                // atomic.bv (needs LLVM IR, not C calls)
+                "std/os/process.bv", "std/os/tty.bv", "std/os/user.bv",
+                "std/os/time.bv", "std/os/mem.bv", "std/os/rand.bv",
+                "std/os/sched.bv", "std/os/resource.bv", "std/os/sysinfo.bv",
+                "std/os/temp.bv", "std/os/dynlib.bv", "std/os/debug.bv",
+                "std/os/ring.bv", "std/os/io.bv",
+                // atomic.bv excluded — atomics need LLVM IR, not C calls
             ];
             for module_path in &prelude_modules {
                 let has_import = items.iter().any(|item| {
