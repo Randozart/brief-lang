@@ -1,0 +1,9 @@
+// Terminal/TTY intrinsics
+// Phase 3: relocated from compiler Intrinsic enum
+
+inop tty_raw_mode#(fd: Int) -> Int;
+inop tty_size#(fd: Int, rows: Ptr<Int>, cols: Ptr<Int>) -> Int;
+inop tty_read_key#(fd: Int) -> Int;
+inop ttyname#(fd: Int) -> String;
+inop ioctl#(fd: Int, request: Int, argp: Ptr<Byte>) -> Int;
+inop isatty#(fd: Int) -> Int;

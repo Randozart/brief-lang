@@ -1,0 +1,9 @@
+// IPC intrinsics
+// Phase 3: relocated from compiler Intrinsic enum
+
+inop pipe#(pipefd: Ptr<Int>) -> Int;
+inop shm_open#(name: Ptr<Byte>, oflag: Int, mode: Int) -> Int;
+inop shm_unlink#(name: Ptr<Byte>) -> Int;
+inop sem_open#(name: Ptr<Byte>, oflag: Int, mode: Int, value: Int) -> Int;
+inop sem_wait#(sem: Ptr<Byte>) -> Int;
+inop sem_post#(sem: Ptr<Byte>) -> Int;

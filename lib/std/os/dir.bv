@@ -1,0 +1,17 @@
+// Directory/filesystem intrinsics
+// Phase 3: relocated from compiler Intrinsic enum
+
+inop mkdir#(path: Ptr<Byte>, mode: Int) -> Int;
+inop rmdir#(path: Ptr<Byte>) -> Int;
+inop unlink#(path: Ptr<Byte>) -> Int;
+inop rename#(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int;
+inop symlink#(target: Ptr<Byte>, linkpath: Ptr<Byte>) -> Int;
+inop readlink#(path: Ptr<Byte>, buf: Ptr<Byte>, bufsiz: Int) -> Int;
+inop link#(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int;
+inop getcwd#(buf: Ptr<Byte>, size: Int) -> Int;
+inop chdir#(path: Ptr<Byte>) -> Int;
+inop readdir#(dirp: Int, buf: Ptr<Byte>) -> Int;
+inop chmod#(path: Ptr<Byte>, mode: Int) -> Int;
+inop chown#(path: Ptr<Byte>, owner: Int, group: Int) -> Int;
+inop umask#(mask: Int) -> Int;
+inop access#(path: Ptr<Byte>, mode: Int) -> Int;

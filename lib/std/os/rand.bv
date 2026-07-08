@@ -1,0 +1,5 @@
+// Random/entropy intrinsics
+// Phase 3: relocated from compiler Intrinsic enum
+
+inop getrandom#(buf: Ptr<Byte>, len: Int, flags: Int) -> Int;
+inop errno#() -> Int;

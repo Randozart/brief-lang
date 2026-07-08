@@ -1,0 +1,8 @@
+// Signal intrinsics
+// Phase 3: relocated from compiler Intrinsic enum
+
+inop sigaction#(signum: Int, act: Ptr<Byte>, oldact: Ptr<Byte>) -> Int;
+inop sigprocmask#(how: Int, set: Ptr<Byte>, oldset: Ptr<Byte>) -> Int;
+inop kill#(pid: Int, sig: Int) -> Int;
+inop signalfd#(fd: Int, mask: Ptr<Byte>, flags: Int) -> Int;
+inop timerfd_create#(clockid: Int, flags: Int) -> Int;

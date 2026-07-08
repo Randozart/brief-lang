@@ -1,0 +1,11 @@
+// Threading intrinsics
+// Phase 3: relocated from compiler Intrinsic enum
+
+inop thread_create#(fn_ptr: Int, arg: Int) -> Int;
+inop thread_join#(thread: Int) -> Int;
+inop thread_exit#(code: Int) -> Void;
+inop mutex_lock#(mptr: Int) -> Int;
+inop mutex_unlock#(mptr: Int) -> Int;
+inop condvar_wait#(cptr: Int, mptr: Int) -> Int;
+inop condvar_signal#(cptr: Int) -> Int;
+inop condvar_broadcast#(cptr: Int) -> Int;

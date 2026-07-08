@@ -1,0 +1,10 @@
+// Core I/O intrinsics (user-facing)
+// Phase 3: relocated from compiler Intrinsic enum
+
+inop print#(s: Ptr<Byte>) -> Int;
+inop println#(s: Ptr<Byte>) -> Int;
+inop readln#(buf: Ptr<Byte>, size: Int) -> Int;
+inop getenv#(name: Ptr<Byte>, buf: Ptr<Byte>, size: Int) -> Int;
+inop setenv#(name: Ptr<Byte>, value: Ptr<Byte>, overwrite: Int) -> Int;
+inop unsetenv#(name: Ptr<Byte>) -> Int;
+inop set_stdout_buf#(mode: Int) -> Bool;
