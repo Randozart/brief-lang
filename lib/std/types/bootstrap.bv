@@ -275,6 +275,7 @@ type String <: Bits {
     tbaa <~ "String";
     box <~ "ptrtoint#";
     unbox <~ "inttoptr#";
+    default_width <~ 64;
 };
 
 type Data <: Bits {
@@ -285,4 +286,5 @@ type Data <: Bits {
     tbaa <~ "String";
     box <~ "ptrtoint#";
     unbox <~ "inttoptr#";
+    default_width <~ 64;
 };
