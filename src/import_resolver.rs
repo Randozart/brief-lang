@@ -199,7 +199,7 @@ impl ImportResolver {
                 "std/os/sched.bv", "std/os/resource.bv", "std/os/sysinfo.bv",
                 "std/os/temp.bv", "std/os/dynlib.bv", "std/os/debug.bv",
                 "std/os/ring.bv", "std/os/io.bv",
-                // atomic.bv excluded — atomics need LLVM IR, not C calls
+                "std/os/atomic.bv", // LLVM IR atomics (load, store, cas, xchg, add, fence, futex)
             ];
             for module_path in &prelude_modules {
                 let has_import = items.iter().any(|item| {

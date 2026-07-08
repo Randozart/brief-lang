@@ -4474,6 +4474,33 @@ mod tests {
                 "Int should have defining_module = 'builtin'");
         }
     }
+
+    // ── Phase 3: Atomic inop tests ─────────────────────────────
+    #[test]
+    fn test_atomic_load_via_inop_resolves_int() {
+        let mut ctx = super::TypeChecker::new();
+        let inop = crate::ast::InopDeclaration {
+            name: "atomic_load".to_string(),
+            type_params: vec![],
+            params: vec![("ptr".to_string(), Type::Applied("Ptr".to_string(), vec![Type::Bits(8)]))],
+            outputs: vec![Type::Custom("Int".to_string())],
+            contract: crate::ast::Contract::new(crate::ast::Expr::Bool(true), crate::ast::Expr::Bool(true)),
+            llvm_body: vec!["%r = load atomic i64, ptr %ptr seq_cst;".to_string()],
+            fallback: None,
+            has_side_effects: true,
+            has_state_access: true,
+            section: None,
+            llvm_body_spans: vec![],
+            span: None,
+        };
+        ctx.inop_decls.insert("atomic_load".to_string(), inop);
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UserDefined("atomic_load".to_string()),
+            args: vec![Expr::Integer(0)],
+        };
+        let ret = ctx.infer_expression(&expr);
+        assert_eq!(ret, Type::Custom("Int".to_string()));
+    }
 }
 
 #[cfg(all(feature = "kani", feature = "kani_full"))]
@@ -5106,6 +5133,36 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+    }
+
+    // ── Phase 3: Atomic inop tests ─────────────────────────────
+    // These test that the UserDefined fallback path resolves atomic
+    // inops to the correct return type via the prelude's inop_decls.
+
+    #[test]
+    fn test_atomic_load_via_inop_resolves_int() {
+        let mut ctx = TypeChecker::new();
+        // Simulate the prelude importing atomic.inop
+        ctx.inop_decls.insert("atomic_load".to_string(), crate::ast::InopDeclaration {
+            name: "atomic_load".to_string(),
+            type_params: vec![],
+            params: vec![("ptr".to_string(), Type::Applied("Ptr".to_string(), vec![Type::Bits(8)]))],
+            outputs: vec![Type::Custom("Int".to_string())],
+            contract: crate::ast::Contract::new(crate::ast::Expr::Bool(true), crate::ast::Expr::Bool(true)),
+            llvm_body: vec!["%r = load atomic i64, ptr %ptr seq_cst;".to_string()],
+            fallback: None,
+            has_side_effects: true,
+            has_state_access: true,
+            section: None,
+            llvm_body_spans: vec![],
+            span: None,
+        });
+        let expr = Expr::IntrinsicCall {
+            intrinsic: Intrinsic::UserDefined("atomic_load".to_string()),
+            args: vec![Expr::Integer(0)],
+        };
+        let ret = ctx.infer_expression(&expr);
+        assert_eq!(ret, Type::Custom("Int".to_string()));
     }
 
     #[test]

@@ -1,38 +1,46 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+// Uses direct LLVM IR atomic instructions (not C function calls).
 
-inop __sys_atomic_load(ptr: Ptr<Byte>) -> Int {
-    %r = call i64 @atomic_load(i64 %ptr);
+inop atomic_load(ptr: Ptr<Byte>) -> Int {
+    %p = inttoptr i64 %ptr to ptr;
+    %r = load atomic i64, ptr %p seq_cst, align 8;
     ret i64 %r;
 };
 
-inop __sys_atomic_store(ptr: Ptr<Byte>, val: Int) -> Int {
-    %r = call i64 @atomic_store(i64 %ptr, i64 %val);
+inop atomic_store(ptr: Ptr<Byte>, val: Int) -> Int {
+    %p = inttoptr i64 %ptr to ptr;
+    store atomic i64 %val, ptr %p seq_cst, align 8;
+    %r = add i64 0, 1;
     ret i64 %r;
 };
 
-inop __sys_atomic_cas(ptr: Ptr<Byte>, expected: Int, desired: Int) -> Int {
-    %r = call i64 @atomic_cas(i64 %ptr, i64 %expected, i64 %desired);
+inop atomic_cas(ptr: Ptr<Byte>, expected: Int, desired: Int) -> Int {
+    %p = inttoptr i64 %ptr to ptr;
+    %pair = cmpxchg ptr %p, i64 %expected, i64 %desired seq_cst seq_cst;
+    %r = extractvalue { i64, i1 } %pair, 0;
     ret i64 %r;
 };
 
-inop __sys_atomic_xchg(ptr: Ptr<Byte>, val: Int) -> Int {
-    %r = call i64 @atomic_xchg(i64 %ptr, i64 %val);
+inop atomic_xchg(ptr: Ptr<Byte>, val: Int) -> Int {
+    %p = inttoptr i64 %ptr to ptr;
+    %r = atomicrmw xchg ptr %p, i64 %val seq_cst, align 8;
     ret i64 %r;
 };
 
-inop __sys_atomic_add(ptr: Ptr<Byte>, val: Int) -> Int {
-    %r = call i64 @atomic_add(i64 %ptr, i64 %val);
+inop atomic_add(ptr: Ptr<Byte>, val: Int) -> Int {
+    %p = inttoptr i64 %ptr to ptr;
+    %r = atomicrmw add ptr %p, i64 %val seq_cst, align 8;
     ret i64 %r;
 };
 
-inop __sys_fence() -> Int {
-    %r = call i64 @fence();
+inop fence() -> Int {
+    fence seq_cst;
+    %r = add i64 0, 1;
     ret i64 %r;
 };
 
-inop __sys_futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int {
+inop futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int {
     %r = call i64 @brief_futex(i64 %uaddr, i64 %opcode, i64 %val, i64 %timeout, i64 %uaddr2, i64 %val3);
     ret i64 %r;
 };
-
