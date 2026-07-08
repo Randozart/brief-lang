@@ -485,6 +485,20 @@ impl TypeUniverse {
             }
         }
 
+        // ── Phase 2G: Add struct_layout to String type ─────────
+        if let Some(rt) = universe.types.get_mut("String") {
+            rt.struct_layout = Some(StructLayout {
+                fields: vec![
+                    StructField { name: "ptr".into(), ty: crate::ast::Type::Applied("Ptr".into(), vec![crate::ast::Type::Bits(8)]), offset_bits: 0, size_bits: 64 },
+                    StructField { name: "len".into(), ty: crate::ast::Type::Bits(64), offset_bits: 64, size_bits: 64 },
+                    StructField { name: "codec".into(), ty: crate::ast::Type::Bits(8), offset_bits: 128, size_bits: 8 },
+                ],
+                packed: false,
+                total_bytes: 24,
+                alignment: 8,
+            });
+        }
+
         universe
     }
 
@@ -733,6 +747,13 @@ impl TypeUniverse {
             "commuting" => {
                 if let Some(b) = binding.value.as_bool() {
                     rt.commuting = b;
+                }
+            }
+            "default_codec" => {
+                if let Some(n) = binding.value.as_integer() {
+                    rt.codec = Some(n.to_string());
+                } else if let Some(s) = type_universe_expr_to_string(&binding.value) {
+                    rt.codec = Some(s);
                 }
             }
             "constant_time" => {

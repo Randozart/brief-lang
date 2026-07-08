@@ -276,6 +276,7 @@ type String <: Bits {
     box <~ "ptrtoint#";
     unbox <~ "inttoptr#";
     default_width <~ 64;
+    default_codec <~ 0;
 };
 
 type Data <: Bits {
