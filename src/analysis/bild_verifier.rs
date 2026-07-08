@@ -124,7 +124,7 @@ mod tests {
             name: name.to_string(),
             type_params: vec![],
             params: params.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
-            outputs: vec![Type::Int],
+            outputs: vec![Type::Custom("Int".to_string())],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: body.into_iter().map(|s| s.to_string()).collect(),
             fallback: None,
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_valid_bild_body() {
-        let inop = make_inop("sadd", vec![("a", Type::Int), ("b", Type::Int)], vec![
+        let inop = make_inop("sadd", vec![("a", Type::Custom("Int".to_string())), ("b", Type::Custom("Int".to_string()))], vec![
             "%res = add i64 %a, %b;",
             "term %res;",
         ]);
@@ -148,7 +148,7 @@ mod tests {
 
     #[test]
     fn test_undefined_register() {
-        let inop = make_inop("bad", vec![("a", Type::Int)], vec![
+        let inop = make_inop("bad", vec![("a", Type::Custom("Int".to_string()))], vec![
             "%res = add i64 %a, %b;",
             "term %res;",
         ]);
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_missing_terminator() {
-        let inop = make_inop("noterm", vec![("a", Type::Int)], vec![
+        let inop = make_inop("noterm", vec![("a", Type::Custom("Int".to_string()))], vec![
             "%res = add i64 %a, %a;",
         ]);
         let errors = check_bild(&inop);
@@ -169,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_forward_reference_is_valid() {
-        let inop = make_inop("valid", vec![("a", Type::Int)], vec![
+        let inop = make_inop("valid", vec![("a", Type::Custom("Int".to_string()))], vec![
             "%t1 = add i64 %a, %a;",
             "%res = add i64 %t1, %a;",
             "term %res;",
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_term_bang_valid() {
-        let inop = make_inop("side", vec![("x", Type::Int)], vec![
+        let inop = make_inop("side", vec![("x", Type::Custom("Int".to_string()))], vec![
             "term!;",
         ]);
         let errors = check_bild(&inop);
@@ -189,14 +189,14 @@ mod tests {
 
     #[test]
     fn test_empty_body_no_errors() {
-        let inop = make_inop("empty", vec![("a", Type::Int)], vec![]);
+        let inop = make_inop("empty", vec![("a", Type::Custom("Int".to_string()))], vec![]);
         let errors = check_bild(&inop);
         assert!(errors.is_empty());
     }
 
     #[test]
     fn test_undefined_self_reference() {
-        let inop = make_inop("selfref", vec![("a", Type::Int)], vec![
+        let inop = make_inop("selfref", vec![("a", Type::Custom("Int".to_string()))], vec![
             "%res = add i64 %res, %a;",
             "term %res;",
         ]);
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_state_register_not_flagged() {
-        let inop = make_inop("has_state", vec![("a", Type::Int)], vec![
+        let inop = make_inop("has_state", vec![("a", Type::Custom("Int".to_string()))], vec![
             "%val = load i64, i8* %state;",
             "term %val;",
         ]);

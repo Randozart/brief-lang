@@ -10,7 +10,7 @@ pub struct SigCallExpr {
 }
 
 impl ExprTypecheck for SigCallExpr {
-    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Int) }
+    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) }
 }
 
 impl ExprEval for SigCallExpr {

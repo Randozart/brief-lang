@@ -218,7 +218,7 @@ mod tests {
     ) -> TopLevel {
         TopLevel::Transaction(Transaction {
             name: name.to_string(),
-            parameters: param_names.iter().map(|n| (n.to_string(), Type::Int)).collect(),
+            parameters: param_names.iter().map(|n| (n.to_string(), Type::Custom("Int".to_string()))).collect(),
             contract: Contract {
                 pre_condition: pre,
                 post_condition: Expr::Bool(true),

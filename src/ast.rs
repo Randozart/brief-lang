@@ -134,24 +134,20 @@ pub enum Dimension {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    Int,
-    Int8,
-    Int16,
-    Int32,
-    Float,
-    Float64,
-    String,
-    Bool,
-    Data,
+    // 2026-07-08: Phase 2A — strong Bits thesis
+    // Bits(u64) is the ONLY scalar primitive. All named types (Int, Float, String, etc.)
+    // are Custom/Applied types resolved through the TypeUniverse.
+    //
+    // Removed in Phase 2A: Int, Int8, Int16, Int32, UInt, UInt8, UInt16, UInt32,
+    // Float, Float64, Bool, Char, String, Data, Interpretation, BitsInfo.
+    //
+    // These are now Custom("Int"), Custom("String"), etc.
+    //
+    // Bits(u64): raw bit sequence of given width. No interpretation lens —
+    // type semantics (signedness, float vs int) live in the TypeUniverse.
+    Bits(u64),
     Void,
-    UInt,
-    UInt8,
-    UInt16,
-    UInt32,
-    Char,  // Unicode codepoint type
-    // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
-    // are defined as regular structs/enums in stdlib, not as AST variants.
-    // This keeps the language philosophically pure - no magic types.
+    /// User-named type: Custom("Int"), Custom("String"), Custom("MyType").
     Custom(String),
     Union(Vec<Type>),
     Tuple(Vec<Type>),
@@ -166,155 +162,103 @@ pub enum Type {
     /// Carries byte size and alignment for the pointee. Operations are spatial-only
     /// when the pointee is `Bits` — no semantic interpretation (add, field access, etc.).
     LayoutPtr(LayoutConstraint),
-    // 2026-07-07: Phase 2 — Bits thesis type system
-    /// Raw bits with explicit width and interpretation lens.
-    /// The canonical form all numeric types normalize to.
-    Bits { width: u64, interpretation: Interpretation },
     /// Type-level width literal: `Int<8>` uses `Applied("Int", [Width(8)])`.
     Width(u64),
 }
 
-/// 2026-07-07: Phase 2 — Bits thesis interpretation lens
-#[derive(Debug, Clone, PartialEq)]
-pub enum Interpretation {
-    SignedInt,
-    UnsignedInt,
-    Ieee754Float,
-    Boolean,
-    UnicodeScalar,
-    RawData,
-}
-
-/// 2026-07-07: Phase 2 — result of Type::to_bits()
-#[derive(Debug, Clone, PartialEq)]
-pub struct BitsInfo {
-    pub width: u64,
-    pub interpretation: Interpretation,
-}
-
-// 2026-06-29: Fixed-width type helpers for the explicit-width types feature
-// bit_width() and is_signed() enable the typechecker, interpreter, and
-// backends to handle all integer/float widths uniformly without match
-// duplication. Used by typechecker (binary_op_type, is_cast_valid,
-// types_are_width_compatible) and LLVM backend (type mapping, codegen).
+// 2026-07-08: Phase 2A — helper methods use Custom(name) bridge tables
+// and Bits(u64) width directly. The Interpretation enum is removed —
+// the TypeUniverse carries type semantics.
 impl Type {
+    /// Bridge table mapping known type names to their bit width.
+    /// Temporary until NormalizeTypes pass resolves all Custom types to Bits.
+    pub fn bit_width_for_name(name: &str) -> Option<u64> {
+        match name {
+            "Int" | "UInt" | "Int64" | "UInt64" | "i64" | "u64" => Some(64),
+            "Int32" | "UInt32" | "i32" | "u32" => Some(32),
+            "Int16" | "UInt16" | "i16" | "u16" => Some(16),
+            "Int8" | "UInt8" | "i8" | "u8" => Some(8),
+            "Float" | "F32" | "f32" => Some(32),
+            "Float64" | "F64" | "f64" | "Double" => Some(64),
+            "Bool" => Some(1),
+            "Char" => Some(32),
+            _ => None,
+        }
+    }
+
     pub fn bit_width(&self) -> Option<u64> {
         match self {
-            Type::Int8 | Type::UInt8 => Some(8),
-            Type::Int16 | Type::UInt16 => Some(16),
-            Type::Int32 | Type::UInt32 => Some(32),
-            Type::Int | Type::UInt => Some(64),
-            Type::Float => Some(32),
-            Type::Float64 => Some(64),
-            Type::Bits { width, .. } => Some(*width),
+            Type::Bits(w) => Some(*w),
+            Type::Custom(name) => Self::bit_width_for_name(name.as_str()),
+            Type::Constrained(inner, _) => inner.bit_width(),
             _ => None,
         }
     }
 
     pub fn is_signed(&self) -> Option<bool> {
         match self {
-            Type::Int8 | Type::Int16 | Type::Int32 | Type::Int => Some(true),
-            Type::UInt8 | Type::UInt16 | Type::UInt32 | Type::UInt => Some(false),
-            Type::Float | Type::Float64 => Some(true), // floats are signed in representation
-            Type::Bits { interpretation, .. } => match interpretation {
-                Interpretation::SignedInt | Interpretation::Ieee754Float => Some(true),
-                Interpretation::UnsignedInt | Interpretation::Boolean
-                | Interpretation::UnicodeScalar | Interpretation::RawData => Some(false),
+            Type::Bits(_) => None, // signedness is in the universe, not the type
+            Type::Custom(name) => match name.as_str() {
+                "Int" | "Int8" | "Int16" | "Int32" | "Int64"
+                | "i8" | "i16" | "i32" | "i64" => Some(true),
+                "UInt" | "UInt8" | "UInt16" | "UInt32" | "UInt64"
+                | "u8" | "u16" | "u32" | "u64" => Some(false),
+                "Float" | "F32" | "f32" | "Float64" | "F64" | "f64" | "Double" => Some(true),
+                _ => None,
             },
             _ => None,
         }
     }
 
     // 2026-06-29: Returns true for any fixed-width integer type
-    // Used by typechecker's is_cast_valid to allow all integer↔integer casts
     pub fn is_integral(&self) -> bool {
-        matches!(self,
-            Type::Int8 | Type::Int16 | Type::Int32 | Type::Int |
-            Type::UInt8 | Type::UInt16 | Type::UInt32 | Type::UInt
-        ) || matches!(self, Type::Bits { interpretation: Interpretation::SignedInt | Interpretation::UnsignedInt, .. })
+        self.bit_width().is_some()
+            && self.is_signed() != Some(true) // exclude signed (could be integer or float)
+            && self.is_signed().is_some() // must have known signedness
     }
 
     // 2026-06-29: Returns true for any fixed-width float type
-    // Used by typechecker's is_cast_valid to allow float↔float casts
     pub fn is_float_type(&self) -> bool {
-        matches!(self, Type::Float | Type::Float64) ||
-        matches!(self, Type::Bits { interpretation: Interpretation::Ieee754Float, .. })
+        matches!(self, Type::Custom(name) if matches!(name.as_str(),
+            "Float" | "Float64" | "F32" | "F64" | "f32" | "f64" | "Double"
+        ))
     }
 
     // 2026-06-29: Returns true for any numeric type (integer or float)
-    // Used by typechecker's is_cast_valid to allow cross-family casts
     pub fn is_numeric(&self) -> bool {
         self.is_integral() || self.is_float_type()
     }
 
-    /// 2026-07-07: Phase 2 — canoncial Bits form
-    /// Returns None for non-Bits types (Void, String, Data, custom types, etc.).
-    pub fn to_bits(&self) -> Option<BitsInfo> {
+    /// 2026-07-08: Phase 2A — returns bit width for types with known width.
+    /// Bits(u64) returns its width directly. Custom types with known names
+    /// (Int → 64, Float → 32, etc.) are bridged. Returns None for non-numeric types.
+    pub fn to_bits(&self) -> Option<u64> {
         match self {
-            Type::Int8 => Some(BitsInfo { width: 8, interpretation: Interpretation::SignedInt }),
-            Type::Int16 => Some(BitsInfo { width: 16, interpretation: Interpretation::SignedInt }),
-            Type::Int32 => Some(BitsInfo { width: 32, interpretation: Interpretation::SignedInt }),
-            Type::Int => Some(BitsInfo { width: 64, interpretation: Interpretation::SignedInt }),
-            Type::UInt8 => Some(BitsInfo { width: 8, interpretation: Interpretation::UnsignedInt }),
-            Type::UInt16 => Some(BitsInfo { width: 16, interpretation: Interpretation::UnsignedInt }),
-            Type::UInt32 => Some(BitsInfo { width: 32, interpretation: Interpretation::UnsignedInt }),
-            Type::UInt => Some(BitsInfo { width: 64, interpretation: Interpretation::UnsignedInt }),
-            Type::Float => Some(BitsInfo { width: 32, interpretation: Interpretation::Ieee754Float }),
-            Type::Float64 => Some(BitsInfo { width: 64, interpretation: Interpretation::Ieee754Float }),
-            Type::Bool => Some(BitsInfo { width: 1, interpretation: Interpretation::Boolean }),
-            Type::Char => Some(BitsInfo { width: 32, interpretation: Interpretation::UnicodeScalar }),
-            Type::Bits { width, interpretation } => Some(BitsInfo { width: *width, interpretation: interpretation.clone() }),
+            Type::Bits(w) => Some(*w),
+            Type::Custom(name) => Self::bit_width_for_name(name.as_str()),
+            Type::Constrained(inner, _) => inner.to_bits(),
             _ => None,
         }
     }
 
     // ── Phase 7A: Canonical universe key for backend property lookups ──
     //
-    // 2026-06-29: Maps every Type variant to its canonical name for
-    // TypeUniverse lookup. This is the SOLE place in the codebase where
-    // Type variants are matched for backend representation decisions.
-    // All other backend functions (llvm_type, tbaa_node, byte_size, etc.)
-    // use this key to query the universe.
-    //
-    // Returns "Int" as safe fallback for types without a universe entry.
+    // 2026-07-08: Phase 2A — simplified universe key for strong Bits thesis
+    // Custom types use their name, Bits(u64) returns "Bits".
+    // All clients query the TypeUniverse for ops, layout, and properties.
     pub fn universe_key(&self) -> &str {
         match self {
-            Type::Int => "Int",
-            Type::UInt => "UInt",
-            Type::Int8 => "Int8",
-            Type::UInt8 => "UInt8",
-            Type::Int16 => "Int16",
-            Type::UInt16 => "UInt16",
-            Type::Int32 => "Int32",
-            Type::UInt32 => "UInt32",
-            Type::Float => "Float",
-            Type::Float64 => "Float64",
-            Type::Bool => "Bool",
-            Type::Char => "Char",
-            Type::String => "String",
-            Type::Data => "Data",
+            Type::Custom(name) | Type::Enum(name) | Type::Sig(name)
+            | Type::Applied(name, _) | Type::Generic(name, _) => name.as_str(),
+            Type::Bits(_) => "Bits",
+            Type::Width(_) => "Width",
             Type::Void => "Void",
-            Type::Custom(name) => name.as_str(),
-            Type::Enum(name) => name.as_str(),
-            Type::Sig(name) => name.as_str(),
-            // 2026-07-07: Phase 2 — Bits thesis types
-            Type::Bits { interpretation: Interpretation::SignedInt, width: 64 } => "Int",
-            Type::Bits { interpretation: Interpretation::UnsignedInt, width: 64 } => "UInt",
-            Type::Bits { interpretation: Interpretation::SignedInt, width: 8 } => "Int8",
-            Type::Bits { interpretation: Interpretation::UnsignedInt, width: 8 } => "UInt8",
-            Type::Bits { interpretation: Interpretation::SignedInt, width: 16 } => "Int16",
-            Type::Bits { interpretation: Interpretation::UnsignedInt, width: 16 } => "UInt16",
-            Type::Bits { interpretation: Interpretation::SignedInt, width: 32 } => "Int32",
-            Type::Bits { interpretation: Interpretation::UnsignedInt, width: 32 } => "UInt32",
-            Type::Bits { interpretation: Interpretation::Ieee754Float, width: 32 } => "Float",
-            Type::Bits { interpretation: Interpretation::Ieee754Float, width: 64 } => "Float64",
-            Type::Bits { interpretation: Interpretation::Boolean, .. } => "Bool",
-            Type::Bits { interpretation: Interpretation::UnicodeScalar, .. } => "Char",
-            // Compound types without universe entries: use Int as safe default
-            Type::Union(_) | Type::Tuple(_) | Type::TypeVar(_)
-            | Type::Generic(_, _) | Type::Applied(_, _)
-            | Type::Vector(_, _) | Type::Constrained(_, _)
-            | Type::LayoutPtr(_) | Type::Width(_) | Type::Bits { .. } => "Int",
+            Type::Union(_) => "Union",
+            Type::Tuple(_) => "Tuple",
+            Type::TypeVar(name) => name.as_str(),
+            Type::Vector(_, _) => "Vector",
+            Type::Constrained(inner, _) => inner.universe_key(),
+            Type::LayoutPtr(_) => "LayoutPtr",
         }
     }
 
@@ -329,7 +273,7 @@ impl Type {
             Type::Applied(name, mut args) if name == "Ptr" && args.len() == 1 => {
                 let inner = args.remove(0);
                 match inner {
-                    Type::Constrained(inner_ty, br) if matches!(*inner_ty, Type::Data) => {
+                    Type::Constrained(inner_ty, br) if *inner_ty == Type::Custom("Data".to_string()) => {
                         let bits = match br {
                             BitRange::Range(start, end) => end - start + 1,
                             BitRange::Single(_) => 1,
@@ -3023,7 +2967,7 @@ impl Program {
         // Create state declaration: let __booted_N: Bool = false;
         let state_decl = TopLevel::StateDecl(StateDecl {
             name: booted_name.clone(),
-            ty: Type::Int,
+            ty: Type::Custom("Int".to_string()),
             expr: Some(Expr::Integer(0)),
             address: None,
             bit_range: None,
@@ -4101,7 +4045,7 @@ mod tests {
     #[test]
     fn test_normalize_layout_ptr_bits_range() {
         let ty = Type::Applied("Ptr".into(), vec![
-            Type::Constrained(Box::new(Type::Data), BitRange::Range(0, 63))
+            Type::Constrained(Box::new(Type::Custom("Data".to_string())), BitRange::Range(0, 63))
         ]);
         let result = ty.normalize_layout_ptr();
         assert_eq!(result, Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 }));
@@ -4110,7 +4054,7 @@ mod tests {
     #[test]
     fn test_normalize_layout_ptr_bits_any() {
         let ty = Type::Applied("Ptr".into(), vec![
-            Type::Constrained(Box::new(Type::Data), BitRange::Any(32))
+            Type::Constrained(Box::new(Type::Custom("Data".to_string())), BitRange::Any(32))
         ]);
         let result = ty.normalize_layout_ptr();
         assert_eq!(result, Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }));
@@ -4119,9 +4063,9 @@ mod tests {
     #[test]
     fn test_normalize_layout_ptr_typed_stays_applied() {
         // Ptr<Int> should stay as Applied("Ptr", [Int])
-        let ty = Type::Applied("Ptr".into(), vec![Type::Int]);
+        let ty = Type::Applied("Ptr".into(), vec![Type::Custom("Int".to_string())]);
         let result = ty.normalize_layout_ptr();
-        assert_eq!(result, Type::Applied("Ptr".into(), vec![Type::Int]));
+        assert_eq!(result, Type::Applied("Ptr".into(), vec![Type::Custom("Int".to_string())]));
     }
 
     #[test]
@@ -4135,14 +4079,14 @@ mod tests {
     #[test]
     fn test_normalize_layout_ptr_in_union() {
         let ty = Type::Union(vec![
-            Type::Int,
+            Type::Custom("Int".to_string()),
             Type::Applied("Ptr".into(), vec![
-                Type::Constrained(Box::new(Type::Data), BitRange::Range(0, 31))
+                Type::Constrained(Box::new(Type::Custom("Data".to_string())), BitRange::Range(0, 31))
             ]),
         ]);
         let result = ty.normalize_layout_ptr();
         assert_eq!(result, Type::Union(vec![
-            Type::Int,
+            Type::Custom("Int".to_string()),
             Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }),
         ]));
     }

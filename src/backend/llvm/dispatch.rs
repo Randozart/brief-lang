@@ -144,7 +144,7 @@ impl LlvmBackend {
     // - Cast(Identifier(n), Int): Ptr<T> field address range
     fn unwrap_cast_to_ident(e: &Expr) -> Option<&str> {
         match e {
-            Expr::Cast(inner, Type::Int) => Self::unwrap_cast_to_ident(inner),
+            Expr::Cast(inner, Type::Custom(__t)) if __t == "Int" => Self::unwrap_cast_to_ident(inner),
             Expr::Identifier(n) => Some(n.as_str()),
             _ => None,
         }

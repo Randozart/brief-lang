@@ -166,23 +166,23 @@ impl MemorySpec {
 
 fn format_type(ty: &Type) -> String {
     match ty {
-        Type::Int => "Int".to_string(),
-        Type::Int8 => "Int8".to_string(),
-        Type::Int16 => "Int16".to_string(),
-        Type::Int32 => "Int32".to_string(),
-        Type::UInt => "UInt".to_string(),
-        Type::UInt8 => "UInt8".to_string(),
-        Type::UInt16 => "UInt16".to_string(),
-        Type::UInt32 => "UInt32".to_string(),
-        Type::Bits { width, .. } => format!("Bits<{}>", width),
+        Type::Custom(__t) if __t == "Int" => "Int".to_string(),
+        Type::Custom(__t) if __t == "Int8" => "Int8".to_string(),
+        Type::Custom(__t) if __t == "Int16" => "Int16".to_string(),
+        Type::Custom(__t) if __t == "Int32" => "Int32".to_string(),
+        Type::Custom(__t) if __t == "UInt" => "UInt".to_string(),
+        Type::Custom(__t) if __t == "UInt8" => "UInt8".to_string(),
+        Type::Custom(__t) if __t == "UInt16" => "UInt16".to_string(),
+        Type::Custom(__t) if __t == "UInt32" => "UInt32".to_string(),
+        Type::Bits(width) => format!("Bits<{}>", width),
         Type::Width(n) => format!("Width({})", n),
-        Type::Float => "Float".to_string(),
-        Type::Float64 => "Float64".to_string(),
-        Type::Bool => "Bool".to_string(),
-        Type::String => "String".to_string(),
+        Type::Custom(__t) if __t == "Float" => "Float".to_string(),
+        Type::Custom(__t) if __t == "Float64" => "Float64".to_string(),
+        Type::Custom(__t) if __t == "Bool" => "Bool".to_string(),
+        Type::Custom(__t) if __t == "String" => "String".to_string(),
         Type::Void => "void".to_string(),
-        Type::Data => "Data".to_string(),
-        Type::Char => "Char".to_string(),
+        Type::Custom(__t) if __t == "Data" => "Data".to_string(),
+        Type::Custom(__t) if __t == "Char" => "Char".to_string(),
         Type::Custom(name) => name.clone(),
         Type::Union(types) => {
             let inner: Vec<_> = types.iter().map(format_type).collect();
@@ -228,17 +228,17 @@ fn format_bit_range(br: &BitRange) -> String {
 
 fn estimate_type_size(ty: &Type) -> usize {
     match ty {
-        Type::Int | Type::UInt => 8,
-        Type::Int8 | Type::UInt8 => 1,
-        Type::Int16 | Type::UInt16 => 2,
-        Type::Int32 | Type::UInt32 => 4,
-        Type::Float => 8,
-        Type::Float64 => 8,
-        Type::Bool => 1,
-        Type::String => 24,
+        Type::Custom(__t) if __t == "Int" || __t == "UInt" => 8,
+        Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => 1,
+        Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => 2,
+        Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => 4,
+        Type::Custom(__t) if __t == "Float" => 8,
+        Type::Custom(__t) if __t == "Float64" => 8,
+        Type::Custom(__t) if __t == "Bool" => 1,
+        Type::Custom(__t) if __t == "String" => 24,
         Type::Void => 0,
-        Type::Data => 24,
-        Type::Char => 4,
+        Type::Custom(__t) if __t == "Data" => 24,
+        Type::Custom(__t) if __t == "Char" => 4,
         Type::Custom(_) => 8,
         Type::Union(types) => types.iter().map(estimate_type_size).max().unwrap_or(8),
         Type::Tuple(types) => types.iter().map(estimate_type_size).sum(),
@@ -258,7 +258,7 @@ fn estimate_type_size(ty: &Type) -> usize {
         Type::Constrained(_, BitRange::Any(n)) => (*n + 7) / 8,
         Type::Constrained(_, BitRange::Range(start, end)) => (end - start + 1 + 7) / 8,
         // 2026-07-03: Layout-constrained pointer — value is always pointer-width (8 bytes on x86_64)
-        Type::LayoutPtr(_) | Type::Bits { .. } | Type::Width(_) => 8,
+        Type::LayoutPtr(_) | Type::Bits(_) | Type::Width(_) => 8,
     }
 }
 
@@ -300,18 +300,18 @@ mod tests {
 
     #[test]
     fn test_estimate_type_size() {
-        assert_eq!(estimate_type_size(&Type::Bool), 1);
-        assert_eq!(estimate_type_size(&Type::Int), 8);
+        assert_eq!(estimate_type_size(&Type::Custom("Bool".to_string())), 1);
+        assert_eq!(estimate_type_size(&Type::Custom("Int".to_string())), 8);
         assert_eq!(
             estimate_type_size(&Type::Constrained(
-                Box::new(Type::UInt),
+                Box::new(Type::Custom("UInt".to_string())),
                 BitRange::Any(8)
             )),
             1
         );
         assert_eq!(
             estimate_type_size(&Type::Constrained(
-                Box::new(Type::UInt),
+                Box::new(Type::Custom("UInt".to_string())),
                 BitRange::Any(32)
             )),
             4

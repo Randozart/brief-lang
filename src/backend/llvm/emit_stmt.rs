@@ -335,7 +335,7 @@ impl LlvmBackend {
     fn adapt_via_box_op(&mut self, out: &mut String, indent: &str, r: &TypedRegister, box_op: &str) -> String {
         match box_op {
             // Already i64 — no conversion needed
-            _ if r.ty == Type::Char => r.name.clone(),
+            _ if r.ty == Type::Custom("Char".to_string()) => r.name.clone(),
 
             // Bool: zext i1 to i64
             "zext.i1.to.i64#" => {
@@ -408,20 +408,20 @@ impl LlvmBackend {
     /// Fallback boxing when universe is not available (unit tests).
     /// 2026-06-29: Will be removed once all tests go through the full pipeline.
     fn adapt_to_i64_fallback(&mut self, out: &mut String, indent: &str, r: &TypedRegister) -> String {
-        if r.ty == Type::Bool {
+        if r.ty == Type::Custom("Bool".to_string()) {
             let z = format!("%rz{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = zext i1 {} to i64", indent, z, r.name).ok();
             z
-        } else if r.ty == Type::Char {
+        } else if r.ty == Type::Custom("Char".to_string()) {
             r.name.clone()
-        } else if r.ty == Type::String || r.ty == Type::Data {
+        } else if r.ty == Type::Custom("String".to_string()) || r.ty == Type::Custom("Data".to_string()) {
             let is_boxed = r.name.starts_with("%t") || r.name.starts_with("%d");
             if is_boxed { r.name.clone() } else {
                 let p = format!("%rp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, r.name).ok();
                 p
             }
-        } else if r.ty == Type::Float {
+        } else if r.ty == Type::Custom("Float".to_string()) {
             let cached = self.fun.reg_float_cache.get(&r.name);
             let fl = if let Some(cached) = cached { cached.clone() } else { r.name.clone() };
             let bi = format!("%rbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -429,31 +429,31 @@ impl LlvmBackend {
             let ze = format!("%rze{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
             ze
-        } else if r.ty == Type::Float64 {
+        } else if r.ty == Type::Custom("Float64".to_string()) {
             let bi = format!("%rbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = bitcast double {} to i64", indent, bi, r.name).ok();
             bi
-        } else if r.ty == Type::Int8 {
+        } else if r.ty == Type::Custom("Int8".to_string()) {
             let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = sext i8 {} to i64", indent, ex, r.name).ok();
             ex
-        } else if r.ty == Type::UInt8 {
+        } else if r.ty == Type::Custom("UInt8".to_string()) {
             let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = zext i8 {} to i64", indent, ex, r.name).ok();
             ex
-        } else if r.ty == Type::Int16 {
+        } else if r.ty == Type::Custom("Int16".to_string()) {
             let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = sext i16 {} to i64", indent, ex, r.name).ok();
             ex
-        } else if r.ty == Type::UInt16 {
+        } else if r.ty == Type::Custom("UInt16".to_string()) {
             let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = zext i16 {} to i64", indent, ex, r.name).ok();
             ex
-        } else if r.ty == Type::Int32 {
+        } else if r.ty == Type::Custom("Int32".to_string()) {
             let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = sext i32 {} to i64", indent, ex, r.name).ok();
             ex
-        } else if r.ty == Type::UInt32 {
+        } else if r.ty == Type::Custom("UInt32".to_string()) {
             let ex = format!("%rex{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = zext i32 {} to i64", indent, ex, r.name).ok();
             ex
@@ -486,11 +486,11 @@ impl LlvmBackend {
                         // Phase 3: Decay chimera return value at term boundary
                         let r = self.emit_decay(out, &r, None, indent);
                         if self.fun.fn_ret_ty == "i32" {
-                            if r.ty == Type::Bool {
+                            if r.ty == Type::Custom("Bool".to_string()) {
                                 let z = format!("%rz{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                                 writeln!(out, "{}{} = zext i1 {} to i32", indent, z, r.name).ok();
                                 writeln!(out, "{}ret i32 {}", indent, z).ok();
-                            } else if r.ty == Type::Char {
+                            } else if r.ty == Type::Custom("Char".to_string()) {
                                 writeln!(out, "{}ret i32 {}", indent, r).ok();
                             } else {
                                 let tr = format!("%tr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -645,13 +645,13 @@ impl LlvmBackend {
                 if let Some(e) = expr {
                     let r = self.emit_expr(out, e, indent);
                     // 2026-06-17: Emit type conversion when annotation differs from emitted type.
-                    // e.g. `let c: Char = s[pos]` — s[pos] loads i64 (Type::Int) but annotation
-                    // is Type::Char (i32 native). Without the trunc, adapt_to_i64 would double-
+                    // e.g. `let c: Char = s[pos]` — s[pos] loads i64 (Type::Custom("Int".to_string())) but annotation
+                    // is Type::Custom("Char".to_string()) (i32 native). Without the trunc, adapt_to_i64 would double-
                     // zext i64→zext i32 i64, producing invalid LLVM IR.
                     if let Some(ann_ty) = ty.as_ref() {
                         if *ann_ty != r.ty {
                             match (ann_ty, &r.ty) {
-                                (Type::Char, Type::Int | Type::UInt) => {
+                                (Type::Custom(__t), Type::Custom(__s)) if __t == "Char" && (__s == "Int" || __s == "UInt") => {
                                     let cv = format!("%clv{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                                     writeln!(out, "{}{} = trunc i64 {} to i32", indent, cv, r.name).ok();
                                     self.fun.let_bindings.insert(name.clone(), cv.clone());
@@ -854,7 +854,7 @@ impl LlvmBackend {
                     let val_boxed = self.adapt_to_i64(out, indent, &val);
                     writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, val_boxed, slot).ok();
                     self.fun.let_bindings.insert(fname.clone(), val_boxed.clone());
-                    self.fun.let_binding_types.insert(fname.clone(), Type::Int);
+                    self.fun.let_binding_types.insert(fname.clone(), Type::Custom("Int".to_string()));
                 } else {
                     self.fun.let_bindings.insert(fname.clone(), val.name.clone());
                     self.fun.let_binding_types.insert(fname.clone(), val.ty.clone());
@@ -863,7 +863,7 @@ impl LlvmBackend {
             }
             Statement::Guarded { condition, statements, .. } => {
                 let cond = self.emit_expr(out, condition, indent);
-                let i1 = if cond.ty == Type::Bool {
+                let i1 = if cond.ty == Type::Custom("Bool".to_string()) {
                     cond.name.clone()
                 } else {
                     let i1 = format!("%gc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -920,7 +920,7 @@ impl LlvmBackend {
                                         let ld = format!("%gl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                                         writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ld, p).ok();
                                         // 2026-06-17: Box float to i64 for uniform i64 store
-                                        let av_i64 = if av.ty == Type::Float {
+                                        let av_i64 = if av.ty == Type::Custom("Float".to_string()) {
                                             self.adapt_to_i64(out, indent, &av)
                                         } else {
                                             av.name.clone()
@@ -1109,7 +1109,7 @@ impl LlvmBackend {
                                                       _builder: &mut crate::backend::llvm::LLVMBuilder,
                                                       _expr: &crate::ast::Expr,
                                                       _indent: &str| {
-                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Int }
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Custom("Int".to_string()) }
                 });
             }
             Statement::Oracle { body, handler, .. } => {
@@ -1151,7 +1151,7 @@ impl LlvmBackend {
                 if let Some(ty) = self.fun.let_binding_types.get(&val.name).cloned() {
                     self.fun.let_binding_types.insert(name.clone(), ty);
                 } else {
-                    self.fun.let_binding_types.insert(name.clone(), Type::Int);
+                    self.fun.let_binding_types.insert(name.clone(), Type::Custom("Int".to_string()));
                 }
             }
         }
@@ -1216,13 +1216,13 @@ fn bind_pattern_fields(
         match field {
             crate::ast::Pattern::Var(name) => {
                 let_bindings.insert(name.clone(), payload_reg.to_string());
-                let_binding_types.insert(name.clone(), Type::Int);
+                let_binding_types.insert(name.clone(), Type::Custom("Int".to_string()));
             }
             crate::ast::Pattern::Tuple(subfields) => {
                 for sub in subfields {
                     if let crate::ast::Pattern::Var(name) = sub {
                         let_bindings.insert(name.clone(), payload_reg.to_string());
-                        let_binding_types.insert(name.clone(), Type::Int);
+                        let_binding_types.insert(name.clone(), Type::Custom("Int".to_string()));
                     }
                 }
             }

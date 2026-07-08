@@ -1884,22 +1884,22 @@ impl<'a> Parser<'a> {
     /// Convert a type name string to a Type
     fn string_to_type(&self, type_name: &str) -> Result<Type, SyntaxError> {
         match type_name {
-            "String" => Ok(Type::String),
-            "Int" => Ok(Type::Int),
-            "UInt" => Ok(Type::UInt),
-            "Float" => Ok(Type::Float),
-            "Bool" => Ok(Type::Bool),
+            "String" => Ok(Type::Custom("String".to_string())),
+            "Int" => Ok(Type::Custom("Int".to_string())),
+            "UInt" => Ok(Type::Custom("UInt".to_string())),
+            "Float" => Ok(Type::Custom("Float".to_string())),
+            "Bool" => Ok(Type::Custom("Bool".to_string())),
             "void" => Ok(Type::Void),
-            "Data" => Ok(Type::Data),
+            "Data" => Ok(Type::Custom("Data".to_string())),
             // Shorthand sized types (syntactic sugar for Int/UInt @/xN)
-            "u8" => Ok(Type::UInt8),
-            "i8" => Ok(Type::Int8),
-            "u16" => Ok(Type::UInt16),
-            "i16" => Ok(Type::Int16),
-            "u32" => Ok(Type::UInt32),
-            "i32" => Ok(Type::Int32),
-            "u64" => Ok(Type::UInt),
-            "i64" => Ok(Type::Int),
+            "u8" => Ok(Type::Custom("UInt8".to_string())),
+            "i8" => Ok(Type::Custom("Int8".to_string())),
+            "u16" => Ok(Type::Custom("UInt16".to_string())),
+            "i16" => Ok(Type::Custom("Int16".to_string())),
+            "u32" => Ok(Type::Custom("UInt32".to_string())),
+            "i32" => Ok(Type::Custom("Int32".to_string())),
+            "u64" => Ok(Type::Custom("UInt".to_string())),
+            "i64" => Ok(Type::Custom("Int".to_string())),
             other => Ok(Type::Custom(other.to_string())),
         }
     }
@@ -6560,110 +6560,110 @@ let span = self.current_span();
             }
             Some(Ok(Token::TypeData)) => {
                 self.advance();
-                Type::Data
+                Type::Custom("Data".to_string())
             }
             Some(Ok(Token::TypeInt)) => {
                 self.advance();
-                Type::Int
+                Type::Custom("Int".to_string())
             }
             Some(Ok(Token::TypeUInt))
             | Some(Ok(Token::TypeUnsigned))
             | Some(Ok(Token::TypeUSgn)) => {
                 self.advance();
-                Type::UInt
+                Type::Custom("UInt".to_string())
             }
             Some(Ok(Token::TypeSigned)) | Some(Ok(Token::TypeSgn)) => {
                 self.advance();
-                Type::Int
+                Type::Custom("Int".to_string())
             }
             Some(Ok(Token::TypeFloat)) => {
                 self.advance();
-                Type::Float
+                Type::Custom("Float".to_string())
             }
             Some(Ok(Token::TypeString)) => {
                 self.advance();
-                Type::String
+                Type::Custom("String".to_string())
             }
             Some(Ok(Token::TypeBool)) => {
                 self.advance();
-                Type::Bool
+                Type::Custom("Bool".to_string())
             }
             Some(Ok(Token::TypeChar)) => {
                 self.advance();
-                Type::Char
+                Type::Custom("Char".to_string())
             }
             // Shorthand sized integer types (syntactic sugar for Int/UInt @/xN)
             Some(Ok(Token::TypeU8)) => {
                 self.advance();
-                Type::UInt8
+                Type::Custom("UInt8".to_string())
             }
             Some(Ok(Token::TypeI8)) => {
                 self.advance();
-                Type::Int8
+                Type::Custom("Int8".to_string())
             }
             Some(Ok(Token::TypeU16)) => {
                 self.advance();
-                Type::UInt16
+                Type::Custom("UInt16".to_string())
             }
             Some(Ok(Token::TypeI16)) => {
                 self.advance();
-                Type::Int16
+                Type::Custom("Int16".to_string())
             }
             Some(Ok(Token::TypeU32)) => {
                 self.advance();
-                Type::UInt32
+                Type::Custom("UInt32".to_string())
             }
             Some(Ok(Token::TypeI32)) => {
                 self.advance();
-                Type::Int32
+                Type::Custom("Int32".to_string())
             }
             Some(Ok(Token::TypeU64)) => {
                 self.advance();
-                Type::UInt
+                Type::Custom("UInt".to_string())
             }
             Some(Ok(Token::TypeI64)) => {
                 self.advance();
-                Type::Int
+                Type::Custom("Int".to_string())
             }
             Some(Ok(Token::TypeInt8)) | Some(Ok(Token::TypeI8)) => {
                 self.advance();
-                Type::Int8
+                Type::Custom("Int8".to_string())
             }
             Some(Ok(Token::TypeUInt8)) | Some(Ok(Token::TypeU8)) => {
                 self.advance();
-                Type::UInt8
+                Type::Custom("UInt8".to_string())
             }
             Some(Ok(Token::TypeInt16)) | Some(Ok(Token::TypeI16)) => {
                 self.advance();
-                Type::Int16
+                Type::Custom("Int16".to_string())
             }
             Some(Ok(Token::TypeUInt16)) | Some(Ok(Token::TypeU16)) => {
                 self.advance();
-                Type::UInt16
+                Type::Custom("UInt16".to_string())
             }
             Some(Ok(Token::TypeInt32)) | Some(Ok(Token::TypeI32)) => {
                 self.advance();
-                Type::Int32
+                Type::Custom("Int32".to_string())
             }
             Some(Ok(Token::TypeUInt32)) | Some(Ok(Token::TypeU32)) => {
                 self.advance();
-                Type::UInt32
+                Type::Custom("UInt32".to_string())
             }
             Some(Ok(Token::TypeInt64)) | Some(Ok(Token::TypeI64)) => {
                 self.advance();
-                Type::Int
+                Type::Custom("Int".to_string())
             }
             Some(Ok(Token::TypeUInt64)) | Some(Ok(Token::TypeU64)) => {
                 self.advance();
-                Type::UInt
+                Type::Custom("UInt".to_string())
             }
             Some(Ok(Token::TypeFloat32)) | Some(Ok(Token::TypeF32)) => {
                 self.advance();
-                Type::Float
+                Type::Custom("Float".to_string())
             }
             Some(Ok(Token::TypeFloat64)) | Some(Ok(Token::TypeF64)) | Some(Ok(Token::TypeDouble)) => {
                 self.advance();
-                Type::Float64
+                Type::Custom("Float64".to_string())
             }
             // Note: HashMap, HashSet, StringBuilder, Stack, Queue are parsed as
             // regular identifiers (Custom/Applied types) defined in stdlib.
@@ -6736,11 +6736,11 @@ let span = self.current_span();
                 self.expect(Token::RBracket)?;
                 let arg_type = match inner {
                     Expr::Identifier(name) => match name.as_str() {
-                        "Int" => Type::Int,
-                        "Float" => Type::Float,
-                        "Bool" => Type::Bool,
-                        "String" => Type::String,
-                        "Char" => Type::Char,
+                        "Int" => Type::Custom("Int".to_string()),
+                        "Float" => Type::Custom("Float".to_string()),
+                        "Bool" => Type::Custom("Bool".to_string()),
+                        "String" => Type::Custom("String".to_string()),
+                        "Char" => Type::Custom("Char".to_string()),
                         "Void" => Type::Void,
                         _ => Type::Custom(name),
                     },
@@ -7782,14 +7782,14 @@ let span = self.current_span();
                 self.advance();
                 Ok(Expr::Literal(Box::new(LiteralExpr::Float(val))))
             }
-            Some(Ok(Token::IntegerI8(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Int8)) }
-            Some(Ok(Token::IntegerI16(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Int16)) }
-            Some(Ok(Token::IntegerI32(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Int32)) }
-            Some(Ok(Token::IntegerI64(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Int)) }
-            Some(Ok(Token::IntegerU8(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::UInt8)) }
-            Some(Ok(Token::IntegerU16(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::UInt16)) }
-            Some(Ok(Token::IntegerU32(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::UInt32)) }
-            Some(Ok(Token::IntegerU64(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::UInt)) }
+            Some(Ok(Token::IntegerI8(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Custom("Int8".to_string()))) }
+            Some(Ok(Token::IntegerI16(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Custom("Int16".to_string()))) }
+            Some(Ok(Token::IntegerI32(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Custom("Int32".to_string()))) }
+            Some(Ok(Token::IntegerI64(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Custom("Int".to_string()))) }
+            Some(Ok(Token::IntegerU8(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Custom("UInt8".to_string()))) }
+            Some(Ok(Token::IntegerU16(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Custom("UInt16".to_string()))) }
+            Some(Ok(Token::IntegerU32(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Custom("UInt32".to_string()))) }
+            Some(Ok(Token::IntegerU64(n))) => { let n = *n; self.advance(); Ok(Expr::IntegerSuffixed(n, Type::Custom("UInt".to_string()))) }
             Some(Ok(Token::Float32(f))) => { let f = *f; self.advance(); Ok(Expr::Literal(Box::new(LiteralExpr::Float(f)))) }
             Some(Ok(Token::Float64(f))) => { let f = *f; self.advance(); Ok(Expr::Float64(f)) }
             Some(Ok(Token::String(val))) => {
@@ -8451,14 +8451,14 @@ let span = self.current_span();
         // that parse_primary() does for `Ident { ... }`.
         let mut value = match self.current_token() {
             Some(Ok(Token::Integer(n))) => { let n = *n; self.advance(); Expr::Literal(Box::new(LiteralExpr::Integer(n))) }
-            Some(Ok(Token::IntegerI8(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Int8) }
-            Some(Ok(Token::IntegerI16(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Int16) }
-            Some(Ok(Token::IntegerI32(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Int32) }
-            Some(Ok(Token::IntegerI64(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Int) }
-            Some(Ok(Token::IntegerU8(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::UInt8) }
-            Some(Ok(Token::IntegerU16(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::UInt16) }
-            Some(Ok(Token::IntegerU32(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::UInt32) }
-            Some(Ok(Token::IntegerU64(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::UInt) }
+            Some(Ok(Token::IntegerI8(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Custom("Int8".to_string())) }
+            Some(Ok(Token::IntegerI16(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Custom("Int16".to_string())) }
+            Some(Ok(Token::IntegerI32(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Custom("Int32".to_string())) }
+            Some(Ok(Token::IntegerI64(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Custom("Int".to_string())) }
+            Some(Ok(Token::IntegerU8(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Custom("UInt8".to_string())) }
+            Some(Ok(Token::IntegerU16(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Custom("UInt16".to_string())) }
+            Some(Ok(Token::IntegerU32(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Custom("UInt32".to_string())) }
+            Some(Ok(Token::IntegerU64(n))) => { let n = *n; self.advance(); Expr::IntegerSuffixed(n, Type::Custom("UInt".to_string())) }
             Some(Ok(Token::Float(f))) => { let f = *f; self.advance(); Expr::Literal(Box::new(LiteralExpr::Float(f))) }
             Some(Ok(Token::Float32(f))) => { let f = *f; self.advance(); Expr::Literal(Box::new(LiteralExpr::Float(f))) }
             Some(Ok(Token::Float64(f))) => { let f = *f; self.advance(); Expr::Float64(f) }
@@ -8730,21 +8730,21 @@ let span = self.current_span();
     fn type_to_base_name(ty: &Type) -> Option<String> {
         let name = match ty {
             Type::Custom(name) => name.clone(),
-            Type::Int => "Int".into(),
-            Type::UInt => "UInt".into(),
-            Type::Float => "Float".into(),
-            Type::Bool => "Bool".into(),
-            Type::String => "String".into(),
-            Type::Char => "Char".into(),
-            Type::Data => "Data".into(),
+            Type::Custom(__t) if __t == "Int" => "Int".into(),
+            Type::Custom(__t) if __t == "UInt" => "UInt".into(),
+            Type::Custom(__t) if __t == "Float" => "Float".into(),
+            Type::Custom(__t) if __t == "Bool" => "Bool".into(),
+            Type::Custom(__t) if __t == "String" => "String".into(),
+            Type::Custom(__t) if __t == "Char" => "Char".into(),
+            Type::Custom(__t) if __t == "Data" => "Data".into(),
             Type::Void => "void".into(),
-            Type::Int8 => "Int8".into(),
-            Type::Int16 => "Int16".into(),
-            Type::Int32 => "Int32".into(),
-            Type::UInt8 => "UInt8".into(),
-            Type::UInt16 => "UInt16".into(),
-            Type::UInt32 => "UInt32".into(),
-            Type::Float64 => "Float64".into(),
+            Type::Custom(__t) if __t == "Int8" => "Int8".into(),
+            Type::Custom(__t) if __t == "Int16" => "Int16".into(),
+            Type::Custom(__t) if __t == "Int32" => "Int32".into(),
+            Type::Custom(__t) if __t == "UInt8" => "UInt8".into(),
+            Type::Custom(__t) if __t == "UInt16" => "UInt16".into(),
+            Type::Custom(__t) if __t == "UInt32" => "UInt32".into(),
+            Type::Custom(__t) if __t == "Float64" => "Float64".into(),
             _ => return None,
         };
         Some(name)
@@ -8752,6 +8752,8 @@ let span = self.current_span();
 
     // 2026-07-08: Phase 2b — resolve well-known type + Width(N) to Bits
     // Enables `Int<8>`, `UInt<16>`, `Float<32>`, `Bits<64>` etc.
+    // 2026-07-08: Phase 2A — resolve_bits_type returns Type::Bits(width).
+    // Interpretation is removed — semantics live in the TypeUniverse.
     // Returns Some(Type::Bits) if base_name + type_args forms a known Bits type.
     // Returns None for non-Bits types (HashMap, List, Ptr, etc.) or invalid widths.
     // Only handles single Width(N) arguments — generic types like HashMap<Int, String>
@@ -8761,31 +8763,13 @@ let span = self.current_span();
             [Type::Width(n)] => *n,
             _ => return None,
         };
-        let bits = match base_name {
-            "Int" | "i8" | "i16" | "i32" | "i64" => {
-                Type::Bits { width, interpretation: Interpretation::SignedInt }
-            }
-            "UInt" | "u8" | "u16" | "u32" | "u64" => {
-                Type::Bits { width, interpretation: Interpretation::UnsignedInt }
-            }
-            "Float" | "f32" => {
-                Type::Bits { width: 32.max(width), interpretation: Interpretation::Ieee754Float }
-            }
-            "f64" | "Float64" | "Double" => {
-                Type::Bits { width: 64.max(width), interpretation: Interpretation::Ieee754Float }
-            }
-            "Bool" => {
-                Type::Bits { width: 1, interpretation: Interpretation::Boolean }
-            }
-            "Bits" => {
-                Type::Bits { width, interpretation: Interpretation::RawData }
-            }
-            "Char" => {
-                Type::Bits { width: 32.max(width), interpretation: Interpretation::UnicodeScalar }
-            }
-            _ => return None,
-        };
-        Some(bits)
+        match base_name {
+            "Int" | "i8" | "i16" | "i32" | "i64"
+            | "UInt" | "u8" | "u16" | "u32" | "u64"
+            | "Float" | "f32" | "f64" | "Float64" | "Double"
+            | "Bool" | "Char" | "Bits" => Some(Type::Bits(width)),
+            _ => None,
+        }
     }
 
     // 2026-07-08: Phase 2b — parse integer token as Type::Width(n) inside generic type arguments
@@ -9390,7 +9374,7 @@ mod parser_tests {
             if let Some(Type::Applied(parent, args)) = &s.parent {
                 assert_eq!(parent, "Container");
                 assert_eq!(args.len(), 1);
-                assert_eq!(args[0], Type::Int);
+                assert_eq!(args[0], Type::Custom("Int".to_string()));
             } else {
                 panic!("Expected Applied parent type, got {:?}", s.parent);
             }
@@ -9531,7 +9515,7 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse u8 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::UInt8), "Expected UInt8, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Custom(__t) if __t == "UInt8"), "Expected UInt8, got {:?}", decl.ty);
         }
 
         // Test i16 shorthand
@@ -9540,7 +9524,7 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse i16 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Int16), "Expected Int16, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Custom(__t) if __t == "Int16"), "Expected Int16, got {:?}", decl.ty);
         }
 
         // Test u32 shorthand
@@ -9549,7 +9533,7 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse u32 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::UInt32), "Expected UInt32, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Custom(__t) if __t == "UInt32"), "Expected UInt32, got {:?}", decl.ty);
         }
 
         // Test i64 shorthand
@@ -9558,60 +9542,60 @@ mod parser_tests {
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse i64 type");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Int), "Expected Int, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Custom(__t) if __t == "Int"), "Expected Int, got {:?}", decl.ty);
         }
     }
 
     #[test]
     fn test_parse_angle_bracket_bits_types() {
-        // Test Int<8> → Type::Bits { 8, SignedInt }
+        // Test Int<8> → Type::Bits(8)
         let s = r#"let x: Int<8> = 0;"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse Int<8>");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Bits { width: 8, interpretation: Interpretation::SignedInt }),
-                "Expected Bits<8> SignedInt, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Bits(8)),
+                "Expected Bits(8), got {:?}", decl.ty);
         }
 
-        // Test UInt<16> → Type::Bits { 16, UnsignedInt }
+        // Test UInt<16> → Type::Bits(16)
         let s = r#"let y: UInt<16> = 0;"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse UInt<16>");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Bits { width: 16, interpretation: Interpretation::UnsignedInt }),
-                "Expected Bits<16> UnsignedInt, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Bits(16)),
+                "Expected Bits(16), got {:?}", decl.ty);
         }
 
-        // Test Float<32> → Type::Bits { 32, Ieee754Float }
+        // Test Float<32> → Type::Bits(32)
         let s = r#"let z: Float<32> = 0.0;"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse Float<32>");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Bits { width: 32, interpretation: Interpretation::Ieee754Float }),
-                "Expected Bits<32> Ieee754Float, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Bits(32)),
+                "Expected Bits(32), got {:?}", decl.ty);
         }
 
-        // Test Float<64> → Type::Bits { 64, Ieee754Float }
+        // Test Float<64> → Type::Bits(64)
         let s = r#"let w: Float<64> = 0.0;"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse Float<64>");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Bits { width: 64, interpretation: Interpretation::Ieee754Float }),
-                "Expected Bits<64> Ieee754Float, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Bits(64)),
+                "Expected Bits(64), got {:?}", decl.ty);
         }
 
-        // Test Bits<64> → Type::Bits { 64, RawData }
+        // Test Bits<64> → Type::Bits(64)
         let s = r#"let d: Bits<64> = 0;"#;
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse Bits<64>");
         if let TopLevel::StateDecl(decl) = &result.unwrap().items[0] {
-            assert!(matches!(&decl.ty, Type::Bits { width: 64, interpretation: Interpretation::RawData }),
-                "Expected Bits<64> RawData, got {:?}", decl.ty);
+            assert!(matches!(&decl.ty, Type::Bits(64)),
+                "Expected Bits(64), got {:?}", decl.ty);
         }
 
         // Test HashMap<String, Int> still works unchanged
@@ -10902,8 +10886,11 @@ mod parser_tests {
             match &defn.body[0] {
                 Statement::Term { values, .. } => {
                     let expr = values[0].as_ref().unwrap();
-                    assert!(matches!(expr, Expr::IsType(_, crate::ast::IsTarget::Type(Type::Int))),
-                        "Expected IsType(Int), got {:?}", expr);
+                    if let Expr::IsType(_, crate::ast::IsTarget::Type(Type::Custom(name))) = expr {
+                        assert_eq!(name, "Int", "Expected IsType(Int), got {:?}", expr);
+                    } else {
+                        panic!("Expected IsType(Int), got {:?}", expr);
+                    }
                 }
                 _ => panic!("Expected Term"),
             }
@@ -10938,8 +10925,11 @@ mod parser_tests {
             match &defn.body[0] {
                 Statement::Term { values, .. } => {
                     let expr = values[0].as_ref().unwrap();
-                    assert!(matches!(expr, Expr::FromCheck(_, Type::Int)),
-                        "Expected FromCheck(Int), got {:?}", expr);
+                    if let Expr::FromCheck(_, Type::Custom(name)) = expr {
+                        assert_eq!(name, "Int", "Expected FromCheck(Int), got {:?}", expr);
+                    } else {
+                        panic!("Expected FromCheck(Int), got {:?}", expr);
+                    }
                 }
                 _ => panic!("Expected Term"),
             }
@@ -10992,8 +10982,11 @@ mod parser_tests {
             match &defn.body[0] {
                 Statement::Term { values, .. } => {
                     let expr = values[0].as_ref().unwrap();
-                    assert!(matches!(expr, Expr::Cast(_, Type::String)),
-                        "Expected Cast(Int, String), got {:?}", expr);
+                    if let Expr::Cast(_, Type::Custom(name)) = expr {
+                        assert_eq!(name, "String", "Expected Cast(Int, String), got {:?}", expr);
+                    } else {
+                        panic!("Expected Cast(Int, String), got {:?}", expr);
+                    }
                 }
                 _ => panic!("Expected Term"),
             }
@@ -11010,8 +11003,11 @@ mod parser_tests {
             match &defn.body[0] {
                 Statement::Term { values, .. } => {
                     let expr = values[0].as_ref().unwrap();
-                    assert!(matches!(expr, Expr::Cast(_, Type::String)),
-                        "Expected Cast(Int, String), got {:?}", expr);
+                    if let Expr::Cast(_, Type::Custom(name)) = expr {
+                        assert_eq!(name, "String", "Expected Cast(Int, String), got {:?}", expr);
+                    } else {
+                        panic!("Expected Cast(Int, String), got {:?}", expr);
+                    }
                 }
                 _ => panic!("Expected Term"),
             }
@@ -11028,8 +11024,11 @@ mod parser_tests {
             match &defn.body[0] {
                 Statement::Term { values, .. } => {
                     let expr = values[0].as_ref().unwrap();
-                    assert!(matches!(expr, Expr::Cast(_, Type::Int)),
-                        "Expected Cast(String, Int), got {:?}", expr);
+                    if let Expr::Cast(_, Type::Custom(name)) = expr {
+                        assert_eq!(name, "Int", "Expected Cast(String, Int), got {:?}", expr);
+                    } else {
+                        panic!("Expected Cast(String, Int), got {:?}", expr);
+                    }
                 }
                 _ => panic!("Expected Term"),
             }
@@ -11781,7 +11780,7 @@ mod kani_full_tests {
             assert!(signature.is_pipe, "should be marked as pipe");
             assert!(signature.fallback.is_some(), "should have fallback expression");
             assert_eq!(signature.success_output.len(), 1);
-            assert_eq!(signature.success_output[0].1, Type::String);
+            assert_eq!(signature.success_output[0].1, Type::Custom("String".to_string()));
         } else {
             panic!("Expected ForeignBinding");
         }
@@ -11796,7 +11795,7 @@ mod kani_full_tests {
         if let TopLevel::ForeignBinding { signature, .. } = &result.unwrap().items[0] {
             assert!(signature.is_pipe, "should be marked as pipe");
             assert!(signature.fallback.is_some(), "should have fallback expression");
-            assert_eq!(signature.success_output[0].1, Type::String);
+            assert_eq!(signature.success_output[0].1, Type::Custom("String".to_string()));
             assert_eq!(signature.location, "libtest.so");
         } else {
             panic!("Expected ForeignBinding");

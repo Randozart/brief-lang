@@ -2720,7 +2720,7 @@ fn link_and_optimize(
                             export_name: ename,
                             orig_name: defn.name.clone(),
                             params,
-                            ret_ty: crate::ast::Type::Int,
+                            ret_ty: crate::ast::Type::Custom("Int".to_string()),
                         });
                     }
                 }

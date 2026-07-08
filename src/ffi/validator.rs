@@ -125,7 +125,8 @@ pub fn validate_frgn_against_binding(
 /// Check if a type is valid for FFI (conservative check)
 pub fn is_valid_ffi_type(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::Int | Type::Float | Type::Bool | Type::Void | Type::Data => true,
+        Type::Custom(__t) if __t == "String" || __t == "Int" || __t == "Float" || __t == "Bool" || __t == "Data" => true,
+        Type::Void => true,
         Type::Custom(_) => true, // Custom types are structs
         _ => false,
     }
@@ -142,13 +143,13 @@ mod tests {
             location: "std::fs::read_to_string".to_string(),
             wasm_impl: None,
             wasm_setup: None,
-            inputs: vec![("path".to_string(), Type::String)],
-            success_output: vec![("content".to_string(), Type::String)],
+            inputs: vec![("path".to_string(), Type::Custom("String".to_string()))],
+            success_output: vec![("content".to_string(), Type::Custom("String".to_string()))],
             result_type: ResultType::TrueAssertion,
             error_type_name: "IoError".to_string(),
             error_fields: vec![
-                ("code".to_string(), Type::Int),
-                ("message".to_string(), Type::String),
+                ("code".to_string(), Type::Custom("Int".to_string())),
+                ("message".to_string(), Type::Custom("String".to_string())),
             ],
             input_layout: None,
             output_layout: None,
@@ -172,12 +173,12 @@ mod tests {
             path: None,
             wasm_impl: None,
             wasm_setup: None,
-            inputs: vec![("path".to_string(), Type::String)],
-            success_output: vec![("content".to_string(), Type::String)],
+            inputs: vec![("path".to_string(), Type::Custom("String".to_string()))],
+            success_output: vec![("content".to_string(), Type::Custom("String".to_string()))],
             error_type: "IoError".to_string(),
             error_fields: vec![
-                ("code".to_string(), Type::Int),
-                ("message".to_string(), Type::String),
+                ("code".to_string(), Type::Custom("Int".to_string())),
+                ("message".to_string(), Type::Custom("String".to_string())),
             ],
             input_layout: None,
             output_layout: None,
@@ -213,10 +214,10 @@ mod tests {
 
     #[test]
     fn test_is_valid_ffi_type() {
-        assert!(is_valid_ffi_type(&Type::String));
-        assert!(is_valid_ffi_type(&Type::Int));
-        assert!(is_valid_ffi_type(&Type::Float));
-        assert!(is_valid_ffi_type(&Type::Bool));
+        assert!(is_valid_ffi_type(&Type::Custom("String".to_string())));
+        assert!(is_valid_ffi_type(&Type::Custom("Int".to_string())));
+        assert!(is_valid_ffi_type(&Type::Custom("Float".to_string())));
+        assert!(is_valid_ffi_type(&Type::Custom("Bool".to_string())));
         assert!(is_valid_ffi_type(&Type::Void));
         assert!(is_valid_ffi_type(&Type::Custom("IoError".to_string())));
     }

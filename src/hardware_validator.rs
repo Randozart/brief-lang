@@ -144,28 +144,28 @@ impl HardwareValidator {
 
     fn check_type_synthesizable(ty: &Type, diagnostics: &mut Vec<Diagnostic>, context: &str) {
         match ty {
-            Type::Int | Type::UInt => {
+            Type::Custom(__t) if __t == "Int" || __t == "UInt" => {
                 diagnostics.push(Diagnostic::new(
                     "B5006",
                     Severity::Error,
                     &format!(".cbv type '{}' uses Int/UInt (unsized) — use UInt[N] or SInt[N] for synthesizable logic", context),
                 ));
             }
-            Type::Float => {
+            Type::Custom(__t) if __t == "Float" => {
                 diagnostics.push(Diagnostic::new(
                     "B5007",
                     Severity::Error,
                     &format!(".cbv type '{}' uses Float — not synthesizable", context),
                 ));
             }
-            Type::String => {
+            Type::Custom(__t) if __t == "String" => {
                 diagnostics.push(Diagnostic::new(
                     "B5008",
                     Severity::Error,
                     &format!(".cbv type '{}' uses String — not synthesizable", context),
                 ));
             }
-            Type::Bool | Type::Char => {} // OK for hardware
+            Type::Custom(__t) if __t == "Bool" || __t == "Char" => {} // OK for hardware
             Type::Vector(inner, _) => Self::check_type_synthesizable(inner, diagnostics, context),
             Type::Tuple(types) => {
                 for t in types {
@@ -176,7 +176,8 @@ impl HardwareValidator {
                 // Struct/enum — assumed synthesizable if fields are
             }
             Type::Constrained(inner, _) => Self::check_type_synthesizable(inner, diagnostics, context),
-            Type::Data | Type::Void => {} // OK
+            Type::Custom(__t) if __t == "Data" => {} // OK
+            Type::Void => {} // OK
             _ => {}
         }
     }
@@ -794,7 +795,7 @@ mod tests {
 
     #[test]
     fn test_hebv_rejects_float_type() {
-        let program = make_program(vec![state("x", Type::Float)]);
+        let program = make_program(vec![state("x", Type::Custom("Float".to_string()))]);
         let diags = HardwareValidator::check_hebv_restrictions(&program);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].title.contains("Float"));
@@ -802,7 +803,7 @@ mod tests {
 
     #[test]
     fn test_hebv_rejects_string_type() {
-        let program = make_program(vec![state("s", Type::String)]);
+        let program = make_program(vec![state("s", Type::Custom("String".to_string()))]);
         let diags = HardwareValidator::check_hebv_restrictions(&program);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].title.contains("String"));
@@ -810,7 +811,7 @@ mod tests {
 
     #[test]
     fn test_hebv_rejects_unsized_int() {
-        let program = make_program(vec![state("x", Type::Int)]);
+        let program = make_program(vec![state("x", Type::Custom("Int".to_string()))]);
         let diags = HardwareValidator::check_hebv_restrictions(&program);
         let int_errors: Vec<_> = diags.iter().filter(|d| d.title.contains("Int/UInt")).collect();
         assert!(!int_errors.is_empty(), "Expected rejection of unsized Int");
@@ -819,7 +820,7 @@ mod tests {
     #[test]
     fn test_hebv_accepts_synthesizable_types() {
         let program = make_program(vec![
-            state("a", Type::Bool),
+            state("a", Type::Custom("Bool".to_string())),
             txn("good",
                 Expr::Identifier("a".to_string()),
                 Expr::Not(Box::new(Expr::Identifier("a".to_string()))),

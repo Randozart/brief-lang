@@ -420,7 +420,7 @@ mod tests {
     fn make_trigger(name: &str) -> TopLevel {
         TopLevel::Trigger(TriggerDeclaration {
             name: name.to_string(),
-            ty: Type::Bool,
+            ty: Type::Custom("Bool".to_string()),
             address: LinkRef::Explicit(0x4000_0000),
             bit_range: None,
             stages: vec![],

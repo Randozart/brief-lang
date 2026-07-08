@@ -706,15 +706,15 @@ impl TypeUniverse {
     pub fn byte_size(&self, ty: &crate::ast::Type) -> Option<u64> {
         match ty {
             crate::ast::Type::LayoutPtr(lc) => Some(lc.bytes),
-            crate::ast::Type::Int | crate::ast::Type::UInt => Some(8),
-            crate::ast::Type::Int8 | crate::ast::Type::UInt8 => Some(1),
-            crate::ast::Type::Int16 | crate::ast::Type::UInt16 => Some(2),
-            crate::ast::Type::Int32 | crate::ast::Type::UInt32 => Some(4),
-            crate::ast::Type::Float => Some(4),
-            crate::ast::Type::Float64 => Some(8),
-            crate::ast::Type::Bool | crate::ast::Type::Char => Some(1),
+            crate::ast::Type::Custom(__t) if __t == "Int" || __t == "UInt" => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => Some(1),
+            crate::ast::Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => Some(2),
+            crate::ast::Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Float" => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Float64" => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "Bool" || __t == "Char" => Some(1),
             crate::ast::Type::Void => Some(0),
-            crate::ast::Type::String | crate::ast::Type::Data => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => Some(8),
             crate::ast::Type::Custom(name) => {
                 self.get(name).map(|rt| rt.bytes)
             }
@@ -739,16 +739,16 @@ impl TypeUniverse {
     pub fn alignment(&self, ty: &crate::ast::Type) -> Option<u64> {
         match ty {
             crate::ast::Type::LayoutPtr(lc) => Some(lc.alignment),
-            crate::ast::Type::Int | crate::ast::Type::UInt => Some(8),
-            crate::ast::Type::Int8 | crate::ast::Type::UInt8 => Some(1),
-            crate::ast::Type::Int16 | crate::ast::Type::UInt16 => Some(2),
-            crate::ast::Type::Int32 | crate::ast::Type::UInt32 => Some(4),
-            crate::ast::Type::Float => Some(4),
-            crate::ast::Type::Float64 => Some(8),
-            crate::ast::Type::Bool => Some(1),
-            crate::ast::Type::Char => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Int" || __t == "UInt" => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => Some(1),
+            crate::ast::Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => Some(2),
+            crate::ast::Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Float" => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Float64" => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "Bool" => Some(1),
+            crate::ast::Type::Custom(__t) if __t == "Char" => Some(4),
             crate::ast::Type::Void => Some(1),
-            crate::ast::Type::String | crate::ast::Type::Data => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => Some(8),
             crate::ast::Type::Custom(name) => {
                 self.get(name).map(|rt| rt.alignment)
             }
@@ -775,7 +775,7 @@ impl TypeUniverse {
                 let inner = &args[0];
                 // For Ptr<Bits @/range>, compute from the bit range
                 if let crate::ast::Type::Constrained(inner, br) = inner {
-                    if **inner == crate::ast::Type::Data {
+                    if **inner == crate::ast::Type::Custom("Data".to_string()) {
                         let bits = match br {
                             crate::ast::BitRange::Range(start, end) => end - start + 1,
                             crate::ast::BitRange::Single(_) => 1,

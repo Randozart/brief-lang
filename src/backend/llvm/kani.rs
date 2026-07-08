@@ -7,7 +7,7 @@ fn verify_llvm_emit_expr_literal_integer() {
     let mut out = String::new();
     let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
     let reg = backend.emit_expr(&mut out, &expr, "");
-    assert_eq!(reg.ty, Type::Int);
+    assert_eq!(reg.ty, Type::Custom("Int".to_string()));
     assert!(out.contains("add i64 0, 42"));
 }
 
@@ -17,7 +17,7 @@ fn verify_llvm_emit_expr_literal_bool() {
     let mut out = String::new();
     let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
     let reg = backend.emit_expr(&mut out, &expr, "");
-    assert_eq!(reg.ty, Type::Bool);
+    assert_eq!(reg.ty, Type::Custom("Bool".to_string()));
 }
 
 #[kani::proof]
@@ -26,7 +26,7 @@ fn verify_llvm_emit_expr_literal_term() {
     let mut out = String::new();
     let expr = Expr::Literal(Box::new(LiteralExpr::Term));
     let reg = backend.emit_expr(&mut out, &expr, "");
-    assert_eq!(reg.ty, Type::Int);
+    assert_eq!(reg.ty, Type::Custom("Int".to_string()));
 }
 
 #[kani::proof]
@@ -35,7 +35,7 @@ fn verify_llvm_emit_expr_literal_float() {
     let mut out = String::new();
     let expr = Expr::Literal(Box::new(LiteralExpr::Float(1.5)));
     let reg = backend.emit_expr(&mut out, &expr, "");
-    assert_eq!(reg.ty, Type::Float);
+    assert_eq!(reg.ty, Type::Custom("Float".to_string()));
 }
 
 #[kani::proof]
@@ -44,7 +44,7 @@ fn verify_llvm_emit_expr_literal_string() {
     let mut out = String::new();
     let expr = Expr::Literal(Box::new(LiteralExpr::String("s".to_string())));
     let reg = backend.emit_expr(&mut out, &expr, "");
-    assert_eq!(reg.ty, Type::String);
+    assert_eq!(reg.ty, Type::Custom("String".to_string()));
 }
 
 #[kani::proof]
@@ -53,7 +53,7 @@ fn verify_llvm_emit_expr_literal_char() {
     let mut out = String::new();
     let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
     let reg = backend.emit_expr(&mut out, &expr, "");
-    assert_eq!(reg.ty, Type::Char);
+    assert_eq!(reg.ty, Type::Custom("Char".to_string()));
 }
 
 #[kani::proof]
@@ -62,7 +62,7 @@ fn verify_llvm_emit_guard_check_trap() {
     let mut out = String::new();
     // Set up let_bindings with a variable for guard_check to find
     backend.fun.let_bindings.insert("x".to_string(), Reg::int("%xval"));
-    backend.fun.let_binding_types.insert("x".to_string(), Type::Int);
+    backend.fun.let_binding_types.insert("x".to_string(), Type::Custom("Int".to_string()));
     // Guard: _ > 0 (where _ is bound to x's value %xval)
     let guard = Expr::Gt(
         Box::new(Expr::Identifier("_".to_string())),
@@ -83,9 +83,9 @@ fn verify_llvm_emit_guard_check_saves_prior_underscore() {
     let mut out = String::new();
     // Bind _ first, then x
     backend.fun.let_bindings.insert("_".to_string(), Reg::int("%prior"));
-    backend.fun.let_binding_types.insert("_".to_string(), Type::Int);
+    backend.fun.let_binding_types.insert("_".to_string(), Type::Custom("Int".to_string()));
     backend.fun.let_bindings.insert("x".to_string(), Reg::int("%xval"));
-    backend.fun.let_binding_types.insert("x".to_string(), Type::Int);
+    backend.fun.let_binding_types.insert("x".to_string(), Type::Custom("Int".to_string()));
     let guard = Expr::Gt(
         Box::new(Expr::Identifier("_".to_string())),
         Box::new(Expr::Integer(0)),

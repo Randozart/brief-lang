@@ -253,8 +253,9 @@ fn calculate_auto_layout(fields: &[(String, Type)], endian: Endian) -> MemoryLay
 
     for (name, ty) in fields {
         let size = match ty {
-            Type::Bool => 1,
-            Type::Int | Type::Float | Type::String | Type::Data | Type::Custom(_) => 8,
+            Type::Custom(__t) if __t == "Bool" => 1,
+            Type::Custom(__t) if __t == "Int" || __t == "Float" || __t == "String" || __t == "Data" => 8,
+            Type::Custom(_) => 8,
             Type::Void => 0,
             _ => 8,
         };
@@ -366,17 +367,17 @@ fn parse_type_string(type_str: &str) -> Result<Type, FfiError> {
     let type_str = type_str.trim();
 
     match type_str {
-        "String" => Ok(Type::String),
-        "Int" => Ok(Type::Int),
-        "Float" => Ok(Type::Float),
-        "Bool" => Ok(Type::Bool),
+        "String" => Ok(Type::Custom("String".to_string())),
+        "Int" => Ok(Type::Custom("Int".to_string())),
+        "Float" => Ok(Type::Custom("Float".to_string())),
+        "Bool" => Ok(Type::Custom("Bool".to_string())),
         "void" => Ok(Type::Void),
-        "Data" => Ok(Type::Data),
+        "Data" => Ok(Type::Custom("Data".to_string())),
         s if s.starts_with('[') && s.ends_with(']') => {
             let inner_str = &s[1..s.len() - 1];
             let inner_type = parse_type_string(inner_str)?;
             // Represent arrays as Data for now
-            Ok(Type::Data)
+            Ok(Type::Custom("Data".to_string()))
         }
         s => {
             // Custom type
@@ -391,10 +392,10 @@ mod tests {
 
     #[test]
     fn test_parse_type_string_basic() {
-        assert_eq!(parse_type_string("String").unwrap(), Type::String);
-        assert_eq!(parse_type_string("Int").unwrap(), Type::Int);
-        assert_eq!(parse_type_string("Float").unwrap(), Type::Float);
-        assert_eq!(parse_type_string("Bool").unwrap(), Type::Bool);
+        assert_eq!(parse_type_string("String").unwrap(), Type::Custom("String".to_string()));
+        assert_eq!(parse_type_string("Int").unwrap(), Type::Custom("Int".to_string()));
+        assert_eq!(parse_type_string("Float").unwrap(), Type::Custom("Float".to_string()));
+        assert_eq!(parse_type_string("Bool").unwrap(), Type::Custom("Bool".to_string()));
         assert_eq!(parse_type_string("void").unwrap(), Type::Void);
     }
 

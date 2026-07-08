@@ -32,7 +32,7 @@ impl ExprTypecheck for BinaryOpExpr {
     fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> {
         // DEFERRED (Phase 4): infer_expression is private. Router arms
         // in typechecker.rs destructure sub-expressions directly.
-        Ok(Type::Int)
+        Ok(Type::Custom("Int".to_string()))
     }
 }
 
@@ -160,7 +160,7 @@ impl ExprCodegenLLVM for BinaryOpExpr {
                 let (a, b) = (ctx.emit_expr(out, &self.left, ""), ctx.emit_expr(out, &self.right, ""));
                 let v = format!("%t{}", ctx.fun.txn_counter); ctx.fun.txn_counter += 1;
                 writeln!(out, "{} = srem i64 {}, {}", v, a, b).ok();
-                crate::backend::llvm::TypedRegister { name: v, ty: crate::ast::Type::Int }
+                crate::backend::llvm::TypedRegister { name: v, ty: crate::ast::Type::Custom("Int".to_string()) }
             }
             // Comparison operators return Bool
             BinaryOpKind::Eq => ctx.emit_fcmp(out, "", &self.left, &self.right, "oeq"),

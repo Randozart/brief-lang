@@ -50,7 +50,7 @@ pub fn emit_rest_expr(
                                      _builder: &mut crate::backend::llvm::LLVMBuilder,
                                      _expr: &crate::ast::Expr,
                                      _indent: &str| {
-                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Int }
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Custom("Int".to_string()) }
                 };
                 let result = bop.emit_llvm(backend, out, &mut builder, &ExprDispatch, &mut emit_expr);
                 builder.finish_into(out, indent.len() as usize);
@@ -63,7 +63,7 @@ pub fn emit_rest_expr(
                                      _builder: &mut crate::backend::llvm::LLVMBuilder,
                                      _expr: &crate::ast::Expr,
                                      _indent: &str| {
-                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Int }
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Custom("Int".to_string()) }
                 };
                 let result = uop.emit_llvm(backend, out, &mut builder, &ExprDispatch, &mut emit_expr);
                 builder.finish_into(out, indent.len() as usize);
@@ -76,7 +76,7 @@ pub fn emit_rest_expr(
                                      _builder: &mut crate::backend::llvm::LLVMBuilder,
                                      _expr: &crate::ast::Expr,
                                      _indent: &str| {
-                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Int }
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::Custom("Int".to_string()) }
                 };
                 let result = lit.emit_llvm(backend, out, &mut builder, &ExprDispatch, &mut emit_expr);
                 builder.finish_into(out, indent.len() as usize);
@@ -126,7 +126,7 @@ pub fn emit_rest_expr(
             // ── ListIndex ───────────────────────────────────────
             // 2026-06-27: propagate element type from the list's type so that
             // downstream FieldAccess can resolve struct fields (e.g. `rules[i].slot_count`).
-            // Without this, the result is Type::Int and the struct lookup fails.
+            // Without this, the result is Type::Custom("Int".to_string()) and the struct lookup fails.
             Expr::ListIndex(list, index) => {
                 let list_val = backend.emit_expr(out, list, indent);
                 let idx_val = backend.emit_expr(out, index, indent);
@@ -159,7 +159,7 @@ pub fn emit_rest_expr(
                 if let Some(et) = el_ty {
                     return TypedRegister { name: v.to_string(), ty: et };
                 }
-                return TypedRegister { name: v.to_string(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
             // ── Projection ──────────────────────────────────────
             Expr::Projection { source, target } => {
@@ -175,7 +175,7 @@ pub fn emit_rest_expr(
                     let fv = backend.emit_expr(out, fval, indent);
                     let fp = format!("%sfp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, fp, ai, i as i64).ok();
-                     let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float || fv.ty == Type::String {
+                     let stored = if fv.ty == Type::Custom("Bool".to_string()) || fv.ty == Type::Custom("Char".to_string()) || fv.ty == Type::Custom("Float".to_string()) || fv.ty == Type::Custom("String".to_string()) {
                          backend.adapt_to_i64(out, indent, &fv)
                      } else { fv.name.clone() };
                      writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
@@ -192,7 +192,7 @@ pub fn emit_rest_expr(
                     let fv = backend.emit_expr(out, fval, indent);
                     let fp = format!("%ofp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, fp, ai, i as i64).ok();
-                    let stored = if fv.ty == Type::Bool || fv.ty == Type::Char || fv.ty == Type::Float || fv.ty == Type::String {
+                    let stored = if fv.ty == Type::Custom("Bool".to_string()) || fv.ty == Type::Custom("Char".to_string()) || fv.ty == Type::Custom("Float".to_string()) || fv.ty == Type::Custom("String".to_string()) {
                         backend.adapt_to_i64(out, indent, &fv)
                     } else { fv.name.clone() };
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, stored, fp).ok();
@@ -200,8 +200,8 @@ pub fn emit_rest_expr(
                 writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
                 // 2026-06-30: BUG FIX — missing return statement since initial Phase 6
                 // extraction. ObjectLiteral produces a boxed i64, same as StructInstance,
-                // but has no named type — return Type::Int.
-                return TypedRegister { name: v.to_string(), ty: Type::Int };
+                // but has no named type — return Type::Custom("Int".to_string()).
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
             // ── FieldAccess ─────────────────────────────────────
             Expr::FieldAccess(obj, field) => {
@@ -242,7 +242,7 @@ pub fn emit_rest_expr(
                     writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, fp).ok();
                     // 2026-06-17: Return Float type for float fields so downstream
                     // code (emit_binop) correctly identifies them. String/Data fields
-                    // remain Type::Int (stored boxed as i64 in struct).
+                    // remain Type::Custom("Int".to_string()) (stored boxed as i64 in struct).
                     let lookup_ty = || -> Option<Type> {
                         if let Expr::Identifier(name) = obj.as_ref() {
                             if let Some(Type::Custom(struct_name)) = backend.fun.let_binding_types.get(name) {
@@ -250,7 +250,7 @@ pub fn emit_rest_expr(
                                     let fi = offset as usize;
                                     if fi < fields.len() {
                                         let (_, field_ty) = &fields[fi];
-                                        if matches!(field_ty, Type::Float) {
+                                        if matches!(field_ty, Type::Custom(__t) if __t == "Float") {
                                             return Some(field_ty.clone());
                                         }
                                     }
@@ -262,7 +262,7 @@ pub fn emit_rest_expr(
                                 let fi = offset as usize;
                                 if fi < fields.len() {
                                     let (_, field_ty) = &fields[fi];
-                                    if matches!(field_ty, Type::Float) {
+                                    if matches!(field_ty, Type::Custom(__t) if __t == "Float") {
                                         return Some(field_ty.clone());
                                     }
                                 }
@@ -274,10 +274,10 @@ pub fn emit_rest_expr(
                         return TypedRegister { name: v.to_string(), ty: ft };
                     }
                     // 2026-06-30: Non-Float fields are stored as boxed i64 — return Int.
-                    return TypedRegister { name: v.to_string(), ty: Type::Int };
+                    return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
                 } else {
                     panic!("emit_expr: FieldAccess: field '{}' not found on object", field);
-                    return TypedRegister { name: v.to_string(), ty: Type::Int };
+                    return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
                 }
             }
             // ── PatternMatch ────────────────────────────────────
@@ -291,7 +291,7 @@ pub fn emit_rest_expr(
                     .map(|(_, d, _)| *d as i64)
                     .unwrap_or(0);
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, v, disc, expected).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Bool };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
             }
             // ── MultiSlice ──────────────────────────────────────
             Expr::MultiSlice { value, ops } => {
@@ -339,7 +339,7 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, de, cv.name).ok();
                             let lv = format!("%mlv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, lv, ep).ok();
-                            result_reg = TypedRegister { name: lv, ty: Type::Int };
+                            result_reg = TypedRegister { name: lv, ty: Type::Custom("Int".to_string()) };
                             reboxed = false;
                         }
                         BracketOp::Coord(SliceCoordinate::Range { start, end }) => {
@@ -418,7 +418,7 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, rcnt, rs1).ok();
                             let rv = format!("%mrv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, rv, rai).ok();
-                            result_reg = TypedRegister { name: rv, ty: Type::Int };
+                            result_reg = TypedRegister { name: rv, ty: Type::Custom("Int".to_string()) };
                             reboxed = true;
                         }
                         BracketOp::Coord(_) => {
@@ -488,7 +488,7 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, sk, ss1).ok();
                             let sv_reg = format!("%msv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, sv_reg, sai).ok();
-                            result_reg = TypedRegister { name: sv_reg, ty: Type::Int };
+                            result_reg = TypedRegister { name: sv_reg, ty: Type::Custom("Int".to_string()) };
                             reboxed = true;
                         }
                         BracketOp::Mask(mask_expr) => {
@@ -562,7 +562,7 @@ pub fn emit_rest_expr(
                             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, mk, ms1).ok();
                             let mv_reg = format!("%mmv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, mv_reg, mai).ok();
-                            result_reg = TypedRegister { name: mv_reg, ty: Type::Int };
+                            result_reg = TypedRegister { name: mv_reg, ty: Type::Custom("Int".to_string()) };
                             reboxed = true;
                         }
                     }
@@ -633,9 +633,9 @@ pub fn emit_rest_expr(
                 backend.fun.let_bindings = saved_bindings;
                 backend.fun.let_binding_types = saved_types;
                 let match_ty = if arms.iter().all(|a| matches!(a.body.as_ref(), Expr::String(_))) {
-                    Type::String
+                    Type::Custom("String".to_string())
                 } else {
-                    Type::Int
+                    Type::Custom("Int".to_string())
                 };
                 return TypedRegister { name: v.to_string(), ty: match_ty };
             }
@@ -827,7 +827,7 @@ pub fn emit_rest_expr(
                     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
                 }
                 // 2026-06-30: Explicit return for normal path (was fallthrough).
-                return TypedRegister { name: v.to_string(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
             // — Subtype projection (e.g. list :> Size) —
             Expr::SubtypeProjection { source, .. } => {
@@ -837,7 +837,7 @@ pub fn emit_rest_expr(
                 let slp = format!("%slp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, slp, hp).ok();
                 writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, v, slp).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
             Expr::SubtypeProjectionExpr(e) => {
                 return backend.emit_expr(out, &Expr::SubtypeProjection {
@@ -852,12 +852,12 @@ pub fn emit_rest_expr(
                     crate::ast::IsTarget::Variant(v) => v,
                 };
                 writeln!(out, "{}{} = add i64 0, 1 ; {} (compile-time)", indent, v, comment).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Bool };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
             }
             Expr::FromCheck(expr, _ty) => {
                 let _ = backend.emit_expr(out, expr, indent);
                 writeln!(out, "{}{} = add i64 0, 1 ; from (compile-time)", indent, v).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Bool };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
             }
             Expr::Like(l, r) => {
                 return backend.emit_fcmp(out, indent, l, r, "oeq");
@@ -899,7 +899,7 @@ pub fn emit_rest_expr(
                     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, kvs, ep).ok();
                 }
                 writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
             Expr::SetLiteral(items) => {
                 let n = items.len() as i64;
@@ -924,7 +924,7 @@ pub fn emit_rest_expr(
                     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, ivs, ep).ok();
                 }
                 writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ai).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
             // Why free+malloc+memcpy instead of realloc: Brief collections have
             // Arrow handlers dispatched to expr::arrow submodule.
@@ -964,8 +964,8 @@ pub fn emit_rest_expr(
                 let cv = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 backend.emit_cast_convert(out, indent, &cv, &inner_val.name, Some(inner_val.ty), target_ty);
                 // Casts to boxed types (String/Data) produce i64, not native i8*.
-                let ret_ty = if matches!(target_ty, Type::String | Type::Data) {
-                    Type::Int
+                let ret_ty = if matches!(target_ty, Type::Custom(__t) if __t == "String" || __t == "Data") {
+                    Type::Custom("Int".to_string())
                 } else {
                     target_ty.clone()
                 };
@@ -975,11 +975,11 @@ pub fn emit_rest_expr(
             Expr::CellCall(callee, args) => {
                 let callee_name = match callee.as_ref() {
                     Expr::Identifier(name) => name.clone(),
-                    _ => { panic!("emit_expr: CellCall with non-identifier callee: {:?}", callee); return TypedRegister { name: v.to_string(), ty: Type::Int }; }
+                    _ => { panic!("emit_expr: CellCall with non-identifier callee: {:?}", callee); return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }; }
                 };
                 let cell = match backend.ctx.cell_defs.get(&callee_name) {
                     Some(c) => c.clone(),
-                    None => { panic!("emit_expr: CellCall: cell '{}' not found in cell_defs", callee_name); return TypedRegister { name: v.to_string(), ty: Type::Int }; }
+                    None => { panic!("emit_expr: CellCall: cell '{}' not found in cell_defs", callee_name); return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }; }
                 };
 
                 // 1. Store input args to prefixed parameter fields
@@ -1096,23 +1096,23 @@ pub fn emit_rest_expr(
                             indent, gep, backend.fun.state_reg_name, idx).ok();
                         writeln!(out, "{}{} = load {}, ptr {}, align 8", indent, v, ll_ty, gep).ok();
                         let ret_ty = match ll_ty.as_str() {
-                            "i8" => Type::Bool,
-                            "i32" => Type::Char,
-                            "float" => Type::Float,
-                            "i8*" => Type::String,
-                            _ => Type::Int,
+                            "i8" => Type::Custom("Bool".to_string()),
+                            "i32" => Type::Custom("Char".to_string()),
+                            "float" => Type::Custom("Float".to_string()),
+                            "i8*" => Type::Custom("String".to_string()),
+                            _ => Type::Custom("Int".to_string()),
                         };
-                        if ret_ty == Type::Int && ll_ty != "i64" {
+                        if ret_ty == Type::Custom("Int".to_string()) && ll_ty != "i64" {
                             // 2026-06-28: Use txn_counter to prevent %t{N} collision
                             let boxed = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = zext {} {} to i64", indent, boxed, ll_ty, v).ok();
-                            return TypedRegister { name: boxed, ty: Type::Int };
+                            return TypedRegister { name: boxed, ty: Type::Custom("Int".to_string()) };
                         }
-                        if ret_ty == Type::String {
+                        if ret_ty == Type::Custom("String".to_string()) {
                             // 2026-06-28: Use txn_counter to prevent %t{N} collision
                             let boxed = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, boxed, v).ok();
-                            return TypedRegister { name: boxed, ty: Type::Int };
+                            return TypedRegister { name: boxed, ty: Type::Custom("Int".to_string()) };
                         }
                         return TypedRegister { name: v.to_string(), ty: ret_ty };
                     }
@@ -1127,7 +1127,7 @@ pub fn emit_rest_expr(
 
                 // Fallback: return 0
                 writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
             Expr::Within { body, bound: _, unit: _, retries: _, fallback } => {
                 // Evaluate body in the CURRENT block using direct GEP + load from %State
@@ -1190,11 +1190,11 @@ pub fn emit_rest_expr(
                 // Done: load result
                 writeln!(out, "{}  {}:", indent, l_done).ok();
                 writeln!(out, "{}    {} = load i64, ptr {}, align 8", indent, v_result, v_save).ok();
-                return TypedRegister { name: v_result.clone(), ty: Type::Int };
+                return TypedRegister { name: v_result.clone(), ty: Type::Custom("Int".to_string()) };
             }
             _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }
         }
         // Default: treat as Int. Float operations are handled explicitly
-        // by emit_binop/emit_fcmp which return Type::Float/Bool respectively.
-        TypedRegister { name: v.to_string(), ty: Type::Int }
+        // by emit_binop/emit_fcmp which return Type::Custom("Float".to_string())/Bool respectively.
+        TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
 }

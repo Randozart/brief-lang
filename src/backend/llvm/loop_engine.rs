@@ -2043,7 +2043,7 @@ impl LlvmBackend {
         let saved_float_regs = self.fun.ssa_old_float_regs.clone();
         let saved_int_regs = self.fun.ssa_old_int_regs.clone();
         let cond = self.emit_expr(out, pre, "  ");
-        let i1 = if cond.ty == Type::Bool {
+        let i1 = if cond.ty == Type::Custom("Bool".to_string()) {
             cond.name.clone()
         } else {
             let i1 = format!("%pi{}", self.fun.txn_counter); self.fun.txn_counter += 1;

@@ -158,17 +158,17 @@ impl Annotator {
 
     fn type_to_string(&self, ty: &Type) -> String {
         match ty {
-            Type::Int => "Int".to_string(),
-            Type::Int8 => "Int8".to_string(),
-            Type::Int16 => "Int16".to_string(),
-            Type::Int32 => "Int32".to_string(),
-            Type::Float => "Float".to_string(),
-            Type::Float64 => "Float64".to_string(),
-            Type::String => "String".to_string(),
-            Type::Bool => "Bool".to_string(),
-            Type::Data => "Data".to_string(),
+            Type::Custom(__t) if __t == "Int" => "Int".to_string(),
+            Type::Custom(__t) if __t == "Int8" => "Int8".to_string(),
+            Type::Custom(__t) if __t == "Int16" => "Int16".to_string(),
+            Type::Custom(__t) if __t == "Int32" => "Int32".to_string(),
+            Type::Custom(__t) if __t == "Float" => "Float".to_string(),
+            Type::Custom(__t) if __t == "Float64" => "Float64".to_string(),
+            Type::Custom(__t) if __t == "String" => "String".to_string(),
+            Type::Custom(__t) if __t == "Bool" => "Bool".to_string(),
+            Type::Custom(__t) if __t == "Data" => "Data".to_string(),
             Type::Void => "Void".to_string(),
-            Type::Bits { width, interpretation } => format!("Bits<{}>{:?}", width, interpretation),
+            Type::Bits(width) => format!("Bits<{}>", width),
             Type::Width(n) => format!("Width({})", n),
             Type::Custom(name) => name.clone(),
             Type::Sig(name) => format!("sig {}", name),
@@ -206,11 +206,11 @@ impl Annotator {
                 )
             }
             Type::Enum(name) => name.clone(),
-            Type::UInt => "UInt".to_string(),
-            Type::UInt8 => "UInt8".to_string(),
-            Type::UInt16 => "UInt16".to_string(),
-            Type::UInt32 => "UInt32".to_string(),
-            Type::Char => "Char".to_string(),
+            Type::Custom(__t) if __t == "UInt" => "UInt".to_string(),
+            Type::Custom(__t) if __t == "UInt8" => "UInt8".to_string(),
+            Type::Custom(__t) if __t == "UInt16" => "UInt16".to_string(),
+            Type::Custom(__t) if __t == "UInt32" => "UInt32".to_string(),
+            Type::Custom(__t) if __t == "Char" => "Char".to_string(),
             // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
             // are regular structs/enums defined in stdlib, handled via
             // Custom/Applied/Enum variants below.
