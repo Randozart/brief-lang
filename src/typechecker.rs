@@ -1626,6 +1626,16 @@ impl TypeChecker {
         for stmt in &txn.body {
             self.check_statement(stmt, Some(&txn.is_async));
         }
+
+        // 2026-07-09: Check for dangling pointer assignments (&field = &local).
+        for warning in crate::analysis::provenance::check_dangling_ptrs(&txn.body) {
+            self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                expected: "valid reference".to_string(),
+                found: warning,
+                context: "dangling pointer check".to_string(),
+            });
+        }
+
         self.pop_scope();
     }
 
