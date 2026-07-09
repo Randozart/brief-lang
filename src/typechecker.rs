@@ -1823,6 +1823,13 @@ impl TypeChecker {
                         self.check_expr_for_ffi_errors(expr);
                         let lhs_ty = self.infer_expression(lhs);
                         let expr_ty = self.infer_expression(expr);
+                        // 2026-07-09: For AddrOf LHS, the expected type is the pointee type
+                        // (write through pointer), not the pointer type itself.
+                        let effective_lhs_ty = match lhs {
+                            Expr::AddrOf(_) => crate::type_universe::pointee_type(&lhs_ty)
+                                .unwrap_or(lhs_ty.clone()),
+                            _ => lhs_ty.clone(),
+                        };
 
                         if let Some((_t_expr, _unit)) = timeout {
                             if !self.is_error_union(&lhs_ty) {
@@ -1834,7 +1841,7 @@ impl TypeChecker {
                             }
                         }
 
-                        if !self.check_geometry(&lhs_ty, &expr_ty) {
+                        if !self.check_geometry(&effective_lhs_ty, &expr_ty) {
                             if let Some(var_name) = lhs.as_var_name() {
                                 if self.trigger_names.contains(var_name) {
                                     self.errors.borrow_mut().push(TypeError::TypeMismatch {
@@ -1847,7 +1854,7 @@ impl TypeChecker {
                                     self.declare_variable(var_name, expr_ty.clone());
                                 } else {
                                     self.errors.borrow_mut().push(TypeError::TypeMismatch {
-                                        expected: self.type_to_string(&lhs_ty),
+                                        expected: self.type_to_string(&effective_lhs_ty),
                                         found: self.type_to_string(&expr_ty),
                                         context: "assignment".to_string(),
                                     });

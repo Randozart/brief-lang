@@ -1,0 +1,17 @@
+// ptr-swap.bv — Swaps two state fields through pointers
+//
+// Demonstrates & (address-of) to create Ptr<T> for mutable access
+// and * (dereference) to read values through pointers.
+
+let a: Int = 42;
+let b: Int = 99;
+
+// Use & to create pointers to a and b, then swap through them
+txn swap [a != 99 || b != 42][a == 99 && b == 42] {
+  let pa = &a;        // Ptr<Int> to a
+  let pb = &b;        // Ptr<Int> to b
+  let tmp = *pa;      // read a's value through pointer
+  *pa = *pb;          // copy b into a through pointers
+  *pb = tmp;          // write old a into b through pointer
+  term! -> print_int#(a);
+};

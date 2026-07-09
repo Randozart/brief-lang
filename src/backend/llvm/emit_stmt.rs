@@ -696,6 +696,26 @@ impl LlvmBackend {
                 let val = self.emit_expr(out, expr, indent);
                 let fname = match lhs {
                     Expr::Identifier(n) => n.clone(),
+                    Expr::AddrOf(inner) => {
+                        // Write through pointer: get the address, then store the value.
+                        match crate::backend::llvm::expr::identifier::emit_addr_of(self, out, inner, indent) {
+                            Ok(ptr_reg) => {
+                                let indent_str = if indent.is_empty() { "  " } else { indent };
+                                writeln!(out, "{}store i64 {}, ptr {}, align 8", indent_str, val.name, ptr_reg).ok();
+                            }
+                            Err(msg) => {
+                                writeln!(out, "{}; cannot write through pointer: {}", indent, msg).ok();
+                            }
+                        }
+                        return;
+                    }
+                    Expr::Deref(ptr) => {
+                        // Deref LHS: evaluate the pointer, store through it.
+                        let ptr_reg = self.emit_expr(out, ptr, indent);
+                        let indent_str = if indent.is_empty() { "  " } else { indent };
+                        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent_str, val.name, ptr_reg.name).ok();
+                        return;
+                    }
                     Expr::ListIndex(list_expr, index_expr) => {
                         let val_reg = val.name.clone();
                         let list_name = match &**list_expr {

@@ -1228,7 +1228,7 @@ pub fn emit_rest_expr(
                     None => ("i64".to_string(), Type::Custom("Int".to_string())),
                 };
                 let align = if llvm_ty == "i1" { 1 } else if llvm_ty == "i32" { 4 } else if llvm_ty == "float" || llvm_ty == "double" { 4 } else { 8 };
-                writeln!(out, "{}{} = load {}, ptr %{}, align {}", indent, v_reg, llvm_ty, ptr.name, align).ok();
+                writeln!(out, "{}{} = load {}, ptr {}, align {}", indent, v_reg, llvm_ty, ptr.name, align).ok();
                 return TypedRegister { name: v_reg, ty: pointee_ty };
             }
             _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }

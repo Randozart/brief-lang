@@ -159,11 +159,27 @@ let word: Int /16;          // 16-bit signed
 let flags: UInt /x8;        // Inferred 8-bit
 ```
 
+### Pointer Types
+
+```brief
+let p: Ptr<Int> = &field;           // Mutable pointer to state field
+let r: PtrConst<Int> = &let_var;    // Read-only pointer to let binding
+let v = *p;                          // Dereference: reads pointed-to value
+```
+
+`Ptr<T>` and `PtrConst<T>` are the types produced by the `&` operator.
+- `&state_field` → `Ptr<T>` (mutable — can write through it)
+- `&let_binding` → `PtrConst<T>` (read-only)
+- `*ptr` → `T` (dereference, type error on non-pointer)
+
+For memory-mapped I/O (volatile access), use the explicit pointer types
+described below in "Volatile Pointers".
+
 ### Union Types
 
 ```brief
-let result: Int | Error;    // Either Int or Error
-let state: Idle | Active | Error;
+let result: Result<Int, String> = Ok(42);
+let value: Int | String = "hello";
 ```
 
 ### Custom Types
@@ -727,6 +743,8 @@ is_enabled
 !flag           // Logical NOT
 -x              // Arithmetic negation
 ~bits           // Bitwise NOT
+&var            // Address-of: creates a Ptr<T> or PtrConst<T> to var
+*ptr            // Dereference: reads the value pointed to by ptr
 ```
 
 ### Binary Operations
@@ -815,11 +833,15 @@ x = 42;
 counter = counter + 1;
 ```
 
-### Mutable Assignment
+### Mutable Assignment (Pointer Write)
 
 ```brief
-&variable = new_value;
+&field = new_value;         // Write through address-of to state field
+*ptr = new_value;           // Write through pointer dereference
 ```
+
+The LHS must be `&state_field` (creates a `Ptr<T>`) or `*ptr` where `ptr` has
+type `Ptr<T>`. Writing through a `PtrConst<T>` is a compile-time error.
 
 ### With Timeout
 

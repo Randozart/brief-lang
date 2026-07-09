@@ -256,10 +256,65 @@ Any other string becomes `Custom(fn_name)`.
 
 Most languages hardcode type rules inside the compiler's Rust/C++ source. Brief hardcodes about 13 properties in the Rust compiler and declares the rest in `lib/std/types/bootstrap.bv` (~300 lines of type definitions with operator annotations). Everything — `String`, `Stack`, `Queue`, `HashMap`, even `Int` — is defined in Brief source files, using the same syntax you use to define your own types.
 
-### Pointers (2026-07-03)
+### The `&` address-of operator (2026-07-09)
 
-Brief has four forms of pointer, all sharing the same machine representation
-(`i64`/`u64` in the backend):
+The `&` operator creates a typed pointer (reference) to a variable or state field:
+
+```brief
+let x: Int = 42;
+let p = &x;        // p: PtrConst<Int>, points to x
+&x = 99;           // write through pointer to state field
+```
+
+**Const vs mutable inference:**
+
+| Source | Result type | Description |
+|--------|-------------|-------------|
+| State field `&field` | `Ptr<T>` | Mutable — can write through it |
+| `let` binding `&let_binding` | `PtrConst<T>` | Read-only — cannot modify |
+| `&param` | `PtrConst<T>` | Read-only — function parameters |
+
+The `*` operator dereferences a pointer:
+
+```brief
+let x: Int = 42;
+let p = &x;
+let v = *p;       // v = 42 (reads through the reference)
+```
+
+**Deref of `Ptr<T>`** produces `T`. Deref of `PtrConst<T>` also produces `T`. Any
+attempt to dereference a non-pointer type is a compile-time type error.
+
+**`&` in assignments** (LHS) is sugar for "store through this address":
+
+```brief
+&field = value;   // writes value to state field 'field'
+*ptr = value;     // writes value through pointer
+```
+
+These produce the same LLVM IR: `getelementptr` + `store`.
+
+**Dangling detection:** The compiler warns if you store a pointer to a local
+variable into a state field:
+
+```brief
+rct txn example [true][true] {
+    let tmp: Int = compute();
+    &state_field = &tmp;  // warning: pointer to local may dangle
+    term;
+};
+```
+
+Store the value instead:
+
+```brief
+&state_field = tmp;       // OK: copies the value, not the pointer
+```
+
+### Volatile pointers (2026-07-03)
+
+For hardware register access, Brief has four forms of explicit pointer type,
+all sharing the same machine representation (`i64`/`u64` in the backend):
 
 | Form | Example | What it says |
 |------|---------|--------------|
@@ -268,7 +323,7 @@ Brief has four forms of pointer, all sharing the same machine representation
 | Fixed | `Ptr32` / `Ptr64` / `Ptr128` | Points to N bytes (known layout) |
 | Bits | `Ptr<Bits @/0..63>` | Points to exact bit range |
 
-`Ptr<T>` **cannot be dereferenced directly** — use `volatile_load#` / `volatile_store#`:
+These pointers **cannot be dereferenced directly** — use `volatile_load#` / `volatile_store#`:
 
 ```brief
 let reg: Ptr<Int> = 0x40011000 as Ptr<Int>;

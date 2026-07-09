@@ -180,6 +180,12 @@ pub fn emit_identifier(
                 writeln!(out, "{}{} = add i64 0, {}", indent, v, z).ok();
                 return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
+            // 2026-07-09: Ptr-type let bindings hold a pointer register (GEP result).
+            // Return the register directly — no add i64 0 wrapper (which would be a
+            // type error: ptr ≠ i64).
+            if matches!(ty, Type::Applied(n, _) if n == "Ptr" || n == "PtrConst") {
+                return TypedRegister { name: reg.clone(), ty: ty.clone() };
+            }
         }
         writeln!(out, "{}{} = add i64 0, {}", indent, v, reg).ok();
         if let Some(ty) = backend.fun.let_binding_types.get(name) {
@@ -354,7 +360,7 @@ pub fn emit_identifier(
 ///
 /// Phase 2: Currently only handles state fields. Let binding and
 /// FieldAccess/Index targets are future extensions.
-pub(super) fn emit_addr_of(
+pub(crate) fn emit_addr_of(
     backend: &mut crate::backend::llvm::LlvmBackend,
     out: &mut String,
     expr: &Expr,
@@ -367,7 +373,7 @@ pub(super) fn emit_addr_of(
                 let state_ptr = &backend.fun.state_reg_name;
                 let reg = format!("%ap{}", backend.fun.txn_counter);
                 backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %{}, i32 0, i32 {}",
+                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}",
                     indent, reg, state_ptr, idx)
                     .map_err(|e| e.to_string())?;
                 Ok::<String, String>(reg)

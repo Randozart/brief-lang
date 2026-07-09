@@ -1,0 +1,26 @@
+// ptr-demo.bv — Demonstrates & (address-of) and * (dereference) operators
+//
+// The & operator creates a typed pointer (Ptr<T> or PtrConst<T>) to any
+// variable or state field. The * operator dereferences a pointer, reading
+// the value it points to.
+
+// State field for demonstration
+let counter: Int = 0;
+
+// Let bindings demonstrate PtrConst inference (read-only)
+let dec: Int = 1;
+
+// Transaction using & in LHS (mutable assignment)
+// &counter creates Ptr<Int> since counter is a state field
+txn increment [counter < 10][counter == 10] {
+  &counter = counter + dec;  // Write through pointer to state field
+  term;
+};
+
+// Transaction demonstrating * dereference
+// Reads the current counter value through a pointer
+txn peek [counter >= 0][[counter >= 10]] {
+  // &counter gives us a Ptr<Int>. *(&counter) reads the value.
+  let counter_val = *(&counter);
+  term! -> print_int#(counter_val);
+};

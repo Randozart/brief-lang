@@ -1,0 +1,21 @@
+// ptr-runtime.bv — Demonstrates & and * with observable output
+//
+// Uses print_int# to produce output, and __get_env_int to make the
+// loop bound runtime-determined (prevents compile-time precomputation).
+
+frgn __get_env_int(name: Ptr<Byte>) -> Int ;
+
+let limit: Int = __get_env_int("LIMIT");
+let counter: Int = 0;
+
+// Uses & to write to state field through a pointer
+txn count_up [counter < limit][counter == limit] {
+  &counter = counter + 1;
+  term;
+};
+
+// Uses * to read value through pointer and print it
+txn done [counter >= limit][[counter >= limit]] {
+  let val = *(&counter);
+  term! -> print_int#(val);
+};
