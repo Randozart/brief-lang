@@ -615,6 +615,8 @@ pub enum OpRune {
     Index, Slice,
     ArrowPush, ArrowPop,
     Cast, Box, Unbox,
+    Shl, Shr,
+    BitAnd, BitOr, BitXor, BitNot,
 }
 
 impl OpRune {
@@ -622,10 +624,11 @@ impl OpRune {
         matches!(self, OpRune::Add | OpRune::Sub | OpRune::Mul | OpRune::Div
             | OpRune::Mod | OpRune::Eq | OpRune::Ne | OpRune::Lt
             | OpRune::Le | OpRune::Gt | OpRune::Ge | OpRune::And
-            | OpRune::Or | OpRune::ArrowPush)
+            | OpRune::Or | OpRune::ArrowPush
+            | OpRune::Shl | OpRune::Shr | OpRune::BitAnd | OpRune::BitOr | OpRune::BitXor)
     }
     pub fn is_prefix(&self) -> bool {
-        matches!(self, OpRune::Neg | OpRune::Not | OpRune::Box | OpRune::Unbox)
+        matches!(self, OpRune::Neg | OpRune::Not | OpRune::Box | OpRune::Unbox | OpRune::BitNot)
     }
     pub fn is_postfix(&self) -> bool {
         matches!(self, OpRune::Index | OpRune::Slice | OpRune::Cast)
@@ -659,6 +662,12 @@ pub fn rune_from_name(name: &str) -> OpRune {
         "unbox" => OpRune::Unbox,
         "arrowpush" => OpRune::ArrowPush,
         "arrowpop" => OpRune::ArrowPop,
+        "shl" => OpRune::Shl,
+        "shr" => OpRune::Shr,
+        "bitand" | "bit_and" => OpRune::BitAnd,
+        "bitor" | "bit_or" => OpRune::BitOr,
+        "bitxor" | "bit_xor" => OpRune::BitXor,
+        "bitnot" | "bit_not" => OpRune::BitNot,
         _ => OpRune::Add, // fallback
     }
 }

@@ -858,7 +858,12 @@ impl LlvmBackend {
             "mul" => OpRune::Mul,
             "sdiv" | "udiv" => OpRune::Div,
             "srem" | "urem" => OpRune::Mod,
-            _ => OpRune::Add, // fallback for bitwise/comparison
+            "shl" => OpRune::Shl,
+            "lshr" | "ashr" => OpRune::Shr,
+            "and" => OpRune::BitAnd,
+            "or" => OpRune::BitOr,
+            "xor" => OpRune::BitXor,
+            _ => OpRune::Add, // fallback for comparison ops
         }
     }
 
