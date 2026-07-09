@@ -604,6 +604,7 @@ impl WebstackGenerator {
                 self.extract_identifiers(i, deps);
             }
             Expr::Projection { source: e, .. } => self.extract_identifiers(e, deps),
+            Expr::AddrOf(e) | Expr::Deref(e) => self.extract_identifiers(e, deps),
             _ => {}
         }
     }
@@ -1047,6 +1048,14 @@ impl WebstackGenerator {
                     crate::features::unary_op::UnaryOpKind::BitNot => format!("(~{})", op),
                 }
             }
+            Expr::AddrOf(inner) => {
+                // In webstack/TS: &x → `x` (value read — no pointer semantics in JS)
+                self.expr_to_ts(inner)
+            }
+            Expr::Deref(inner) => {
+                // Dereference: *x → the value it points to (just evaluate inner)
+                self.expr_to_ts(inner)
+            }
             _ => format!("/* expr: {:?} */ 0", expr),
         }
     }
@@ -1381,6 +1390,8 @@ impl WebstackGenerator {
                 let idx = self.expr_to_rust(index);
                 format!("{}.remove({} as usize)", list, idx)
             }
+            Expr::AddrOf(inner) => self.expr_to_rust(inner),
+            Expr::Deref(inner) => self.expr_to_rust(inner),
             _ => "0".to_string(),
         }
     }

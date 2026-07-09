@@ -506,6 +506,17 @@ impl CirctBackend {
                     }
                 }
             }
+            Expr::AddrOf(inner) => {
+                // In CIRCT, address-of evaluates the inner expression and
+                // returns the register name (same as Identifier — no pointer
+                // indirection needed for hardware synthesis).
+                self.emit_expr(ng, out, inner, reg_names, result_ty)
+            }
+            Expr::Deref(ptr) => {
+                // Dereference reads the pointed-to value.
+                // In CIRCT, this is just a wire assignment.
+                self.emit_expr(ng, out, ptr, reg_names, result_ty)
+            }
             _ => None,
         }
     }
