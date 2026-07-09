@@ -114,6 +114,7 @@ pub enum SymbolicValue {
     And(Box<SymbolicValue>, Box<SymbolicValue>),
     Or(Box<SymbolicValue>, Box<SymbolicValue>),
     Not(Box<SymbolicValue>),
+    Pointer(Box<SymbolicValue>),
     Unknown,
 }
 
@@ -199,6 +200,16 @@ impl SymbolicValue {
             Expr::Not(inner) => SymbolicValue::Not(
                 Box::new(Self::from_expr(inner, vars)),
             ),
+            Expr::AddrOf(inner) => SymbolicValue::Pointer(
+                Box::new(Self::from_expr(inner, vars)),
+            ),
+            Expr::Deref(ptr) => {
+                let sv = Self::from_expr(ptr, vars);
+                match sv {
+                    SymbolicValue::Pointer(inner) => *inner,
+                    _ => SymbolicValue::Unknown,
+                }
+            }
             _ => SymbolicValue::Unknown,
         }
     }
@@ -315,6 +326,10 @@ impl SymbolicValue {
             }
             SymbolicValue::Not(inner) => {
                 inner.to_bool_impl(initial_vars, current_vars, visited).map(|v| !v)
+            }
+            SymbolicValue::Pointer(inner) => {
+                // A pointer is truthy if the inner value is non-zero (non-null)
+                inner.to_bool_impl(initial_vars, current_vars, visited)
             }
             SymbolicValue::Add(l, r) => {
                 let lv = l.to_i64_impl(initial_vars, current_vars, visited);
@@ -444,6 +459,10 @@ impl SymbolicValue {
             SymbolicValue::Not(inner) => {
                 let s = inner.to_string_impl(initial_vars, current_vars, visited)?;
                 Some(format!("!{}", s))
+            }
+            SymbolicValue::Pointer(inner) => {
+                let s = inner.to_string_impl(initial_vars, current_vars, visited)?;
+                Some(format!("&{}", s))
             }
             _ => None,
         }
