@@ -1,6 +1,6 @@
 # Types in Brief — Learning Guide
 
-**Last updated:** 2026-06-26
+**Last updated:** 2026-07-09
 
 ## Type Derivation (`<:`)
 
@@ -24,6 +24,9 @@ Type Int <: U64;
 ```
 
 `Bits` is the only truly built-in type. `Bytes` and `Alignment` describe physical layout.
+
+Each type also declares its operations (`op Add`, `op Sub`, etc.) which map to LLVM
+instructions. See [Operator Declarations](#operator-declarations) below.
 
 ### Collections
 
@@ -110,8 +113,97 @@ The projection operator `:>` extracts metadata from any value without mutation:
 | `val :> Keys` | `List<K>` — all keys | HashMap |
 | `val :> Values` | `List<V>` — all values | HashMap |
 | `val :> Contains(k)` | `Bool` — key membership | HashMap, HashSet |
+| `val :> Width` | `Int` — bit width of the type | Any scalar type |
+| `val :> Endian` | `Int` — endianness (0=little, 1=big) | Any scalar type |
+| `val :> Codec` | `Int` — encoding tag | String, Data |
+| `val :> Ops` | `Int` — number of declared operators | Any type |
 
 Tuple element access via `:> N` (integer index) is **deprecated** — use `val[N]` bracket syntax instead.
+
+### Operator Declarations
+
+Types declare their operations in the type definition body using `op` annotations.
+These tell the compiler which LLVM instruction to emit for each operator:
+
+```brief
+type Int <: Bits {
+    bytes <~ 8;
+    storage <~ "Boxed";
+    llvm <~ "i64";
+    op Add(Int) -> Int = "add nsw";     // nsw = no signed wrap
+    op Sub(Int) -> Int = "sub nsw";
+    op Mul(Int) -> Int = "mul nsw";
+    op Div(Int) -> Int = "sdiv";
+    op Mod(Int) -> Int = "srem";
+    op Neg() -> Int = "neg";
+    op Eq(Int) -> Bool = "icmp eq";
+    op Ne(Int) -> Bool = "icmp ne";
+    op Lt(Int) -> Bool = "icmp slt";
+    op Le(Int) -> Bool = "icmp sle";
+    op Gt(Int) -> Bool = "icmp sgt";
+    op Ge(Int) -> Bool = "icmp sge";
+    default_width <~ 64;               // Int → Int<64>
+    commuting <~ true;                 // optimizer: order-independent
+};
+```
+
+Supported annotations:
+
+| Annotation | Purpose | Example |
+|---|---|---|
+| `bytes` | Physical size in bytes | `bytes <~ 8` |
+| `alignment` | Memory alignment | `alignment <~ 8` |
+| `llvm` | LLVM type string | `llvm <~ "i64"` |
+| `storage` | `"Native"` (float/double) or `"Boxed"` (i64 register) | `storage <~ "Boxed"` |
+| `tbaa` | TBAA type node for alias analysis | `tbaa <~ "Int"` |
+| `box` | Boxing transform (Int → i64) | `box <~ "sext.i64.to.i8#"` |
+| `unbox` | Unboxing transform (i64 → Int) | `unbox <~ "trunc.i64.to.i8#"` |
+| `op Name(T) -> R = "llvm_inst"` | Operator → LLVM instruction mapping | `op Add(Int) -> Int = "add nsw"` |
+| `default_width` | Width when none specified | `default_width <~ 64` |
+| `commuting` | Optimization hint: operand order irrelevant | `commuting <~ true` |
+| `constant_time` | Optimization hint: runtime independent of value | `constant_time <~ true` |
+
+### Type Resolution Pipeline
+
+When you write `let x: Int = 0`, the compiler resolves the type through three stages:
+
+1. **Parser** produces `Type::Custom("Int")` — a named reference
+2. **NormalizeTypes pass** looks up `"Int"` in the TypeUniverse, finds `default_width <~ 64`, and produces `Type::Applied("Int", [Width(64)])`
+3. **Codegen** queries the universe for `Int`'s storage (`"Boxed"` → `i64`) and operator declarations (`"add nsw"` for Add)
+
+```brief
+// All of these produce equivalent code:
+let a: Int = 0;          // Custom("Int") → Applied("Int", [Width(64)]) → Bits(64)
+let b: Int<64> = 0;      // Applied("Int", [Width(64)]) → Bits(64)
+let c: Int<8> = 0;       // Applied("Int", [Width(8)]) → Bits(8) with Int's ops
+```
+
+The same pipeline applies to all named types: `Float`, `Bool`, `String`, `Data`,
+and user-defined types all resolve through the universe.
+
+### String Layout
+
+`String` is a struct with three fields, defined in the TypeUniverse:
+
+```brief
+type String <: Bits {
+    struct ptr: Ptr<Byte>;      // pointer to UTF-8 data
+    struct len: Int;            // byte length
+    struct codec: Int;          // encoding tag (0 = UTF-8)
+};
+```
+
+This means `String` occupies 24 bytes (pointer + length + codec) and supports
+field projection via `s :> ptr`, `s :> len`, `s :> codec`. String literals like
+`"hello"` are desugared at compile time:
+
+```brief
+// Before NormalizeTypes:
+let s: String = "hello";
+
+// After NormalizeTypes:
+let s: String = String { ptr: &"hello", len: 5, codec: 0 };
+```
 
 ### InsertAt / ExtractFrom
 
@@ -154,14 +246,15 @@ Built-in strategy names:
 
 Any other string becomes `Custom(fn_name)`.
 
-### How it works (Two-Pass Pipeline)
+### How it works (Three-Pass Pipeline)
 
 1. **Pass 1 (Type-Universe)**: The compiler collects all `Type` declarations, resolves derivation chains, inherits properties, and freezes the type map.
-2. **Pass 2 (Executable)**: Uses the frozen type map for type checking, literal encoding, and code generation.
+2. **Pass 2 (NormalizeTypes)**: Resolves `Custom("Int")` → `Applied("Int", [Width(64)])` → `Bits(64)` using universe defaults. Desugars string literals to struct instances.
+3. **Pass 3 (Executable)**: Uses the frozen type map for type checking, literal encoding, and code generation.
 
 ### The Brief philosophy
 
-Most languages hardcode type rules inside the compiler's Rust/C++ source. Brief hardcodes about 13 properties. **That's it.** Everything — `String`, `Stack`, `Queue`, `HashMap`, even `Int` — is defined in Brief source files, using the same syntax you use to define your own types.
+Most languages hardcode type rules inside the compiler's Rust/C++ source. Brief hardcodes about 13 properties in the Rust compiler and declares the rest in `lib/std/types/bootstrap.bv` (~300 lines of type definitions with operator annotations). Everything — `String`, `Stack`, `Queue`, `HashMap`, even `Int` — is defined in Brief source files, using the same syntax you use to define your own types.
 
 ### Pointers (2026-07-03)
 

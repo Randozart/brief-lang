@@ -1,8 +1,8 @@
 # Brief Language Reference Guide
 
-**Version:** v0.12.0
-**Date:** 2026-06-18
-**Status:** Development
+**Version:** v0.16.0
+**Date:** 2026-07-09
+**Status:** Development (Phase 2/3 complete: Strong Bits thesis, intrinsic reduction)
 
 ---
 
@@ -955,17 +955,40 @@ txn flush_cache {
 
 ## Compilation Targets
 
-### Verilog/SystemVerilog (FPGA)
+The file extension selects the backend:
+
+| Extension | Variant | Backend | Output |
+|-----------|---------|---------|--------|
+| `.bv` | Brief | LLVM | Native binary (`llc` + `ld`) |
+| `.ebv` | Embedded Brief | LLVM | Microcontroller binary |
+| `.abv` | Accelerated Brief | LLVM | SPIR-V GPU kernel |
+| `.rbv` | Rendered Brief | Webstack | TypeScript + WASM + view bindings |
+| `.cbv` | Circuit Brief | CIRCT | Verilog/VHDL (via MLIR) |
+| `.dbv` / `.dbvs` / `.dbvl` | Data Brief | (parsed by Brief) | Configuration data |
+
+### LLVM Native (`.bv`)
 ```bash
-brief-compiler verilog input.ebv --hw hardware.toml
+brief-compiler build input.bv                # full compile chain
+brief-compiler build --llvm input.bv          # emit LLVM IR only
+brief-compiler check input.bv                # type-check only
 ```
 
-### ARM Rust (Bare-Metal)
+### Web Frontend (`.rbv`)
 ```bash
-brief-compiler arm input.ebv --hw hardware.toml
+brief-compiler build input.rbv               # TypeScript + WASM
 ```
 
-### WASM (Browser)
+### Hardware (`.cbv`)
 ```bash
-brief-compiler wasm input.bv
+brief-compiler build input.cbv               # CIRCT MLIR → Verilog/VHDL
+```
+
+### GPU (`.abv`)
+```bash
+brief-compiler build input.abv               # SPIR-V kernel
+```
+
+### Strict Mode (`.sbv`, `.srbv`, `.sebv`)
+```bash
+brief-compiler build --strict input.sbv      # full contracts required
 ```

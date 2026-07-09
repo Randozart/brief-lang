@@ -1,8 +1,8 @@
 # Brief Language Specification
 
-**Version:** v0.17.0  
-**Date:** 2026-06-11  
-**Status:** Development (stable core, experimental backends, **new: Universal FFI via LTO library coupling (C/Rust/Zig), `import "link/..."` with `resolve_link_source()` search, FFI registry eliminating built-in magic, xxHash vendored as stdlib module, `sig` contract projections with `#out`/`#inline` modifiers, `frgn!` fire-and-forget, `--explain` flag, multi-output `term a,b,c;`, 14 new system/data intrinsics (29 total: println, readln, exit, time, read_file, write_file, sleep, socket, bind, listen, accept, sort, reverse, range), `@"..."` regex literals with DFA compilation at parse time, `Value::Regex`, top-level executable statements desugar to `rct txn __init` with atomic boot safety, Universal Bracket Syntax — every type decomposes to `Char` fragments under bracket operations, `BracketOp::Mask` supports `Bool`, `Regex`, and `String` predicates, type-directed desugar: bare string in bracket on atomic type → per-element regex filter**)  
+**Version:** v0.16.0  
+**Date:** 2026-07-09  
+**Status:** Development (Phase 2/3 complete: Strong Bits thesis, intrinsic reduction. Three canonical backends: LLVM, Webstack, CIRCT.)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -21,10 +21,11 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 
 ### 1.2 Language Variants
 
-* **Core Brief** (`.bv`): Transactional state machines with FFI support. Pure specification, compiles to C, Rust, WASM, COBOL.
-* **Rendered Brief** (`.rbv`): Adds `rstruct`, view components (HTML/CSS/SVG), and UI binding directives (b-text, b-show, b-trigger). Compiles to browser-ready WASM + JS.
-* **Embedded Brief** (`.ebv`): Adds native `Float` types, vector types, bit-range addressing, and hardware triggers (`trg`). Compiles to SystemVerilog/VHDL for FPGAs or bare-metal Rust/C for ARM.
-* **Data Brief** (`.dbv`): Concrete configuration data with schema validation. Replaces hardware.toml.
+* **Core Brief** (`.bv`): Transactional state machines with FFI support. Compiles to native binary via LLVM backend.
+* **Rendered Brief** (`.rbv`): Adds `rstruct`, view components (HTML/CSS/SVG), and UI binding directives (b-text, b-show, b-trigger). Compiles to TypeScript + WASM via Webstack backend.
+* **Embedded Brief** (`.ebv`): Adds native `Float` types, vector types, bit-range addressing, and hardware triggers (`trg`). Compiles to microcontroller binary via LLVM backend.
+* **Accelerated Brief** (`.abv`): GPU compute kernels. Compiles to SPIR-V via LLVM backend (GPU intrinsics, no FFI).
+* **Circuit Brief** (`.cbv`): Pure hardware logic. Compiles to Verilog/VHDL via CIRCT backend (no FFI, no external deps).
 * **Data Brief Schema** (`.dbvs`): Schema definitions for Data Brief, including aliases and validation rules.
 * **Data Brief Lines** (`.dbvl`): Line-based mutable database for large datasets with verification.
 * **Strict Brief** (`.sbv`): Enforces full pre/postcondition verification. Both conditions are mandatory and must be non-trivial. Same compilation targets as `.bv`.
@@ -33,33 +34,47 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 
 ### 1.3 Versioning
 
-* **Semantic**: `v0.12.0` (development, core stable)
-* **Date-based**: `2026-05-06`
+* **Semantic**: `v0.16.0` (development, Phase 2/3 complete)
+* **Date-based**: `2026-07-09`
 
 ### 1.4 Compiler Architecture
 
 ```
-Lexer → Parser → Type Checker → Proof Engine → Backend
-               ↓
-         Symbolic Execution
-               ↓
-        Contract Verification
+Source (.bv/.rbv/.ebv/.abv/.cbv/.dbv)
+  ↓
+Lexer (lexer.rs)
+  ↓ Token stream
+Parser (parser.rs)
+  ↓ AST
+Import Resolver (import_resolver.rs)
+  ↓ Resolved AST
+Desugarer (desugarer.rs)
+  ↓ Desugared AST
+Type Universe Build (type_universe.rs)
+  ↓ Frozen universe
+NormalizeTypes Pass (normalize_types.rs)
+  ↓ Normalized AST (Custom→Applied→Bits resolved)
+Type Checker (typechecker.rs)
+  ↓ Typed AST
+Proof Engine (proof_engine.rs)
+  ↓ Verified AST
+Shared Analysis (CallGraph, Range, Dataflow, Protocol)
+  ↓
+Three Canonical Backends:
+  ├── LLVM (llvm/) → .bv → native binary, .ebv → MCU, .abv → SPIR-V
+  ├── Webstack (webstack.rs) → .rbv → TypeScript + WASM
+  └── CIRCT (circt.rs) → .cbv → MLIR → Verilog/VHDL
 ```
 
-**Backends:**
-- **Rust** (`.bv` → native executable)
-- **C** (`.bv`, `.ebv` → hosted or bare-metal)
-- **WASM** (`.bv` → standalone WASM, `.rbv` → WASM + JS + UI)
-- **SystemVerilog** (`.ebv` → FPGA with TCL build scripts)
-- **VHDL** (`.ebv` → FPGA with PSL assertions)
-- **COBOL** (`.bv` → IBM Enterprise COBOL)
-- **React Native** (`.rbv` → React Native component via target spec)
-- **Next.js** (`.rbv` → Next.js page via target spec)
-- **Vite** (`.rbv` → Vite React component via target spec)
-- **LLVM IR** (`.bv` → `.ll` with acyclic optimization, `noalias`, `!range`, `llvm.assume`) \[Added 2026-05-29\]
-- **AArch64** (`.bv`, `.ebv` → ARM64 binary via acyclic inlining) \[Added 2026-05-29\]
-- **x86_64** (`.bv`, `.ebv` → x86-64 binary via acyclic inlining) \[Added 2026-05-29\]
-- **Webstack** (`.rbv` → Next.js / Vite pages via target spec) \[Added 2026-05-29\]
+**Backends (active):**
+
+| Backend | Input | Output | Status |
+|---------|-------|--------|--------|
+| LLVM | `.bv`, `.ebv`, `.abv` | Native binary, MCU binary, SPIR-V | Active |
+| Webstack | `.rbv` | TypeScript + WASM + view bindings | Active |
+| CIRCT | `.cbv` | MLIR → Verilog/VHDL | Active |
+
+9 retired backends (Rust, C, WASM text, COBOL, SystemVerilog, VHDL, AArch64, x86_64, TCL) are archived in `src/archive/backend/` for reference.
 
 ---
 
@@ -2251,16 +2266,34 @@ The interpreter maintains an **FFI registry** that maps location keys (e.g., `"s
 | `std/math` | Mathematical operations | `abs`, `sqrt`, `sin`, `cos`, `pow`, `min`, `max` |
 | `std/string` | String manipulation | `len`, `concat`, `find`, `split`, `replace`, `trim` |
 | `std/collections` | Data structures | `List`, `HashMap`, `HashSet`, `Stack`, `Queue` |
-| `std/io` | Input/output | `print`, `println`, `input`, `read_file`, `write_file` |
-| `std/time` | Time operations | `now`, `sleep`, `duration`, `timestamp` |
-| `std/http` | HTTP client | `get`, `post`, `put`, `delete` |
-| `std/json` | JSON serialization | `to_json`, `from_json`, `parse`, `stringify` |
-| `std/encoding` | Data encoding | `base64_encode`, `base64_decode`, `hex_encode`, `hex_decode` |
 | `std/option` | Option type methods | `is_some`, `is_none`, `unwrap`, `map`, `and_then` |
 | `std/result` | Result type methods | `is_ok`, `is_err`, `unwrap`, `map`, `map_err` |
-| `std/bits` | Bit manipulation \[2026-06-05\] | `popcount`, `leading_zeros`, `trailing_zeros`, `abs`, `bit_reverse`, `ffs`, `is_power_of_two`, `rotate_left`, `rotate_right` |
-| `std/ptr` | Safe pointer operations \[2026-06-05\] | `read_i64`, `write_i64`, `address`, `read_byte`, `copy` |
-| `std/xxhash` | xxHash hashing \[2026-06-07, LTO coupled\] | `XXH64`, `XXH32`, `XXH3_64`, `XXH3_128` via `frgn` from vendored `xxhash.c` |
+| `std/bits` | Bit manipulation | `popcount`, `leading_zeros`, `trailing_zeros`, `abs`, `bit_reverse`, `ffs`, `is_power_of_two`, `rotate_left`, `rotate_right` |
+| `std/ptr` | Safe pointer operations | `read_i64`, `write_i64`, `address`, `read_byte`, `copy` |
+| `std/os/io` | File I/O (read/write/seek) | `open`, `read`, `write`, `close`, `lseek` |
+| `std/os/user` | User/group identity | `getuid`, `geteuid`, `getgid`, `getegid` |
+| `std/os/time` | System time | `clock_gettime`, `nanosleep`, `gettimeofday` |
+| `std/os/env` | Environment variables | `getenv`, `setenv`, `unsetenv` |
+| `std/os/signal` | Signal handling | `signal`, `kill`, `sigaction` |
+| `std/os/socket` | Networking | `socket`, `bind`, `listen`, `accept`, `connect` |
+| `std/os/mman` | Memory mapping | `mmap`, `munmap`, `mprotect` |
+| `std/os/sched` | Scheduling | `sched_yield`, `sched_getattr` |
+| `std/os/sysinfo` | System information | `uname`, `sysconf` |
+| `std/os/resource` | Resource limits | `getrlimit`, `setrlimit`, `getrusage` |
+| `std/os/thread` | POSIX threads | `pthread_create`, `pthread_join`, `pthread_mutex_lock` |
+| `std/os/process` | Process management | `fork`, `execvp`, `waitpid`, `exit` |
+| `std/os/tty` | Terminal I/O | `tcgetattr`, `tcsetattr`, `isatty` |
+| `std/os/dir` | Directory operations | `opendir`, `readdir`, `mkdir`, `rmdir` |
+| `std/os/temp` | Temporary files | `mkstemp`, `mkdtemp` |
+| `std/os/dynlink` | Dynamic linking | `dlopen`, `dlsym`, `dlclose` |
+| `std/os/debug` | Debugging | `ptrace`, `get_backtrace` |
+| `std/os/ipc` | Inter-process communication | `pipe`, `shm_open`, `sem_open`, `mq_open` |
+| `std/os/ring` | Ring buffer | `ring_create`, `ring_push`, `ring_pop`, `ring_free` |
+| `std/os/core` | Core I/O | `read`, `write`, `open`, `close` — micro-optimized |
+| `std/os/atomic` | Atomic operations | `atomic_load`, `atomic_store`, `atomic_fetch_add`, `cmpxchg`, `fence` |
+| `std/rt` | Runtime | `__rt_init`, `__rt_alloc`, `__rt_free` via `frgn` from `brief_rt.c` |
+
+All `std/os/` modules are prelude-imported automatically. Each module contains `inop` declarations that call `brief_rt.c` wrapper functions (or direct LLVM IR for atomics).
 
 ### 6.2 Math Module
 

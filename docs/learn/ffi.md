@@ -88,6 +88,74 @@ No `-> Void` syntax. `frgn!` IS the void case.
 
 Python, JavaScript, Java, etc. cannot produce LLVM IR. They are **interpreter-only** — compiled backends emit an error: *"`from "python"` has no LLVM backend — can only be called via interpreter."*
 
+## Prelude Auto-Import (std/os/)
+
+The compiler auto-imports 20 modules from `lib/std/os/` as a prelude, replacing 127 former compiler intrinsics. These modules declare `inop` functions that call `brief_rt.c` wrappers:
+
+```brief
+// No explicit import needed — these are auto-loaded:
+let fd = open#("/path/file", 0, 0);       // from std/os/fs.bv
+let pid = getpid#();                        // from std/os/process.bv
+let page = mmap#(0, 4096, 3, 0x22, -1, 0); // from std/os/mem.bv
+```
+
+Available modules:
+
+| Module | Contents |
+|--------|----------|
+| `std/os/fs.bv` | open, close, read, write, lseek, pread, pwrite, stat, ftruncate, fsync, dup, fcntl |
+| `std/os/net.bv` | socket, bind, listen, accept, connect, send, recv, setsockopt, getaddrinfo |
+| `std/os/dir.bv` | mkdir, rmdir, unlink, rename, symlink, readlink, getcwd, readdir, chmod, chown, access |
+| `std/os/thread.bv` | thread_create, thread_join, mutex_lock, mutex_unlock, condvar_wait, condvar_signal |
+| `std/os/atomic.bv` | atomic_load, atomic_store, atomic_cas, atomic_xchg, atomic_add, fence |
+| `std/os/mem.bv` | mmap, munmap, mprotect, brk, mlock |
+| `std/os/process.bv` | spawn, getpid, getppid, exit, abort, sleep |
+| `std/os/time.bv` | clock_gettime, nanosleep, time |
+| `std/os/signal.bv` | sigaction, sigprocmask, kill, signal_fd, timerfd_create |
+| `std/os/ipc.bv` | pipe, shm_open, shm_unlink, sem_open, sem_wait, sem_post |
+| `std/os/io.bv` | print, println, readln, get_env, set_env |
+| `std/os/tty.bv` | tty_raw_mode, tty_size, tty_read_key, ioctl, isatty |
+| `std/os/user.bv` | getuid, geteuid, getgid, getegid |
+| `std/os/sched.bv` | sched_yield, getpriority, setpriority |
+| `std/os/resource.bv` | getrlimit, setrlimit |
+| `std/os/sysinfo.bv` | uname, hostname, realpath, pagesize, cpu_count |
+| `std/os/dynlib.bv` | dlopen, dlsym, dlclose |
+| `std/os/debug.bv` | backtrace, halt, abort |
+| `std/os/temp.bv` | mkstemp, mkdtemp |
+| `std/os/ring.bv` | ring_push, ring_pop |
+| `std/os/rand.bv` | getrandom, errno |
+
+Use `--no-std` to disable prelude auto-import.
+
+## ABI Bridge (brief_rt.c)
+
+Brief's native integer type is `i64` for all scalar values (Int, pointers, etc.).
+libc functions often take/return `i32` or `uid_t` (different widths). The
+`brief_rt.c` runtime provides wrapper functions that bridge between the two:
+
+```c
+// libc: uid_t getuid(void);  (returns i32 on most platforms)
+// brief_rt.c wrapper:
+int64_t brief_getuid(void) { return (int64_t)getuid(); }
+```
+
+In the generated LLVM IR, the wrapper is declared then called from the inop:
+
+```
+declare i64 @brief_getuid()     // preamble
+define internal i64 @__sys_getuid(i64 %s) {
+  %r = call i64 @brief_getuid();
+  ret i64 %r;
+}
+```
+
+The `internal` linkage on the inop function prevents symbol conflicts with
+libc — `define internal i64 @read(...)` coexists with `declare i64 @read(...)`
+from the C library preamble.
+
+53 wrapper functions currently exist in `lib/runtime/brief_rt.c`, covering
+all prelude module requirements.
+
 ## No Magic
 
 | Bad (old) | Good (new) |
@@ -96,5 +164,8 @@ Python, JavaScript, Java, etc. cannot produce LLVM IR. They are **interpreter-on
 | Hardcoded `emit_declares("__rt_init")` | `frgn __rt_init()` declared in `std/rt.bv`, imported explicitly |
 | Interpreter match on `"insert"` string | Type-based dispatch on `Value::HashMap` — same native code |
 | `"None"`/`"Err"` => discriminant 0 | Enum declaration drives discriminant |
+| 127 compiler intrinsics (Socket, Open, MkDir, ...) | 20 `std/os/*.bv` prelude modules with `inop` declarations |
+| Hardcoded `Intrinsic::from_name()` dispatches | Universe-resolved `inop` + `frgn` calls through `brief_rt.c` |
+| Type dispatch on `Type::Int8`, `Type::Float64`, etc. | TypeUniverse query: `universe.get(name).ops["add"]` |
 
 The FFI is transparent. Every function name you see is the actual symbol the linker resolves. No hidden name mapping, no string matching, no magic destinations.

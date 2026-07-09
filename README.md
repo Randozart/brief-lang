@@ -9,7 +9,7 @@
 
 ## Brief Doesn't Break
 
-**Status:** v0.15.0 - Three Canonical Backends, Contract-Proven Optimizations
+**Status:** v0.16.0 — Strong Bits Thesis, Intrinsic Reduction, Three Canonical Backends
 
 Brief is a declarative, contract-enforced logic language designed for building verifiable state machines. It treats program execution as a series of verified state transitions rather than sequential instructions. The file extension selects the compilation target. Each one optimizes the same contract-proven logic for a different material:
 
@@ -268,7 +268,9 @@ graph TD
     Lex -->|Token stream| Par[Parser: parser.rs]
     Par -->|AST| Imp[Import Resolver: import_resolver.rs]
     Imp -->|Resolved AST| Des[Desugarer: desugarer.rs]
-    Des -->|Desugared AST| TC[Type Checker: typechecker.rs]
+    Des -->|Desugared AST| UB[TypeUniverse Build: type_universe.rs]
+    UB -->|Frozen universe| NT[NormalizeTypes Pass: normalize_types.rs]
+    NT -->|Normalized AST| TC[Type Checker: typechecker.rs]
     TC -->|Typed AST| PE[Proof Engine: proof_engine.rs]
     PE -->|Verified AST| SA[Shared Analysis]
 
@@ -334,13 +336,37 @@ graph TD
 - Process spawning (`spawn`, `spawn_with_output`)
 - Environment access (`env_var`, `current_dir`)
 
+### OS Prelude (auto-imported, 20 modules)
+The `std/os/` modules replace 127 former compiler intrinsics:
+- **fs.bv** — open, close, read, write, lseek, pread, pwrite, stat, ftruncate, fsync, dup, fcntl
+- **net.bv** — socket, bind, listen, accept, connect, send, recv, setsockopt, getaddrinfo
+- **dir.bv** — mkdir, rmdir, unlink, rename, symlink, readlink, getcwd, readdir, chmod, chown, access
+- **thread.bv** — thread_create, thread_join, mutex_lock, mutex_unlock, condvar_wait, condvar_signal
+- **atomic.bv** — atomic_load, atomic_store, atomic_cas, atomic_xchg, atomic_add, fence, futex
+- **mem.bv** — mmap, munmap, mprotect, brk, mlock
+- **process.bv** — spawn, getpid, getppid, exit, abort, sleep
+- **signal.bv** — sigaction, sigprocmask, kill, signal_fd, timerfd_create
+- **time.bv** — clock_gettime, nanosleep, time
+- **ipc.bv** — pipe, shm_open, shm_unlink, sem_open, sem_wait, sem_post
+- **io.bv** — print, println, readln, get_env, set_env
+- **tty.bv** — tty_raw_mode, tty_size, tty_read_key, ioctl, isatty
+- **user.bv** — getuid, geteuid, getgid, getegid
+- **sched.bv** — sched_yield, getpriority, setpriority
+- **resource.bv** — getrlimit, setrlimit
+- **sysinfo.bv** — uname, hostname, realpath, pagesize, cpu_count
+- **dynlib.bv** — dlopen, dlsym, dlclose
+- **debug.bv** — backtrace, halt, abort
+- **temp.bv** — mkstemp, mkdtemp
+- **ring.bv** — ring_push, ring_pop
+- **rand.bv** — getrandom, errno
+
 ### Iterators
 - `map`, `filter`, `fold`
 - `take`, `skip`, `zip`, `chain`
 - `sum`, `product`, `min`, `max`
 - `find`, `any`, `all`
 
-**Total:** 300+ native functions across 15+ modules
+**Total:** 300+ native functions across 15+ modules + 20 auto-imported OS modules
 
 ## Learning Brief
 
@@ -355,6 +381,8 @@ cd learn-brief
 3. **[02-contracts.md](learn-brief/02-contracts.md)** - Preconditions & postconditions
 4. **[03-reactive.md](learn-brief/03-reactive.md)** - Reactive transactions
 5. **[11-triggers.md](learn-brief/11-triggers.md)** - Triggers and reactive I/O (`trg`, `trg!`)
+6. **[13-projections.md](learn-brief/13-projections.md)** - `:>` metadata projections (Width, Endian, Codec, Ops)
+7. **[15-custom-types.md](learn-brief/15-custom-types.md)** - Custom type definitions with operator declarations
 
 **Full documentation:**
 - [spec/SPEC.md](spec/SPEC.md) - Complete language specification
@@ -362,6 +390,8 @@ cd learn-brief
 - [spec/QUICK-REFERENCE.md](spec/QUICK-REFERENCE.md) - Syntax cheat sheet
 - [lib/std/README.md](lib/std/README.md) - Standard library guide
 - [lib/compiler/README.md](lib/compiler/README.md) - Compiler architecture
+- [docs/architecture/bits-thesis.md](docs/architecture/bits-thesis.md) - Strong Bits thesis design
+- [learn-brief/15-custom-types.md](learn-brief/15-custom-types.md) - Custom type definitions guide
 
 ---
 
@@ -455,7 +485,7 @@ cargo test --lib backend::llvm::tests
 ./target/debug/brief-compiler check --strict counter.sbv
 ```
 
-**Test Suite (1,078 tests):**
+**Test Suite (1,403 tests):**
 - `tests/tier1/` - Core data type tests
 - `tests/tier2/` - String processing tests
 - `tests/backends/` - Backend generation tests
@@ -482,21 +512,20 @@ The Brief compiler can now:
 **Implementation:**
 - 3 canonical backends (LLVM, CIRCT, Webstack)
 - 300+ standard library functions
-- ~46,000 lines of Rust bootstrap compiler
-- ~8,500 lines of Brief self-hosted compiler
-- ~7,500 lines of documentation
-- 1,078 passing tests
+- ~141,000 lines of Rust bootstrap compiler
+- ~11,300 lines of Brief self-hosted compiler
+- ~75,000 lines of documentation
+- 1,403 passing tests
 
-**Key v0.15.0 additions:**
-- Three canonical backends: LLVM (native/embedded/SPIR-V), Webstack (TypeScript + WASM), CIRCT (HLS)
-- TypeScript emitter replaces Rust/wasm-bindgen (native-typed signals, no JsValue boxing)
-- `(wasm) import` syntax for compute-heavy WASM sidecars
-- `.rbv` Brief-as-default format (no `<script>` wrapper needed)
-- Full CIRCT FSM with pre/postcondition guards, sized integers, modern output ports
-- `!range` metadata and TBAA type trees for LLVM optimization
-- `?#` proof oracle with structural recursion checker
-- Instruction reordering (ILP optimization via dependency DAG)
-- 9 retired backends archived to `archive/backend/`
+**Key v0.16.0 additions:**
+- Strong Bits Thesis: `Bits(u64)` is the only primitive — all types resolve through the TypeUniverse
+- NormalizeTypes pass: resolves `Custom("Int")` → `Applied("Int", [Width(64)])` → `Bits(64)` automatically
+- `:>` metadata projections: `Width`, `Endian`, `Codec`, `Ops` for compile-time type queries
+- String is now a struct `{ptr, len, codec}` with full universe-defined layout
+- Prelude auto-import: 20 `std/os/` modules (networking, filesystem, threading, atomics, etc.) replace 127 compiler intrinsics
+- 127 dead Intrinsic variants removed from compiler — all standard library features are user-defined `inop` declarations
+- 20 `std/types/bootstrap.bv` operator declarations enable universe-driven codegen dispatch
+- brief_rt.c ABI bridge: 53 `brief_*` wrappers convert between Brief i64 ABI and native libc types
 
 **See:** [docs/milestones/SELF_HOSTING_COMPLETE.md](docs/milestones/SELF_HOSTING_COMPLETE.md) for the full story.
 
@@ -641,7 +670,13 @@ brief-compiler/
 
 ## Roadmap
 
-### ✅ Complete (v0.15.0)
+### ✅ Complete (v0.16.0)
+- [x] Strong Bits Thesis: `Bits(u64)` as only primitive, all types resolve through TypeUniverse
+- [x] 127 compiler intrinsics replaced by 20 auto-imported `std/os/` prelude modules
+- [x] NormalizeTypes pass for automatic type resolution (Custom → Applied → Bits)
+- [x] `:>` metadata projections: Width, Endian, Codec, Ops
+- [x] String as struct `{ptr, len, codec}` with universe-defined layout
+- [x] Universe-driven operator dispatch (`op Add(Int) -> Int = "add nsw"` in bootstrap.bv)
 - [x] Three canonical backends: LLVM (native/embedded/SPIR-V), Webstack (TypeScript + WASM), CIRCT (HLS)
 - [x] TypeScript emitter with native-typed signals (no JsValue boxing)
 - [x] `(wasm) import` syntax for compute-heavy WASM sidecars
@@ -653,8 +688,9 @@ brief-compiler/
 - [x] `<-` arrow push/pop/discard/transfer for List, HashMap, HashSet, Stack, Queue
 - [x] Reactive dirty-flag architecture with DependencyGraph
 - [x] Dead-field elimination, LTO pipeline, compile-time PGO
-- [x] 1,078 passing tests
+- [x] 1,403 passing tests, 0 Rust warnings
 - [x] 9 retired backends archived (no dead code in active pipeline)
+- [x] `docs/architecture/bits-thesis.md`, `learn-brief/15-custom-types.md`
 
 ### 📋 Planned
 - [ ] COBOL backend (enterprise integration — re-implement from archive)
@@ -677,5 +713,5 @@ Apache 2.0 with explicit runtime exception
 
 ---
 
-*Last updated: 2026-06-19*  
-*Version: Brief v0.15.0*
+*Last updated: 2026-07-09*  
+*Version: Brief v0.16.0*
