@@ -2822,6 +2822,27 @@ Expr::ObjectLiteral(fields) => {
                 }
                 t1
             }
+            Expr::AddrOf(inner) => {
+                if crate::type_universe::is_mutable_location(inner) {
+                    Type::Applied("Ptr".to_string(), vec![self.infer_expression(inner)])
+                } else {
+                    Type::Applied("PtrConst".to_string(), vec![self.infer_expression(inner)])
+                }
+            }
+            Expr::Deref(ptr) => {
+                let ptr_ty = self.infer_expression(ptr);
+                match crate::type_universe::pointee_type(&ptr_ty) {
+                    Some(inner) => inner,
+                    None => {
+                        self.errors.borrow_mut().push(TypeError::TypeMismatch {
+                            expected: "pointer type (Ptr<T> or PtrConst<T>)".to_string(),
+                            found: format!("{:?}", ptr_ty),
+                            context: "dereference (*) requires a pointer".to_string(),
+                        });
+                        Type::Custom("unknown".to_string())
+                    }
+                }
+            }
             _ => Type::Custom("unknown".to_string()),
         }
     }
