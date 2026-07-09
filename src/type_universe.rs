@@ -101,8 +101,37 @@ pub struct ResolvedType {
     /// Operator→intrinsic mappings. Key is (rune, optional param type name).
     /// 2026-06-29: Phase 7B — user-facing operator declarations.
     pub operators: std::collections::HashMap<(crate::ast::OpRune, Option<String>), crate::ast::OpDeclaration>,
+
+    // ── Phase 2B: Expanded TypeUniverse fields ────────────────
+    /// Default type parameter values (e.g., Int → Width(64)).
+    pub default_params: Vec<(String, crate::ast::Type)>,
+    /// Whether this type's arithmetic operators commute.
+    pub commuting: bool,
+    /// Whether operations on this type are constant-time.
+    pub constant_time: bool,
+    /// Struct layout for compound types (String, user-defined structs).
+    pub struct_layout: Option<StructLayout>,
+
     /// Source TypeDef for reference.
     pub source: TypeDef,
+}
+
+/// 2026-07-08: Phase 2B — struct layout for compound types.
+#[derive(Debug, Clone)]
+pub struct StructLayout {
+    pub fields: Vec<StructField>,
+    pub packed: bool,
+    pub total_bytes: u64,
+    pub alignment: u64,
+}
+
+/// 2026-07-08: Phase 2B — a single field in a struct layout.
+#[derive(Debug, Clone)]
+pub struct StructField {
+    pub name: String,
+    pub ty: crate::ast::Type,
+    pub offset_bits: u64,
+    pub size_bits: u64,
 }
 
 /// The frozen type universe — built in Pass 1, read-only in Pass 2.
@@ -338,6 +367,10 @@ impl TypeUniverse {
             guards: vec![],
             operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
+            default_params: vec![],
+            commuting: true,
+            constant_time: false,
+            struct_layout: None,
             source: crate::ast::TypeDef {
                 name: String::new(),
                 type_params: vec![],
@@ -452,6 +485,20 @@ impl TypeUniverse {
             }
         }
 
+        // ── Phase 2G: Add struct_layout to String type ─────────
+        if let Some(rt) = universe.types.get_mut("String") {
+            rt.struct_layout = Some(StructLayout {
+                fields: vec![
+                    StructField { name: "ptr".into(), ty: crate::ast::Type::Applied("Ptr".into(), vec![crate::ast::Type::Bits(8)]), offset_bits: 0, size_bits: 64 },
+                    StructField { name: "len".into(), ty: crate::ast::Type::Bits(64), offset_bits: 64, size_bits: 64 },
+                    StructField { name: "codec".into(), ty: crate::ast::Type::Bits(8), offset_bits: 128, size_bits: 8 },
+                ],
+                packed: false,
+                total_bytes: 24,
+                alignment: 8,
+            });
+        }
+
         universe
     }
 
@@ -492,6 +539,10 @@ impl TypeUniverse {
             guards: vec![],
             operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
+            default_params: vec![],
+            commuting: true,
+            constant_time: false,
+            struct_layout: None,
             source: td.clone(),
         };
 
@@ -514,6 +565,11 @@ impl TypeUniverse {
             rt.on_exit = base.on_exit.clone();
             // Inherit operators from base type
             rt.operators = base.operators.clone();
+            // Inherit Phase 2B fields from base
+            rt.default_params = base.default_params.clone();
+            rt.commuting = base.commuting;
+            rt.constant_time = base.constant_time;
+            rt.struct_layout = base.struct_layout.clone();
         }
 
         // Phase 4: Auto-compute Bytes from bit_range for `Bits @/lo..hi` syntax
@@ -682,6 +738,29 @@ impl TypeUniverse {
                     rt.unbox_op = Some(id.clone());
                 }
             }
+            // ── Phase 2B binding handlers ────────────────────────
+            "default_width" => {
+                if let Some(n) = binding.value.as_integer() {
+                    rt.default_params.push(("W".to_string(), crate::ast::Type::Width(n as u64)));
+                }
+            }
+            "commuting" => {
+                if let Some(b) = binding.value.as_bool() {
+                    rt.commuting = b;
+                }
+            }
+            "default_codec" => {
+                if let Some(n) = binding.value.as_integer() {
+                    rt.codec = Some(n.to_string());
+                } else if let Some(s) = type_universe_expr_to_string(&binding.value) {
+                    rt.codec = Some(s);
+                }
+            }
+            "constant_time" => {
+                if let Some(b) = binding.value.as_bool() {
+                    rt.constant_time = b;
+                }
+            }
             // Unknown name → user-defined projection
             _ => {
                 rt.projections.insert(binding.name.clone(), binding.clone());
@@ -701,20 +780,34 @@ impl TypeUniverse {
         self.get(ty.universe_key())
     }
 
-    // 2026-07-03: Return the byte size of a type. Handles primitives,
-    // LayoutPtr, compound types, and universe-resolved custom types.
+    // 2026-07-08: Phase 2B — compute LLVM type string from base type + width.
+    // For Int<8>: base "Int" + width 8 → "i8"
+    // For Float<32>: base "Float" + width 32 → "float"
+    pub fn llvm_type_for_width(&self, base_name: &str, width: u64) -> Option<std::borrow::Cow<'static, str>> {
+        let rt = self.get(base_name)?;
+        match rt.storage.as_str() {
+            "Native" => match base_name {
+                "Float" if width <= 32 => Some(std::borrow::Cow::Borrowed("float")),
+                "Float" if width <= 64 => Some(std::borrow::Cow::Borrowed("double")),
+                _ => Some(std::borrow::Cow::Owned(format!("i{}", width))),
+            },
+            "Boxed" => Some(std::borrow::Cow::Borrowed("i64")),
+            _ => Some(std::borrow::Cow::Owned(format!("i{}", width))),
+        }
+    }
+
     pub fn byte_size(&self, ty: &crate::ast::Type) -> Option<u64> {
         match ty {
             crate::ast::Type::LayoutPtr(lc) => Some(lc.bytes),
-            crate::ast::Type::Int | crate::ast::Type::UInt => Some(8),
-            crate::ast::Type::Int8 | crate::ast::Type::UInt8 => Some(1),
-            crate::ast::Type::Int16 | crate::ast::Type::UInt16 => Some(2),
-            crate::ast::Type::Int32 | crate::ast::Type::UInt32 => Some(4),
-            crate::ast::Type::Float => Some(4),
-            crate::ast::Type::Float64 => Some(8),
-            crate::ast::Type::Bool | crate::ast::Type::Char => Some(1),
+            crate::ast::Type::Custom(__t) if __t == "Int" || __t == "UInt" => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => Some(1),
+            crate::ast::Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => Some(2),
+            crate::ast::Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Float" => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Float64" => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "Bool" || __t == "Char" => Some(1),
             crate::ast::Type::Void => Some(0),
-            crate::ast::Type::String | crate::ast::Type::Data => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => Some(8),
             crate::ast::Type::Custom(name) => {
                 self.get(name).map(|rt| rt.bytes)
             }
@@ -739,16 +832,16 @@ impl TypeUniverse {
     pub fn alignment(&self, ty: &crate::ast::Type) -> Option<u64> {
         match ty {
             crate::ast::Type::LayoutPtr(lc) => Some(lc.alignment),
-            crate::ast::Type::Int | crate::ast::Type::UInt => Some(8),
-            crate::ast::Type::Int8 | crate::ast::Type::UInt8 => Some(1),
-            crate::ast::Type::Int16 | crate::ast::Type::UInt16 => Some(2),
-            crate::ast::Type::Int32 | crate::ast::Type::UInt32 => Some(4),
-            crate::ast::Type::Float => Some(4),
-            crate::ast::Type::Float64 => Some(8),
-            crate::ast::Type::Bool => Some(1),
-            crate::ast::Type::Char => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Int" || __t == "UInt" => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => Some(1),
+            crate::ast::Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => Some(2),
+            crate::ast::Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Float" => Some(4),
+            crate::ast::Type::Custom(__t) if __t == "Float64" => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "Bool" => Some(1),
+            crate::ast::Type::Custom(__t) if __t == "Char" => Some(4),
             crate::ast::Type::Void => Some(1),
-            crate::ast::Type::String | crate::ast::Type::Data => Some(8),
+            crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => Some(8),
             crate::ast::Type::Custom(name) => {
                 self.get(name).map(|rt| rt.alignment)
             }
@@ -775,7 +868,7 @@ impl TypeUniverse {
                 let inner = &args[0];
                 // For Ptr<Bits @/range>, compute from the bit range
                 if let crate::ast::Type::Constrained(inner, br) = inner {
-                    if **inner == crate::ast::Type::Data {
+                    if **inner == crate::ast::Type::Custom("Data".to_string()) {
                         let bits = match br {
                             crate::ast::BitRange::Range(start, end) => end - start + 1,
                             crate::ast::BitRange::Single(_) => 1,

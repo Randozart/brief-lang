@@ -1,0 +1,13 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_ring_push(handle: Int, val: Int) -> Int {
+    %r = call i64 @brief_ring_push(i64 %handle, i64 %val);
+    ret i64 %r;
+};
+
+inop __sys_ring_pop(handle: Int) -> Int {
+    %r = call i64 @brief_ring_pop(i64 %handle);
+    ret i64 %r;
+};
+

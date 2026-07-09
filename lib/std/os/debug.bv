@@ -1,0 +1,8 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_backtrace() -> Int {
+    %r = call i64 @__backtrace__();
+    ret i64 %r;
+};
+

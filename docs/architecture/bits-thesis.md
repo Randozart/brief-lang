@@ -104,6 +104,61 @@ gets the same `lshr + and` codegen as a native `Int @/` access.
 
 The only cost is in the compiler, not the runtime.
 
+## Strong Bits Thesis: `Bits(u64)` is the Only Primitive
+
+**Implemented in Phase 2A-2G (2026-07-08).**
+
+The Type enum in `src/ast.rs` no longer has concrete numeric/string variants.
+All 12 concrete numeric types (`Int`, `Int8`, `Int16`, `Int32`, `UInt`, `UInt8`,
+`UInt16`, `UInt32`, `Float`, `Float64`, `Bool`, `Char`) plus `String` and `Data`
+were removed. They are now `Type::Custom("name")` — regular named types that
+resolve through the TypeUniverse.
+
+### What Changed
+
+| Before | After |
+|--------|-------|
+| `Type::Int` | `Type::Custom("Int")` |
+| `Type::Bits { width, interpretation }` | `Type::Bits(u64)` |
+| 26 lexer tokens (`TypeInt`, `TypeFloat64`, etc.) | `Identifier("Int")`, `Identifier("Float")` |
+| `Interpretation` enum | Removed — semantics in TypeUniverse |
+| `BitsInfo` struct | Removed — `to_bits()` returns `Option<u64>` |
+
+### How Codegen Handles Types
+
+The `Type::Custom("Int")` → LLVM `i64` mapping goes through bridge tables
+on `Type` itself (`bit_width()`, `is_signed()`, `to_bits()`) and through
+the TypeUniverse (`llvm_type`, `storage`, `box_op`). The flow is:
+
+1. Expression codegen gets `TypedRegister` with `ty: Type::Custom("Int")`
+2. `emit_binop`, `emit_neg`, etc. call `ty.bit_width()` → `Some(64)`
+3. `llvm_type(ty)` queries universe → `"i64"` (or `fallback_llvm_type`)
+4. `adapt_to_i64(ty)` uses universe `box_op` → `"zext.i1.to.i64#"` for Bool
+5. Float dispatch checks universe `storage == "Native"` instead of name matching
+
+### Why This Matters
+
+Previously, adding a new numeric type (e.g., `Int24`) required:
+- Adding `Type::Int24` variant
+- Adding lexer token
+- Adding match arms in ~30 files
+
+Now:
+- Define `type Int24 <: Bits { bytes <~ 3; ... }` in bootstrap.bv
+- Add `op Add(Int24) -> Int24 = "add nsw"` etc.
+- Everything else works through the universe
+
+The `NormalizeTypes` pass (Phase 2C, gated awaiting typechecker migration)
+will eventually resolve `Custom("Int")` → `Applied("Int", [Width(64)])`
+so that default-width introspection works at compile time.
+
+### Remaining Name-Based Dispatch
+
+The LLVM codegen still has ~30 name-based checks (`Type::Custom("Float")`,
+`Type::Custom("Bool")`, etc.) in projection.rs, math.rs, emit_stmt.rs, and
+emit_toplevel.rs. These are the last hardcoded type dispatch paths —
+migrating them to universe queries is tracked as the remainder of Phase 2D.
+
 ### "What about cross-language FFI? Won't I pay for conversion?"
 
 Zero-cost, if you use lazy lenses. A `CString` lens over a raw `char*`
@@ -133,6 +188,19 @@ those calls' data is described in Brief, so there's no marshalling cost.
 | Backend fast-path registry | 3.5 | ✅ 45+ projection fast paths |
 | TypeUniverse pipeline wiring | 3.5 | ✅ main.rs → typechecker → LLVM |
 | Educational `from-bits.bv` | 5 | ✅ All fundamental types documented |
+| **Strong Bits Thesis (Phase 2A-2G)** | **2A-2G** | **✅ Complete** |
+| Bits(u64) as only primitive | 2A | ✅ All concrete numeric/string variants removed |
+| Interpretation enum removed | 2A | ✅ Type semantics live in TypeUniverse |
+| 26 type keyword tokens removed | 2A | ✅ Int/Float/Bool etc. become identifiers |
+| TypeUniverse operator bindings | 2B | ✅ op Add(Int) -> Int = "add nsw" |
+| default_width/commuting annotations | 2B | ✅ Default type parameter resolution |
+| llvm_type_for_width() | 2B | ✅ Universe-driven LLVM type selection |
+| NormalizeTypes pass | 2C | ✅ Custom(name) → Applied(name, [default]) |
+| LLVM codegen → bridge tables | 2D | ✅ fallback_llvm_type uses to_bits()/helpers |
+| emit_operator_call for native types | 2D | ✅ float/double ops through universe |
+| :> metadata projections | 2F | ✅ Width, Endian, Codec, Ops |
+| String struct layout | 2G | ✅ { ptr, len, codec } in TypeUniverse |
+| String literal desugaring | 2G | ✅ "hello" → String { ptr, len: 5, codec: 0 } |
 | `strlen#` intrinsic | future | 🚧 Planned for CString lazy lens |
 | `#export` directive | future | 🚧 Planned for cross-language export |
 | Autogenous binding generation | future | 🚧 Planned for auto .h/crate generation |

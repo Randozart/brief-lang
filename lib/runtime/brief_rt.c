@@ -1759,3 +1759,53 @@ __attribute__((constructor))
 static void brief_rt_ctor(void) {
     __rt_init();
 }
+/* ===================================================================
+ * Phase 3: i64-wrapper functions for prelude modules
+ *
+ * These wrappers take int64_t and return int64_t, matching Brief's ABI.
+ * They bridge the prelude's i64 calling convention to libc's native types.
+ * =================================================================== */
+
+#include <unistd.h>
+#include <sys/resource.h>
+#include <sched.h>
+
+int64_t brief_getuid(void)   { return (int64_t)getuid(); }
+int64_t brief_geteuid(void)  { return (int64_t)geteuid(); }
+int64_t brief_getgid(void)   { return (int64_t)getgid(); }
+int64_t brief_getegid(void)  { return (int64_t)getegid(); }
+
+int64_t brief_sched_yield(void) { return (int64_t)sched_yield(); }
+int64_t brief_getpriority(int64_t which, int64_t who) {
+    errno = 0;
+    int ret = getpriority((int)which, (id_t)who);
+    if (errno) return -1;
+    return (int64_t)ret;
+}
+int64_t brief_setpriority(int64_t which, int64_t who, int64_t prio) {
+    return (int64_t)setpriority((int)which, (id_t)who, (int)prio);
+}
+
+int64_t brief_getrlimit(int64_t resource) {
+    struct rlimit rl;
+    if (getrlimit((int)resource, &rl) != 0) return -1;
+    // Pack soft/hard limits into one i64: (soft << 32) | hard
+    return ((int64_t)rl.rlim_cur << 32) | (int64_t)rl.rlim_max;
+}
+int64_t brief_setrlimit(int64_t resource, int64_t packed) {
+    struct rlimit rl;
+    rl.rlim_cur = (rlim_t)(packed >> 32);
+    rl.rlim_max = (rlim_t)(packed & 0xFFFFFFFF);
+    return (int64_t)setrlimit((int)resource, &rl);
+}
+
+int64_t brief_pagesize(void) {
+    long sz = sysconf(_SC_PAGESIZE);
+    return (sz > 0) ? (int64_t)sz : 4096;
+}
+int64_t brief_cpu_count(void) {
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return (n > 0) ? (int64_t)n : 1;
+}
+
+int64_t brief_ttyname(int64_t fd) { return (int64_t)(uintptr_t)ttyname((int)fd); }

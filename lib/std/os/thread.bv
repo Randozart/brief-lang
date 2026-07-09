@@ -1,0 +1,43 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_thread_create(fn_ptr: Int, arg: Int) -> Int {
+    %r = call i64 @__thread_create__(i64 %fn_ptr, i64 %arg);
+    ret i64 %r;
+};
+
+inop __sys_thread_join(thread: Int) -> Int {
+    %r = call i64 @__thread_join__(i64 %thread);
+    ret i64 %r;
+};
+
+inop __sys_thread_exit(code: Int) -> Int {
+    %r = call i64 @__thread_exit__(i64 %code);
+    ret i64 %r;
+};
+
+inop __sys_mutex_lock(mptr: Int) -> Int {
+    %r = call i64 @__mutex_lock__(i64 %mptr);
+    ret i64 %r;
+};
+
+inop __sys_mutex_unlock(mptr: Int) -> Int {
+    %r = call i64 @__mutex_unlock__(i64 %mptr);
+    ret i64 %r;
+};
+
+inop __sys_condvar_wait(cptr: Int, mptr: Int) -> Int {
+    %r = call i64 @__condvar_wait__(i64 %cptr, i64 %mptr);
+    ret i64 %r;
+};
+
+inop __sys_condvar_signal(cptr: Int) -> Int {
+    %r = call i64 @__condvar_signal__(i64 %cptr);
+    ret i64 %r;
+};
+
+inop __sys_condvar_broadcast(cptr: Int) -> Int {
+    %r = call i64 @__condvar_broadcast__(i64 %cptr);
+    ret i64 %r;
+};
+

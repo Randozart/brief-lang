@@ -2003,10 +2003,30 @@ Example: if the backedge processed "vx0" first,
 carry element 0's update but elements 1-3 stagnate at initial values. Only
 the last-processed field (element 3) had ALL 4 elements correctly set.
 
-**Fix**: In `emit_countable_latch`, when processing a vector group backedge,
-read from `vector_phi_current[vec_phi]` (fully accumulated vector after all
-4 insertelements) instead of `pending_phi_native_backedge[name]`.
+## 2026-07-08 — `emit_operator_call` double-wraps register + missing string impl handler
 
-**Lesson**: Vector phi backedges must always use the accumulator
-(`vector_phi_current`), never per-field pending maps. The same bug could
-appear in any path that touches vector group backedge emission.
+**Issue**: All runtime benchmarks collapsed to "precomputed" because the LLVM IR was invalid:
+`%t%t8 = add i64 0, %t3`. LLVM rejects `%` inside register names, so `opt`/`llc` failed,
+binaries were never produced, and the harness reported precompute_ok (SKIP).
+
+**Root Cause**: Phase 2B added operator declarations to bootstrap.bv (`op Add(Int) -> Int = "add nsw"`).
+This caused `emit_binop` to find universe operators for `Int` and call `emit_operator_call()`,
+which had two latent bugs never triggered before (no types had declared operators):
+
+1. **Register name**: `format!("%t{}", self.fun.next_reg())` — `next_reg()` already returns
+   `%t{N}`, so wrapping it in `"%t{}"` produces `%t%t{N}` (e.g. `%t%t8`). Fix: `self.fun.next_reg()`.
+
+2. **Missing string literal arm**: The operator's `implementation` field is the LLVM opcode string
+   `"add nsw"`, stored as `Expr::Literal(LiteralExpr::String(...))` or similar. The match on
+   `&op.implementation.as_ref()` had arms for `Expr::IntrinsicCall` and `Expr::Identifier` but
+   the `_ =>` fallback emitted `add i64 0, %reg` — ignoring the opcode entirely. Needed: an
+   `Expr::Literal(lit) if lit.is_string()` arm that writes the string as the LLVM opcode.
+
+**Fix**: 
+- `src/backend/llvm/helpers.rs:1056`: `format!("%t{}", self.fun.next_reg())` → `self.fun.next_reg()`
+- Add `Expr::Literal(lit)` arm that extracts the string and emits `{opcode} i64 {a}, {b}`.
+
+**Lesson**: Adding operator declarations to bootstrap types triggers code paths that were
+previously dead (no types had universe operators). Any new binding that makes a type "look
+resolved" can activate untested match arms. Always run `--runtime` benchmarks (without `| tail`)
+after adding operator bindings.

@@ -24,7 +24,7 @@
 
 use brief_compiler::{
     analysis, annotator, ast, backend, dbrief, desugarer, errors, fuzz_checker, hardware, hardware_validator, import_resolver, interpreter,
-    linkage, lsp, manifest, memory_spec, parser, proof_engine, rbv, typechecker, type_universe, view_compiler,
+    linkage, lsp, manifest, memory_spec, normalize_types, parser, proof_engine, rbv, typechecker, type_universe, view_compiler,
     target_spec::{self, TargetSpec},
 };
 use brief_compiler::backend::llvm::EmbeddedConfig;
@@ -182,11 +182,10 @@ fn format_type_errors(errors: &[typechecker::TypeError], file_name: &str) -> Str
                 ));
             }
             typechecker::TypeError::FFIError { message } => {
-                output.push_str(&format!(
-                    "error[F001]: FFI error\n --> {}:?:?\n  |\n",
-                    file_name
-                ));
-                output.push_str(&format!("  = {}\n", message));
+                eprintln!("  ⚠ {}", message);
+            }
+            typechecker::TypeError::RemovedIntrinsic { name, module } => {
+                eprintln!("  ⚠ intrinsic '{}' moved to {} (auto-imported via prelude).", name, module);
             }
         }
         output.push('\n');
@@ -2561,6 +2560,10 @@ fn link_and_optimize(
     // Phase 3.5: Build the Type Universe for projection resolution
     let tu = type_universe::TypeUniverse::build(&program);
 
+    // Phase 3.6: Normalize types (resolve defaults for user-defined types)
+    normalize_types::normalize_types(&mut program, &tu);
+    normalize_types::desugar_string_literals(&mut program, &tu);
+
     let comp_target = if is_embedded {
         typechecker::CompilationTarget::Embedded
     } else if is_circuit_extension(file_path) {
@@ -2720,7 +2723,7 @@ fn link_and_optimize(
                             export_name: ename,
                             orig_name: defn.name.clone(),
                             params,
-                            ret_ty: crate::ast::Type::Int,
+                            ret_ty: crate::ast::Type::Custom("Int".to_string()),
                         });
                     }
                 }

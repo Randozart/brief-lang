@@ -105,12 +105,12 @@ pub struct MultiSliceExpr {
     pub ops: Vec<BracketOp>,
 }
 
-impl ExprTypecheck for ListLiteralExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Int) } }
-impl ExprTypecheck for MapLiteralExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Int) } }
-impl ExprTypecheck for SetLiteralExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Int) } }
-impl ExprTypecheck for ListIndexExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Int) } }
-impl ExprTypecheck for SliceExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Int) } }
-impl ExprTypecheck for MultiSliceExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Int) } }
+impl ExprTypecheck for ListLiteralExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
+impl ExprTypecheck for MapLiteralExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
+impl ExprTypecheck for SetLiteralExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
+impl ExprTypecheck for ListIndexExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
+impl ExprTypecheck for SliceExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
+impl ExprTypecheck for MultiSliceExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
 
 impl ExprEval for ListLiteralExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _: &ExprDispatch) -> Result<Value, RuntimeError> {
@@ -327,7 +327,7 @@ impl ExprCodegenLLVM for ListLiteralExpr {
         ) -> crate::backend::llvm::TypedRegister,
     ) -> crate::backend::llvm::TypedRegister {
         // Delegated to expr/collections.rs via emit_expr
-        crate::backend::llvm::TypedRegister { name: "%list".into(), ty: crate::ast::Type::Int }
+        crate::backend::llvm::TypedRegister { name: "%list".into(), ty: crate::ast::Type::Custom("Int".to_string()) }
     }
 }
 impl ExprCodegenLLVM for MapLiteralExpr { fn emit_llvm(&self, _ctx: &mut crate::backend::llvm::LlvmBackend, _out: &mut String,
@@ -364,7 +364,7 @@ impl ExprCodegenLLVM for ListIndexExpr {
             &str,
         ) -> crate::backend::llvm::TypedRegister,
     ) -> crate::backend::llvm::TypedRegister {
-        crate::backend::llvm::TypedRegister { name: "%idx".into(), ty: crate::ast::Type::Int }
+        crate::backend::llvm::TypedRegister { name: "%idx".into(), ty: crate::ast::Type::Custom("Int".to_string()) }
     }
 }
 impl ExprCodegenLLVM for SliceExpr {
@@ -379,7 +379,7 @@ impl ExprCodegenLLVM for SliceExpr {
             &str,
         ) -> crate::backend::llvm::TypedRegister,
     ) -> crate::backend::llvm::TypedRegister {
-        crate::backend::llvm::TypedRegister { name: "%slc".into(), ty: crate::ast::Type::Int }
+        crate::backend::llvm::TypedRegister { name: "%slc".into(), ty: crate::ast::Type::Custom("Int".to_string()) }
     }
 }
 impl ExprCodegenLLVM for MultiSliceExpr {
@@ -394,7 +394,7 @@ impl ExprCodegenLLVM for MultiSliceExpr {
             &str,
         ) -> crate::backend::llvm::TypedRegister,
     ) -> crate::backend::llvm::TypedRegister {
-        crate::backend::llvm::TypedRegister { name: "%mslc".into(), ty: crate::ast::Type::Int }
+        crate::backend::llvm::TypedRegister { name: "%mslc".into(), ty: crate::ast::Type::Custom("Int".to_string()) }
     }
 }
 impl ExprCodegenWebstack for ListLiteralExpr { fn emit_js(&self, _: &crate::backend::webstack::WebstackGenerator, _: &ExprDispatch) -> String { "JsValue::TRUE".into() } }

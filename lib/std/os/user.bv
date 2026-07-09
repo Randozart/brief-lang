@@ -1,0 +1,23 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_getuid() -> Int {
+    %r = call i64 @brief_getuid();
+    ret i64 %r;
+};
+
+inop __sys_geteuid() -> Int {
+    %r = call i64 @brief_geteuid();
+    ret i64 %r;
+};
+
+inop __sys_getgid() -> Int {
+    %r = call i64 @brief_getgid();
+    ret i64 %r;
+};
+
+inop __sys_getegid() -> Int {
+    %r = call i64 @brief_getegid();
+    ret i64 %r;
+};
+

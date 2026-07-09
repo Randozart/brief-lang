@@ -177,9 +177,6 @@ fn collect_writes_from_body(body: &[Statement], writes: &mut HashSet<String>) {
                     writes.insert(name.clone());
                 }
             }
-            Statement::LocalTrigger { name, .. } => {
-                writes.insert(name.clone());
-            }
             Statement::Guarded { statements, .. } => {
                 collect_writes_from_body(statements, writes);
             }
@@ -423,7 +420,7 @@ mod tests {
     fn make_trigger(name: &str) -> TopLevel {
         TopLevel::Trigger(TriggerDeclaration {
             name: name.to_string(),
-            ty: Type::Bool,
+            ty: Type::Custom("Bool".to_string()),
             address: LinkRef::Explicit(0x4000_0000),
             bit_range: None,
             stages: vec![],

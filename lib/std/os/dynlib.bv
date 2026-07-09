@@ -1,0 +1,18 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_dlopen(filename: Ptr<Byte>) -> Int {
+    %r = call i64 @__dlopen__(i64 %filename);
+    ret i64 %r;
+};
+
+inop __sys_dlsym(handle: Int, symbol: Ptr<Byte>) -> Int {
+    %r = call i64 @__dlsym__(i64 %handle, i64 %symbol);
+    ret i64 %r;
+};
+
+inop __sys_dlclose(handle: Int) -> Int {
+    %r = call i64 @__dlclose__(i64 %handle);
+    ret i64 %r;
+};
+

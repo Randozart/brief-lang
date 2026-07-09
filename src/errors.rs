@@ -324,6 +324,11 @@ pub enum TypeError {
     FFIError {
         message: String,
     },
+    /// 2026-07-08: Phase 5 — intrinsic was relocated to std/os/ module
+    RemovedIntrinsic {
+        name: String,
+        module: String,
+    },
 }
 
 impl fmt::Display for TypeError {
@@ -359,6 +364,9 @@ impl fmt::Display for TypeError {
             }
             TypeError::FFIError { message, .. } => {
                 write!(f, "FFI error: {}", message)
+            }
+            TypeError::RemovedIntrinsic { name, module, .. } => {
+                write!(f, "intrinsic '{}' was moved to {} (auto-imported via prelude). If using --no-std, add: import \"{}\";", name, module, module)
             }
         }
     }

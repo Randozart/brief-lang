@@ -1,4 +1,4 @@
-use crate::ast::{ArrowDir, BracketOp, Expr, Hashtag, Intrinsic, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
+use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel};
 use crate::features::literal::LiteralExpr;
 use std::collections::{HashMap, HashSet};
 
@@ -109,12 +109,12 @@ impl ReactorTransitionGraph {
 
                     let assume_events: Vec<String> = txn.modifiers.iter()
                         .filter(|m| m.name == "assume_event")
-                        .filter_map(|m| m.value.clone())
+                        .filter_map(|m| m.string_value())
                         .collect();
 
                     let assume_shape_action = txn.modifiers.iter()
                         .find(|m| m.name == "assume_shape")
-                        .and_then(|m| m.value.as_ref())
+                        .and_then(|m| m.string_value())
                         .and_then(|v| {
                             let parts: Vec<&str> = v.splitn(2, ", ").collect();
                             if parts.len() == 2 {
@@ -813,7 +813,6 @@ fn is_pure_body(
                 }
             }
             Statement::Escape(_) => return false,
-            Statement::OnExit { .. } => return false,
             Statement::Guarded { condition, statements } => {
                 if references_triggers_or_ffi_with_decls(condition, inop_decls) {
                     return false;
@@ -1005,6 +1004,11 @@ pub fn projection_target_name(target: &crate::ast::ProjectionTarget) -> String {
         ProjectionTarget::Module => "Module".into(),
         ProjectionTarget::IsPure => "IsPure".into(),
         ProjectionTarget::FnSpan => "FnSpan".into(),
+        // ── Phase 2F: Metadata projections ──────────────────────
+        ProjectionTarget::Width => "Width".into(),
+        ProjectionTarget::Endian => "Endian".into(),
+        ProjectionTarget::Codec => "Codec".into(),
+        ProjectionTarget::Ops => "Ops".into(),
     }
 }
 
@@ -1806,8 +1810,8 @@ mod tests {
     fn test_graph_single_counter_txn() {
         let program = Program {
             items: vec![
-                make_state("count", Type::Int),
-                make_state("total", Type::Int),
+                make_state("count", Type::Custom("Int".to_string())),
+                make_state("total", Type::Custom("Int".to_string())),
                 TopLevel::Transaction(Transaction {
                     name: "inc".to_string(),
                     is_reactive: true,
@@ -1867,7 +1871,7 @@ mod tests {
     fn test_compute_projection_usage_none() {
         let program = Program {
             items: vec![
-                make_state("x", Type::Int),
+                make_state("x", Type::Custom("Int".to_string())),
                 TopLevel::Transaction(Transaction {
                     name: "t".into(),
                     parameters: vec![],
@@ -1891,7 +1895,7 @@ mod tests {
     fn test_compute_projection_usage_single() {
         let program = Program {
             items: vec![
-                make_state("x", Type::Int),
+                make_state("x", Type::Custom("Int".to_string())),
                 TopLevel::Transaction(Transaction {
                     name: "t".into(),
                     parameters: vec![],
@@ -1972,7 +1976,7 @@ mod tests {
     }
 }
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
 

@@ -328,11 +328,11 @@ impl WebstackGenerator {
 
         // Otherwise, derive from the type
         match ty {
-            Type::Int => "i32".to_string(),
-            Type::UInt => "u32".to_string(),
-            Type::Float => "f64".to_string(),
-            Type::Bool => "bool".to_string(),
-            Type::String => "u32".to_string(), // String would need special handling
+            Type::Custom(__t) if __t == "Int" => "i32".to_string(),
+            Type::Custom(__t) if __t == "UInt" => "u32".to_string(),
+            Type::Custom(__t) if __t == "Float" => "f64".to_string(),
+            Type::Custom(__t) if __t == "Bool" => "bool".to_string(),
+            Type::Custom(__t) if __t == "String" => "u32".to_string(), // String would need special handling
             Type::Constrained(inner, br) => {
                 Self::rust_type_from_bit_range(br)
             }
@@ -376,13 +376,13 @@ impl WebstackGenerator {
             match item {
                 TopLevel::StateDecl(decl) => {
                     let signal_type = match &decl.ty {
-                        Type::Int => SignalType::Int,
-                        Type::Float => SignalType::Float,
+                        Type::Custom(__t) if __t == "Int" => SignalType::Int,
+                        Type::Custom(__t) if __t == "Float" => SignalType::Float,
                         // 2026-06-29: Fixed-width types for webstack
-                        Type::Int8 | Type::Int16 | Type::Int32 | Type::UInt8 | Type::UInt16 | Type::UInt32 => SignalType::Int,
-                        Type::Float64 => SignalType::Float,
-                        Type::Bool => SignalType::Bool,
-                        Type::String => SignalType::String,
+                        Type::Custom(__t) if __t == "Int8" || __t == "Int16" || __t == "Int32" || __t == "UInt8" || __t == "UInt16" || __t == "UInt32" => SignalType::Int,
+                        Type::Custom(__t) if __t == "Float64" => SignalType::Float,
+                        Type::Custom(__t) if __t == "Bool" => SignalType::Bool,
+                        Type::Custom(__t) if __t == "String" => SignalType::String,
                         Type::Applied(name, _) if name == "List" => SignalType::List,
                         Type::Generic(name, _) if name == "List" => SignalType::List,
                         Type::Vector(_, dims) => {
@@ -393,10 +393,10 @@ impl WebstackGenerator {
                             SignalType::Vector(total)
                         }
                         Type::Constrained(inner, _) => match **inner {
-                            Type::Int => SignalType::Int,
-                            Type::UInt => SignalType::Int,
-                            Type::Float => SignalType::Float,
-                            Type::Bool => SignalType::Bool,
+                            Type::Custom(ref __t) if __t == "Int" => SignalType::Int,
+                            Type::Custom(ref __t) if __t == "UInt" => SignalType::Int,
+                            Type::Custom(ref __t) if __t == "Float" => SignalType::Float,
+                            Type::Custom(ref __t) if __t == "Bool" => SignalType::Bool,
                             _ => SignalType::Int,
                         },
                         Type::Custom(_) => SignalType::Struct,
@@ -432,13 +432,13 @@ impl WebstackGenerator {
                     self.trigger_names.push(trg.name.clone());
                     // Register trigger as a signal (like StateDecl but with FFI-observable initializer)
                     let signal_type = match &trg.ty {
-                        Type::Int => SignalType::Int,
-                        Type::Float => SignalType::Float,
+                        Type::Custom(__t) if __t == "Int" => SignalType::Int,
+                        Type::Custom(__t) if __t == "Float" => SignalType::Float,
                         // 2026-06-29: Fixed-width types for webstack
-                        Type::Int8 | Type::Int16 | Type::Int32 | Type::UInt8 | Type::UInt16 | Type::UInt32 => SignalType::Int,
-                        Type::Float64 => SignalType::Float,
-                        Type::Bool => SignalType::Bool,
-                        Type::String => SignalType::String,
+                        Type::Custom(__t) if __t == "Int8" || __t == "Int16" || __t == "Int32" || __t == "UInt8" || __t == "UInt16" || __t == "UInt32" => SignalType::Int,
+                        Type::Custom(__t) if __t == "Float64" => SignalType::Float,
+                        Type::Custom(__t) if __t == "Bool" => SignalType::Bool,
+                        Type::Custom(__t) if __t == "String" => SignalType::String,
                         _ => SignalType::Int,
                     };
                     self.signal_types.insert(trg.name.clone(), signal_type.clone());
@@ -783,20 +783,6 @@ impl WebstackGenerator {
             }
             Statement::InlineAsm { .. } => {
                 out.push_str("// asm: not applicable to TS\n");
-            }
-            Statement::LocalTrigger { name, .. } => {
-                out.push_str(&format!("// local trigger: {} (omitted in TS)\n", name));
-            }
-            Statement::Alka(alka) => {
-                out.push_str("// alka block (hardware construct, omitted)\n");
-                let _ = alka;
-            }
-            Statement::OnExit { body, .. } => {
-                out.push_str("try {\n");
-                for s in body {
-                    self.statement_to_ts(out, s);
-                }
-                out.push_str("} catch (__exit_err) { /* on_exit handler */ }\n");
             }
             Statement::SyncBlock { body } => {
                 // sync block: emitted sequentially in TS (structural concurrency hint)
@@ -1221,19 +1207,6 @@ impl WebstackGenerator {
             Statement::InlineAsm { asm_string, .. } => {
                 out.push_str(&format!("core::arch::asm!(\"{}\");\n", asm_string));
             }
-            Statement::LocalTrigger { name, .. } => {
-                out.push_str(&format!("// local trigger: {}\n", name));
-            }
-            Statement::Alka(alka) => {
-                out.push_str("// alka block (hardware construct)\n");
-                let _ = alka;
-            }
-            Statement::OnExit { body, .. } => {
-                out.push_str("// on_exit block\n");
-                for s in body {
-                    self.statement_to_rust(out, s);
-                }
-            }
             Statement::SyncBlock { body } => {
                 for s in body {
                     self.statement_to_rust(out, s);
@@ -1516,7 +1489,7 @@ mod tests {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "count".into(),
-                    ty: Type::Int,
+                    ty: Type::Custom("Int".to_string()),
                     expr: None,
                     address: None,
                     bit_range: None,
@@ -1528,7 +1501,7 @@ mod tests {
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "name".into(),
-                    ty: Type::String,
+                    ty: Type::Custom("String".to_string()),
                     expr: None,
                     address: None,
                     bit_range: None,
@@ -1562,7 +1535,7 @@ mod tests {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".into(),
-                    ty: Type::Int,
+                    ty: Type::Custom("Int".to_string()),
                     expr: Some(Expr::Integer(42)),
                     address: None,
                     bit_range: None,
@@ -1623,7 +1596,7 @@ mod tests {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "count".into(),
-                    ty: Type::Int,
+                    ty: Type::Custom("Int".to_string()),
                     expr: Some(Expr::Integer(0)),
                     address: None,
                     bit_range: None,
@@ -1838,7 +1811,7 @@ mod tests {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".into(),
-                    ty: Type::Int,
+                    ty: Type::Custom("Int".to_string()),
                     expr: Some(Expr::Integer(0)),
                     address: None,
                     bit_range: None,
@@ -1906,7 +1879,7 @@ mod tests {
     }
 }
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
     use crate::features::literal::LiteralExpr;

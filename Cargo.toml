@@ -8,6 +8,8 @@ name = "brief_compiler"
 path = "src/lib.rs"
 
 [features]
+kani = []
+
 kani_full = []
 
 [[bin]]
@@ -51,3 +53,6 @@ libc = "0.2"
 tempfile = "3.10"
 proptest = "1.4"
 goblin = "0.8"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("kani", "nightly"))'] }

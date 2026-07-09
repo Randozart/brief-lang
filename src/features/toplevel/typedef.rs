@@ -169,7 +169,7 @@ mod tests {
 // ── Kani harnesses ─────────────────────────────────────────────────
 // Fast group (kani): no Box::new, no Vec, no String, no formatting, no heap allocation.
 // These harnesses use pure match dispatch only.
-#[cfg(kani)]
+#[cfg(feature = "kani")]
 mod kani_tests {
     use super::*;
 
@@ -178,7 +178,7 @@ mod kani_tests {
     // a non-heap representation for the primitive kernel.
 }
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
 

@@ -23,7 +23,7 @@ pub fn emit_projection(
         if let Expr::Identifier(fn_name) = source {
             if backend.ctx.defn_params.contains_key(fn_name) || backend.ctx.defn_return_types.contains_key(fn_name) {
                 writeln!(out, "{}{} = ptrtoint @{} to i64", indent, v, fn_name).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Int };
+                return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
             }
         }
     }
@@ -58,11 +58,11 @@ pub fn emit_projection(
         }
         ProjectionTarget::Bytes => {
             let bs = match &src_val.ty {
-                Type::Float => 4,
-                Type::Int | Type::UInt => 8,
-                Type::Bool => 1,
-                Type::Char => 4,
-                Type::String | Type::Data => 8,
+                Type::Custom(__t) if __t == "Float" => 4,
+                Type::Custom(__t) if __t == "Int" || __t == "UInt" => 8,
+                Type::Custom(__t) if __t == "Bool" => 1,
+                Type::Custom(__t) if __t == "Char" => 4,
+                Type::Custom(__t) if __t == "String" || __t == "Data" => 8,
                 Type::Custom(name) => {
                     match backend.ctx.struct_types.get(name) {
                         Some(fields) => fields.len() as i64 * 8,
@@ -85,11 +85,11 @@ pub fn emit_projection(
         }
         ProjectionTarget::Type => {
             let tid = match src_val.ty {
-                Type::Int | Type::UInt => 1i64,
-                Type::Bool => 2,
-                Type::Char => 3,
-                Type::String | Type::Data => 4,
-                Type::Float => 5,
+                Type::Custom(__t) if __t == "Int" || __t == "UInt" => 1i64,
+                Type::Custom(__t) if __t == "Bool" => 2,
+                Type::Custom(__t) if __t == "Char" => 3,
+                Type::Custom(__t) if __t == "String" || __t == "Data" => 4,
+                Type::Custom(__t) if __t == "Float" => 5,
                 Type::Custom(_) => 6,
                 Type::Void => 0,
                 _ => 0,
@@ -166,7 +166,7 @@ pub fn emit_projection(
             writeln!(out, "{}br label %{}", indent, d_l).ok();
             writeln!(out, "{}{}:", indent, d_l).ok();
             writeln!(out, "{}{} = phi i1 [ false, %{} ], [ true, %{} ]", indent, v, e_l, f_l).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Bool };
+            return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
         }
         ProjectionTarget::Range => {
             // Return list length (same as Size) — Range = [0, len)
@@ -200,6 +200,33 @@ pub fn emit_projection(
             writeln!(out, "{}{} = icmp eq i64 {}, 0", indent, v, len).ok();
             writeln!(out, "{}{} = zext i1 {} to i64", indent, v, v).ok();
         }
+        // ── Phase 2F: Metadata projections ──────────────────────
+        ProjectionTarget::Width => {
+            let w = src_val.ty.bit_width().unwrap_or(64) as i64;
+            writeln!(out, "{}{} = add i64 0, {}", indent, v, w).ok();
+        }
+        ProjectionTarget::Endian => {
+            let endian = backend.ctx.type_universe.as_ref()
+                .and_then(|u| u.get_by_type(&src_val.ty))
+                .map(|rt| if rt.endian == 0 { "little" } else { "big" })
+                .unwrap_or("little");
+            writeln!(out, "{}{} = add i64 0, {} ; endian: {}", indent, v, if endian == "big" { 1 } else { 0 }, endian).ok();
+        }
+        ProjectionTarget::Codec => {
+            let codec = backend.ctx.type_universe.as_ref()
+                .and_then(|u| u.get_by_type(&src_val.ty))
+                .and_then(|rt| rt.codec.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or("none");
+            writeln!(out, "{}{} = add i64 0, 0 ; codec: {}", indent, v, codec).ok();
+        }
+        ProjectionTarget::Ops => {
+            let count = backend.ctx.type_universe.as_ref()
+                .and_then(|u| u.get_by_type(&src_val.ty))
+                .map(|rt| rt.operators.len())
+                .unwrap_or(0);
+            writeln!(out, "{}{} = add i64 0, {} ; ops count", indent, v, count).ok();
+        }
         ProjectionTarget::UserDefinedWithArg(name, arg_expr) => {
             // Phase 3.5: Fast-path for well-known operator projections
             if let Some(tr) = backend.try_projection_fast_path(out, &src_val, name.as_str(), arg_expr, indent, &v) {
@@ -232,6 +259,6 @@ pub fn emit_projection(
         }
     }
     // 2026-06-30: All projection targets that don't explicitly return
-    // produce a boxed i64 — return Type::Int.
-    TypedRegister { name: v.to_string(), ty: Type::Int }
+    // produce a boxed i64 — return Type::Custom("Int".to_string()).
+    TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
 }

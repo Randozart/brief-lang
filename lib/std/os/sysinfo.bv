@@ -1,0 +1,23 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_uname() -> Int {
+    %r = call i64 @__uname__();
+    ret i64 %r;
+};
+
+inop __sys_hostname() -> Int {
+    %r = call i64 @__hostname__();
+    ret i64 %r;
+};
+
+inop __sys_pagesize() -> Int {
+    %r = call i64 @brief_pagesize();
+    ret i64 %r;
+};
+
+inop __sys_cpu_count() -> Int {
+    %r = call i64 @brief_cpu_count();
+    ret i64 %r;
+};
+

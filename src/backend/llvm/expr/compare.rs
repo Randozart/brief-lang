@@ -50,7 +50,7 @@ pub fn emit_and(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Exp
         let bn = backend.as_bool_reg(out, indent, &b);
         writeln!(out, "{}{} = and i1 {}, {}", indent, v, an, bn).ok();
     }
-    TypedRegister { name: v.to_string(), ty: crate::ast::Type::Bool }
+    TypedRegister { name: v.to_string(), ty: crate::ast::Type::Custom("Bool".to_string()) }
 }
 
 pub fn emit_or(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Expr, indent: &str) -> TypedRegister {
@@ -61,7 +61,7 @@ pub fn emit_or(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Expr
         let bn = backend.as_bool_reg(out, indent, &b);
         writeln!(out, "{}{} = or i1 {}, {}", indent, v, an, bn).ok();
     }
-    TypedRegister { name: v.to_string(), ty: crate::ast::Type::Bool }
+    TypedRegister { name: v.to_string(), ty: crate::ast::Type::Custom("Bool".to_string()) }
 }
 
 pub fn emit_not(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Expr, indent: &str) -> TypedRegister {
@@ -70,5 +70,5 @@ pub fn emit_not(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Exp
         let name = backend.as_bool_reg(out, indent, &inner);
         writeln!(out, "{}{} = xor i1 {}, true", indent, v, name).ok();
     }
-    TypedRegister { name: v.to_string(), ty: crate::ast::Type::Bool }
+    TypedRegister { name: v.to_string(), ty: crate::ast::Type::Custom("Bool".to_string()) }
 }

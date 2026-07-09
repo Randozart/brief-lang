@@ -17,7 +17,7 @@ impl ProjectionExpr {
 
 impl ExprTypecheck for ProjectionExpr {
     fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> {
-        Ok(Type::Int)
+        Ok(Type::Custom("Int".to_string()))
     }
 }
 
@@ -269,6 +269,19 @@ impl ExprEval for ProjectionExpr {
                     "user-defined projection '{}' is not supported at runtime", name
                 )))
             }
+            // ── Phase 2F: Metadata projections ──────────────────
+            ProjectionTarget::Width => {
+                let w = match &source_val {
+                    Value::Int(_) | Value::Float(_) => 64i64,
+                    Value::Bool(_) => 1,
+                    Value::Char(_) => 32,
+                    _ => 64,
+                };
+                Ok(Value::Int(w))
+            }
+            ProjectionTarget::Endian => Ok(Value::String("little".to_string())),
+            ProjectionTarget::Codec => Ok(Value::String("none".to_string())),
+            ProjectionTarget::Ops => Ok(Value::Int(0)),
         }
     }
 }

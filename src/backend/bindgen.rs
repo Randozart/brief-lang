@@ -138,11 +138,11 @@ fn emit_c_function_decl(out: &mut String, decl: &ExportDecl, universe: &TypeUniv
 /// Map a Brief Type to a Rust type.
 fn type_to_rust(ty: &crate::ast::Type, universe: &TypeUniverse) -> String {
     match ty {
-        crate::ast::Type::Int | crate::ast::Type::UInt => "i64".to_string(),
-        crate::ast::Type::Float => "f32".to_string(),
-        crate::ast::Type::Bool => "u8".to_string(),
-        crate::ast::Type::Char => "u32".to_string(),
-        crate::ast::Type::String | crate::ast::Type::Data => "*const u8".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "Float" => "f32".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "Bool" => "u8".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "Char" => "u32".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => "*const u8".to_string(),
         crate::ast::Type::Void => "()".to_string(),
         crate::ast::Type::Custom(name) | crate::ast::Type::Applied(name, _) => {
             if universe.types.contains_key(name) {
@@ -158,11 +158,11 @@ fn type_to_rust(ty: &crate::ast::Type, universe: &TypeUniverse) -> String {
 /// Map a Brief Type to a Python ctypes type name.
 fn type_to_python(ty: &crate::ast::Type, universe: &TypeUniverse) -> &'static str {
     match ty {
-        crate::ast::Type::Int | crate::ast::Type::UInt => "ctypes.c_int64",
-        crate::ast::Type::Float => "ctypes.c_float",
-        crate::ast::Type::Bool => "ctypes.c_uint8",
-        crate::ast::Type::Char => "ctypes.c_uint32",
-        crate::ast::Type::String | crate::ast::Type::Data => "ctypes.c_char_p",
+        crate::ast::Type::Custom(__t) if __t == "Int" || __t == "UInt" => "ctypes.c_int64",
+        crate::ast::Type::Custom(__t) if __t == "Float" => "ctypes.c_float",
+        crate::ast::Type::Custom(__t) if __t == "Bool" => "ctypes.c_uint8",
+        crate::ast::Type::Custom(__t) if __t == "Char" => "ctypes.c_uint32",
+        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => "ctypes.c_char_p",
         crate::ast::Type::Void => "None",
         crate::ast::Type::Custom(name) | crate::ast::Type::Applied(name, _) => {
             if universe.types.contains_key(name) {
@@ -178,11 +178,11 @@ fn type_to_python(ty: &crate::ast::Type, universe: &TypeUniverse) -> &'static st
 /// Map a Brief Type to a C type.
 fn type_to_c(ty: &crate::ast::Type, universe: &TypeUniverse) -> String {
     match ty {
-        crate::ast::Type::Int | crate::ast::Type::UInt => "int64_t".to_string(),
-        crate::ast::Type::Float => "float".to_string(),
-        crate::ast::Type::Bool => "uint8_t".to_string(),
-        crate::ast::Type::Char => "uint32_t".to_string(),
-        crate::ast::Type::String | crate::ast::Type::Data => "struct BriefString".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "Int" || __t == "UInt" => "int64_t".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "Float" => "float".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "Bool" => "uint8_t".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "Char" => "uint32_t".to_string(),
+        crate::ast::Type::Custom(__t) if __t == "String" || __t == "Data" => "struct BriefString".to_string(),
         crate::ast::Type::Void => "void".to_string(),
         crate::ast::Type::Custom(name) => {
             if universe.types.contains_key(name) {
@@ -377,6 +377,11 @@ mod tests {
             guards: vec![],
             operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
+            // 2026-07-08: Phase 2B — test defaults
+            default_params: vec![],
+            commuting: true,
+            constant_time: false,
+            struct_layout: None,
             source: TypeDef {
                 name: name.to_string(),
                 type_params: vec![],
@@ -418,7 +423,7 @@ mod tests {
             params: vec![
                 ExportParam { name: "p".to_string(), ty: Type::Custom("Packet".to_string()) },
             ],
-            ret_ty: Type::Int,
+            ret_ty: Type::Custom("Int".to_string()),
         }];
         let h = emit_c_header(&universe, &exports);
         assert!(h.contains("process_packet"));
@@ -443,7 +448,7 @@ mod tests {
             params: vec![
                 ExportParam { name: "p".to_string(), ty: Type::Custom("Packet".to_string()) },
             ],
-            ret_ty: Type::Bool,
+            ret_ty: Type::Custom("Bool".to_string()),
         }];
         let rs = emit_rust_bindings(&universe, &exports);
         assert!(rs.contains("process_packet"));
@@ -461,13 +466,13 @@ mod tests {
     #[test]
     fn test_type_mapping() {
         let universe = make_test_universe();
-        assert_eq!(type_to_c(&Type::Int, &universe), "int64_t");
-        assert_eq!(type_to_c(&Type::Float, &universe), "float");
-        assert_eq!(type_to_c(&Type::Bool, &universe), "uint8_t");
+        assert_eq!(type_to_c(&Type::Custom("Int".to_string()), &universe), "int64_t");
+        assert_eq!(type_to_c(&Type::Custom("Float".to_string()), &universe), "float");
+        assert_eq!(type_to_c(&Type::Custom("Bool".to_string()), &universe), "uint8_t");
         assert_eq!(type_to_c(&Type::Custom("Packet".to_string()), &universe), "struct Packet");
-        assert_eq!(type_to_rust(&Type::Int, &universe), "i64");
-        assert_eq!(type_to_rust(&Type::Float, &universe), "f32");
-        assert_eq!(type_to_python(&Type::Int, &universe), "ctypes.c_int64");
-        assert_eq!(type_to_python(&Type::Float, &universe), "ctypes.c_float");
+        assert_eq!(type_to_rust(&Type::Custom("Int".to_string()), &universe), "i64");
+        assert_eq!(type_to_rust(&Type::Custom("Float".to_string()), &universe), "f32");
+        assert_eq!(type_to_python(&Type::Custom("Int".to_string()), &universe), "ctypes.c_int64");
+        assert_eq!(type_to_python(&Type::Custom("Float".to_string()), &universe), "ctypes.c_float");
     }
 }

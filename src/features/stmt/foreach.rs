@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Hashtag, Statement, Type};
+use crate::ast::{Expr, Hashtag, Statement, Type, Annotation};
 use crate::errors::TypeError;
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
@@ -8,7 +8,7 @@ pub struct ForeachStmt {
     pub item: String,
     pub list: Box<Expr>,
     pub body: Vec<Statement>,
-    pub modifiers: Vec<Hashtag>,
+    pub modifiers: Vec<Annotation>,
 }
 
 impl StmtTypecheck for ForeachStmt {
@@ -54,7 +54,7 @@ impl StmtCodegenLLVM for ForeachStmt {
         // Determine element type from the list expression's type
         let elem_ty = match &list_val.ty {
             Type::Applied(name, params) if name == "List" && params.len() == 1 => params[0].clone(),
-            _ => Type::Int,
+            _ => Type::Custom("Int".to_string()),
         };
         let tc = ctx.fun.txn_counter; ctx.fun.txn_counter += 20;
         let hp = format!("%fe_hp_{}", tc);
@@ -94,7 +94,7 @@ impl StmtCodegenLLVM for ForeachStmt {
         }
         if let Some(prev) = prev_item {
             ctx.fun.let_bindings.insert(self.item.clone(), prev);
-            ctx.fun.let_binding_types.insert(self.item.clone(), prev_item_ty.unwrap_or(Type::Int));
+            ctx.fun.let_binding_types.insert(self.item.clone(), prev_item_ty.unwrap_or(Type::Custom("Int".to_string())));
         } else {
             ctx.fun.let_bindings.remove(self.item.as_str());
             ctx.fun.let_binding_types.remove(self.item.as_str());
@@ -109,7 +109,7 @@ impl StmtCodegenLLVM for ForeachStmt {
         );
         // Emit optimization remarks for speculative loop directives.
         for tag in &self.modifiers {
-            if !tag.speculative { continue; }
+            if !tag.speculative() { continue; }
             match tag.name.as_str() {
                 "unroll" => {
                     let is_full = dir_effects.iter().any(|e| {

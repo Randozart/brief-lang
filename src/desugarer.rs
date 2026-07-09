@@ -62,8 +62,8 @@ impl Desugarer {
 
     fn infer_type_from_expr(&self, expr: &Expr, var_name: &str) -> Type {
         match expr {
-            Expr::Identifier(name) if name == var_name => Type::Bool,
-            Expr::PriorState(name) if name == var_name => Type::Bool,
+            Expr::Identifier(name) if name == var_name => Type::Custom("Bool".to_string()),
+            Expr::PriorState(name) if name == var_name => Type::Custom("Bool".to_string()),
             Expr::Eq(l, r)
             | Expr::Ne(l, r)
             | Expr::Lt(l, r)
@@ -72,7 +72,7 @@ impl Desugarer {
             | Expr::Ge(l, r) => {
                 let left_type = self.infer_type_from_expr(l, var_name);
                 let right_type = self.infer_type_from_expr(r, var_name);
-                if right_type != Type::Bool {
+                if right_type != Type::Custom("Bool".to_string()) {
                     right_type
                 } else {
                     left_type
@@ -81,28 +81,28 @@ impl Desugarer {
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
                 let left_type = self.infer_type_from_expr(l, var_name);
                 let right_type = self.infer_type_from_expr(r, var_name);
-                if right_type != Type::Int {
+                if right_type != Type::Custom("Int".to_string()) {
                     right_type
                 } else {
                     left_type
                 }
             }
-            Expr::And(_, _) | Expr::Or(_, _) => Type::Bool,
-            Expr::Not(_) => Type::Bool,
-            Expr::Integer(_) => Type::Int,
-            Expr::Float(_) => Type::Float,
-            Expr::String(_) => Type::String,
-            Expr::Bool(_) => Type::Bool,
+            Expr::And(_, _) | Expr::Or(_, _) => Type::Custom("Bool".to_string()),
+            Expr::Not(_) => Type::Custom("Bool".to_string()),
+            Expr::Integer(_) => Type::Custom("Int".to_string()),
+            Expr::Float(_) => Type::Custom("Float".to_string()),
+            Expr::String(_) => Type::Custom("String".to_string()),
+            Expr::Bool(_) => Type::Custom("Bool".to_string()),
             Expr::Call(_, args) => {
                 for arg in args {
                     let ty = self.infer_type_from_expr(arg, var_name);
-                    if ty != Type::Bool {
+                    if ty != Type::Custom("Bool".to_string()) {
                         return ty;
                     }
                 }
-                Type::Bool
+                Type::Custom("Bool".to_string())
             }
-            _ => Type::Bool,
+            _ => Type::Custom("Bool".to_string()),
         }
     }
 
@@ -205,10 +205,10 @@ impl Desugarer {
                             let ty =
                                 self.infer_type_from_expr(&txn.contract.post_condition, &var_name);
                             let default_val = match &ty {
-                                Type::Int => Expr::Integer(0),
-                                Type::Float => Expr::Float(0.0),
-                                Type::Bool => Expr::Bool(false),
-                                Type::String => Expr::String(String::new()),
+                                Type::Custom(__t) if __t == "Int" => Expr::Integer(0),
+                                Type::Custom(__t) if __t == "Float" => Expr::Float(0.0),
+                                Type::Custom(__t) if __t == "Bool" => Expr::Bool(false),
+                                Type::Custom(__t) if __t == "String" => Expr::String(String::new()),
                                 _ => Expr::Bool(false),
                             };
                             self.generated_state.push(StateDecl {
@@ -250,17 +250,17 @@ impl Desugarer {
                     if !s.transactions.is_empty() {
                         for field in fields {
                             let ty = match &field.ty {
-                                Type::Int => Type::Int,
-                                Type::Float => Type::Float,
-                                Type::Bool => Type::Bool,
-                                Type::String => Type::String,
+                                Type::Custom(__t) if __t == "Int" => Type::Custom("Int".to_string()),
+                                Type::Custom(__t) if __t == "Float" => Type::Custom("Float".to_string()),
+                                Type::Custom(__t) if __t == "Bool" => Type::Custom("Bool".to_string()),
+                                Type::Custom(__t) if __t == "String" => Type::Custom("String".to_string()),
                                 other => other.clone(),
                             };
                             let initial_expr = match &ty {
-                                Type::Int => Some(Expr::Integer(0)),
-                                Type::Float => Some(Expr::Integer(0)),
-                                Type::Bool => Some(Expr::Bool(false)),
-                                Type::String => Some(Expr::String("".to_string())),
+                                Type::Custom(__t) if __t == "Int" => Some(Expr::Integer(0)),
+                                Type::Custom(__t) if __t == "Float" => Some(Expr::Integer(0)),
+                                Type::Custom(__t) if __t == "Bool" => Some(Expr::Bool(false)),
+                                Type::Custom(__t) if __t == "String" => Some(Expr::String("".to_string())),
                                 Type::Applied(name, _) if name == "List" => {
                                     Some(Expr::ListLiteral(vec![]))
                                 }
@@ -298,17 +298,17 @@ impl Desugarer {
                     if !rs.transactions.is_empty() {
                         for field in &rs.fields {
                             let ty = match &field.ty {
-                                Type::Int => Type::Int,
-                                Type::Float => Type::Float,
-                                Type::Bool => Type::Bool,
-                                Type::String => Type::String,
+                                Type::Custom(__t) if __t == "Int" => Type::Custom("Int".to_string()),
+                                Type::Custom(__t) if __t == "Float" => Type::Custom("Float".to_string()),
+                                Type::Custom(__t) if __t == "Bool" => Type::Custom("Bool".to_string()),
+                                Type::Custom(__t) if __t == "String" => Type::Custom("String".to_string()),
                                 other => other.clone(),
                             };
                             let initial_expr = match &ty {
-                                Type::Int => Some(Expr::Integer(0)),
-                                Type::Float => Some(Expr::Integer(0)),
-                                Type::Bool => Some(Expr::Bool(false)),
-                                Type::String => Some(Expr::String("".to_string())),
+                                Type::Custom(__t) if __t == "Int" => Some(Expr::Integer(0)),
+                                Type::Custom(__t) if __t == "Float" => Some(Expr::Integer(0)),
+                                Type::Custom(__t) if __t == "Bool" => Some(Expr::Bool(false)),
+                                Type::Custom(__t) if __t == "String" => Some(Expr::String("".to_string())),
                                 Type::Applied(name, _) if name == "List" => {
                                     Some(Expr::ListLiteral(vec![]))
                                 }
@@ -533,7 +533,7 @@ impl Desugarer {
         state.push(StateDecl {
                     attrs: Vec::new(),
             name: "done".to_string(),
-            ty: Type::Bool,
+            ty: Type::Custom("Bool".to_string()),
             expr: Some(Expr::Bool(false)),
             address: None,
             bit_range: None,
@@ -607,7 +607,7 @@ impl Desugarer {
                 let sig = Signature {
                     name: name.clone(),
                     params: input_types.iter().map(|t| ("".to_string(), t.clone())).collect(),
-                    result_type: ResultType::Projection(vec![Type::Bool]),
+                    result_type: ResultType::Projection(vec![Type::Custom("Bool".to_string())]),
                     source: None,
                     alias: None,
                     bound_defn: None,
@@ -1183,20 +1183,6 @@ impl Desugarer {
                 fields,
                 expr: self.desugar_expr(expr),
             },
-            Statement::LocalTrigger {
-                name,
-                ty,
-                expr,
-                span,
-            } => Statement::LocalTrigger {
-                name,
-                ty,
-                expr: expr.map(|e| self.desugar_expr(e)),
-                span,
-            },
-            Statement::OnExit { body, span } => {
-                Statement::OnExit { body: body.into_iter().map(|s| self.desugar_stmt(s)).collect(), span }
-            }
             Statement::Oracle { handler, body, span } => Statement::Oracle {
                 handler: handler.into_iter().map(|s| self.desugar_stmt(s)).collect(),
                 body: body.into_iter().map(|s| self.desugar_stmt(s)).collect(),
@@ -1215,7 +1201,6 @@ impl Desugarer {
                 lhs,
                 modifiers,
             },
-            Statement::InlineAsm { .. } | Statement::Alka(_) => stmt,
             Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
                 name,
                 ty,
@@ -1223,6 +1208,7 @@ impl Desugarer {
                 port,
                 modifiers,
             },
+            Statement::InlineAsm { .. } => stmt,
         }
     }
 
@@ -1257,7 +1243,7 @@ mod tests {
         let defn = Definition {
             name: "test".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Int)],
+            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
@@ -1324,7 +1310,7 @@ mod tests {
         let defn = Definition {
             name: "test".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Int)],
+            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
             outputs: vec![],
             output_type: None,
             output_names: vec![],

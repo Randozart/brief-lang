@@ -1,0 +1,8 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_getrandom(buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
+    %r = call i64 @__getrandom__(i64 %buf, i64 %len, i64 %flags);
+    ret i64 %r;
+};
+

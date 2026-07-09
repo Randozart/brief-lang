@@ -368,23 +368,12 @@ impl LlvmBackend {
                 clobbers: clobbers.clone(),
                 span: *span,
             },
-            Statement::LocalTrigger { name, ty, expr, span } => Statement::LocalTrigger {
-                name: name.clone(),
-                ty: ty.clone(),
-                expr: expr.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
-                span: *span,
-            },
             Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
                 name: name.clone(),
                 ty: ty.clone(),
                 instance: Self::rewrite_cell_identifiers(instance, cell_name),
                 port: port.clone(),
                 modifiers: modifiers.clone(),
-            },
-            Statement::Alka(alka) => Statement::Alka(alka.clone()),
-            Statement::OnExit { body, span } => Statement::OnExit {
-                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                span: *span,
             },
             Statement::SyncBlock { body } => Statement::SyncBlock {
                 body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
@@ -572,28 +561,28 @@ impl LlvmBackend {
             return;
         }
         match (&src_ty, target) {
-            (Type::Int | Type::UInt, Type::Float) => {
+            (Type::Custom(__t), Type::Custom(__s)) if (__t == "Int" || __t == "UInt") && __s == "Float" => {
                 // 2026-06-17: Native float, not boxed i64. Downstream
                 // code (emit_binop, enum constructors) converts to/from
                 // i64 as needed via ensure_float_reg / native_float_or_box.
                 let _ = writeln!(out, "{}{} = sitofp i64 {} to float", indent, dst, src);
             }
-            (Type::Float, Type::Int | Type::UInt) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Float" && (__s == "Int" || __s == "UInt") => {
                 let tr = format!("%ctr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let fl = format!("%cfl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
                 let _ = writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr);
                 let _ = writeln!(out, "{}{} = fptosi float {} to i64", indent, dst, fl);
             }
-            (Type::Int | Type::UInt, Type::Bool) => {
+            (Type::Custom(__t), Type::Custom(__s)) if (__t == "Int" || __t == "UInt") && __s == "Bool" => {
                 let ci = format!("%ccb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
                 let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
             }
-            (Type::Bool, Type::Int | Type::UInt) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Bool" && (__s == "Int" || __s == "UInt") => {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             }
-            (Type::Float, Type::Bool) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Float" && __s == "Bool" => {
                 let tr = format!("%cfbtr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let fl = format!("%cfbfl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let ci = format!("%cfbci{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -602,7 +591,7 @@ impl LlvmBackend {
                 let _ = writeln!(out, "{}{} = fcmp fast une float {}, 0.0", indent, ci, fl);
                 let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
             }
-            (Type::Bool, Type::Float) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Bool" && __s == "Float" => {
                 let ci = format!("%cbfci{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let fl = format!("%cbffl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let fi = format!("%cbffi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -612,23 +601,23 @@ impl LlvmBackend {
                 let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, fi);
             }
             // Char ↔ Bool
-            (Type::Char, Type::Bool) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Char" && __s == "Bool" => {
                 let ci = format!("%cci{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
                 let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
             }
-            (Type::Bool, Type::Char) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Bool" && __s == "Char" => {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             }
             // Char ↔ Int
-            (Type::Char, Type::Int | Type::UInt) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Char" && (__s == "Int" || __s == "UInt") => {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             }
-            (Type::Int | Type::UInt, Type::Char) => {
+            (Type::Custom(__t), Type::Custom(__s)) if (__t == "Int" || __t == "UInt") && __s == "Char" => {
                 let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, dst, src);
             }
             // Char ↔ String (construct Brief string struct {cap, len, data})
-            (Type::Char, Type::String) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Char" && __s == "String" => {
                 let tr = format!("%cctr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
                 let alloc = format!("%ccac{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -653,7 +642,7 @@ impl LlvmBackend {
                 let _ = writeln!(out, "{}store i8 0, ptr {}, align 1", indent, nt);
                 let _ = writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dst, alloc);
             }
-            (Type::String, Type::Char) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "String" && __s == "Char" => {
                 let ip = format!("%csip{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, src);
                 let lb = format!("%cslb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -661,16 +650,16 @@ impl LlvmBackend {
                 let _ = writeln!(out, "{}{} = zext i8 {} to i64", indent, dst, lb);
             }
             // Int ↔ String (via existing __int_to_str)
-            (Type::Int | Type::UInt, Type::String) => {
+            (Type::Custom(__t), Type::Custom(__s)) if (__t == "Int" || __t == "UInt") && __s == "String" => {
                 let _ = writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, dst, src);
             }
-            (Type::String, Type::Int | Type::UInt) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "String" && (__s == "Int" || __s == "UInt") => {
                 let ip = format!("%csii{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, src);
                 let _ = writeln!(out, "{}{} = call i64 @__str_to_int(i8* {})", indent, dst, ip);
             }
             // String ↔ Bool (non-empty is true)
-            (Type::String, Type::Bool) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "String" && __s == "Bool" => {
                 let ip = format!("%csbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let lb = format!("%csbl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let ci = format!("%csbc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -679,7 +668,7 @@ impl LlvmBackend {
                 let _ = writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, ci, lb);
                 let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
             }
-            (Type::Bool, Type::String) => {
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Bool" && __s == "String" => {
                 let ci = format!("%cbsc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let ip = format!("%cbsi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
@@ -708,7 +697,7 @@ impl LlvmBackend {
 
     /// If `reg` is an i64 (Int), truncate to i1. Otherwise return its name as-is.
     pub(super) fn as_bool_reg(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
-        if reg.ty == Type::Int {
+        if reg.ty == Type::Custom("Int".to_string()) {
             let t = format!("%tb{}", self.fun.txn_counter);
             self.fun.txn_counter += 1;
             writeln!(out, "{}{} = trunc i64 {} to i1", indent, t, reg.name).ok();
@@ -721,7 +710,7 @@ impl LlvmBackend {
     /// Convert a String/Data typed register to i64 for C ABI calls.
     /// Int/Bool/Char/Float registers are passed through as-is.
     fn ptrtoint_if_string(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
-        if reg.ty == Type::String || reg.ty == Type::Data {
+        if reg.ty == Type::Custom("String".to_string()) || reg.ty == Type::Custom("Data".to_string()) {
             let p = format!("%ptri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, reg.name).ok();
             p
@@ -853,7 +842,7 @@ impl LlvmBackend {
         // Tag as temporary (bit 1 = 1) so future concat calls can free it
         let vi_tagged = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         writeln!(out, "{}{} = or i64 {}, 2", indent, vi_tagged, vi).ok();
-        TypedRegister { name: vi_tagged, ty: Type::Int }
+        TypedRegister { name: vi_tagged, ty: Type::Custom("Int".to_string()) }
     }
 
     /// Map int_op/float_op strings to an OpRune for operator resolution.
@@ -869,7 +858,12 @@ impl LlvmBackend {
             "mul" => OpRune::Mul,
             "sdiv" | "udiv" => OpRune::Div,
             "srem" | "urem" => OpRune::Mod,
-            _ => OpRune::Add, // fallback for bitwise/comparison
+            "shl" => OpRune::Shl,
+            "lshr" | "ashr" => OpRune::Shr,
+            "and" => OpRune::BitAnd,
+            "or" => OpRune::BitOr,
+            "xor" => OpRune::BitXor,
+            _ => OpRune::Add, // fallback for comparison ops
         }
     }
 
@@ -900,13 +894,17 @@ impl LlvmBackend {
             // SSA violations (nbody %bfr errors). Integer types have no
             // such cache dependency — saving and reusing their registers
             // avoids the O(2^depth) double-emission (const_heavy fix).
-            if l_reg.ty != Type::Float && l_reg.ty != Type::Float64 {
+            // 2026-07-08: Phase 2D — use universe storage check for
+            // native type detection instead of hardcoded name matching.
+            let l_is_native = universe.get(&l_key).map(|r| r.storage == "Native").unwrap_or(false);
+            if !l_is_native {
                 phase7b_l = Some(l_reg.clone());
             }
             if universe.types.contains_key(&l_key) {
                 let r_reg = self.emit_expr(out, r, indent);
                 let r_key = r_reg.ty.universe_key().to_string();
-                if r_reg.ty != Type::Float && r_reg.ty != Type::Float64 {
+                let r_is_native = universe.get(&r_key).map(|r| r.storage == "Native").unwrap_or(false);
+                if !r_is_native {
                     phase7b_r = Some(r_reg.clone());
                 }
                 let rune = Self::op_str_to_rune(int_op);
@@ -941,7 +939,7 @@ impl LlvmBackend {
                 // reference the renamed register via internal maps (let_bindings).
                 let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = add i64 0, {}", indent, v, folded).ok();
-                return TypedRegister { name: v, ty: Type::Int };
+                return TypedRegister { name: v, ty: Type::Custom("Int".to_string()) };
             }
         }
         // 2026-07-01: Use Phase 7B-emitted registers if available (avoids
@@ -952,16 +950,24 @@ impl LlvmBackend {
             phase7b_r.unwrap_or_else(|| self.emit_expr(out, r, indent)),
         );
 
+        // 2026-07-08: Phase 2D — universe storage check for native types.
+        // Falls back to name-based Float/Float64 check when universe is absent (tests).
+        let a_is_native = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(&a.ty))
+            .map(|r| r.storage == "Native")
+            .unwrap_or_else(|| a.ty == Type::Custom("Float".to_string()) || a.ty == Type::Custom("Float64".to_string()));
+        let b_is_native = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(&b.ty))
+            .map(|r| r.storage == "Native")
+            .unwrap_or_else(|| b.ty == Type::Custom("Float".to_string()) || b.ty == Type::Custom("Float64".to_string()));
+
         // ── Expression hash-consing dedup cache lookup ─────────────
         // 2026-07-01: Check if we already emitted this (op, lhs, rhs) within
-        // the current body scope. Only caches ops with string ≥ 3 chars
-        // (fadd, fmul, fsub, fdiv, sdiv, srem) — cheap integer ops like "add",
-        // "sub", "mul" on i64 are not cached since the HashMap lookup + insert
-        // (~50ns) exceeds the recomputation cost (~0.5ns for a single i64 add).
+        // the current body scope. ...
         // For float ops the benefit is in IR compactness: fewer instructions
         // means LLVM can find SIMD vectorization patterns more easily.
-        let dedup_op = if a.ty == Type::Float64 || a.ty == Type::Float
-            || b.ty == Type::Float64 || b.ty == Type::Float {
+        // 2026-07-08: Phase 2D — use universe storage query instead of name matching.
+        let dedup_op = if a_is_native || b_is_native {
             float_op
         } else {
             int_op
@@ -973,9 +979,7 @@ impl LlvmBackend {
         };
         if let Some(ref key) = dedup_key {
             if let Some(cached) = self.fun.expr_dedup_cache.get(key) {
-                let result_ty = if a.ty == Type::Float64 { Type::Float64 }
-                                else if a.ty == Type::Float { Type::Float }
-                                else { a.ty.clone() };
+                let result_ty = a.ty.clone();
                 return TypedRegister { name: cached.clone(), ty: result_ty };
             }
         }
@@ -988,34 +992,26 @@ impl LlvmBackend {
         let ptr_ty = if is_a_ptr { Some(a.ty.clone()) }
                      else if is_b_ptr { Some(b.ty.clone()) }
                      else { None };
-        // 2026-06-29: Handle Float64 binary ops (fadd/fsub/fmul/fdiv double)
-        if a.ty == Type::Float64 && b.ty == Type::Float64 {
+        // Handle Native storage types (float/double) via universe query
+        if a_is_native && b_is_native && a.ty == b.ty {
             let fa = self.ensure_float_reg(out, indent, &a);
             let fb = self.ensure_float_reg(out, indent, &b);
+            let llvm_ty = self.operator_llvm_type(&a.ty);
             let fr = format!("%bfr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = {} fast double {}, {}", indent, fr, float_op, fa, fb).ok();
+            writeln!(out, "{}{} = {} fast {} {}, {}", indent, fr, float_op, llvm_ty, fa, fb).ok();
+            self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
             if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), fr.clone()); }
-            return TypedRegister { name: fr, ty: Type::Float64 };
+            return TypedRegister { name: fr, ty: a.ty.clone() };
         }
-        if a.ty == Type::Float || b.ty == Type::Float {
-            // 2026-06-17: Skip float path if either operand is String/Data
-            // (prevents pointer→float corruption, e.g. String + Float).
-            if a.ty == Type::String || a.ty == Type::Data || b.ty == Type::String || b.ty == Type::Data {
-                let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let a_i64 = self.adapt_to_i64(out, indent, &a);
-                let b_i64 = self.adapt_to_i64(out, indent, &b);
-                writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
-                if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
-                return TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Int) };
-            } else {
-                let fa = self.ensure_float_reg(out, indent, &a);
-                let fb = self.ensure_float_reg(out, indent, &b);
-                let fr = format!("%bfr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = {} fast float {}, {}", indent, fr, float_op, fa, fb).ok();
-                self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
-                if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), fr.clone()); }
-                return TypedRegister { name: fr, ty: Type::Float };
-            }
+        if a_is_native || b_is_native {
+            // Mixed: one operand is native float, the other is boxed.
+            // Box both to i64 and emit integer operation.
+            let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            let a_i64 = self.adapt_to_i64(out, indent, &a);
+            let b_i64 = self.adapt_to_i64(out, indent, &b);
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
+            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
+            return TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Custom("Int".to_string())) };
         }
         // 2026-06-29: Fixed-width integer same-type arithmetic (native width, no boxing)
         if a.ty.is_integral() && a.ty == b.ty {
@@ -1031,7 +1027,7 @@ impl LlvmBackend {
             let b_i64 = self.adapt_to_i64(out, indent, &b);
             writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
             if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
-            TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Int) }
+            TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::Custom("Int".to_string())) }
         }
     }
 
@@ -1044,7 +1040,7 @@ impl LlvmBackend {
     fn is_linked_string_trigger(&self, expr: &Expr) -> bool {
         if let Expr::Identifier(name) = expr {
             if let Some(trg) = self.ctx.triggers.get(name) {
-                return matches!(trg.ty, Type::String | Type::Data);
+                return trg.ty == Type::Custom("String".to_string()) || trg.ty == Type::Custom("Data".to_string());
             }
         }
         false
@@ -1060,28 +1056,81 @@ impl LlvmBackend {
     // Falls back to identity (no-op) if unimplemented.
 
     /// Emit a call to a resolved operator's implementation.
-    /// Called from emit_binop when a universe type has an operator mapping.
+    /// 2026-07-08: Phase 2D — handles Native storage (float/double) by
+    /// calling ensure_float_reg on operands before emitting the opcode.
     fn emit_operator_call(&mut self, out: &mut String, indent: &str,
                           a: &TypedRegister, b: &TypedRegister,
                           op: &OpDeclaration) -> TypedRegister {
-        let v = format!("%t{}", self.fun.next_reg());
+        let v = self.fun.next_reg();
+        // 2026-07-08: Determine LLVM type from operand's type storage.
+        // For Native storage (float/double), ensure operands are in native form.
+        let is_native = self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(&a.ty))
+            .map(|r| r.storage == "Native")
+            .unwrap_or(false);
+        let (op_a, op_b) = if is_native {
+            (self.ensure_float_reg(out, indent, a), self.ensure_float_reg(out, indent, b))
+        } else {
+            (a.name.clone(), b.name.clone())
+        };
+        let llvm_ty = self.operator_llvm_type(&a.ty);
         match &op.implementation.as_ref() {
             // Intrinsic call: emit via the intrinsic name
             Expr::IntrinsicCall { intrinsic, .. } => {
                 writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
-                         indent, v, intrinsic.name(), a.name, b.name).ok();
+                         indent, v, intrinsic.name(), op_a, op_b).ok();
             }
             // Identifier → function call: call i64 @name(i64, i64)
             Expr::Identifier(name) => {
                 writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
-                         indent, v, name, a.name, b.name).ok();
+                         indent, v, name, op_a, op_b).ok();
+            }
+            // 2026-07-08: String literal → LLVM opcode, e.g. "add nsw" → add nsw i64 %a, %b
+            // For Native storage: "fadd fast" + ensure_float_reg operands → fadd fast float %fa, %fb
+            Expr::String(llvm_op) => {
+                writeln!(out, "{}{} = {} {} {}, {}",
+                         indent, v, llvm_op, llvm_ty, op_a, op_b).ok();
+                if is_native {
+                    self.fun.reg_float_cache.insert(v.clone(), v.clone());
+                }
+            }
+            Expr::Literal(lit) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
+                if let crate::features::literal::LiteralExpr::String(llvm_op) = lit.as_ref() {
+                    writeln!(out, "{}{} = {} {} {}, {}",
+                             indent, v, llvm_op, llvm_ty, op_a, op_b).ok();
+                    if is_native {
+                        self.fun.reg_float_cache.insert(v.clone(), v.clone());
+                    }
+                }
             }
             // Fallback: identity
             _ => {
-                writeln!(out, "{}{} = add i64 0, {}", indent, v, a.name).ok();
+                writeln!(out, "{}{} = {} 0, {}", indent, v, llvm_ty, op_a).ok();
             }
         }
         TypedRegister { name: v, ty: a.ty.clone() }
+    }
+
+    /// 2026-07-08: Look up the LLVM codegen type for a Brief type.
+    /// Returns "float" for Native storage types ≤32 bits, "double" for >32,
+    /// and "i64" for Boxed or unknown types (boxed to native register).
+    /// Falls back to name-based Float/Float64 check when universe is absent.
+    fn operator_llvm_type(&self, ty: &Type) -> &'static str {
+        if let Some(ref universe) = self.ctx.type_universe {
+            if let Some(rt) = universe.get_by_type(ty) {
+                return match rt.storage.as_str() {
+                    "Native" => match ty.bit_width() {
+                        Some(w) if w <= 32 => "float",
+                        _ => "double",
+                    },
+                    _ => "i64",
+                };
+            }
+        }
+        // Fallback for tests without universe
+        if ty == &Type::Custom("Float".to_string()) { "float" }
+        else if ty == &Type::Custom("Float64".to_string()) { "double" }
+        else { "i64" }
     }
 
     pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, cond: &str) -> TypedRegister {
@@ -1102,7 +1151,7 @@ impl LlvmBackend {
             } else {
                 writeln!(out, "{}{} = xor i1 true, true", indent, v).ok();
             }
-            return TypedRegister { name: v, ty: Type::Bool };
+            return TypedRegister { name: v, ty: Type::Custom("Bool".to_string()) };
         }
         // String trigger vs string literal: dereference pointer and compare first byte
         if let Expr::String(s) = r {
@@ -1122,7 +1171,7 @@ impl LlvmBackend {
                 let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
                 let c = format!("%fc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
-                return TypedRegister { name: c, ty: Type::Bool };
+                return TypedRegister { name: c, ty: Type::Custom("Bool".to_string()) };
             }
         }
         if let Expr::String(s) = l {
@@ -1142,12 +1191,12 @@ impl LlvmBackend {
                 let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
                 let c = format!("%fc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
-                return TypedRegister { name: c, ty: Type::Bool };
+                return TypedRegister { name: c, ty: Type::Custom("Bool".to_string()) };
             }
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         let c = format!("%c{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        if a.ty == Type::Float || b.ty == Type::Float {
+        if a.ty == Type::Custom("Float".to_string()) || b.ty == Type::Custom("Float".to_string()) {
             let fa = self.ensure_float_reg(out, indent, &a);
             let fb = self.ensure_float_reg(out, indent, &b);
             writeln!(out, "{}{} = fcmp fast {} float {}, {}", indent, c, cond, fa, fb).ok();
@@ -1167,7 +1216,7 @@ impl LlvmBackend {
             let b_i64 = self.adapt_to_i64(out, indent, &b);
             writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a_i64, b_i64).ok();
         }
-        TypedRegister { name: c, ty: Type::Bool }
+        TypedRegister { name: c, ty: Type::Custom("Bool".to_string()) }
     }
 
     /// Recursively detect if an expression chain produces a String/Data value.
@@ -1182,8 +1231,8 @@ impl LlvmBackend {
             Expr::String(_) => true,
             Expr::Literal(lit) => matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)),
             Expr::Identifier(name) => {
-                matches!(self.fun.let_binding_types.get(name), Some(t) if *t == Type::String || *t == Type::Data)
-                || matches!(self.fun.let_original_types.get(name), Some(t) if *t == Type::String || *t == Type::Data)
+                matches!(self.fun.let_binding_types.get(name), Some(t) if *t == Type::Custom("String".to_string()) || *t == Type::Custom("Data".to_string()))
+                || matches!(self.fun.let_original_types.get(name), Some(t) if *t == Type::Custom("String".to_string()) || *t == Type::Custom("Data".to_string()))
                 || {
                     // Check state fields whose LLVM type is i8* (String/Data)
                     self.ctx.field_index_map.get(name)
@@ -1196,7 +1245,7 @@ impl LlvmBackend {
                 self.is_string_chain(l) || self.is_string_chain(r)
             }
             Expr::Cast(inner, target_ty) => {
-                matches!(*target_ty, Type::String | Type::Data)
+                *target_ty == Type::Custom("String".to_string()) || *target_ty == Type::Custom("Data".to_string())
                     || self.is_string_chain(inner)
             }
             Expr::BinaryOp(bo) if bo.kind == crate::features::binary_op::BinaryOpKind::Add => {
@@ -1204,7 +1253,7 @@ impl LlvmBackend {
             }
             Expr::Call(name, _) => {
                 self.ctx.defn_return_types.get(name.as_str())
-                    .map(|types| types.iter().any(|t| *t == Type::String || *t == Type::Data))
+                    .map(|types| types.iter().any(|t| *t == Type::Custom("String".to_string()) || *t == Type::Custom("Data".to_string())))
                     .unwrap_or(false)
             }
             _ => false,
@@ -1242,7 +1291,7 @@ impl LlvmBackend {
         // Dispatch without exhaustive match to avoid non-exhaustive pattern errors
         if matches!(target, ProjectionTarget::Address) {
             writeln!(out, "{}{} = ptrtoint @{} to i64", indent, v, name).ok();
-            return Some(TypedRegister { name: v, ty: Type::Int });
+            return Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) });
         }
         if matches!(target, ProjectionTarget::Arity) {
             let arity = self.ctx.defn_params.get(&name)
@@ -1250,7 +1299,7 @@ impl LlvmBackend {
                 .or_else(|| self.ctx.inop_decls.get(&name).map(|i| i.params.len() as i64))
                 .unwrap_or(0);
             writeln!(out, "{}{} = add i64 0, {}", indent, v, arity).ok();
-            return Some(TypedRegister { name: v, ty: Type::Int });
+            return Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) });
         }
         if matches!(target, ProjectionTarget::Hash) {
             use std::hash::{Hash, Hasher};
@@ -1258,17 +1307,17 @@ impl LlvmBackend {
             name.hash(&mut hasher);
             let h = hasher.finish() as i64;
             writeln!(out, "{}{} = add i64 0, {}", indent, v, h).ok();
-            return Some(TypedRegister { name: v, ty: Type::Int });
+            return Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) });
         }
         if matches!(target, ProjectionTarget::IsPure) {
             let is_inop_bang = self.ctx.inop_decls.get(&name).map(|i| i.has_side_effects).unwrap_or(false);
             let val = if is_inop_bang { 0 } else { 1 };
             writeln!(out, "{}{} = add i64 0, {}", indent, v, val).ok();
-            return Some(TypedRegister { name: v, ty: Type::Int });
+            return Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) });
         }
         // Default for string-valued and other Fn* targets
         writeln!(out, "{}{} = add i64 0, 0 ; {:?}", indent, v, target).ok();
-        Some(TypedRegister { name: v, ty: Type::Int })
+        Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) })
     }
 
     pub(super) fn try_projection_fast_path(
@@ -1283,174 +1332,206 @@ impl LlvmBackend {
         let rhs = self.emit_expr(out, arg_expr, indent);
         let tr = match (src_val.ty.clone(), name) {
             // ── Int arithmetic ──
-            (Type::Int, "Add") => {
+            
+(Type::Custom(__t), "Add") if __t == "Int" => {
                 writeln!(out, "{}{} = add i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Sub") => {
+            
+(Type::Custom(__t), "Sub") if __t == "Int" => {
                 writeln!(out, "{}{} = sub i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Mul") => {
+            
+(Type::Custom(__t), "Mul") if __t == "Int" => {
                 writeln!(out, "{}{} = mul i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Div") => {
+            
+(Type::Custom(__t), "Div") if __t == "Int" => {
                 writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Mod") => {
+            
+(Type::Custom(__t), "Mod") if __t == "Int" => {
                 writeln!(out, "{}{} = srem i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
             // ── Int comparison ──
-            (Type::Int, "Eq") => {
+            
+(Type::Custom(__t), "Eq") if __t == "Int" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Ne") => {
+            
+(Type::Custom(__t), "Ne") if __t == "Int" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Lt") => {
+            
+(Type::Custom(__t), "Lt") if __t == "Int" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Le") => {
+            
+(Type::Custom(__t), "Le") if __t == "Int" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Gt") => {
+            
+(Type::Custom(__t), "Gt") if __t == "Int" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Ge") => {
+            
+(Type::Custom(__t), "Ge") if __t == "Int" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
             // ── Int bitwise ──
-            (Type::Int, "BitAnd") => {
+            
+(Type::Custom(__t), "BitAnd") if __t == "Int" => {
                 writeln!(out, "{}{} = and i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "BitOr") => {
+            
+(Type::Custom(__t), "BitOr") if __t == "Int" => {
                 writeln!(out, "{}{} = or i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "BitXor") => {
+            
+(Type::Custom(__t), "BitXor") if __t == "Int" => {
                 writeln!(out, "{}{} = xor i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Shl") => {
+            
+(Type::Custom(__t), "Shl") if __t == "Int" => {
                 writeln!(out, "{}{} = shl i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Shr") => {
+            
+(Type::Custom(__t), "Shr") if __t == "Int" => {
                 writeln!(out, "{}{} = lshr i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
             // ── Int/Char logical (treated as boolean in Brief) ──
-            (Type::Int, "And") => {
+            
+(Type::Custom(__t), "And") if __t == "Int" => {
                 writeln!(out, "{}{} = and i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
-            (Type::Int, "Or") => {
+            
+(Type::Custom(__t), "Or") if __t == "Int" => {
                 writeln!(out, "{}{} = or i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Int }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
             }
             // ── Float arithmetic ──
-            (Type::Float, "Add") => {
+            
+(Type::Custom(__t), "Add") if __t == "Float" => {
                 writeln!(out, "{}{} = fadd float {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Sub") => {
+            
+(Type::Custom(__t), "Sub") if __t == "Float" => {
                 writeln!(out, "{}{} = fsub float {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Mul") => {
+            
+(Type::Custom(__t), "Mul") if __t == "Float" => {
                 writeln!(out, "{}{} = fmul float {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Div") => {
+            
+(Type::Custom(__t), "Div") if __t == "Float" => {
                 writeln!(out, "{}{} = fdiv float {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Eq") => {
+            
+(Type::Custom(__t), "Eq") if __t == "Float" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = fcmp oeq float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
                 writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Ne") => {
+            
+(Type::Custom(__t), "Ne") if __t == "Float" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = fcmp one float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
                 writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Lt") => {
+            
+(Type::Custom(__t), "Lt") if __t == "Float" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = fcmp olt float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
                 writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Le") => {
+            
+(Type::Custom(__t), "Le") if __t == "Float" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = fcmp ole float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
                 writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Gt") => {
+            
+(Type::Custom(__t), "Gt") if __t == "Float" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = fcmp ogt float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
                 writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
-            (Type::Float, "Ge") => {
+            
+(Type::Custom(__t), "Ge") if __t == "Float" => {
                 let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = fcmp oge float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
                 let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
                 writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Float }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
             }
             // ── Bool logical ──
-            (Type::Bool, "And") => {
+            
+(Type::Custom(__t), "And") if __t == "Bool" => {
                 writeln!(out, "{}{} = and i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Bool }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) }
             }
-            (Type::Bool, "Or") => {
+            
+(Type::Custom(__t), "Or") if __t == "Bool" => {
                 writeln!(out, "{}{} = or i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Bool }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) }
             }
-            (Type::Bool, "Eq") => {
+            
+(Type::Custom(__t), "Eq") if __t == "Bool" => {
                 writeln!(out, "{}{} = icmp eq i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Bool }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) }
             }
-            (Type::Bool, "Ne") => {
+            
+(Type::Custom(__t), "Ne") if __t == "Bool" => {
                 writeln!(out, "{}{} = icmp ne i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::Bool }
+                TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) }
             }
             // ── Unknown combination — not a fast-path ──
             _ => return None,
@@ -1522,7 +1603,7 @@ impl LlvmBackend {
         self.fun.txn_counter += 1;
         writeln!(out, "{}{} = phi i64 [ {}, %{} ], [ {}, %{} ]",
             indent, phi_reg, cache_val, hit_label, v, miss_label).ok();
-        Some(TypedRegister { name: phi_reg, ty: Type::Int })
+        Some(TypedRegister { name: phi_reg, ty: Type::Custom("Int".to_string()) })
     }
 
     /// Phase 2: Check if the source type has a meld route for the given projection target.
@@ -1585,7 +1666,7 @@ impl LlvmBackend {
                             if name == "Ptr" || name == "Size" || name == "Bytes" {
                                 let proj_reg = self.emit_direct_projection(out, src_val, name, indent)?;
                                 writeln!(out, "{}{} = call i64 @__strlen__(i64 {})", indent, v, proj_reg.name).ok();
-                                return Some(TypedRegister { name: v, ty: Type::Int });
+                                return Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) });
                             }
                         }
                     }
@@ -1739,7 +1820,7 @@ impl LlvmBackend {
         match target_name {
             "Ptr" => {
                 writeln!(out, "{}{} = add i64 0, {} ; ptr", indent, v, src_val.name).ok();
-                Some(TypedRegister { name: v, ty: Type::Int })
+                Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) })
             }
             "Size" => {
                 let hp = format!("%drphp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -1747,19 +1828,19 @@ impl LlvmBackend {
                 let lp = format!("%drplp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
                 writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, lp).ok();
-                Some(TypedRegister { name: v, ty: Type::Int })
+                Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) })
             }
             "Bytes" => {
                 writeln!(out, "{}{} = add i64 0, 8 ; bytes", indent, v).ok();
-                Some(TypedRegister { name: v, ty: Type::Int })
+                Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) })
             }
             "Alignment" => {
                 writeln!(out, "{}{} = add i64 0, 8 ; alignment", indent, v).ok();
-                Some(TypedRegister { name: v, ty: Type::Int })
+                Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) })
             }
             "Type" => {
                 writeln!(out, "{}{} = add i64 0, 6 ; type=custom", indent, v).ok();
-                Some(TypedRegister { name: v, ty: Type::Int })
+                Some(TypedRegister { name: v, ty: Type::Custom("Int".to_string()) })
             }
             _ => None,
         }
@@ -1816,24 +1897,21 @@ impl LlvmBackend {
             Expr::Div(_, _) => "sdiv",
             _ => return None,
         };
-        match cast_ty {
-            crate::ast::Type::Float | crate::ast::Type::Float64 => {
-                let fl_a = self.ensure_float_reg(out, indent, &a);
-                let fl_b = self.ensure_float_reg(out, indent, &b);
-                writeln!(out, "{}{} = {} float {}, {}", indent, v, fl_op, fl_a, fl_b).ok();
-                let bi = format!("%eor_bi{}", self.fun.txn_counter);
-                self.fun.txn_counter += 1;
-                let ze = format!("%eor_ze{}", self.fun.txn_counter);
-                writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, v).ok();
-                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
-                self.fun.reg_float_cache.insert(ze.clone(), v.to_string());
-                let ret_ty = if cast_ty == Type::Float64 { Type::Float64 } else { Type::Float };
-                Some(TypedRegister { name: ze, ty: ret_ty })
-            }
-            _ => {
-                writeln!(out, "{}{} = {} i64 {}, {}", indent, v, i_op, a, b).ok();
-                Some(TypedRegister { name: v.to_string(), ty: Type::Int })
-            }
+        if cast_ty == Type::Custom("Float".to_string()) || cast_ty == Type::Custom("Float64".to_string()) {
+            let fl_a = self.ensure_float_reg(out, indent, &a);
+            let fl_b = self.ensure_float_reg(out, indent, &b);
+            writeln!(out, "{}{} = {} float {}, {}", indent, v, fl_op, fl_a, fl_b).ok();
+            let bi = format!("%eor_bi{}", self.fun.txn_counter);
+            self.fun.txn_counter += 1;
+            let ze = format!("%eor_ze{}", self.fun.txn_counter);
+            writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, v).ok();
+            writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+            self.fun.reg_float_cache.insert(ze.clone(), v.to_string());
+            let ret_ty = if cast_ty == Type::Custom("Float64".to_string()) { Type::Custom("Float64".to_string()) } else { Type::Custom("Float".to_string()) };
+            Some(TypedRegister { name: ze, ty: ret_ty })
+        } else {
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, i_op, a, b).ok();
+            Some(TypedRegister { name: v.to_string(), ty: cast_ty })
         }
     }
 }

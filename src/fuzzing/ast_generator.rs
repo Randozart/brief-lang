@@ -517,21 +517,21 @@ fn arb_string_literal() -> impl Strategy<Value = String> {
 /// Generate a random type
 pub fn arb_type() -> impl Strategy<Value = Type> {
     prop_oneof![
-        Just(Type::Int),
-        Just(Type::UInt),
-        Just(Type::Float),
-        Just(Type::Bool),
-        Just(Type::String),
+        Just(Type::Custom("Int".to_string())),
+        Just(Type::Custom("UInt".to_string())),
+        Just(Type::Custom("Float".to_string())),
+        Just(Type::Custom("Bool".to_string())),
+        Just(Type::Custom("String".to_string())),
         Just(Type::Void),
-        Just(Type::Data),
-        Just(Type::Char),
+        Just(Type::Custom("Data".to_string())),
+        Just(Type::Custom("Char".to_string())),
         arb_identifier().prop_map(Type::Custom),
         // Constrained types (sized integers)
         prop_oneof![Just(8), Just(16), Just(32), Just(64)]
             .prop_flat_map(|n| {
                 prop_oneof![
-                    (Just(Type::Int), Just(n)).prop_map(|(t, n)| Type::Constrained(Box::new(t), BitRange::Any(n))),
-                    (Just(Type::UInt), Just(n)).prop_map(|(t, n)| Type::Constrained(Box::new(t), BitRange::Any(n))),
+                    (Just(Type::Custom("Int".to_string())), Just(n)).prop_map(|(t, n)| Type::Constrained(Box::new(t), BitRange::Any(n))),
+                    (Just(Type::Custom("UInt".to_string())), Just(n)).prop_map(|(t, n)| Type::Constrained(Box::new(t), BitRange::Any(n))),
                 ]
             }),
     ]
@@ -540,14 +540,14 @@ pub fn arb_type() -> impl Strategy<Value = Type> {
 /// Generate a random simple type (no constrained types)
 fn arb_simple_type() -> impl Strategy<Value = Type> {
     prop_oneof![
-        Just(Type::Int),
-        Just(Type::UInt),
-        Just(Type::Float),
-        Just(Type::Bool),
-        Just(Type::String),
+        Just(Type::Custom("Int".to_string())),
+        Just(Type::Custom("UInt".to_string())),
+        Just(Type::Custom("Float".to_string())),
+        Just(Type::Custom("Bool".to_string())),
+        Just(Type::Custom("String".to_string())),
         Just(Type::Void),
-        Just(Type::Data),
-        Just(Type::Char),
+        Just(Type::Custom("Data".to_string())),
+        Just(Type::Custom("Char".to_string())),
     ]
 }
 
@@ -625,8 +625,6 @@ mod tests {
                     | Statement::Term { .. } | Statement::TermBang { .. }
                     | Statement::Escape(_)
                     | Statement::Expression(_)
-                    | Statement::Alka(_)
-                    | Statement::OnExit { .. }
             );
             prop_assert!(is_valid, "Generated invalid statement type: {:?}", stmt);
         }

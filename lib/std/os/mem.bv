@@ -1,0 +1,28 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop mmap(addr: Ptr<Byte>, length: Int, prot: Int, flags: Int, fd: Int, offset: Int) -> Int {
+    %r = call i64 @brief_mmap(i64 %addr, i64 %length, i64 %prot, i64 %flags, i64 %fd, i64 %offset);
+    ret i64 %r;
+};
+
+inop munmap(addr: Ptr<Byte>, length: Int) -> Int {
+    %r = call i64 @brief_munmap(i64 %addr, i64 %length);
+    ret i64 %r;
+};
+
+inop mprotect(addr: Ptr<Byte>, length: Int, prot: Int) -> Int {
+    %r = call i64 @brief_mprotect(i64 %addr, i64 %length, i64 %prot);
+    ret i64 %r;
+};
+
+inop brk(addr: Ptr<Byte>) -> Int {
+    %r = call i64 @brief_brk(i64 %addr);
+    ret i64 %r;
+};
+
+inop mlock(addr: Ptr<Byte>, length: Int) -> Int {
+    %r = call i64 @brief_mlock(i64 %addr, i64 %length);
+    ret i64 %r;
+};
+

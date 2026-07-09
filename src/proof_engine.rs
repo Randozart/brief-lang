@@ -925,8 +925,7 @@ impl SymbolicExecutor {
                     terminated = true;
                     path_kind = PathKind::Escape;
                 }
-                Statement::Expression(_) | Statement::Unification { .. } | Statement::SyncBlock { .. } | Statement::LocalTrigger { .. } => {}
-                Statement::Alka(_) | Statement::OnExit { .. } => {}
+                Statement::Expression(_) | Statement::Unification { .. } | Statement::SyncBlock { .. } => {}
                 Statement::Foreach { body, .. } => {
                     self.enumerate_paths_recursive(body, current_state.clone(), paths);
                 }
@@ -2883,15 +2882,17 @@ impl ProofEngine {
         match ty {
             Type::Custom(name) => name.clone(),
             Type::Sig(name) => format!("sig {}", name),
-            Type::Int => "Int".to_string(),
-            Type::Int8 => "Int8".to_string(),
-            Type::Int16 => "Int16".to_string(),
-            Type::Int32 => "Int32".to_string(),
-            Type::Float => "Float".to_string(),
-            Type::Float64 => "Float64".to_string(),
-            Type::String => "String".to_string(),
-            Type::Bool => "Bool".to_string(),
-            Type::Data => "Data".to_string(),
+            Type::Custom(__t) if __t == "Int" => "Int".to_string(),
+            Type::Custom(__t) if __t == "Int8" => "Int8".to_string(),
+            Type::Custom(__t) if __t == "Int16" => "Int16".to_string(),
+            Type::Custom(__t) if __t == "Int32" => "Int32".to_string(),
+            Type::Bits(width) => format!("Bits<{}>", width),
+            Type::Width(n) => format!("Width({})", n),
+            Type::Custom(__t) if __t == "Float" => "Float".to_string(),
+            Type::Custom(__t) if __t == "Float64" => "Float64".to_string(),
+            Type::Custom(__t) if __t == "String" => "String".to_string(),
+            Type::Custom(__t) if __t == "Bool" => "Bool".to_string(),
+            Type::Custom(__t) if __t == "Data" => "Data".to_string(),
             Type::Void => "Void".to_string(),
             Type::Union(types) => types
                 .iter()
@@ -2927,11 +2928,11 @@ impl ProofEngine {
                 )
             }
             Type::Enum(name) => name.clone(),
-            Type::UInt => "UInt".to_string(),
-            Type::UInt8 => "UInt8".to_string(),
-            Type::UInt16 => "UInt16".to_string(),
-            Type::UInt32 => "UInt32".to_string(),
-            Type::Char => "Char".to_string(),
+            Type::Custom(__t) if __t == "UInt" => "UInt".to_string(),
+            Type::Custom(__t) if __t == "UInt8" => "UInt8".to_string(),
+            Type::Custom(__t) if __t == "UInt16" => "UInt16".to_string(),
+            Type::Custom(__t) if __t == "UInt32" => "UInt32".to_string(),
+            Type::Custom(__t) if __t == "Char" => "Char".to_string(),
             // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
             // are regular structs/enums defined in stdlib, handled via
             // Custom/Applied/Enum variants.
@@ -3262,8 +3263,8 @@ impl ProofEngine {
             }
             Statement::SyncBlock { .. } => {}
             Statement::Unification { .. } => {}
-            Statement::LocalTrigger { .. } => {}
-            Statement::Alka(_) | Statement::OnExit { .. } => {}
+            
+            
             Statement::Foreach { body, .. } => {
                 for stmt in body {
                     self.collect_write_vars(stmt, vars);
@@ -4062,7 +4063,6 @@ pub(crate) fn contains_call_to(stmt: &Statement, name: &str) -> bool {
         }
         Statement::SyncBlock { body } => body.iter().any(|s| contains_call_to(s, name)),
         Statement::Unification { expr, .. } => expr_contains_call_to(expr, name),
-        Statement::OnExit { body, .. } => body.iter().any(|s| contains_call_to(s, name)),
         Statement::Await { expr, .. } => expr_contains_call_to(expr, name),
         Statement::Async { body, .. } => contains_call_to(body, name),
         Statement::AsyncAwait { body, .. } => contains_call_to(body, name),
@@ -4126,7 +4126,6 @@ fn check_decreasing_arg(stmt: &Statement, fn_name: &str, param_name: &str) -> bo
         }
         Statement::SyncBlock { body } => body.iter().all(|s| check_decreasing_arg(s, fn_name, param_name)),
         Statement::Unification { expr, .. } => check_decreasing_arg_expr(expr, fn_name, param_name),
-        Statement::OnExit { body, .. } => body.iter().all(|s| check_decreasing_arg(s, fn_name, param_name)),
         _ => true,
     }
 }
@@ -4810,7 +4809,7 @@ mod tests {
     }
 }
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_tests_fast {
     use super::*;
     use crate::features::literal::LiteralExpr;
@@ -4973,7 +4972,7 @@ mod kani_tests_fast {
 }
 
 // ── FULL: ProofEngine-based harnesses (bigger state) ──
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
     use crate::features::literal::LiteralExpr;

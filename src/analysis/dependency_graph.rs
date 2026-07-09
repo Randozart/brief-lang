@@ -623,7 +623,7 @@ mod tests {
     #[test]
     fn test_trg_variable_only() {
         let graph = DependencyGraph::build(&make_program(vec![
-            make_trigger("sensor", Type::Int),
+            make_trigger("sensor", Type::Custom("Int".to_string())),
         ])).unwrap();
         assert_eq!(graph.topo_order.len(), 1);
         assert!(graph.is_trg.contains("sensor"));
@@ -633,10 +633,10 @@ mod tests {
     #[test]
     fn test_simple_dependency() {
         let graph = DependencyGraph::build(&make_program(vec![
-            make_trigger("sensor", Type::Int),
+            make_trigger("sensor", Type::Custom("Int".to_string())),
             make_state_decl(
                 "derived",
-                Type::Int,
+                Type::Custom("Int".to_string()),
                 Some(Expr::Add(
                     Box::new(Expr::Identifier("sensor".to_string())),
                     Box::new(Expr::Integer(5)),
@@ -657,9 +657,9 @@ mod tests {
     #[test]
     fn test_chain_dependency() {
         let graph = DependencyGraph::build(&make_program(vec![
-            make_trigger("a", Type::Int),
-            make_state_decl("b", Type::Int, Some(Expr::Identifier("a".to_string()))),
-            make_state_decl("c", Type::Int, Some(Expr::Identifier("b".to_string()))),
+            make_trigger("a", Type::Custom("Int".to_string())),
+            make_state_decl("b", Type::Custom("Int".to_string()), Some(Expr::Identifier("a".to_string()))),
+            make_state_decl("c", Type::Custom("Int".to_string()), Some(Expr::Identifier("b".to_string()))),
         ])).unwrap();
         let pos_a = graph.topo_order.iter().position(|v| v == "a").unwrap();
         let pos_b = graph.topo_order.iter().position(|v| v == "b").unwrap();
@@ -670,8 +670,8 @@ mod tests {
     #[test]
     fn test_cycle_detection() {
         let result = DependencyGraph::build(&make_program(vec![
-            make_state_decl("a", Type::Int, Some(Expr::Identifier("b".to_string()))),
-            make_state_decl("b", Type::Int, Some(Expr::Identifier("a".to_string()))),
+            make_state_decl("a", Type::Custom("Int".to_string()), Some(Expr::Identifier("b".to_string()))),
+            make_state_decl("b", Type::Custom("Int".to_string()), Some(Expr::Identifier("a".to_string()))),
         ]));
         assert!(result.is_err(), "cycle should be detected");
         if let Err(e) = result {
@@ -682,11 +682,11 @@ mod tests {
     #[test]
     fn test_multiple_trgs() {
         let graph = DependencyGraph::build(&make_program(vec![
-            make_trigger("a", Type::Int),
-            make_trigger("b", Type::Int),
+            make_trigger("a", Type::Custom("Int".to_string())),
+            make_trigger("b", Type::Custom("Int".to_string())),
             make_state_decl(
                 "sum",
-                Type::Int,
+                Type::Custom("Int".to_string()),
                 Some(Expr::Add(
                     Box::new(Expr::Identifier("a".to_string())),
                     Box::new(Expr::Identifier("b".to_string())),
@@ -701,8 +701,8 @@ mod tests {
     #[test]
     fn test_independent_vars() {
         let graph = DependencyGraph::build(&make_program(vec![
-            make_trigger("x", Type::Int),
-            make_state_decl("y", Type::Int, None),
+            make_trigger("x", Type::Custom("Int".to_string())),
+            make_state_decl("y", Type::Custom("Int".to_string()), None),
         ])).unwrap();
         assert_eq!(graph.topo_order.len(), 2);
     }

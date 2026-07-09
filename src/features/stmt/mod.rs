@@ -16,7 +16,4 @@ pub mod expression;
 pub mod foreach;
 pub mod unification;
 pub mod inline_asm;
-pub mod local_trigger;
-pub mod alka;
-pub mod on_exit;
 pub mod sync_block;

@@ -12,7 +12,7 @@ pub fn emit_list_literal(backend: &mut LlvmBackend, out: &mut String, v: &str, e
         emit_list_or_tuple_body(backend, out, v, items, "l", indent)
     } else {
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-        TypedRegister { name: v.to_string(), ty: Type::Int }
+        TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
     }
 }
 
@@ -21,7 +21,7 @@ pub fn emit_tuple(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &E
         emit_list_or_tuple_body(backend, out, v, items, "t", indent)
     } else {
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-        TypedRegister { name: v.to_string(), ty: Type::Int }
+        TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
     }
 }
 
@@ -29,7 +29,7 @@ fn emit_list_or_tuple_body(backend: &mut LlvmBackend, out: &mut String, v: &str,
     if items.is_empty() {
         // Empty list/tuple → global rodata sentinel @ll_empty_list
         writeln!(out, "{}{} = ptrtoint {{ i64, i64 }}* @ll_empty_list to i64", indent, v).ok();
-        return TypedRegister { name: v.to_string(), ty: Type::Int };
+        return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
     }
     // Non-empty → malloc + populate (safe for %State persistence)
     let n = items.len() as i64;
@@ -56,5 +56,5 @@ fn emit_list_or_tuple_body(backend: &mut LlvmBackend, out: &mut String, v: &str,
         writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, adapted, ep).ok();
     }
     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, cast).ok();
-    TypedRegister { name: v.to_string(), ty: Type::Int }
+    TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
 }

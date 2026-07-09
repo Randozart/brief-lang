@@ -1313,7 +1313,7 @@ mod tests {
         // ReadFile# has side effects and no SPIR-V mapping — should be blocked
         let body = vec![
             Statement::Expression(Expr::IntrinsicCall {
-                intrinsic: Intrinsic::ReadFile,
+                intrinsic: Intrinsic::UserDefined("read_file".to_string()),
                 args: vec![Expr::String("test".to_string())],
             }),
         ];
@@ -1348,7 +1348,7 @@ mod tests {
                 condition: Expr::Bool(true),
                 statements: vec![
                     Statement::Expression(Expr::IntrinsicCall {
-                        intrinsic: Intrinsic::ReadFile,
+                        intrinsic: Intrinsic::UserDefined("read_file".to_string()),
                         args: vec![Expr::String("test".to_string())],
                     }),
                 ],

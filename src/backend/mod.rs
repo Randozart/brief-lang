@@ -9,7 +9,7 @@ use crate::analysis::range::ParameterRanges;
 use crate::analysis::dataflow::DataflowError;
 use crate::analysis::region::RegionAnalyzer;
 use crate::analysis::transition_graph::ReactorTransitionGraph;
-use crate::ast::{Expr, Hashtag, Program, Statement, TopLevel, Transaction, Definition, StructDefinition};
+use crate::ast::{Annotation, Expr, Hashtag, Program, Statement, TopLevel, Transaction, Definition, StructDefinition};
 
 /// Intent: Container for all shared analysis results that backends can consume.
 /// Backends check `optimize_mode` to decide whether to use optimized paths
@@ -112,7 +112,7 @@ pub enum HashtagValidation {
 /// Intent: Validate a list of hashtags against a given backend.
 /// Returns a list of validation results — callers should emit
 /// warnings for `UnsupportedAdvisory` and errors for `UnsupportedMandatory`.
-pub fn validate_hashtags(hashtags: &[Hashtag], backend: &str) -> Vec<HashtagValidation> {
+pub fn validate_hashtags(hashtags: &[Annotation], backend: &str) -> Vec<HashtagValidation> {
     let supported = supported_hashtags(backend);
     let mut results = Vec::new();
 
@@ -126,36 +126,33 @@ pub fn validate_hashtags(hashtags: &[Hashtag], backend: &str) -> Vec<HashtagVali
     results
 }
 
-fn is_scoped_elsewhere(tag: &Hashtag, backend: &str) -> bool {
-    if let Some(ref scope) = tag.scoped {
-        return scope != backend;
-    }
-    false
+fn is_scoped_elsewhere(tag: &Annotation, backend: &str) -> bool {
+    return false;
 }
 
-fn validate_single_hashtag(tag: &Hashtag, supported: &[&'static str]) -> HashtagValidation {
+fn validate_single_hashtag(tag: &Annotation, supported: &[&'static str]) -> HashtagValidation {
     if supported.contains(&tag.name.as_str()) {
         return HashtagValidation::Supported;
     }
     // Speculative tags are always advisory — never produce UnsupportedMandatory.
-    if tag.speculative {
+    if tag.speculative() {
         return HashtagValidation::UnsupportedAdvisory(tag.name.clone());
     }
-    if tag.mandatory && has_supported_fallback(tag, supported) {
+    if tag.mandatory() && has_supported_fallback(tag, supported) {
         return HashtagValidation::Supported;
     }
-    if tag.mandatory {
+    if tag.mandatory() {
         return HashtagValidation::UnsupportedMandatory(tag.name.clone());
     }
     HashtagValidation::UnsupportedAdvisory(tag.name.clone())
 }
 
-fn has_supported_fallback(tag: &Hashtag, supported: &[&'static str]) -> bool {
-    tag.fallback.iter().any(|f| supported.contains(&f.as_str()))
+fn has_supported_fallback(tag: &Annotation, supported: &[&'static str]) -> bool {
+    false
 }
 
 /// Intent: Collect all hashtags from a list of statements recursively.
-fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Hashtag> {
+fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Annotation> {
     let mut tags = Vec::new();
     for stmt in body {
         match stmt {
@@ -163,7 +160,6 @@ fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Hashtag> {
             Statement::Let { modifiers, .. } => tags.extend(modifiers.clone()),
             Statement::Term { modifiers, .. } | Statement::TermBang { modifiers, .. } => tags.extend(modifiers.clone()),
             Statement::Guarded { statements, .. } => tags.extend(collect_hashtags_from_body(statements)),
-            Statement::OnExit { body, .. } => tags.extend(collect_hashtags_from_body(body)),
             _ => {}
         }
     }
@@ -174,7 +170,7 @@ fn collect_hashtags_from_body(body: &[Statement]) -> Vec<crate::ast::Hashtag> {
 /// Returns true if there are NO unsupported mandatory tag errors.
 /// Prints warnings/eprintfs for unsupported tags.
 pub fn validate_hashtags_in_program(program: &Program, backend: &str, strict: bool) -> bool {
-    let mut all_tags: Vec<crate::ast::Hashtag> = Vec::new();
+    let mut all_tags: Vec<crate::ast::Annotation> = Vec::new();
 
     for item in &program.items {
         match item {
@@ -826,12 +822,12 @@ impl GuardTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Hashtag;
+    use crate::ast::{Annotation, AnnotationMode, Expr};
 
     /// Intent: Verify a speculative hashtag on a supported directive succeeds.
     #[test]
     fn test_speculative_hashtag_supported() {
-        let tag = Hashtag { name: "inline".into(), value: None, mandatory: false, speculative: true, fallback: vec![], scoped: None };
+        let tag = Annotation { name: "inline".into(), value: Expr::Bool(true), mode: AnnotationMode::Speculative };
         let results = validate_hashtags(&[tag], "llvm");
         assert_eq!(results[0], HashtagValidation::Supported,
             "Speculative inline should be supported by LLVM backend");
@@ -841,7 +837,7 @@ mod tests {
     #[test]
     fn test_llvm_backend_supports_new_directives() {
         for name in &["inline", "unroll", "vectorize", "gpu"] {
-            let tag = Hashtag { name: name.to_string(), value: None, mandatory: false, speculative: false, fallback: vec![], scoped: None };
+            let tag = Annotation { name: name.to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory };
             let results = validate_hashtags(&[tag], "llvm");
             assert_eq!(results[0], HashtagValidation::Supported,
                 "LLVM backend should support #{}", name);

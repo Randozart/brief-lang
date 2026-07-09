@@ -203,10 +203,10 @@ impl std::fmt::Display for FfiType {
 /// Convert Brief type to FFI type
 pub fn brief_type_to_ffi(t: &Type) -> Result<FfiType, String> {
     match t {
-        Type::String => Ok(FfiType::String),
-        Type::Int => Ok(FfiType::Int),
-        Type::Float => Ok(FfiType::Float),
-        Type::Bool => Ok(FfiType::Bool),
+        Type::Custom(__t) if __t == "String" => Ok(FfiType::String),
+        Type::Custom(__t) if __t == "Int" => Ok(FfiType::Int),
+        Type::Custom(__t) if __t == "Float" => Ok(FfiType::Float),
+        Type::Custom(__t) if __t == "Bool" => Ok(FfiType::Bool),
         Type::Void => Ok(FfiType::Void),
         Type::Custom(name) => {
             // Custom types are treated as struct names
@@ -219,14 +219,14 @@ pub fn brief_type_to_ffi(t: &Type) -> Result<FfiType, String> {
 /// Convert FFI type back to Brief type
 pub fn ffi_type_to_brief(t: &FfiType) -> Type {
     match t {
-        FfiType::String => Type::String,
-        FfiType::Int => Type::Int,
-        FfiType::Float => Type::Float,
-        FfiType::Bool => Type::Bool,
+        FfiType::String => Type::Custom("String".to_string()),
+        FfiType::Int => Type::Custom("Int".to_string()),
+        FfiType::Float => Type::Custom("Float".to_string()),
+        FfiType::Bool => Type::Custom("Bool".to_string()),
         FfiType::Void => Type::Void,
         FfiType::Struct(name, _) => Type::Custom(name.clone()),
         FfiType::Generic(name, _) => Type::Custom(name.clone()),
-        FfiType::Array(_) => Type::Data, // Use Data as generic array type
+        FfiType::Array(_) => Type::Custom("Data".to_string()), // Use Data as generic array type
     }
 }
 
@@ -236,10 +236,10 @@ mod tests {
 
     #[test]
     fn test_brief_type_to_ffi_basic() {
-        assert_eq!(brief_type_to_ffi(&Type::String).unwrap(), FfiType::String);
-        assert_eq!(brief_type_to_ffi(&Type::Int).unwrap(), FfiType::Int);
-        assert_eq!(brief_type_to_ffi(&Type::Float).unwrap(), FfiType::Float);
-        assert_eq!(brief_type_to_ffi(&Type::Bool).unwrap(), FfiType::Bool);
+        assert_eq!(brief_type_to_ffi(&Type::Custom("String".to_string())).unwrap(), FfiType::String);
+        assert_eq!(brief_type_to_ffi(&Type::Custom("Int".to_string())).unwrap(), FfiType::Int);
+        assert_eq!(brief_type_to_ffi(&Type::Custom("Float".to_string())).unwrap(), FfiType::Float);
+        assert_eq!(brief_type_to_ffi(&Type::Custom("Bool".to_string())).unwrap(), FfiType::Bool);
         assert_eq!(brief_type_to_ffi(&Type::Void).unwrap(), FfiType::Void);
     }
 
@@ -247,7 +247,7 @@ mod tests {
     fn test_ffi_type_roundtrip() {
         let ffi = FfiType::String;
         let brief = ffi_type_to_brief(&ffi);
-        assert_eq!(brief, Type::String);
+        assert_eq!(brief, Type::Custom("String".to_string()));
     }
 
     #[test]

@@ -16,7 +16,7 @@ pub mod reorder;
 #[cfg(test)]
 mod tests;
 
-#[cfg(all(kani, feature = "kani_full"))]
+#[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani;
 
 pub use builder::LLVMBuilder;
@@ -71,13 +71,9 @@ fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Op
             }
         }
         Expr::Identifier(name) => {
-            if let Some((Type::Float, inner)) = constants.get(name) {
-                try_eval_cfloat(inner, constants)
-            // 2026-06-29: Also resolve Float64 constants (e.g. const pi: Float64 = 3.14f64)
-            } else if let Some((Type::Float64, inner)) = constants.get(name) {
-                try_eval_cfloat(inner, constants)
-            } else {
-                None
+            match constants.get(name) {
+                Some((Type::Custom(__t), inner)) if __t == "Float" || __t == "Float64" => try_eval_cfloat(inner, constants),
+                _ => None,
             }
         }
         Expr::Add(l, r) => Some(try_eval_cfloat(l, constants)? + try_eval_cfloat(r, constants)?),
@@ -106,20 +102,20 @@ fn llvm_type_byte_size(t: &str) -> i64 {
 /// Used by `resolve_bild_type` to resolve aliases and melds.
 fn primitive_from_name(name: &str) -> Option<Type> {
     match name {
-        "Int" | "UInt" | "Signed" | "Unsigned" => Some(Type::Int),
+        "Int" | "UInt" | "Signed" | "Unsigned" => Some(Type::Custom("Int".to_string())),
         // 2026-06-29: Fixed-width type aliases for BILD type resolution
-        "Int8" | "I8" => Some(Type::Int8),
-        "Int16" | "I16" => Some(Type::Int16),
-        "Int32" | "I32" => Some(Type::Int32),
-        "UInt8" | "U8" => Some(Type::UInt8),
-        "UInt16" | "U16" => Some(Type::UInt16),
-        "UInt32" | "U32" => Some(Type::UInt32),
-        "Float" => Some(Type::Float),
-        "Float64" | "F64" | "Double" => Some(Type::Float64),
-        "Bool" => Some(Type::Bool),
-        "Char" => Some(Type::Char),
-        "String" => Some(Type::String),
-        "Data" | "Bytes" => Some(Type::Data),
+        "Int8" | "I8" => Some(Type::Custom("Int8".to_string())),
+        "Int16" | "I16" => Some(Type::Custom("Int16".to_string())),
+        "Int32" | "I32" => Some(Type::Custom("Int32".to_string())),
+        "UInt8" | "U8" => Some(Type::Custom("UInt8".to_string())),
+        "UInt16" | "U16" => Some(Type::Custom("UInt16".to_string())),
+        "UInt32" | "U32" => Some(Type::Custom("UInt32".to_string())),
+        "Float" => Some(Type::Custom("Float".to_string())),
+        "Float64" | "F64" | "Double" => Some(Type::Custom("Float64".to_string())),
+        "Bool" => Some(Type::Custom("Bool".to_string())),
+        "Char" => Some(Type::Custom("Char".to_string())),
+        "String" => Some(Type::Custom("String".to_string())),
+        "Data" | "Bytes" => Some(Type::Custom("Data".to_string())),
         _ => None,
     }
 }
@@ -268,13 +264,18 @@ impl std::fmt::Display for TypedRegister {
 /// This is the single source of truth — eliminates i64 boxing for strings, chars, bools.
 impl TypedRegister {
     pub fn llvm(&self) -> &'static str {
-        match self.ty {
-            Type::Bool => "i1",
-            Type::Char => "i32",
-            Type::Int | Type::UInt => "i64",
-            Type::Float => "float",
-            Type::String | Type::Data => "i8*",
-            _ => "i64",
+        if self.ty == Type::Custom("Bool".to_string()) {
+            "i1"
+        } else if self.ty == Type::Custom("Char".to_string()) {
+            "i32"
+        } else if self.ty == Type::Custom("Int".to_string()) || self.ty == Type::Custom("UInt".to_string()) {
+            "i64"
+        } else if self.ty == Type::Custom("Float".to_string()) {
+            "float"
+        } else if self.ty == Type::Custom("String".to_string()) || self.ty == Type::Custom("Data".to_string()) {
+            "i8*"
+        } else {
+            "i64"
         }
     }
 }
@@ -319,9 +320,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         Statement::Unification { expr, .. } => { collect_strings_expr(expr, seen, out); }
         Statement::Escape(Some(e)) => { collect_strings_expr(e, seen, out); }
         Statement::Escape(None) => {}
-        Statement::LocalTrigger { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
         Statement::SyncBlock { body } => { for s in body { collect_strings_stmt(s, seen, out); } }
-        Statement::Alka { .. } | Statement::OnExit { .. } | Statement::InlineAsm { .. } => {}
         Statement::Foreach { list, body, .. } => {
             collect_strings_expr(list, seen, out);
             for s in body { collect_strings_stmt(s, seen, out); }
@@ -334,6 +333,7 @@ fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<S
         Statement::Async { body, .. } => { collect_strings_stmt(body, seen, out); }
         Statement::AsyncAwait { body, .. } => { collect_strings_stmt(body, seen, out); }
         Statement::TrgBinding { .. } => {}
+        Statement::InlineAsm { .. } => {}
     }
 }
 
@@ -535,11 +535,11 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
 /// and `char*` (String→i8*).
 pub(super) fn trg_llvm_storage_ty(ty: &Type) -> &str {
     match ty {
-        Type::Bool => "i8",
-        Type::Int | Type::UInt => "i64",
-        Type::Float => "float",
-        Type::Char => "i32",
-        Type::String | Type::Data => "i8*",
+        Type::Custom(__t) if __t == "Bool" => "i8",
+        Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
+        Type::Custom(__t) if __t == "Float" => "float",
+        Type::Custom(__t) if __t == "Char" => "i32",
+        Type::Custom(__t) if __t == "String" || __t == "Data" => "i8*",
         _ => "i8", // fallback for unsupported types
     }
 }
@@ -775,7 +775,7 @@ pub struct LlvmBackend {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ChimeraInfo {
+pub struct ChimeraInfo {
     pub is_chimera: bool,
     pub backing_type: String,
 }
@@ -996,11 +996,11 @@ impl LlvmBackend {
                 .map(|(t, f)| *t.max(f)).max().unwrap_or(0);
             if max_count > 0 { Some(max_count) } else { None }
         } else { None };
-        let cost_N = pgo_bound.unwrap_or(0);
+        let cost_n = pgo_bound.unwrap_or(0);
 
         // Run cost model for speculative directives.
         if is_speculative {
-            let est = crate::analysis::gpu_cost::estimate(body, cost_N);
+            let est = crate::analysis::gpu_cost::estimate(body, cost_n);
             match est.recommended {
                 crate::analysis::gpu_cost::OffloadDecision::Cpu => {
                     self.push_remark(directive::OptimizationRemark::skipped("gpu",
@@ -1307,7 +1307,7 @@ impl LlvmBackend {
     }
 
     fn type_is_heap_allocated(&self, ty: &Type) -> bool {
-        matches!(ty, Type::String | Type::Data) || matches!(ty, Type::Custom(name) if name == "List" || name == "HashMap" || name == "HashSet" || name == "Stack" || name == "Queue" || name == "StringBuilder")
+        matches!(ty, Type::Custom(__t) if __t == "String" || __t == "Data") || matches!(ty, Type::Custom(name) if name == "List" || name == "HashMap" || name == "HashSet" || name == "Stack" || name == "Queue" || name == "StringBuilder")
     }
 
     fn check_stmt_embedded(&mut self, stmt: &Statement, ctx_name: &str, threading_intrinsics: &[Intrinsic]) {
@@ -1512,7 +1512,7 @@ impl LlvmBackend {
             let idx = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("__trg_epfd".to_string(), idx);
             self.ctx.field_types.push("i32".to_string());
-            self.ctx.field_brief_types.push(Type::Int);
+            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
             self.ctx.field_initializers.insert("__trg_epfd".to_string(), None);
         }
         // Inject synthetic cycle_count field for watchdog timing
@@ -1520,7 +1520,7 @@ impl LlvmBackend {
             let idx = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("cycle_count".to_string(), idx);
             self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::Int);
+            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
             self.ctx.field_initializers.insert("cycle_count".to_string(), Some(Expr::Integer(0)));
         }
         self.validate_schema_types();
@@ -1590,7 +1590,7 @@ impl LlvmBackend {
                                 name.clone(), cell_name.clone(), resolved_port.clone()
                             ));
                             // Register the trigger so its storage is allocated in %State
-                            let trig_ty = ty.clone().unwrap_or(crate::ast::Type::String);
+                            let trig_ty = ty.clone().unwrap_or(crate::ast::Type::Custom("String".to_string()));
                             self.ctx.trigger_names.push(name.clone());
                             let trg_decl = crate::ast::TriggerDeclaration {
                                 name: name.clone(),
@@ -1668,9 +1668,9 @@ impl LlvmBackend {
             .map(|(k, v)| (k.clone(), v.clone())).collect();
         for (name, (ty, expr)) in consts_snapshot {
             // 2026-06-29: Fold both Float and Float64 constant expressions
-            if ty == Type::Float || ty == Type::Float64 {
+            if ty == Type::Custom("Float".to_string()) || ty == Type::Custom("Float64".to_string()) {
                 if let Some(val) = try_eval_cfloat(&expr, &self.ctx.constants) {
-                    let new_expr = if ty == Type::Float64 { Expr::Float64(val) } else { Expr::Float(val) };
+                    let new_expr = if ty == Type::Custom("Float64".to_string()) { Expr::Float64(val) } else { Expr::Float(val) };
                     self.ctx.constants.insert(name, (ty.clone(), new_expr));
                 }
             }
@@ -1702,16 +1702,16 @@ self.emit_declares(&mut out);
                 crate::ast::ResultType::VoidType | crate::ast::ResultType::TrueAssertion => "void",
                 crate::ast::ResultType::Projection(ref ts) => {
                     if ts.is_empty() || ts.iter().any(|t| matches!(t, Type::Void)) { "void" }
-                    else if ts.iter().any(|t| matches!(t, Type::Float)) { "float" }
+                    else if ts.iter().any(|t| matches!(t, Type::Custom(__t) if __t == "Float")) { "float" }
                     else { "i64" }
                 }
             };
             let param_tys: Vec<&str> = sig.inputs.iter().map(|(_, t)| match t {
-                Type::Int | Type::UInt => "i64",
-                Type::Bool => "i32",
-                Type::Char => "i32",
-                Type::Float => "float",
-        Type::String | Type::Data => "i8*",
+                Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
+                Type::Custom(__t) if __t == "Bool" => "i32",
+                Type::Custom(__t) if __t == "Char" => "i32",
+                Type::Custom(__t) if __t == "Float" => "float",
+        Type::Custom(__t) if __t == "String" || __t == "Data" => "i8*",
                 _ => "i64",
             }).collect();
             write!(out, "declare {} @{}(", ret_ty, name).ok();
@@ -1745,6 +1745,88 @@ self.emit_declares(&mut out);
         writeln!(out, "declare i64 @__int_to_str__(i64) #1").ok();
         writeln!(out, "declare i64 @__str_bytes__(i64) #1").ok();
         writeln!(out, "declare i64 @__str_to_int(i8*) #1").ok();
+
+        // 2026-07-08: Phase 3 — brief_rt.c wrapper function declarations
+        // These are called by inop declarations in lib/std/os/*.bv.
+        // All take/return i64 (boxed value) matching Brief's ABI.
+        writeln!(out, "declare i64 @brief_open(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_close(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_read(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_write(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_lseek(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_pread(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_pwrite(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_stat(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_fstat(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_truncate(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_ftruncate(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_fsync(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_dup(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_dup2(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_fcntl(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_socket(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_bind(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_listen(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_accept(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_connect(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_send(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_recv(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_sendto(i64, i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_recvfrom(i64, i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_setsockopt(i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_getsockopt(i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_shutdown(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_mkdir(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_rmdir(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_unlink(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_rename(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_symlink(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_link(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_chdir(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_chmod(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_chown(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_umask(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_access(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_mmap(i64, i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_munmap(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_mprotect(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_brk(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_mlock(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_pipe(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_shm_open(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_shm_unlink(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_sem_open(i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_sem_wait(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_sem_post(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_getpid() #1").ok();
+        writeln!(out, "declare i64 @brief_getppid() #1").ok();
+        writeln!(out, "declare i64 @brief_clock_gettime(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_nanosleep(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_getenv(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_setenv(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_unsetenv(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_futex(i64, i64, i64, i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @__ioctl__(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @__isatty__(i64) #1").ok();
+        writeln!(out, "declare i64 @__print(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_getuid() #1").ok();
+        writeln!(out, "declare i64 @brief_geteuid() #1").ok();
+        writeln!(out, "declare i64 @brief_getgid() #1").ok();
+        writeln!(out, "declare i64 @brief_getegid() #1").ok();
+        writeln!(out, "declare i64 @brief_sched_yield() #1").ok();
+        writeln!(out, "declare i64 @brief_getpriority(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_setpriority(i64, i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_getrlimit(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_setrlimit(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_pagesize() #1").ok();
+        writeln!(out, "declare i64 @brief_cpu_count() #1").ok();
+        writeln!(out, "declare i64 @brief_ttyname(i64) #1").ok();
+        writeln!(out, "declare i64 @brief_ring_push(i64, i64) #1").ok();
+        writeln!(out, "declare i64 @brief_ring_pop(i64) #1").ok();
+        writeln!(out, "declare i64 @__tty_read_key__(i64) #1").ok();
+        writeln!(out, "declare i64 @__tty_size__() #1").ok();
+        writeln!(out, "declare i64 @cpu_count() #1").ok();
+        writeln!(out, "declare i64 @pagesize() #1").ok();
 
         // Format string constants for benchmark intrinsics (print_int#, print_float#)
         writeln!(out, "@FMT_INT = private unnamed_addr constant [5 x i8] c\"%ld\\0A\\00\"").ok();
@@ -1797,7 +1879,7 @@ self.emit_declares(&mut out);
                 }
                 // Warn on unsupported trigger types
                 match &trg.ty {
-                    Type::Bool | Type::Int | Type::UInt | Type::Char | Type::String | Type::Data => {}
+                    Type::Custom(__t) if __t == "Bool" || __t == "Int" || __t == "UInt" || __t == "Char" || __t == "String" || __t == "Data" => {}
                     _ => {
                         eprintln!("warning:{}:{}: trigger '{}' has type {:?} which the LLVM runtime does not fully support; using i8 storage",
                             trg.span.as_ref().map(|s| s.line).unwrap_or(0),
@@ -1820,13 +1902,13 @@ self.emit_declares(&mut out);
         for (name, (ty, expr)) in &self.ctx.constants {
             let llvm_ty = match ty {
                 // 2026-06-29: Updated for fixed-width types
-                Type::Float64 => "double",
-                Type::Float => "float",
-                Type::Int | Type::UInt => "i64",
-                Type::Int8 | Type::UInt8 => "i8",
-                Type::Int16 | Type::UInt16 => "i16",
-                Type::Int32 | Type::UInt32 => "i32",
-                Type::Bool => "i1",
+                Type::Custom(__t) if __t == "Float64" => "double",
+                Type::Custom(__t) if __t == "Float" => "float",
+                Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
+                Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => "i8",
+                Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => "i16",
+                Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => "i32",
+                Type::Custom(__t) if __t == "Bool" => "i1",
                 _ => "i64",
             };
             let key = match expr {
@@ -1871,26 +1953,26 @@ self.emit_declares(&mut out);
             let canonical = alias_map.get(name).cloned().unwrap_or_else(|| name.clone());
             if canonical != *name {
                 let llvm_ty = match ty {
-                    Type::Float64 => "double",
-                    Type::Float => "float",
-                    Type::Int | Type::UInt => "i64",
-                    Type::Int8 | Type::UInt8 => "i8",
-                    Type::Int16 | Type::UInt16 => "i16",
-                    Type::Int32 | Type::UInt32 => "i32",
-                    Type::Bool => "i1",
+                    Type::Custom(__t) if __t == "Float64" => "double",
+                    Type::Custom(__t) if __t == "Float" => "float",
+                    Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
+                    Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => "i8",
+                    Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => "i16",
+                    Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => "i32",
+                    Type::Custom(__t) if __t == "Bool" => "i1",
                     _ => "i64",
                 };
                 writeln!(out, "@{} = alias {}, {}* @{}", name, llvm_ty, llvm_ty, canonical).ok();
                 continue;
             }
             let llvm_ty = match ty {
-                Type::Float64 => "double",
-                Type::Float => "float",
-                Type::Int | Type::UInt => "i64",
-                Type::Int8 | Type::UInt8 => "i8",
-                Type::Int16 | Type::UInt16 => "i16",
-                Type::Int32 | Type::UInt32 => "i32",
-                Type::Bool => "i1",
+                Type::Custom(__t) if __t == "Float64" => "double",
+                Type::Custom(__t) if __t == "Float" => "float",
+                Type::Custom(__t) if __t == "Int" || __t == "UInt" => "i64",
+                Type::Custom(__t) if __t == "Int8" || __t == "UInt8" => "i8",
+                Type::Custom(__t) if __t == "Int16" || __t == "UInt16" => "i16",
+                Type::Custom(__t) if __t == "Int32" || __t == "UInt32" => "i32",
+                Type::Custom(__t) if __t == "Bool" => "i1",
                 _ => "i64",
             };
             let val_str = match expr {
@@ -1914,15 +1996,15 @@ self.emit_declares(&mut out);
                         if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                             format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f))
                         } else {
-                            if *ty == Type::Float { "0.0".to_string() } else { "0".to_string() }
+                            if *ty == Type::Custom("Float".to_string()) { "0.0".to_string() } else { "0".to_string() }
                         }
                     }
                     Expr::Integer(n) => format!("-{}", n),
-                    _ => if *ty == Type::Float { "0.0".to_string() } else { "0".to_string() },
+                    _ => if *ty == Type::Custom("Float".to_string()) { "0.0".to_string() } else { "0".to_string() },
                 },
                 Expr::String(_) => "null".to_string(),
                 _ => {
-                    if *ty == Type::Float {
+                    if *ty == Type::Custom("Float".to_string()) {
                         "0.0".to_string()
                     } else {
                         "0".to_string()
@@ -3104,22 +3186,22 @@ self.emit_declares(&mut out);
                             let data_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
                             self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::Int);
+                            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
                             self.ctx.field_initializers.insert(format!("{}_data", s.name), None);
                             let head_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_head", s.name), head_idx);
                             self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::Int);
+                            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
                             self.ctx.field_initializers.insert(format!("{}_head", s.name), None);
                             let tail_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_tail", s.name), tail_idx);
                             self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::Int);
+                            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
                             self.ctx.field_initializers.insert(format!("{}_tail", s.name), None);
                             let mask_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_mask", s.name), mask_idx);
                             self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::Int);
+                            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
                             self.ctx.field_initializers.insert(format!("{}_mask", s.name), None);
                             self.ctx.ringbuf_inline.insert(s.name.clone(),
                                 crate::backend::llvm::context::RingbufInlineFields {
@@ -3138,7 +3220,7 @@ self.emit_declares(&mut out);
             } else if let TopLevel::TriggerBinding { name, ty, .. } = item {
                 // Trigger bindings (trg name: Type @ Console!) get a state slot
                 // like regular triggers, so emit_expr can load their value.
-                let trig_ty = ty.clone().unwrap_or(crate::ast::Type::String);
+                let trig_ty = ty.clone().unwrap_or(crate::ast::Type::Custom("String".to_string()));
                 self.ctx.field_index_map
                     .insert(name.clone(), self.ctx.field_types.len());
                 self.push_field_type(&trig_ty);
@@ -3323,7 +3405,7 @@ self.emit_declares(&mut out);
                     self.ctx.field_types.push(old_types[orig_type_idx].clone());
                     // 2026-06-29: Preserve the original Brief type alongside LLVM type
                     self.ctx.field_brief_types.push(
-                        old_brief_types.get(orig_type_idx).cloned().unwrap_or(Type::Int)
+                        old_brief_types.get(orig_type_idx).cloned().unwrap_or(Type::Custom("Int".to_string()))
                     );
                 }
             }
@@ -3338,10 +3420,10 @@ self.emit_declares(&mut out);
                     for target_name in targets {
                         let cache_idx = self.ctx.field_types.len();
                         self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::Int);
+            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
                         let valid_idx = self.ctx.field_types.len();
                         self.ctx.field_types.push("i8".to_string());
-                        self.ctx.field_brief_types.push(Type::Bool);
+                        self.ctx.field_brief_types.push(Type::Custom("Bool".to_string()));
                         target_map.insert(target_name.clone(), (cache_idx, valid_idx));
                     }
                 }
@@ -3349,10 +3431,10 @@ self.emit_declares(&mut out);
                 if target_map.is_empty() {
                     let cache_idx = self.ctx.field_types.len();
                     self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::Int);
+            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
                     let valid_idx = self.ctx.field_types.len();
                     self.ctx.field_types.push("i8".to_string());
-                        self.ctx.field_brief_types.push(Type::Bool);
+                        self.ctx.field_brief_types.push(Type::Custom("Bool".to_string()));
                     target_map.insert("_".to_string(), (cache_idx, valid_idx));
                 }
                 self.ctx.cache_slots.insert(name.clone(), target_map);

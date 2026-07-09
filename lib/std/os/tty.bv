@@ -1,0 +1,28 @@
+// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
+// Auto-imported via prelude.
+
+inop __sys_tty_raw_mode(enable: Int) -> Int {
+    %r = call i64 @__tty_raw_mode__(i64 %enable);
+    ret i64 %r;
+};
+
+inop __sys_tty_size() -> Int {
+    %r = call i64 @__tty_size__();
+    ret i64 %r;
+};
+
+inop __sys_tty_read_key(fd: Int) -> Int {
+    %r = call i64 @__tty_read_key__(i64 %fd);
+    ret i64 %r;
+};
+
+inop __sys_ioctl(fd: Int, request: Int, argp: Ptr<Byte>) -> Int {
+    %r = call i64 @__ioctl__(i64 %fd, i64 %request, i64 %argp);
+    ret i64 %r;
+};
+
+inop __sys_isatty(fd: Int) -> Int {
+    %r = call i64 @__isatty__(i64 %fd);
+    ret i64 %r;
+};
+
