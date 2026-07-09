@@ -4175,4 +4175,63 @@ mod tests {
         assert!(!Intrinsic::Hash.has_side_effects(),
             "__hash# is pure (read-only)");
     }
+
+    // ── as_var_name() regression tests ──────────────────────────
+
+    #[test]
+    fn test_as_var_name_identifier() {
+        let expr = Expr::Identifier("x".to_string());
+        assert_eq!(expr.as_var_name(), Some("x"));
+    }
+
+    #[test]
+    fn test_as_var_name_addr_of_identifier() {
+        let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
+        assert_eq!(expr.as_var_name(), Some("x"));
+    }
+
+    #[test]
+    fn test_as_var_name_prior_state() {
+        let expr = Expr::PriorState("x".to_string());
+        assert_eq!(expr.as_var_name(), Some("x"));
+    }
+
+    #[test]
+    fn test_as_var_name_integer_returns_none() {
+        let expr = Expr::Integer(42);
+        assert_eq!(expr.as_var_name(), None);
+    }
+
+    #[test]
+    fn test_as_var_name_binary_op_returns_none() {
+        let expr = Expr::Add(
+            Box::new(Expr::Identifier("x".to_string())),
+            Box::new(Expr::Integer(1)),
+        );
+        assert_eq!(expr.as_var_name(), None);
+    }
+
+    #[test]
+    fn test_as_var_name_addr_of_binary_op_returns_none() {
+        // &(x + 1) is not a simple variable reference
+        let inner = Expr::Add(
+            Box::new(Expr::Identifier("x".to_string())),
+            Box::new(Expr::Integer(1)),
+        );
+        let expr = Expr::AddrOf(Box::new(inner));
+        assert_eq!(expr.as_var_name(), None);
+    }
+
+    #[test]
+    fn test_as_var_name_deref_identifier() {
+        let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
+        assert_eq!(expr.as_var_name(), None);
+    }
+
+    #[test]
+    fn test_as_var_name_deref_returns_none() {
+        // *x is not a valid LHS variable reference
+        let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
+        assert_eq!(expr.as_var_name(), None);
+    }
 }

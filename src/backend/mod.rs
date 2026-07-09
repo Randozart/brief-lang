@@ -927,4 +927,71 @@ mod tests {
         df.mark(3);
         assert_eq!(df.bits(), 0b1001);
     }
+
+    // ── collect_expr_identifiers regression tests ────────────────
+
+    #[test]
+    fn test_collect_expr_identifiers_identifier() {
+        let mut ids = std::collections::HashSet::new();
+        collect_expr_identifiers(&Expr::Identifier("x".to_string()), &mut ids);
+        assert!(ids.contains("x"));
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn test_collect_expr_identifiers_addr_of() {
+        let mut ids = std::collections::HashSet::new();
+        collect_expr_identifiers(
+            &Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
+            &mut ids,
+        );
+        assert!(ids.contains("x"), "collect_expr_identifiers should recurse through AddrOf");
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn test_collect_expr_identifiers_deref() {
+        let mut ids = std::collections::HashSet::new();
+        collect_expr_identifiers(
+            &Expr::Deref(Box::new(Expr::Identifier("x".to_string()))),
+            &mut ids,
+        );
+        assert!(ids.contains("x"), "collect_expr_identifiers should recurse through Deref");
+        assert_eq!(ids.len(), 1);
+    }
+
+    #[test]
+    fn test_collect_expr_identifiers_addr_of_through_binary() {
+        let mut ids = std::collections::HashSet::new();
+        let rhs = Expr::Add(
+            Box::new(Expr::AddrOf(Box::new(Expr::Identifier("a".to_string())))),
+            Box::new(Expr::Identifier("b".to_string())),
+        );
+        collect_expr_identifiers(&rhs, &mut ids);
+        assert!(ids.contains("a"), "collect_expr_identifiers should find a through AddrOf");
+        assert!(ids.contains("b"), "collect_expr_identifiers should find b via Identifier");
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn test_collect_assigned_identifiers_addr_of() {
+        let body = vec![
+            Statement::Assignment {
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
+                expr: Expr::Integer(1),
+                timeout: None,
+                modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::Identifier("y".to_string()),
+                expr: Expr::Integer(2),
+                timeout: None,
+                modifiers: vec![],
+            },
+        ];
+        let ids = collect_assigned_identifiers(&body);
+        assert!(ids.contains(&"x".to_string()), "collect_assigned_identifiers should find x via AddrOf");
+        assert!(ids.contains(&"y".to_string()), "collect_assigned_identifiers should find y via Identifier");
+        assert_eq!(ids.len(), 2);
+    }
 }

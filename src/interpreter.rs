@@ -1458,13 +1458,18 @@ impl Interpreter {
 
                             if !transaction_failed && !transaction_escaped {
                                 let post_val = self.eval_expr(&txn.contract.post_condition)?;
-                                if post_val != Value::Bool(true) {
-                                    self.state = self.prior_state.clone();
-                                } else if self.state != self.prior_state {
+                                // Commit state if postcondition is met (convergence reached).
+                                // If post is not yet met, state still advances (convergent loop
+                                // makes progress each tick). Only revert on error/escape.
+                                if post_val == Value::Bool(true) {
+                                    if self.state != self.prior_state {
+                                        executed = true;
+                                    }
+                                } else {
                                     executed = true;
                                 }
                             }
-                            // If escaped, state is already restored and we continue
+                            // If escaped or failed, state is already restored and we continue
                         }
                     }
             } else if let TopLevel::TypeDef(_) = item {
@@ -11732,6 +11737,90 @@ mod tests {
         };
         let result = i.eval_expr(&vs);
         assert!(result.is_err(), "volatile_store with non-Ptr should error");
+    }
+
+    // ── AddrOf / Deref regression tests ─────────────────────────
+    #[test]
+    fn test_addr_of_identifier_reads_from_state() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(42));
+        let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_addr_of_undefined_var_errors() {
+        let mut i = Interpreter::new();
+        let expr = Expr::AddrOf(Box::new(Expr::Identifier("undefined".to_string())));
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err(), "AddrOf of undefined variable should error");
+    }
+
+    #[test]
+    fn test_addr_of_assignment_writes_to_state() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        let stmt = Statement::Assignment {
+            lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
+            expr: Expr::Integer(99),
+            timeout: None,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("x"), Some(&Value::Int(99)));
+    }
+
+    #[test]
+    fn test_addr_of_assignment_creates_new_state_entry() {
+        let mut i = Interpreter::new();
+        let stmt = Statement::Assignment {
+            lhs: Expr::AddrOf(Box::new(Expr::Identifier("new_var".to_string()))),
+            expr: Expr::Bool(true),
+            timeout: None,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("new_var"), Some(&Value::Bool(true)));
+    }
+
+    #[test]
+    fn test_addr_of_assignment_in_txn_body() {
+        let code = r#"
+            let count: Int = 10;
+            rct txn dec [count > 0][count == 0] {
+                &count = count - 1;
+                term;
+            };
+        "#;
+        let mut parser = crate::parser::Parser::new(code);
+        let program = parser.parse().expect("Failed to parse");
+        let mut i = Interpreter::new();
+        let _ = i.run(&program);
+        assert_eq!(i.state.get("count"), Some(&Value::Int(0)));
+    }
+
+    #[test]
+    fn test_deref_identifier_evaluates_inner() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(42));
+        let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_addr_of_lhs_via_feature_assignment() {
+        let mut i = Interpreter::new();
+        i.state.insert("x".to_string(), Value::Int(0));
+        let stmt = Statement::Assignment {
+            lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
+            expr: Expr::Integer(77),
+            timeout: None,
+            modifiers: vec![],
+        };
+        i.exec_stmt(&stmt).unwrap();
+        assert_eq!(i.state.get("x"), Some(&Value::Int(77)));
     }
 }
 
