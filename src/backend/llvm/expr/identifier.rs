@@ -1,6 +1,6 @@
 // ── Identifier Variable Access Codegen ─────────────────────────
 //
-// Handles emission of Expr::Identifier, Expr::OwnedRef, and
+// Handles emission of Expr::Identifier, Expr::AddrOf, and
 // Expr::PriorState — variable and field lookups.
 // 2026-06-29: Extracted from emit_expr.rs lines 109-430.
 
@@ -52,7 +52,7 @@ pub fn emit_identifier(
         panic!("emit_expr: PriorState field '{}' not found in field_index_map", name);
     }
 
-    // ── Expr::Identifier / Expr::OwnedRef ──────────────────────
+    // ── Expr::Identifier / Expr::AddrOf ────────────────────────
     let name = match expr {
         Expr::Identifier(n) => n,
         expr @ Expr::AddrOf(_) => expr.as_var_name().unwrap(),

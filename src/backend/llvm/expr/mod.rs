@@ -11,7 +11,7 @@
 //   compare.rs      — DONE (Eq, Ne, Lt, Le, Gt, Ge, And, Or, Not)
 //   collections.rs  — DONE (ListLiteral, Tuple)
 //   intrinsics.rs   — DONE (200+ intrinsic variants)
-//   identifier.rs   — DONE (Identifier, OwnedRef, PriorState)
+//   identifier.rs   — DONE (Identifier, AddrOf, PriorState)
 //   call.rs         — DONE (Call — FFI and internal)
 //   projection.rs   — DONE (Projection — all ProjectionTarget variants)
 //   arrow.rs        — DONE (ArrowMut Push/Pop, ArrowDiscard, ArrowTransfer)

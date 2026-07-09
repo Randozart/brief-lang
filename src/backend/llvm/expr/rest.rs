@@ -104,7 +104,7 @@ pub fn emit_rest_expr(
             Expr::And(_, _) => return crate::backend::llvm::expr::compare::emit_and(backend, out, &v, &expr, indent),
             Expr::Or(_, _) => return crate::backend::llvm::expr::compare::emit_or(backend, out, &v, &expr, indent),
             Expr::Not(_) => return crate::backend::llvm::expr::compare::emit_not(backend, out, &v, &expr, indent),
-            // ── Identifier / OwnedRef / PriorState ──────────────
+            // ── Identifier / AddrOf / PriorState ────────────────
             Expr::Identifier(_) | Expr::PriorState(_) => {
                 return crate::backend::llvm::expr::identifier::emit_identifier(
                     backend, out, v, expr, indent);
