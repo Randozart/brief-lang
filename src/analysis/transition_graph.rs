@@ -580,9 +580,8 @@ fn get_int(e: &Expr) -> Option<i64> {
 fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
     for stmt in body {
         if let Statement::Assignment { lhs, expr, .. } = stmt {
-            let name = match lhs {
-                Expr::Identifier(n) => n.clone(),
-                _ => continue,
+            let Some(name) = lhs.as_var_name() else {
+                continue;
             };
             // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
             // so the Add/Sub checks below can detect increment patterns.
@@ -594,12 +593,12 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
             if let Expr::Add(a, b) = expr_ref {
                 if let (Expr::Identifier(var), Some(delta)) = (a.as_ref(), get_int(b)) {
                     if *var == name && delta > 0 {
-                        return Some(IncrementInfo { var: name.clone(), delta });
+                        return Some(IncrementInfo { var: name.to_string(), delta });
                     }
                 }
                 if let (Expr::Identifier(var), Some(delta)) = (b.as_ref(), get_int(a)) {
                     if *var == name && delta > 0 {
-                        return Some(IncrementInfo { var: name.clone(), delta });
+                        return Some(IncrementInfo { var: name.to_string(), delta });
                     }
                 }
             }
@@ -607,7 +606,7 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
             if let Expr::Sub(a, b) = expr_ref {
                 if let (Expr::Identifier(var), Some(delta)) = (a.as_ref(), get_int(b)) {
                     if *var == name && delta > 0 {
-                        return Some(IncrementInfo { var: name.clone(), delta });
+                        return Some(IncrementInfo { var: name.to_string(), delta });
                     }
                 }
             }
@@ -622,12 +621,12 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
                         if let (Some(r1_val), Some(r2_val)) = (r1, r2) {
                             let net = r1_val - r2_val;
                             if net > 0 {
-                                return Some(IncrementInfo { var: name.clone(), delta: net });
+                                return Some(IncrementInfo { var: name.to_string(), delta: net });
                             }
                         }
                         // If only one side is a constant and positive, assume at least 1
                         if r1.map_or(false, |v| v >= 1) && r2.is_none() {
-                            return Some(IncrementInfo { var: name.clone(), delta: 1 });
+                            return Some(IncrementInfo { var: name.to_string(), delta: 1 });
                         }
                     }
                 }

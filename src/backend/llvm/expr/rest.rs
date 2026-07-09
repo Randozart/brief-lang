@@ -1192,6 +1192,45 @@ pub fn emit_rest_expr(
                 writeln!(out, "{}    {} = load i64, ptr {}, align 8", indent, v_result, v_save).ok();
                 return TypedRegister { name: v_result.clone(), ty: Type::Custom("Int".to_string()) };
             }
+            // ── AddrOf (address-of) ──────────────────────────────
+            Expr::AddrOf(inner) => {
+                // emit_addr_of returns a pointer register (ptr in LLVM IR).
+                // The result type is Ptr<T> which maps to LLVM's opaque ptr.
+                match crate::backend::llvm::expr::identifier::emit_addr_of(backend, out, inner, indent) {
+                    Ok(ptr_reg) => {
+                        return TypedRegister { name: ptr_reg, ty: Type::Applied("Ptr".to_string(), vec![Type::Custom("Int".to_string())]) };
+                    }
+                    Err(msg) => {
+                        unreachable!("emit_expr: cannot take address: {}", msg);
+                    }
+                }
+            }
+            // ── Deref (dereference) ───────────────────────────────
+            Expr::Deref(inner) => {
+                // Evaluate the pointer expression → gets a ptr register
+                let ptr = backend.emit_expr(out, inner, indent);
+                // Load from the pointer → gets the value
+                let v_reg = format!("%t{}", backend.fun.txn_counter);
+                backend.fun.txn_counter += 1;
+                // Determine the pointee type for the load
+                let (llvm_ty, pointee_ty) = match crate::type_universe::pointee_type(&ptr.ty) {
+                    Some(inner_ty) => {
+                        // Map Brief type to LLVM type
+                        match inner_ty {
+                            Type::Custom(ref s) if s == "Bool" => ("i1".to_string(), inner_ty),
+                            Type::Custom(ref s) if s == "Char" => ("i32".to_string(), inner_ty),
+                            Type::Custom(ref s) if s == "Int" => ("i64".to_string(), inner_ty),
+                            Type::Custom(ref s) if s == "Float" => ("float".to_string(), inner_ty),
+                            Type::Custom(ref s) if s == "Float64" => ("double".to_string(), inner_ty),
+                            _ => ("i64".to_string(), Type::Custom("Int".to_string())),
+                        }
+                    }
+                    None => ("i64".to_string(), Type::Custom("Int".to_string())),
+                };
+                let align = if llvm_ty == "i1" { 1 } else if llvm_ty == "i32" { 4 } else if llvm_ty == "float" || llvm_ty == "double" { 4 } else { 8 };
+                writeln!(out, "{}{} = load {}, ptr %{}, align {}", indent, v_reg, llvm_ty, ptr.name, align).ok();
+                return TypedRegister { name: v_reg, ty: pointee_ty };
+            }
             _ => { unreachable!("emit_expr: unhandled Expr variant: {:?}", expr); }
         }
         // Default: treat as Int. Float operations are handled explicitly

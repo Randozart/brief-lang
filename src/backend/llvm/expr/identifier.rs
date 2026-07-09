@@ -346,3 +346,38 @@ pub fn emit_identifier(
     TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
 }
 
+/// Emit a GEP (getelementptr) to compute the address of a variable.
+/// Returns the register name holding the pointer (`ptr` in LLVM IR).
+///
+/// Supported cases:
+/// - `Expr::Identifier(name)`: state field (GEP on `%State*`)
+///
+/// Phase 2: Currently only handles state fields. Let binding and
+/// FieldAccess/Index targets are future extensions.
+pub(super) fn emit_addr_of(
+    backend: &mut crate::backend::llvm::LlvmBackend,
+    out: &mut String,
+    expr: &Expr,
+    indent: &str,
+) -> Result<String, String> {
+    match expr {
+        Expr::Identifier(name) => {
+            if let Some(&idx) = backend.ctx.field_index_map.get(name) {
+                // State field → GEP on %State*
+                let state_ptr = &backend.fun.state_reg_name;
+                let reg = format!("%ap{}", backend.fun.txn_counter);
+                backend.fun.txn_counter += 1;
+                writeln!(out, "{}{} = getelementptr inbounds %State, ptr %{}, i32 0, i32 {}",
+                    indent, reg, state_ptr, idx)
+                    .map_err(|e| e.to_string())?;
+                Ok::<String, String>(reg)
+            } else {
+                // Let bindings without an alloca are not supported.
+                // Phase 2 extension: create alloca on demand.
+                Err(format!("cannot take address of '{}': not a state field", name))
+            }
+        }
+        _ => Err("cannot take address of expression: only identifiers supported".to_string()),
+    }
+}
+

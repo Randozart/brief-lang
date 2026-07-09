@@ -70,7 +70,10 @@ pub fn emit_arrow_push(
             return TypedRegister { name: elem_boxed.to_string(), ty: Type::Custom("Int".to_string()) };
         }
     }
-    let list_val = backend.emit_expr(out, target, indent);
+    // 2026-07-09: Unwrap AddrOf to emit the inner expression (value load).
+    // AddrOf now emits a GEP pointer, but arrow ops need the i64 handle value.
+    let value_target = match target.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+    let list_val = backend.emit_expr(out, value_target, indent);
     let elem_val = backend.emit_expr(out, val, indent);
     let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
     let elem_boxed = backend.adapt_to_i64(out, indent, &elem_val);
@@ -308,7 +311,8 @@ pub fn emit_arrow_pop(
             return TypedRegister { name: result.name.clone(), ty: Type::Custom("Int".to_string()) };
         }
         // Custom extract: call @fn_name(i64) -> { i64, i64 }
-        let list_val = backend.emit_expr(out, target, indent);
+        let value_target = match target.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+        let list_val = backend.emit_expr(out, value_target, indent);
         let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
         let call_reg = format!("%pc{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
         writeln!(out, "{}{} = call {{ i64, i64 }} @{}(i64 {})", indent, call_reg, fn_name, list_boxed).ok();
@@ -335,7 +339,8 @@ pub fn emit_arrow_pop(
     }
     // Determine pop index: Shift strategy removes from front (0), otherwise end (len-1)
     let should_shift = matches!(pop_strategy, Some(crate::type_universe::ExtractStrategy::Shift));
-    let list_val = backend.emit_expr(out, target, indent);
+    let value_target = match target.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+    let list_val = backend.emit_expr(out, value_target, indent);
     let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
     // Unbox list header
     let hp = format!("%php{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -509,7 +514,8 @@ pub fn emit_arrow_discard(
             return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
         }
     }
-    let list_val = backend.emit_expr(out, target, indent);
+    let value_target = match target.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+    let list_val = backend.emit_expr(out, value_target, indent);
     let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
     // Unbox list header, read length
     let hp = format!("%dhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -607,8 +613,10 @@ pub fn emit_arrow_transfer(
     indent: &str,
 ) -> TypedRegister {
     // Unfiltered: move all elements from source to dest
-    let dest_val = backend.emit_expr(out, dest, indent);
-    let src_val = backend.emit_expr(out, source, indent);
+    let dest_target = match dest.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+    let src_target = match source.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+    let dest_val = backend.emit_expr(out, dest_target, indent);
+    let src_val = backend.emit_expr(out, src_target, indent);
     let dest_boxed = backend.adapt_to_i64(out, indent, &dest_val);
     let src_boxed = backend.adapt_to_i64(out, indent, &src_val);
     let dhp = format!("%tdh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
