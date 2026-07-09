@@ -25,12 +25,19 @@ impl StmtEval for AssignmentStmt {
     fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &StmtDispatch) -> Result<(), RuntimeError> {
         let value = ctx.eval_expr(&self.expr)?;
         match &self.lhs {
-            Expr::Identifier(name) | Expr::OwnedRef(name) => {
+            Expr::Identifier(name) => {
                 ctx.state.insert(name.clone(), value);
+            }
+            expr @ Expr::AddrOf(_) => {
+                let name = expr.as_var_name().ok_or_else(|| RuntimeError::TypeMismatch("AddrOf LHS must be an identifier".to_string()))?.to_string();
+                ctx.state.insert(name, value);
             }
             Expr::ListIndex(list_expr, index_expr) => {
                 let list_name = match list_expr.as_ref() {
-                    Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                    Expr::Identifier(n) => n.clone(),
+                    expr @ Expr::AddrOf(_) => {
+                        expr.as_var_name().ok_or_else(|| RuntimeError::TypeMismatch("Expected identifier".to_string()))?.to_string()
+                    }
                     _ => return Err(RuntimeError::TypeMismatch("Expected identifier".to_string())),
                 };
                 let idx_val = ctx.eval_expr(index_expr)?;

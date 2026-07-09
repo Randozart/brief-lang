@@ -6484,7 +6484,7 @@ let span = self.current_span();
     /// Accepts `&name`, `&name.field`, and `&name.field.subfield...` (via FieldAccess chain).
     fn is_valid_arrow_inner(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::OwnedRef(_) => true,
+            Expr::AddrOf(_) => true,
             Expr::FieldAccess(target, _) => self.is_valid_arrow_inner(target),
             _ => false,
         }
@@ -6492,7 +6492,7 @@ let span = self.current_span();
 
     fn extract_arrow_target(&self, expr: Expr) -> Option<(Expr, Expr)> {
         match expr {
-            Expr::OwnedRef(_) => Some((expr, Expr::Term)),
+            Expr::AddrOf(_) => Some((expr, Expr::Term)),
             Expr::ListIndex(target, index) => {
                 if self.is_valid_arrow_inner(&*target) {
                     Some((*target, *index))
@@ -7304,7 +7304,7 @@ let span = self.current_span();
                             Ok(Expr::TupleDestructure(names, Box::new(Expr::Term)))
                         }
                         _ => match self.expect_identifier() {
-                            Ok(name) => self.parse_postfix_expr(Expr::OwnedRef(name)),
+                            Ok(name) => self.parse_postfix_expr(Expr::AddrOf(Box::new(Expr::Identifier(name)))),
                             Err(e) => return Err(e),
                         },
                     }

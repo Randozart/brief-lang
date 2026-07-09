@@ -95,7 +95,7 @@ fn expr_involves_trigger(expr: &Expr) -> bool {
             is_trigger_like_name(name)
         }
         Expr::PriorState(name) => is_trigger_like_name(name),
-        Expr::OwnedRef(name) => is_trigger_like_name(name),
+        expr @ Expr::AddrOf(_) => expr.as_var_name().map_or(false, is_trigger_like_name),
         Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
         | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r)
         | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)

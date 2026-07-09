@@ -406,7 +406,7 @@ impl Annotator {
             Expr::Bool(false) => "false".to_string(),
             Expr::Term => "term".to_string(),
             Expr::Identifier(n) => n.clone(),
-            Expr::OwnedRef(n) => format!("&{}", n),
+            expr @ Expr::AddrOf(_) => format!("&{}", expr.as_var_name().unwrap()),
             Expr::PriorState(n) => format!("@{}", n),
             Expr::Call(name, args) => {
                 let args_str = args

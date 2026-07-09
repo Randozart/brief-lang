@@ -43,7 +43,8 @@ impl LlvmBackend {
             Expr::Literal(lit) => Expr::Literal(lit.clone()),
             // Identifier variants — rewrite to prefixed form
             Expr::Identifier(name) => Expr::Identifier(p(name)),
-            Expr::OwnedRef(name) => Expr::OwnedRef(p(name)),
+            Expr::AddrOf(inner) => Expr::AddrOf(Box::new(Self::rewrite_cell_identifiers(inner, cell_name))),
+            Expr::Deref(inner) => Expr::Deref(Box::new(Self::rewrite_cell_identifiers(inner, cell_name))),
             Expr::PriorState(name) => Expr::PriorState(p(name)),
             Expr::EllipsisExpr(e) => Expr::EllipsisExpr(e.clone()),
             Expr::TypeRef(name) => Expr::TypeRef(name.clone()),

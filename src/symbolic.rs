@@ -158,7 +158,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::PriorState(name) => SymbolicValue::Previous(name.clone()),
 
         // Owned references (assignments)
-        Expr::OwnedRef(name) => SymbolicValue::Previous(name.clone()),
+        expr @ Expr::AddrOf(_) => SymbolicValue::Previous(expr.as_var_name().unwrap().to_string()),
 
         // Binary operations
         Expr::Add(left, right) => {
@@ -278,6 +278,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             Expr::SharedMem(_) => SymbolicValue::Unknown,
             // Pipe chains — desugared before this pass
             Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
+        Expr::AddrOf(_) | Expr::Deref(_) => SymbolicValue::Unknown,
         }
     }
 
@@ -472,7 +473,7 @@ fn execute_statement(stmt: &Statement, state: &mut SymbolicState) {
             timeout: _,
             modifiers: _,
         } => {
-            if let Expr::Identifier(name) | Expr::OwnedRef(name) = lhs {
+            if let Expr::Identifier(name) = lhs {
                 state.assign(name, expr);
             }
         }

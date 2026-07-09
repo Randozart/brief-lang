@@ -751,3 +751,4 @@ the execution paths.
 | **Benchmark strategy** | `docs/architecture/benchmark-strategy.md` |
 | **Kani harnesses** | `docs/architecture/kani-harnesses.md` |
 | **Plan documents** | `docs/plans/` |
+| **Ptr Level 3 plan** | `docs/plans/2026-07-09-ptr-level3-borrow-checking.md` |

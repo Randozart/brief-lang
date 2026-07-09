@@ -126,7 +126,7 @@ impl LlvmBackend {
                 }
                 v
             }
-            Expr::OwnedRef(name) => {
+            expr @ Expr::AddrOf(_) => { let name = expr.as_var_name().unwrap().to_string();
                 return self.emit_exit_expr(out, &Expr::Identifier(name.clone()), indent);
             }
             Expr::Eq(l, r) => {
@@ -3428,7 +3428,7 @@ fn collect_parallel_safe_exemptions(
     for s in body {
         // Track mutation order
         if let Statement::Assignment { lhs, .. } = s {
-            if let (Expr::Identifier(name) | Expr::OwnedRef(name)) = lhs {
+            if let (Expr::Identifier(name)) = lhs {
                 mutation_order.push(name.clone());
             }
         }
@@ -3522,7 +3522,7 @@ fn exempt_side_effect_args(
     for arg in args {
         if is_float_call {
             // Float calls: only direct Expr::Identifier args need exact values
-            if let (Expr::Identifier(name) | Expr::OwnedRef(name)) = arg {
+            if let (Expr::Identifier(name)) = arg {
                 if field_index_map.contains_key(name) {
                     fields.insert(name.clone());
                 }
@@ -3541,7 +3541,7 @@ fn collect_field_ids_from_expr(
     field_index_map: &HashMap<String, usize>,
 ) {
     match e {
-        Expr::Identifier(name) | Expr::OwnedRef(name) => {
+        Expr::Identifier(name) => {
             if field_index_map.contains_key(name) { fields.insert(name.clone()); }
         }
         Expr::BinaryOp(bop) => {
@@ -3594,7 +3594,7 @@ fn extract_side_effect_reads(
     for arg in args {
         if is_float_call {
             // Float: only direct identifiers
-            if let (Expr::Identifier(name) | Expr::OwnedRef(name)) = arg {
+            if let (Expr::Identifier(name)) = arg {
                 if field_index_map.contains_key(name) { result.push(name.clone()); }
             }
         } else {
@@ -3624,7 +3624,7 @@ fn is_body_parallel_safe(_body: &[Statement]) -> bool {
 /// Helper: extract identifiers from an expression into a set.
 fn collect_expr_field_refs_for_set(e: &Expr, refs: &mut HashSet<String>) {
     match e {
-        Expr::Identifier(name) | Expr::OwnedRef(name) => { refs.insert(name.clone()); }
+        Expr::Identifier(name) => { refs.insert(name.clone()); }
         Expr::BinaryOp(bop) => {
             let bop = bop.as_ref();
             collect_expr_field_refs_for_set(&bop.left, refs);
@@ -3692,7 +3692,7 @@ fn collect_expr_field_refs(
     field_index_map: &HashMap<String, usize>,
 ) {
     match e {
-        Expr::Identifier(name) | Expr::OwnedRef(name) => {
+        Expr::Identifier(name) => {
             if field_index_map.contains_key(name) {
                 fields.insert(name.clone());
             }
@@ -3905,7 +3905,7 @@ fn emit_cycle_count_increment(backend: &mut LlvmBackend, out: &mut String) {
 /// a state field, but tracing through the LET uncovers `checksum` and `saved`).
 fn collect_all_idents(e: &Expr, idents: &mut HashSet<String>) {
     match e {
-        Expr::Identifier(name) | Expr::OwnedRef(name) => { idents.insert(name.clone()); }
+        Expr::Identifier(name) => { idents.insert(name.clone()); }
         Expr::BinaryOp(bop) => {
             collect_all_idents(&bop.left, idents);
             collect_all_idents(&bop.right, idents);
@@ -4031,7 +4031,7 @@ fn observable_field_refs(stmt: &Statement, field_index_map: &HashMap<String, usi
 /// Returns `None` for non-identifier lhs (list-index assigns, tupledestructure, etc.).
 fn target_field_name(lhs: &Expr) -> Option<String> {
     match lhs {
-        Expr::Identifier(n) | Expr::OwnedRef(n) => Some(n.clone()),
+        Expr::Identifier(n) => Some(n.clone()),
         _ => None,
     }
 }

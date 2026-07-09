@@ -92,7 +92,7 @@ impl<'a> DataflowAnalyzer<'a> {
     fn extract_ids_recursive(&self, expr: &Expr, ids: &mut HashSet<String>) {
         match expr {
             Expr::Identifier(name) => { ids.insert(name.clone()); }
-            Expr::OwnedRef(name) => { ids.insert(name.clone()); }
+            expr @ Expr::AddrOf(_) => { ids.insert(expr.as_var_name().unwrap().to_string()); }
             Expr::PriorState(name) => { ids.insert(name.clone()); }
             Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_)
             | Expr::Bool(_) | Expr::Term | Expr::Literal(_)

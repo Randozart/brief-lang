@@ -74,9 +74,8 @@ impl LlvmBackend {
     pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::InsertStrategy> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
-            crate::ast::Expr::OwnedRef(n) => n,
             crate::ast::Expr::Identifier(n) => n,
-            _ => return None,
+            _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
         tu.insert_strategy(&type_name)
@@ -87,9 +86,8 @@ impl LlvmBackend {
     pub(super) fn check_extract_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::ExtractStrategy> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
-            crate::ast::Expr::OwnedRef(n) => n,
             crate::ast::Expr::Identifier(n) => n,
-            _ => return None,
+            _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
         tu.extract_strategy(&type_name)

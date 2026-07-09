@@ -866,11 +866,15 @@ impl SymbolicExecutor {
                     modifiers: _,
                 } => {
                     let value = SymbolicValue::from_expr(expr, &current_state.vars);
-                    if let Expr::Identifier(name) | Expr::OwnedRef(name) = lhs {
+                    if let Expr::Identifier(name) = lhs {
                         current_state.vars.insert(name.clone(), value);
+                    } else if let Some(name) = lhs.as_var_name() {
+                        current_state.vars.insert(name.to_string(), value);
                     } else if let Expr::ListIndex(list_expr, _) = lhs {
-                        if let Expr::Identifier(name) | Expr::OwnedRef(name) = &**list_expr {
+                        if let Expr::Identifier(name) = &**list_expr {
                             current_state.vars.insert(name.clone(), value);
+                        } else if let Some(name) = list_expr.as_var_name() {
+                            current_state.vars.insert(name.to_string(), value);
                         }
                     }
                 }
@@ -1247,7 +1251,7 @@ fn format_expr(expr: &Expr) -> String {
         Expr::ListIndex(source, index) => {
             format!("{}[{}]", format_expr(source), format_expr(index))
         }
-        Expr::OwnedRef(name) => format!("&{}", name),
+        expr @ Expr::AddrOf(_) => format!("&{}", expr.as_var_name().unwrap()),
         Expr::PriorState(name) => format!("@{}", name),
         Expr::Term => "term".to_string(),
         Expr::Sub(l, r) => format!("{} - {}", format_expr(l), format_expr(r)),
@@ -1474,11 +1478,10 @@ fn check_convergence(
     let mut direction: i8 = 0; // 1 = counting up, -1 = counting down
     for stmt in body {
         if let Statement::Assignment { lhs, expr, .. } = stmt {
-            let assign_name = match lhs {
-                Expr::Identifier(n) | Expr::OwnedRef(n) => n,
-                _ => continue,
+            let Some(assign_name) = lhs.as_var_name().map(|s| s.to_string()) else {
+                continue;
             };
-            if assign_name != &var {
+            if assign_name != var {
                 continue;
             }
             // Normalize BinaryOp to old variants for convergence analysis
@@ -1564,11 +1567,10 @@ fn check_convergence(
     if let Expr::Identifier(ref bound_name) = bound_expr {
         for stmt in body {
             if let Statement::Assignment { lhs, .. } = stmt {
-                let assign_name = match lhs {
-                    Expr::Identifier(n) | Expr::OwnedRef(n) => n,
-                    _ => continue,
+                let Some(assign_name) = lhs.as_var_name() else {
+                    continue;
                 };
-                if assign_name == bound_name {
+                if assign_name == bound_name.as_str() {
                     return false;
                 }
             }
@@ -1895,8 +1897,8 @@ impl ProofEngine {
                 Statement::Assignment { lhs, expr, .. } => {
                     if let Expr::Call(fn_name, _) = expr {
                         if fn_name == target_fn {
-                            if let Expr::Identifier(name) = lhs {
-                                return Some(name.clone());
+                            if let Some(name) = lhs.as_var_name() {
+                                return Some(name.to_string());
                             }
                         }
                     }
@@ -2600,7 +2602,7 @@ impl ProofEngine {
             Expr::Identifier(name) => {
                 vars.insert(name.clone());
             }
-            Expr::OwnedRef(name) => {
+            expr @ Expr::AddrOf(_) => { let name = expr.as_var_name().unwrap().to_string();
                 vars.insert(name.clone());
             }
             Expr::PriorState(name) => {
@@ -2735,6 +2737,7 @@ impl ProofEngine {
             }
             // Pipe chains — desugared before this pass
             Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
+        Expr::AddrOf(inner) | Expr::Deref(inner) => self.collect_identifiers(inner, vars),
             Expr::Within { body, fallback, .. } => {
                 self.collect_identifiers(body, vars);
                 self.collect_identifiers(fallback, vars);
@@ -3239,11 +3242,11 @@ impl ProofEngine {
     fn collect_write_vars(&self, stmt: &Statement, vars: &mut HashSet<String>) {
         match stmt {
             Statement::Assignment { lhs, .. } => {
-                if let Expr::OwnedRef(name) = lhs {
-                    vars.insert(name.clone());
+                if let Some(var_name) = lhs.as_var_name() {
+                    vars.insert(var_name.to_string());
                 } else if let Expr::ListIndex(inner, _) = lhs {
-                    if let Expr::OwnedRef(name) = &**inner {
-                        vars.insert(name.clone());
+                    if let Some(name) = inner.as_var_name() {
+                        vars.insert(name.to_string());
                     }
                 }
             }
@@ -3650,7 +3653,7 @@ fn expr_cost(expr: &Expr) -> u64 {
     match expr {
         Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
         | Expr::String(_) | Expr::Term => 1,
-        Expr::Identifier(_) | Expr::OwnedRef(_) | Expr::PriorState(_) => 1,
+        Expr::Identifier(_) | Expr::PriorState(_) => 1,
         Expr::Add(_, _) | Expr::Sub(_, _) | Expr::Mul(_, _)
         | Expr::Div(_, _) | Expr::Mod(_, _) => 3,
         Expr::Eq(_, _) | Expr::Ne(_, _) | Expr::Lt(_, _)
@@ -4089,7 +4092,7 @@ fn expr_contains_call_to(expr: &Expr, name: &str) -> bool {
         Expr::Not(e) | Expr::Neg(e) => {
             expr_contains_call_to(e, name)
         }
-        Expr::OwnedRef(_) | Expr::PriorState(_) => false,
+        Expr::AddrOf(_) | Expr::PriorState(_) => false,
         Expr::Projection { source, .. } => expr_contains_call_to(source, name),
         Expr::ListLiteral(items) => items.iter().any(|e| expr_contains_call_to(e, name)),
         Expr::MapLiteral(entries) => {
@@ -4154,7 +4157,7 @@ fn check_decreasing_arg_expr(expr: &Expr, fn_name: &str, param_name: &str) -> bo
         Expr::Not(e) | Expr::Neg(e) => {
             check_decreasing_arg_expr(e, fn_name, param_name)
         }
-        Expr::OwnedRef(_) | Expr::PriorState(_) => true,
+        Expr::AddrOf(_) | Expr::PriorState(_) => true,
         Expr::UnaryOp(op) => check_decreasing_arg_expr(&op.operand, fn_name, param_name),
         Expr::Projection { source, .. } => check_decreasing_arg_expr(source, fn_name, param_name),
         Expr::ListLiteral(items) => items.iter().all(|e| check_decreasing_arg_expr(e, fn_name, param_name)),

@@ -581,7 +581,7 @@ fn detect_increments(body: &[Statement]) -> Option<IncrementInfo> {
     for stmt in body {
         if let Statement::Assignment { lhs, expr, .. } = stmt {
             let name = match lhs {
-                Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                Expr::Identifier(n) => n.clone(),
                 _ => continue,
             };
             // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
@@ -643,7 +643,7 @@ fn detect_popcount_decay(body: &[Statement]) -> Option<IncrementInfo> {
     for stmt in body {
         if let Statement::Assignment { lhs, expr, .. } = stmt {
             let name = match lhs {
-                Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                Expr::Identifier(n) => n.clone(),
                 _ => continue,
             };
             // reg & (reg - 1)
@@ -751,7 +751,7 @@ fn detect_lexicographic_ranking(pre: &Expr, body: &[Statement]) -> Vec<String> {
     let decremented: HashSet<String> = body.iter().filter_map(|stmt| {
         if let Statement::Assignment { lhs, expr, .. } = stmt {
             let name = match lhs {
-                Expr::Identifier(n) | Expr::OwnedRef(n) => Some(n.clone()),
+                Expr::Identifier(n) => Some(n.clone()),
                 _ => None,
             }?;
             let is_decrement = if let Expr::Sub(a, d) = expr {
@@ -777,7 +777,7 @@ fn is_pure_body(
         match stmt {
             Statement::Assignment { lhs, expr, .. } if inc_var.is_some() => {
                 let name = match lhs {
-                    Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                    Expr::Identifier(n) => n.clone(),
                     _ => return false,
                 };
                 if Some(&name) == inc_var {
@@ -1218,11 +1218,11 @@ fn collect_state_identifiers(expr: &crate::ast::Expr, state_fields: &HashSet<Str
             if let Some(s) = stride { collect_state_identifiers(s, state_fields, out); }
             if let Some(m) = mask { collect_state_identifiers(m, state_fields, out); }
         }
-        crate::ast::Expr::OwnedRef(name) => {
+        Expr::AddrOf(inner) => { if let Some(name) = inner.as_var_name() {
             if state_fields.contains(name) {
-                out.insert(name.clone());
+                out.insert(name.to_string());
             }
-        }
+        } }
         crate::ast::Expr::Block(_, last) => {
             collect_state_identifiers(last, state_fields, out);
         }
@@ -1352,7 +1352,7 @@ fn collect_ffi_identifiers(expr: &Expr, out: &mut HashSet<String>) {
 
 fn expr_name(expr: &Expr) -> Option<String> {
     match expr {
-        Expr::Identifier(n) | Expr::OwnedRef(n) => Some(n.clone()),
+        Expr::Identifier(n) => Some(n.clone()),
         _ => None,
     }
 }
@@ -1424,7 +1424,7 @@ fn is_self_identity(a: &Expr, b: &Expr) -> bool {
 
 fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
     match expr {
-        Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => {
+        Expr::Identifier(name) | Expr::PriorState(name) => {
             out.insert(name.clone());
         }
         // Self-identity operations (x == x, x >= x, x <= x) are tautologies that
@@ -1584,7 +1584,7 @@ fn extract_write_set(body: &[Statement], state_fields: &HashSet<String>) -> Hash
     for stmt in body {
         if let Statement::Assignment { lhs, .. } = stmt {
             let name = match lhs {
-                Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                Expr::Identifier(n) => n.clone(),
                 _ => continue,
             };
             if state_fields.contains(&name) {

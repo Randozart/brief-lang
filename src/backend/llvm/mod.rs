@@ -136,9 +136,11 @@ pub(crate) fn hoist_terminating_guard(
     // Pattern: &field_name = let_name  →  map[let_name] = field_name
     let mut let_to_field: HashMap<String, String> = HashMap::new();
     for s in body {
-        if let Statement::Assignment { lhs: Expr::OwnedRef(field_name), expr: Expr::Identifier(let_name), .. } = s {
-            if field_index_map.contains_key(field_name) {
-                let_to_field.insert(let_name.clone(), field_name.clone());
+        if let Statement::Assignment { lhs, expr: Expr::Identifier(let_name), .. } = s {
+            if let Some(field_name) = lhs.as_var_name() {
+                if field_index_map.contains_key(field_name) {
+                    let_to_field.insert(let_name.clone(), field_name.to_string());
+                }
             }
         }
     }
@@ -493,7 +495,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::Like(l, r) => { collect_strings_expr(l, seen, out); collect_strings_expr(r, seen, out); }
         // Terminals
         Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
-        | Expr::Ellipsis | Expr::TypeRef(_) | Expr::OwnedRef(_) | Expr::PriorState(_)
+        | Expr::Ellipsis | Expr::TypeRef(_) | Expr::AddrOf(_) | Expr::PriorState(_)
         | Expr::SharedMem(_) => {}
         // Macro/template nodes — should be expanded before reaching backends
         Expr::TemplateCall { .. } | Expr::MacroCall { .. } | Expr::Interpolate(..) | Expr::InterpolateExpr(..) | Expr::QuoteBlock { .. } => {
@@ -501,6 +503,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         }
         // Pipe chains — desugared before this pass
         Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
+        Expr::Deref(inner) => collect_strings_expr(inner, seen, out),
         Expr::Within { body, fallback, .. } => {
             collect_strings_expr(body, seen, out);
             collect_strings_expr(fallback, seen, out);
@@ -812,8 +815,8 @@ pub(crate) fn collect_push_targets(body: &[Statement], out: &mut Vec<String>) {
     for stmt in body {
         match stmt {
             Statement::Assignment { lhs: Expr::ArrowMut { dir: crate::ast::ArrowDir::Push, target, .. }, .. } => {
-                if let Expr::OwnedRef(n) = target.as_ref() {
-                    out.push(n.clone());
+                if let Some(field_name) = target.as_var_name() {
+                    out.push(field_name.to_string());
                 }
             }
             Statement::Guarded { statements, .. } => {
@@ -1405,7 +1408,7 @@ impl LlvmBackend {
             | Expr::Cast(inner, _) => {
                 self.check_expr_embedded(inner, ctx_name, threading_intrinsics);
             }
-            Expr::OwnedRef(_) | Expr::PriorState(_) => {} // identifiers, no embedded checks
+            Expr::AddrOf(_) | Expr::PriorState(_) => {} // identifiers, no embedded checks
             Expr::FieldAccess(target, _) | Expr::ListIndex(target, _) => {
                 self.check_expr_embedded(target, ctx_name, threading_intrinsics);
             }
@@ -3101,8 +3104,8 @@ self.emit_declares(&mut out);
                         || matches!(t, Type::LayoutPtr(_)))
                     .unwrap_or(false)
             }
-            Expr::OwnedRef(name) => {
-                self.fun.let_binding_types.get(name)
+            expr @ Expr::AddrOf(_) => { let name = expr.as_var_name().unwrap().to_string();
+                self.fun.let_binding_types.get(&name)
                     .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr")
                         || matches!(t, Type::LayoutPtr(_)))
                     .unwrap_or(false)

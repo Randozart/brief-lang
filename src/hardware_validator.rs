@@ -599,7 +599,7 @@ impl WriteGraph {
     fn extract_variable_name(expr: &Expr) -> Option<String> {
         match expr {
             Expr::Identifier(name) => Some(name.clone()),
-            Expr::OwnedRef(name) => Some(name.clone()),
+            expr @ Expr::AddrOf(_) => Some(expr.as_var_name().unwrap().to_string()),
             Expr::ListIndex(list, _) => Self::extract_variable_name(list),
             _ => None,
         }

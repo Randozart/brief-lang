@@ -1060,7 +1060,7 @@ impl Interpreter {
     /// Supports: `&name`, `&name[i]`, `&name.field`, `&name.field[i]`
     pub(crate) fn extract_arrow_root(&self, target: &Expr) -> Result<(String, Vec<String>), RuntimeError> {
         match target {
-            Expr::OwnedRef(n) => Ok((n.clone(), vec![])),
+            expr @ Expr::AddrOf(_) => Ok((expr.as_var_name().unwrap().to_string(), vec![])),
             Expr::FieldAccess(inner, field) => {
                 let (root, mut path) = self.extract_arrow_root(inner)?;
                 path.push(field.clone());
@@ -1928,7 +1928,8 @@ impl Interpreter {
                 | Expr::SharedMem(_) => expr.clone(),
             Expr::Literal(lit) => Expr::Literal(lit.clone()),
             Expr::Identifier(name) => Expr::Identifier(prefix(name)),
-            Expr::OwnedRef(name) => Expr::OwnedRef(prefix(name)),
+            Expr::AddrOf(inner) => Expr::AddrOf(Box::new(Expr::Identifier(prefix(inner.as_var_name().unwrap())))),
+            Expr::Deref(inner) => Expr::Deref(Box::new(self.rewrite_identifiers(inner, uid, cell_name))),
             Expr::PriorState(name) => Expr::PriorState(prefix(name)),
             Expr::EllipsisExpr(e) => Expr::EllipsisExpr(e.clone()),
             Expr::TypeRef(name) => Expr::TypeRef(name.clone()),
@@ -2437,12 +2438,12 @@ impl Interpreter {
             } => {
                 let value = self.eval_expr(expr)?;
                 match lhs {
-                    Expr::Identifier(name) | Expr::OwnedRef(name) => {
+                    Expr::Identifier(name) => {
                         self.state.insert(name.clone(), value);
                     }
                     Expr::ListIndex(list_expr, index_expr) => {
                         let list_name = match &**list_expr {
-                            Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                            Expr::Identifier(n) => n.clone(),
                             _ => {
                                 return Err(RuntimeError::TypeMismatch(
                                     "Expected identifier".to_string(),
@@ -2463,6 +2464,10 @@ impl Interpreter {
                                 }
                             }
                         }
+                    }
+                    expr @ Expr::AddrOf(_) => {
+                        let name = expr.as_var_name().ok_or_else(|| RuntimeError::TypeMismatch("AddrOf target must be an identifier".to_string()))?.to_string();
+                        self.state.insert(name, value);
                     }
                     Expr::TupleDestructure(names, _) => {
                         match value {
@@ -2966,8 +2971,7 @@ impl Interpreter {
                 .ok_or_else(|| RuntimeError::UndefinedVariable("term".to_string())),
             Expr::Identifier(name) => self.state.get(name).cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
-            Expr::OwnedRef(name) => self.state.get(name).cloned()
-                .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
+            expr @ Expr::AddrOf(_) => { let name = expr.as_var_name().unwrap().to_string(); self.state.get(&name).cloned().ok_or_else(|| RuntimeError::UndefinedVariable(name)) },
             Expr::PriorState(name) => self.prior_state.get(name).cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
             // Legacy binary op variants — delegate through feature struct
@@ -6142,6 +6146,7 @@ impl Interpreter {
             }
             // Pipe chains — desugared before this pass
             Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
+            Expr::Deref(inner) => self.eval_expr(inner),
             Expr::Within { body, bound, unit: _, retries, fallback } => {
                 let saved_counter = self.cycle_counter;
                 let saved_budget = self.cycle_budget;
@@ -7499,7 +7504,7 @@ mod tests {
         let mut i = make_interpreter_with_list();
         let expr = Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(42))),
         };
@@ -7513,7 +7518,7 @@ mod tests {
         let mut i = make_interpreter_with_list();
         let push = |v: i64| Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(v))),
         };
@@ -7531,14 +7536,14 @@ mod tests {
         // First push a value
         i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(99))),
         }).unwrap();
         // Then pop it
         let popped = i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Pop,
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: None,
         }).unwrap();
@@ -7552,19 +7557,19 @@ mod tests {
         // Push 2 values
         i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(10))),
         }).unwrap();
         i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(20))),
         }).unwrap();
         // Discard last
         let discard = Expr::ArrowDiscard {
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
         };
         i.eval_expr(&discard).unwrap();
@@ -7578,7 +7583,7 @@ mod tests {
         for v in &[10, 20, 30] {
             i.eval_expr(&Expr::ArrowMut {
                 dir: ArrowDir::Push,
-                target: Box::new(Expr::OwnedRef("list".to_string())),
+                target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                 index: Box::new(Expr::Term),
                 value: Some(Box::new(Expr::Integer(*v))),
             }).unwrap();
@@ -7586,7 +7591,7 @@ mod tests {
         // Insert 15 at index 1: [10, 15, 20, 30]
         i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Integer(1)),
             value: Some(Box::new(Expr::Integer(15))),
         }).unwrap();
@@ -7601,7 +7606,7 @@ mod tests {
         for v in &[10, 20, 30, 40] {
             i.eval_expr(&Expr::ArrowMut {
                 dir: ArrowDir::Push,
-                target: Box::new(Expr::OwnedRef("list".to_string())),
+                target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                 index: Box::new(Expr::Term),
                 value: Some(Box::new(Expr::Integer(*v))),
             }).unwrap();
@@ -7609,7 +7614,7 @@ mod tests {
         // Pop at index 1 → removes 20
         let popped = i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Pop,
-            target: Box::new(Expr::OwnedRef("list".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Integer(1)),
             value: None,
         }).unwrap();
@@ -7631,7 +7636,7 @@ mod tests {
         // <- &queue.items[0] — discard first element (dequeue)
         let discard = Expr::ArrowDiscard {
             target: Box::new(Expr::FieldAccess(
-                Box::new(Expr::OwnedRef("queue".to_string())),
+                Box::new(Expr::AddrOf(Box::new(Expr::Identifier("queue".to_string())))),
                 "items".to_string(),
             )),
             index: Box::new(Expr::Integer(0)),
@@ -7961,7 +7966,7 @@ mod tests {
             fields: vec![],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -7984,7 +7989,7 @@ mod tests {
             fields: vec![],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8021,7 +8026,7 @@ mod tests {
             fields: vec![Pattern::Var("v".to_string())],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8086,7 +8091,7 @@ mod tests {
             fields: vec![Pattern::LitInt(42)],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8109,7 +8114,7 @@ mod tests {
             fields: vec![Pattern::LitInt(42)],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8132,7 +8137,7 @@ mod tests {
             fields: vec![Pattern::LitString("ok".to_string())],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8182,7 +8187,7 @@ mod tests {
             ])],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8221,7 +8226,7 @@ mod tests {
             fields: vec![],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8245,7 +8250,7 @@ mod tests {
             fields: vec![],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8269,7 +8274,7 @@ mod tests {
             fields: vec![],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8295,7 +8300,7 @@ mod tests {
             fields: vec![Pattern::Wildcard],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8320,7 +8325,7 @@ mod tests {
             fields: vec![Pattern::LitFloat(3.14)],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8343,7 +8348,7 @@ mod tests {
             fields: vec![Pattern::LitBool(true)],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8366,7 +8371,7 @@ mod tests {
             fields: vec![Pattern::LitChar('x')],
             expr: Expr::Block(
                 vec![Statement::Assignment {
-                    lhs: Expr::OwnedRef("flag".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
@@ -8699,7 +8704,7 @@ mod tests {
             },
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("result".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("result".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("result".to_string())),
                         Box::new(Expr::Integer(1)),
@@ -8708,7 +8713,7 @@ mod tests {
                     modifiers: vec![],
                 },
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("i".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("i".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("i".to_string())),
                         Box::new(Expr::Integer(1)),
@@ -8765,7 +8770,7 @@ mod tests {
             },
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("result".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("result".to_string()))),
                     expr: Expr::Integer(99),
                     timeout: None,
                     modifiers: vec![],
@@ -8819,7 +8824,7 @@ mod tests {
             },
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("x".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("x".to_string())),
                         Box::new(Expr::Integer(1)),
@@ -8863,7 +8868,7 @@ mod tests {
         // Push (key, value) as a tuple (list with 2 elements)
         let expr = Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("m".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Tuple(vec![
                 Expr::String("a".to_string()),
@@ -8884,7 +8889,7 @@ mod tests {
         // &m[key] <- value
         let expr = Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("m".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
             index: Box::new(Expr::String("b".to_string())),
             value: Some(Box::new(Expr::Integer(2))),
         };
@@ -8904,7 +8909,7 @@ mod tests {
         // value <- &m[key]
         let popped = i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Pop,
-            target: Box::new(Expr::OwnedRef("m".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
             index: Box::new(Expr::String("x".to_string())),
             value: None,
         }).unwrap();
@@ -8921,7 +8926,7 @@ mod tests {
         i.state.insert("s".to_string(), Value::HashSet(std::collections::HashSet::new()));
         let expr = Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("s".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::String("hello".to_string()))),
         };
@@ -8940,7 +8945,7 @@ mod tests {
         i.state.insert("s".to_string(), Value::HashSet(set));
         let popped = i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Pop,
-            target: Box::new(Expr::OwnedRef("s".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             index: Box::new(Expr::Term),
             value: None,
         }).unwrap();
@@ -8958,7 +8963,7 @@ mod tests {
         set.insert("discard".to_string());
         i.state.insert("s".to_string(), Value::HashSet(set));
         i.eval_expr(&Expr::ArrowDiscard {
-            target: Box::new(Expr::OwnedRef("s".to_string())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             index: Box::new(Expr::Term),
         }).unwrap();
         match i.state.get("s").unwrap() {
@@ -9011,7 +9016,7 @@ mod tests {
         map.insert("b".to_string(), Value::Int(2));
         i.state.insert("m".to_string(), Value::HashMap(map));
         let result = i.eval_expr(&Expr::Projection {
-            source: Box::new(Expr::OwnedRef("m".to_string())),
+            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
             target: ProjectionTarget::Keys,
         }).unwrap();
         match result {
@@ -9031,12 +9036,12 @@ mod tests {
         set.insert("hello".to_string());
         i.state.insert("s".to_string(), Value::HashSet(set));
         let result = i.eval_expr(&Expr::Projection {
-            source: Box::new(Expr::OwnedRef("s".to_string())),
+            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             target: ProjectionTarget::Contains(Box::new(Expr::String("hello".to_string()))),
         }).unwrap();
         assert_eq!(result, Value::Bool(true));
         let result = i.eval_expr(&Expr::Projection {
-            source: Box::new(Expr::OwnedRef("s".to_string())),
+            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             target: ProjectionTarget::Contains(Box::new(Expr::String("nope".to_string()))),
         }).unwrap();
         assert_eq!(result, Value::Bool(false));
@@ -9050,8 +9055,8 @@ mod tests {
         ]));
         i.state.insert("dest".to_string(), Value::List(vec![]));
         i.eval_expr(&Expr::ArrowTransfer {
-            dest: Box::new(Expr::OwnedRef("dest".to_string())),
-            source: Box::new(Expr::OwnedRef("src".to_string())),
+            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: None,
         }).unwrap();
         assert_eq!(i.state.get("src"), Some(&Value::List(vec![])));
@@ -9069,8 +9074,8 @@ mod tests {
         i.state.insert("src".to_string(), Value::HashMap(src));
         i.state.insert("dest".to_string(), Value::HashMap(std::collections::HashMap::new()));
         i.eval_expr(&Expr::ArrowTransfer {
-            dest: Box::new(Expr::OwnedRef("dest".to_string())),
-            source: Box::new(Expr::OwnedRef("src".to_string())),
+            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: None,
         }).unwrap();
         match (i.state.get("src").unwrap(), i.state.get("dest").unwrap()) {
@@ -9221,8 +9226,8 @@ mod tests {
         ]));
         i.state.insert("dest".to_string(), Value::List(vec![]));
         i.eval_expr(&Expr::ArrowTransfer {
-            dest: Box::new(Expr::OwnedRef("dest".to_string())),
-            source: Box::new(Expr::OwnedRef("src".to_string())),
+            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: Some(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
                     Box::new(Expr::Integer(5)))
@@ -9246,8 +9251,8 @@ mod tests {
         i.state.insert("src".to_string(), Value::HashMap(src));
         i.state.insert("dest".to_string(), Value::HashMap(std::collections::HashMap::new()));
         i.eval_expr(&Expr::ArrowTransfer {
-            dest: Box::new(Expr::OwnedRef("dest".to_string())),
-            source: Box::new(Expr::OwnedRef("src".to_string())),
+            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: Some(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
                     Box::new(Expr::Integer(15)))
@@ -9377,13 +9382,13 @@ mod tests {
         let sync_block = Statement::SyncBlock {
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("x".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Integer(1),
                     timeout: None,
                     modifiers: vec![],
                 },
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("y".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".to_string()))),
                     expr: Expr::Integer(2),
                     timeout: None,
                     modifiers: vec![],
@@ -9405,14 +9410,14 @@ mod tests {
                 Statement::Guarded {
                     condition: Expr::Bool(true),
                     statements: vec![Statement::Assignment {
-                        lhs: Expr::OwnedRef("a".to_string()),
+                        lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".to_string()))),
                         expr: Expr::Bool(true),
                         timeout: None,
                         modifiers: vec![],
                     }],
                 },
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("b".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".to_string()))),
                     expr: Expr::Integer(42),
                     timeout: None,
                     modifiers: vec![],
@@ -9961,7 +9966,7 @@ mod tests {
         let mut i = Interpreter::new();
         i.state.insert("result".to_string(), Value::Int(0));
         let stmt = Statement::Assignment {
-            lhs: Expr::OwnedRef("result".to_string()),
+            lhs: Expr::AddrOf(Box::new(Expr::Identifier("result".to_string()))),
             expr: Expr::ListIndex(
                 Box::new(Expr::Tuple(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
                 Box::new(Expr::Integer(1)),
@@ -9994,7 +9999,7 @@ mod tests {
             },
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("x".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Integer(99),
                     timeout: None,
                     modifiers: vec![],
@@ -10055,7 +10060,7 @@ mod tests {
             },
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("acc".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("acc".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("acc".to_string())),
                         Box::new(Expr::Identifier("i".to_string())),
@@ -10064,7 +10069,7 @@ mod tests {
                     modifiers: vec![],
                 },
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("i".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("i".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("i".to_string())),
                         Box::new(Expr::Integer(1)),
@@ -10121,7 +10126,7 @@ mod tests {
             modifiers: vec![],
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("sum".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("sum".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("sum".to_string())),
                         Box::new(Expr::Identifier("x".to_string())),
@@ -10186,14 +10191,14 @@ mod tests {
         let stmt = Statement::Oracle {
             handler: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("x".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Integer(99),
                     timeout: None, modifiers: vec![],
                 },
             ],
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("x".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Integer(42),
                     timeout: None, modifiers: vec![],
                 },
@@ -10213,7 +10218,7 @@ mod tests {
         // The fuel limit is 100, so 200 assignments should exhaust it
         for _ in 0..200 {
             body.push(Statement::Assignment {
-                lhs: Expr::OwnedRef("x".to_string()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                 expr: Expr::Integer(42),
                 timeout: None, modifiers: vec![],
             });
@@ -10221,7 +10226,7 @@ mod tests {
         let stmt = Statement::Oracle {
             handler: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("x".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Integer(999),
                     timeout: None, modifiers: vec![],
                 },
@@ -10290,23 +10295,23 @@ mod tests {
         i.cycle_budget = 3;
         let body = vec![
             Statement::Assignment {
-                lhs: Expr::OwnedRef("x".to_string()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                 expr: Expr::Integer(1),
                 timeout: None, modifiers: vec![],
             },
             Statement::Assignment {
-                lhs: Expr::OwnedRef("x".to_string()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                 expr: Expr::Integer(2),
                 timeout: None, modifiers: vec![],
             },
             Statement::Assignment {
-                lhs: Expr::OwnedRef("x".to_string()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                 expr: Expr::Integer(3),
                 timeout: None, modifiers: vec![],
             },
             // 4th assignment — exceeds budget of 3
             Statement::Assignment {
-                lhs: Expr::OwnedRef("x".to_string()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                 expr: Expr::Integer(4),
                 timeout: None, modifiers: vec![],
             },
@@ -10314,7 +10319,7 @@ mod tests {
         let stmt = Statement::Oracle {
             handler: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("x".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Integer(999),
                     timeout: None, modifiers: vec![],
                 },
@@ -10856,7 +10861,7 @@ mod tests {
         // Execute &x <- 42 — should dispatch through Custom("my_insert")
         let push_stmt = Statement::Expression(Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("x".into())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("x".into())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(42))),
         });
@@ -10938,7 +10943,7 @@ mod tests {
         // Execute val <- &q — should dispatch through Custom("my_extract")
         let pop_stmt = Statement::Expression(Expr::ArrowMut {
             dir: ArrowDir::Pop,
-            target: Box::new(Expr::OwnedRef("q".into())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("q".into())))),
             index: Box::new(Expr::Term),
             value: None,
         });
@@ -11000,7 +11005,7 @@ mod tests {
                 Statement::Term {
                     values: vec![Some(Expr::ArrowMut {
                         dir: ArrowDir::Push,
-                        target: Box::new(Expr::OwnedRef("l".into())),
+                        target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("l".into())))),
                         index: Box::new(Expr::Term),
                         value: Some(Box::new(Expr::Identifier("v".into()))),
                     })],
@@ -11030,7 +11035,7 @@ mod tests {
         // Execute &s <- 42 — should dispatch through Custom("sl_insert_fn")
         let push_stmt = Statement::Expression(Expr::ArrowMut {
             dir: ArrowDir::Push,
-            target: Box::new(Expr::OwnedRef("s".into())),
+            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(42))),
         });
@@ -12010,7 +12015,7 @@ mod kani_full_tests {
         i.state.insert("m".to_string(), Value::HashMap(map));
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Keys,
-            args: vec![Expr::OwnedRef("m".to_string())],
+            args: vec![Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))],
         };
         let result = i.eval_expr(&expr).unwrap();
         match result {
@@ -12032,7 +12037,7 @@ mod kani_full_tests {
         i.state.insert("m".to_string(), Value::HashMap(map));
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Values,
-            args: vec![Expr::OwnedRef("m".to_string())],
+            args: vec![Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))],
         };
         let result = i.eval_expr(&expr).unwrap();
         match result {
@@ -13172,7 +13177,7 @@ mod kani_full_tests {
         fields.insert("value".to_string(), Value::Int(42));
         i.state.insert("x".to_string(), Value::Enum("Option".to_string(), "Some".to_string(), fields));
         let expr = Expr::IsType(
-            Box::new(Expr::OwnedRef("x".to_string())),
+            Box::new(Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())))),
             crate::ast::IsTarget::Variant("Some".to_string()),
         );
         let result = i.eval_expr(&expr).unwrap();
@@ -13184,7 +13189,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         i.state.insert("x".to_string(), Value::Enum("Option".to_string(), "None".to_string(), std::collections::HashMap::new()));
         let expr = Expr::IsType(
-            Box::new(Expr::OwnedRef("x".to_string())),
+            Box::new(Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())))),
             crate::ast::IsTarget::Variant("Some".to_string()),
         );
         let result = i.eval_expr(&expr).unwrap();
@@ -13198,7 +13203,7 @@ mod kani_full_tests {
         fields.insert("x".to_string(), Value::Int(1));
         i.state.insert("obj".to_string(), Value::Instance { typename: "Foo".to_string(), fields });
         let expr = Expr::FromCheck(
-            Box::new(Expr::OwnedRef("obj".to_string())),
+            Box::new(Expr::AddrOf(Box::new(Expr::Identifier("obj".to_string())))),
             Type::Custom("Foo".to_string()),
         );
         let result = i.eval_expr(&expr).unwrap();
@@ -13268,8 +13273,8 @@ mod kani_full_tests {
         i.state.insert("a".to_string(), a);
         i.state.insert("b".to_string(), b);
         let expr = Expr::Like(
-            Box::new(Expr::OwnedRef("a".to_string())),
-            Box::new(Expr::OwnedRef("b".to_string())),
+            Box::new(Expr::AddrOf(Box::new(Expr::Identifier("a".to_string())))),
+            Box::new(Expr::AddrOf(Box::new(Expr::Identifier("b".to_string())))),
         );
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(true), "[1,2] like [1,2] should be true");
@@ -13283,8 +13288,8 @@ mod kani_full_tests {
         i.state.insert("a".to_string(), a);
         i.state.insert("b".to_string(), b);
         let expr = Expr::Like(
-            Box::new(Expr::OwnedRef("a".to_string())),
-            Box::new(Expr::OwnedRef("b".to_string())),
+            Box::new(Expr::AddrOf(Box::new(Expr::Identifier("a".to_string())))),
+            Box::new(Expr::AddrOf(Box::new(Expr::Identifier("b".to_string())))),
         );
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(false), "[1,2] like [1,3] should be false");

@@ -63,7 +63,7 @@ fn structural_hash_into(expr: &Expr, h: &mut u64) {
         Expr::String(s) => { *h = combine(*h, 5); *h = hash_str(*h, s); }
         Expr::Identifier(id) => { *h = combine(*h, 6); *h = hash_str(*h, id); }
         Expr::Term => { *h = combine(*h, 7); }
-        Expr::OwnedRef(id) => { *h = combine(*h, 8); *h = hash_str(*h, id); }
+        expr @ Expr::AddrOf(_) => { let id = expr.as_var_name().unwrap(); *h = combine(*h, 8); *h = hash_str(*h, id); }
         Expr::PriorState(id) => { *h = combine(*h, 9); *h = hash_str(*h, id); }
         Expr::Ellipsis => { *h = combine(*h, 10); }
         Expr::TypeRef(t) => { *h = combine(*h, 11); *h = hash_str(*h, t); }

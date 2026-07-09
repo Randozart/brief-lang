@@ -103,10 +103,12 @@ impl CirctBackend {
                 TopLevel::Transaction(txn) => {
                     self.fn_arity.insert(txn.name.clone(), txn.parameters.len());
                     for stmt in &txn.body {
-                        if let Statement::Assignment { lhs: Expr::OwnedRef(name), expr, .. } = stmt {
-                            if !self.var_types.contains_key(name) {
-                                self.var_types.insert(name.clone(), Type::Custom("Int".to_string()));
-                                self.var_exprs.insert(name.clone(), Some(expr.clone()));
+                        if let Statement::Assignment { lhs, expr, .. } = stmt {
+                            if let Some(name) = lhs.as_var_name() {
+                                if !self.var_types.contains_key(name) {
+                                    self.var_types.insert(name.to_string(), Type::Custom("Int".to_string()));
+                                    self.var_exprs.insert(name.to_string(), Some(expr.clone()));
+                                }
                             }
                         }
                     }
@@ -544,7 +546,7 @@ impl CirctBackend {
         for stmt in body {
             match stmt {
                 Statement::Assignment { lhs, expr, .. } => {
-                    if let Expr::OwnedRef(var_name) = lhs {
+                    if let Some(var_name) = lhs.as_var_name() {
                         let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Custom("Int".to_string())));
                         if let Some(reg) = reg_names.get(var_name) {
                             let val = self.emit_expr(ng, out, expr, reg_names, &mlir_ty);
@@ -723,7 +725,7 @@ impl CirctBackend {
                 self.emit_expr(ng, out, expr, reg_names, "i64");
             }
             Statement::Assignment { lhs, expr, .. } => {
-                if let Expr::OwnedRef(var_name) = lhs {
+                if let Some(var_name) = lhs.as_var_name() {
                     let mlir_ty = self.mlir_type(self.var_types.get(var_name).unwrap_or(&Type::Custom("Int".to_string())));
                     if let Some(reg) = reg_names.get(var_name) {
                         let val = self.emit_expr(ng, out, expr, reg_names, &mlir_ty);
@@ -1040,7 +1042,7 @@ mod tests {
             make_state_decl("counter", Type::Custom("Int".to_string()), Some(Expr::Integer(0))),
             make_txn("count", vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("counter".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("counter".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("counter".to_string())),
                         Box::new(Expr::Integer(1)),
@@ -1106,12 +1108,12 @@ mod tests {
                 Statement::SyncBlock {
                     body: vec![
                         Statement::Assignment {
-                            lhs: Expr::OwnedRef("a".to_string()),
+                            lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".to_string()))),
                             expr: Expr::Integer(10),
                             timeout: None, modifiers: vec![],
                         },
                         Statement::Assignment {
-                            lhs: Expr::OwnedRef("b".to_string()),
+                            lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".to_string()))),
                             expr: Expr::Integer(20),
                             timeout: None, modifiers: vec![],
                         },
@@ -1129,7 +1131,7 @@ mod tests {
             make_state_decl("x", Type::Custom("Int".to_string()), Some(Expr::Integer(0))),
             make_txn("compute", vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("x".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Call("add".to_string(), vec![
                         Expr::Integer(1),
                         Expr::Integer(2),

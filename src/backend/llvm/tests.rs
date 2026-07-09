@@ -905,7 +905,7 @@ fn empty_program() -> Program {
                     },
                     body: vec![
                         Statement::Assignment {
-                            lhs: Expr::OwnedRef("x".to_string()),
+                            lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                             expr: Expr::Add(
                                 Box::new(Expr::Identifier("x".to_string())),
                                 Box::new(Expr::Identifier("y".to_string())),
@@ -1776,7 +1776,7 @@ fn empty_program() -> Program {
                     },
                     body: vec![
                         Statement::Assignment {
-                            lhs: Expr::OwnedRef("a".to_string()),
+                            lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".to_string()))),
                             expr: Expr::Add(Box::new(ident_s("a")), Box::new(int_s(1))),
                             timeout: None,
                             modifiers: vec![],
@@ -1807,7 +1807,7 @@ fn empty_program() -> Program {
                     },
                     body: vec![
                         Statement::Assignment {
-                            lhs: Expr::OwnedRef("b".to_string()),
+                            lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".to_string()))),
                             expr: Expr::Add(Box::new(ident_s("b")), Box::new(int_s(1))),
                             timeout: None,
                             modifiers: vec![],
@@ -1929,7 +1929,7 @@ fn empty_program() -> Program {
             },
             body: vec![
                 Statement::Assignment {
-                    lhs: Expr::OwnedRef("ops".to_string()),
+                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("ops".to_string()))),
                     expr: Expr::Add(Box::new(ident_s("ops")), Box::new(int_s(1))),
                     timeout: None, modifiers: vec![],
                 },
@@ -4734,7 +4734,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Expression(Expr::ArrowMut {
                             dir: ArrowDir::Push,
-                            target: Box::new(Expr::OwnedRef("list".to_string())),
+                            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                             index: Box::new(Expr::Term),
                             value: Some(Box::new(Expr::Integer(42))),
                         }),
@@ -4782,7 +4782,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Expression(Expr::ArrowMut {
                             dir: ArrowDir::Pop,
-                            target: Box::new(Expr::OwnedRef("list".to_string())),
+                            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                             index: Box::new(Expr::Term),
                             value: None,
                         }),
@@ -4823,7 +4823,7 @@ let spec = crate::target_spec::TargetSpec {
                     },
                     body: vec![
                         Statement::Expression(Expr::ArrowDiscard {
-                            target: Box::new(Expr::OwnedRef("list".to_string())),
+                            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                             index: Box::new(Expr::Term),
                         }),
                         Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
@@ -4869,8 +4869,8 @@ let spec = crate::target_spec::TargetSpec {
                     },
                     body: vec![
                         Statement::Expression(Expr::ArrowTransfer {
-                            dest: Box::new(Expr::OwnedRef("dest".to_string())),
-                            source: Box::new(Expr::OwnedRef("src".to_string())),
+                            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+                            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
                             filter: None,
                         }),
                         Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
@@ -6153,7 +6153,7 @@ let spec = crate::target_spec::TargetSpec {
         let push = |i: &mut crate::interpreter::Interpreter, val: i64| {
             i.eval_expr(&Expr::ArrowMut {
                 dir: ArrowDir::Push,
-                target: Box::new(Expr::OwnedRef("s".into())),
+                target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
                 index: Box::new(Expr::Term),
                 value: Some(Box::new(Expr::Integer(val))),
             }).unwrap();

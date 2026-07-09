@@ -1775,7 +1775,7 @@ impl TypeChecker {
             // List literal of compile-time items
             Expr::ListLiteral(items) => items.iter().all(|i| Self::is_compile_time_expr(i)),
             // Disallow variable/function references and runtime state
-            Expr::Identifier(_) | Expr::OwnedRef(_) | Expr::PriorState(_) => false,
+            Expr::Identifier(_) | Expr::PriorState(_) => false,
             // Everything else (operators, blocks, etc.) is rejected for safety
             _ => false,
         }
@@ -1825,8 +1825,8 @@ impl TypeChecker {
                         }
 
                         if !self.check_geometry(&lhs_ty, &expr_ty) {
-                            if let Expr::OwnedRef(var_name) = lhs {
-                                if self.trigger_names.contains(var_name.as_str()) {
+                            if let Some(var_name) = lhs.as_var_name() {
+                                if self.trigger_names.contains(var_name) {
                                     self.errors.borrow_mut().push(TypeError::TypeMismatch {
                                         expected: "regular variable".to_string(),
                                         found: "trigger variable".to_string(),
@@ -2041,7 +2041,7 @@ impl TypeChecker {
             Expr::RegexLiteral(_) => Type::Custom("String".to_string()),
             Expr::Char(_) => Type::Custom("Char".to_string()),
             Expr::Bool(_) => Type::Custom("Bool".to_string()),
-            Expr::Identifier(name) | Expr::OwnedRef(name) | Expr::PriorState(name) => self
+            Expr::Identifier(name) | Expr::PriorState(name) => self
                 .lookup_variable(name)
                 .unwrap_or(Type::Custom(name.clone())),
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
@@ -4147,7 +4147,7 @@ mod tests {
 
     #[test]
     fn test_is_compile_time_expr_rejects_owned_ref() {
-        assert!(!super::TypeChecker::is_compile_time_expr(&Expr::OwnedRef("x".into())));
+        assert!(!super::TypeChecker::is_compile_time_expr(&Expr::AddrOf(Box::new(Expr::Identifier("x".into())))));
     }
 
     #[test]

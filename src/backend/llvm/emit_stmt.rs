@@ -695,11 +695,11 @@ impl LlvmBackend {
             Statement::Assignment { lhs, expr, modifiers, .. } => {
                 let val = self.emit_expr(out, expr, indent);
                 let fname = match lhs {
-                    Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                    Expr::Identifier(n) => n.clone(),
                     Expr::ListIndex(list_expr, index_expr) => {
                         let val_reg = val.name.clone();
                         let list_name = match &**list_expr {
-                            Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                            Expr::Identifier(n) => n.clone(),
                             _ => { writeln!(out, "{}; assign list[idx] = {}", indent, val_reg).ok(); return; }
                         };
                         let idx_val = self.emit_expr(out, index_expr, indent);
@@ -890,7 +890,7 @@ impl LlvmBackend {
                 // the branch-based path.
                 if statements.len() == 1 && self.fun.ssa_state_reg.is_none() {
                     if let Statement::Assignment { lhs, expr, modifiers, .. } = &statements[0] {
-                        if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
+                        if let Expr::Identifier(n) = lhs {
                             if let Some(&idx) = self.ctx.field_index_map.get(n) {
                                 let g_is_volatile = modifiers.iter().any(|h| h.name == "volatile");
                                 let gvol = if g_is_volatile { " volatile" } else { "" };

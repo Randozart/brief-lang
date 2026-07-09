@@ -139,7 +139,7 @@ fn rw_set_of(stmt: &Statement) -> ReadWriteSet {
 /// Collect write target variable from an LHS expression.
 fn collect_write_target(expr: &Expr, writes: &mut HashSet<String>) {
     match expr {
-        Expr::OwnedRef(name) | Expr::Identifier(name) => { writes.insert(name.clone()); }
+        Expr::Identifier(name) => { writes.insert(name.clone()); }
         Expr::ListIndex(target, _) => collect_write_target(target, writes),
         Expr::Projection { source, .. } => collect_write_target(source, writes),
         _ => {}
@@ -149,7 +149,7 @@ fn collect_write_target(expr: &Expr, writes: &mut HashSet<String>) {
 /// Collect all variable reads from an expression.
 fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
     match expr {
-        Expr::Identifier(name) | Expr::OwnedRef(name) => { reads.insert(name.clone()); }
+        Expr::Identifier(name) => { reads.insert(name.clone()); }
         Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
         | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
         | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
@@ -311,12 +311,12 @@ mod tests {
         // x = a + b; y = c + d; — independent, order preserved
         let body = vec![
             Statement::Assignment {
-                lhs: Expr::OwnedRef("x".into()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
                 expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into()))),
                 timeout: None, modifiers: vec![],
             },
             Statement::Assignment {
-                lhs: Expr::OwnedRef("y".into()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
                 expr: Expr::Add(Box::new(Expr::Identifier("c".into())), Box::new(Expr::Identifier("d".into()))),
                 timeout: None, modifiers: vec![],
             },
@@ -331,12 +331,12 @@ mod tests {
         // x = a + b; y = x + 1; — y depends on x, must come after
         let body = vec![
             Statement::Assignment {
-                lhs: Expr::OwnedRef("x".into()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
                 expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into()))),
                 timeout: None, modifiers: vec![],
             },
             Statement::Assignment {
-                lhs: Expr::OwnedRef("y".into()),
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
                 expr: Expr::Add(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(1))),
                 timeout: None, modifiers: vec![],
             },
@@ -344,8 +344,8 @@ mod tests {
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 2);
         // y must come after x
-        let x_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "x"));
-        let y_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "y"));
+        let x_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("x")));
+        let y_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("y")));
         assert!(x_pos < y_pos, "dependent statement must come after");
     }
 
@@ -353,16 +353,16 @@ mod tests {
     fn test_reorder_chain() {
         // a = 1; b = a + 1; c = b + 1; — chain, must preserve order
         let body = vec![
-            Statement::Assignment { lhs: Expr::OwnedRef("a".into()), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::OwnedRef("b".into()), expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::OwnedRef("c".into()), expr: Expr::Add(Box::new(Expr::Identifier("b".into())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".into()))), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".into()))), expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("c".into()))), expr: Expr::Add(Box::new(Expr::Identifier("b".into())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 3);
         assert!(!has_cycle);
-        let a_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "a"));
-        let b_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "b"));
-        let c_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::OwnedRef(n), .. } if n == "c"));
+        let a_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("a")));
+        let b_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("b")));
+        let c_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("c")));
         assert!(a_pos < b_pos && b_pos < c_pos, "chain order must be preserved");
     }
 
@@ -372,8 +372,8 @@ mod tests {
         // reorder_body_statements cannot produce cycles (edges are always forward),
         // so test topological_sort directly with a manually constructed cycle graph.
         let body = vec![
-            Statement::Assignment { lhs: Expr::OwnedRef("x".into()), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::OwnedRef("y".into()), expr: Expr::Integer(2), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))), expr: Expr::Integer(2), timeout: None, modifiers: vec![] },
         ];
         let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
         deps.insert(0, HashSet::from([1]));
@@ -388,7 +388,7 @@ mod tests {
     fn test_reorder_short_body_no_reordering() {
         // 2026-06-19: Bodies with < 3 statements are returned as-is.
         let body = vec![
-            Statement::Assignment { lhs: Expr::OwnedRef("x".into()), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 1);

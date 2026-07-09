@@ -384,7 +384,7 @@ pub fn arb_expr(max_depth: usize) -> impl Strategy<Value = Expr> {
         // Prior state access
         arb_identifier().prop_map(|name| Expr::PriorState(name)),
         // Owned ref
-        arb_identifier().prop_map(|name| Expr::OwnedRef(name)),
+        arb_identifier().prop_map(|name| Expr::AddrOf(Box::new(Expr::Identifier(name)))),
     ].boxed()
 }
 

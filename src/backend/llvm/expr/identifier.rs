@@ -55,7 +55,8 @@ pub fn emit_identifier(
     // ── Expr::Identifier / Expr::OwnedRef ──────────────────────
     let name = match expr {
         Expr::Identifier(n) => n,
-        Expr::OwnedRef(n) | Expr::PriorState(n) => n,
+        expr @ Expr::AddrOf(_) => expr.as_var_name().unwrap(),
+        Expr::PriorState(n) => n,
         _ => { writeln!(out, "{}{} = add i64 0, 0", indent, v).ok(); return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }; }
     };
     // SSA body mode: prefer pre-extracted old-value register
@@ -185,7 +186,7 @@ pub fn emit_identifier(
             return TypedRegister { name: v.to_string(), ty: ty.clone() };
         }
     }
-    if backend.ctx.trigger_names.contains(name) {
+    if backend.ctx.trigger_names.contains(&name.to_string()) {
         if let Some(sampled) = backend.sampled_triggers.get(name) {
             writeln!(out, "{}{} = add i64 0, {}", indent, v, sampled).ok();
             return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };

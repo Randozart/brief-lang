@@ -230,7 +230,7 @@ impl RegionAnalyzer {
                 for stmt in &txn.body {
                     if let Statement::Assignment { lhs, expr, .. } = stmt {
                         let writer = match lhs {
-                            Expr::Identifier(n) | Expr::OwnedRef(n) => n.clone(),
+                            Expr::Identifier(n) => n.clone(),
                             _ => continue,
                         };
                         txn_write_vars.insert(writer.clone());
@@ -259,7 +259,7 @@ impl RegionAnalyzer {
 
         while let Some(e) = work.pop() {
             match e {
-                Expr::Identifier(name) | Expr::OwnedRef(name) => {
+                Expr::Identifier(name) => {
                     self.deps.entry(rf.clone()).or_default().insert(name.clone());
                     self.rev_deps.entry(name.clone()).or_default().insert(rf.clone());
                 }
@@ -1049,7 +1049,7 @@ impl RegionAnalyzer {
                 0 => match f.expr {
                     Expr::Integer(n) => results.push(*n),
                     Expr::Bool(b) => results.push(if *b { 1 } else { 0 }),
-                    Expr::Identifier(n) | Expr::OwnedRef(n) => {
+                    Expr::Identifier(n) => {
                         if let Some(&v) = bindings.get(n) { results.push(v); }
                         else { return None; }
                     }
@@ -1349,7 +1349,7 @@ fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
     let mut work: Vec<&Expr> = vec![expr];
     while let Some(e) = work.pop() {
         match e {
-            Expr::Identifier(n) | Expr::OwnedRef(n) => { vars.insert(n.clone()); }
+            Expr::Identifier(n) => { vars.insert(n.clone()); }
             Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
             | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
             | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
@@ -1452,7 +1452,7 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, trigger_vars: &HashSet<String>) -> 
             Statement::Assignment { lhs, expr, .. } => {
                 if expr_has_call(expr) { return true; }
                 // Also check if lhs references a trigger variable
-                if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
+                if let Expr::Identifier(n) = lhs {
                     if trigger_vars.contains(n) { return true; }
                 }
             }
@@ -1557,7 +1557,7 @@ fn has_term_or_unify_escape(body: &[Statement]) -> bool {
 
 fn is_counter_bump_stmt(stmt: &Statement, counter_var: &str) -> bool {
     matches!(stmt, Statement::Assignment {
-        lhs: Expr::Identifier(lhs_name) | Expr::OwnedRef(lhs_name),
+        lhs: Expr::Identifier(lhs_name),
         expr: Expr::Add(a, b),
         ..
     } if lhs_name == counter_var && {
@@ -1571,7 +1571,7 @@ fn is_counter_bump_stmt(stmt: &Statement, counter_var: &str) -> bool {
 fn find_counter_var(body: &[Statement]) -> Option<String> {
     for s in body {
         if let Statement::Assignment {
-            lhs: Expr::Identifier(n) | Expr::OwnedRef(n),
+            lhs: Expr::Identifier(n),
             expr: Expr::Add(a, b),
             ..
         } = s {
@@ -1589,7 +1589,7 @@ fn find_counter_var(body: &[Statement]) -> Option<String> {
 fn find_write_expr(body: &[Statement], var: &str) -> Option<Expr> {
     for s in body {
         if let Statement::Assignment {
-            lhs: Expr::Identifier(n) | Expr::OwnedRef(n),
+            lhs: Expr::Identifier(n),
             expr,
             ..
         } = s {
@@ -1742,11 +1742,11 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
                 Expr::Identifier(n) if n == owned_old => {
                     results.push(owned_new.clone());
                 }
-                Expr::OwnedRef(n) if n == owned_old => {
+                expr @ Expr::AddrOf(_) if expr.as_var_name() == Some(owned_old.as_str()) => { let n = owned_old.clone();
                     results.push(owned_new.clone());
                 }
                 Expr::Identifier(n) => { results.push(Expr::Identifier(n)); }
-                Expr::OwnedRef(n) => { results.push(Expr::OwnedRef(n)); }
+                expr @ Expr::AddrOf(_) => { results.push(expr.clone()); }
                 Expr::Integer(_) | Expr::Float(_) | Expr::String(_)
                 | Expr::Char(_) | Expr::Bool(_) | Expr::Term
                 | Expr::Ellipsis | Expr::RegexLiteral(_) | Expr::TypeRef(_)

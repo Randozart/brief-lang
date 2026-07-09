@@ -239,7 +239,7 @@ fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
         // Terminals — no sub-expressions
         Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
         | Expr::String(_) | Expr::Term | Expr::Identifier(_)
-        | Expr::OwnedRef(_) | Expr::PriorState(_)
+        | Expr::AddrOf(_) | Expr::PriorState(_)
         | Expr::Ellipsis | Expr::TypeRef(_) => {}
         // Shared memory — always allowed in GPU kernels
         Expr::SharedMem(_) => {}

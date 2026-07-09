@@ -113,7 +113,7 @@ impl DependencyGraph {
         match stmt {
             Statement::Assignment { lhs, expr, .. } => {
                 let lhs_name = match lhs {
-                    Expr::Identifier(n) | Expr::OwnedRef(n) => Some(n.clone()),
+                    Expr::Identifier(n) => Some(n.clone()),
                     _ => None,
                 };
                 let rhs_ids: Vec<String> = collect_expr_identifiers(expr)
@@ -235,7 +235,7 @@ pub fn collect_expr_identifiers(expr: &Expr) -> Vec<String> {
 
 fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
     match expr {
-        Expr::Identifier(n) | Expr::OwnedRef(n) | Expr::PriorState(n) => {
+        Expr::Identifier(n) | Expr::PriorState(n) => {
             ids.push(n.clone());
         }
         Expr::Add(a, b)
@@ -529,13 +529,15 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
         }
         // Pipe chains — desugared before this pass
         Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
+            Expr::AddrOf(inner) => collect_expr_ids_inner(inner, ids),
+            Expr::Deref(inner) => collect_expr_ids_inner(inner, ids),
     }
 }
 
 fn statement_ids(stmt: &Statement, ids: &mut Vec<String>) {
     match stmt {
         Statement::Assignment { lhs, expr, .. } => {
-            if let Expr::Identifier(n) | Expr::OwnedRef(n) = lhs {
+            if let Expr::Identifier(n) = lhs {
                 ids.push(n.clone());
             }
             collect_expr_ids_inner(expr, ids);

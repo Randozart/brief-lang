@@ -73,8 +73,8 @@ fn check_all_paths(
                 // Track assignments
                 if let Expr::Identifier(name) = lhs {
                     vars.insert(name.clone(), expr.clone());
-                } else if let Expr::OwnedRef(name) = lhs {
-                    vars.insert(name.clone(), expr.clone());
+                } else if let Some(name) = lhs.as_var_name() {
+                    vars.insert(name.to_string(), expr.clone());
                 }
             }
 

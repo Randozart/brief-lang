@@ -1636,7 +1636,11 @@ pub enum Expr {
     /// Pattern B feature struct: wraps Integer, Float, String, Char, Bool, Term
     Literal(Box<LiteralExpr>),
     Identifier(String),
-    OwnedRef(String),
+    /// `&expr` — address of an expression. Produces `Ptr<T>` (mutable)
+    /// or `PtrConst<T>` (read-only, when referent is a `let` binding).
+    AddrOf(Box<Expr>),
+    /// `*expr` — dereference a pointer. Reads/writes through `Ptr<T>`.
+    Deref(Box<Expr>),
     PriorState(String),
     /// `...` — ellipsis, expands to fill unspecified dimensions in bracket context
     Ellipsis,
@@ -2053,13 +2057,24 @@ impl Expr {
         deps
     }
 
+    /// Extract the variable name from an expression, handling `Identifier`,
+    /// `AddrOf(Identifier(...))`, and `PriorState` uniformly.
+    pub fn as_var_name(&self) -> Option<&str> {
+        match self {
+            Expr::Identifier(n) => Some(n.as_str()),
+            Expr::AddrOf(inner) => inner.as_var_name(),
+            Expr::PriorState(n) => Some(n.as_str()),
+            _ => None,
+        }
+    }
+
     fn extract_deps_recursive(&self, deps: &mut HashSet<String>) {
         match self {
             Expr::Identifier(name) => {
                 deps.insert(name.clone());
             }
-            Expr::OwnedRef(name) => {
-                deps.insert(name.clone());
+            Expr::AddrOf(inner) => {
+                inner.extract_deps_recursive(deps);
             }
             Expr::PriorState(name) => {
                 deps.insert(name.clone());
@@ -3030,7 +3045,7 @@ impl Program {
 
         // Add &__booted_N = true; before term
         body.push(Statement::Assignment {
-            lhs: Expr::OwnedRef(booted_name.clone()),
+            lhs: Expr::AddrOf(Box::new(Expr::Identifier(booted_name.clone()))),
             expr: Expr::Integer(1),
             timeout: None,
             modifiers: vec![],
@@ -3048,8 +3063,8 @@ impl Program {
             is_reactive: true, // rct — fires once when !__booted_N
             parameters: vec![],
             contract: Contract {
-                pre_condition: Expr::Not(Box::new(Expr::OwnedRef(booted_name.clone()))),
-                post_condition: Expr::OwnedRef(booted_name),
+                pre_condition: Expr::Not(Box::new(Expr::AddrOf(Box::new(Expr::Identifier(booted_name.clone()))))),
+                post_condition: Expr::AddrOf(Box::new(Expr::Identifier(booted_name.clone()))),
                 watchdog: None,
                 span: None,
             },

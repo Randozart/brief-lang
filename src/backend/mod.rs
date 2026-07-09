@@ -226,7 +226,7 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
         return collect_expr_identifiers(&norm, ids);
     }
     match expr {
-        Expr::Identifier(n) | Expr::OwnedRef(n) | Expr::PriorState(n) => {
+        Expr::Identifier(n) | Expr::PriorState(n) => {
             ids.insert(n.clone());
         }
         Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) => {}
@@ -259,6 +259,7 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
                 collect_expr_identifiers(elem, ids);
             }
         }
+        Expr::AddrOf(inner) | Expr::Deref(inner) => collect_expr_identifiers(inner, ids),
         _ => {}
     }
 }
@@ -268,8 +269,8 @@ pub fn collect_assigned_identifiers(body: &[Statement]) -> Vec<String> {
     let mut ids = Vec::new();
     for stmt in body {
         if let Statement::Assignment { lhs, .. } = stmt {
-            if let Expr::Identifier(name) | Expr::OwnedRef(name) = lhs {
-                ids.push(name.clone());
+            if let Some(name) = lhs.as_var_name() {
+                ids.push(name.to_string());
             }
         }
     }

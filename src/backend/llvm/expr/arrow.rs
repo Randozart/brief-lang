@@ -37,7 +37,7 @@ pub fn emit_arrow_push(
     // bypassing the inttoptr handle. We emit the ring buffer operations
     // inline here rather than using IntrinsicCall, which would try to
     // emit_expr the target as an i64 handle (which no longer exists).
-    if let Expr::OwnedRef(field_name) = target.as_ref() {
+    if let Some(field_name) = target.as_var_name() {
         if let Some(rb_info) = backend.ctx.ringbuf_inline.get(field_name).cloned() {
             let elem_val = backend.emit_expr(out, val, indent);
             let elem_boxed = backend.adapt_to_i64(out, indent, &elem_val);
@@ -91,7 +91,7 @@ pub fn emit_arrow_push(
             };
             let result = backend.emit_expr(out, &call_expr, indent);
             // Store result back to state field (intrinsic may return updated handle)
-            if let Expr::OwnedRef(field_name) = target.as_ref() {
+            if let Some(field_name) = target.as_var_name() {
                 if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
                     let ap = format!("%aap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
@@ -106,7 +106,7 @@ pub fn emit_arrow_push(
         // Custom push: emit call @fn_name(i64, i64) -> i64
         writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})", indent, v, fn_name, list_boxed, elem_boxed).ok();
         // Store new list handle back to state field if target is OwnedRef
-        if let Expr::OwnedRef(field_name) = target.as_ref() {
+        if let Some(field_name) = target.as_var_name() {
             if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
                 let ap = format!("%aap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
@@ -139,8 +139,8 @@ pub fn emit_arrow_push(
     // to terminate the preceding basic block before the label.
     let mut emitted_slow_branch = false;
     if !prepend {
-    if let Expr::OwnedRef(field_name) = target.as_ref() {
-        if let Some((cap_reg, buf_i64)) = backend.fun.field_prealloc_info.get(field_name.as_str()).cloned() {
+    if let Some(field_name) = target.as_var_name() {
+        if let Some((cap_reg, buf_i64)) = backend.fun.field_prealloc_info.get(field_name).cloned() {
             let cap_check = format!("%acap{}", backend.fun.txn_counter);
             backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = icmp ult i64 {}, {}", indent, cap_check, old_len, cap_reg).ok();
@@ -257,7 +257,7 @@ pub fn emit_arrow_push(
     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ne_ptr, new_hp, new_elem_pos).ok();
     writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !1", indent, elem_boxed, ne_ptr).ok();
     // Store new list handle back to state field if target is OwnedRef
-    if let Expr::OwnedRef(field_name) = target.as_ref() {
+    if let Some(field_name) = target.as_var_name() {
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%aap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
@@ -267,7 +267,7 @@ pub fn emit_arrow_push(
             // back-edge reload. Without this, the phi back-edge for
             // this field remains a pass-through (old value), causing
             // the next tick to see the pre-push handle (queue_drain).
-            backend.fun.pending_phi_backedge.insert(field_name.clone(), base.clone());
+            backend.fun.pending_phi_backedge.insert(field_name.to_string(), base.clone());
         } else if let Some(slot) = backend.fun.param_slots.get(field_name).cloned() {
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
         }
@@ -317,7 +317,7 @@ pub fn emit_arrow_pop(
         let new_list = format!("%pnl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
         writeln!(out, "{}{} = extractvalue {{ i64, i64 }} {}, 1", indent, new_list, call_reg).ok();
         // Store new list handle back to state
-        if let Expr::OwnedRef(field_name) = target.as_ref() {
+        if let Some(field_name) = target.as_var_name() {
             if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
                 let ap = format!("%pap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
@@ -325,7 +325,7 @@ pub fn emit_arrow_pop(
                 writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, new_list, ap, tn).ok();
                 // 2026-06-27: Record field as modified for per-field
                 // phi back-edge reload (same rationale as push).
-                backend.fun.pending_phi_backedge.insert(field_name.clone(), new_list.clone());
+                backend.fun.pending_phi_backedge.insert(field_name.to_string(), new_list.clone());
             } else if let Some(slot) = backend.fun.param_slots.get(field_name).cloned() {
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_list, slot).ok();
             }
@@ -413,7 +413,7 @@ pub fn emit_arrow_pop(
     writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
         indent, aft_dst, aft_src, aft_bytes).ok();
     // Store updated list back
-    if let Expr::OwnedRef(field_name) = target.as_ref() {
+    if let Some(field_name) = target.as_var_name() {
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%pap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
@@ -421,7 +421,7 @@ pub fn emit_arrow_pop(
             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base, ap, tn).ok();
             // 2026-06-27: Record field as modified for per-field
             // phi back-edge reload (same rationale as push).
-            backend.fun.pending_phi_backedge.insert(field_name.clone(), base.clone());
+            backend.fun.pending_phi_backedge.insert(field_name.to_string(), base.clone());
         } else if let Some(slot) = backend.fun.param_slots.get(field_name).cloned() {
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
         }
@@ -445,7 +445,7 @@ pub fn emit_arrow_discard(
 ) -> TypedRegister {
     // 2026-07-02: Inline RingBuffer pop path — use GEP on %State fields
     // instead of IntrinsicCall (which would fail for inline fields).
-    if let Expr::OwnedRef(field_name) = target.as_ref() {
+    if let Some(field_name) = target.as_var_name() {
         if let Some(rb_info) = backend.ctx.ringbuf_inline.get(field_name).cloned() {
             // Load head, tail from inline %State fields
             let hg = format!("%rbhg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -578,7 +578,7 @@ pub fn emit_arrow_discard(
     writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
         indent, aft_dst, aft_src, aft_bytes).ok();
     // Store updated list back
-    if let Expr::OwnedRef(field_name) = target.as_ref() {
+    if let Some(field_name) = target.as_var_name() {
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%dap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
@@ -672,7 +672,7 @@ pub fn emit_arrow_transfer(
     writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, i8* {}, i64 {}, i1 false)",
         indent, src_off, sdp, sbytes).ok();
     // Store dest back
-    if let Expr::OwnedRef(field_name) = dest.as_ref() {
+    if let Some(field_name) = dest.as_var_name() {
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%tap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
@@ -681,7 +681,7 @@ pub fn emit_arrow_transfer(
         }
     }
     // Store source (empty) back
-    if let Expr::OwnedRef(field_name) = source.as_ref() {
+    if let Some(field_name) = source.as_var_name() {
         if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
             let ap = format!("%sap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();

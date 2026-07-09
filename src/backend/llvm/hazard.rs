@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 fn expr_refs_name(expr: &Expr, name: &str) -> bool {
     match expr {
-        Expr::Identifier(n) | Expr::OwnedRef(n) => n == name,
+        Expr::Identifier(n) => n == name,
         Expr::PriorState(n) => n == name,
         Expr::Add(l, r)
         | Expr::Sub(l, r)
@@ -222,7 +222,7 @@ impl LlvmBackend {
     pub(super) fn is_float_expr_pre_cg(&self, expr: &Expr, local_floats: &HashSet<String>) -> bool {
         match expr {
             Expr::Float(_) => true,
-            Expr::Identifier(name) | Expr::OwnedRef(name) => {
+            Expr::Identifier(name) => {
                 self.is_float_field(name)
                     || local_floats.contains(name.as_str())
                     || self.ctx.constants.get(name.as_str()).map_or(false, |(t, _)| *t == Type::Custom("Float".to_string()))
@@ -242,8 +242,9 @@ impl LlvmBackend {
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
                 let is_float = self.is_float_expr_pre_cg(l, local_floats) || self.is_float_expr_pre_cg(r, local_floats);
                 let is_cross_field = match (l.as_ref(), r.as_ref()) {
-                    (Expr::Identifier(n1), Expr::Identifier(n2)) | (Expr::OwnedRef(n1), Expr::OwnedRef(n2)) => n1 != n2,
-                    (Expr::Identifier(_), Expr::OwnedRef(n)) | (Expr::OwnedRef(n), Expr::Identifier(_)) => true,
+                    (Expr::Identifier(n1), Expr::Identifier(n2)) => n1 != n2,
+                    (e1 @ Expr::AddrOf(_), e2 @ Expr::AddrOf(_)) => e1.as_var_name() != e2.as_var_name(),
+                    (Expr::Identifier(_), Expr::AddrOf(_)) | (Expr::AddrOf(_), Expr::Identifier(_)) => true,
                     _ => false,
                 };
                 let mut count = if is_cross_field && is_float { 1 } else { 0 };

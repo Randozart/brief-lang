@@ -199,8 +199,12 @@ fn collect_vars(expr: &Expr, vars: &mut HashSet<String>) {
         Expr::Identifier(name) => {
             vars.insert(name.clone());
         }
-        Expr::PriorState(name) | Expr::OwnedRef(name) => {
+        Expr::PriorState(name) => {
             vars.insert(name.clone());
+        }
+        expr @ Expr::AddrOf(_) => {
+            let name = expr.as_var_name().unwrap().to_string();
+            vars.insert(name);
         }
         Expr::Add(l, r)
         | Expr::Sub(l, r)

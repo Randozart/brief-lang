@@ -552,7 +552,7 @@ impl Desugarer {
 
                     new_body_items.push(Statement::Expression(expr.clone()));
                     new_body_items.push(Statement::Assignment {
-                        lhs: Expr::OwnedRef("done".to_string()),
+                        lhs: Expr::AddrOf(Box::new(Expr::Identifier("done".to_string()))),
                         expr: Expr::Bool(true),
                         timeout: None,
                         modifiers: vec![],
