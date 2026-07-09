@@ -94,6 +94,11 @@ pub enum Value {
     /// not at runtime.
     Ptr(u64),
 
+    /// Reference (address-of) — wraps a value produced by `&expr`.
+    /// In the interpreter, `&x` evaluates the inner expression and wraps the
+    /// result in `Value::Ref`. This enables `Deref` to unwrap it.
+    Ref(Box<Value>),
+
     /// Compile-time AST node values (for template/macro return values)
     Expr(Box<crate::ast::Expr>),
     Stmt(Box<crate::ast::Statement>),
@@ -127,6 +132,7 @@ impl PartialEq for Value {
             (Value::DbvlTable(a), Value::DbvlTable(b)) => a == b,
             (Value::Regex(a), Value::Regex(b)) => a == b,
             (Value::Ptr(a), Value::Ptr(b)) => a == b,
+            (Value::Ref(a), Value::Ref(b)) => a == b,
             (Value::Expr(a), Value::Expr(b)) => a == b,
             (Value::Stmt(a), Value::Stmt(b)) => a == b,
             (Value::Block(a), Value::Block(b)) => a == b,
@@ -170,6 +176,7 @@ impl fmt::Display for Value {
             }
             Value::Regex(r) => write!(f, "<Regex {:?}>", r.pattern),
             Value::Ptr(addr) => write!(f, "Ptr({})", addr),
+            Value::Ref(v) => write!(f, "&{}", v),
             Value::Expr(_) => write!(f, "<Expr>"),
             Value::Stmt(_) => write!(f, "<Stmt>"),
             Value::Block(_) => write!(f, "<Block>"),
@@ -224,6 +231,7 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
         Value::Stack(stack) => JsonValue::Array(stack.iter().map(value_to_json_value).collect()),
         Value::Queue(queue) => JsonValue::Array(queue.iter().map(value_to_json_value).collect()),
         Value::Ptr(p) => JsonValue::Number((*p).into()),
+        Value::Ref(v) => value_to_json_value(v),
         Value::Instance { fields, .. } => {
             let map: serde_json::Map<String, JsonValue> = fields
                 .iter()
@@ -2976,7 +2984,10 @@ impl Interpreter {
                 .ok_or_else(|| RuntimeError::UndefinedVariable("term".to_string())),
             Expr::Identifier(name) => self.state.get(name).cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
-            expr @ Expr::AddrOf(_) => { let name = expr.as_var_name().unwrap().to_string(); self.state.get(&name).cloned().ok_or_else(|| RuntimeError::UndefinedVariable(name)) },
+            Expr::AddrOf(inner) => {
+                let val = self.eval_expr(inner)?;
+                Ok(Value::Ref(Box::new(val)))
+            },
             Expr::PriorState(name) => self.prior_state.get(name).cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable(name.clone())),
             // Legacy binary op variants — delegate through feature struct
@@ -6151,7 +6162,13 @@ impl Interpreter {
             }
             // Pipe chains — desugared before this pass
             Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
-            Expr::Deref(inner) => self.eval_expr(inner),
+            Expr::Deref(inner) => {
+                let val = self.eval_expr(inner)?;
+                match val {
+                    Value::Ref(v) => Ok(*v),
+                    _ => Err(RuntimeError::TypeMismatch("cannot dereference non-pointer".into())),
+                }
+            },
             Expr::Within { body, bound, unit: _, retries, fallback } => {
                 let saved_counter = self.cycle_counter;
                 let saved_budget = self.cycle_budget;
@@ -11746,7 +11763,8 @@ mod tests {
         i.state.insert("x".to_string(), Value::Int(42));
         let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Int(42));
+        // AddrOf wraps the value in Value::Ref
+        assert_eq!(result, Value::Ref(Box::new(Value::Int(42))));
     }
 
     #[test]
@@ -11804,9 +11822,20 @@ mod tests {
     fn test_deref_identifier_evaluates_inner() {
         let mut i = Interpreter::new();
         i.state.insert("x".to_string(), Value::Int(42));
-        let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
+        // Deref expects a Value::Ref, dereferences to inner value
+        let inner = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
+        let expr = Expr::Deref(Box::new(inner));
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(42));
+    }
+
+    #[test]
+    fn test_deref_non_pointer_errors() {
+        let mut i = Interpreter::new();
+        // Dereferencing a plain Int (not a Ref) should error
+        let expr = Expr::Deref(Box::new(Expr::Integer(42)));
+        let result = i.eval_expr(&expr);
+        assert!(result.is_err(), "Deref of non-pointer should error");
     }
 
     #[test]

@@ -23,7 +23,10 @@ impl ExprTypecheck for ProjectionExpr {
 
 impl ExprEval for ProjectionExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
-        let source_val = ctx.eval_expr(&self.source)?;
+        let source_val = match ctx.eval_expr(&self.source)? {
+            Value::Ref(inner) => *inner,
+            v => v,
+        };
         match &self.target {
             ProjectionTarget::Size => match &source_val {
                 Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
@@ -64,7 +67,7 @@ impl ExprEval for ProjectionExpr {
                         | Value::Stack(_) | Value::Queue(_) | Value::Enum(..)
                         | Value::Instance { .. } | Value::StringBuilder(_)
                         | Value::Defn(_) | Value::DbvlTable(_) | Value::Regex(_)
-                        | Value::Ptr(_) => 8,
+                        | Value::Ptr(_) | Value::Ref(_) => 8,
                     Value::Void => 0,
                     Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
                         return Err(RuntimeError::TypeMismatch("Alignment on compile-time value".into()));
@@ -112,7 +115,7 @@ impl ExprEval for ProjectionExpr {
                     Value::Stack(_) => 12, Value::Queue(_) => 13,
                     Value::Instance { .. } => 14, Value::Enum(..) => 15,
                     Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Regex(_) => 18,
-                    Value::Ptr(_) => 19, Value::Void => 0,
+                    Value::Ptr(_) | Value::Ref(_) => 19, Value::Void => 0,
                     Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
                         unreachable!("compile-time only value")
                     }
