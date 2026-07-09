@@ -7279,6 +7279,11 @@ let span = self.current_span();
                     let expr = self.parse_unary()?;
                     Ok(Expr::UnaryOp(Box::new(UnaryOpExpr::new(UnaryOpKind::BitNot, expr))))
                 }
+                Ok(Token::Star) => {
+                    self.advance();
+                    let expr = self.parse_unary()?;
+                    Ok(Expr::Deref(Box::new(expr)))
+                }
                 Ok(Token::Ampersand) => {
                     self.advance();
                     match self.current_token() {
@@ -7303,10 +7308,10 @@ let span = self.current_span();
                             // No postfix ops on &(a, b) — return directly
                             Ok(Expr::TupleDestructure(names, Box::new(Expr::Term)))
                         }
-                        _ => match self.expect_identifier() {
-                            Ok(name) => self.parse_postfix_expr(Expr::AddrOf(Box::new(Expr::Identifier(name)))),
-                            Err(e) => return Err(e),
-                        },
+                        _ => {
+                            let expr = self.parse_unary()?;
+                            Ok(Expr::AddrOf(Box::new(expr)))
+                        }
                     }
                 }
                 Ok(Token::At) if self.in_quote_block => {
