@@ -537,8 +537,9 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
 fn statement_ids(stmt: &Statement, ids: &mut Vec<String>) {
     match stmt {
         Statement::Assignment { lhs, expr, .. } => {
-            if let Expr::Identifier(n) = lhs {
-                ids.push(n.clone());
+            // 2026-07-09: Handle AddrOf LHS for pointer writes.
+            if let Some(n) = lhs.as_var_name() {
+                ids.push(n.to_string());
             }
             collect_expr_ids_inner(expr, ids);
         }

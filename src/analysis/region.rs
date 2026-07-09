@@ -229,8 +229,14 @@ impl RegionAnalyzer {
 
                 for stmt in &txn.body {
                     if let Statement::Assignment { lhs, expr, .. } = stmt {
+                        // 2026-07-09: Handle AddrOf LHS for pointer writes.
+                        // Both Identifier and AddrOf(Identifier) target a named field.
                         let writer = match lhs {
                             Expr::Identifier(n) => n.clone(),
+                            Expr::AddrOf(inner) => {
+                                let Some(n) = inner.as_var_name() else { continue; };
+                                n.to_string()
+                            }
                             _ => continue,
                         };
                         txn_write_vars.insert(writer.clone());
@@ -333,6 +339,7 @@ impl RegionAnalyzer {
                         work.push(e);
                     }
                 }
+                Expr::AddrOf(a) | Expr::Deref(a) => { work.push(a); }
                 _ => {}
             }
         }
@@ -1006,6 +1013,15 @@ impl RegionAnalyzer {
                     true
                 } else { false }
             }
+            // 2026-07-09: Compile-time evaluation of pointer writes.
+            // &counter = counter + 1 writes through the pointer to counter.
+            Statement::Assignment { lhs: Expr::AddrOf(inner), expr, .. } => {
+                let Some(name) = inner.as_var_name() else { return true; };
+                if let Some(val) = Self::eval_expr_simple(expr, bindings) {
+                    bindings.insert(name.to_string(), val);
+                }
+                true
+            }
             Statement::Let { name, expr, .. } => {
                 if let Some(e) = expr {
                     if let Some(val) = Self::eval_expr_simple(e, bindings) {
@@ -1065,7 +1081,8 @@ impl RegionAnalyzer {
                         stack.push(Frame { expr: b, state: 0, left: None });
                         stack.push(Frame { expr: a, state: 0, left: None });
                     }
-                    Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _) => {
+                    Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
+                    | Expr::AddrOf(a) | Expr::Deref(a) => {
                         f.state = 1;
                         stack.push(f);
                         stack.push(Frame { expr: a, state: 0, left: None });
@@ -1095,6 +1112,7 @@ impl RegionAnalyzer {
                     Expr::Neg(_) => { let v = results.pop()?; results.push(-v); }
                     Expr::BitNot(_) => { let v = results.pop()?; results.push(!v); }
                     Expr::Cast(_, _) => {} // result already on stack
+                    Expr::AddrOf(_) | Expr::Deref(_) => {} // identity: result already on stack
                     _ => unreachable!(),
                 },
                 _ => unreachable!(),
@@ -1359,7 +1377,8 @@ fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
                 work.push(a);
             }
             Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-            | Expr::Projection { source: a, .. } => { work.push(a); }
+            | Expr::Projection { source: a, .. }
+            | Expr::AddrOf(a) | Expr::Deref(a) => { work.push(a); }
             Expr::Call(_, args) => { work.extend(args.iter().rev()); }
             Expr::ListLiteral(elems) | Expr::Tuple(elems) => { work.extend(elems.iter().rev()); }
             Expr::ListIndex(l, i) => { work.push(i); work.push(l); }
@@ -1556,30 +1575,40 @@ fn has_term_or_unify_escape(body: &[Statement]) -> bool {
 }
 
 fn is_counter_bump_stmt(stmt: &Statement, counter_var: &str) -> bool {
-    matches!(stmt, Statement::Assignment {
-        lhs: Expr::Identifier(lhs_name),
-        expr: Expr::Add(a, b),
-        ..
-    } if lhs_name == counter_var && {
-        (matches!(a.as_ref(), Expr::Identifier(n) if n == counter_var)
-            && matches!(b.as_ref(), Expr::Integer(n) if *n > 0))
-        || (matches!(b.as_ref(), Expr::Identifier(n) if n == counter_var)
-            && matches!(a.as_ref(), Expr::Integer(n) if *n > 0))
-    })
+    // 2026-07-09: Handle both Identifier and AddrOf LHS.
+    let lhs_name = match stmt {
+        Statement::Assignment { lhs: Expr::Identifier(n), .. } => Some(n.as_str()),
+        Statement::Assignment { lhs: Expr::AddrOf(inner), .. } => inner.as_var_name(),
+        _ => None,
+    };
+    let Some(name) = lhs_name else { return false; };
+    if name != counter_var { return false; }
+    if let Statement::Assignment { expr: Expr::Add(a, b), .. } = stmt {
+        let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(n) if n == counter_var);
+        let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(n) if n == counter_var);
+        let pos_int = |e: &Expr| matches!(e, Expr::Integer(d) if *d > 0);
+        return (lhs_in_a && pos_int(b)) || (lhs_in_b && pos_int(a));
+    }
+    false
 }
 
 fn find_counter_var(body: &[Statement]) -> Option<String> {
     for s in body {
-        if let Statement::Assignment {
-            lhs: Expr::Identifier(n),
-            expr: Expr::Add(a, b),
-            ..
-        } = s {
-            let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(an) if an == n);
-            let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(bn) if bn == n);
+        // 2026-07-09: Handle both Identifier and AddrOf LHS (pointer write).
+        let (lhs_name, expr) = match s {
+            Statement::Assignment { lhs: Expr::Identifier(n), expr, .. } => (Some(n.clone()), expr),
+            Statement::Assignment { lhs: Expr::AddrOf(inner), expr, .. } => {
+                (inner.as_var_name().map(|n| n.to_string()), expr)
+            }
+            _ => continue,
+        };
+        let Some(name) = lhs_name else { continue; };
+        if let Expr::Add(a, b) = expr {
+            let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(an) if *an == name);
+            let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(bn) if *bn == name);
             let pos_int = |e: &Expr| matches!(e, Expr::Integer(d) if *d > 0);
             if (lhs_in_a && pos_int(b)) || (lhs_in_b && pos_int(a)) {
-                return Some(n.clone());
+                return Some(name);
             }
         }
     }
@@ -1588,13 +1617,17 @@ fn find_counter_var(body: &[Statement]) -> Option<String> {
 
 fn find_write_expr(body: &[Statement], var: &str) -> Option<Expr> {
     for s in body {
-        if let Statement::Assignment {
-            lhs: Expr::Identifier(n),
-            expr,
-            ..
-        } = s {
+        // 2026-07-09: Handle both Identifier and AddrOf LHS.
+        let lhs_name = match s {
+            Statement::Assignment { lhs: Expr::Identifier(n), .. } => Some(n.as_str()),
+            Statement::Assignment { lhs: Expr::AddrOf(inner), .. } => inner.as_var_name(),
+            _ => None,
+        };
+        if let Some(n) = lhs_name {
             if n == var {
-                return Some(expr.clone());
+                if let Statement::Assignment { expr, .. } = s {
+                    return Some(expr.clone());
+                }
             }
         }
     }
