@@ -1134,6 +1134,37 @@ fn type_universe_expr_to_string(e: &Expr) -> Option<String> {
     }
 }
 
+/// Returns true if `ty` is `PtrConst<T>` (a read-only pointer).
+/// Returns false for `Ptr<T>` (mutable pointer) and all other types.
+pub fn is_const_ptr(ty: &crate::ast::Type) -> bool {
+    match ty {
+        crate::ast::Type::Applied(name, _) => name == "PtrConst",
+        _ => false,
+    }
+}
+
+/// Returns the pointee type for `Ptr<T>` or `PtrConst<T>`.
+/// Returns `None` for any other type.
+pub fn pointee_type(ty: &crate::ast::Type) -> Option<crate::ast::Type> {
+    match ty {
+        crate::ast::Type::Applied(name, args) if (name == "Ptr" || name == "PtrConst") && args.len() == 1 => {
+            Some(args[0].clone())
+        }
+        _ => None,
+    }
+}
+
+/// Returns true if `expr` names a mutable storage location (can be borrowed as `Ptr<T>`).
+/// Non-mutable locations (e.g., `let` bindings, literals) are borrowed as `PtrConst<T>`.
+pub fn is_mutable_location(expr: &Expr) -> bool {
+    match expr {
+        Expr::Identifier(_) | Expr::AddrOf(_) => true,
+        Expr::PriorState(_) | Expr::Deref(_) => true,
+        Expr::FieldAccess(obj, _) | Expr::ListIndex(obj, _) => is_mutable_location(obj),
+        _ => false,
+    }
+}
+
 // ── Tests ───────────────────────────────────────────────────────────
 #[cfg(test)]
 mod tests {
@@ -1580,5 +1611,78 @@ mod tests {
         let universe = TypeUniverse::build(&program);
         let errors = universe.validate_operators();
         assert!(errors.is_empty(), "Valid identifier op should pass: {:?}", errors);
+    }
+
+    // ── is_const_ptr / pointee_type / is_mutable_location tests ──
+
+    #[test]
+    fn test_is_const_ptr_on_ptr_returns_false() {
+        let ty = crate::ast::Type::Applied("Ptr".to_string(), vec![crate::ast::Type::Custom("Int".to_string())]);
+        assert!(!is_const_ptr(&ty), "Ptr<T> is not const");
+    }
+
+    #[test]
+    fn test_is_const_ptr_on_ptr_const_returns_true() {
+        let ty = crate::ast::Type::Applied("PtrConst".to_string(), vec![crate::ast::Type::Custom("Int".to_string())]);
+        assert!(is_const_ptr(&ty), "PtrConst<T> is const");
+    }
+
+    #[test]
+    fn test_is_const_ptr_on_other_returns_false() {
+        assert!(!is_const_ptr(&crate::ast::Type::Custom("Int".to_string())));
+        assert!(!is_const_ptr(&crate::ast::Type::Void));
+    }
+
+    #[test]
+    fn test_pointee_type_ptr() {
+        let inner = crate::ast::Type::Custom("Int".to_string());
+        let ty = crate::ast::Type::Applied("Ptr".to_string(), vec![inner.clone()]);
+        assert_eq!(pointee_type(&ty), Some(inner));
+    }
+
+    #[test]
+    fn test_pointee_type_ptr_const() {
+        let inner = crate::ast::Type::Custom("Bool".to_string());
+        let ty = crate::ast::Type::Applied("PtrConst".to_string(), vec![inner.clone()]);
+        assert_eq!(pointee_type(&ty), Some(inner));
+    }
+
+    #[test]
+    fn test_pointee_type_non_ptr_returns_none() {
+        assert_eq!(pointee_type(&crate::ast::Type::Custom("Int".to_string())), None);
+        assert_eq!(pointee_type(&crate::ast::Type::Void), None);
+    }
+
+    #[test]
+    fn test_pointee_type_wrong_arg_count_returns_none() {
+        let ty = crate::ast::Type::Applied("Ptr".to_string(), vec![]);
+        assert_eq!(pointee_type(&ty), None);
+    }
+
+    #[test]
+    fn test_is_mutable_location_identifier() {
+        let expr = Expr::Identifier("x".to_string());
+        assert!(is_mutable_location(&expr));
+    }
+
+    #[test]
+    fn test_is_mutable_location_addr_of() {
+        let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
+        assert!(is_mutable_location(&expr));
+    }
+
+    #[test]
+    fn test_is_mutable_location_field_access() {
+        let expr = Expr::FieldAccess(
+            Box::new(Expr::Identifier("obj".to_string())),
+            "field".to_string(),
+        );
+        assert!(is_mutable_location(&expr));
+    }
+
+    #[test]
+    fn test_is_mutable_location_literal_returns_false() {
+        assert!(!is_mutable_location(&Expr::Integer(42)));
+        assert!(!is_mutable_location(&Expr::Bool(true)));
     }
 }
