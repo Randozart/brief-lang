@@ -1,59 +1,45 @@
 # GLUE Rust Bridge Example
 
-This example demonstrates the **GLUE protocol** (General Language Unification Engine)
-— calling Brief-exported functions from Rust with zero-copy FFI.
+Call Brief-exported functions from Rust via the GLUE protocol.
 
-## Prerequisites
-
-- LLVM toolchain (`llc`) — `apt install llvm` or `brew install llvm`
-- Brief compiler (`brief`) — `cargo build --release` from repo root
-
-## Workflow
+## Quick Start
 
 ```bash
-# Step 1: Build bridge.ll with --library mode (no main, has __brief_init_state)
 cd examples/glue-rust-bridge
-brief build --library bridge.bv --out .
-
-# Step 2: Export bridge metadata
-brief export bridge.bv rust --out .
-
-# Step 3: Build Rust binary
+brief build --no-stdlib --library bridge.bv --out .
 cargo build
-
-# Step 4: Run
 cargo run
-# ═══ GLUE Rust Bridge Demo ═══
-#   Brief runtime initialized (state=0x...)
-#   add(40, 2) = 42
-#   multiply(6, 7) = 42
-# ═══ All bridge calls passed ═══
+```
+
+Expected output:
+```
+═══ GLUE Rust Bridge Demo ═══
+  Brief runtime initialized (state=0x...)
+  add(40, 2) = 42
+  multiply(6, 7) = 42
+═══ All bridge calls passed ═══
 ```
 
 ## How It Works
 
-### Brief Side (`bridge.bv`)
-- `#export` functions are compiled to externally-visible LLVM functions
-- `brief build --library` emits `.ll` with `__brief_init_state()` and exports, but no `main()`
-- `brief export` writes `bridge-exports.dbvl` with tagged entries
+1. `brief build --no-stdlib --library bridge.bv --out .` compiles to `bridge.ll`
+   — a reusable LLVM IR module with `__brief_init_state()` + exports, no `main()`
+2. `build.rs` runs `llc bridge.ll -filetype=obj -O2 -o bridge.o`, packs into `libbridge.a`
+3. Rust binary links the archive statically
+4. `main.rs` declares `extern "C"` functions matching the LLVM signatures,
+   calls `__brief_init_state()` once, then calls exports directly
 
-### Rust Side (`build.rs` + `main.rs`)
-- `build.rs` reads `bridge-exports.dbvl` for metadata and runs `llc` on the `.ll`
-- The bridge object is linked statically into the binary
-- `main.rs` declares `extern "C"` functions matching the LLVM signatures
-- `__brief_init_state()` initializes the Brief runtime
-- Each export takes the state pointer as its first argument, plus typed params
+## C ABI Convention
 
-## LLVM Function Signatures
-
-Brief `i64` exports become:
-```llvm
-define i64 @add(ptr %state, i64 %arg0, i64 %arg1) { ... }
-```
-
-Rust `extern "C"` declarations match:
 ```rust
+// LLVM:  define i64 @add(ptr %state, i64 %a, i64 %b)
 extern "C" {
+    fn __brief_init_state() -> *mut c_void;  // returns state ptr
     fn add(state: *mut c_void, a: i64, b: i64) -> i64;
 }
 ```
+
+## Prerequisites
+
+- LLVM toolchain (`llc`) — `apt install llvm` or `brew install llvm`
+- Brief compiler from this repo

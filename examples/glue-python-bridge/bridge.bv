@@ -1,0 +1,25 @@
+// GLUE Python Bridge — example Brief bridge file
+//
+// Inlines minimal type definitions (no stdlib dependency).
+// Compiled to a shared library that Python loads via ctypes.
+//
+// Workflow:
+//   brief build --no-stdlib --library bridge.bv --out .
+//   llc -filetype=obj bridge.ll -o bridge.o
+//   cc -shared bridge.o -o libbridge.so   (Linux)
+//   python3 gluerun.py
+
+type Int <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+};
+
+#export
+defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};
+
+#export
+defn multiply(a: Int, b: Int) -> Int {
+    term a * b;
+};

@@ -1,7 +1,0 @@
-export,add,Int|Int,Int
-export,multiply,Int|Int,Int
-ctype,Bool,bool
-ctype,Char,char
-ctype,Float,double
-ctype,Int,int64_t
-ctype,String,cstring

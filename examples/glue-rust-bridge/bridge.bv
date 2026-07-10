@@ -1,13 +1,17 @@
 // GLUE Rust Bridge — example Brief bridge file
 //
-// Exports pure-integer functions for the first dogfooding test.
-// String exports (heap-allocated across FFI boundary) are a future
-// extension — they require meld projections onto the Rust allocator.
+// Inlines the minimal type definitions to avoid pulling in the stdlib
+// OS runtime (no extern brief_rt.c dependency needed for scalar math).
+// The resulting .ll is self-contained — only references LLVM builtins.
 //
 // Workflow:
-//   brief build --library bridge.bv --out .      # bridge.ll
-//   brief export bridge.bv rust --out .           # bridge-exports.dbvl
-//   cargo build                                    # build.rs links bridge.o
+//   brief build --no-stdlib --library bridge.bv --out .  # bridge.ll
+//   cargo build                                            # build.rs llc + link
+
+type Int <: Bits {
+    bytes <~ 8;
+    alignment <~ 8;
+};
 
 #export
 defn add(a: Int, b: Int) -> Int {
