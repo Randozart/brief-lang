@@ -4868,7 +4868,7 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None, span: None,
                     },
                     body: vec![
-                        Statement::Expression(Expr::ArrowTransfer { consume: false, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+                        Statement::Expression(Expr::ArrowTransfer { consume: true, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
                             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
                             filter: None,
                         }),

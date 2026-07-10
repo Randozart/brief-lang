@@ -712,3 +712,134 @@ pub fn emit_arrow_transfer(
     writeln!(out, "{}{} = add i64 0, {} ; transfer", indent, v, dbase).ok();
     return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
 }
+
+// ── emit_arrow_peek ─────────────────────────────────────────────
+//
+// Peek: load last element from list without removing it.
+// Same as pop but WITHOUT the state field update (no removal).
+// Only works for standard heap-allocated lists; ring buffers
+// are not consumed by peek either (ring pop is already non-mutating).
+
+pub fn emit_arrow_peek(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    v: &str,
+    target: &Box<Expr>,
+    index: &Box<Expr>,
+    indent: &str,
+) -> TypedRegister {
+    let pop_strategy = backend.check_extract_strategy(target);
+    if let Some(crate::type_universe::ExtractStrategy::Custom(fn_name)) = &pop_strategy {
+        if let Some(intrinsic) = crate::ast::Intrinsic::from_name(fn_name) {
+            let call_expr = crate::ast::Expr::IntrinsicCall {
+                intrinsic,
+                args: vec![target.as_ref().clone()],
+            };
+            let result = backend.emit_expr(out, &call_expr, indent);
+            return TypedRegister { name: result.name.clone(), ty: Type::Custom("Int".to_string()) };
+        }
+    }
+    let value_target = match target.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+    let list_val = backend.emit_expr(out, value_target, indent);
+    let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
+    let hp = format!("%lhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_boxed).ok();
+    // Read header fields: data_ptr (offset 0) and length (offset 1)
+    let dp = format!("%ldp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, dp, hp).ok();
+    let ln = format!("%lln{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    let lngp = format!("%llgp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lngp, hp).ok();
+    writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, ln, lngp).ok();
+    // Determine pop position: 0 for shift, ln-1 for pop
+    let pos = if matches!(index.as_ref(), Expr::Term) {
+        let sub = format!("%lps{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+        writeln!(out, "{}{} = sub i64 {}, 1", indent, sub, ln).ok();
+        let cond = format!("%lpc{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+        writeln!(out, "{}{} = icmp sgt i64 {}, 0", indent, cond, ln).ok();
+        let sel = format!("%lpsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+        writeln!(out, "{}{} = select i1 {}, i64 {}, i64 0", indent, sel, cond, sub).ok();
+        sel
+    } else {
+        let idx_reg = backend.emit_expr(out, index, indent);
+        backend.adapt_to_i64(out, indent, &idx_reg)
+    };
+    // Load element at pos (peek: DON'T update state — just return the value)
+    let cp = format!("%lcp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+    let ep = format!("%lep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, cp, pos).ok();
+    let ev = format!("%lev{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, ev, ep).ok();
+    return TypedRegister { name: ev.to_string(), ty: Type::Custom("Int".to_string()) };
+}
+
+// ── emit_arrow_copy ─────────────────────────────────────────────
+//
+// Copy: duplicate all elements from source to dest without consuming source.
+// Same as transfer but source state field is NOT updated (no removal).
+
+pub fn emit_arrow_copy(
+    backend: &mut LlvmBackend,
+    out: &mut String,
+    v: &str,
+    dest: &Box<Expr>,
+    source: &Box<Expr>,
+    indent: &str,
+) -> TypedRegister {
+    // 2026-07-10: Copy is a simple alias to transfer, but we skip the source
+    // update. For heap-allocated lists this means: alloc new buffer for dest,
+    // memcpy both source data into it, emit transfer code as-is but skip the
+    // final store that sets source length to 0.
+    let value_target = match source.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+    let src_val = backend.emit_expr(out, value_target, indent);
+    let src_boxed = backend.adapt_to_i64(out, indent, &src_val);
+    let shp = format!("%sch{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, shp, src_boxed).ok();
+    // Read source header: data_ptr (offset 0) and length (offset 1)
+    let sdp = format!("%csdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, sdp, shp).ok();
+    let slnp = format!("%csln{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, slnp, shp).ok();
+    let sln = format!("%csllen{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, sln, slnp).ok();
+    // Allocate new buffer for copy
+    let nbl = format!("%cbnl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = add i64 {}, 1", indent, nbl, sln).ok();
+    let nbs = format!("%cbnbs{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = mul i64 8, {}", indent, nbs, nbl).ok();
+    let nbb = format!("%cbnbc{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, nbb, nbs).ok();
+    let nbp = format!("%cbdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, nbp, nbb).ok();
+    // Build new header: data_ptr (nbp), length (sln)
+    let new_hp = format!("%cnwh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = call ptr @malloc(i64 16)", indent, new_hp).ok();
+    writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, nbp, new_hp).ok();
+    let nh_lngp = format!("%cnwl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, nh_lngp, new_hp).ok();
+    writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, sln, nh_lngp).ok();
+    // Memcpy source data into new buffer
+    let sdp_ptr = format!("%csdpp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sdp_ptr, sdp).ok();
+    let nbp_ptr = format!("%cnbpp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, nbp_ptr, nbp).ok();
+    let bytes = format!("%cbytes{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = mul i64 8, {}", indent, bytes, sln).ok();
+    writeln!(out, "{}call void @llvm.memcpy(ptr {}, ptr {}, i64 {}, i1 false)", indent, nbp_ptr, sdp_ptr, bytes).ok();
+    // Step 6: Store the new handle to dest (same as transfer, but NO source update)
+    let dest_target = match dest.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
+    let dest_name = dest_target.as_var_name();
+    if let Some(field_name) = dest_name {
+        if let Some(&idx) = backend.ctx.field_index_map.get(field_name) {
+            let ap = format!("%caap{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", indent, ap, idx).ok();
+            let tn = crate::backend::llvm::tbaa_node(&backend.ctx.field_types[idx], backend.ctx.type_universe.as_ref());
+            writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, nbp, ap, tn).ok();
+            backend.fun.pending_phi_backedge.insert(field_name.to_string(), nbp.to_string());
+        }
+    }
+    let ptr_val = format!("%cnpn{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr_val, new_hp).ok();
+    return TypedRegister { name: ptr_val.to_string(), ty: Type::Custom("Int".to_string()) };
+}

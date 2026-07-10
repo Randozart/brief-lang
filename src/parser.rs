@@ -6285,7 +6285,7 @@ let span = self.current_span();
                     let (target, index) = match self.extract_arrow_target(target_expr) {
                         Some((t, i)) => (t, i),
                         None => return self.spanned_err::<Statement>(
-                            "Expected &list or &list[...] after '<-'".to_string()
+                            "Expected a list expression after '<-'".to_string()
                         ),
                     };
                     self.expect(Token::Semicolon)?;
@@ -6378,41 +6378,88 @@ let span = self.current_span();
                     self.advance();
                     let right = self.parse_expression()?;
 
-                    // Check for two-sided transfer: &dest <- &source or &dest <- &source[; filter]
+                    // Check arrow targets: has_& indicates consumption.
+                    // 2026-07-10: Both bare identifiers are accepted as targets.
+                    let left_has_amp = matches!(&expr, Expr::AddrOf(_));
+                    let right_has_amp = matches!(&right, Expr::AddrOf(_));
                     let left_target = self.extract_arrow_target(expr.clone());
                     let right_target = self.extract_arrow_target(right.clone());
 
-                    if left_target.is_some() && right_target.is_some() {
-                        // Both sides have & → ArrowTransfer
+                    if left_has_amp && right_has_amp {
+                        // &dest <- &source (both have &) → transfer, consume: true
                         let (dest, _) = left_target.unwrap();
                         let (source, _) = right_target.unwrap();
                         let filter = self.extract_arrow_filter(&right);
                         let modifiers = self.parse_hashtag_modifiers()?;
                         self.expect(Token::Semicolon)?;
-                        Ok(Statement::Expression(Expr::ArrowTransfer { consume: true, 
+                        Ok(Statement::Expression(Expr::ArrowTransfer { consume: true,
                             dest: Box::new(dest),
                             source: Box::new(source),
                             filter,
                         }))
-                    } else if let Some((target, index)) = left_target {
-                        // &list <- x or &list[i] <- x → Push/Insert
+                    } else if left_has_amp {
+                        // &list <- x or &list[i] <- x → Push
+                        let (target, index) = left_target.unwrap();
                         let modifiers = self.parse_hashtag_modifiers()?;
                         self.expect(Token::Semicolon)?;
                         Ok(Statement::Expression(Expr::ArrowMut {
                             dir: ArrowDir::Push,
-                             consume: false, target: Box::new(target),
+                            consume: false, target: Box::new(target),
                             index: Box::new(index),
                             value: Some(Box::new(right)),
                         }))
-                    } else if let Some((target, index)) = self.extract_arrow_target(right) {
-                        // x <- &list or x <- &list[i] → Pop/Remove, bind to expr
+                    } else if right_has_amp {
+                        // dest <- &source → transfer, OR value <- &list → pop
+                        // Both have & on the RHS (consumption). Codegen decides
+                        // transfer vs pop based on types.
+                        let (source, index) = right_target.unwrap();
+                        if left_target.is_some() {
+                            // dest <- &source → transfer (both sides are collections)
+                            let (dest, _) = left_target.unwrap();
+                            let filter = self.extract_arrow_filter(&right);
+                            let modifiers = self.parse_hashtag_modifiers()?;
+                            self.expect(Token::Semicolon)?;
+                            Ok(Statement::Expression(Expr::ArrowTransfer { consume: true,
+                                dest: Box::new(dest),
+                                source: Box::new(source),
+                                filter,
+                            }))
+                        } else {
+                            // value <- &list → pop, bind to expr
+                            let modifiers = self.parse_hashtag_modifiers()?;
+                            self.expect(Token::Semicolon)?;
+                            Ok(Statement::Assignment {
+                                lhs: expr,
+                                expr: Expr::ArrowMut {
+                                    dir: ArrowDir::Pop,
+                                    consume: true, target: Box::new(source),
+                                    index: Box::new(index),
+                                    value: None,
+                                },
+                                timeout: None,
+                                modifiers,
+                            })
+                        }
+                    } else if let Some((target, index)) = left_target {
+                        // list <- x or list[i] <- x → Push (no & on either side)
+                        // The LHS looks like a collection → push
+                        let modifiers = self.parse_hashtag_modifiers()?;
+                        self.expect(Token::Semicolon)?;
+                        Ok(Statement::Expression(Expr::ArrowMut {
+                            dir: ArrowDir::Push,
+                            consume: false, target: Box::new(target),
+                            index: Box::new(index),
+                            value: Some(Box::new(right)),
+                        }))
+                    } else if let Some((target, index)) = right_target {
+                        // value <- list → Peek/Pop without consumption, bind to expr
                         let modifiers = self.parse_hashtag_modifiers()?;
                         self.expect(Token::Semicolon)?;
                         Ok(Statement::Assignment {
                             lhs: expr,
                             expr: Expr::ArrowMut {
                                 dir: ArrowDir::Pop,
-                                 consume: true, target: Box::new(target),
+                                consume: false, target: Box::new(target),
                                 index: Box::new(index),
                                 value: None,
                             },
@@ -6421,7 +6468,7 @@ let span = self.current_span();
                         })
                     } else {
                         self.spanned_err(
-                            "Either side of '<-' must be &list or &list[...]".to_string()
+                            "Either side of '<-' must be a list or &list".to_string()
                         )
                     }
                 } else {
@@ -6481,10 +6528,12 @@ let span = self.current_span();
     /// - `&list` → (OwnedRef("list"), Term)
     /// - `&list[5]` → (OwnedRef("list"), Integer(5))
     /// Check if an expression is a valid inner target for arrow mutation.
-    /// Accepts `&name`, `&name.field`, and `&name.field.subfield...` (via FieldAccess chain).
+    /// Accepts `&name`, `name`, `&name.field`, `name.field`, and deeper field chains.
     fn is_valid_arrow_inner(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::AddrOf(_) => true,
+            // 2026-07-10: Accept bare Identifier as a collection target.
+            // Previously only AddrOf was accepted (the & marker was required).
+            Expr::AddrOf(_) | Expr::Identifier(_) => true,
             Expr::FieldAccess(target, _) => self.is_valid_arrow_inner(target),
             _ => false,
         }
@@ -6492,7 +6541,8 @@ let span = self.current_span();
 
     fn extract_arrow_target(&self, expr: Expr) -> Option<(Expr, Expr)> {
         match expr {
-            Expr::AddrOf(_) => Some((expr, Expr::Term)),
+            // 2026-07-10: Accept bare Identifier as a collection target.
+            Expr::AddrOf(_) | Expr::Identifier(_) => Some((expr, Expr::Term)),
             Expr::ListIndex(target, index) => {
                 if self.is_valid_arrow_inner(&*target) {
                     Some((*target, *index))

@@ -937,8 +937,12 @@ pub fn emit_rest_expr(
             // we still allocate a fresh buffer of len-1. An arena allocator
             // (planned) would replace the free+malloc with a bump pointer reset.
             // 2026-06-30: Extracted to src/backend/llvm/expr/arrow.rs.
-            Expr::ArrowMut { dir: ArrowDir::Pop, target, index, value: None, consume: _ } => {
-                return crate::backend::llvm::expr::arrow::emit_arrow_pop(backend, out, v, target, index, indent);
+            Expr::ArrowMut { dir: ArrowDir::Pop, target, index, value: None, consume } => {
+                if *consume {
+                    return crate::backend::llvm::expr::arrow::emit_arrow_pop(backend, out, v, target, index, indent);
+                } else {
+                    return crate::backend::llvm::expr::arrow::emit_arrow_peek(backend, out, v, target, index, indent);
+                }
             }
             // 2026-06-30: Extracted to src/backend/llvm/expr/arrow.rs.
             Expr::ArrowDiscard { target, index } => {
@@ -950,8 +954,12 @@ pub fn emit_rest_expr(
             // This is the most allocation-heavy arrow op — the arena plan (Phase 1)
             // benefits transfer the most.
             // 2026-06-30: Extracted to src/backend/llvm/expr/arrow.rs.
-            Expr::ArrowTransfer { dest, source, filter: _, consume: _ } => {
-                return crate::backend::llvm::expr::arrow::emit_arrow_transfer(backend, out, v, dest, source, indent);
+            Expr::ArrowTransfer { dest, source, filter: _, consume } => {
+                if *consume {
+                    return crate::backend::llvm::expr::arrow::emit_arrow_transfer(backend, out, v, dest, source, indent);
+                } else {
+                    return crate::backend::llvm::expr::arrow::emit_arrow_copy(backend, out, v, dest, source, indent);
+                }
             }
             Expr::Cast(inner, target_ty) => {
                 // 2026-07-03: EOR optimization — detect Cast(BinaryOp(Cast(a, T), Cast(b, T)), U)
