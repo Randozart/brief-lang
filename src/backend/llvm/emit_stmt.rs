@@ -750,12 +750,67 @@ impl LlvmBackend {
                 let fname = match lhs {
                     Expr::Identifier(n) => n.clone(),
                     Expr::AddrOf(inner) => {
-                        let Some(name) = inner.as_var_name() else {
-                            writeln!(out, "{}; &<complex> = value not supported", indent).ok();
+                        // 2026-07-10: Simple &field = value → typed store.
+                        // For complex inner expressions (AddrOf(ListIndex(...)),
+                        // AddrOf(FieldAccess(...))), fall through to match the
+                        // inner expression as the LHS directly.
+                        if let Some(name) = inner.as_var_name() {
+                            self.emit_typed_store(out, indent, name, &val);
                             return;
-                        };
-                        self.emit_typed_store(out, indent, name, &val);
-                        return;
+                        }
+                        let lhs = inner.as_ref();
+                        let val = val;
+                        match lhs {
+                            Expr::ListIndex(list_expr, index_expr) => {
+                                let val_reg = val.name.clone();
+                                let list_name = match &**list_expr {
+                                    Expr::Identifier(n) => n.clone(),
+                                    _ => { writeln!(out, "{}; assign list[idx] = {}", indent, val_reg).ok(); return; }
+                                };
+                                let idx_val = self.emit_expr(out, index_expr, indent);
+                                let list_ptr: Option<String> =
+                                    if let Some(ref ssa_reg) = self.fun.ssa_state_reg.clone() {
+                                        if let Some(&field_idx) = self.ctx.field_index_map.get(&list_name) {
+                                            let ev = format!("%lev{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                                            writeln!(out, "{}{} = extractvalue %State {}, {}", indent, ev, ssa_reg, field_idx).ok();
+                                            Some(ev)
+                                        } else if let Some(reg) = self.fun.let_bindings.get(&list_name).cloned() {
+                                            Some(reg)
+                                        } else {
+                                            None
+                                        }
+                                    } else if let Some(reg) = self.fun.let_bindings.get(&list_name).cloned() {
+                                        Some(reg)
+                                    } else if let Some(&field_idx) = self.ctx.field_index_map.get(&list_name) {
+                                        let sr = self.fun.state_reg_name.clone();
+                                        let p = self.emit_state_gep(out, indent, "lgp", &sr, field_idx);
+                                        let ld = format!("%lld{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                                        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, ld, p).ok();
+                                        Some(ld)
+                                    } else {
+                                        None
+                                    };
+                                let Some(list_ptr) = list_ptr else {
+                                    writeln!(out, "{}; assign list[idx] = {} (unknown list '{}')", indent, val_reg, list_name).ok();
+                                    return;
+                                };
+                                let hp = format!("%lhp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_ptr).ok();
+                                let dp = format!("%ldp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
+                                let de = format!("%lde{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
+                                let idx_boxed = self.adapt_to_i64(out, indent, &idx_val);
+                                let ep = format!("%lep{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, de, idx_boxed).ok();
+                                writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, val_reg, ep).ok();
+                                return;
+                            }
+                            _ => {
+                                writeln!(out, "{}; assign unknown LHS", indent).ok();
+                                return;
+                            }
+                        }
                     }
                     Expr::Deref(ptr) => {
                         // 2026-07-10: Deref LHS — evaluate the pointer, store through it.

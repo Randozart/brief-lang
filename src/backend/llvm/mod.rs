@@ -2246,6 +2246,21 @@ self.emit_declares(&mut out);
         // The decision is driven by the transition graph (analysis), not by
         // runtime profiling data. Contracts provide the bound/liveness info.
 
+        // 2026-07-10: Count distinct fields written by the txn via &field = value.
+        // A005c per-field phi loop is optimal for 1-4 fields. Beyond that, the
+        // GEP+load+store per tick overhead exceeds the phi register benefit,
+        // and A006 (direct SSA loop with full phi state) produces better code.
+        let active_writes: usize = txns.first().map_or(0, |(_, txn)| {
+            let mut seen = std::collections::HashSet::new();
+            for stmt in &txn.body {
+                if let Statement::Assignment { lhs, .. } = stmt {
+                    if let Some(name) = lhs.as_var_name() {
+                        seen.insert(name.to_string());
+                    }
+                }
+            }
+            seen.len()
+        });
         let foldable = graph.nodes.len() == 1
             && !graph.has_triggers
             && txns.len() == 1
