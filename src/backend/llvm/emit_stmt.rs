@@ -293,7 +293,18 @@ impl LlvmBackend {
         let p = self.emit_state_gep(out, indent, "ts", &sr, idx);
         let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
         let tv = self.ensure_typed_value(out, indent, &ty, &val.name, brief_ty, Some(&val.ty));
-        writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
+        // 2026-07-10: TBAA metadata enables LLVM to prove field stores don't
+        // alias each other. Without it, every store blocks load hoisting, store
+        // forwarding, and SROA — causing ~54% slowdown (fannkuch regression).
+        let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
+        let is_counter = self.fun.counter_field_name.as_deref() == Some(name);
+        if (self.fun.needs_state_stores_in_body || self.fun.rotation_fields.contains(name) || is_counter)
+            && (self.fun.done_needs_fields.is_empty() || self.fun.done_needs_fields.contains(name)
+                || self.fun.rotation_fields.contains(name) || is_counter)
+        {
+            writeln!(out, "{}store {} {}, ptr {}, align {}, !tbaa !{}",
+                indent, ty, tv, p, self.align_of(&ty), tn).ok();
+        }
         // 2026-07-10: Update SSA tracking maps so subsequent reads in the same
         // tick (guard expressions, phi backedge) see the computed value, not the
         // stale phi register. Without this, guards like [ops % 5000000 == 0] read
