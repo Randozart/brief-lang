@@ -294,6 +294,31 @@ impl LlvmBackend {
         let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
         let tv = self.ensure_typed_value(out, indent, &ty, &val.name, brief_ty, Some(&val.ty));
         writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
+        // 2026-07-10: Update SSA tracking maps so subsequent reads in the same
+        // tick (guard expressions, phi backedge) see the computed value, not the
+        // stale phi register. Without this, guards like [ops % 5000000 == 0] read
+        // the old phi value (0) instead of the new body-computed value.
+        let ty_str = ty.as_str();
+        let is_native_float = ty_str == "float" || ty_str == "double";
+        if !is_native_float {
+            let val_boxed = self.adapt_to_i64(out, indent, val);
+            let is_counter = self.fun.counter_field_name.as_deref() == Some(name);
+            let is_exempt = is_counter || self.fun.parallel_safe_exempt_fields.contains(name);
+            if !self.fun.parallel_safe_body || is_exempt {
+                self.fun.ssa_old_int_regs.insert(name.to_string(), val_boxed.clone());
+            }
+            self.fun.pending_phi_backedge.insert(name.to_string(), val_boxed);
+            self.fun.pending_phi_native_backedge.insert(name.to_string(), tv);
+        } else {
+            // Native float/double: track in float regs cache instead.
+            let is_counter = self.fun.counter_field_name.as_deref() == Some(name);
+            let is_exempt = is_counter || self.fun.parallel_safe_exempt_fields.contains(name);
+            if !self.fun.parallel_safe_body || is_exempt {
+                self.fun.ssa_old_float_regs.insert(name.to_string(), tv.clone());
+            }
+            self.fun.pending_phi_backedge.insert(name.to_string(), tv.clone());
+            self.fun.pending_phi_native_backedge.insert(name.to_string(), tv);
+        }
     }
 
     /// 2026-07-04: Emit chunk allocas for all %State sub-structs.
