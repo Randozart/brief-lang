@@ -307,7 +307,17 @@ impl LlvmBackend {
         let sr = self.fun.state_reg_name.clone();
         let p = self.emit_state_gep(out, indent, "ts", &sr, idx);
         let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
-        let tv = self.ensure_typed_value(out, indent, &ty, &val.name, brief_ty, Some(&val.ty));
+        // 2026-07-10: Box non-float values through adapt_to_i64 for SSA register
+        // copying (affects LLVM phi placement/register allocation). Float/double
+        // skip the boxing to avoid the float→i32→i64→i32→float bitcast chain.
+        let ty_str = ty.as_str();
+        let is_native_float = ty_str == "float" || ty_str == "double";
+        let val_for_store = if is_native_float {
+            val.name.clone()
+        } else {
+            self.adapt_to_i64(out, indent, val)
+        };
+        let tv = self.ensure_typed_value(out, indent, &ty, &val_for_store, brief_ty, Some(&val.ty));
         // 2026-07-10: TBAA metadata enables LLVM to prove field stores don't
         // alias each other. Without it, every store blocks load hoisting, store
         // forwarding, and SROA — causing ~54% slowdown (fannkuch regression).
@@ -324,10 +334,8 @@ impl LlvmBackend {
         // tick (guard expressions, phi backedge) see the computed value, not the
         // stale phi register. Without this, guards like [ops % 5000000 == 0] read
         // the old phi value (0) instead of the new body-computed value.
-        let ty_str = ty.as_str();
-        let is_native_float = ty_str == "float" || ty_str == "double";
         if !is_native_float {
-            let val_boxed = self.adapt_to_i64(out, indent, val);
+            let val_boxed = val_for_store.clone();
             let is_counter = self.fun.counter_field_name.as_deref() == Some(name);
             let is_exempt = is_counter || self.fun.parallel_safe_exempt_fields.contains(name);
             if !self.fun.parallel_safe_body || is_exempt {
