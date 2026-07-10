@@ -7,6 +7,22 @@ This plan extends zero-copy to composite types (structs, String, heap objects) t
 four phases. Every phase is driven entirely by Brief declarations — the user never
 touches C, Rust, or Python bridge code.
 
+## Testing Mandate
+
+Every new code path, match arm, and feature in ALL phases MUST have corresponding
+unit tests. No exceptions. The existing 1448-test baseline must never regress.
+
+Each phase below lists the specific tests to add. As a general rule:
+- **Parser changes**: test both the new syntax AND that old syntax still parses
+- **Codegen changes**: compile the new pattern to LLVM IR and verify the IR text
+- **Typechecker changes**: test both valid programs (no diagnostics) and invalid
+  programs (expected warnings/errors)
+- **Regression tests**: for every bug found during implementation, add a test
+  that exercises the precise failing pattern before fixing it
+
+Run `cargo test --lib` before every commit. Run `bash benchmarks/build_and_bench.sh
+--correctness` before every Phase 1 and Phase 2 commit.
+
 ## Constraint: Flat Control Flow
 
 ALL code written or modified in these phases MUST follow the 2-level nesting depth
@@ -89,6 +105,22 @@ a proper struct type in Brief's type universe means `llvm_type("String")` return
 | `src/backend/llvm/context.rs` | `fn llvm_type()` on backend context — same change | Delegate to shared helper in emit_toplevel |
 | `src/backend/llvm/expr/projection.rs` | Handle `extractvalue` for by-value struct params (Phase 1b) | Early return if not struct; single match |
 | `src/type_universe.rs` | Register String as a struct type if not already | ~5 lines, no nesting concern |
+
+### Unit tests
+
+| Test file | Test name | What it covers |
+|-----------|-----------|----------------|
+| `src/backend/llvm/tests.rs` | `test_export_struct_param_llvm_type` | Struct param emits `%StructName` in LLVM signature |
+| `src/backend/llvm/tests.rs` | `test_export_struct_param_no_box` | Struct param is NOT `ptrtoint`-boxed at entry |
+| `src/backend/llvm/tests.rs` | `test_export_struct_field_extractvalue` | Field access on struct param uses `extractvalue` |
+| `src/backend/llvm/tests.rs` | `test_export_empty_struct` | `struct Empty {}` param emits `%Empty = type {}` |
+| `src/backend/llvm/tests.rs` | `test_export_large_struct_by_ptr` | Struct over 128 bits passed by pointer |
+| `src/backend/llvm/tests.rs` | `test_string_struct_llvm_emission` | String → `%String = type { i8*, i64 }` |
+| `src/backend/llvm/tests.rs` | `test_intern_struct_no_export_unchanged` | Internal-only structs (not exported) stay boxed |
+| `src/type_universe.rs` | `test_string_registered_as_struct` | String appears in struct_types with ptr + len fields |
+
+All tests must verify the emitted LLVM IR text directly (grep for `%StructName`,
+`extractvalue`, etc.) — not just that the compiler doesn't crash.
 
 ### Benchmark verification
 
@@ -182,6 +214,23 @@ When an export function takes a `PyLongObject` parameter:
 4. The route expression `ob_digit_0` is evaluated as a struct field access: GEP at offset 24
 5. The load reads directly from the Python heap — zero copy
 
+### Unit tests
+
+| Test file | Test name | What it covers |
+|-----------|-----------|----------------|
+| `src/backend/llvm/tests.rs` | `test_meld_gep_export_param` | Export `ptr` param marked chimera; field access emits GEP at meld offset |
+| `src/backend/llvm/tests.rs` | `test_meld_gep_offset_computation` | Meld route `Ptr -> ob_digit_0` computes correct byte offset |
+| `src/backend/llvm/tests.rs` | `test_meld_identity_route_noop` | `Ptr -> Ptr` route emits no instructions |
+| `src/backend/llvm/tests.rs` | `test_chimera_noop_decay` | `emit_decay` returns register unchanged when backing matches target |
+| `src/backend/llvm/tests.rs` | `test_meld_gep_mutability` | Writing to chimera field emits `store` at meld offset |
+| `src/backend/llvm/tests.rs` | `test_export_chimera_param_marking` | After entry, export `PyLongObject` param is in chimera_map |
+| `src/backend/llvm/tests.rs` | `test_meld_gep_unknown_route_error` | Field not in meld route produces compiler error |
+| `src/backend/llvm/helpers.rs` (test module) | `test_meld_route_offset_intrinsic` | Route with `strlen#` intrinsic delegates to intrinsic path |
+
+LLVM IR verification: grep for `getelementptr`, verify the offset matches the
+meld route. Also verify zero `malloc`/`alloca` calls in the export body (no
+materialization).
+
 ### Edge cases
 
 - **Mutability**: If a chimera value is written to (e.g., `p.ob_digit_0 = 42`), emit a `store` at the meld offset. Brief's mutability rules already track this.
@@ -264,6 +313,27 @@ The typechecker maintains a set of "may-fail" registers (those returned by a fai
 This is a lightweight taint-tracking pass. Not full dataflow — just one hop. A value
 is "checked" if the immediate next use is a comparison against its sentinel.
 
+### Unit tests
+
+| Test file | Test name | What it covers |
+|-----------|-----------|----------------|
+| `src/parser.rs` | `test_parse_frgn_with_sentinel` | `[fail: -1]` parses and stores sentinel expression |
+| `src/parser.rs` | `test_parse_frgn_no_sentinel` | `frgn` without `[fail: ...]` has no sentinel (triggers implicit Result) |
+| `src/ast.rs` | `test_frgn_sentinel_field` | `ForeignBinding.sentinel` is `Some` for fail-tagged frgn |
+| `src/typechecker.rs` | `test_frgn_sentinel_checked_ok` | Sentinel compared to value — no warning |
+| `src/typechecker.rs` | `test_frgn_sentinel_unchecked_warning` | Sentinel value used without check — warning emitted |
+| `src/typechecker.rs` | `test_frgn_result_handled` | `match frgn_call() { Ok(v) => ..., Err(e) => ... }` — no warning |
+| `src/typechecker.rs` | `test_frgn_result_unhandled_warning` | `let x = frgn_call()` without match — warning emitted |
+| `src/typechecker.rs` | `test_frgn_result_propagated` | `frgn_call()?` — propagates, no warning |
+| `src/backend/llvm/tests.rs` | `test_frgn_emit_sentinel_check` | LLVM IR for `[fail: -1]` includes comparison + branch |
+| `src/backend/llvm/tests.rs` | `test_frgn_emit_result_wrap` | LLVM IR for implicit Result includes `__wrap_frgn_result` |
+| `src/backend/llvm/intrinsics.rs` | `test_wrap_frgn_result_ok_path` | `__wrap_frgn_result` with no error returns success discriminant |
+| `src/backend/llvm/intrinsics.rs` | `test_wrap_frgn_result_err_path` | `__wrap_frgn_result` with error returns error struct |
+
+Additionally: update ALL existing `frgn` declarations in `lib/std/os/*.bv` with
+appropriate `[fail: sentinel]` annotations. These are exercised by the benchmark
+suite — if a benchmark breaks, the annotations were applied incorrectly.
+
 ---
 
 ## Phase 4 — `export` Keyword
@@ -275,29 +345,96 @@ mirroring `frgn` syntactically.
 
 ### Syntax
 
+`export` is a first-class keyword that can precede `defn` or `txn`. It mirrors
+`frgn` syntactically — `frgn` is an incoming external call, `export` is an
+outgoing one. Both are part of the function/txn signature, not annotations:
+
 ```brief
-// Current (annotation):
-#export
-defn add(a: Int, b: Int) -> Int { term a + b; };
+// ── export defn (pure function) ─────────────────────────────────
 
-// Proposed (keyword — first-class part of signature, optional):
-defn add(a: Int, b: Int) -> Int { term a + b; };
+// Basic: same symbol name
 export defn add(a: Int, b: Int) -> Int { term a + b; };
-export("my_api_name") defn add(a: Int, b: Int) -> Int { term a + b; };
+// LLVM: define i64 @add(ptr %state, i64 %a, i64 %b)
 
-// Also valid — export on txn:
-export txn accum(n: Int, i: Int) [i < n][i == n] -> Int { i = i + 1; term i; };
+// With explicit foreign symbol name:
+export("my_add_api") defn add(a: Int, b: Int) -> Int { term a + b; };
+// LLVM: define i64 @my_add_api(ptr %state, i64 %a, i64 %b)
 
-// Not valid — export on rct (reactive txns are state-internal):
-rct txn tick [x < 100][x == 100] { ... };  // internal — no export
+// ── export txn (callable convergent loop — with params) ─────────
+
+// Callable txn that converges: iterates until postcondition
+export txn fact_loop(n: Int, acc: Int, i: Int) [i <= n][i > n] -> Int {
+    let next: Int = acc * i;
+    i = i + 1;
+    term next;
+};
+// LLVM: define i64 @fact_loop(ptr %state, i64 %n, i64 %acc, i64 %i)
+// Body emits the convergence loop; returns when postcondition met.
+// Foreign caller sees a single call — the loop runs inside.
+
+// With override symbol:
+export("compute_factorial") txn fact_loop(n: Int, acc: Int, i: Int) [i <= n][i > n] -> Int {
+    let next: Int = acc * i;
+    i = i + 1;
+    term next;
+};
+
+// ── NOT valid: export rct txn (reactive txns are state-internal) ──
+//   rct txn tick [x < 100][x == 100] { ... };
+// Reactive txns have no well-defined single-entry, single-exit calling
+// convention. They react to state changes and may never terminate.
+// The compiler MUST reject `export rct txn` with a clear error.
+
+// ── NOT valid: export on non-defn/txn items ────────────────
+//   export struct Foo { ... };
+//   export const N: Int = 42;
+// Only defn and txn have a calling convention at the FFI boundary.
+// The compiler MUST reject `export struct` etc. with a clear error.
+
+// ── Symmetry with frgn ─────────────────────────────────────
+
+// Incoming:
+frgn  open_file(path: String) -> Int [fail: -1];
+
+// Outgoing:
+export defn process(buf: CBuffer) -> Int;
+
+// Both cross the Brief↔foreign boundary. Both participate in the same
+// meld-verified ABI dispatch. The compiler handles them identically for
+// codegen — the only difference is which side owns the implementation.
 ```
 
 ### Backward compatibility
 
 - `#export` annotation still works (Phase 4 is additive)
 - `export defn` and `#export defn` behave identically
+- `export txn` and `#export txn` behave identically (if `#export txn` was already supported)
 - Migration warning: "`#export` annotation is deprecated; use `export` keyword"
-- Remove `#export` in a later release
+- Remove `#export` annotation support in a later release (after at least one full cycle)
+
+### Unit tests
+
+| Test file | Test name | What it covers |
+|-----------|-----------|----------------|
+| `src/parser.rs` | `test_parse_export_defn_basic` | `export defn add(...)` parses as defn with `export_name = Some("add")` |
+| `src/parser.rs` | `test_parse_export_defn_override` | `export("my_name") defn add(...)` — `export_name = Some("my_name")` |
+| `src/parser.rs` | `test_parse_export_txn` | `export txn accum(...) [pre][post] -> Ret { ... }` parses as txn with export flag |
+| `src/parser.rs` | `test_parse_export_txn_override` | `export("loop") txn iter(...) [pre][post] -> Ret { ... }` |
+| `src/parser.rs` | `test_parse_export_rct_txn_rejected` | `export rct txn tick ...` produces clear error |
+| `src/parser.rs` | `test_parse_export_struct_rejected` | `export struct Foo ...` produces clear error |
+| `src/parser.rs` | `test_parse_export_const_rejected` | `export const N ...` produces clear error |
+| `src/parser.rs` | `test_parse_hash_export_still_works` | `#export defn add(...)` still parses (backward compat) |
+| `src/ast.rs` | `test_export_name_field` | `defn.export_name` populated for `export defn`, `None` for regular defn |
+| `src/ast.rs` | `test_export_txn_name_field` | `txn.export_name` populated for `export txn`, `None` for regular txn |
+| `src/backend/llvm/tests.rs` | `test_emit_export_defn_library` | `export defn add` in library mode emits correct LLVM symbol |
+| `src/backend/llvm/tests.rs` | `test_emit_export_defn_override` | `export("my_add") defn add` in library mode emits `@my_add` |
+| `src/backend/llvm/tests.rs` | `test_emit_export_txn_library` | `export txn` in library mode emits correct convergence loop in LLVM |
+| `src/glue/export.rs` | `test_export_extracts_export_name` | `export defn` appears in bridge-exports.dbvl |
+| `src/glue/export.rs` | `test_hash_export_still_extracted` | `#export defn` still appears in bridge-exports.dbvl (backward compat) |
+
+Additionally: verify that ALL existing test programs using `#export` still produce
+identical LLVM IR after the change. Use `git diff --word-diff` on the `.ll` outputs
+of the existing test suite before vs after the refactor.
 
 ### Files to modify
 
@@ -306,9 +443,10 @@ rct txn tick [x < 100][x == 100] { ... };  // internal — no export
 | `src/lexer.rs` (or token definitions) | Add `Token::Export` | Single token variant |
 | `src/parser.rs` | In `parse_top_level()`: match `Token::Export` → parse optional `("symbol")` → expect `defn` or `txn` → set export name on the parsed item | Extract into `fn parse_export_defn()` — guard clause for `(` vs `defn` |
 | `src/parser.rs` | In `parse_definition()`: accept modifier annotations AND the new export keyword form | `parse_definition()` stays unchanged; the keyword wrapping happens in `parse_top_level` |
-| `src/ast.rs` | Remove `SigModifier::Export` — move export_name to `Definition.export_name: Option<String>` | Struct field, clean rename; verify all existing match arms removed |
+| `src/ast.rs` | Remove `SigModifier::Export` — move export_name to `Definition.export_name: Option<String>` and add `export_name: Option<String>` to `Transaction` | Struct field, clean rename; verify all existing match arms removed |
 | `src/backend/llvm/emit_toplevel.rs` | Key off `defn.export_name` instead of scanning modifiers for `#export` | Replace `get_export_name()` call with direct field access |
 | `src/glue/export.rs` | Same — use `defn.export_name` | Straightforward field access |
+| `src/backend/llvm/emit_toplevel.rs` | Handle `txn.export_name` in `emit_callable_txn()` — emit wrapper when present | Extract export wrapper emission into `fn emit_export_wrapper()` — shared by defn and txn |
 
 ---
 
