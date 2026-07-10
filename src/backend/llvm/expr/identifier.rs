@@ -368,14 +368,15 @@ pub(crate) fn emit_addr_of(
 ) -> Result<String, String> {
     match expr {
         Expr::Identifier(name) => {
-            if let Some(&idx) = backend.ctx.field_index_map.get(name) {
-                // State field → GEP on %State*
-                let state_ptr = &backend.fun.state_reg_name;
-                let reg = format!("%ap{}", backend.fun.txn_counter);
-                backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}",
-                    indent, reg, state_ptr, idx)
-                    .map_err(|e| e.to_string())?;
+            // 2026-07-09: Look up field index first, then borrow backend mutably.
+            let idx = backend.ctx.field_index_map.get(name).copied();
+            if let Some(idx) = idx {
+                // 2026-07-09: Use emit_state_gep which routes to chunk allocas
+                // (%state_0, %StateChunk0) when main_body=true, matching what
+                // pre_load_all_fields uses. Previously hardcoded %State* which
+                // desynchronized pre-checks from body stores.
+                let sr = backend.fun.state_reg_name.clone();
+                let reg = backend.emit_state_gep(out, indent, "ap", &sr, idx);
                 Ok::<String, String>(reg)
             } else {
                 // Let bindings without an alloca are not supported.

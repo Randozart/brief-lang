@@ -120,6 +120,86 @@ pub fn check_dangling_ptrs(body: &[Statement]) -> Vec<String> {
     warnings
 }
 
+/// Collect variable names referenced in an expression.
+fn collect_var_names(expr: &Expr) -> Vec<String> {
+    let mut vars = Vec::new();
+    let mut work = vec![expr];
+    while let Some(e) = work.pop() {
+        match e {
+            Expr::Identifier(n) => vars.push(n.clone()),
+            Expr::AddrOf(inner) | Expr::Deref(inner)
+            | Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) | Expr::Cast(inner, _) => {
+                work.push(inner);
+            }
+            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
+            | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
+            | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
+            | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
+            | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
+                work.push(b);
+                work.push(a);
+            }
+            Expr::FieldAccess(obj, _) | Expr::ListIndex(obj, _) => { work.push(obj); }
+            Expr::Call(_, args) => { work.extend(args.iter().rev()); }
+            _ => {}
+        }
+    }
+    vars
+}
+
+/// Collect variable names written to by assignment statements in a body.
+fn collect_write_vars(body: &[Statement]) -> Vec<String> {
+    let mut vars = Vec::new();
+    for stmt in body {
+        if let Statement::Assignment { lhs, .. } = stmt {
+            if let Some(name) = lhs.as_var_name() {
+                vars.push(name.to_string());
+            }
+        }
+        if let Statement::Let { name, .. } = stmt {
+            vars.push(name.clone());
+        }
+    }
+    vars
+}
+
+/// Check that every reactive transaction can converge on its own.
+/// A reactive txn must modify at least one variable in its pre-condition;
+/// otherwise it depends entirely on other txns to unblock it, which is
+/// a convergence footgun.
+pub fn check_convergence_safety(txn_name: &str, is_reactive: bool, pre: &Expr, body: &[Statement]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if !is_reactive { return warnings; }
+    if matches!(pre, Expr::Bool(true)) { return warnings; }
+
+    let pre_vars = collect_var_names(pre);
+    let write_vars = collect_write_vars(body);
+
+    let mut modifies_own_pre = false;
+    for pre_var in &pre_vars {
+        if write_vars.contains(pre_var) {
+            modifies_own_pre = true;
+            break;
+        }
+    }
+    if !modifies_own_pre {
+        let pre_str = pre_vars.join(", ");
+        let write_str = if write_vars.is_empty() {
+            "nothing".to_string()
+        } else {
+            write_vars.join(", ")
+        };
+        warnings.push(format!(
+            "warning: reactive txn '{}' has precondition [{}] but body writes to [{}]. \
+             The txn does not modify any precondition variable and depends on other \
+             txns to satisfy its convergence. If no other txn changes the precondition \
+             to false, this txn will run forever.",
+            txn_name, pre_str, write_str
+        ));
+    }
+    warnings
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

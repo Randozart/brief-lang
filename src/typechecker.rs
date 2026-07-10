@@ -1636,6 +1636,17 @@ impl TypeChecker {
             });
         }
 
+        // 2026-07-09: Check convergence safety — reactive txns should modify
+        // at least one variable in their pre-condition. Otherwise they depend
+        // entirely on other txns to unblock them (convergence footgun).
+        for warning in crate::analysis::provenance::check_convergence_safety(
+            &txn.name, txn.is_reactive, &txn.contract.pre_condition, &txn.body,
+        ) {
+            self.diagnostics.borrow_mut().push(
+                crate::errors::Diagnostic::new("W003", crate::errors::Severity::Warning, &warning)
+            );
+        }
+
         self.pop_scope();
     }
 

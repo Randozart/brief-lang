@@ -7,7 +7,7 @@ let a: Int = 42;
 let b: Int = 99;
 
 // Use & to create pointers to a and b, then swap through them
-txn swap [a != 99 || b != 42][a == 99 && b == 42] {
+rct txn swap [a != 99 || b != 42][a == 99 && b == 42] {
   let pa = &a;        // Ptr<Int> to a
   let pb = &b;        // Ptr<Int> to b
   let tmp = *pa;      // read a's value through pointer

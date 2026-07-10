@@ -2286,10 +2286,23 @@ impl LlvmBackend {
             // so let-bindings like `energy` in nbody are re-emitted post-loop
             // with fresh field loads from %State.
             let (body_stmts, post_hoist): (Vec<&Statement>, Vec<Vec<Statement>>) = {
+                // 2026-07-09: Filter out Term (plain term) — these mark the end
+                // of a txn iteration without side effects. TermBang is also filtered
+                // because emit_stmt for TermBang in main_body emits ret i32 0 (line 580),
+                // which would terminate @main mid-body. Top-level TermBang swan songs
+                // are not hoisted to post_hoist in the non-canonical path (todo).
                 let mut stmts: Vec<&Statement> = txn.body.iter()
                     .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
                     .collect();
                 let mut hoist: Vec<Vec<Statement>> = Vec::new();
+                for s in &txn.body {
+                    if let Statement::TermBang { swan_song: Some(ss), .. } = s {
+                        hoist.push(vec![ss.as_ref().clone()]);
+                    }
+                }
+                let mut stmts: Vec<&Statement> = txn.body.iter()
+                    .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
+                    .collect();
                 if let Some(last_idx) = stmts.len().checked_sub(1) {
                     if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
                         let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang { .. }));

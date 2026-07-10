@@ -2474,15 +2474,16 @@ self.emit_declares(&mut out);
                     self.emit_thread_pool_metadata(&mut out);
                 } else if dispatch_mode == DispatchMode::Sequential && !txns.is_empty()
                     && enumerable.is_none() && !has_wake_triggers
-                    && txns.iter().filter(|(_, t)| t.is_reactive).all(|(name, _)| {
-                        graph.nodes.iter().find(|n| n.name == *name)
-                            .map_or(false, |n| n.bounded_pre.is_some() && n.increments.is_some())
-                    })
                 {
                     // A005: SSA register pipeline (or modulo-switch dispatch)
-                    // 2026-07-01: emit_ssa_main internally checks for modulo dispatch
-                    // pattern and emits switch-based dispatch if detected. The specific
-                    // path taken is reported in the function's own warning message.
+                    // 2026-07-09: Removed bounded_pre + increments requirement —
+                    // emit_ssa_main correctly handles txns without bounded_pre via
+                    // emit_ssa_txn_with_precond (per-tick pre check + any_fired).
+                    // The A005 fold path is independently guarded by multi_fold_params.
+                    // The A006 fallback at line 2632 handles the same codegen path,
+                    // so entering here vs A006 produces identical IR for non-foldable
+                    // programs. This change allows mixed bounded/unbounded reactive txns
+                    // to share the SSA pipeline instead of falling through to A006.
                     self.emit_ssa_main(&mut out, &txns, false);
                 } else if let Some(ref enum_sizes) = enumerable {
                 // Enumerable triggers — emit switch-dispatch main
