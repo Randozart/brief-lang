@@ -1,18 +1,26 @@
-// GLUE Adapter Registry Schema
+// GLUE Target Registry Schema
+//
 // Validates each entry in glue.dbvl:
 //   position 0: language (String) — name of the target language
-//   position 1: macro_path (String) — path to the $!macro adapter file
+//   position 1: types_module (String) — path to .bv with foreign type declarations
 //   position 2: file_extension (String) — native source file extension (without dot)
-//   position 3: output_dir (String, Optional) — subdirectory for generated files
-//   position 4: type_map (Map<String, String>, Optional) — Brief-to-language type mapping
+//   position 3: llvm_triple (String) — LLVM target triple; "any" for non-LLVM targets
+//   position 4: c_type_map (Map<String, String>, Optional) — Brief type → C ABI type mapping
+//
+// 2026-07-10: GLUE v2 schema. Removed macro_path and output_dir (adapter $!macro
+// system is replaced by LLVM IR merging + meld projections). Added types_module
+// (foreign type names for Brief's type universe so meld can reference them) and
+// llvm_triple (target triple for LLVM compilation). c_type_map now maps Brief
+// types to canonical C ABI types (int64_t, double, etc.) instead of language-
+// specific type names.
 //
 // The map format matches parse_map() in dbvl_reader.rs:
 //   pairs separated by whitespace, key:value separated by colon, wrapped in { }
 //
-entry AdapterEntry {
+entry GlueTarget {
     language: String;
-    macro_path: String;
+    types_module: String;
     file_extension: String;
-    output_dir: Optional<String>;
-    type_map: Optional<Map<String, String; pair_separator=:, value_delimiter=space, brace=required>>;
+    llvm_triple: String;
+    c_type_map: Optional<Map<String, String; pair_separator=:, value_delimiter=space, brace=required>>;
 };

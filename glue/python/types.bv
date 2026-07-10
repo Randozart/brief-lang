@@ -1,0 +1,14 @@
+// GLUE: Python foreign type declarations for Brief's type universe.
+//
+// Python doesn't compile to LLVM IR, so interop goes through C ABI +
+// meld projections onto CPython's GC heap. These types are the C
+// representation at the CPython extension boundary.
+//
+// Python heap object layouts (PyLongObject, PyUnicodeObject, etc.)
+// are defined via meld routes in the bridge file for zero-copy access.
+
+type int64_t;
+type double;
+type bool;
+type char;
+type cstring;

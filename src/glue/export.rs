@@ -1,24 +1,29 @@
 // GLUE Export Pipeline
 //
-// `brief export <bridge.bv> <language>` — compiles a Brief bridge to a
-// native archive (.a), then invokes the language's `$!` adapter macro to
-// generate native wrapper source files alongside the archive.
+// `brief export <bridge.bv> <language>` — reads a Brief bridge file,
+// extracts #export, frgn, and meld declarations, then writes a
+// bridge-exports.dbvl metadata file alongside the compiled LLVM IR module.
 //
 // Pipeline:
 //   1. Parse the bridge .bv to collect #export/frgn/meld declarations.
-//   2. Compile to .a via `brief build --library` (LLVM backend).
-//   3. Read glue.dbvl to find the language adapter entry.
-//   4. Validate against glue.dbvs schema.
-//   5. Invoke the adapter's `$!macro` which calls emit_file#() to write
-//      native source files into the output directory.
+//   2. Read glue.dbvl to find the language target entry (types_module,
+//      llvm_triple, c_type_map).
+//   3. Write bridge-exports.dbvl with tagged entries:
+//      - export lines: function signatures crossing the boundary
+//      - meld lines: type-layout compatibility proofs for the boundary
+//      - ctype lines: Brief type → C ABI type mappings (from glue.dbvl)
+//   4. (Future) Compile bridge to .ll via `brief build --library`.
 //
-// Architecture: Adapters are Brief `$!` macros (glue/adapters/<lang>.bv),
-// not Rust template engines. The Rust side simply compiles the bridge and
-// calls into the macro system. This keeps all language-specific logic in
-// Brief code that survives self-hosting.
+// 2026-07-10: GLUE v2. Replaced the $!macro adapter pipeline (which
+// generated C ABI wrapper crates) with direct bridge-exports.dbvl output
+// consumed by foreign build systems. The foreign build.rs or script reads
+// the .dbvl to generate bindings. Two interop paths exist:
+//   Path A (LLVM LTO) — for LLVM targets (Rust, C, Swift, Zig). Brief's
+//     .ll merges with the host's .ll before optimization.
+//   Path B (Meld) — for managed runtimes (Python, Node). C ABI transport
+//     + meld projections for zero-copy data access.
 
 use crate::ast::{Annotation, OutputType, Program, ResultType, TopLevel};
-use crate::features::macros::context::MacroContext;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::fs;
@@ -64,13 +69,25 @@ pub struct MeldDecl {
     pub route: String,
 }
 
-/// Registry entry for a language adapter, parsed from glue.dbvl.
+/// Registry entry for a GLUE target language, parsed from glue.dbvl.
+///
+/// 2026-07-10: GLUE v2. Removed macro_path (adapter $!macro system is
+/// gone). Added types_module (path to .bv with foreign type declarations)
+/// and llvm_triple (target triple for LLVM compilation, "any" for non-LLVM).
+/// Renamed type_map to c_type_map — now maps Brief types to C ABI types
+/// (int64_t, double, etc.) instead of language-specific type names.
 #[derive(Debug, Clone)]
 pub struct AdapterEntry {
+    /// Target language name (rust, python, etc.)
     pub language: String,
-    pub macro_path: String,
+    /// Path to .bv file declaring foreign type names for Brief's type universe
+    pub types_module: String,
+    /// Native source file extension without dot (rs, py, js)
     pub file_extension: String,
-    pub type_map: HashMap<String, String>,
+    /// LLVM target triple ("any" for non-LLVM targets like Python/Node)
+    pub llvm_triple: String,
+    /// Brief type name → C ABI type name mapping (e.g., Int → int64_t)
+    pub c_type_map: HashMap<String, String>,
 }
 
 /// Extract bridge information from a parsed Program.
@@ -193,44 +210,47 @@ fn format_result_type(rt: &ResultType) -> String {
 }
 
 // =========================================================================
-// DBVL Serialization — bridge info as D-Brief Lines
+// DBVL Serialization — bridge-exports.dbvl output format
 //
-// Architecture: Bridge info flows from Rust → $!macro adapter via bare
-// comma-separated DBVL strings (no JSON, no TOML). Each entry is one line,
-// fields separated by commas. No quoting needed — none of our field values
-// contain commas. The adapter macro splits by "\n" then by "," to extract.
+// Architecture: Brief export produces a .dbvl metadata file alongside the
+// compiled .ll module. Each line is tagged with a discriminator field so
+// the consumer (build.rs, Python script) can dispatch on entry type:
 //
-// Format per entry type:
-//   exports:  name, param_types_pipe_separated, return_type
-//   frgns:    name, param_types_pipe_separated, return_type, intrinsic_match
-//   melds:    from_type, to_type, route
+//   export:  export, name, param_types|pipe|separated, return_type
+//   meld:    meld, from_type, to_type, route
+//   ctype:   ctype, brief_type, c_type
+//
+// No quoting needed — none of our field values contain commas.
+// The consumer splits by "\n" then by "," and switches on field[0].
+//
+// 2026-07-10: Tagged format replaces the old bare-entries format that was
+// passed to $!macro adapters. Tagged lines allow a single file to carry
+// multiple entry types without schema switching.
 // =========================================================================
 
-/// Serialize exports to DBVL format: one line per export.
-/// Fields: name, param_types (pipe-separated), return_type
-fn serialize_exports_dbvl(exports: &[ExportDecl]) -> String {
-    exports.iter().map(|e| {
+fn serialize_exports_tagged(exports: &[ExportDecl]) -> String {
+    let mut lines = Vec::new();
+    for e in exports {
         let params: Vec<String> = e.params.iter().map(|(_, t)| t.clone()).collect();
-        format!("{},{},{}", e.name, params.join("|"), e.return_type)
-    }).collect::<Vec<_>>().join("\n")
+        lines.push(format!("export,{},{},{}", e.name, params.join("|"), e.return_type));
+    }
+    lines.join("\n")
 }
 
-/// Serialize frgns to DBVL format: one line per frgn.
-/// Fields: name, param_types (pipe-separated), return_type, intrinsic_match
-fn serialize_frgns_dbvl(frgns: &[FrgnDecl]) -> String {
-    frgns.iter().map(|f| {
-        let params: Vec<String> = f.params.iter().map(|(_, t)| t.clone()).collect();
-        let intrinsic = f.intrinsic_match.as_deref().unwrap_or("");
-        format!("{},{},{},{}", f.name, params.join("|"), f.return_type, intrinsic)
-    }).collect::<Vec<_>>().join("\n")
+fn serialize_melds_tagged(melds: &[MeldDecl]) -> String {
+    let mut lines = Vec::new();
+    for m in melds {
+        lines.push(format!("meld,{},{},{}", m.from_type, m.to_type, m.route));
+    }
+    lines.join("\n")
 }
 
-/// Serialize melds to DBVL format: one line per meld.
-/// Fields: from_type, to_type, route
-fn serialize_melds_dbvl(melds: &[MeldDecl]) -> String {
-    melds.iter().map(|m| {
-        format!("{},{},{}", m.from_type, m.to_type, m.route)
-    }).collect::<Vec<_>>().join("\n")
+fn serialize_ctypes_dbvl(c_type_map: &HashMap<String, String>) -> String {
+    let mut lines: Vec<String> = c_type_map.iter()
+        .map(|(brief_type, c_type)| format!("ctype,{},{}", brief_type, c_type))
+        .collect();
+    lines.sort();
+    lines.join("\n")
 }
 
 /// Parse a DBVL type map field like "{Int:i64 Float:f64 Bool:bool}"
@@ -255,7 +275,11 @@ fn parse_type_map(s: &str) -> HashMap<String, String> {
     map
 }
 
-/// Find a language adapter entry in glue.dbvl.
+/// Find a language target entry in glue.dbvl.
+///
+/// 2026-07-10: GLUE v2 field layout — language(0), types_module(1),
+/// file_extension(2), llvm_triple(3), c_type_map(4). Returns an error
+/// if fewer than 4 fields or the language doesn't match.
 pub fn find_adapter(language: &str, dbvl_path: &Path) -> Result<AdapterEntry, String> {
     let source = fs::read_to_string(dbvl_path)
         .map_err(|e| format!("Failed to read {}: {}", dbvl_path.display(), e))?;
@@ -266,28 +290,36 @@ pub fn find_adapter(language: &str, dbvl_path: &Path) -> Result<AdapterEntry, St
             crate::glue::dbvl_reader::DbvlEntry::Raw(tokens) => tokens,
             crate::glue::dbvl_reader::DbvlEntry::Validated { fields, .. } => fields,
         };
-        if fields.len() >= 3 && fields[0] == language {
-            let type_map = if fields.len() > 4 {
-                parse_type_map(&fields[4])
-            } else {
-                HashMap::new()
-            };
-            return Ok(AdapterEntry {
-                language: language.to_string(),
-                macro_path: fields[1].clone(),
-                file_extension: fields[2].clone(),
-                type_map,
-            });
+        if fields.len() < 4 {
+            continue;
         }
+        if fields[0] != language {
+            continue;
+        }
+        let c_type_map = if fields.len() > 4 {
+            parse_type_map(&fields[4])
+        } else {
+            HashMap::new()
+        };
+        return Ok(AdapterEntry {
+            language: language.to_string(),
+            types_module: fields[1].clone(),
+            file_extension: fields[2].clone(),
+            llvm_triple: fields[3].clone(),
+            c_type_map,
+        });
     }
-    Err(format!("Adapter not found for language '{}' in {}", language, dbvl_path.display()))
+    Err(format!("Target not found for language '{}' in {}", language, dbvl_path.display()))
 }
 
 /// Run the export pipeline:
 /// 1. Extract bridge info from the program
-/// 2. Find the language adapter
-/// 3. Set up the BRIEF_OUTPUT_DIR env var so emit_file#() writes to the right place
-/// 4. Invoke the adapter macro via the $! macro system
+/// 2. Find the language target entry in glue.dbvl
+/// 3. Write bridge-exports.dbvl (tagged lines: export/meld/ctype)
+///
+/// 2026-07-10: GLUE v2. Replaced the $!macro adapter invocation with
+/// direct bridge-exports.dbvl output. The foreign build system reads
+/// this .dbvl to generate bindings — no adapter .bv macros needed.
 pub fn run_export(
     program: &Program,
     bridge_name: &str,
@@ -300,98 +332,47 @@ pub fn run_export(
     println!("  Bridge '{}': {} exports, {} frgns, {} melds",
         info.name, info.exports.len(), info.frgns.len(), info.melds.len());
 
-    // Step 2: Find the adapter entry
+    // Step 2: Find the language target entry
     let adapter = find_adapter(language, dbvl_path)?;
-    println!("  Adapter: {} (macro: {})", adapter.language, adapter.macro_path);
+    println!("  Target: {} (types: {}, llvm_triple: {})",
+        adapter.language, adapter.types_module, adapter.llvm_triple);
 
     // Step 3: Create output directory
     let output_dir = out_dir.join(format!("{}-bridge", bridge_name));
     fs::create_dir_all(&output_dir)
         .map_err(|e| format!("Failed to create output dir: {}", e))?;
 
-    // Step 4: Set BRIEF_OUTPUT_DIR so emit_file#() writes to the right place
-    // We use the env var approach because the $! macro system's sandboxed
-    // interpreter reads BRIEF_OUTPUT_DIR to determine where to write files.
-    // This avoids passing Rust-side state into the macro expansion sandbox.
-    // SAFETY: set_var is unsafe in modern Rust (race condition with other
-    // threads reading env vars). In the CLI context, this runs during a single
-    // compiler invocation with no concurrent env readers, so it is safe.
-    unsafe { std::env::set_var("BRIEF_OUTPUT_DIR", output_dir.to_str().unwrap_or(".")); }
+    // Step 4: Write bridge-exports.dbvl with tagged entries
+    // Each line has a discriminator field so the consumer can dispatch on
+    // entry type: "export, ..." for functions, "meld, ..." for type
+    // compatibility proofs, "ctype, ..." for C ABI type mappings.
+    let mut dbvl_content = String::new();
 
-    // Step 5: Load and invoke the adapter macro
-    // The adapter macro is a .bv file that defines a $!macro taking the
-    // bridge info and calling emit_file#() to generate wrapper sources.
-    let macro_source = fs::read_to_string(&adapter.macro_path)
-        .map_err(|e| format!("Failed to read adapter macro '{}': {}", adapter.macro_path, e))?;
-
-    // Parse and expand the adapter macro
-    let mut macro_parser = crate::parser::Parser::new(&macro_source);
-    let mut macro_program = macro_parser.parse()
-        .map_err(|e| format!("Failed to parse adapter macro: {}", e))?;
-
-    // Create a macro context and register the adapter
-    let mut ctx = MacroContext::new();
-    // Collect macro definitions from the adapter file
-    crate::features::macros::expand::collect_macro_defs(&mut macro_program, &mut ctx);
-
-    // Build a program that calls the adapter macro with the bridge info
-    // We construct a synthetic TopLevel that invokes the adapter's macro
-    // with the bridge info serialized as D-Brief Lines (.dbvl) format.
-    //
-    // Architecture: Bridge info uses D-Brief Lines format (not JSON, not TOML)
-    // because it is the native Brief data interchange format. The adapter macro
-    // receives dbvl-formatted strings and uses Brief string operations (split,
-    // trim, etc.) to extract fields. This keeps the entire adapter pipeline in
-    // Brief-native data — no JSON dependency in the macro system.
-    //
-    // DBVL format per line: bare comma-separated fields (no quoting).
-    //   exports:  name, param_types|pipe|separated, return_type
-    //   frgns:    name, param_types|pipe|separated, return_type, intrinsic_match
-    //   melds:    from_type, to_type, route
-    //
-    let macro_name = format!("generate_{}_wrapper", language);
-    let exports_dbvl = serialize_exports_dbvl(&info.exports);
-    let frgns_dbvl = serialize_frgns_dbvl(&info.frgns);
-    let melds_dbvl = serialize_melds_dbvl(&info.melds);
-    let adapter_args = vec![
-        crate::ast::Expr::String(info.name.clone()),
-        crate::ast::Expr::String(exports_dbvl),
-        crate::ast::Expr::String(frgns_dbvl),
-        crate::ast::Expr::String(melds_dbvl),
-    ];
-    let call_stmt = crate::ast::Statement::Expression(
-        crate::ast::Expr::MacroCall {
-            name: macro_name,
-            args: adapter_args,
-            block: None,
-            span: None,
-        },
-    );
-
-    // Create a minimal program and expand it
-    let mut expand_program = crate::ast::Program {
-        items: vec![crate::ast::TopLevel::Statement(Box::new(call_stmt))],
-        comments: Vec::new(),
-        reactor_speed: None,
-        attrs: Vec::new(),
-        ffi: None,
-        strict_mode: crate::ast::StrictMode::Off,
-        dispatch_mode: crate::ast::DispatchMode::default(),
-        exit_condition: None,
-        out_pragmas: Vec::new(),
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-    };
-
-    // Phase 1b: Expand the macro call — this will invoke the adapter's
-    // $!macro which in turn calls emit_file#() to write wrapper sources.
-    match crate::features::macros::expand::expand_macros(&mut expand_program, &mut ctx) {
-        Ok(_) => {
-            println!("  Wrapper generated in: {}", output_dir.display());
-            Ok(())
-        }
-        Err(e) => Err(format!("Adapter macro expansion failed: {}", e)),
+    let exports_str = serialize_exports_tagged(&info.exports);
+    if !exports_str.is_empty() {
+        dbvl_content.push_str(&exports_str);
+        dbvl_content.push('\n');
     }
+
+    let melds_str = serialize_melds_tagged(&info.melds);
+    if !melds_str.is_empty() {
+        dbvl_content.push_str(&melds_str);
+        dbvl_content.push('\n');
+    }
+
+    let ctypes_str = serialize_ctypes_dbvl(&adapter.c_type_map);
+    if !ctypes_str.is_empty() {
+        dbvl_content.push_str(&ctypes_str);
+        dbvl_content.push('\n');
+    }
+
+    let dbvl_path = output_dir.join("bridge-exports.dbvl");
+    fs::write(&dbvl_path, dbvl_content.trim_end())
+        .map_err(|e| format!("Failed to write bridge-exports.dbvl: {}", e))?;
+
+    println!("  Metadata: {}", dbvl_path.display());
+    println!("  LLVM IR:  (future) {}/bridge.ll", output_dir.display());
+    Ok(())
 }
 
 #[cfg(test)]
@@ -399,24 +380,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_serialize_exports_dbvl_empty() {
-        let result = serialize_exports_dbvl(&[]);
+    fn test_serialize_exports_tagged_empty() {
+        let result = serialize_exports_tagged(&[]);
         assert_eq!(result, "");
     }
 
     #[test]
-    fn test_serialize_exports_dbvl_single() {
+    fn test_serialize_exports_tagged_single() {
         let exports = vec![ExportDecl {
             name: "print_int".to_string(),
             params: vec![("n".to_string(), "Int".to_string())],
             return_type: "Int".to_string(),
         }];
-        let result = serialize_exports_dbvl(&exports);
-        assert_eq!(result, "print_int,Int,Int");
+        let result = serialize_exports_tagged(&exports);
+        assert_eq!(result, "export,print_int,Int,Int");
     }
 
     #[test]
-    fn test_serialize_exports_dbvl_multiple_params() {
+    fn test_serialize_exports_tagged_multiple_params() {
         let exports = vec![ExportDecl {
             name: "write_file".to_string(),
             params: vec![
@@ -425,38 +406,43 @@ mod tests {
             ],
             return_type: "Int".to_string(),
         }];
-        let result = serialize_exports_dbvl(&exports);
-        assert_eq!(result, "write_file,String|Data,Int");
+        let result = serialize_exports_tagged(&exports);
+        assert_eq!(result, "export,write_file,String|Data,Int");
     }
 
     #[test]
-    fn test_serialize_frgns_dbvl_with_intrinsic() {
-        let frgns = vec![FrgnDecl {
-            name: "sqrt".to_string(),
-            params: vec![("x".to_string(), "Float".to_string())],
-            return_type: "Float".to_string(),
-            intrinsic_match: Some("sqrt".to_string()),
-        }];
-        let result = serialize_frgns_dbvl(&frgns);
-        assert_eq!(result, "sqrt,Float,Float,sqrt");
-    }
-
-    #[test]
-    fn test_serialize_melds_dbvl() {
+    fn test_serialize_melds_tagged() {
         let melds = vec![MeldDecl {
             from_type: "CBuffer".to_string(),
             to_type: "RSBuffer".to_string(),
             route: "identity".to_string(),
         }];
-        let result = serialize_melds_dbvl(&melds);
-        assert_eq!(result, "CBuffer,RSBuffer,identity");
+        let result = serialize_melds_tagged(&melds);
+        assert_eq!(result, "meld,CBuffer,RSBuffer,identity");
+    }
+
+    #[test]
+    fn test_serialize_ctypes_dbvl() {
+        let mut map = HashMap::new();
+        map.insert("Int".to_string(), "int64_t".to_string());
+        map.insert("Float".to_string(), "double".to_string());
+        let result = serialize_ctypes_dbvl(&map);
+        assert!(result.contains("ctype,Int,int64_t"));
+        assert!(result.contains("ctype,Float,double"));
+    }
+
+    #[test]
+    fn test_serialize_ctypes_dbvl_empty() {
+        let map = HashMap::new();
+        let result = serialize_ctypes_dbvl(&map);
+        assert_eq!(result, "");
     }
 
     #[test]
     fn test_parse_type_map() {
-        let map = parse_type_map("{Int:i64 Float:f64 Bool:bool}");
-        assert_eq!(map.get("Int"), Some(&"i64".to_string()));
-        assert_eq!(map.get("Float"), Some(&"f64".to_string()));
+        let map = parse_type_map("{Int:int64_t Float:double Bool:bool}");
+        assert_eq!(map.get("Int"), Some(&"int64_t".to_string()));
+        assert_eq!(map.get("Float"), Some(&"double".to_string()));
         assert_eq!(map.get("Bool"), Some(&"bool".to_string()));
     }
 
@@ -468,13 +454,13 @@ mod tests {
 
     #[test]
     fn test_parse_type_map_no_braces() {
-        let map = parse_type_map("Int:int Float:float");
-        assert_eq!(map.get("Int"), Some(&"int".to_string()));
+        let map = parse_type_map("Int:int64_t Float:double");
+        assert_eq!(map.get("Int"), Some(&"int64_t".to_string()));
         assert_eq!(map.len(), 2);
     }
 
     #[test]
-    fn test_serialize_exports_dbvl_multiple_separate() {
+    fn test_serialize_exports_tagged_multiple_separate() {
         let exports = vec![
             ExportDecl {
                 name: "add".to_string(),
@@ -487,7 +473,53 @@ mod tests {
                 return_type: "String".to_string(),
             },
         ];
-        let result = serialize_exports_dbvl(&exports);
-        assert_eq!(result, "add,Int|Int,Int\ngreet,String,String");
+        let result = serialize_exports_tagged(&exports);
+        assert_eq!(result, "export,add,Int|Int,Int\nexport,greet,String,String");
+    }
+
+    #[test]
+    fn test_find_adapter_new_format() {
+        let dir = std::env::temp_dir();
+        let dbvl_path = dir.join("test_glue_export.dbvl");
+        let dbvl_content = "schema lib/glue.dbvs;\nrust, glue/rust/types.bv, rs, x86_64-unknown-linux-gnu, {Int:int64_t Float:double}";
+        fs::write(&dbvl_path, dbvl_content).unwrap();
+
+        let result = find_adapter("rust", &dbvl_path);
+        assert!(result.is_ok());
+        let adapter = result.unwrap();
+        assert_eq!(adapter.language, "rust");
+        assert_eq!(adapter.types_module, "glue/rust/types.bv");
+        assert_eq!(adapter.file_extension, "rs");
+        assert_eq!(adapter.llvm_triple, "x86_64-unknown-linux-gnu");
+        assert_eq!(adapter.c_type_map.get("Int"), Some(&"int64_t".to_string()));
+        assert_eq!(adapter.c_type_map.get("Float"), Some(&"double".to_string()));
+
+        let _ = fs::remove_file(&dbvl_path);
+    }
+
+    #[test]
+    fn test_find_adapter_language_not_found() {
+        let dir = std::env::temp_dir();
+        let dbvl_path = dir.join("test_glue_missing.dbvl");
+        let dbvl_content = "schema lib/glue.dbvs;\nrust, glue/rust/types.bv, rs, x86_64";
+        fs::write(&dbvl_path, dbvl_content).unwrap();
+
+        let result = find_adapter("python", &dbvl_path);
+        assert!(result.is_err());
+
+        let _ = fs::remove_file(&dbvl_path);
+    }
+
+    #[test]
+    fn test_find_adapter_too_few_fields() {
+        let dir = std::env::temp_dir();
+        let dbvl_path = dir.join("test_glue_too_few.dbvl");
+        let dbvl_content = "schema lib/glue.dbvs;\nrust, glue/rust/types.bv, rs";
+        fs::write(&dbvl_path, dbvl_content).unwrap();
+
+        let result = find_adapter("rust", &dbvl_path);
+        assert!(result.is_err(), "should reject entries with < 4 fields");
+
+        let _ = fs::remove_file(&dbvl_path);
     }
 }
