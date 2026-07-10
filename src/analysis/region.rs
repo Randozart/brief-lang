@@ -962,10 +962,13 @@ impl RegionAnalyzer {
             let mut chain_bindings = HashMap::new();
             if cc.all_internal {
                 if let Some(ref cv) = cc.counter_var {
-                    if let Some(&bound) = self.iter_bounds.get(&cc.chain[0]) {
-                        bindings.insert(cv.clone(), bound as i64);
-                        chain_bindings.insert(cv.clone(), bound as i64);
-                    }
+                    let Some(&bound) = self.iter_bounds.get(&cc.chain[0]) else {
+                        // 2026-07-10: Bound is runtime-determined (e.g. getenv_int#).
+                        // Cannot precompute when iteration count is unknown.
+                        return None;
+                    };
+                    bindings.insert(cv.clone(), bound as i64);
+                    chain_bindings.insert(cv.clone(), bound as i64);
                 }
                 all_bindings.push((cc.chain.clone(), chain_bindings));
                 continue;

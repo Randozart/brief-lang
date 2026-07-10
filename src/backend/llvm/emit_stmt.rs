@@ -67,7 +67,7 @@ impl LlvmBackend {
             let val_boxed = self.adapt_to_i64(out, indent, val);
             let tn = crate::backend::llvm::tbaa_node(&ty, self.ctx.type_universe.as_ref());
             let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
-            let typed_val = self.ensure_typed_value(out, indent, ty_str, &val_boxed, brief_ty);
+            let typed_val = self.ensure_typed_value(out, indent, ty_str, &val_boxed, brief_ty, Some(&val.ty));
             // 2026-07-04: Gate the store on both needs_state_stores_in_body
             // and per-field done: liveness.  When done_needs_fields is
             // non-empty, only store fields that the done: block reads.
@@ -157,8 +157,16 @@ impl LlvmBackend {
     /// for the correct unbox operation — enabling custom-type-aware codegen
     /// rather than hardcoded LLVM type string matching.
     pub(super) fn ensure_typed_value(&mut self, out: &mut String, indent: &str,
-        ty: &str, val: &str, brief_ty: Option<crate::ast::Type>) -> String
+        ty: &str, val: &str, brief_ty: Option<crate::ast::Type>, src_ty: Option<&Type>) -> String
     {
+        // 2026-07-10: If source is already the target type, return as-is.
+        if let Some(src) = src_ty {
+            let is_native_float = *src == Type::Custom("Float".to_string()) && ty == "float";
+            let is_native_double = *src == Type::Custom("Float64".to_string()) && ty == "double";
+            if is_native_float || is_native_double {
+                return val.to_string();
+            }
+        }
         // 2026-07-04: Try universe-driven unbox first.
         // Clone unbox_op to avoid simultaneous immutable/mutable borrow of self.
         let universe_unbox = brief_ty.as_ref().and_then(|brief| {
@@ -284,7 +292,7 @@ impl LlvmBackend {
         let sr = self.fun.state_reg_name.clone();
         let p = self.emit_state_gep(out, indent, "ts", &sr, idx);
         let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
-        let tv = self.ensure_typed_value(out, indent, &ty, &val.name, brief_ty);
+        let tv = self.ensure_typed_value(out, indent, &ty, &val.name, brief_ty, Some(&val.ty));
         writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
     }
 
@@ -741,7 +749,7 @@ impl LlvmBackend {
                             Type::Custom(ref s) if s == "Float64" => "double".to_string(),
                             _ => "i64".to_string(),
                         };
-                        let tv = self.ensure_typed_value(out, indent, &llvm_ty, &val.name, Some(inner_ty.clone()));
+                        let tv = self.ensure_typed_value(out, indent, &llvm_ty, &val.name, Some(inner_ty.clone()), Some(&val.ty));
                         writeln!(out, "{}store {} {}, ptr {}, align {}", indent, llvm_ty, tv, ptr_reg.name, self.align_of(&llvm_ty)).ok();
                         return;
                     }
@@ -822,7 +830,7 @@ impl LlvmBackend {
                                 let sr = self.fun.state_reg_name.clone();
                                 let p = self.emit_state_gep(out, indent, "ap", &sr, idx);
                                 let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
-                                let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &elem.to_string(), brief_ty);
+                                let tv = self.ensure_typed_value(out, indent, &ty.as_str(), &elem.to_string(), brief_ty, None);
                                 writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
                             } else if let Some(slot) = self.fun.param_slots.get(name) {
                                 writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, elem, slot).ok();
