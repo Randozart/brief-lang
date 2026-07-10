@@ -241,3 +241,6 @@ src/backend/verilog.rs
 src/backend/vhdl.rs
 src/backend/wasm.rs
 src/backend/x86_64.rs
+
+# Binaries
+ptr-demo
