@@ -285,7 +285,7 @@ expression ::= literal
              | range
              | cast
              | prior_state
-             | owned_ref
+             | addr_of
              | projection
              | arrow_mut
              | arrow_discard
@@ -300,7 +300,9 @@ operator ::= "+" | "-" | "*" | "/" | "%"
            | "&&" | "||"
            | "&" | "|" | "^" | "<<" | ">>"
 
-unary_op ::= "-" expression | "!" expression | "~" expression | "&" identifier
+unary_op ::= "-" expression | "!" expression | "~" expression 
+           | "&" expression          // Address-of
+           | "*" expression           // Dereference
 
 call ::= expression "(" (expression ("," expression)*)? ")"
 
@@ -317,7 +319,7 @@ coordinate ::= expression                    // Single index: 5
              | "..."                         // Ellipsis: fill unspecified dimensions
              | "@" integer ":" coordinate    // Dimension specifier: @3:0..10
 
-owned_ref ::= "&" identifier ("." identifier | "[" expression "]")*
+addr_of ::= "&" expression           // Address-of: generalized beyond identifiers
 
 projection ::= expression ":>" projection_target
 projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
@@ -328,12 +330,11 @@ projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
                     | "Top" | "Front" | "Elements"
                     | "AsStack" | "AsQueue"
 
-arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
-            | expression "<-" owned_ref              // Insert (prepend): x <- &list
-            | owned_ref "[" expression "]" "<-" expression  // Indexed write: &list[i] <- x
-
-arrow_discard ::= "<-" owned_ref                     // Pop/remove: <- &list
-                | "<-" owned_ref "[" expression "]"  // Indexed remove: <- &list[i]
+arrow_mut ::= expression "<-" expression           // Push: list <- x (no & needed)
+            | expression "<-" addr_of              // Pop: x <- &list (& on RHS = consumption)
+            | expression "[" expression "]" "<-" expression  // Indexed write
+arrow_discard ::= "<-" addr_of                     // Drain: <- &list (& = consumption)
+                | "<-" addr_of "[" expression "]"  // Indexed remove: <- &list[i]
                 | "<-" expression                    // Discard expression result: <- syscall! @ 1 (...)
 
 tuple ::= "(" (expression ("," expression)*)? ")"
@@ -433,7 +434,7 @@ expression ::= literal
              | range
              | cast
              | prior_state
-             | owned_ref
+             | addr_of
              | projection
              | arrow_mut
              | arrow_discard
@@ -448,7 +449,9 @@ operator ::= "+" | "-" | "*" | "/" | "%"
            | "&&" | "||"
            | "&" | "|" | "^" | "<<" | ">>"
 
-unary_op ::= "-" expression | "!" expression | "~" expression | "&" identifier
+unary_op ::= "-" expression | "!" expression | "~" expression 
+           | "&" expression          // Address-of
+           | "*" expression           // Dereference
 
 call ::= expression "(" (expression ("," expression)*)? ")"
 
@@ -465,7 +468,7 @@ coordinate ::= expression                    // Single index: 5
              | "..."                         // Ellipsis: fill unspecified dimensions
              | "@" integer ":" coordinate    // Dimension specifier: @3:0..10
 
-owned_ref ::= "&" identifier ("." identifier | "[" expression "]")*
+addr_of ::= "&" expression           // Address-of: generalized beyond identifiers
 
 projection ::= expression ":>" projection_target
 projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
@@ -476,12 +479,11 @@ projection_target ::= "Size" | "Bytes" | "Ptr" | "Alignment" | "Range"
                     | "Top" | "Front" | "Elements"
                     | "AsStack" | "AsQueue"
 
-arrow_mut ::= owned_ref "<-" expression              // Push: &list <- x
-            | expression "<-" owned_ref              // Insert (prepend): x <- &list
-            | owned_ref "[" expression "]" "<-" expression  // Indexed write: &list[i] <- x
-
-arrow_discard ::= "<-" owned_ref                     // Pop/remove: <- &list
-                | "<-" owned_ref "[" expression "]"  // Indexed remove: <- &list[i]
+arrow_mut ::= expression "<-" expression           // Push: list <- x (no & needed)
+            | expression "<-" addr_of              // Pop: x <- &list (& on RHS = consumption)
+            | expression "[" expression "]" "<-" expression  // Indexed write
+arrow_discard ::= "<-" addr_of                     // Drain: <- &list (& = consumption)
+                | "<-" addr_of "[" expression "]"  // Indexed remove: <- &list[i]
                 | "<-" expression                    // Discard expression result: <- syscall! @ 1 (...)
 
 tuple ::= "(" (expression ("," expression)*)? ")"
@@ -551,16 +553,16 @@ Brief uses a reactor model where transactions declare when they can run and what
 ```brief
 // Passive transaction (must be explicitly called)
 txn increment(amount: Int) [amount > 0][counter == @counter + amount] {
-    &counter = counter + amount;
+    counter = counter + amount;
     term;
 };
 
 // Reactive transaction (fires automatically when precondition met)
 rct txn auto_save [dirty && !saving][!dirty] {
-    &saving = true;
+    saving = true;
     save_to_disk();
-    &dirty = false;
-    &saving = false;
+    dirty = false;
+    saving = false;
     term;
 };
 
@@ -568,7 +570,7 @@ rct txn auto_save [dirty && !saving][!dirty] {
 rct async txn fetch_data [needs_update][data != @data] {
     let result = http_get(url);
     [result.is_ok()] {
-        &data = result.value;
+        data = result.value;
     };
     term;
 };
@@ -595,11 +597,11 @@ txn process(value: Int) [true][result != 0] {
     
     // Guard: only executes if condition is true
     [value > 0] {
-        &result = value * 2;
+        result = value * 2;
     };
     
     [value < 0] {
-        &result = value * -1;
+        result = value * -1;
     };
     
     [value == 0] {
@@ -728,7 +730,7 @@ const VERSION: String = "1.0.0";
 
 // Mutable state in transaction
 txn increment() [true][counter == @counter + 1] {
-    &counter = counter + 1;  // & required for mutation
+    counter = counter + 1;  // & required for mutation
     term;
 };
 ```
@@ -760,11 +762,11 @@ txn process(value: Int) [true][result != 0] {
     
     // Guard: only executes if condition is true
     [value > 0] {
-        &result = value * 2;
+        result = value * 2;
     };
     
     [value < 0] {
-        &result = value * -1;
+        result = value * -1;
     };
     
     [value == 0] {
@@ -868,7 +870,7 @@ const VERSION: String = "1.0.0";
 
 // Mutable state in transaction
 txn increment() [true][counter == @counter + 1] {
-    &counter = counter + 1;  // & required for mutation
+    counter = counter + 1;  // & required for mutation
     term;
 };
 ```
@@ -895,12 +897,12 @@ struct Counter {
     value: Int = 0;
     
     txn increment(amount: Int) [amount > 0][value == @value + amount] {
-        &value = value + amount;
+        value = value + amount;
         term;
     };
     
     txn reset() [true][value == 0] {
-        &value = 0;
+        value = 0;
         term;
     };
 };
@@ -920,7 +922,7 @@ rstruct App {
     count: Int = 0;
     
     txn increment() [true][count == @count + 1] {
-        &count = count + 1;
+        count = count + 1;
         term;
     };
     
@@ -2134,7 +2136,7 @@ engine to prove termination for reactive transactions with wake triggers:
 ```brief
 #assume_event(stdin_ready)
 rct txn [count < total][count == total] {
-    &count = count + 1;
+    count = count + 1;
     term;
 }
 ```
@@ -2182,7 +2184,7 @@ rsrc file: File("data.txt", "read");
 txn read_data() [file.exists()][data :> Size > 0] {
     let result = file.read();
     [result.is_ok()] {
-        &data = result.value;
+        data = result.value;
     };
     term;
 };
@@ -2968,12 +2970,12 @@ rstruct Counter {
     count: Int = 0;
     
     txn increment() [true][count == @count + 1] {
-        &count = count + 1;
+        count = count + 1;
         term;
     };
     
     txn decrement() [count > 0][count == @count - 1] {
-        &count = count - 1;
+        count = count - 1;
         term;
     };
     

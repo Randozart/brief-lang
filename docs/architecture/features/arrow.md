@@ -1,4 +1,4 @@
-# Arrow (`<-`) — Collection Mutation Syntax
+# Arrow (`<-`) — Collection Mutation & Consumption Syntax
 
 **Date:** 2026-06-24
 **Status:** Fully implemented in interpreter; LLVM backend is a stub
@@ -9,63 +9,63 @@ The arrow operator `<-` provides concise mutation syntax for collections. It dis
 
 ## Operations
 
-### Push (`&collection <- value`)
+### Push (`collection <- value`)
 
 Appends a value to the collection. Dispatch by type:
 
 | Type | Behavior |
 |------|----------|
 | `List<T>` | Append to end (or insert at index with `&list[idx] <- val`) |
-| `HashMap<K,V>` | Insert key-value pair: `&map <- ("key", value)` |
-| `HashSet<T>` | Insert element: `&set <- "element"` |
+| `HashMap<K,V>` | Insert key-value pair: `map <- ("key", value)` |
+| `HashSet<T>` | Insert element: `set <- "element"` |
 | `Stack<T>` | Push onto top |
 | `Queue<T>` | Enqueue to back |
 
 ```brief
-&items <- 42;
-&map <- ("name", "alice");
-&set <- "tag";
-&stack <- 100;
-&queue <- 7;
+items <- 42;
+map <- ("name", "alice");
+set <- "tag";
+stack <- 100;
+queue <- 7;
 ```
 
-### Pop (`let val = &collection <-`)
+### Pop (`let val = collection <-`)
 
 Removes and returns an element. Dispatch by type:
 
 | Type | Behavior |
 |------|----------|
 | `List<T>` | Pop from end (or at index with `list[idx]`) |
-| `HashMap<K,V>` | Remove by key: `&map <- "key"` |
+| `HashMap<K,V>` | Remove by key: `map <- "key"` |
 | `HashSet<T>` | Remove and return element |
 | `Stack<T>` | Pop from top |
 | `Queue<T>` | Dequeue from front |
 
 ```brief
-let last = &items <- ;        // pop list
-let val = &map <- "name";     // remove key from map
-let top = &stack <- ;         // pop stack
-let front = &queue <- ;       // dequeue queue
+let last = items <- ;    // pop list
+let val = map <- "name";   // remove key from map
+let top = stack <- ;     // pop stack
+let front = queue <- ;    // dequeue queue
 ```
 
-### Discard (`&collection <- index ! `)
+### Discard (`collection <- index ! `)
 
 Removes an element without returning it:
 
 ```brief
-&list <- 0 !;           // discard index 0
-&map <- "key" !;        // discard entry by key
-&set <- "elem" !;       // discard element
-&stack <- !;            // discard top
+list <- 0 !;      // discard index 0
+map <- "key" !;    // discard entry by key
+set <- "elem" !;    // discard element
+stack <- !;      // discard top
 ```
 
-### Transfer (`&dest <- &source`)
+### Transfer (`dest <- &source`)
 
 Moves all elements from source to destination:
 
 ```brief
-&dest <- &source;         // transfer all
-&dest <- &source { FILTER(active); };  // transfer with filter
+dest <- &source;     // transfer all (& on RHS = consumption)
+dest <- &source { FILTER(active); }; // transfer with filter
 ```
 
 The transfer with filter uses a subtype projection (`<:` syntax) as the filter — only matching elements are moved.
@@ -83,8 +83,8 @@ type Mapped <: List { InsertAt = hash; };
 
 // Custom function strategy:
 type SkipList<T> <: List<T> {
-    InsertAt = sl_insert;    // dispatches to sl_insert#(list, val)
-    ExtractFrom = sl_remove; // dispatches to sl_remove#(list)
+  InsertAt = sl_insert;  // dispatches to sl_insert#(list, val)
+  ExtractFrom = sl_remove; // dispatches to sl_remove#(list)
 };
 ```
 

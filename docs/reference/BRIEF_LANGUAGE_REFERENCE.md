@@ -263,7 +263,7 @@ let message: String = "Hello, Brief!";
 let __booted_0: Int = 0;
 rct txn __init [!__booted_0][__booted_0] {
     println(message);
-    &__booted_0 = 1;
+    __booted_0 = 1;
     term;
 };
 ```
@@ -301,7 +301,7 @@ txn name [precondition] [postcondition] {
 
 ```brief
 rct txn name [precondition] [postcondition] {
-    &variable = value;
+    variable = value;
     term;
 };
 ```
@@ -348,7 +348,7 @@ rct txn blink @60Hz [true] [led == !led] {
 
 ```brief
 rct txn counter.increment [count < max] [count == @count + 1] {
-    &count = count + 1;
+    count = count + 1;
     term;
 };
 ```
@@ -386,7 +386,7 @@ Expands to: `[~identifier][identifier]`
 
 ```brief
 rct txn toggle [~/ready][ready] {
-    &ready = !ready;
+    ready = !ready;
     term;
 };
 ```
@@ -397,7 +397,7 @@ rct txn toggle [~/ready][ready] {
 rct txn increment [counter < 10]
   [counter == @counter + 1]
 {
-    &counter = counter + 1;
+    counter = counter + 1;
     term;
 };
 
@@ -408,7 +408,7 @@ rct txn guarded [x > 0][y == x * 2]
 };
 
 rct txn with_watchdog [ready == true][done == true][?timeout] {
-    &done = true;
+    done = true;
     term;
 };
 ```
@@ -453,7 +453,7 @@ struct Counter {
     let value: Int = 0;
 
     txn increment [value < 100][value == @value + 1] {
-        &value = value + 1;
+        value = value + 1;
         term;
     };
 };
@@ -481,7 +481,7 @@ rstruct Counter {
     let value: Int = 0;
 
     txn increment [value < 100][value == @value + 1] {
-        &value = value + 1;
+        value = value + 1;
         term;
     };
 };
@@ -531,11 +531,11 @@ Enums use bare variant names:
 let state: Status = Idle;
 
 // Comparison
-[state == Idle] &state = Processing;
+[state == Idle] state = Processing;
 
 // Pattern matching via guard
 Status(s) = state;
-[s == Processing] &state = Done;
+[s == Processing] state = Done;
 ```
 
 **Note:** Enum variants are compared and assigned using bare names, not namespaced syntax.
@@ -805,12 +805,12 @@ Brief uses **guard-based pattern matching** for unions and enums:
 // Extract variant from union type
 let result: Int | Error = fetch_data();
 Ok(value) = result;
-[value > 0] &status = Success;
+[value > 0] status = Success;
 
 // Enum pattern matching
 let state: Status = Idle;
 Status(s) = state;
-[s == Processing] &state = Done;
+[s == Processing] state = Done;
 ```
 
 *(Note: `match { }` expression syntax is planned but not yet implemented)*
@@ -836,7 +836,7 @@ counter = counter + 1;
 ### Mutable Assignment (Pointer Write)
 
 ```brief
-&field = new_value;         // Write through address-of to state field
+field = new_value;         // Direct state field write
 *ptr = new_value;           // Write through pointer dereference
 ```
 
@@ -865,7 +865,7 @@ data = fetch(url) within 100 ms;
 // Union type pattern extraction
 let result: Int | Error = fetch();
 Ok(value) = result;
-[value > 0] &status = Success;
+[value > 0] status = Success;
 
 // Enum variant extraction
 let state: Status = Idle;

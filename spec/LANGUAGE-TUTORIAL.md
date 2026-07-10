@@ -54,7 +54,7 @@ State is declared with `let`. You can:
 let count: Int = 0;
 
 txn increment [count < 100][count == @count + 1] {
-    &count = count + 1;
+    count = count + 1;
     term;
 };
 ```
@@ -65,7 +65,7 @@ txn increment [count < 100][count == @count + 1] {
 - `increment` - the name
 - `[count < 100]` - precondition: when can this run?
 - `[count == @count + 1]` - postcondition: what must be true after?
-- `&count = count + 1;` - mutate state (the `&` is required)
+- `count = count + 1;` - mutate state (the `&` is required)
 - `term;` - complete successfully
 
 **The key insight**: You're not describing code that runs. You're declaring:
@@ -83,7 +83,7 @@ txn withdraw(amount: Int)
     [amount > 0 && amount <= balance]
     [balance == @balance - amount]
 {
-    &balance = balance - amount;
+    balance = balance - amount;
     term;
 };
 ```
@@ -96,8 +96,8 @@ txn withdraw(amount: Int)
 txn process [true][true] {
     let value = compute();
     
-    [value > 0] &positive = true;
-    [value < 0] &negative = true;
+    [value > 0] positive = true;
+    [value < 0] negative = true;
     [value == 0] escape;  // Rollback if zero
     
     term;
@@ -115,7 +115,7 @@ txn validate(x: Int)
     [x > 1000] {
         escape;  // Rollback, nothing changes
     };
-    &state = x;
+    state = x;
     term;
 };
 ```
@@ -135,14 +135,14 @@ let done: Bool = false;
 rct txn increment [count < 10 && !done]
     [count == @count + 1]
 {
-    &count = count + 1;
+    count = count + 1;
     term;
 };
 
 rct txn finish [count >= 10 && !done]
     [done == true]
 {
-    &done = true;
+    done = true;
     term;
 };
 ```
@@ -165,17 +165,17 @@ This is Brief's superpower - describe state transitions, compiler handles the re
 let state: Int = 0;
 
 rct txn step_1 [state == 0][state == 1] {
-    &state = 1;
+    state = 1;
     term;
 };
 
 rct txn step_2 [state == 1][state == 2] {
-    &state = 2;
+    state = 2;
     term;
 };
 
 rct txn reset [state == 2][state == 0] {
-    &state = 0;
+    state = 0;
     term;
 };
 ```
@@ -253,8 +253,8 @@ Functions requiring system access use `frgn` (see Part 7).
 ```brief
 let result: Int | String;
 
-[Int(n) = result] &int_val = n;
-[String(s) = result] &str_val = s;
+[Int(n) = result] int_val = n;
+[String(s) = result] str_val = s;
 ```
 
 ### Guards for Branches
@@ -262,9 +262,9 @@ let result: Int | String;
 ```brief
 let value: Int = get_value();
 
-[value > 0] &positive = true;
-[value == 0] &zero = true;
-[value < 0] &negative = true;
+[value > 0] positive = true;
+[value == 0] zero = true;
+[value < 0] negative = true;
 ```
 
 ### Enum Pattern Matching
@@ -281,12 +281,12 @@ let result: Result<Int, String> = from_json("42");
 
 // Match on Ok - bind inner value to 'n'
 [result Ok(n)] {
-    &parsed_value = n;
+    parsed_value = n;
 };
 
 // Match on Err - bind error to 'e'
 [result Err(e)] {
-    &error_msg = e;
+    error_msg = e;
 };
 ```
 
@@ -307,7 +307,7 @@ struct BankAccount {
         [amount > 0]
         [balance == @balance + amount]
     {
-        &balance = balance + amount;
+        balance = balance + amount;
         term;
     };
     
@@ -315,7 +315,7 @@ struct BankAccount {
         [amount > 0 && amount <= balance + overdraft_limit]
         [balance == @balance - amount]
     {
-        &balance = balance - amount;
+        balance = balance - amount;
         term;
     };
 };
@@ -355,24 +355,24 @@ arrow always points toward the collection:
 
 ```brief
 // Push/append
-&items <- "hello";
+items <- "hello";
 
 // Pop (remove last, bind to variable)
-let last = <- &items;
+let last = <- items ;
 
 // Pop and discard
-<- &items;
+<- items ;
 
 // Indexed write
 &items[0] <- "world";
 
 // Indexed remove
-<- &items[2];
+<- items [2];
 ```
 
 The `&` prefix marks the target collection. Without `&`, the expression
 is a read — with `&`, it is a mutation. This rule also applies to state
-fields: `&x = expr` writes to `x`, `x = expr` shadows it locally.
+fields: `x = expr` writes to `x`, `x = expr` shadows it locally.
 
 Length queries use the `:>` operator — `items :> Size` returns the element
 count. `len()` is available as a stdlib convenience function.
@@ -453,10 +453,10 @@ txn transfer_to_bob(amount: Int)
     [!in_transfer && alice_balance >= amount]
     [alice_balance == @alice_balance - amount && bob_balance == @bob_balance + amount && !in_transfer]
 {
-    &in_transfer = true;
-    &alice_balance = alice_balance - amount;
-    &bob_balance = bob_balance + amount;
-    &in_transfer = false;
+    in_transfer = true;
+    alice_balance = alice_balance - amount;
+    bob_balance = bob_balance + amount;
+    in_transfer = false;
     term;
 };
 
@@ -484,8 +484,8 @@ let initialized: Bool = false;
 let value: Int = 0;
 
 txn initialize [~initialized][initialized] {
-    &initialized = true;
-    &value = 100;
+    initialized = true;
+    value = 100;
     term;
 };
 
@@ -500,17 +500,17 @@ rct txn use_value [initialized][initialized] {
 let state: Int = 0;  // 0=idle, 1=processing, 2=done
 
 rct txn process [state == 0][state == 1] {
-    &state = 1;
+    state = 1;
     term;
 };
 
 rct txn complete [state == 1][state == 2] {
-    &state = 2;
+    state = 2;
     term;
 };
 
 rct txn reset [state == 2][state == 0] {
-    &state = 0;
+    state = 0;
     term;
 };
 ```
@@ -522,12 +522,12 @@ let ready: Bool = false;
 let busy: Bool = false;
 
 txn start_work [ready && !busy][busy == true] {
-    &busy = true;
+    busy = true;
     term;
 };
 
 txn finish_work [busy][busy == false] {
-    &busy = false;
+    busy = false;
     term;
 };
 ```
@@ -545,12 +545,12 @@ Brief provides several syntactic shortcuts that make code more concise.
 ```brief
 // These are equivalent:
 txn initialize [~/ready] {
-    &ready = true;
+    ready = true;
     term;
 };
 
 txn initialize [~ready][ready] {
-    &ready = true;
+    ready = true;
     term;
 };
 ```
@@ -565,7 +565,7 @@ When you use `~/condition`, the variable is automatically declared:
 // No need to write: let ready: Bool = false;
 // Brief infers it from the contract
 rct txn start [~/ready] {
-    &ready = true;
+    ready = true;
     term;
 };
 ```
@@ -586,7 +586,7 @@ When the postcondition is a Bool expression, `term;` checks if it is satisfied:
 ```brief
 // Postcondition is an expression - term; checks if it is met
 txn set_flag [true][flag == true] {
-    &flag = true;
+    flag = true;
     term;  // checks: is flag == true satisfied?
 };
 ```
@@ -600,7 +600,7 @@ For simple transactions where the body is just `term`, you can omit the body:
 ```brief
 // Full form:
 txn increment [count < 100][count == @count + 1] {
-    &count = count + 1;
+    count = count + 1;
     term;
 };
 
@@ -722,7 +722,7 @@ Transactions loop until the postcondition is satisfied. They continue mutating u
 ```brief
 // This terminates - each iteration accumulates until postcondition is met
 txn increment_by_2 [count < 100][count == @count + 2] {
-    &count = count + 1;
+    count = count + 1;
     term;
 };
 // Starting at count=99, @count=99: 99->100->101->102 (stops at 102)
@@ -734,7 +734,7 @@ The `@` operator captures the value at the START of the transaction:
 
 ```brief
 txn increment [count < 100][count == @count + 1] {
-    &count = count + 1;
+    count = count + 1;
     term;
 };
 // @count is captured once at start. As transaction loops, @count stays the same
@@ -746,7 +746,7 @@ txn increment [count < 100][count == @count + 1] {
 ```brief
 let count: Int = 0;
 
-&count = count + 1;    // Correct - use &
+count = count + 1;    // Correct - use &
 count = count + 1;     // Wrong - & required
 ```
 
@@ -756,7 +756,7 @@ count = count + 1;     // Wrong - & required
 // Reactive transaction - fires automatically when preconditions are met
 // Return values are meaningless (no caller to receive them)
 rct txn process [ready][done] {
-    &done = true;
+    done = true;
     term;
 };
 
@@ -779,8 +779,8 @@ txn increment [count < 100][count == @count + 1];  // No body needed
 
 ```brief
 txn example [true][true] {
-    [false] &never_runs = true;  // This never executes
-    [true] &always_runs = true;   // This always executes
+    [false] never_runs = true;  // This never executes
+    [true] always_runs = true;   // This always executes
     term;
 };
 ```
@@ -820,7 +820,7 @@ txn bad [x > 0 && x < 0][...] {
 ```brief
 // Code doesn't achieve postcondition
 txn bad [true][count == @count + 1] {
-    &count = count;  // Doesn't change count
+    count = count;  // Doesn't change count
     term;
 };
 ```
@@ -862,9 +862,9 @@ rstruct ShoppingCart {
         [price > 0 && quantity > 0]
         [items == @items + quantity && total == @total + (price * quantity)]
     {
-        &items = items + quantity;
-        &total = total + (price * quantity);
-        &last_added = name;
+        items = items + quantity;
+        total = total + (price * quantity);
+        last_added = name;
         term;
     };
     
@@ -872,20 +872,20 @@ rstruct ShoppingCart {
         [quantity > 0 && quantity <= items]
         [items == @items - quantity]
     {
-        &items = items - quantity;
+        items = items - quantity;
         term;
     };
     
     txn clear_cart() [items > 0][items == 0 && total == 0.0] {
-        &items = 0;
-        &total = 0.0;
-        &last_added = "";
+        items = 0;
+        total = 0.0;
+        last_added = "";
         term;
     };
     
     rct txn apply_discount() [items > 10 && total > 100.0][total < @total] {
         let discount: Float = total * 0.1;
-        &total = total - discount;
+        total = total - discount;
         term;
     };
     
@@ -954,10 +954,10 @@ trg timer_interrupt: Int @ 0x40001004;
 rct txn handle_timer() [timer_value == 0][led_state != @led_state] {
     // Toggle LED
     [led_state == false] {
-        &led_state = true;
+        led_state = true;
     };
     [led_state == true] {
-        &led_state = false;
+        led_state = false;
     };
     
     // Reload timer
@@ -1292,27 +1292,27 @@ enum State {
 let state: State = State::Idle;
 
 rct txn start() [state == State::Idle][state == State::Running] {
-    &state = State::Running;
+    state = State::Running;
     term;
 };
 
 rct txn pause() [state == State::Running][state == State::Paused] {
-    &state = State::Paused;
+    state = State::Paused;
     term;
 };
 
 rct txn resume() [state == State::Paused][state == State::Running] {
-    &state = State::Running;
+    state = State::Running;
     term;
 };
 
 rct txn finish() [state == State::Running][state == State::Done] {
-    &state = State::Done;
+    state = State::Done;
     term;
 };
 
 rct txn reset() [state == State::Done][state == State::Idle] {
-    &state = State::Idle;
+    state = State::Idle;
     term;
 };
 ```
@@ -1326,15 +1326,15 @@ let in_use: List<Int> = [];
 
 rct txn acquire() [available > 0][available == @available - 1] {
     let id = find_free_id();
-    &available = available - 1;
-    &in_use = in_use + [id];
+    available = available - 1;
+    in_use = in_use + [id];
     term;
 };
 
 rct txn release(id: Int) [in_use.contains(id)][available == @available + 1] {
     let idx = in_use.find(id);
-    &in_use = in_use.remove(idx);
-    &available = available + 1;
+    in_use = in_use.remove(idx);
+    available = available + 1;
     term;
 };
 ```
@@ -1349,24 +1349,24 @@ defn notify_observers() -> Bool {
     let i: Int = 0;
     [i < observers :> Size] {
         notify(observers[i], subject_value);
-        &i = i + 1;
+        i = i + 1;
     };
     term true;
 };
 
 txn subscribe(observer: String) [true][observers.contains(observer)] {
-    &observers = observers + [observer];
+    observers = observers + [observer];
     term;
 };
 
 txn unsubscribe(observer: String) [observers.contains(observer)][!observers.contains(observer)] {
     let idx = observers.find(observer);
-    &observers = observers.remove(idx);
+    observers = observers.remove(idx);
     term;
 };
 
 txn set_value(value: Int) [true][subject_value == value] {
-    &subject_value = value;
+    subject_value = value;
     notify_observers();
     term;
 };
@@ -1381,10 +1381,10 @@ const MAX_ATTEMPTS: Int = 5;
 rct txn try_operation() [attempts < MAX_ATTEMPTS][true] {
     let result = external_call();
     [result.is_ok()] {
-        &attempts = 0;  // Reset on success
+        attempts = 0;  // Reset on success
     };
     [result.is_err()] {
-        &attempts = attempts + 1;
+        attempts = attempts + 1;
         [attempts < MAX_ATTEMPTS] {
             sleep(backoff(attempts));
         };
@@ -1410,8 +1410,8 @@ let tx_log: List<String> = [];
 state committed: Int = 0;
 
 rct txn transfer(amount: Int) [balance >= amount][balance == @balance - amount] {
-    &balance = balance - amount;
-    term -> &committed = committed + 1;
+    balance = balance - amount;
+    term -> committed = committed + 1;
 };
 ```
 
@@ -1439,7 +1439,7 @@ eventually, enabling termination proofs for external-trigger loops:
 ```brief
 #assume_event(data_ready)
 rct txn process() [data_ready][processed == @processed + 1] {
-    &processed = processed + 1;
+    processed = processed + 1;
     term;
 };
 ```
@@ -1454,7 +1454,7 @@ true at runtime. The action specifies what happens on mismatch:
 ```brief
 #assume_shape(packet :> PaymentTxn, escape)
 rct txn process_payment() [packet.active][processed == @processed + 1] {
-    &processed = processed + 1;
+    processed = processed + 1;
     term;
 };
 ```
@@ -1494,7 +1494,7 @@ rct txn log_state() [true][true] {
 txn long_operation() [true][done] ?[5000ms] {
     // Must complete within 5 seconds
     do_work();
-    &done = true;
+    done = true;
     term;
 };
 ```
@@ -1529,7 +1529,7 @@ rct txn check_sensor() [true][true] {
 // Good: Event-driven
 rct txn handle_event() [sensor_value > threshold][handled] {
     process_event();
-    &handled = true;
+    handled = true;
     term;
 };
 ```
@@ -1539,9 +1539,9 @@ rct txn handle_event() [sensor_value > threshold][handled] {
 ```brief
 // Bad: Multiple mutations
 txn bad_example() [true][true] {
-    &x = x + 1;
-    &y = y + 1;
-    &z = z + 1;
+    x = x + 1;
+    y = y + 1;
+    z = z + 1;
     term;
 };
 
@@ -1550,9 +1550,9 @@ txn good_example() [true][true] {
     let new_x = x + 1;
     let new_y = y + 1;
     let new_z = z + 1;
-    &x = new_x;
-    &y = new_y;
-    &z = new_z;
+    x = new_x;
+    y = new_y;
+    z = new_z;
     term;
 };
 ```
