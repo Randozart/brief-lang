@@ -1507,7 +1507,7 @@ fn expr_has_call(expr: &Expr) -> bool {
     let mut work: Vec<&Expr> = vec![expr];
     while let Some(e) = work.pop() {
         match e {
-            Expr::Call(_, _) => return true,
+            Expr::Call(_, _) | Expr::IntrinsicCall { .. } => return true,
             Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
             | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
             | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)

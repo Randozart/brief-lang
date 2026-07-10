@@ -2295,14 +2295,6 @@ impl LlvmBackend {
                     .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
                     .collect();
                 let mut hoist: Vec<Vec<Statement>> = Vec::new();
-                for s in &txn.body {
-                    if let Statement::TermBang { swan_song: Some(ss), .. } = s {
-                        hoist.push(vec![ss.as_ref().clone()]);
-                    }
-                }
-                let mut stmts: Vec<&Statement> = txn.body.iter()
-                    .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
-                    .collect();
                 if let Some(last_idx) = stmts.len().checked_sub(1) {
                     if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
                         let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang { .. }));

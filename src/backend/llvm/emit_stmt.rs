@@ -268,6 +268,26 @@ impl LlvmBackend {
         p
     }
 
+    /// 2026-07-10: Type-aware store to a state field.
+    /// Looks up the field's LLVM type, adapts the value via ensure_typed_value,
+    /// and emits a correctly-typed store. All LHS store paths should route
+    /// through this to avoid the recurring `store i64` bug class.
+    pub(crate) fn emit_typed_store(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        name: &str,
+        val: &TypedRegister,
+    ) {
+        let Some(&idx) = self.ctx.field_index_map.get(name) else { return; };
+        let ty = self.ctx.field_types[idx].clone();
+        let sr = self.fun.state_reg_name.clone();
+        let p = self.emit_state_gep(out, indent, "ts", &sr, idx);
+        let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
+        let tv = self.ensure_typed_value(out, indent, &ty, &val.name, brief_ty);
+        writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, p, self.align_of(&ty)).ok();
+    }
+
     /// 2026-07-04: Emit chunk allocas for all %State sub-structs.
     /// Each chunk has ≤MAX_FIELDS_PER_CHUNK fields so SROA can decompose
     /// each chunk into scalar registers for alias analysis and vectorization.
@@ -697,23 +717,32 @@ impl LlvmBackend {
                 let fname = match lhs {
                     Expr::Identifier(n) => n.clone(),
                     Expr::AddrOf(inner) => {
-                        // Write through pointer: get the address, then store the value.
-                        match crate::backend::llvm::expr::identifier::emit_addr_of(self, out, inner, indent) {
-                            Ok(ptr_reg) => {
-                                let indent_str = if indent.is_empty() { "  " } else { indent };
-                                writeln!(out, "{}store i64 {}, ptr {}, align 8", indent_str, val.name, ptr_reg).ok();
-                            }
-                            Err(msg) => {
-                                writeln!(out, "{}; cannot write through pointer: {}", indent, msg).ok();
-                            }
-                        }
+                        let Some(name) = inner.as_var_name() else {
+                            writeln!(out, "{}; &<complex> = value not supported", indent).ok();
+                            return;
+                        };
+                        self.emit_typed_store(out, indent, name, &val);
                         return;
                     }
                     Expr::Deref(ptr) => {
-                        // Deref LHS: evaluate the pointer, store through it.
+                        // 2026-07-10: Deref LHS — evaluate the pointer, store through it.
+                        // Use the value's type from the TypedRegister (pointee type).
                         let ptr_reg = self.emit_expr(out, ptr, indent);
-                        let indent_str = if indent.is_empty() { "  " } else { indent };
-                        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent_str, val.name, ptr_reg.name).ok();
+                        let pointee_ty = crate::type_universe::pointee_type(&ptr_reg.ty);
+                        let Some(inner_ty) = pointee_ty else {
+                            writeln!(out, "{}; cannot dereference non-pointer type", indent).ok();
+                            return;
+                        };
+                        let llvm_ty = match inner_ty {
+                            Type::Custom(ref s) if s == "Bool" => "i1".to_string(),
+                            Type::Custom(ref s) if s == "Char" => "i32".to_string(),
+                            Type::Custom(ref s) if s == "Int" => "i64".to_string(),
+                            Type::Custom(ref s) if s == "Float" => "float".to_string(),
+                            Type::Custom(ref s) if s == "Float64" => "double".to_string(),
+                            _ => "i64".to_string(),
+                        };
+                        let tv = self.ensure_typed_value(out, indent, &llvm_ty, &val.name, Some(inner_ty.clone()));
+                        writeln!(out, "{}store {} {}, ptr {}, align {}", indent, llvm_ty, tv, ptr_reg.name, self.align_of(&llvm_ty)).ok();
                         return;
                     }
                     Expr::ListIndex(list_expr, index_expr) => {
