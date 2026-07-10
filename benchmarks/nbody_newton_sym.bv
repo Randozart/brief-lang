@@ -68,12 +68,12 @@ rct txn simulate [
     let ge01: Float32 = 0.5f32 * (gd01 + dsq01 / gd01);
     let dist01: Float32 = 0.5f32 * (ge01 + dsq01 / ge01);
     let mag01: Float32 = dt / (dsq01 * dist01);
-    &vx0 = vx0 - dx01 * m1 * mag01;
-    &vy0 = vy0 - dy01 * m1 * mag01;
-    &vz0 = vz0 - dz01 * m1 * mag01;
-    &vx1 = vx1 + dx01 * m0 * mag01;
-    &vy1 = vy1 + dy01 * m0 * mag01;
-    &vz1 = vz1 + dz01 * m0 * mag01;
+    vx0 = vx0 - dx01 * m1 * mag01;
+    vy0 = vy0 - dy01 * m1 * mag01;
+    vz0 = vz0 - dz01 * m1 * mag01;
+    vx1 = vx1 + dx01 * m0 * mag01;
+    vy1 = vy1 + dy01 * m0 * mag01;
+    vz1 = vz1 + dz01 * m0 * mag01;
 
     let dx02: Float32 = bx0 - bx2;
     let dy02: Float32 = by0 - by2;
@@ -86,12 +86,12 @@ rct txn simulate [
     let ge02: Float32 = 0.5f32 * (gd02 + dsq02 / gd02);
     let dist02: Float32 = 0.5f32 * (ge02 + dsq02 / ge02);
     let mag02: Float32 = dt / (dsq02 * dist02);
-    &vx0 = vx0 - dx02 * m2 * mag02;
-    &vy0 = vy0 - dy02 * m2 * mag02;
-    &vz0 = vz0 - dz02 * m2 * mag02;
-    &vx2 = vx2 + dx02 * m0 * mag02;
-    &vy2 = vy2 + dy02 * m0 * mag02;
-    &vz2 = vz2 + dz02 * m0 * mag02;
+    vx0 = vx0 - dx02 * m2 * mag02;
+    vy0 = vy0 - dy02 * m2 * mag02;
+    vz0 = vz0 - dz02 * m2 * mag02;
+    vx2 = vx2 + dx02 * m0 * mag02;
+    vy2 = vy2 + dy02 * m0 * mag02;
+    vz2 = vz2 + dz02 * m0 * mag02;
 
     let dx03: Float32 = bx0 - bx3;
     let dy03: Float32 = by0 - by3;
@@ -104,12 +104,12 @@ rct txn simulate [
     let ge03: Float32 = 0.5f32 * (gd03 + dsq03 / gd03);
     let dist03: Float32 = 0.5f32 * (ge03 + dsq03 / ge03);
     let mag03: Float32 = dt / (dsq03 * dist03);
-    &vx0 = vx0 - dx03 * m3 * mag03;
-    &vy0 = vy0 - dy03 * m3 * mag03;
-    &vz0 = vz0 - dz03 * m3 * mag03;
-    &vx3 = vx3 + dx03 * m0 * mag03;
-    &vy3 = vy3 + dy03 * m0 * mag03;
-    &vz3 = vz3 + dz03 * m0 * mag03;
+    vx0 = vx0 - dx03 * m3 * mag03;
+    vy0 = vy0 - dy03 * m3 * mag03;
+    vz0 = vz0 - dz03 * m3 * mag03;
+    vx3 = vx3 + dx03 * m0 * mag03;
+    vy3 = vy3 + dy03 * m0 * mag03;
+    vz3 = vz3 + dz03 * m0 * mag03;
 
     let dx04: Float32 = bx0 - bx4;
     let dy04: Float32 = by0 - by4;
@@ -122,12 +122,12 @@ rct txn simulate [
     let ge04: Float32 = 0.5f32 * (gd04 + dsq04 / gd04);
     let dist04: Float32 = 0.5f32 * (ge04 + dsq04 / ge04);
     let mag04: Float32 = dt / (dsq04 * dist04);
-    &vx0 = vx0 - dx04 * m4 * mag04;
-    &vy0 = vy0 - dy04 * m4 * mag04;
-    &vz0 = vz0 - dz04 * m4 * mag04;
-    &vx4 = vx4 + dx04 * m0 * mag04;
-    &vy4 = vy4 + dy04 * m0 * mag04;
-    &vz4 = vz4 + dz04 * m0 * mag04;
+    vx0 = vx0 - dx04 * m4 * mag04;
+    vy0 = vy0 - dy04 * m4 * mag04;
+    vz0 = vz0 - dz04 * m4 * mag04;
+    vx4 = vx4 + dx04 * m0 * mag04;
+    vy4 = vy4 + dy04 * m0 * mag04;
+    vz4 = vz4 + dz04 * m0 * mag04;
 
     let dx12: Float32 = bx1 - bx2;
     let dy12: Float32 = by1 - by2;
@@ -140,12 +140,12 @@ rct txn simulate [
     let ge12: Float32 = 0.5f32 * (gd12 + dsq12 / gd12);
     let dist12: Float32 = 0.5f32 * (ge12 + dsq12 / ge12);
     let mag12: Float32 = dt / (dsq12 * dist12);
-    &vx1 = vx1 - dx12 * m2 * mag12;
-    &vy1 = vy1 - dy12 * m2 * mag12;
-    &vz1 = vz1 - dz12 * m2 * mag12;
-    &vx2 = vx2 + dx12 * m1 * mag12;
-    &vy2 = vy2 + dy12 * m1 * mag12;
-    &vz2 = vz2 + dz12 * m1 * mag12;
+    vx1 = vx1 - dx12 * m2 * mag12;
+    vy1 = vy1 - dy12 * m2 * mag12;
+    vz1 = vz1 - dz12 * m2 * mag12;
+    vx2 = vx2 + dx12 * m1 * mag12;
+    vy2 = vy2 + dy12 * m1 * mag12;
+    vz2 = vz2 + dz12 * m1 * mag12;
 
     let dx13: Float32 = bx1 - bx3;
     let dy13: Float32 = by1 - by3;
@@ -158,12 +158,12 @@ rct txn simulate [
     let ge13: Float32 = 0.5f32 * (gd13 + dsq13 / gd13);
     let dist13: Float32 = 0.5f32 * (ge13 + dsq13 / ge13);
     let mag13: Float32 = dt / (dsq13 * dist13);
-    &vx1 = vx1 - dx13 * m3 * mag13;
-    &vy1 = vy1 - dy13 * m3 * mag13;
-    &vz1 = vz1 - dz13 * m3 * mag13;
-    &vx3 = vx3 + dx13 * m1 * mag13;
-    &vy3 = vy3 + dy13 * m1 * mag13;
-    &vz3 = vz3 + dz13 * m1 * mag13;
+    vx1 = vx1 - dx13 * m3 * mag13;
+    vy1 = vy1 - dy13 * m3 * mag13;
+    vz1 = vz1 - dz13 * m3 * mag13;
+    vx3 = vx3 + dx13 * m1 * mag13;
+    vy3 = vy3 + dy13 * m1 * mag13;
+    vz3 = vz3 + dz13 * m1 * mag13;
 
     let dx14: Float32 = bx1 - bx4;
     let dy14: Float32 = by1 - by4;
@@ -176,12 +176,12 @@ rct txn simulate [
     let ge14: Float32 = 0.5f32 * (gd14 + dsq14 / gd14);
     let dist14: Float32 = 0.5f32 * (ge14 + dsq14 / ge14);
     let mag14: Float32 = dt / (dsq14 * dist14);
-    &vx1 = vx1 - dx14 * m4 * mag14;
-    &vy1 = vy1 - dy14 * m4 * mag14;
-    &vz1 = vz1 - dz14 * m4 * mag14;
-    &vx4 = vx4 + dx14 * m1 * mag14;
-    &vy4 = vy4 + dy14 * m1 * mag14;
-    &vz4 = vz4 + dz14 * m1 * mag14;
+    vx1 = vx1 - dx14 * m4 * mag14;
+    vy1 = vy1 - dy14 * m4 * mag14;
+    vz1 = vz1 - dz14 * m4 * mag14;
+    vx4 = vx4 + dx14 * m1 * mag14;
+    vy4 = vy4 + dy14 * m1 * mag14;
+    vz4 = vz4 + dz14 * m1 * mag14;
 
     let dx23: Float32 = bx2 - bx3;
     let dy23: Float32 = by2 - by3;
@@ -194,12 +194,12 @@ rct txn simulate [
     let ge23: Float32 = 0.5f32 * (gd23 + dsq23 / gd23);
     let dist23: Float32 = 0.5f32 * (ge23 + dsq23 / ge23);
     let mag23: Float32 = dt / (dsq23 * dist23);
-    &vx2 = vx2 - dx23 * m3 * mag23;
-    &vy2 = vy2 - dy23 * m3 * mag23;
-    &vz2 = vz2 - dz23 * m3 * mag23;
-    &vx3 = vx3 + dx23 * m2 * mag23;
-    &vy3 = vy3 + dy23 * m2 * mag23;
-    &vz3 = vz3 + dz23 * m2 * mag23;
+    vx2 = vx2 - dx23 * m3 * mag23;
+    vy2 = vy2 - dy23 * m3 * mag23;
+    vz2 = vz2 - dz23 * m3 * mag23;
+    vx3 = vx3 + dx23 * m2 * mag23;
+    vy3 = vy3 + dy23 * m2 * mag23;
+    vz3 = vz3 + dz23 * m2 * mag23;
 
     let dx24: Float32 = bx2 - bx4;
     let dy24: Float32 = by2 - by4;
@@ -212,12 +212,12 @@ rct txn simulate [
     let ge24: Float32 = 0.5f32 * (gd24 + dsq24 / gd24);
     let dist24: Float32 = 0.5f32 * (ge24 + dsq24 / ge24);
     let mag24: Float32 = dt / (dsq24 * dist24);
-    &vx2 = vx2 - dx24 * m4 * mag24;
-    &vy2 = vy2 - dy24 * m4 * mag24;
-    &vz2 = vz2 - dz24 * m4 * mag24;
-    &vx4 = vx4 + dx24 * m2 * mag24;
-    &vy4 = vy4 + dy24 * m2 * mag24;
-    &vz4 = vz4 + dz24 * m2 * mag24;
+    vx2 = vx2 - dx24 * m4 * mag24;
+    vy2 = vy2 - dy24 * m4 * mag24;
+    vz2 = vz2 - dz24 * m4 * mag24;
+    vx4 = vx4 + dx24 * m2 * mag24;
+    vy4 = vy4 + dy24 * m2 * mag24;
+    vz4 = vz4 + dz24 * m2 * mag24;
 
     let dx34: Float32 = bx3 - bx4;
     let dy34: Float32 = by3 - by4;
@@ -230,28 +230,28 @@ rct txn simulate [
     let ge34: Float32 = 0.5f32 * (gd34 + dsq34 / gd34);
     let dist34: Float32 = 0.5f32 * (ge34 + dsq34 / ge34);
     let mag34: Float32 = dt / (dsq34 * dist34);
-    &vx3 = vx3 - dx34 * m4 * mag34;
-    &vy3 = vy3 - dy34 * m4 * mag34;
-    &vz3 = vz3 - dz34 * m4 * mag34;
-    &vx4 = vx4 + dx34 * m3 * mag34;
-    &vy4 = vy4 + dy34 * m3 * mag34;
-    &vz4 = vz4 + dz34 * m3 * mag34;
+    vx3 = vx3 - dx34 * m4 * mag34;
+    vy3 = vy3 - dy34 * m4 * mag34;
+    vz3 = vz3 - dz34 * m4 * mag34;
+    vx4 = vx4 + dx34 * m3 * mag34;
+    vy4 = vy4 + dy34 * m3 * mag34;
+    vz4 = vz4 + dz34 * m3 * mag34;
 
-    &bx0 = bx0 + dt * vx0;
-    &by0 = by0 + dt * vy0;
-    &bz0 = bz0 + dt * vz0;
-    &bx1 = bx1 + dt * vx1;
-    &by1 = by1 + dt * vy1;
-    &bz1 = bz1 + dt * vz1;
-    &bx2 = bx2 + dt * vx2;
-    &by2 = by2 + dt * vy2;
-    &bz2 = bz2 + dt * vz2;
-    &bx3 = bx3 + dt * vx3;
-    &by3 = by3 + dt * vy3;
-    &bz3 = bz3 + dt * vz3;
-    &bx4 = bx4 + dt * vx4;
-    &by4 = by4 + dt * vy4;
-    &bz4 = bz4 + dt * vz4;
+    bx0 = bx0 + dt * vx0;
+    by0 = by0 + dt * vy0;
+    bz0 = bz0 + dt * vz0;
+    bx1 = bx1 + dt * vx1;
+    by1 = by1 + dt * vy1;
+    bz1 = bz1 + dt * vz1;
+    bx2 = bx2 + dt * vx2;
+    by2 = by2 + dt * vy2;
+    bz2 = bz2 + dt * vz2;
+    bx3 = bx3 + dt * vx3;
+    by3 = by3 + dt * vy3;
+    bz3 = bz3 + dt * vz3;
+    bx4 = bx4 + dt * vx4;
+    by4 = by4 + dt * vy4;
+    bz4 = bz4 + dt * vz4;
 
     // Energy computation (same as original)
     let dxe01: Float32 = bx0 - bx1;
@@ -385,7 +385,7 @@ rct txn simulate [
     [count % 5000000 == 0] {
         let __printed: Bool = print_float#(energy);
     };
-    &count = count + 1;
+    count = count + 1;
     [count == bound] {
         term! -> print_float#(energy);
     };

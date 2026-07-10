@@ -63,9 +63,9 @@ rct txn process [count < total][count == total] {
 
     // Shift delay line
     &x2 = x1;
-    &x1 = input;
-    &y2 = y1;
-    &y1 = out;
+    x1 = input;
+    y2 = y1;
+    y1 = out;
 
     // Bump loop counter
     &count = count + 1;

@@ -11,10 +11,10 @@ let locked: Bool = false;
 rct txn withdraw [locked == false && account_balance >= 50 && total_withdrawals < 10]
   [account_balance == @account_balance - 50 && total_withdrawals == @total_withdrawals + 1]
 {
-  &locked = true;
-  &account_balance = account_balance - 50;
-  &total_withdrawals = total_withdrawals + 1;
-  &locked = false;
+  locked = true;
+  account_balance = account_balance - 50;
+  total_withdrawals = total_withdrawals + 1;
+  locked = false;
   term;
 };
 
@@ -22,9 +22,9 @@ rct txn withdraw [locked == false && account_balance >= 50 && total_withdrawals 
 rct txn deposit [locked == false]
   [account_balance == @account_balance + 100]
 {
-  &locked = true;
-  &account_balance = account_balance + 100;
-  &locked = false;
+  locked = true;
+  account_balance = account_balance + 100;
+  locked = false;
   term;
 };
 
@@ -32,6 +32,6 @@ rct txn deposit [locked == false]
 rct txn reset_counter [total_withdrawals > 0]
   [total_withdrawals == 0]
 {
-  &total_withdrawals = 0;
+  total_withdrawals = 0;
   term;
 };

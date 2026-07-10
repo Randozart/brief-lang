@@ -10,7 +10,7 @@ txn allocate_memory [mapped_addr == 0][mapped_addr > 0] {
     // PROT_READ | PROT_WRITE = 0x03
     // MAP_PRIVATE | MAP_ANONYMOUS = 0x22
     let addr: Int = mmap#(0, mapped_size, 0x03, 0x22, -1, 0);
-    &mapped_addr = addr;
+    mapped_addr = addr;
     term;
 };
 
@@ -18,7 +18,7 @@ txn allocate_memory [mapped_addr == 0][mapped_addr > 0] {
 txn write_to_memory [mapped_addr > 0][written == true] {
     let ptr: Int = mapped_addr :> Ptr;
     let _ = atomic_store#(ptr, 42, 0);
-    &written = true;
+    written = true;
     term;
 };
 
@@ -26,7 +26,7 @@ txn write_to_memory [mapped_addr > 0][written == true] {
 txn read_from_memory [mapped_addr > 0][value == 42] {
     let ptr: Int = mapped_addr :> Ptr;
     let val: Int = atomic_load#(ptr, 0);
-    &value = val;
+    value = val;
     term;
 };
 
@@ -34,13 +34,13 @@ txn read_from_memory [mapped_addr > 0][value == 42] {
 txn protect_memory [mapped_addr > 0][protected == true] {
     // PROT_READ = 0x01
     let ret: Int = mprotect#(mapped_addr, mapped_size, 0x01);
-    &protected = ret == 0;
+    protected = ret == 0;
     term;
 };
 
 // Free mapped memory
 txn free_memory [mapped_addr > 0][mapped_addr == 0] {
     let ret: Int = munmap#(mapped_addr, mapped_size);
-    &mapped_addr = 0;
+    mapped_addr = 0;
     term;
 };

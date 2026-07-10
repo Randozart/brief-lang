@@ -10,12 +10,12 @@ rstruct Greeter {
 
     // Transactions inside an rstruct become Greeter.set_name, Greeter.greet, etc.
     txn Greeter.set_name [true][name == new_name] {
-        &name = new_name;
+        name = new_name;
         term;
     };
 
     txn Greeter.greet [count < 100][count == @count + 1] {
-        &count = count + 1;
+        count = count + 1;
         term;
     };
 

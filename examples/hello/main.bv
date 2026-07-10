@@ -5,6 +5,6 @@ txn greet [greeting != ""][term == greeting] {
 };
 
 txn set_greeting [greeting != "Hello, World!"][greeting == "Hello, World!"] {
-  &greeting = "Hello, World!";
+  greeting = "Hello, World!";
   term;
 };

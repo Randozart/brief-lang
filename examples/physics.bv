@@ -9,8 +9,8 @@ txn simulate(p: Ptr<Float>, n: Int) -> Float {
     var i: Int = 0;
     rct txn loop [i < n][i == n] {
         [i < n] {
-            &result = result + (p[i] * p[i]);
-            &i = i + 1;
+            result = result + (p[i] * p[i]);
+            i = i + 1;
         };
         term;
     };

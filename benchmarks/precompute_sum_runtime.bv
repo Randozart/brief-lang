@@ -15,8 +15,8 @@ let acc_a: Int = 0;
 let acc_b: Int = 0;
 
 rct txn step_a [bound > 0 && count < bound && acc_a >= 0][count == bound] {
-    &acc_a = acc_a + count;
-    &count = count + 1;
+    acc_a = acc_a + count;
+    count = count + 1;
     [count == bound] {
         term! -> print_int#(acc_a + acc_b);
     };
@@ -24,8 +24,8 @@ rct txn step_a [bound > 0 && count < bound && acc_a >= 0][count == bound] {
 };
 
 rct txn step_b [bound > 0 && count < bound && acc_b >= 0][count == bound] {
-    &acc_b = acc_b + count;
-    &count = count + 1;
+    acc_b = acc_b + count;
+    count = count + 1;
     [count == bound] {
         term! -> print_int#(acc_a + acc_b);
     };

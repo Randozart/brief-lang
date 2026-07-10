@@ -3,17 +3,17 @@ rstruct Counter {
   count: Int = 0;
 
   txn Counter.increment [count < 100][@count + 1 == count] {
-    &count = count + 1;
+    count = count + 1;
     term;
   };
 
   txn Counter.decrement [count > 0][@count - 1 == count] {
-    &count = count - 1;
+    count = count - 1;
     term;
   };
 
   txn Counter.reset [count != 0][0 == count] {
-    &count = 0;
+    count = 0;
     term;
   };
 

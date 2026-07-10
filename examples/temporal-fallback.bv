@@ -32,7 +32,7 @@ let result = query_db() within 100 ms (3) ~? cache_lookup();
 
 // ── Watchdog bracket form ──
 rct txn process [x > 0][x == 0] ?[cycles <= 1000 retry 3] ~? log_timeout() {
-    &x = x - 1;
+    x = x - 1;
     term;
 };
 

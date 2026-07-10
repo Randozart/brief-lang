@@ -16,6 +16,6 @@ frgn greet(name: String) -> Bool;
 txn run [true][result == 84] {
     let doubled: Int = double_it(42);
     let greeted: Bool = greet("Brief");
-    &result = doubled;
+    result = doubled;
     term greeted;
 };

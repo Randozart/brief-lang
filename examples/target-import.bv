@@ -42,7 +42,7 @@ defn uart_send(c: Byte) -> Bool {
     // Wait for TX buffer empty (SR.TXE bit 7)
     let sr: Byte = volatile_load#(uart1_sr as Ptr<Byte>);
     while (sr & 0x80) == 0 {
-        &sr = volatile_load#(uart1_sr as Ptr<Byte>);
+        sr = volatile_load#(uart1_sr as Ptr<Byte>);
     };
     // Send the character
     term volatile_store#(uart1_dr as Ptr<Byte>, c);
@@ -52,7 +52,7 @@ defn uart_recv() -> Bool {
     // Wait for RX buffer not empty (SR.RXNE bit 5)
     let sr: Byte = volatile_load#(uart1_sr as Ptr<Byte>);
     while (sr & 0x20) == 0 {
-        &sr = volatile_load#(uart1_sr as Ptr<Byte>);
+        sr = volatile_load#(uart1_sr as Ptr<Byte>);
     };
     // Read and acknowledge data
     let _c: Byte = volatile_load#(uart1_dr as Ptr<Byte>);

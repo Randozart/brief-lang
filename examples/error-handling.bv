@@ -32,7 +32,7 @@ defn find_first_even(items: List<Int>) -> Option<Int> {
         [items[i] % 2 == 0] {
             term some(items[i]);
         };
-        &i = i + 1;
+        i = i + 1;
         term;
     };
     term none();

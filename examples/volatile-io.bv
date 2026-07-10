@@ -35,7 +35,7 @@ defn uart_send(c: Byte) -> Bool
     // Wait until TX buffer is empty
     let status: Byte = volatile_load#(UART_SR);
     while (status & SR_TXE) == 0 {
-        &status = volatile_load#(UART_SR);
+        status = volatile_load#(UART_SR);
     };
     // Send the character
     term volatile_store#(UART_DR, c);
@@ -49,7 +49,7 @@ defn uart_recv() -> Byte
     // Wait until RX buffer is full
     let status: Byte = volatile_load#(UART_SR);
     while (status & SR_RXNE) == 0 {
-        &status = volatile_load#(UART_SR);
+        status = volatile_load#(UART_SR);
     };
     // Read the received character
     term volatile_load#(UART_DR);
@@ -92,8 +92,8 @@ defn fifo_read(fifo: Ptr<Byte>, count: Int) -> String
     rct txn loop [i < count][i == count] {
         [i < count] {
             let c: Byte = volatile_load#(fifo);
-            &buf = buf + (c as Char);
-            &i = i + 1;
+            buf = buf + (c as Char);
+            i = i + 1;
         };
         term;
     };

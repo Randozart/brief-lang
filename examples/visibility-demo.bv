@@ -31,7 +31,7 @@ defn create_buffer<T>() -> Buffer<T> {
 
 // pvt fields are accessible inside the struct's methods
 txn Buffer.resize(buf: Buffer<Int>) [true][buf.size == new_size] {
-    &buf.size = new_size;
+    buf.size = new_size;
     term;
 };
 
@@ -44,7 +44,7 @@ let doubled: Int = helper(21);
 // ===== TOP-LEVEL sed WORKS ON: =====
 sed let config: String = "secret";
 sed struct InternalState { x: Int; y: Int; };
-sed txn internal_tick [true][x == @x + 1] { &x = x + 1; term; };
+sed txn internal_tick [true][x == @x + 1] { x = x + 1; term; };
 
 // ===== PUBLIC RE-EXPORT =====
 // A public defn can call sed helpers internally

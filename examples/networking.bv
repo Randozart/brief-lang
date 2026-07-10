@@ -19,7 +19,7 @@ txn connect_socket [sock > 0 && connected == false][connected == true] {
     // [family(2), port(htons), addr(4 bytes), padding(8 bytes)]
     let addr: List<Int> = [2, 0x5000, 0x0100007F, 0, 0];
     let ret: Int = connect#(sock, addr :> Ptr, 16);
-    &connected = ret == 0;
+    connected = ret == 0;
     term;
 };
 
@@ -27,7 +27,7 @@ txn connect_socket [sock > 0 && connected == false][connected == true] {
 txn send_data [connected == true][sent == true] {
     let data: String = "GET / HTTP/1.0\r\n\r\n";
     let ret: Int = send#(sock, data :> Ptr, data :> Size, 0);
-    &sent = ret >= 0;
+    sent = ret >= 0;
     term;
 };
 
@@ -36,7 +36,7 @@ txn recv_data [connected == true][received :> Size > 0] {
     let buf: List<Int> = [0; 4096];
     let ret: Int = recv#(sock, buf :> Ptr, 4096, 0);
     [ret > 0] {
-        &received = buf;
+        received = buf;
     };
     term;
 };
@@ -44,6 +44,6 @@ txn recv_data [connected == true][received :> Size > 0] {
 // Clean up
 txn close_socket [sock > 0][sock == 0] {
     let _ = close#(sock);
-    &sock = 0;
+    sock = 0;
     term;
 };

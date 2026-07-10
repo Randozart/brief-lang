@@ -22,9 +22,9 @@ let acc_a: Int = 0;
 let acc_b: Int = 0;
 
 rct txn compute [count < total][count == total] {
-    &acc_a = acc_a + count;
-    &acc_b = acc_b + count;
-    &count = count + 1;
+    acc_a = acc_a + count;
+    acc_b = acc_b + count;
+    count = count + 1;
     [count == total] {
         term! -> print_int#(acc_a + acc_b);
     };

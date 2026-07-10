@@ -7,8 +7,8 @@ let locked: Bool = false;
 rct txn withdraw [locked == false && balance >= 100]
   [balance == @balance - 100]
 {
-  &locked = true;
-  &balance = balance - 100;
-  &locked = false;
+  locked = true;
+  balance = balance - 100;
+  locked = false;
   term;
 };

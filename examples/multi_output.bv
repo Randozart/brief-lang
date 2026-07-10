@@ -11,8 +11,8 @@ txn run_process [done == false]
 {
   let (a, b, c) = process_step();
   
-  &count = a;
-  &message = b;
-  &done = c;
+  count = a;
+  message = b;
+  done = c;
   term;
 };

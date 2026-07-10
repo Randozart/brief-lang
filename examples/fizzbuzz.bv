@@ -8,16 +8,16 @@ rct txn fizzbuzz [current <= n][current == @current + 1 || current > n] {
   let result: String = "";
 
   if is_fizz && is_buzz {
-    &result = "FizzBuzz";
+    result = "FizzBuzz";
   } else if is_fizz {
-    &result = "Fizz";
+    result = "Fizz";
   } else if is_buzz {
-    &result = "Buzz";
+    result = "Buzz";
   } else {
-    &result = String(current);
+    result = String(current);
   };
 
-  &output = output + result + "\n";
-  &current = current + 1;
+  output = output + result + "\n";
+  current = current + 1;
   term;
 };

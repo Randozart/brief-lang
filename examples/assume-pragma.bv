@@ -14,7 +14,7 @@ let timer_fired: Bool = false;
 // The compiler won't eliminate this transaction because
 // button_press is an #assume_event
 rct txn handle_button [button_pressed == false][button_pressed == true] {
-    &button_pressed = true;
+    button_pressed = true;
     term;
 };
 

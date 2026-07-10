@@ -12,27 +12,27 @@ let pid: Int = getpid#();
 // Spawn a child process (fire-and-forget)
 txn spawn_process [true][spawned == true] {
     let ret: Int = spawn#("echo", ["hello", "world"]);
-    &spawned = ret >= 0;
+    spawned = ret >= 0;
     term;
 };
 
 // Spawn and capture output
 txn capture_output [true][output :> Size > 0] {
     let result: String = spawn_with_output#("whoami", []);
-    &output = result;
+    output = result;
     term;
 };
 
 // Environment variables
 txn read_env [true][env_val != ""] {
     let val: String = getenv#("HOME");
-    &env_val = val;
+    env_val = val;
     term;
 };
 
 txn set_env [true][env_set == true] {
     let ret: Int = setenv#("MY_VAR", "42");
-    &env_set = ret == 0;
+    env_set = ret == 0;
     term;
 };
 
@@ -41,7 +41,7 @@ let cwd: String = getcwd#();
 
 txn change_dir [true][new_dir_set == true] {
     let ret: Int = chdir#("/tmp");
-    &new_dir_set = ret == 0;
+    new_dir_set = ret == 0;
     term;
 };
 

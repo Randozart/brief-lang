@@ -9,27 +9,27 @@ defn sufficient_funds(amount: Int) [amount > 0][term == (balance >= amount)] -> 
 txn withdraw [balance > min_balance]
   [balance == @balance - 50]
 {
-  &balance = balance - 50;
+  balance = balance - 50;
   term;
 };
 
 txn deposit [balance < 1000]
   [balance == @balance + 25]
 {
-  &balance = balance + 25;
+  balance = balance + 25;
   term;
 };
 
 rct txn emergency_refill [balance < 20]
   [balance == 100]
 {
-  &balance = 100;
+  balance = 100;
   term;
 };
 
 rct txn check_funds [balance > 0]
   [fund_available == true]
 {
-  &fund_available = true;
+  fund_available = true;
   term;
 };

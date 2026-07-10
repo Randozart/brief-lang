@@ -14,7 +14,7 @@ rct txn saxpy_loop
 {
     // Each thread would compute y[i] = a * x[i] + y[i]
     [i < N] {
-        &i = i + 1;
+        i = i + 1;
     };
     term;
 };

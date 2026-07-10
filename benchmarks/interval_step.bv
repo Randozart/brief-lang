@@ -22,8 +22,8 @@ const R1: Int = 200;
 const R2: Int = 199;
 
 rct txn step [count < N][count == N] {
-    &acc = acc + count;
-    &count = (count + R1) - R2;
+    acc = acc + count;
+    count = (count + R1) - R2;
 
     [count % 5000000 == 0] {
         print_int#(acc);

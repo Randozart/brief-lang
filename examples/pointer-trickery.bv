@@ -51,8 +51,8 @@ rct txn configure_uart [step < 3][step == 3] {
         // Step 0: configure baud rate registers
         let ok: Bool = write_uart(UART_IBRD, 26);
         let ok2: Bool = write_uart(UART_FBRD, 3);
-        &uart_config_done = ok && ok2;
-        &step = step + 1;
+        uart_config_done = ok && ok2;
+        step = step + 1;
         term;
     };
     [step == 1] {
@@ -60,16 +60,16 @@ rct txn configure_uart [step < 3][step == 3] {
         let ibrd_val: Int = read_uart(UART_IBRD);
         let fbrd_val: Int = read_uart(UART_FBRD);
         if ibrd_val == 0 && fbrd_val == 0 {
-            &result = 1;  // interpreter returns 0 for volatile_load (dummy)
+            result = 1;  // interpreter returns 0 for volatile_load (dummy)
         };
-        &step = step + 1;
+        step = step + 1;
         term;
     };
     [step == 2] {
         // Step 2: finalize — these pass because contracts prove bounds safety
         let final_ok: Bool = write_uart(UART_LCRH, 0x60);
-        &uart_init_done = final_ok;
-        &result = result + 2;  // total = 3
+        uart_init_done = final_ok;
+        result = result + 2;  // total = 3
         &step = step + 1;
         term;
     };

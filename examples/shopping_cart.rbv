@@ -6,46 +6,46 @@ rstruct ShoppingCart {
   step: Int = 0;
 
   // Product selection transactions - set the selected product
-  txn ShoppingCart.select_laptop [product != 1][product == 1] { &product = 1; term; };
-  txn ShoppingCart.select_keyboard [product != 2][product == 2] { &product = 2; term; };
-  txn ShoppingCart.select_mouse [product != 3][product == 3] { &product = 3; term; };
-  txn ShoppingCart.select_monitor [product != 4][product == 4] { &product = 4; term; };
+  txn ShoppingCart.select_laptop [product != 1][product == 1] { product = 1; term; };
+  txn ShoppingCart.select_keyboard [product != 2][product == 2] { product = 2; term; };
+  txn ShoppingCart.select_mouse [product != 3][product == 3] { product = 3; term; };
+  txn ShoppingCart.select_monitor [product != 4][product == 4] { product = 4; term; };
 
   // Product-specific add transactions - ADD SPECIFIC PRODUCT TO CART
   // These preserve the contract [product > 0] by setting product FIRST, then adding
   // CONTRACT-FIRST: Each transaction adds a specific product (not "nothing")
   txn ShoppingCart.add_laptop [product == 1][items == @items + 1] { 
-    &product = 1;
-    &items = items + 1;
-    &total = total + 1299;
+    product = 1;
+    items = items + 1;
+    total = total + 1299;
     term; 
   };
   
   txn ShoppingCart.add_keyboard [product == 2][items == @items + 1] { 
-    &product = 2;
-    &items = items + 1;
-    &total = total + 149;
+    product = 2;
+    items = items + 1;
+    total = total + 149;
     term; 
   };
   
   txn ShoppingCart.add_mouse [product == 3][items == @items + 1] { 
-    &product = 3;
-    &items = items + 1;
-    &total = total + 49;
+    product = 3;
+    items = items + 1;
+    total = total + 49;
     term; 
   };
   
   txn ShoppingCart.add_monitor [product == 4][items == @items + 1] { 
-    &product = 4;
-    &items = items + 1;
-    &total = total + 399;
+    product = 4;
+    items = items + 1;
+    total = total + 399;
     term; 
   };
 
   // Checkout flow - preserves contracts
-  txn ShoppingCart.checkout [items > 0 && step == 0][step == 1] { &step = 1; term; };
-  txn ShoppingCart.confirm [step == 1][step == 2] { &step = 2; term; };
-  txn ShoppingCart.reset [step > 0][step == 0] { &step = 0; &items = 0; &total = 0; &product = 0; term; };
+  txn ShoppingCart.checkout [items > 0 && step == 0][step == 1] { step = 1; term; };
+  txn ShoppingCart.confirm [step == 1][step == 2] { step = 2; term; };
+  txn ShoppingCart.reset [step > 0][step == 0] { step = 0; items = 0; total = 0; product = 0; term; };
 
   <div class="app">
     <span class="header">

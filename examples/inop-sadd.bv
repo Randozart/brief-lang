@@ -21,7 +21,7 @@ rct txn run [tick < 1][tick == 1] {
         term! -> print_int#(x);
     };
     [tick != 0] {
-        &tick = tick + 1;
+        tick = tick + 1;
         term;
     };
 };

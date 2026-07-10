@@ -18,8 +18,8 @@ rct txn kn [count < N][count == N] {
     let nseed: Int = (seed * IA + IC) % IM;
     let nhash: Int = ((hash << 2) | (nseed & 3)) & MASK;
     let nchksum: Int = chksum + nhash % 13;
-    &seed = nseed;  &hash = nhash;  &chksum = nchksum;
+    seed = nseed;  hash = nhash;  chksum = nchksum;
     [count % 5000000 == 0] { print_int#(nchksum); };
-    &count = count + 1;
+    count = count + 1;
     term;
 };

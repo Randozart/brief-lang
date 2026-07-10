@@ -10,12 +10,12 @@ let counter: Int = 0;
 
 // Uses & to write to state field through a pointer
 txn count_up [counter < limit][counter == limit] {
-  &counter = counter + 1;
+  counter = counter + 1;
   term;
 };
 
 // Uses * to read value through pointer and print it
 txn done [counter >= limit][[counter >= limit]] {
-  let val = *(&counter);
+  let val = counter;
   term! -> print_int#(val);
 };

@@ -72,21 +72,21 @@ rct txn propagate [
 
     // Step 2: P_new = AP * A^T + Q
     &p00 = ap00 * a00 + ap01 * a10 + ap02 * a20 + q00;
-    &p01 = ap00 * a01 + ap01 * a11 + ap02 * a21 + q01;
-    &p02 = ap00 * a02 + ap01 * a12 + ap02 * a22 + q02;
+    p01 = ap00 * a01 + ap01 * a11 + ap02 * a21 + q01;
+    p02 = ap00 * a02 + ap01 * a12 + ap02 * a22 + q02;
 
-    &p10 = ap10 * a00 + ap11 * a10 + ap12 * a20 + q10;
-    &p11 = ap10 * a01 + ap11 * a11 + ap12 * a21 + q11;
-    &p12 = ap10 * a02 + ap11 * a12 + ap12 * a22 + q12;
+    p10 = ap10 * a00 + ap11 * a10 + ap12 * a20 + q10;
+    p11 = ap10 * a01 + ap11 * a11 + ap12 * a21 + q11;
+    p12 = ap10 * a02 + ap11 * a12 + ap12 * a22 + q12;
 
-    &p20 = ap20 * a00 + ap21 * a10 + ap22 * a20 + q20;
-    &p21 = ap20 * a01 + ap21 * a11 + ap22 * a21 + q21;
-    &p22 = ap20 * a02 + ap21 * a12 + ap22 * a22 + q22;
+    p20 = ap20 * a00 + ap21 * a10 + ap22 * a20 + q20;
+    p21 = ap20 * a01 + ap21 * a11 + ap22 * a21 + q21;
+    p22 = ap20 * a02 + ap21 * a12 + ap22 * a22 + q22;
 
     // Update state vector
     &x0 = nx0;
-    &x1 = nx1;
-    &x2 = nx2;
+    x1 = nx1;
+    x2 = nx2;
 
     // Increment counter
     &count = count + 1;

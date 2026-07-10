@@ -13,7 +13,7 @@ let count: Int = 0;
 // Precondition: count must be less than 100
 // Postcondition: count increases by exactly 1
 txn increment [count < 100][count == @count + 1] {
-    &count = count + 1;
+    count = count + 1;
     term;
 };
 
@@ -21,7 +21,7 @@ txn increment [count < 100][count == @count + 1] {
 // Precondition: count must be greater than 0
 // Postcondition: count decreases by exactly 1
 txn decrement [count > 0][count == @count - 1] {
-    &count = count - 1;
+    count = count - 1;
     term;
 };
 
@@ -29,6 +29,6 @@ txn decrement [count > 0][count == @count - 1] {
 // Precondition: count must not be zero
 // Postcondition: count equals zero
 txn reset [count != 0][count == 0] {
-    &count = 0;
+    count = 0;
     term;
 };

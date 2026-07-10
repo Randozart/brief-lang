@@ -13,7 +13,7 @@ let N: Int = getenv_int#("BOUND");
 let count: Int = 0;
 
 rct txn work [count < N][count == N] {
-    &count = count + 1;
+    count = count + 1;
 
     [count % 5000000 == 0] {
         print_int#(count);

@@ -19,7 +19,7 @@ txn program_exit [output_written == true][true] {
 // Without swan song, this program is dead code — the compiler
 // would fold it all away since nothing is observable
 txn dead_without_io [true][counter == @counter + 1] {
-    &counter = counter + 1;
+    counter = counter + 1;
     // NO term -> or term! -> means no observable output
     // The compiler is correct to eliminate this
     term;

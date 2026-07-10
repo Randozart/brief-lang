@@ -6,8 +6,8 @@ cell adder(a: Int, b: Int) -> sum: Int {
     done: Bool = false;
     sum: Int = 0;
     rct txn compute [!done]] {
-        &sum = a + b;
-        &done = true;
+        sum = a + b;
+        done = true;
         term;
     };
 };
@@ -16,7 +16,7 @@ cell adder(a: Int, b: Int) -> sum: Int {
 cell! counter(start: Int) -> val: Int {
     val: Int = 0;
     rct txn count [val < 100]] {
-        &val = val + 1;
+        val = val + 1;
         term;
     };
 };

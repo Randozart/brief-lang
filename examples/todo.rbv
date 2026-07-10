@@ -2,12 +2,12 @@
 let items: List<String> = ["Buy groceries", "Walk the dog", "Read a book"];
 
 txn add_item [items :> Size < 100][items :> Size == @items :> Size + 1] {
-  &items = items + ["New task"];
+  items = items + ["New task"];
   term;
 };
 
 txn clear_all [items :> Size > 0][items :> Size == 0] {
-  &items = [];
+  items = [];
   term;
 };
 </script>

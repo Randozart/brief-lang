@@ -8,20 +8,20 @@ let doubled: List<Int> = [];
 // Basic foreach — iterates over all elements
 // The !llvm.loop.vectorize.enable metadata hints SIMD vectorization
 foreach n in numbers {
-    &sum = sum + n;
+    sum = sum + n;
 };
 
 // Foreach with index tracking
 let i: Int = 0;
 foreach n in numbers {
-    &doubled = doubled + [n * 2];
-    &i = i + 1;
+    doubled = doubled + [n * 2];
+    i = i + 1;
 };
 
 // Foreach over a range (compile-time known bounds)
 let range_sum: Int = 0;
 foreach x in [1, 2, 3, 4, 5] {
-    &range_sum = range_sum + x;
+    range_sum = range_sum + x;
 };
 
 // Terminate with observable output

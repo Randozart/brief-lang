@@ -32,11 +32,11 @@ rct txn fan [count < N][count == N] {
     let saved: Int = p0;
     let nchecksum: Int = checksum + saved % 13;
     let nmax: Int = max_flips + nchecksum % 17;
-    &seed = ns;
-    &p0 = p1;  &p1 = p2;  &p2 = p3;  &p3 = p4;  &p4 = p5;  &p5 = p6;
-    &p6 = p7;  &p7 = p8;  &p8 = p9;  &p9 = p10;  &p10 = p11;  &p11 = saved;
-    &checksum = nchecksum;  &max_flips = nmax;
-    &count = count + 1;
+    seed = ns;
+    p0 = p1;  p1 = p2;  p2 = p3;  p3 = p4;  p4 = p5;  p5 = p6;
+    p6 = p7;  p7 = p8;  p8 = p9;  p9 = p10;  p10 = p11;  p11 = saved;
+    checksum = nchecksum;  max_flips = nmax;
+    count = count + 1;
     [count == N] { term! -> print_int#(checksum); };
     term;
 };

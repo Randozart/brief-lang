@@ -16,15 +16,15 @@ let dec: Int = 1;
 // Transaction using & in LHS (mutable assignment)
 // &counter creates Ptr<Int> since counter is a state field
 rct txn increment [counter < 10][counter == 10] {
-  &counter = counter + dec;  // Write through pointer to state field
+  counter = counter + dec;  // Write through pointer to state field
   term;
 };
 
 // Transaction demonstrating * dereference
 // Uses a Guarded block to get proper swan-song hoisting
 rct txn peek [counter > 0 && counter < 10][counter >= 10] {
-  // &counter gives us a Ptr<Int>. *(&counter) reads the value.
-  let counter_val = *(&counter);
+  // &counter gives us a Ptr<Int>. counter reads the value.
+  let counter_val = counter;
   [counter_val > 0] {  // guard ensures this only fires when there is a value
     term! -> print_int#(counter_val);
   };

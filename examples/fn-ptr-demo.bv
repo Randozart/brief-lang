@@ -22,6 +22,6 @@ rct txn comparator [done < 2][done == 2] {
         let r = cmp(2, 2);
         term! -> __print_int(r); // prints 1 (true)
     };
-    &done = done + 1;
+    done = done + 1;
     term;
 };

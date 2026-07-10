@@ -31,28 +31,28 @@ const IA: Int = 3877;
 const IC: Int = 29573;
 
 rct txn fan [count < N][count == N] {
-    &seed = seed * IA;
-    &seed = seed + IC;
-    &seed = seed % IM;
+    seed = seed * IA;
+    seed = seed + IC;
+    seed = seed % IM;
 
-    &seed = p0;
-    &p0 = p1;
-    &p1 = p2;
-    &p2 = p3;
-    &p3 = p4;
-    &p4 = p5;
-    &p5 = p6;
-    &p6 = p7;
-    &p7 = p8;
-    &p8 = p9;
-    &p9 = p10;
-    &p10 = p11;
-    &p11 = seed;
+    seed = p0;
+    p0 = p1;
+    p1 = p2;
+    p2 = p3;
+    p3 = p4;
+    p4 = p5;
+    p5 = p6;
+    p6 = p7;
+    p7 = p8;
+    p8 = p9;
+    p9 = p10;
+    p10 = p11;
+    p11 = seed;
 
-    &checksum = checksum + seed % 13;
-    &max_flips = max_flips + checksum % 17;
+    checksum = checksum + seed % 13;
+    max_flips = max_flips + checksum % 17;
 
-    &count = count + 1;
+    count = count + 1;
 
     [count % 5000000 == 0] {
         print_int#(checksum);

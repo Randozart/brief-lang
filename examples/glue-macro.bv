@@ -25,8 +25,8 @@ frgn print_number(n: Int) -> Bool ;
     let i: Int = 0;
     let n: Int = x :> Size;
     txn dot_loop [i < n][i == n] -> Float {
-        &dot = dot + (x[i] * y[i]);
-        &i = i + 1;
+        dot = dot + (x[i] * y[i]);
+        i = i + 1;
         term;
     };
     term dot;

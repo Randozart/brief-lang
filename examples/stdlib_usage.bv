@@ -23,7 +23,7 @@ rct txn initialize_system
   [initialized == false]
   [initialized == true && counter == @counter]
 {
-  &initialized = true;
+  initialized = true;
   term;
 };
 
@@ -32,6 +32,6 @@ rct txn process_value [initialized == true][counter == @counter + 1] {
   let a: Int = absolute(x);
   let m: Int = min(y, 20);
   let positive: Bool = is_positive(clamped);
-  &counter = counter + 1;
+  counter = counter + 1;
   term;
 };

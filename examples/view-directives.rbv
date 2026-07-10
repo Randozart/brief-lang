@@ -7,17 +7,17 @@ let dark_mode: Bool = false;
 let show_sidebar: Bool = true;
 
 txn toggle_dark [dark_mode == false][dark_mode == true] {
-    &dark_mode = true;
+    dark_mode = true;
     term;
 };
 
 txn toggle_sidebar [show_sidebar == true][show_sidebar == false] {
-    &show_sidebar = false;
+    show_sidebar = false;
     term;
 };
 
 txn select_item [true][selected == item] {
-    &selected = item;
+    selected = item;
     term;
 };
 
