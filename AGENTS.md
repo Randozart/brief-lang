@@ -420,8 +420,8 @@ still holds.
 txn iter_map<T, U>(list: List<T>, f: T -> U, result: List<U>, i: Int)
     [i < list :> Size][i == list :> Size] -> List<U>
 {
-    &result = result.append(f(list[i]));
-    &i = i + 1;
+    result = result.append(f(list[i]));
+    i = i + 1;
     term result;
 };
 

@@ -318,7 +318,7 @@ When `term expr;` or `term! expr;` executes inside a cell, the expression value 
 | `emit_expr.rs` | Full CellCall codegen + `rewrite_cell_identifiers` (90+ Expr variants) + `rewrite_cell_stmt_identifiers` (all Statement variants) + `extract_output_names_llvm` | +524 |
 
 **Helper functions** (all in `emit_expr.rs`):
-- `rewrite_cell_identifiers(expr, cell_name) → Expr`: Recursively rewrites all `Expr::Identifier(name)` to `Expr::Identifier(format!("cell${}${}", cell_name, name))`, plus `OwnedRef` and `PriorState`. Handles 90+ Expr variants, reconstructing Pattern B types (BinaryOpExpr, UnaryOpExpr, ProjectionExpr, etc.) with rewritten children. Non-identifier leaf nodes (Integer, Float, Bool, Char, Term) are cloned as-is.
+- `rewrite_cell_identifiers(expr, cell_name) → Expr`: Recursively rewrites all `Expr::Identifier(name)` to `Expr::Identifier(format!("cell${}${}", cell_name, name))`, plus `AddrOf` and `PriorState`. Handles 90+ Expr variants, reconstructing Pattern B types (BinaryOpExpr, UnaryOpExpr, ProjectionExpr, etc.) with rewritten children. Non-identifier leaf nodes (Integer, Float, Bool, Char, Term) are cloned as-is.
 - `rewrite_cell_stmt_identifiers(stmt, cell_name) → Statement`: Rewrites all expression children in Statements (Assignment, Let, Term, TermBang, Guarded, Foreach, Oracle, SyncBlock, Async, etc.).
 - `extract_output_names_llvm(ot) → Vec<String>`: Flattens `OutputType::Named`, `Tuple`, `Union`, `Single`, `Array` into a list of port names.
 

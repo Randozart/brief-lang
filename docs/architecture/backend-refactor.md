@@ -148,7 +148,7 @@ pub trait ExprCodegenLLVM {
 | `expr/compare.rs` | Eq, Ne, Lt, Le, Gt, Ge, And, Or, Not |
 | `expr/collections.rs` | ListLiteral, Tuple |
 | `expr/intrinsics.rs` | 200+ intrinsic variants (sqrt, sin, print, etc.) |
-| `expr/identifier.rs` | Identifier, OwnedRef, PriorState |
+| `expr/identifier.rs` | Identifier, AddrOf, PriorState |
 | `expr/rest.rs` | All remaining handlers (Call, FieldAccess, Arrow, Match, etc.) |
 | `emit_stmt.rs` | Statement codegen |
 | `emit_toplevel.rs` | Top-level emits (header, declares, definitions) |

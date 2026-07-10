@@ -28,13 +28,15 @@ let p = &field;     // creates a persistent Ptr<T> — the pointer lives
 let v = *p;         // reads through p — genuine pointer load
 ```
 
-And in collection operations, `&` is also redundant for the same reason:
+For collection arrow operations, `&` on the RHS of `<-` marks **consumption**
+(take elements, don't copy). On the LHS of `<-`, `&` is still required by the
+parser for now (it's a syntactic requirement, not a semantic one):
 
 ```brief
-list <- value;      // push to list — use this
-&list <- value;     // redundant — creates transient pointer
-<- list;            // drain list — use this
-<- &list;           // redundant
+&list <- value;     // push — parser requires & on LHS
+value <- &list;     // pop — & on RHS means consumption (remove from list)
+value <- list;      // peek — no & means no consumption (future)
+<- &list;           // drain — & on target means consumption
 ```
 
 ## Dereferencing

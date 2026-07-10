@@ -30,7 +30,7 @@
 | **BracketOp::Mask** | Bracket operation that filters elements by evaluating a predicate. `_` is bound as the current element. Now supports Bool, Regex, and String (compiled to DFA on the fly). |
 | **BracketOp::Coord** | Bracket operation for coordinate indexing into a value. On atomic types with a string expression, desugars to a regex filter. |
 | **BracketOp::Stride** | Bracket operation that takes every Nth element. |
-| **Prior-state semantics** | In `rct txn` bodies, all reads see the state as it was at the BEGINNING of the tick. Chained `&field = ...` does NOT accumulate within a tick. |
+| **Prior-state semantics** | In `rct txn` bodies, all reads see the state as it was at the BEGINNING of the tick. Chained `field = ...` does NOT accumulate within a tick. |
 | **Equality Saturation** | 5-pass fixpoint rewrite engine with 9 rules (add-zero, mul-one, sub-self, etc.) that runs before codegen. |
 | **SLP hazard** | Analysis that estimates register pressure from SLP vectorization candidates and disables SLP when spills would occur. |
 | **Precomputation budget** | `--optimize-budget` flag (default 256). Programs with all-const inputs are fully precomputed up to this budget. `--prod` sets budget to `u64::MAX`. |
