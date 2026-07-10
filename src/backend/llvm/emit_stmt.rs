@@ -287,6 +287,21 @@ impl LlvmBackend {
         name: &str,
         val: &TypedRegister,
     ) {
+        // 2026-07-10: Vector phi group — build vector via insertelement.
+        for (vec_phi, members) in &self.fun.vector_phi_groups {
+            if let Some(comp_idx) = members.iter().position(|m| m == name) {
+                let cur_vec = self.fun.vector_phi_current.get(vec_phi)
+                    .cloned().unwrap_or_else(|| vec_phi.clone());
+                let ins = format!("%iv{}_{}", self.fun.txn_counter, &vec_phi[1..]);
+                self.fun.txn_counter += 1;
+                writeln!(out, "{} {} = insertelement <4 x float> {}, float {}, i32 {}",
+                    indent, ins, cur_vec, val.name, comp_idx).ok();
+                self.fun.vector_phi_current.insert(vec_phi.clone(), ins.clone());
+                self.fun.pending_phi_backedge.insert(name.to_string(), ins.clone());
+                self.fun.pending_phi_native_backedge.insert(name.to_string(), ins);
+                return;
+            }
+        }
         let Some(&idx) = self.ctx.field_index_map.get(name) else { return; };
         let ty = self.ctx.field_types[idx].clone();
         let sr = self.fun.state_reg_name.clone();

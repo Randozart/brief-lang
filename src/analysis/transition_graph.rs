@@ -1582,8 +1582,14 @@ fn extract_write_set(body: &[Statement], state_fields: &HashSet<String>) -> Hash
     let mut writes = HashSet::new();
     for stmt in body {
         if let Statement::Assignment { lhs, .. } = stmt {
+            // 2026-07-10: Handle both Identifier and AddrOf LHS.
+            // &field = value (now AddrOf) is the primary assignment syntax.
             let name = match lhs {
                 Expr::Identifier(n) => n.clone(),
+                Expr::AddrOf(inner) => match inner.as_var_name() {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                },
                 _ => continue,
             };
             if state_fields.contains(&name) {
