@@ -6389,7 +6389,7 @@ let span = self.current_span();
                         let filter = self.extract_arrow_filter(&right);
                         let modifiers = self.parse_hashtag_modifiers()?;
                         self.expect(Token::Semicolon)?;
-                        Ok(Statement::Expression(Expr::ArrowTransfer {
+                        Ok(Statement::Expression(Expr::ArrowTransfer { consume: true, 
                             dest: Box::new(dest),
                             source: Box::new(source),
                             filter,
@@ -6400,7 +6400,7 @@ let span = self.current_span();
                         self.expect(Token::Semicolon)?;
                         Ok(Statement::Expression(Expr::ArrowMut {
                             dir: ArrowDir::Push,
-                            target: Box::new(target),
+                             consume: false, target: Box::new(target),
                             index: Box::new(index),
                             value: Some(Box::new(right)),
                         }))
@@ -6412,7 +6412,7 @@ let span = self.current_span();
                             lhs: expr,
                             expr: Expr::ArrowMut {
                                 dir: ArrowDir::Pop,
-                                target: Box::new(target),
+                                 consume: true, target: Box::new(target),
                                 index: Box::new(index),
                                 value: None,
                             },

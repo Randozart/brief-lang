@@ -185,7 +185,7 @@ impl<'a> DataflowAnalyzer<'a> {
                 self.extract_ids_recursive(target, ids);
                 self.extract_ids_recursive(index, ids);
             }
-            Expr::ArrowTransfer { dest, source, filter } => {
+            Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
                 self.extract_ids_recursive(dest, ids);
                 self.extract_ids_recursive(source, ids);
                 if let Some(f) = filter {

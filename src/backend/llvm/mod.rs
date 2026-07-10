@@ -422,7 +422,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
             collect_strings_expr(target, seen, out);
             collect_strings_expr(index, seen, out);
         }
-        Expr::ArrowTransfer { dest, source, filter } => {
+        Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
             collect_strings_expr(dest, seen, out);
             collect_strings_expr(source, seen, out);
             if let Some(f) = filter { collect_strings_expr(f, seen, out); }

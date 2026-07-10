@@ -1653,6 +1653,7 @@ pub enum Expr {
     /// `index` is `Expr::Term` for full-range (end operations)
     ArrowMut {
         dir: ArrowDir,
+        consume: bool,
         target: Box<Expr>,
         index: Box<Expr>,
         value: Option<Box<Expr>>,
@@ -1666,6 +1667,7 @@ pub enum Expr {
     /// All matching elements move from source to dest.
     /// `filter` is None for unconditional transfer.
     ArrowTransfer {
+        consume: bool,
         dest: Box<Expr>,
         source: Box<Expr>,
         filter: Option<Box<Expr>>,
@@ -2147,7 +2149,7 @@ impl Expr {
             Expr::PatternMatch { value, .. } => {
                 value.extract_deps_recursive(deps);
             }
-            Expr::ArrowTransfer { dest, source, filter } => {
+            Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
                 dest.extract_deps_recursive(deps);
                 source.extract_deps_recursive(deps);
                 if let Some(f) = filter {

@@ -929,7 +929,7 @@ pub fn emit_rest_expr(
             // Why free+malloc+memcpy instead of realloc: Brief collections have
             // Arrow handlers dispatched to expr::arrow submodule.
             // 2026-06-30: Extracted from rest.rs to src/backend/llvm/expr/arrow.rs.
-            Expr::ArrowMut { dir: ArrowDir::Push, target, index, value: Some(val) } => {
+            Expr::ArrowMut { dir: ArrowDir::Push, target, index, value: Some(val), consume: _ } => {
                 return crate::backend::llvm::expr::arrow::emit_arrow_push(backend, out, v, target, index, val, indent);
             }
             // Why free+malloc+memcpy for pop: same semantics as push — the old
@@ -937,7 +937,7 @@ pub fn emit_rest_expr(
             // we still allocate a fresh buffer of len-1. An arena allocator
             // (planned) would replace the free+malloc with a bump pointer reset.
             // 2026-06-30: Extracted to src/backend/llvm/expr/arrow.rs.
-            Expr::ArrowMut { dir: ArrowDir::Pop, target, index, value: None } => {
+            Expr::ArrowMut { dir: ArrowDir::Pop, target, index, value: None, consume: _ } => {
                 return crate::backend::llvm::expr::arrow::emit_arrow_pop(backend, out, v, target, index, indent);
             }
             // 2026-06-30: Extracted to src/backend/llvm/expr/arrow.rs.
@@ -950,7 +950,7 @@ pub fn emit_rest_expr(
             // This is the most allocation-heavy arrow op — the arena plan (Phase 1)
             // benefits transfer the most.
             // 2026-06-30: Extracted to src/backend/llvm/expr/arrow.rs.
-            Expr::ArrowTransfer { dest, source, filter: _ } => {
+            Expr::ArrowTransfer { dest, source, filter: _, consume: _ } => {
                 return crate::backend::llvm::expr::arrow::emit_arrow_transfer(backend, out, v, dest, source, indent);
             }
             Expr::Cast(inner, target_ty) => {

@@ -1946,9 +1946,8 @@ impl Interpreter {
             Expr::PriorState(name) => Expr::PriorState(prefix(name)),
             Expr::EllipsisExpr(e) => Expr::EllipsisExpr(e.clone()),
             Expr::TypeRef(name) => Expr::TypeRef(name.clone()),
-            Expr::ArrowMut { dir, target, index, value } => Expr::ArrowMut {
-                dir: dir.clone(),
-                target: Box::new(self.rewrite_identifiers(target, uid, cell_name)),
+            Expr::ArrowMut { dir, target, index, value, consume } => Expr::ArrowMut { consume: *consume, 
+                dir: dir.clone(), target: Box::new(self.rewrite_identifiers(target, uid, cell_name)),
                 index: Box::new(self.rewrite_identifiers(index, uid, cell_name)),
                 value: value.as_ref().map(|v| Box::new(self.rewrite_identifiers(v, uid, cell_name))),
             },
@@ -1956,8 +1955,7 @@ impl Interpreter {
                 target: Box::new(self.rewrite_identifiers(target, uid, cell_name)),
                 index: Box::new(self.rewrite_identifiers(index, uid, cell_name)),
             },
-            Expr::ArrowTransfer { dest, source, filter } => Expr::ArrowTransfer {
-                dest: Box::new(self.rewrite_identifiers(dest, uid, cell_name)),
+            Expr::ArrowTransfer { dest, source, filter, consume } => Expr::ArrowTransfer { consume: *consume,  dest: Box::new(self.rewrite_identifiers(dest, uid, cell_name)),
                 source: Box::new(self.rewrite_identifiers(source, uid, cell_name)),
                 filter: filter.as_ref().map(|f| Box::new(self.rewrite_identifiers(f, uid, cell_name))),
             },
@@ -3027,13 +3025,13 @@ impl Interpreter {
             Expr::Neg(inner) => UnaryOpExpr::new(UnaryOpKind::Neg, *inner.clone()).evaluate(self, &ExprDispatch),
             Expr::BitNot(inner) => UnaryOpExpr::new(UnaryOpKind::BitNot, *inner.clone()).evaluate(self, &ExprDispatch),
             // Legacy Arrow variants — delegate through feature structs
-            Expr::ArrowMut { dir, target, index, value } => ArrowMutExpr {
+            Expr::ArrowMut { dir, target, index, value, consume } => ArrowMutExpr { consume: *consume, 
                 dir: dir.clone(), target: target.clone(), index: index.clone(), value: value.clone(),
             }.evaluate(self, &ExprDispatch),
             Expr::ArrowDiscard { target, index } => ArrowDiscardExpr {
                 target: target.clone(), index: index.clone(),
             }.evaluate(self, &ExprDispatch),
-            Expr::ArrowTransfer { dest, source, filter } => ArrowTransferExpr {
+            Expr::ArrowTransfer { dest, source, filter, consume } => ArrowTransferExpr { consume: *consume, 
                 dest: dest.clone(), source: source.clone(), filter: filter.clone(),
             }.evaluate(self, &ExprDispatch),
             Expr::SigCall { modifier, expr } => SigCallExpr { modifier: modifier.clone(), expr: expr.clone() }.evaluate(self, &ExprDispatch),
@@ -7525,8 +7523,7 @@ mod tests {
     fn test_arrow_push_append() {
         let mut i = make_interpreter_with_list();
         let expr = Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(42))),
         };
@@ -7539,8 +7536,7 @@ mod tests {
     fn test_arrow_push_multiple() {
         let mut i = make_interpreter_with_list();
         let push = |v: i64| Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(v))),
         };
@@ -7557,15 +7553,13 @@ mod tests {
         let mut i = make_interpreter_with_list();
         // First push a value
         i.eval_expr(&Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(99))),
         }).unwrap();
         // Then pop it
         let popped = i.eval_expr(&Expr::ArrowMut {
-            dir: ArrowDir::Pop,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+            dir: ArrowDir::Pop, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: None,
         }).unwrap();
@@ -7578,14 +7572,12 @@ mod tests {
         let mut i = make_interpreter_with_list();
         // Push 2 values
         i.eval_expr(&Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(10))),
         }).unwrap();
         i.eval_expr(&Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(20))),
         }).unwrap();
@@ -7604,16 +7596,14 @@ mod tests {
         // Push 3 items: [10, 20, 30]
         for v in &[10, 20, 30] {
             i.eval_expr(&Expr::ArrowMut {
-                dir: ArrowDir::Push,
-                target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+                dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                 index: Box::new(Expr::Term),
                 value: Some(Box::new(Expr::Integer(*v))),
             }).unwrap();
         }
         // Insert 15 at index 1: [10, 15, 20, 30]
         i.eval_expr(&Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Integer(1)),
             value: Some(Box::new(Expr::Integer(15))),
         }).unwrap();
@@ -7627,16 +7617,14 @@ mod tests {
         let mut i = make_interpreter_with_list();
         for v in &[10, 20, 30, 40] {
             i.eval_expr(&Expr::ArrowMut {
-                dir: ArrowDir::Push,
-                target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+                dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                 index: Box::new(Expr::Term),
                 value: Some(Box::new(Expr::Integer(*v))),
             }).unwrap();
         }
         // Pop at index 1 → removes 20
         let popped = i.eval_expr(&Expr::ArrowMut {
-            dir: ArrowDir::Pop,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+            dir: ArrowDir::Pop, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Integer(1)),
             value: None,
         }).unwrap();
@@ -8889,8 +8877,7 @@ mod tests {
         i.state.insert("m".to_string(), Value::HashMap(std::collections::HashMap::new()));
         // Push (key, value) as a tuple (list with 2 elements)
         let expr = Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Tuple(vec![
                 Expr::String("a".to_string()),
@@ -8910,8 +8897,7 @@ mod tests {
         i.state.insert("m".to_string(), Value::HashMap(std::collections::HashMap::new()));
         // &m[key] <- value
         let expr = Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
             index: Box::new(Expr::String("b".to_string())),
             value: Some(Box::new(Expr::Integer(2))),
         };
@@ -8930,8 +8916,7 @@ mod tests {
         i.state.insert("m".to_string(), Value::HashMap(map));
         // value <- &m[key]
         let popped = i.eval_expr(&Expr::ArrowMut {
-            dir: ArrowDir::Pop,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
+            dir: ArrowDir::Pop, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
             index: Box::new(Expr::String("x".to_string())),
             value: None,
         }).unwrap();
@@ -8947,8 +8932,7 @@ mod tests {
         let mut i = Interpreter::new();
         i.state.insert("s".to_string(), Value::HashSet(std::collections::HashSet::new()));
         let expr = Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::String("hello".to_string()))),
         };
@@ -8966,8 +8950,7 @@ mod tests {
         set.insert("world".to_string());
         i.state.insert("s".to_string(), Value::HashSet(set));
         let popped = i.eval_expr(&Expr::ArrowMut {
-            dir: ArrowDir::Pop,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
+            dir: ArrowDir::Pop, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             index: Box::new(Expr::Term),
             value: None,
         }).unwrap();
@@ -9076,8 +9059,7 @@ mod tests {
             Value::Int(1), Value::Int(2), Value::Int(3),
         ]));
         i.state.insert("dest".to_string(), Value::List(vec![]));
-        i.eval_expr(&Expr::ArrowTransfer {
-            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+        i.eval_expr(&Expr::ArrowTransfer { consume: false, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: None,
         }).unwrap();
@@ -9095,8 +9077,7 @@ mod tests {
         src.insert("b".to_string(), Value::Int(2));
         i.state.insert("src".to_string(), Value::HashMap(src));
         i.state.insert("dest".to_string(), Value::HashMap(std::collections::HashMap::new()));
-        i.eval_expr(&Expr::ArrowTransfer {
-            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+        i.eval_expr(&Expr::ArrowTransfer { consume: false, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: None,
         }).unwrap();
@@ -9247,8 +9228,7 @@ mod tests {
             Value::Int(1), Value::Int(6), Value::Int(3), Value::Int(8), Value::Int(2),
         ]));
         i.state.insert("dest".to_string(), Value::List(vec![]));
-        i.eval_expr(&Expr::ArrowTransfer {
-            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+        i.eval_expr(&Expr::ArrowTransfer { consume: false, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: Some(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
@@ -9272,8 +9252,7 @@ mod tests {
         src.insert("c".to_string(), Value::Int(5));
         i.state.insert("src".to_string(), Value::HashMap(src));
         i.state.insert("dest".to_string(), Value::HashMap(std::collections::HashMap::new()));
-        i.eval_expr(&Expr::ArrowTransfer {
-            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+        i.eval_expr(&Expr::ArrowTransfer { consume: false, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: Some(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
@@ -10882,8 +10861,7 @@ mod tests {
         assert_eq!(i.state.get("x"), Some(&Value::List(vec![Value::Int(10)])));
         // Execute &x <- 42 — should dispatch through Custom("my_insert")
         let push_stmt = Statement::Expression(Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("x".into())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("x".into())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(42))),
         });
@@ -10964,8 +10942,7 @@ mod tests {
         i.exec_stmt(&let_stmt).unwrap();
         // Execute val <- &q — should dispatch through Custom("my_extract")
         let pop_stmt = Statement::Expression(Expr::ArrowMut {
-            dir: ArrowDir::Pop,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("q".into())))),
+            dir: ArrowDir::Pop, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("q".into())))),
             index: Box::new(Expr::Term),
             value: None,
         });
@@ -11026,8 +11003,7 @@ mod tests {
             body: vec![
                 Statement::Term {
                     values: vec![Some(Expr::ArrowMut {
-                        dir: ArrowDir::Push,
-                        target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("l".into())))),
+                        dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("l".into())))),
                         index: Box::new(Expr::Term),
                         value: Some(Box::new(Expr::Identifier("v".into()))),
                     })],
@@ -11056,8 +11032,7 @@ mod tests {
         i.exec_stmt(&let_stmt).unwrap();
         // Execute &s <- 42 — should dispatch through Custom("sl_insert_fn")
         let push_stmt = Statement::Expression(Expr::ArrowMut {
-            dir: ArrowDir::Push,
-            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
+            dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Integer(42))),
         });

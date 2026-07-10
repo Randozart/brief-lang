@@ -313,7 +313,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             collect_expr_ids_inner(target, ids);
             collect_expr_ids_inner(index, ids);
         }
-        Expr::ArrowTransfer { dest, source, filter } => {
+        Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
             collect_expr_ids_inner(dest, ids);
             collect_expr_ids_inner(source, ids);
             if let Some(f) = filter { collect_expr_ids_inner(f, ids); }

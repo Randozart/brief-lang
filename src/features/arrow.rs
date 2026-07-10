@@ -6,6 +6,7 @@ use crate::typechecker::TypeChecker;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrowMutExpr {
     pub dir: ArrowDir,
+    pub consume: bool,
     pub target: Box<Expr>,
     pub index: Box<Expr>,
     pub value: Option<Box<Expr>>,
@@ -19,6 +20,7 @@ pub struct ArrowDiscardExpr {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrowTransferExpr {
+    pub consume: bool,
     pub dest: Box<Expr>,
     pub source: Box<Expr>,
     pub filter: Option<Box<Expr>>,

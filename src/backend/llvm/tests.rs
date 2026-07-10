@@ -4734,7 +4734,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Expression(Expr::ArrowMut {
                             dir: ArrowDir::Push,
-                            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+                             consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                             index: Box::new(Expr::Term),
                             value: Some(Box::new(Expr::Integer(42))),
                         }),
@@ -4782,7 +4782,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Expression(Expr::ArrowMut {
                             dir: ArrowDir::Pop,
-                            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
+                             consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                             index: Box::new(Expr::Term),
                             value: None,
                         }),
@@ -4868,8 +4868,7 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None, span: None,
                     },
                     body: vec![
-                        Statement::Expression(Expr::ArrowTransfer {
-                            dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
+                        Statement::Expression(Expr::ArrowTransfer { consume: false, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
                             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
                             filter: None,
                         }),
@@ -6153,7 +6152,7 @@ let spec = crate::target_spec::TargetSpec {
         let push = |i: &mut crate::interpreter::Interpreter, val: i64| {
             i.eval_expr(&Expr::ArrowMut {
                 dir: ArrowDir::Push,
-                target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
+                 consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
                 index: Box::new(Expr::Term),
                 value: Some(Box::new(Expr::Integer(val))),
             }).unwrap();

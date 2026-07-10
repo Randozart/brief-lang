@@ -564,7 +564,7 @@ impl Annotator {
                 let idx_str = if matches!(index.as_ref(), Expr::Term) { String::new() } else { format!("[{}]", i) };
                 format!("<- {}{}", t, idx_str)
             }
-            Expr::ArrowTransfer { dest, source, filter } => {
+            Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
                 let d = self.format_expr(dest);
                 let s = self.format_expr(source);
                 if let Some(f) = filter {

@@ -2724,7 +2724,7 @@ impl ProofEngine {
                 self.collect_identifiers(target, vars);
                 self.collect_identifiers(index, vars);
             }
-            Expr::ArrowTransfer { dest, source, filter } => {
+            Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
                 self.collect_identifiers(dest, vars);
                 self.collect_identifiers(source, vars);
                 if let Some(f) = filter {

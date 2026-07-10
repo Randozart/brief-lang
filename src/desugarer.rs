@@ -1020,8 +1020,7 @@ impl Desugarer {
                 dir,
                 target,
                 index,
-                value,
-            } => Expr::ArrowMut {
+                value, consume } => Expr::ArrowMut { consume, 
                 dir,
                 target: Box::new(self.desugar_expr(*target)),
                 index: Box::new(self.desugar_expr(*index)),
@@ -1034,9 +1033,7 @@ impl Desugarer {
             Expr::ArrowTransfer {
                 dest,
                 source,
-                filter,
-            } => Expr::ArrowTransfer {
-                dest: Box::new(self.desugar_expr(*dest)),
+                filter, consume } => Expr::ArrowTransfer { consume, dest: Box::new(self.desugar_expr(*dest)),
                 source: Box::new(self.desugar_expr(*source)),
                 filter: filter.map(|f| Box::new(self.desugar_expr(*f))),
             },

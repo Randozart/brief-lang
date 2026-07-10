@@ -1007,7 +1007,7 @@ impl WebstackGenerator {
                 let idx = self.expr_to_ts(index);
                 format!("{}.splice({}, 1)[0]", list, idx)
             }
-            Expr::ArrowTransfer { dest, source, filter } => {
+            Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
                 let d = self.expr_to_ts(dest);
                 let s = self.expr_to_ts(source);
                 if filter.is_some() {

@@ -1531,7 +1531,7 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                 collect_identifiers(target, out);
                 collect_identifiers(index, out);
             }
-            Expr::ArrowTransfer { dest, source, filter } => {
+            Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
                 collect_identifiers(dest, out);
                 collect_identifiers(source, out);
                 if let Some(f) = filter {

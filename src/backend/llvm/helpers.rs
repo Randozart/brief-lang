@@ -49,9 +49,8 @@ impl LlvmBackend {
             Expr::EllipsisExpr(e) => Expr::EllipsisExpr(e.clone()),
             Expr::TypeRef(name) => Expr::TypeRef(name.clone()),
             // Arrow variants
-            Expr::ArrowMut { dir, target, index, value } => Expr::ArrowMut {
-                dir: dir.clone(),
-                target: Box::new(Self::rewrite_cell_identifiers(target, cell_name)),
+            Expr::ArrowMut { dir, target, index, value, consume } => Expr::ArrowMut { consume: *consume, 
+                dir: dir.clone(), target: Box::new(Self::rewrite_cell_identifiers(target, cell_name)),
                 index: Box::new(Self::rewrite_cell_identifiers(index, cell_name)),
                 value: value.as_ref().map(|v| Box::new(Self::rewrite_cell_identifiers(v, cell_name))),
             },
@@ -59,13 +58,13 @@ impl LlvmBackend {
                 target: Box::new(Self::rewrite_cell_identifiers(target, cell_name)),
                 index: Box::new(Self::rewrite_cell_identifiers(index, cell_name)),
             },
-            Expr::ArrowTransfer { dest, source, filter } => Expr::ArrowTransfer {
-                dest: Box::new(Self::rewrite_cell_identifiers(dest, cell_name)),
+            Expr::ArrowTransfer { dest, source, filter, consume } => Expr::ArrowTransfer { consume: *consume, dest: Box::new(Self::rewrite_cell_identifiers(dest, cell_name)),
                 source: Box::new(Self::rewrite_cell_identifiers(source, cell_name)),
                 filter: filter.as_ref().map(|f| Box::new(Self::rewrite_cell_identifiers(f, cell_name))),
             },
             Expr::ArrowMutExpr(e) => Expr::ArrowMutExpr(ArrowMutExpr {
                 dir: e.dir.clone(),
+                consume: e.consume,
                 target: Box::new(Self::rewrite_cell_identifiers(&e.target, cell_name)),
                 index: Box::new(Self::rewrite_cell_identifiers(&e.index, cell_name)),
                 value: e.value.as_ref().map(|v| Box::new(Self::rewrite_cell_identifiers(v, cell_name))),
@@ -75,6 +74,7 @@ impl LlvmBackend {
                 index: Box::new(Self::rewrite_cell_identifiers(&e.index, cell_name)),
             }),
             Expr::ArrowTransferExpr(e) => Expr::ArrowTransferExpr(ArrowTransferExpr {
+                consume: e.consume,
                 dest: Box::new(Self::rewrite_cell_identifiers(&e.dest, cell_name)),
                 source: Box::new(Self::rewrite_cell_identifiers(&e.source, cell_name)),
                 filter: e.filter.as_ref().map(|f| Box::new(Self::rewrite_cell_identifiers(f, cell_name))),
