@@ -2373,11 +2373,28 @@ self.emit_declares(&mut out);
                             } else {
                                 // A005c: per-field phi loop with Path A + dead-field
                                 // elimination + commit block.
+                                // 2026-07-10: Cap write_set to avoid register spilling.
+                                // Too many phi registers (>=8) causes LLVM to spill to
+                                // stack, which is slower than GEP+load+store for the
+                                // non-tracked fields. Priority: counter, bound, vec groups.
+                                let mut capped_set: HashSet<String> = HashSet::new();
+                                capped_set.insert(bp.var.clone());
+                                if let Some(ref tv) = total_idx {
+                                    if let Some(name) = self.ctx.field_index_map.iter()
+                                        .find(|&(_, v)| *v == *tv).map(|(k, _)| k.clone())
+                                    {
+                                        capped_set.insert(name);
+                                    }
+                                }
+                                for f in &node.write_set {
+                                    if capped_set.len() >= 6 { break; }
+                                    capped_set.insert(f.clone());
+                                }
                                 self.fun.pending_post_hoist = post_hoist;
-                                let num_fields = node.write_set.len().max(2);
+                                let num_fields = capped_set.len().max(2);
                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing);
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
                                 true
                             }
                             }
@@ -2402,11 +2419,24 @@ self.emit_declares(&mut out);
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
                                 true
                             } else {
+                                let mut capped_set: HashSet<String> = HashSet::new();
+                                capped_set.insert(bp.var.clone());
+                                if let Some(ref tv) = total_idx {
+                                    if let Some(name) = self.ctx.field_index_map.iter()
+                                        .find(|&(_, v)| *v == *tv).map(|(k, _)| k.clone())
+                                    {
+                                        capped_set.insert(name);
+                                    }
+                                }
+                                for f in &node.write_set {
+                                    if capped_set.len() >= 6 { break; }
+                                    capped_set.insert(f.clone());
+                                }
                                 self.fun.pending_post_hoist = post_hoist;
-                                let num_fields = node.write_set.len().max(2);
+                                let num_fields = capped_set.len().max(2);
                                 self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
-                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &node.write_set, is_decreasing);
+                                self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
                                 true
                             }
                         }
