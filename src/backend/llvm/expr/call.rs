@@ -286,9 +286,20 @@ fn try_fn_ptr_call(
     let fn_reg = backend.fun.let_bindings.get(name)
         .cloned()
         .unwrap_or_else(|| "0".to_string());
-    let fn_ptr = format!("%ic_ptr{}", backend.fun.txn_counter);
-    backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, fn_ptr, fn_reg).ok();
+    // 2026-07-10: If the variable type is Ptr<Fn> or PtrConst<Fn>, the register
+    // is already a ptr (from &fn or Deref). Otherwise, it's an i64 (from
+    // ptrtoint via :> Ptr or let-binding of fn type) and needs inttoptr.
+    let is_fn_ptr = backend.fun.let_binding_types.get(name)
+        .and_then(|t| crate::type_universe::pointee_type(t))
+        .is_some();
+    let fn_ptr = if is_fn_ptr {
+        fn_reg
+    } else {
+        let p = format!("%ic_ptr{}", backend.fun.txn_counter);
+        backend.fun.txn_counter += 1;
+        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, fn_reg).ok();
+        p
+    };
     // Marshal arguments matching internal call convention: %state + typed args
     let mut arg_strs: Vec<String> = Vec::new();
     arg_strs.push("ptr %state".to_string());

@@ -7332,7 +7332,7 @@ let span = self.current_span();
                 Ok(Token::Star) => {
                     self.advance();
                     let expr = self.parse_unary()?;
-                    Ok(Expr::Deref(Box::new(expr)))
+                    self.parse_postfix_expr(Expr::Deref(Box::new(expr)))
                 }
                 Ok(Token::Ampersand) => {
                     self.advance();
@@ -7618,6 +7618,26 @@ let span = self.current_span();
                     retries,
                     fallback,
                 };
+            } else if let Some(Ok(Token::LParen)) = self.current_token() {
+                self.advance();
+                let mut args = Vec::new();
+                if !matches!(self.current_token(), Some(Ok(Token::RParen))) {
+                    loop {
+                        args.push(self.parse_expression()?);
+                        if let Some(Ok(Token::Comma)) = self.current_token() {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.expect(Token::RParen)?;
+                let fn_name = match &expr {
+                    Expr::Identifier(n) => n.clone(),
+                    Expr::AddrOf(inner) => inner.as_var_name().map(|s| s.to_string()).unwrap_or("".to_string()),
+                    _ => "".to_string(),
+                };
+                expr = Expr::Call(fn_name, args);
             } else {
                 break;
             }

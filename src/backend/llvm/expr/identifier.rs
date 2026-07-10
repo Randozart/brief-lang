@@ -345,6 +345,16 @@ pub fn emit_identifier(
             }
         }
     } else {
+        // 2026-07-10: Check for function definitions (defn/txn) — emit ptrtoint.
+        if backend.ctx.defn_params.contains_key(name) || backend.ctx.defn_return_types.contains_key(name) {
+            writeln!(out, "{}{} = ptrtoint ptr @{} to i64", indent, v, name).ok();
+            let fn_params = backend.ctx.defn_params.get(name).cloned().unwrap_or_default();
+            let fn_ret = backend.ctx.defn_return_types.get(name).and_then(|v| v.first().cloned())
+                .unwrap_or(Type::Custom("Void".to_string()));
+            let params_ty = if fn_params.len() == 1 { fn_params.into_iter().next().unwrap() } else { Type::Tuple(fn_params) };
+            let fn_ty = Type::Applied("Fn".to_string(), vec![params_ty, fn_ret]);
+            return TypedRegister { name: v.to_string(), ty: fn_ty };
+        }
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     }
     // Default fallthrough
@@ -368,6 +378,10 @@ pub(crate) fn emit_addr_of(
 ) -> Result<String, String> {
     match expr {
         Expr::Identifier(name) => {
+            // 2026-07-10: Function definitions — address is the function label.
+            if backend.ctx.defn_params.contains_key(name) || backend.ctx.defn_return_types.contains_key(name) {
+                return Ok(format!("@{}", name));
+            }
             // 2026-07-09: Look up field index first, then borrow backend mutably.
             let idx = backend.ctx.field_index_map.get(name).copied();
             if let Some(idx) = idx {

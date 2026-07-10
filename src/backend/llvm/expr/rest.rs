@@ -1230,6 +1230,7 @@ pub fn emit_rest_expr(
                             Type::Custom(ref s) if s == "Int" => ("i64".to_string(), inner_ty),
                             Type::Custom(ref s) if s == "Float" => ("float".to_string(), inner_ty),
                             Type::Custom(ref s) if s == "Float64" => ("double".to_string(), inner_ty),
+                            Type::Applied(ref n, _) if n == "Fn" => ("ptr".to_string(), inner_ty),
                             _ => ("i64".to_string(), Type::Custom("Int".to_string())),
                         }
                     }

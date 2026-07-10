@@ -1639,11 +1639,16 @@ impl TypeChecker {
         // 2026-07-09: Check convergence safety — reactive txns should modify
         // at least one variable in their pre-condition. Otherwise they depend
         // entirely on other txns to unblock them (convergence footgun).
-        for warning in crate::analysis::provenance::check_convergence_safety(
-            &txn.name, txn.is_reactive, &txn.contract.pre_condition, &txn.body,
+        let txn_map: std::collections::HashMap<String, crate::ast::Transaction> = self.transactions.clone();
+        for (severity, msg) in crate::analysis::provenance::check_convergence_safety(
+            &txn.name, txn.is_reactive, &txn.contract.pre_condition, &txn.body, &txn_map,
         ) {
+            let diag_sev = match severity {
+                "error" => crate::errors::Severity::Error,
+                _ => crate::errors::Severity::Warning,
+            };
             self.diagnostics.borrow_mut().push(
-                crate::errors::Diagnostic::new("W003", crate::errors::Severity::Warning, &warning)
+                crate::errors::Diagnostic::new("W003", diag_sev, &msg)
             );
         }
 
@@ -2069,9 +2074,40 @@ impl TypeChecker {
             Expr::RegexLiteral(_) => Type::Custom("String".to_string()),
             Expr::Char(_) => Type::Custom("Char".to_string()),
             Expr::Bool(_) => Type::Custom("Bool".to_string()),
-            Expr::Identifier(name) | Expr::PriorState(name) => self
-                .lookup_variable(name)
-                .unwrap_or(Type::Custom(name.clone())),
+            Expr::Identifier(name) | Expr::PriorState(name) => {
+                let lookup = self.lookup_variable(name);
+                if let Some(ty) = lookup { ty }
+                else if let Some(def) = self.definitions.get(name) {
+                    // Known defn → function pointer type
+                    let param_types: Vec<Type> = def.parameters.iter().map(|(_, t)| t.clone()).collect();
+                    let ret_types: Vec<Type> = def.outputs.clone();
+                    let params_ty = if param_types.len() == 1 {
+                        param_types.into_iter().next().unwrap()
+                    } else {
+                        Type::Tuple(param_types)
+                    };
+                    let ret_ty = if ret_types.len() == 1 {
+                        ret_types.into_iter().next().unwrap()
+                    } else if ret_types.is_empty() {
+                        Type::Custom("Void".to_string())
+                    } else {
+                        Type::Tuple(ret_types)
+                    };
+                    Type::Applied("Fn".to_string(), vec![params_ty, ret_ty])
+                } else if let Some(txn) = self.transactions.get(name) {
+                    // Known txn → function pointer type
+                    let param_types: Vec<Type> = txn.parameters.iter().map(|(_, t)| t.clone()).collect();
+                    let ret_ty = txn.outputs.first().cloned().unwrap_or(Type::Custom("Void".to_string()));
+                    let params_ty = if param_types.len() == 1 {
+                        param_types.into_iter().next().unwrap()
+                    } else {
+                        Type::Tuple(param_types)
+                    };
+                    Type::Applied("Fn".to_string(), vec![params_ty, ret_ty])
+                } else {
+                    Type::Custom(name.clone())
+                }
+            }
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
                 self.binary_op_type(l, r, Type::Custom("Int".to_string()), Type::Custom("Float".to_string()))
             }

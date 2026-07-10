@@ -167,21 +167,25 @@ fn collect_write_vars(body: &[Statement]) -> Vec<String> {
 /// A reactive txn must modify at least one variable in its pre-condition;
 /// otherwise it depends entirely on other txns to unblock it, which is
 /// a convergence footgun.
-pub fn check_convergence_safety(txn_name: &str, is_reactive: bool, pre: &Expr, body: &[Statement]) -> Vec<String> {
-    let mut warnings = Vec::new();
-    if !is_reactive { return warnings; }
-    if matches!(pre, Expr::Bool(true)) { return warnings; }
+///
+/// Returns (severity, message) pairs. When no other txn modifies any
+/// pre-condition variable and no convergng txn depends on it, the
+/// txn will run forever — this is a hard error, not a warning.
+pub fn check_convergence_safety(
+    txn_name: &str,
+    is_reactive: bool,
+    pre: &Expr,
+    body: &[Statement],
+    all_txns: &std::collections::HashMap<String, crate::ast::Transaction>,
+) -> Vec<(&'static str, String)> {
+    let mut results = Vec::new();
+    if !is_reactive { return results; }
+    if matches!(pre, Expr::Bool(true)) { return results; }
 
     let pre_vars = collect_var_names(pre);
     let write_vars = collect_write_vars(body);
 
-    let mut modifies_own_pre = false;
-    for pre_var in &pre_vars {
-        if write_vars.contains(pre_var) {
-            modifies_own_pre = true;
-            break;
-        }
-    }
+    let modifies_own_pre = pre_vars.iter().any(|pv| write_vars.contains(pv));
     if !modifies_own_pre {
         let pre_str = pre_vars.join(", ");
         let write_str = if write_vars.is_empty() {
@@ -189,15 +193,34 @@ pub fn check_convergence_safety(txn_name: &str, is_reactive: bool, pre: &Expr, b
         } else {
             write_vars.join(", ")
         };
-        warnings.push(format!(
-            "warning: reactive txn '{}' has precondition [{}] but body writes to [{}]. \
+
+        // Check if ANY other txn writes to any pre-condition variable.
+        let other_modifies = pre_vars.iter().any(|pv| {
+            all_txns.iter().any(|(other_name, other_txn)| {
+                other_name != txn_name && {
+                    let other_writes = collect_write_vars(&other_txn.body);
+                    other_writes.contains(pv)
+                }
+            })
+        });
+
+        let msg = format!(
+            "reactive txn '{}' has precondition [{}] but body writes to [{}]. \
              The txn does not modify any precondition variable and depends on other \
              txns to satisfy its convergence. If no other txn changes the precondition \
              to false, this txn will run forever.",
             txn_name, pre_str, write_str
-        ));
+        );
+
+        if other_modifies {
+            // Another txn may eventually unblock this one — soft warning.
+            results.push(("warning", msg));
+        } else {
+            // No txn modifies any pre-condition variable — guaranteed infinite loop.
+            results.push(("error", msg));
+        }
     }
-    warnings
+    results
 }
 
 #[cfg(test)]
