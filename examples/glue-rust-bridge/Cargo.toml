@@ -1,0 +1,5 @@
+[package]
+name = "glue-rust-bridge"
+version = "0.1.0"
+edition = "2021"
+description = "GLUE protocol example: call Brief exports from Rust"

@@ -1171,7 +1171,7 @@ fn run_build(
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000);
+            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1194,7 +1194,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000);
+            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1223,7 +1223,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend, None, None, 10_000);
+            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend, None, None, 10_000);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1871,7 +1871,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
     let result: Option<PathBuf> = match backend.as_str() {
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, false, None, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan", None, emit_bindings_dir.clone(), 10_000) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), false, target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, false, None, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan", None, emit_bindings_dir.clone(), 10_000) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -2327,6 +2327,7 @@ fn link_and_optimize(
  fn run_llvm_compile(
      file_path: &PathBuf,
      out_dir: Option<&Path>,
+     library_mode: bool,
      target: Option<&TargetSpec>,
      _strict: bool,
      optimize_budget: u64,
@@ -2600,6 +2601,7 @@ fn link_and_optimize(
         .with_dump_layout(dump_layout)
         .with_gpu_offload(gpu_offload)
         .with_gpu_backend(gpu_backend.to_string())
+        .with_library_mode(library_mode)
         .with_embedded_mode(is_embedded)
         .with_type_universe(tu.clone());
     if dead_info_disabled {
@@ -2688,6 +2690,11 @@ fn link_and_optimize(
     let output_file = out_dir.unwrap_or_else(|| std::path::Path::new(".")).join(format!("{}.ll", stem));
     fs::write(&output_file, &output)?;
     println!("  Output: {}", output_file.display());
+
+    // Library mode: emit .ll only, skip all linking
+    if library_mode {
+        return Ok(output_file);
+    }
 
     // If --gpu-offload was used, attempt SPIR-V compilation as well.
     if gpu_offload && !llvm_backend.spirv_kernels().is_empty() {
@@ -3622,10 +3629,52 @@ fn run_export_main(
         .to_string();
 
     let output = out_dir.unwrap_or_else(|| Path::new("."));
-    let dbvl_path = Path::new("lib/glue.dbvl");
+
+    // Search for glue.dbvl in multiple locations:
+    //   1. CWD: lib/glue.dbvl
+    //   2. CARGO_MANIFEST_DIR: (repo build) lib/glue.dbvl
+    //   3. Binary-relative: ../lib/glue.dbvl
+    let dbvl_path = {
+        let candidates = [
+            Path::new("lib/glue.dbvl").to_path_buf(),
+            std::env::current_dir().unwrap_or_default().join("lib/glue.dbvl"),
+        ];
+        let mut found = None;
+        for c in &candidates {
+            if c.exists() {
+                found = Some(c.clone());
+                break;
+            }
+        }
+        // Also check CARGO_MANIFEST_DIR
+        if found.is_none() {
+            if let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") {
+                let p = Path::new(&manifest).join("lib/glue.dbvl");
+                if p.exists() {
+                    found = Some(p);
+                }
+            }
+        }
+        // Also check binary-relative for installed builds
+        // binary is at target/release/brief-compiler, need ../../lib/glue.dbvl
+        if found.is_none() {
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(parent) = exe.parent() {
+                    for depth in &["../", "../../", "../../../"] {
+                        let p = parent.join(format!("{}lib/glue.dbvl", depth));
+                        if p.exists() {
+                            found = Some(p);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        found.unwrap_or_else(|| Path::new("lib/glue.dbvl").to_path_buf())
+    };
 
     use brief_compiler::glue::export::run_export as run_glue_export;
-    run_glue_export(&program, &bridge_name, language, output, dbvl_path)
+    run_glue_export(&program, &bridge_name, language, output, &dbvl_path)
         .map_err(|e| format!("Export failed: {}", e).into())
 }
 
@@ -3772,6 +3821,7 @@ fn main() {
             let mut gpu_offload = false;
             let mut gpu_backend = "vulkan".to_string();
             let mut emit_llvm = false;
+            let mut library_mode = false;
 
             let mut i = 2;
             while i < args.len() {
@@ -3781,6 +3831,9 @@ fn main() {
                     i += 2;
                 } else if arg == "--llvm" {
                     emit_llvm = true;
+                    i += 1;
+                } else if arg == "--library" {
+                    library_mode = true;
                     i += 1;
                 } else if arg == "--prod" || arg == "--release" {
                     prod_mode = true;
@@ -3819,7 +3872,7 @@ fn main() {
                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                     match ext {
                         "bv" | "sbv" | "ebv" | "sebv" | "abv" => {
-                            let result = run_llvm_compile(&path, out, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None, 10_000);
+                            let result = run_llvm_compile(&path, out, false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None, 10_000);
                             match result {
                                 Ok(ll_path) => {
                                     println!("  LLVM IR emitted: {}", ll_path.display());
@@ -3833,6 +3886,32 @@ fn main() {
                         }
                         _ => {
                             eprintln!("Error: --llvm flag is only valid for .bv, .sbv, .ebv, .sebv, and .abv files");
+                            eprintln!("  '{}' does not compile via LLVM", ext);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+
+                // --library flag: emit LLVM IR with library shim (no main, has __brief_init_state)
+                // Used by GLUE protocol — foreign build systems consume this .ll via llc.
+                if library_mode {
+                    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    match ext {
+                        "bv" | "sbv" | "ebv" | "sebv" | "abv" => {
+                            let result = run_llvm_compile(&path, out, true, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None, 10_000);
+                            match result {
+                                Ok(ll_path) => {
+                                    println!("  Library LLVM IR emitted: {}", ll_path.display());
+                                    std::process::exit(0);
+                                }
+                                Err(e) => {
+                                    eprintln!("{}", e);
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        _ => {
+                            eprintln!("Error: --library flag is only valid for .bv, .sbv, .ebv, .sebv, and .abv files");
                             eprintln!("  '{}' does not compile via LLVM", ext);
                             std::process::exit(1);
                         }
@@ -3858,6 +3937,7 @@ fn main() {
                 eprintln!("  .cbv file             → CIRCT hardware description (Verilog/VHDL)");
                 eprintln!("  .dbv/.dbvs/.dbvl files → validate and emit JSON");
                 eprintln!("  --llvm                → emit LLVM IR instead of binary (.bv/.sbv/.ebv/.sebv/.abv only)");
+                eprintln!("  --library             → emit LLVM IR as reusable library (no main; #export + __brief_init_state) (.bv/.sbv/.ebv/.sebv/.abv only)");
             }
         }
 
@@ -3990,7 +4070,7 @@ fn main() {
                     macro_budget = Some(u64::MAX);
                 }
                 let txn_max_iter = txn_convergence_max_iterations.unwrap_or(10_000);
-                let result = run_llvm_compile(&path, out_dir.as_deref(), None, strict,
+                let result = run_llvm_compile(&path, out_dir.as_deref(), false, None, strict,
                     optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, dump_layout, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget, emit_remarks, gpu_offload, &gpu_backend, None, None, txn_max_iter);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);

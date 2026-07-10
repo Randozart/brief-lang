@@ -1,0 +1,108 @@
+// CPython 3.x heap object layouts (64-bit, default build)
+//
+// These structs mirror CPython's C struct memory layout exactly, enabling
+// zero-copy access to Python heap objects from Brief via meld projections.
+//
+// Usage in a bridge file:
+//   import { PyLongObject, PyUnicodeObject } from "glue/python/layouts.bv";
+//   import { Int } from "std/types.bv";
+//   meld Int <:> PyLongObject {
+//       Ptr -> ob_digit_0;
+//       Size -> ob_size;
+//       Bytes -> 4;
+//   };
+//
+//   frgn py_get_value(obj: PyLongObject) -> Int;
+//
+// CPython memory layout reference (64-bit):
+//   https://docs.python.org/3/c-api/structures.html
+//
+// Types used (all 8 bytes in Brief/LLVM):
+//   Int     = int64 (8 bytes)
+//   Ptr     = int64 (8 bytes, pointer-width)
+
+// PyObject header — every CPython object starts with this (16 bytes total)
+struct PyObject {
+    ob_refcnt: Int;  // offset 0,  8 bytes — reference count
+    ob_type: Int;    // offset 8,  8 bytes — pointer to type object
+};
+
+// PyVarObject — variable-length object header (24 bytes total)
+struct PyVarObject {
+    ob_refcnt: Int;  // offset 0,  8 bytes
+    ob_type: Int;    // offset 8,  8 bytes
+    ob_size: Int;    // offset 16, 8 bytes — element count (negative = neg value for PyLong)
+};
+
+// PyLongObject — arbitrary precision integer (24 bytes header + digit array)
+// ob_digit[0] is at offset 24 (sizeof(PyVarObject)).
+// Each digit is uint32_t (4 bytes); value = sum(digit[i] * 2^(30*i)) * (ob_size < 0 ? -1 : 1)
+struct PyLongObject {
+    ob_refcnt: Int;    // offset 0,  8 bytes
+    ob_type: Int;      // offset 8,  8 bytes
+    ob_size: Int;      // offset 16, 8 bytes — digit count, sign-extended for negative
+    ob_digit_0: Int;   // offset 24, 4 bytes (lower 32 bits of first digit, rest at offset+4)
+};
+
+// PyASCIIObject — base Unicode string header (48 bytes total; compact ASCII layout)
+// Used for compact ASCII strings where data follows header immediately.
+struct PyASCIIObject {
+    ob_refcnt: Int;  // offset 0,  8 bytes
+    ob_type: Int;    // offset 8,  8 bytes
+    length: Int;     // offset 16, 8 bytes — number of code points
+    hash: Int;       // offset 24, 8 bytes — cached hash (-1 if not computed)
+    state: Int;      // offset 32, 4 bytes — bitfield: interned:2, kind:3, compact:1, ascii:1, ready:1
+    wstr: Int;       // offset 40, 8 bytes — wide string pointer (null if not used)
+};
+
+// PyCompactUnicodeObject — compact string with UTF-8 cache (72 bytes total)
+// Extends PyASCIIObject: data immediately follows the header.
+struct PyCompactUnicodeObject {
+    ob_refcnt: Int;     // offset 0,  8 bytes
+    ob_type: Int;       // offset 8,  8 bytes
+    length: Int;        // offset 16, 8 bytes
+    hash: Int;          // offset 24, 8 bytes
+    state: Int;         // offset 32, 4 bytes
+    wstr: Int;          // offset 40, 8 bytes
+    utf8_length: Int;   // offset 48, 8 bytes
+    utf8: Int;          // offset 56, 8 bytes — pointer to UTF-8 buffer
+    wstr_length: Int;   // offset 64, 8 bytes
+};
+
+// PyUnicodeObject — full string object (80 bytes total)
+// Non-compact Unicode: has a separate data pointer for UCS1/UCS2/UCS4 buffer.
+struct PyUnicodeObject {
+    ob_refcnt: Int;     // offset 0,  8 bytes
+    ob_type: Int;       // offset 8,  8 bytes
+    length: Int;        // offset 16, 8 bytes
+    hash: Int;          // offset 24, 8 bytes
+    state: Int;         // offset 32, 4 bytes
+    wstr: Int;          // offset 40, 8 bytes
+    utf8_length: Int;   // offset 48, 8 bytes
+    utf8: Int;          // offset 56, 8 bytes
+    wstr_length: Int;   // offset 64, 8 bytes
+    data: Int;          // offset 72, 8 bytes — pointer to UCS1/UCS2/UCS4 buffer
+};
+
+// ── Meld declarations ──────────────────────────────────────────────
+//
+// These establish compatibility so bridge files can write:
+//   let obj: PyLongObject = ptr as PyLongObject;
+//   let digit: Int = obj.ob_digit_0;
+
+// PyObject → PyVarObject: compatible header (same first 16 bytes)
+meld PyObject <:> PyVarObject;
+
+// PyVarObject → PyLongObject: PyLongObject extends PyVarObject
+// (last 8 bytes of PyLongObject is ob_digit_0 — access via explicit route)
+meld PyVarObject <:> PyLongObject {
+    ob_refcnt -> ob_refcnt;
+    ob_type -> ob_type;
+    ob_size -> ob_size;
+};
+
+// PyASCIIObject → PyCompactUnicodeObject: compact extends ascii
+meld PyASCIIObject <:> PyCompactUnicodeObject;
+
+// PyCompactUnicodeObject → PyUnicodeObject: full extends compact
+meld PyCompactUnicodeObject <:> PyUnicodeObject;

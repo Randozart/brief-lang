@@ -1,0 +1,20 @@
+// GLUE Rust Bridge — example Brief bridge file
+//
+// Exports pure-integer functions for the first dogfooding test.
+// String exports (heap-allocated across FFI boundary) are a future
+// extension — they require meld projections onto the Rust allocator.
+//
+// Workflow:
+//   brief build --library bridge.bv --out .      # bridge.ll
+//   brief export bridge.bv rust --out .           # bridge-exports.dbvl
+//   cargo build                                    # build.rs links bridge.o
+
+#export
+defn add(a: Int, b: Int) -> Int {
+    term a + b;
+};
+
+#export
+defn multiply(a: Int, b: Int) -> Int {
+    term a * b;
+};
