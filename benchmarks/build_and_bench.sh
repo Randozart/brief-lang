@@ -144,7 +144,10 @@ build_bench() {
         gpu/*) gpu_flag="--gpu-offload" ;;
     esac
 
-    ./target/release/brief-compiler build --llvm "benchmarks/${name}.bv" \
+    # 2026-07-10: Set BOUND so getenv_int# at module init evaluates correctly.
+    # Without this, benchmarks using getenv_int#("BOUND") get N=0 and all loops
+    # are dead code (zero iterations → output "0" instead of correct checksum).
+    BOUND=50000000 ./target/release/brief-compiler build --llvm "benchmarks/${name}.bv" \
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
