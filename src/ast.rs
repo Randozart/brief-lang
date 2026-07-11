@@ -1707,6 +1707,17 @@ pub struct InopDeclaration {
     pub span: Option<Span>,
 }
 
+/// A `codec Name { ... }` declaration defining a serialization/validation codec.
+/// 2026-07-11: Phase 4 — codec system.
+/// Phases 5-6 will add parse/format handler bodies and WASM compilation.
+#[derive(Debug, Clone)]
+pub struct CodecDeclaration {
+    pub name: String,
+    /// Validation constraints: `[expr]` — applied to values of types using this codec
+    pub constraints: Vec<Expr>,
+    pub span: Option<Span>,
+}
+
 /// A single route in a `meld A <:> B` declaration.
 /// Maps a field/accessor from type A to the corresponding expression in type B.
 /// Example: `@0..63 -> B.ptr` maps bits 0-63 of A to B's `ptr` field.
@@ -2742,6 +2753,9 @@ pub enum TopLevel {
     /// Establishes that A and B are mutually lens-compatible.
     /// The value's physical layout adapts based on usage across both lenses.
     Meld(MeldDeclaration),
+    /// `codec Name { ... }` — codec declaration for custom serialization/validation.
+    /// 2026-07-11: Phase 4.
+    Codec(CodecDeclaration),
     /// `#test("group")` pragma — wraps an item with test group membership.
     /// Skipped in production; included in test mode.
     Test {

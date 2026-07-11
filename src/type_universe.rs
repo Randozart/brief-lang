@@ -20,7 +20,8 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{Expr, MeldDeclaration, Program, TopLevel, TypeBinding, TypeDef, TypeDefBody};
+use crate::ast::{CodecDeclaration, Expr, MeldDeclaration, Program, TopLevel, TypeBinding, TypeDef, TypeDefBody};
+use crate::features::binary_op::{BinaryOpExpr, BinaryOpKind};
 
 /// Resolved metadata for a single type in the universe.
 #[derive(Debug, Clone)]
@@ -188,6 +189,9 @@ pub struct TypeUniverse {
     pub melds: HashMap<(String, String), MeldDeclaration>,
     /// Warnings from meld validation (e.g., circular meld cycles).
     pub meld_warnings: Vec<String>,
+    /// Registered codec declarations. Phase 4 — codec system.
+    /// Populated from `TopLevel::Codec` items during `build()`.
+    pub codecs: HashMap<String, CodecDeclaration>,
 }
 
 /// Known codec names for D-2 validation.
@@ -234,6 +238,7 @@ impl TypeUniverse {
             resolution_order: Vec::new(),
             melds: HashMap::new(),
             meld_warnings: Vec::new(),
+            codecs: HashMap::new(),
         }
     }
 
@@ -446,6 +451,14 @@ impl TypeUniverse {
         // wrong Expr variant), this assertion catches it at compiler startup
         // rather than producing invalid LLVM IR.
         universe.validate_primitives();
+
+        // Phase 1: Collect codec declarations
+        for item in &program.items {
+            if let TopLevel::Codec(codec) = item {
+                universe.codecs.insert(codec.name.clone(), codec.clone());
+            }
+        }
+
         let mut type_defs: Vec<&TypeDef> = Vec::new();
         for item in &program.items {
             if let TopLevel::TypeDef(td) = item {
@@ -636,6 +649,17 @@ impl TypeUniverse {
         // when a value of this type is constructed or assigned.
         for constraint in &td.body.constraints {
             rt.guards.push(constraint.clone());
+        }
+
+        // ── Phase 4: Link codec constraints ─────────────────────
+        // 2026-07-11: If this type references a registered codec, merge
+        // the codec's validation constraints into the type's guards.
+        if let Some(ref codec_name) = rt.codec {
+            if let Some(codec_decl) = self.codecs.get(codec_name) {
+                for constraint in &codec_decl.constraints {
+                    rt.guards.push(constraint.clone());
+                }
+            }
         }
 
         // ── Phase 7B: Resolve operator declarations ────────────
@@ -1548,6 +1572,57 @@ mod tests {
         let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
         let universe = TypeUniverse::build(&program);
         assert_eq!(universe.get("Utf8Str").unwrap().codec, Some("Utf8".into()));
+    }
+
+    #[test]
+    /// 2026-07-11: Phase 4 — Test codec declaration is collected by TypeUniverse.
+    fn test_codec_declaration_collected() {
+        let codec = TopLevel::Codec(CodecDeclaration {
+            name: "PositiveInt".into(),
+            constraints: vec![
+                Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, Expr::Identifier("value".into()), Expr::Integer(0)))),
+            ],
+            span: None,
+        });
+        let program = make_program(vec![codec]);
+        let universe = TypeUniverse::build(&program);
+        assert!(universe.codecs.contains_key("PositiveInt"));
+        assert_eq!(universe.codecs["PositiveInt"].constraints.len(), 1);
+    }
+
+    #[test]
+    /// 2026-07-11: Phase 4 — Test codec constraints are merged into type guards.
+    fn test_codec_constraints_merged_into_type() {
+        let codec = TopLevel::Codec(CodecDeclaration {
+            name: "PositiveInt".into(),
+            constraints: vec![
+                Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, Expr::Identifier("value".into()), Expr::Integer(0)))),
+            ],
+            span: None,
+        });
+        let td = TypeDef {
+            name: "MyInt".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Int".into())),
+            body: TypeDefBody {
+                slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
+                bindings: vec![
+                    TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::Identifier("PositiveInt".into())), span: None },
+                ],
+                operators: vec![],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![codec, TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        let my_int = universe.get("MyInt").unwrap();
+        // Should have the codec's constraint merged into guards
+        assert_eq!(my_int.guards.len(), 1);
     }
 
     #[test]

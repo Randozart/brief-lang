@@ -1466,6 +1466,11 @@ impl<'a> Parser<'a> {
                 let render_block = self.parse_render_block()?;
                 Ok(wrap_test(TopLevel::RenderBlock(render_block), &test_groups))
             }
+            Some(Ok(Token::Identifier(name))) if name == "codec" => {
+                self.advance(); // consume `codec` keyword
+                let codec = self.parse_codec_decl()?;
+                Ok(wrap_test(TopLevel::Codec(codec), &test_groups))
+            }
             Some(Ok(tok)) => {
                 // Try to parse as a top-level executable statement
                 match self.try_parse_exec_statement() {
@@ -1526,6 +1531,7 @@ impl<'a> Parser<'a> {
                     TopLevel::RStruct(r) => Some(r.name.clone()),
                     TopLevel::Inop(i) => Some(i.name.clone()),
                     TopLevel::Cell(c) => Some(c.name.clone()),
+                    TopLevel::Codec(c) => Some(c.name.clone()),
                     _ => None,
                 };
                 if let Some(name) = name {
@@ -2573,6 +2579,38 @@ impl<'a> Parser<'a> {
             routes,
             span: None,
         })
+    }
+
+    /// Parse a `codec Name { [constraint]; ... };` declaration.
+    /// 2026-07-11: Phase 4 — codec system.
+    fn parse_codec_decl(&mut self) -> Result<CodecDeclaration, SyntaxError> {
+        let name = self.expect_identifier()?;
+        let mut constraints = Vec::new();
+
+        if let Some(Ok(Token::LBrace)) = self.current_token() {
+            self.advance();
+            // Parse constraint expressions: [expr];
+            while !matches!(self.current_token(), Some(Ok(Token::RBrace)) | None) {
+                if let Some(Ok(Token::LBracket)) = self.current_token() {
+                    self.advance();
+                    let expr = self.parse_expression()?;
+                    self.expect(Token::RBracket)?;
+                    constraints.push(expr);
+                    if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                        self.advance();
+                    }
+                } else {
+                    break;
+                }
+            }
+            self.expect(Token::RBrace)?;
+        }
+
+        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            self.advance();
+        }
+
+        Ok(CodecDeclaration { name, constraints, span: None })
     }
 
     /// Parse a resource declaration: rsrc name: Type(args);
@@ -11805,6 +11843,56 @@ defn fallback() -> Int { term 0; };
             other => panic!("Expected Test wrapping Fuzzed, got {:?}", std::mem::discriminant(other)),
         }
     }
+    // ── Phase 4: Codec System tests ───────────────────────────────
+
+    #[test]
+    /// 2026-07-11: Phase 4 — Parse a basic codec declaration with constraints.
+    fn test_parse_codec_declaration() {
+        let s = "codec PositiveInt { [value > 0]; [value < 100]; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse codec declaration: {:?}", result.err());
+        let items = result.unwrap().items;
+        assert_eq!(items.len(), 1);
+        if let TopLevel::Codec(codec) = &items[0] {
+            assert_eq!(codec.name, "PositiveInt");
+            assert_eq!(codec.constraints.len(), 2);
+        } else {
+            panic!("Expected TopLevel::Codec");
+        }
+    }
+
+    #[test]
+    /// 2026-07-11: Phase 4 — Parse a codec declaration with empty body.
+    fn test_parse_codec_declaration_empty() {
+        let s = "codec EmptyCodec {};";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse empty codec declaration: {:?}", result.err());
+        if let TopLevel::Codec(codec) = &result.unwrap().items[0] {
+            assert!(codec.constraints.is_empty());
+        } else {
+            panic!("Expected TopLevel::Codec");
+        }
+    }
+
+    #[test]
+    /// 2026-07-11: Phase 4 — Parse a codec followed by a type that references it.
+    fn test_parse_codec_with_type() {
+        let s = "codec PositiveInt { [value > 0]; };
+                  type MyInt <: Int {
+                      value: Int;
+                      codec <~ PositiveInt;
+                  };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse codec + type: {:?}", result.err());
+        let items = result.unwrap().items;
+        assert_eq!(items.len(), 2);
+        assert!(matches!(&items[0], TopLevel::Codec(c) if c.name == "PositiveInt"));
+        assert!(matches!(&items[1], TopLevel::TypeDef(td) if td.name == "MyInt"));
+    }
+
 } // end parser_tests
 
 // ── Type slot syntax tests ──────────────────────────────────────────
