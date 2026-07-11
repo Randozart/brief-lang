@@ -129,6 +129,13 @@ impl PartialEq for Value {
             (Value::Char(a), Value::Bits(b)) | (Value::Bits(b), Value::Char(a)) => {
                 b.len() >= 4 && *a == char::from_u32(u32::from_le_bytes(b[..4].try_into().unwrap_or([0; 4]))).unwrap_or('\0')
             }
+            (Value::Float(a), Value::Bits(b)) | (Value::Bits(b), Value::Float(a)) => {
+                b.len() >= 8 && {
+                    let mut arr = [0u8; 8];
+                    arr.copy_from_slice(&b[..8]);
+                    *a == f64::from_le_bytes(arr)
+                }
+            }
             (Value::Bits(a), Value::Bits(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
@@ -3132,8 +3139,8 @@ impl Interpreter {
             // Legacy scalar variants — keep inline until Phase 14 (variant removal)
             Expr::Integer(v) => Ok(Value::Bits(i64_to_bits(*v))),
             Expr::IntegerSuffixed(v, _) => Ok(Value::Bits(i64_to_bits(*v))),
-            Expr::Float(v) => Ok(Value::Float(*v)),
-            Expr::Float64(v) => Ok(Value::Float(*v)),
+            Expr::Float(v) => Ok(Value::Bits(f64_to_bits(*v))),
+            Expr::Float64(v) => Ok(Value::Bits(f64_to_bits(*v))),
             Expr::String(v) => Ok(Value::String(v.clone())),
             Expr::RegexLiteral(v) => {
                 match crate::analysis::dfa::compile_to_dfa(v) {
@@ -10654,6 +10661,12 @@ mod tests {
             Value::Enum(e, v, fields) if e == "Result" && v == "Err" => {
                 match fields.get("value") {
                     Some(Value::Float(f)) => assert_eq!(*f, 0.0),
+                    Some(Value::Bits(b)) => {
+                        let mut arr = [0u8; 8];
+                        arr.copy_from_slice(&b[..b.len().min(8)]);
+                        let f = f64::from_le_bytes(arr);
+                        assert_eq!(f, 0.0, "Float fallback should be 0.0");
+                    }
                     other => panic!("Expected fallback Float(0.0), got {:?}", other),
                 }
             }
