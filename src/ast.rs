@@ -1213,6 +1213,17 @@ pub enum Intrinsic {
     /// Hash N bytes. Returns a 64-bit hash.
     Hash,
 
+    /// Virtual heap allocation: allocates N bytes in the interpreter's
+    /// sandboxed VirtualHeap, returns a virtual address.
+    /// 2026-07-11: Phase 7.5 — Bits thesis.
+    Malloc,
+    /// Virtual heap deallocation: frees a previously allocated block.
+    /// 2026-07-11: Phase 7.5 — Bits thesis.
+    Free,
+    /// Virtual heap reallocation: resizes an existing block.
+    /// 2026-07-11: Phase 7.5 — Bits thesis.
+    Realloc,
+
     /// User-defined intrinsic via `inop#` / `inop!#` declaration.
     /// The String stores the name for display/lookup; validation happens
     /// in the typechecker against the program's `inop_decls` map.
@@ -1659,6 +1670,10 @@ impl Intrinsic {
             Intrinsic::Memcmp => "__memcmp",
             Intrinsic::Memset => "__memset",
             Intrinsic::Hash => "__hash",
+            // 2026-07-11: Virtual heap intrinsics
+            Intrinsic::Malloc => "malloc",
+            Intrinsic::Free => "free",
+            Intrinsic::Realloc => "realloc",
             Intrinsic::UserDefined(_) => "__user__",
         }
     }

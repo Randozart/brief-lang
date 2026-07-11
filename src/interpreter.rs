@@ -6095,6 +6095,42 @@ impl Interpreter {
                             )),
                         }
                     }
+                    Intrinsic::Malloc => {
+                        let size = match values.remove(0) {
+                            Value::Int(s) if s >= 0 => s as usize,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("malloc# requires non-negative Int, got {:?}", v))),
+                        };
+                        let addr = self.virtual_heap.alloc(&vec![0u8; size]);
+                        Ok(Value::Int(addr as i64))
+                    }
+                    Intrinsic::Free => {
+                        let addr = match values.remove(0) {
+                            Value::Int(a) => a as u64,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("free# requires Int address, got {:?}", v))),
+                        };
+                        self.virtual_heap.free(addr);
+                        Ok(Value::Bool(true))
+                    }
+                    Intrinsic::Realloc => {
+                        let addr = match values.remove(0) {
+                            Value::Int(a) => a as u64,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("realloc# requires Int address, got {:?}", v))),
+                        };
+                        let new_size = match values.remove(0) {
+                            Value::Int(s) if s >= 0 => s as usize,
+                            v => return Err(RuntimeError::TypeMismatch(
+                                format!("realloc# requires non-negative Int size, got {:?}", v))),
+                        };
+                        // Read existing block, create new one
+                        let existing = self.virtual_heap.read(addr, new_size as u64).unwrap_or(&[]);
+                        let mut new_block = existing.to_vec();
+                        new_block.resize(new_size, 0);
+                        self.virtual_heap.write(addr, &new_block).ok();
+                        Ok(Value::Int(addr as i64))
+                    }
                     Intrinsic::UserDefined(name) => {
                         let inop = self.inop_decls.get(name).cloned();
                         if let Some(inop) = inop {

@@ -2146,6 +2146,32 @@ pub fn emit_intrinsic_call(
             writeln!(out, "{}{} = add i64 0, {}", indent, v, result).ok();
             return TypedRegister { name: v.to_string(), ty: Type::int() };
         }
+        // 2026-07-11: Virtual heap intrinsics — delegate to libc
+        Intrinsic::Malloc => {
+            let size = backend.emit_expr(out, &args[0], indent);
+            let ptr = format!("%mal_ptr{}", backend.fun.txn_counter);
+            backend.fun.txn_counter += 1;
+            writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, ptr, size.name).ok();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ptr).ok();
+        }
+        Intrinsic::Free => {
+            let addr = backend.emit_expr(out, &args[0], indent);
+            let ptr = format!("%fre_ptr{}", backend.fun.txn_counter);
+            backend.fun.txn_counter += 1;
+            backend.emit_inttoptr(out, indent, &ptr, &addr.name);
+            writeln!(out, "{}call void @free(ptr {})", indent, ptr).ok();
+            writeln!(out, "{}{} = add i64 0, 1 ; free success", indent, v).ok();
+        }
+        Intrinsic::Realloc => {
+            let addr = backend.emit_expr(out, &args[0], indent);
+            let size = backend.emit_expr(out, &args[1], indent);
+            let ptr = format!("%rel_ptr{}", backend.fun.txn_counter);
+            let old_ptr = format!("%rel_old{}", backend.fun.txn_counter);
+            backend.fun.txn_counter += 1;
+            backend.emit_inttoptr(out, indent, &old_ptr, &addr.name);
+            writeln!(out, "{}{} = call ptr @realloc(ptr {}, i64 {})", indent, ptr, old_ptr, size.name).ok();
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ptr).ok();
+        }
         Intrinsic::UserDefined(name) => {
             // 2026-07-08: Phase 3 — remap to avoid libc symbol conflicts
             let inop_name = match name.as_str() {
