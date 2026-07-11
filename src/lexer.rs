@@ -277,6 +277,10 @@ pub enum Token {
 
     #[token(":>")]
     ColonGreaterThan,
+    #[token(":=")]
+    /// `:=` — derivation / compile-time assertion block.
+    /// 2026-07-11: Phase 8.0.
+    ColonEq,
     #[token(":")]
     Colon,
     #[token("::")]
@@ -599,6 +603,7 @@ impl std::fmt::Display for Token {
             Token::LtColonGt => write!(f, "<:>"),
             Token::LtColon => write!(f, "<:"),
             Token::ColonGreaterThan => write!(f, ":>"),
+            Token::ColonEq => write!(f, ":="),
             Token::Colon => write!(f, ":"),
             Token::ColonColon => write!(f, "::"),
             Token::LBrace => write!(f, "{{"),

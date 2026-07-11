@@ -228,6 +228,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -263,6 +264,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -306,6 +308,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -343,6 +346,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -378,6 +382,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
 
         // Should be OK because this is not a TrueAssertion

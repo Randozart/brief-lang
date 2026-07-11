@@ -465,6 +465,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         })
     }
 
@@ -487,6 +488,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         })
     }
 
@@ -523,7 +525,8 @@ mod tests {
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 annotations: vec![],
                 metadata: HashMap::new(),
-                body: vec![], is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+                body: vec![], is_lambda: false, modifiers: vec![],                 variant_bodies: vec![],
+                derivation: None,
             }),
             TopLevel::Transaction(Transaction {
                 name: "bar".into(), is_reactive: false, is_async: false, parameters: vec![],
@@ -533,6 +536,7 @@ mod tests {
                 annotations: vec![],
                 metadata: HashMap::new(),
                 output_type: None,
+                derivation: None,
             }),
         ]);
         let reactor = build_reactor(&prog);
@@ -667,6 +671,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         };
         let reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
         assert_eq!(reactor.transactions.len(), 1);
@@ -699,6 +704,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         };
         let mut interp = Interpreter::new();
         interp.state.insert("x".into(), Value::Int(0));
@@ -731,6 +737,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         };
         let mut interp = Interpreter::new();
         let mut reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));

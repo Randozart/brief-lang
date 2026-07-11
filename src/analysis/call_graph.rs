@@ -224,6 +224,7 @@ mod tests {
             variant_bodies: vec![],
                  outputs: Vec::new(),
          output_type: None,
+            derivation: None,
      })
     }
 

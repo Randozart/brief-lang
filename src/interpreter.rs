@@ -7960,6 +7960,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
         i.definitions.insert("len".to_string(), defn);
         let expr = Expr::Call("len".to_string(), vec![Expr::Identifier("xs".to_string())]);
@@ -8758,6 +8759,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         };
         i.callable_txns.insert("count_up".to_string(), txn);
         let result = i.eval_expr(&Expr::Call("count_up".to_string(), vec![
@@ -8813,6 +8815,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         };
         i.callable_txns.insert("noop".to_string(), txn);
         // pre is i < n, but i=5, n=3 → false, so body never runs
@@ -8871,6 +8874,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         };
         i.callable_txns.insert("mutate".to_string(), txn);
         i.state.insert("outer".to_string(), Value::Int(42));
@@ -10036,6 +10040,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         };
         i.callable_txns.insert("bad_post".to_string(), txn);
         let result = i.eval_expr(&Expr::Call("bad_post".to_string(), vec![
@@ -10110,6 +10115,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         };
         i.callable_txns.insert("count_to_n".to_string(), txn);
         let result = i.eval_expr(&Expr::Call("count_to_n".to_string(), vec![
@@ -11047,6 +11053,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
         i.definitions.insert("sl_insert_fn".into(), defn);
         // Declare variable with SList type
@@ -11123,7 +11130,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![Type::int()], output_type: None,
+                outputs: vec![Type::int()], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![],
             span: None, modifiers: vec![],
@@ -11157,7 +11164,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![], output_type: None,
+                outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![],
             span: None, modifiers: vec![],
@@ -11191,7 +11198,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![], output_type: None,
+                outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![],
             span: None, modifiers: vec![],
@@ -11224,7 +11231,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![], output_type: None,
+                outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![],
             span: None, modifiers: vec![],
@@ -11260,7 +11267,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![Type::int()], output_type: None,
+                outputs: vec![Type::int()], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
         };
@@ -11323,7 +11330,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![], output_type: None,
+                outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
         };
@@ -11351,7 +11358,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![], output_type: None,
+                outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
         };
@@ -11423,7 +11430,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![], output_type: None,
+                outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![],
             internal_triggers: vec![TriggerDeclaration {
@@ -11544,7 +11551,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![], output_type: None,
+                outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![],
             // Note: Internal trigger is NOT declared here — we manually manage

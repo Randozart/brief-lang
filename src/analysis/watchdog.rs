@@ -456,6 +456,7 @@ mod tests {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         })
     }
 

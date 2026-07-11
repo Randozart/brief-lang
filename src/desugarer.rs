@@ -595,6 +595,7 @@ impl Desugarer {
             variant_bodies: Vec::new(),
                  outputs: Vec::new(),
          output_type: None,
+         derivation: None,
      };
 
         (new_txn, sigs, state)
@@ -1260,6 +1261,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
 
         let mut desugarer = Desugarer::new();
@@ -1296,6 +1298,7 @@ mod tests {
             variant_bodies: vec![],
                  outputs: Vec::new(),
          output_type: None,
+            derivation: None,
      };
 
         let mut desugarer = Desugarer::new();
@@ -1329,6 +1332,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         };
 
         let mut desugarer = Desugarer::new();

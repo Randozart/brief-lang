@@ -135,6 +135,7 @@ pub fn arb_transaction(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             variant_bodies: vec![],
                  outputs: Vec::new(),
          output_type: None,
+            derivation: None,
      })
     })
 }
@@ -177,6 +178,7 @@ pub fn arb_definition(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         })
     })
 }

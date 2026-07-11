@@ -648,6 +648,7 @@ use crate::ast::*;
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         })
     }
 

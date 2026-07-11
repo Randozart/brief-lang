@@ -112,6 +112,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -169,6 +170,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -230,6 +232,7 @@ fn empty_program() -> Program {
             variant_bodies: vec![],
             outputs: Vec::new(),
             output_type: None,
+            derivation: None,
         })
     }
 
@@ -356,6 +359,7 @@ fn empty_program() -> Program {
             variant_bodies: vec![],
             outputs: Vec::new(),
             output_type: None,
+            derivation: None,
         })
     }
 
@@ -470,6 +474,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                     outputs: Vec::new(),
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             comments: vec![],
@@ -522,6 +527,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                     outputs: Vec::new(),
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             comments: vec![],
@@ -652,6 +658,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
                 TopLevel::Transaction(Transaction {
                     name: "sleep".to_string(),
@@ -676,6 +683,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -778,6 +786,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -842,6 +851,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -939,6 +949,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -1001,6 +1012,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -1144,6 +1156,7 @@ fn empty_program() -> Program {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -1204,6 +1217,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -1272,6 +1286,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                     outputs: Vec::new(),
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             comments: vec![],
@@ -1339,6 +1354,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                     outputs: Vec::new(),
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             comments: vec![],
@@ -1437,6 +1453,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -1528,8 +1545,9 @@ fn empty_program() -> Program {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                         outputs: Vec::new(),
+                          outputs: Vec::new(),
              output_type: None,
+            derivation: None,
          }));
         }
         Program {
@@ -1815,6 +1833,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
                 TopLevel::Transaction(Transaction {
                     name: "inc_b".to_string(),
@@ -1847,6 +1866,7 @@ fn empty_program() -> Program {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             comments: vec![],
@@ -1963,6 +1983,7 @@ fn empty_program() -> Program {
             metadata: HashMap::new(),
                  outputs: Vec::new(),
          output_type: None,
+            derivation: None,
      }));
         Program {
             items,
@@ -2303,6 +2324,7 @@ fn empty_program() -> Program {
             variant_bodies: vec![],
                  outputs: Vec::new(),
          output_type: None,
+            derivation: None,
      }));
         Program {
             items,
@@ -2647,7 +2669,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: Vec::new(), output_type: None,
+                    outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -2803,6 +2825,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -2904,6 +2927,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -2977,6 +3001,7 @@ let spec = crate::target_spec::TargetSpec {
                     annotations: vec![],
                     metadata: HashMap::new(),
                     variant_bodies: vec![],
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -3023,6 +3048,7 @@ let spec = crate::target_spec::TargetSpec {
                     annotations: vec![],
                     metadata: HashMap::new(),
                     variant_bodies: vec![],
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -3072,6 +3098,7 @@ let spec = crate::target_spec::TargetSpec {
                     annotations: vec![],
                     metadata: HashMap::new(),
                     variant_bodies: vec![],
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -3176,6 +3203,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3261,6 +3289,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3328,6 +3357,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3397,6 +3427,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3459,6 +3490,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3502,6 +3534,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3543,6 +3576,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3589,6 +3623,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3627,6 +3662,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3670,6 +3706,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3712,6 +3749,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3751,6 +3789,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3799,6 +3838,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3836,6 +3876,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
             ..empty_program()
@@ -3868,7 +3909,7 @@ let spec = crate::target_spec::TargetSpec {
                         },
                     ],
                     reactor_speed: None, span: None, is_lambda: false, dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+ modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
                     annotations: vec![],
                     metadata: HashMap::new(),
                 }),
@@ -3915,7 +3956,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: Vec::new(), output_type: None,
+                    outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -3962,7 +4003,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: Vec::new(), output_type: None,
+                    outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4005,7 +4046,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: Vec::new(), output_type: None,
+                    outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4045,7 +4086,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: Vec::new(), output_type: None,
+                    outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4088,7 +4129,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: Vec::new(), output_type: None,
+                    outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4199,6 +4240,7 @@ let spec = crate::target_spec::TargetSpec {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            derivation: None,
         }));
         Program { items, ..empty_program() }
     }
@@ -4234,6 +4276,7 @@ let spec = crate::target_spec::TargetSpec {
                     variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4361,6 +4404,7 @@ let spec = crate::target_spec::TargetSpec {
                     variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4406,6 +4450,7 @@ let spec = crate::target_spec::TargetSpec {
                     variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4451,6 +4496,7 @@ let spec = crate::target_spec::TargetSpec {
                     variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4496,6 +4542,7 @@ let spec = crate::target_spec::TargetSpec {
                     variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4541,6 +4588,7 @@ let spec = crate::target_spec::TargetSpec {
                     variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4575,7 +4623,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4628,6 +4676,7 @@ let spec = crate::target_spec::TargetSpec {
                     variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4666,7 +4715,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4704,7 +4753,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4742,7 +4791,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4782,7 +4831,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4828,7 +4877,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4863,7 +4912,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![],
+                    variant_bodies: vec![], outputs: vec![], derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4905,7 +4954,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4944,7 +4993,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -4983,7 +5032,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5019,7 +5068,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![],
+                    variant_bodies: vec![], outputs: vec![], derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5065,7 +5114,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5107,7 +5156,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5156,7 +5205,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5197,7 +5246,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5244,7 +5293,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5305,6 +5354,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                     modifiers: vec![],
                     variant_bodies: vec![],
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5364,6 +5414,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                     modifiers: vec![],
                     variant_bodies: vec![],
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5426,6 +5477,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                     modifiers: vec![],
                     variant_bodies: vec![],
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5485,6 +5537,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                     modifiers: vec![],
                     variant_bodies: vec![],
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5558,6 +5611,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                     modifiers: vec![],
                     variant_bodies: vec![],
+                    derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5686,7 +5740,7 @@ let spec = crate::target_spec::TargetSpec {
                     dependencies: vec![], modifiers: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None,
+                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
@@ -5841,6 +5895,7 @@ let spec = crate::target_spec::TargetSpec {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         });
         let program = Program {
             items: vec![defn],
@@ -5885,6 +5940,7 @@ let spec = crate::target_spec::TargetSpec {
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         });
         let program = Program {
             items: vec![defn],
@@ -6013,7 +6069,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: Vec::new(), output_type: None,
+                    outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
@@ -6063,7 +6119,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: Vec::new(), output_type: None,
+                    outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
@@ -6235,7 +6291,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![Type::int()], output_type: None,
+                outputs: vec![Type::int()], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
         };
@@ -6255,7 +6311,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: vec![], output_type: None,
+                    outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
@@ -6291,7 +6347,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![Type::int()], output_type: None,
+                outputs: vec![Type::int()], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
         };
@@ -6314,7 +6370,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: vec![], output_type: None,
+                    outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
@@ -6356,7 +6412,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![Type::int()], output_type: None,
+                outputs: vec![Type::int()], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
         };
@@ -6376,7 +6432,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: vec![], output_type: None,
+                    outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
@@ -6415,7 +6471,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![], output_type: None,
+                outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
         };
@@ -6438,7 +6494,7 @@ let spec = crate::target_spec::TargetSpec {
  modifiers: vec![], variant_bodies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    outputs: vec![], output_type: None,
+                    outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
@@ -6690,6 +6746,7 @@ let spec = crate::target_spec::TargetSpec {
                     metadata: HashMap::new(),
                     outputs: Vec::new(),
                     output_type: None,
+                    derivation: None,
                 }),
             ];
             Program {
@@ -6880,7 +6937,7 @@ let spec = crate::target_spec::TargetSpec {
             dependencies: vec![], is_async: false, is_reactive: true,
             annotations: vec![], modifiers: vec![],
             metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
@@ -6965,7 +7022,7 @@ let spec = crate::target_spec::TargetSpec {
             dependencies: vec![], is_async: false, is_reactive: true,
             annotations: vec![], modifiers: vec![],
             metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
@@ -7047,7 +7104,7 @@ let spec = crate::target_spec::TargetSpec {
             dependencies: vec![], is_async: false, is_reactive: true,
             annotations: vec![], modifiers: vec![],
             metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
@@ -7144,7 +7201,7 @@ let spec = crate::target_spec::TargetSpec {
             dependencies: vec![], is_async: false, is_reactive: true,
             annotations: vec![], modifiers: vec![],
             metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
@@ -7265,7 +7322,7 @@ let spec = crate::target_spec::TargetSpec {
             dependencies: vec![], is_async: false, is_reactive: true,
             annotations: vec![], modifiers: vec![],
             metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],

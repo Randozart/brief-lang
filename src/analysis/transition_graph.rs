@@ -1722,6 +1722,7 @@ mod tests {
             variant_bodies: vec![],
                  outputs: Vec::new(),
          output_type: None,
+            derivation: None,
      };
         let txn2 = Transaction {
             name: "txn_b".to_string(),
@@ -1771,6 +1772,7 @@ mod tests {
             variant_bodies: vec![],
                  outputs: Vec::new(),
          output_type: None,
+            derivation: None,
      };
         let txn_b = Transaction {
             body: body_b,
@@ -1810,6 +1812,7 @@ mod tests {
             variant_bodies: vec![],
                  outputs: Vec::new(),
          output_type: None,
+            derivation: None,
      };
         let pairs: Vec<(String, &Transaction)> = vec![("only".to_string(), &txn)];
         assert!(!is_uniform_body_group(&pairs));
@@ -1855,8 +1858,10 @@ mod tests {
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
+                 derivation: None,
              }),
             ],
+
             comments: vec![],
             reactor_speed: None,
             attrs: Vec::new(),
@@ -1891,7 +1896,7 @@ mod tests {
                     is_lambda: false, dependencies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+                    modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
@@ -1922,7 +1927,7 @@ mod tests {
                     is_lambda: false, dependencies: vec![],
                     annotations: vec![],
                     metadata: HashMap::new(),
-                    modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None,
+                    modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,

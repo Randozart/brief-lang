@@ -2586,6 +2586,31 @@ impl OutputType {
     }
 }
 
+/// A single input-output pair in a derivation block.
+/// `2, 2 -> 4` becomes `inputs: [2, 2], output: 4`.
+/// 2026-07-11: Phase 8.1.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DerivationExample {
+    /// Input expressions (one per function parameter).
+    pub inputs: Vec<Expr>,
+    /// Expected output expression.
+    pub output: Box<Expr>,
+    /// Source span for error messages.
+    pub span: crate::errors::Span,
+}
+
+/// A derivation block attached to a definition or transaction.
+/// Contains input-output examples (inductive synthesis) or can be combined
+/// with contracts for deductive synthesis.
+/// 2026-07-11: Phase 8.1.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DerivationBlock {
+    /// List of example pairs: (inputs, expected_output).
+    pub examples: Vec<DerivationExample>,
+    /// Source span for error messages.
+    pub span: crate::errors::Span,
+}
+
 #[derive(Debug, Clone)]
 pub struct Definition {
     pub name: String,
@@ -2603,6 +2628,9 @@ pub struct Definition {
     /// 2026-07-11: Phase 1A.
     pub metadata: HashMap<String, PropertyValue>,
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
+    /// Optional derivation block `:= { ... }` attached after the body.
+    /// 2026-07-11: Phase 8.1.
+    pub derivation: Option<DerivationBlock>,
 }
 
 #[derive(Debug, Clone)]
@@ -2625,6 +2653,9 @@ pub struct Transaction {
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
     pub outputs: Vec<Type>,
     pub output_type: Option<OutputType>,
+    /// Optional derivation block `:= { ... }` attached after the body.
+    /// 2026-07-11: Phase 8.1.
+    pub derivation: Option<DerivationBlock>,
 }
 
 #[derive(Debug, Clone)]
@@ -3241,6 +3272,7 @@ impl Program {
             outputs: vec![],
             output_type: None,
             metadata: HashMap::new(),
+            derivation: None,
         });
 
         // Prepend the state decl (declarations must precede transactions)

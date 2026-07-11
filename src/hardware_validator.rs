@@ -723,7 +723,7 @@ use std::collections::HashMap;
             is_lambda: false, dependencies: vec![],
             annotations: vec![],
             metadata: HashMap::new(),
-            modifiers: vec![], variant_bodies: vec![], outputs: vec![], output_type: None,
+            modifiers: vec![], variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
         })
     }
 

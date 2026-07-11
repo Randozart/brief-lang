@@ -4784,6 +4784,7 @@ let span = self.current_span();
             variant_bodies,
             outputs: txn_outputs,
             output_type: txn_output_type,
+            derivation: None,
         })
     }
 
@@ -4891,6 +4892,29 @@ let span = self.current_span();
             (Vec::new(), Vec::new(), None, Contract::new(Expr::Bool(true), Expr::Bool(true)))
         };
 
+        // Phase 8.2: Check for derivation block in drafting state (no body)
+        if let Some(Ok(Token::ColonEq)) = self.current_token() {
+            self.advance();
+            let derivation = Some(self.parse_derivation_block()?);
+            self.expect(Token::Semicolon)?;
+            return Ok(Definition {
+                name,
+                type_params,
+                parameters,
+                outputs,
+                output_type,
+                output_names,
+                contract,
+                body: Vec::new(),
+                is_lambda: true,
+                annotations: defn_annotations,
+                metadata: HashMap::new(),
+                modifiers: Vec::new(),
+                variant_bodies: Vec::new(),
+                derivation,
+            });
+        }
+
         // Lambda-style: allow ; termination (no body)
         let (body, metadata) = if let Some(Ok(Token::Semicolon)) = self.current_token() {
             (Vec::new(), HashMap::new())
@@ -4911,7 +4935,15 @@ let span = self.current_span();
             self.parse_variant_bodies()?
         };
 
-        // Semicolon after body or last variant body
+        // Phase 8.2: After body + variants, check for trailing derivation block
+        let derivation = if let Some(Ok(Token::ColonEq)) = self.current_token() {
+            self.advance();
+            Some(self.parse_derivation_block()?)
+        } else {
+            None
+        };
+
+        // Semicolon after body or last variant body or derivation block
         if let Some(Ok(Token::Semicolon)) = self.current_token() {
             self.advance();
         }
@@ -4930,6 +4962,7 @@ let span = self.current_span();
             metadata,
             modifiers: Vec::new(),
             variant_bodies,
+            derivation,
         })
     }
 
@@ -5672,6 +5705,53 @@ let span = self.current_span();
         Ok(metadata)
     }
 
+    /// Parse a derivation block: `{ 2, 2 -> 4; 3, 5 -> 8; }`
+    /// 2026-07-11: Phase 8.2
+    fn parse_derivation_block(&mut self) -> Result<DerivationBlock, SyntaxError> {
+        let start_span = self.current_span().unwrap_or_else(Span::dummy);
+        self.expect(Token::LBrace)?;
+        let mut examples = Vec::new();
+
+        while !matches!(self.current_token(), Some(Ok(Token::RBrace))) {
+            let example = self.parse_derivation_example()?;
+            examples.push(example);
+            if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                self.advance();
+            } else if !matches!(self.current_token(), Some(Ok(Token::RBrace))) {
+                return self.spanned_err("expected ';' between derivation examples".to_string());
+            }
+        }
+        if examples.is_empty() {
+            return self.spanned_err("derivation block must contain at least one example".to_string());
+        }
+        let end_span = self.current_span().unwrap_or_else(Span::dummy);
+        self.expect(Token::RBrace)?;
+        Ok(DerivationBlock {
+            examples,
+            span: Span::new(start_span.start, end_span.end, start_span.line, start_span.column),
+        })
+    }
+
+    /// Parse a single example: `2, 2 -> 4` or `0x1234 -> 0x3412`
+    /// 2026-07-11: Phase 8.2
+    fn parse_derivation_example(&mut self) -> Result<DerivationExample, SyntaxError> {
+        let start_span = self.current_span().unwrap_or_else(Span::dummy);
+        let start = start_span.start;
+        let mut inputs = Vec::new();
+        inputs.push(self.parse_expression()?);
+        while let Some(Ok(Token::Comma)) = self.current_token() {
+            self.advance();
+            inputs.push(self.parse_expression()?);
+        }
+        self.expect(Token::Arrow)?;
+        let output = self.parse_expression()?;
+        let end = output.span().unwrap_or_else(Span::dummy).end;
+        Ok(DerivationExample {
+            inputs,
+            output: Box::new(output),
+            span: Span::new(start, end, start_span.line, start_span.column),
+        })
+    }
 
     /// Parse a time unit keyword. Returns an error if no time unit is found.
     fn parse_time_unit(&mut self) -> Result<TimeUnit, SyntaxError> {
@@ -11430,6 +11510,7 @@ defn fallback() -> Int { term 0; };
             metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
+            derivation: None,
         }
     }
 
@@ -12093,6 +12174,72 @@ mod within_tests {
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse ms: {:?}", result.err());
+    }
+}
+
+// ── Phase 8: Derivation block parsing tests ──
+
+#[test]
+fn test_parse_defn_with_body_and_derivation() {
+    let s = "defn add(x: Int, y: Int) -> Int { term x + y; } := { 2, 2 -> 4; 3, 5 -> 8; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse body + derivation: {:?}", result.err());
+    if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+        assert!(!defn.body.is_empty(), "Body should be present");
+        assert!(defn.derivation.is_some(), "Derivation should be present");
+        let derivation = defn.derivation.as_ref().unwrap();
+        assert_eq!(derivation.examples.len(), 2, "Should have 2 examples");
+        assert_eq!(derivation.examples[0].inputs.len(), 2, "First example should have 2 inputs");
+    } else {
+        panic!("Expected Definition");
+    }
+}
+
+#[test]
+fn test_parse_defn_draft_with_derivation() {
+    let s = "defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; 3, 5 -> 8; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse draft + derivation: {:?}", result.err());
+    if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+        assert!(defn.body.is_empty(), "Body should be empty (drafting)");
+        assert!(defn.derivation.is_some(), "Derivation should be present");
+        let derivation = defn.derivation.as_ref().unwrap();
+        assert_eq!(derivation.examples.len(), 2, "Should have 2 examples");
+    } else {
+        panic!("Expected Definition");
+    }
+}
+
+#[test]
+fn test_parse_defn_single_example() {
+    let s = "defn swap(x: UInt16) -> UInt16 := { 0x1234 -> 0x3412; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse single example: {:?}", result.err());
+    if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+        assert!(defn.derivation.is_some());
+        assert_eq!(defn.derivation.as_ref().unwrap().examples.len(), 1);
+    }
+}
+
+#[test]
+fn test_parse_derivation_rejects_empty_block() {
+    let s = "defn f() -> Int := {};";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_err(), "Empty derivation block should be rejected");
+}
+
+#[test]
+fn test_parse_defn_no_derivation() {
+    let s = "defn add(x: Int, y: Int) -> Int { term x + y; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse without derivation");
+    if let TopLevel::Definition(defn) = &result.unwrap().items[0] {
+        assert!(defn.derivation.is_none(), "No derivation expected");
     }
 }
 

@@ -3861,7 +3861,7 @@ mod tests {
                 body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -3878,7 +3878,7 @@ mod tests {
                 body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -3898,7 +3898,7 @@ mod tests {
                 ],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -3969,7 +3969,7 @@ mod tests {
                 dependencies: vec![], modifiers: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                variant_bodies: vec![], outputs: vec![], output_type: None,
+                variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -4070,7 +4070,7 @@ mod tests {
                 ],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -4093,7 +4093,7 @@ mod tests {
                 ],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
             }),
             TopLevel::Definition(Definition {
                 name: "caller".into(),
@@ -4108,7 +4108,7 @@ mod tests {
                 ],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -4134,7 +4134,7 @@ mod tests {
                 ],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                is_lambda: false, modifiers: vec![], variant_bodies: vec![],
+                is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
             }),
         ]);
         let errors = check(&mut prog);
@@ -4651,6 +4651,18 @@ mod kani_full_tests {
         let expr = Expr::Literal(Box::new(LiteralExpr::Term));
         let result = ctx.infer_expression(&expr);
         assert_eq!(result, Type::Void);
+    }
+
+    #[test]
+    /// 2026-07-11: Phase 5 — DeferredLiteral typechecks as its expected_type.
+    fn verify_infer_deferred_literal() {
+        let ctx = TypeChecker::new();
+        let expr = Expr::DeferredLiteral {
+            text: "FF00FF".into(),
+            expected_type: Box::new(Type::Custom("Color".into())),
+        };
+        let result = ctx.infer_expression(&expr);
+        assert_eq!(result, Type::Custom("Color".into()));
     }
 
     // ── Intrinsic type inference tests ──────────────────────────
