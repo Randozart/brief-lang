@@ -2404,6 +2404,9 @@ fn resolve_single_deferred_literal(
     // Call the parse handler via the interpreter using eval_expr
     let mut interp = interpreter::Interpreter::new();
     interp.load_program(program);
+    // Set the expected type so the interpreter can dispatch operators via properties
+    let expected_ty = ast::Type::Custom(type_name.to_string());
+    interp.current_expected_type = Some(expected_ty);
     let call_expr = ast::Expr::Call(fn_name.clone(), vec![ast::Expr::String(text.to_string())]);
     match interp.eval_expr(&call_expr) {
         Ok(value) => match value {

@@ -447,6 +447,11 @@ pub struct Interpreter {
     /// Virtual heap for compile-time memory allocation.
     /// 2026-07-11: Phase 7.5 — Bits thesis.
     pub virtual_heap: VirtualHeap,
+    /// Expected type for the current expression being evaluated.
+    /// Set by the caller before eval_expr when the type context is known.
+    /// Used by property-based operator dispatch (Phase 8B).
+    /// 2026-07-11: Phase 8A.3.
+    pub current_expected_type: Option<crate::ast::Type>,
 }
 
 impl Clone for Interpreter {
@@ -483,6 +488,7 @@ impl Clone for Interpreter {
             cell_wires: Vec::new(),
             cell_thread_handle: None,
             virtual_heap: self.virtual_heap.clone(),
+            current_expected_type: None,
         }
     }
 }
@@ -692,6 +698,7 @@ impl Interpreter {
             cell_wires: Vec::new(),
             cell_thread_handle: None,
             virtual_heap: VirtualHeap::new(),
+            current_expected_type: None,
         }
     }
 
