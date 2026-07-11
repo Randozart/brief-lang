@@ -6,6 +6,7 @@ use crate::ast::{Expr, Hashtag, Annotation};
 use crate::errors::TypeError;
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
+use crate::interpreter::value_as_i64;
 
 pub struct AssignmentStmt {
     pub lhs: Expr,
@@ -41,7 +42,7 @@ impl StmtEval for AssignmentStmt {
                     _ => return Err(RuntimeError::TypeMismatch("Expected identifier".to_string())),
                 };
                 let idx_val = ctx.eval_expr(index_expr)?;
-                if let Value::Int(idx) = idx_val {
+                if let Some(idx) = value_as_i64(&idx_val) {
                     if let Some(target) = ctx.state.get_mut(&list_name) {
                         if let Value::List(items) = target {
                             if idx >= 0 && (idx as usize) < items.len() {

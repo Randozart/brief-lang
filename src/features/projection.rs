@@ -1,6 +1,7 @@
 use crate::ast::{Expr, ProjectionTarget, Type};
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
+use crate::interpreter::value_as_i64;
 use crate::typechecker::TypeChecker;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,7 +30,7 @@ impl ExprEval for ProjectionExpr {
         };
         match &self.target {
             ProjectionTarget::Size => match &source_val {
-                Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
+                Value::Int(_) | Value::Bits(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
                 Value::List(items) => Ok(Value::Int(items.len() as i64)),
                 Value::Tuple(items) => Ok(Value::Int(items.len() as i64)),
                 Value::String(s) => Ok(Value::Int(s.len() as i64)),
@@ -42,7 +43,7 @@ impl ExprEval for ProjectionExpr {
             },
             ProjectionTarget::Bytes => {
                 let size = match &source_val {
-                    Value::Int(_) => 8, Value::Float(_) => 8,
+                    Value::Int(_) | Value::Bits(_) | Value::Float(_) => 8,
                     Value::Bool(_) => 1, Value::Char(_) => 4,
                     Value::String(s) => s.len() as i64,
                     Value::List(items) => items.len() as i64 * 8,
@@ -77,7 +78,7 @@ impl ExprEval for ProjectionExpr {
             }
             ProjectionTarget::Range => {
                 let range = match &source_val {
-                    Value::Int(_) => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
+                    Value::Int(_) | Value::Bits(_) => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
                     Value::Bool(_) => vec![Value::Int(0), Value::Int(1)],
                     Value::Char(_) => vec![Value::Int(0), Value::Int(0x10FFFF)],
                     Value::Float(_) => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
@@ -87,35 +88,55 @@ impl ExprEval for ProjectionExpr {
             }
             ProjectionTarget::Popcount => match source_val {
                 Value::Int(n) => Ok(Value::Int(n.count_ones() as i64)),
+                Value::Bits(_) => {
+                    let n = value_as_i64(&source_val).unwrap();
+                    Ok(Value::Int(n.count_ones() as i64))
+                }
                 _ => Err(RuntimeError::TypeMismatch("Popcount requires Int".into())),
             },
             ProjectionTarget::LeadingZeros => match source_val {
                 Value::Int(n) => Ok(Value::Int(n.leading_zeros() as i64)),
+                Value::Bits(_) => {
+                    let n = value_as_i64(&source_val).unwrap();
+                    Ok(Value::Int(n.leading_zeros() as i64))
+                }
                 _ => Err(RuntimeError::TypeMismatch("LeadingZeros requires Int".into())),
             },
             ProjectionTarget::TrailingZeros => match source_val {
                 Value::Int(n) => Ok(Value::Int(n.trailing_zeros() as i64)),
+                Value::Bits(_) => {
+                    let n = value_as_i64(&source_val).unwrap();
+                    Ok(Value::Int(n.trailing_zeros() as i64))
+                }
                 _ => Err(RuntimeError::TypeMismatch("TrailingZeros requires Int".into())),
             },
             ProjectionTarget::Absolute => match source_val {
                 Value::Int(n) => Ok(Value::Int(n.abs())),
+                Value::Bits(_) => {
+                    let n = value_as_i64(&source_val).unwrap();
+                    Ok(Value::Int(n.abs()))
+                }
                 Value::Float(f) => Ok(Value::Float(f.abs())),
                 _ => Err(RuntimeError::TypeMismatch("Absolute requires Int or Float".into())),
             },
             ProjectionTarget::BitReverse => match source_val {
                 Value::Int(n) => Ok(Value::Int(n.reverse_bits())),
+                Value::Bits(_) => {
+                    let n = value_as_i64(&source_val).unwrap();
+                    Ok(Value::Int(n.reverse_bits()))
+                }
                 _ => Err(RuntimeError::TypeMismatch("BitReverse requires Int".into())),
             },
             ProjectionTarget::Type => {
                 let discriminant = match &source_val {
-                    Value::Int(_) => 1, Value::Float(_) => 2, Value::Bool(_) => 3,
+                    Value::Int(_) | Value::Bits(_) => 1, Value::Float(_) => 2, Value::Bool(_) => 3,
                     Value::Char(_) => 4, Value::String(_) => 5, Value::List(_) => 6,
                     Value::Tuple(_) => 7, Value::Data(_) => 8, Value::HashMap(_) => 9,
                     Value::HashSet(_) => 10, Value::StringBuilder(_) => 11,
                     Value::Stack(_) => 12, Value::Queue(_) => 13,
                     Value::Instance { .. } => 14, Value::Enum(..) => 15,
                     Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Regex(_) => 18,
-                    Value::Ptr(_) | Value::Ref(_) => 19, Value::Bits(_) => 20, Value::Void => 0,
+                    Value::Ptr(_) | Value::Ref(_) => 19, Value::Void => 0,
                     Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
                         unreachable!("compile-time only value")
                     }
@@ -218,35 +239,38 @@ impl ExprEval for ProjectionExpr {
             | ProjectionTarget::FnSpan => Err(RuntimeError::TypeMismatch(
                 "Fn projection requires a function/transaction/inop name, not a runtime value".into()
             )),
-            ProjectionTarget::BitRange(br) => match &source_val {
-                Value::Int(n) => {
-                    let (lo, hi) = match br {
-                        crate::ast::BitRange::Single(i) => (*i, *i),
-                        crate::ast::BitRange::Range(l, h) => (*l, *h),
-                        crate::ast::BitRange::Any(w) => (0, *w - 1),
-                    };
-                    if hi > 63 {
-                        return Err(RuntimeError::TypeMismatch(
-                            "BitRange exceeds 64-bit integer width".into()
-                        ));
-                    }
-                    let width = hi - lo + 1;
-                    let shifted = (*n as u64) >> lo;
-                    let result = if width >= 64 {
-                        shifted as i64
-                    } else {
-                        let mask = (1u64 << width) - 1;
-                        (shifted & mask) as i64
-                    };
-                    Ok(Value::Int(result))
+            ProjectionTarget::BitRange(br) => {
+                let n = match &source_val {
+                    Value::Int(n) => *n,
+                    Value::Bits(_) => value_as_i64(&source_val).unwrap(),
+                    _ => return Err(RuntimeError::TypeMismatch("BitRange requires Int".into())),
+                };
+                let (lo, hi) = match br {
+                    crate::ast::BitRange::Single(i) => (*i, *i),
+                    crate::ast::BitRange::Range(l, h) => (*l, *h),
+                    crate::ast::BitRange::Any(w) => (0, *w - 1),
+                };
+                if hi > 63 {
+                    return Err(RuntimeError::TypeMismatch(
+                        "BitRange exceeds 64-bit integer width".into()
+                    ));
                 }
-                _ => Err(RuntimeError::TypeMismatch("BitRange requires Int".into())),
+                let width = hi - lo + 1;
+                let shifted = (n as u64) >> lo;
+                let result = if width >= 64 {
+                    shifted as i64
+                } else {
+                    let mask = (1u64 << width) - 1;
+                    (shifted & mask) as i64
+                };
+                Ok(Value::Int(result))
             },
             ProjectionTarget::UserDefined(name) => {
                 let val = source_val.clone();
                 match name.as_str() {
                     "Neg" => match &val {
                         Value::Int(n) => Ok(Value::Int(-n)),
+                        Value::Bits(_) => Ok(Value::Int(-value_as_i64(&val).unwrap())),
                         Value::Float(f) => Ok(Value::Float(-f)),
                         _ => Err(RuntimeError::TypeMismatch("Neg requires Int or Float".into())),
                     },
@@ -256,6 +280,7 @@ impl ExprEval for ProjectionExpr {
                     },
                     "BitNot" => match &val {
                         Value::Int(n) => Ok(Value::Int(!n)),
+                        Value::Bits(_) => Ok(Value::Int(!value_as_i64(&val).unwrap())),
                         _ => Err(RuntimeError::TypeMismatch("BitNot requires Int".into())),
                     },
                     _ => Err(RuntimeError::UnsupportedProjection(format!(
@@ -275,7 +300,7 @@ impl ExprEval for ProjectionExpr {
             // ── Phase 2F: Metadata projections ──────────────────
             ProjectionTarget::Width => {
                 let w = match &source_val {
-                    Value::Int(_) | Value::Float(_) => 64i64,
+                    Value::Int(_) | Value::Bits(_) | Value::Float(_) => 64i64,
                     Value::Bool(_) => 1,
                     Value::Char(_) => 32,
                     _ => 64,
@@ -324,35 +349,39 @@ fn eval_user_projection_fast_path(
     arg_expr: &Expr,
 ) -> Result<Value, RuntimeError> {
     let rhs = ctx.eval_expr(arg_expr)?;
+    // Extract i64 from lhs and rhs, returning None if either is non-integer
+    let (l_int, r_int) = (value_as_i64(source_val), value_as_i64(&rhs));
     match (source_val, &rhs, name) {
         // ── Int arithmetic ──
-        (Value::Int(l), Value::Int(r), "Add") => Ok(Value::Int(l + r)),
-        (Value::Int(l), Value::Int(r), "Sub") => Ok(Value::Int(l - r)),
-        (Value::Int(l), Value::Int(r), "Mul") => Ok(Value::Int(l * r)),
-        (Value::Int(l), Value::Int(r), "Div") => {
-            if *r == 0 { Err(RuntimeError::DivisionByZero) }
-            else { Ok(Value::Int(l / r)) }
+        _ if l_int.is_some() && r_int.is_some() => {
+            let (l, r) = (l_int.unwrap(), r_int.unwrap());
+            match name {
+                "Add" => Ok(Value::Int(l + r)),
+                "Sub" => Ok(Value::Int(l - r)),
+                "Mul" => Ok(Value::Int(l * r)),
+                "Div" => { if r == 0 { Err(RuntimeError::DivisionByZero) } else { Ok(Value::Int(l / r)) } }
+                "Mod" => { if r == 0 { Err(RuntimeError::DivisionByZero) } else { Ok(Value::Int(l % r)) } }
+                // ── Int comparisons ──
+                "Eq" => Ok(Value::Bool(l == r)),
+                "Ne" => Ok(Value::Bool(l != r)),
+                "Lt" => Ok(Value::Bool(l < r)),
+                "Le" => Ok(Value::Bool(l <= r)),
+                "Gt" => Ok(Value::Bool(l > r)),
+                "Ge" => Ok(Value::Bool(l >= r)),
+                // ── Int bitwise ──
+                "BitAnd" => Ok(Value::Int(l & r)),
+                "BitOr" => Ok(Value::Int(l | r)),
+                "BitXor" => Ok(Value::Int(l ^ r)),
+                "Shl" => Ok(Value::Int(l << r)),
+                "Shr" => Ok(Value::Int(l >> r)),
+                // ── Int logical (treated as boolean in Brief) ──
+                "And" => Ok(Value::Bool(l != 0 && r != 0)),
+                "Or" => Ok(Value::Bool(l != 0 || r != 0)),
+                _ => Err(RuntimeError::UnsupportedProjection(format!(
+                    "projection '{}' not applicable to Int source type", name
+                ))),
+            }
         }
-        (Value::Int(l), Value::Int(r), "Mod") => {
-            if *r == 0 { Err(RuntimeError::DivisionByZero) }
-            else { Ok(Value::Int(l % r)) }
-        }
-        // ── Int comparisons ──
-        (Value::Int(l), Value::Int(r), "Eq") => Ok(Value::Bool(l == r)),
-        (Value::Int(l), Value::Int(r), "Ne") => Ok(Value::Bool(l != r)),
-        (Value::Int(l), Value::Int(r), "Lt") => Ok(Value::Bool(l < r)),
-        (Value::Int(l), Value::Int(r), "Le") => Ok(Value::Bool(l <= r)),
-        (Value::Int(l), Value::Int(r), "Gt") => Ok(Value::Bool(l > r)),
-        (Value::Int(l), Value::Int(r), "Ge") => Ok(Value::Bool(l >= r)),
-        // ── Int bitwise ──
-        (Value::Int(l), Value::Int(r), "BitAnd") => Ok(Value::Int(l & r)),
-        (Value::Int(l), Value::Int(r), "BitOr") => Ok(Value::Int(l | r)),
-        (Value::Int(l), Value::Int(r), "BitXor") => Ok(Value::Int(l ^ r)),
-        (Value::Int(l), Value::Int(r), "Shl") => Ok(Value::Int(l << r)),
-        (Value::Int(l), Value::Int(r), "Shr") => Ok(Value::Int(l >> r)),
-        // ── Int logical (treated as boolean in Brief) ──
-        (Value::Int(l), Value::Int(r), "And") => Ok(Value::Bool(*l != 0 && *r != 0)),
-        (Value::Int(l), Value::Int(r), "Or") => Ok(Value::Bool(*l != 0 || *r != 0)),
         // ── Float arithmetic ──
         (Value::Float(l), Value::Float(r), "Add") => Ok(Value::Float(l + r)),
         (Value::Float(l), Value::Float(r), "Sub") => Ok(Value::Float(l - r)),

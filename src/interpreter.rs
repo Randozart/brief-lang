@@ -116,6 +116,14 @@ impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::Int(a), Value::Int(b)) => a == b,
+            // Migration equality: Bits ↔ Int (same numeric value)
+            (Value::Int(a), Value::Bits(b)) | (Value::Bits(b), Value::Int(a)) => {
+                let mut arr = [0u8; 8];
+                let copy_len = b.len().min(8);
+                arr[..copy_len].copy_from_slice(&b[..copy_len]);
+                *a == i64::from_le_bytes(arr)
+            }
+            (Value::Bits(a), Value::Bits(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Char(a), Value::Char(b)) => a == b,
@@ -363,8 +371,23 @@ fn bits_to_i64(v: &Value) -> Result<i64, RuntimeError> {
     Ok(i64::from_le_bytes(arr))
 }
 
-fn i64_to_bits(i: i64) -> Vec<u8> {
+pub(crate) fn i64_to_bits(i: i64) -> Vec<u8> {
     i.to_le_bytes().to_vec()
+}
+
+/// Extract i64 from either Value::Int or Value::Bits.
+/// 2026-07-11: Phase 8A migration — unified integer extraction.
+pub(crate) fn value_as_i64(v: &Value) -> Option<i64> {
+    match v {
+        Value::Int(i) => Some(*i),
+        Value::Bits(b) => {
+            let mut arr = [0u8; 8];
+            let copy_len = b.len().min(8);
+            arr[..copy_len].copy_from_slice(&b[..copy_len]);
+            Some(i64::from_le_bytes(arr))
+        }
+        _ => None,
+    }
 }
 
 fn bits_to_f64(v: &Value) -> Result<f64, RuntimeError> {
@@ -1289,15 +1312,11 @@ impl Interpreter {
             Expr::Term => Ok(None),
             idx_expr => {
                 let idx_val = self.eval_expr(idx_expr)?;
-                match idx_val {
-                    Value::Int(i) => {
-                        let p = if i < 0 { (list.len() as i64 + i).max(0) as usize } else { i as usize };
-                        Ok(Some(p))
-                    }
-                    _ => Err(RuntimeError::TypeMismatch(
-                        "Arrow index must be an integer".to_string()
-                    )),
-                }
+                let i = value_as_i64(&idx_val).ok_or_else(|| RuntimeError::TypeMismatch(
+                    "Arrow index must be an integer".to_string()
+                ))?;
+                let p = if i < 0 { (list.len() as i64 + i).max(0) as usize } else { i as usize };
+                Ok(Some(p))
             }
         }
     }
@@ -1336,6 +1355,11 @@ impl Interpreter {
             Value::Float(f) => Ok(f.to_string()),
             Value::Bool(b) => Ok(b.to_string()),
             Value::Char(c) => Ok(c.to_string()),
+            Value::Bits(_) => {
+                value_as_i64(val).map(|i| i.to_string()).ok_or_else(|| RuntimeError::TypeMismatch(
+                    "Value cannot be used as a HashMap key".to_string()
+                ))
+            }
             _ => Err(RuntimeError::TypeMismatch(
                 "Value cannot be used as a HashMap key".to_string()
             )),
@@ -1403,10 +1427,8 @@ impl Interpreter {
                     _ => return Err(RuntimeError::TypeMismatch("Cannot index non-list/non-tuple in multi-slice".to_string())),
                 };
                 let idx_val = self.eval_expr(idx_expr)?;
-                let n = match idx_val {
-                    Value::Int(i) => if i < 0 { (list.len() as i64 + i).max(0) as usize } else { i as usize },
-                    _ => return Err(RuntimeError::TypeMismatch("Index must be integer".to_string())),
-                };
+                let i = value_as_i64(&idx_val).ok_or_else(|| RuntimeError::TypeMismatch("Index must be integer".to_string()))?;
+                let n = if i < 0 { (list.len() as i64 + i).max(0) as usize } else { i as usize };
                 if n >= list.len() {
                     return Err(RuntimeError::TypeMismatch("Index out of bounds".to_string()));
                 }
@@ -1423,20 +1445,16 @@ impl Interpreter {
                 let start_idx = match start {
                     Some(s) => {
                         let sv = self.eval_expr(s)?;
-                        match sv {
-                            Value::Int(i) => if i < 0 { (len as i64 + i).max(0) as usize } else { i as usize },
-                            _ => return Err(RuntimeError::TypeMismatch("Range start must be integer".to_string())),
-                        }
+                        let i = value_as_i64(&sv).ok_or_else(|| RuntimeError::TypeMismatch("Range start must be integer".to_string()))?;
+                        if i < 0 { (len as i64 + i).max(0) as usize } else { i as usize }
                     }
                     None => 0,
                 };
                 let end_idx = match end {
                     Some(e) => {
                         let ev = self.eval_expr(e)?;
-                        match ev {
-                            Value::Int(i) => if i < 0 { (len as i64 + i).max(0) as usize } else { i as usize },
-                            _ => return Err(RuntimeError::TypeMismatch("Range end must be integer".to_string())),
-                        }
+                        let i = value_as_i64(&ev).ok_or_else(|| RuntimeError::TypeMismatch("Range end must be integer".to_string()))?;
+                        if i < 0 { (len as i64 + i).max(0) as usize } else { i as usize }
                     }
                     None => len,
                 };
@@ -2539,7 +2557,7 @@ impl Interpreter {
                     Self::pattern_match(p, v, state)
                 })
             }
-            Pattern::LitInt(n) => matches!(value, Value::Int(v) if *v == *n),
+            Pattern::LitInt(n) => value_as_i64(value) == Some(*n),
             Pattern::LitFloat(f) => matches!(value, Value::Float(v) if *v == *f),
             Pattern::LitString(s) => matches!(value, Value::String(v) if v == s),
             Pattern::LitChar(c) => matches!(value, Value::Char(v) if v == c),
@@ -3106,8 +3124,8 @@ impl Interpreter {
             // Pattern B: delegate to feature struct
             Expr::Literal(lit) => lit.evaluate(self, &ExprDispatch),
             // Legacy scalar variants — keep inline until Phase 14 (variant removal)
-            Expr::Integer(v) => Ok(Value::Int(*v)),
-            Expr::IntegerSuffixed(v, _) => Ok(Value::Int(*v)),
+            Expr::Integer(v) => Ok(Value::Bits(i64_to_bits(*v))),
+            Expr::IntegerSuffixed(v, _) => Ok(Value::Bits(i64_to_bits(*v))),
             Expr::Float(v) => Ok(Value::Float(*v)),
             Expr::Float64(v) => Ok(Value::Float(*v)),
             Expr::String(v) => Ok(Value::String(v.clone())),
@@ -3298,8 +3316,7 @@ impl Interpreter {
                     Intrinsic::ByteCount => {
                         let v = values.remove(0);
                         match v {
-                            Value::Float(_) => Ok(Value::Int(8)),
-                            Value::Int(_) => Ok(Value::Int(8)),
+                            Value::Float(_) | Value::Int(_) | Value::Bits(_) => Ok(Value::Int(8)),
                             Value::Bool(_) => Ok(Value::Int(1)),
                             Value::Char(_) => Ok(Value::Int(4)),
                             Value::Ptr(_) => Ok(Value::Int(8)),
@@ -3339,7 +3356,7 @@ impl Interpreter {
                     Intrinsic::Size => {
                         let v = values.remove(0);
                         match v {
-                            Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) | Value::Ptr(_) => Ok(Value::Int(1)),
+                            Value::Int(_) | Value::Bits(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) | Value::Ptr(_) => Ok(Value::Int(1)),
                             Value::List(l) => Ok(Value::Int(l.len() as i64)),
                             Value::String(s) => Ok(Value::Int(s.len() as i64)),
                             Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
@@ -5412,43 +5429,35 @@ impl Interpreter {
                     // but return constant values since the interpreter cannot simulate a GPU.
                     Intrinsic::GetGlobalId => {
                         let dim = values.remove(0);
-                        match dim {
-                            Value::Int(d) if d >= 0 && d < 3 => Ok(Value::Int(0)),
-                            Value::Int(d) => Err(RuntimeError::TypeMismatch(
-                                format!("get_global_id: dimension {} out of range [0,2]", d))),
-                            v => Err(RuntimeError::TypeMismatch(
-                                format!("get_global_id expects Int dimension, got {:?}", v))),
-                        }
+                        let d = value_as_i64(&dim).ok_or_else(|| RuntimeError::TypeMismatch(
+                            format!("get_global_id expects Int dimension, got {:?}", dim)))?;
+                        if d >= 0 && d < 3 { Ok(Value::Bits(i64_to_bits(0))) }
+                        else { Err(RuntimeError::TypeMismatch(
+                            format!("get_global_id: dimension {} out of range [0,2]", d))) }
                     }
                     Intrinsic::GetLocalId => {
                         let dim = values.remove(0);
-                        match dim {
-                            Value::Int(d) if d >= 0 && d < 3 => Ok(Value::Int(0)),
-                            Value::Int(d) => Err(RuntimeError::TypeMismatch(
-                                format!("get_local_id: dimension {} out of range [0,2]", d))),
-                            v => Err(RuntimeError::TypeMismatch(
-                                format!("get_local_id expects Int dimension, got {:?}", v))),
-                        }
+                        let d = value_as_i64(&dim).ok_or_else(|| RuntimeError::TypeMismatch(
+                            format!("get_local_id expects Int dimension, got {:?}", dim)))?;
+                        if d >= 0 && d < 3 { Ok(Value::Bits(i64_to_bits(0))) }
+                        else { Err(RuntimeError::TypeMismatch(
+                            format!("get_local_id: dimension {} out of range [0,2]", d))) }
                     }
                     Intrinsic::GetGroupId => {
                         let dim = values.remove(0);
-                        match dim {
-                            Value::Int(d) if d >= 0 && d < 3 => Ok(Value::Int(0)),
-                            Value::Int(d) => Err(RuntimeError::TypeMismatch(
-                                format!("get_group_id: dimension {} out of range [0,2]", d))),
-                            v => Err(RuntimeError::TypeMismatch(
-                                format!("get_group_id expects Int dimension, got {:?}", v))),
-                        }
+                        let d = value_as_i64(&dim).ok_or_else(|| RuntimeError::TypeMismatch(
+                            format!("get_group_id expects Int dimension, got {:?}", dim)))?;
+                        if d >= 0 && d < 3 { Ok(Value::Bits(i64_to_bits(0))) }
+                        else { Err(RuntimeError::TypeMismatch(
+                            format!("get_group_id: dimension {} out of range [0,2]", d))) }
                     }
                     Intrinsic::GetNumGroups => {
                         let dim = values.remove(0);
-                        match dim {
-                            Value::Int(d) if d >= 0 && d < 3 => Ok(Value::Int(1)),
-                            Value::Int(d) => Err(RuntimeError::TypeMismatch(
-                                format!("get_num_groups: dimension {} out of range [0,2]", d))),
-                            v => Err(RuntimeError::TypeMismatch(
-                                format!("get_num_groups expects Int dimension, got {:?}", v))),
-                        }
+                        let d = value_as_i64(&dim).ok_or_else(|| RuntimeError::TypeMismatch(
+                            format!("get_num_groups expects Int dimension, got {:?}", dim)))?;
+                        if d >= 0 && d < 3 { Ok(Value::Bits(i64_to_bits(1))) }
+                        else { Err(RuntimeError::TypeMismatch(
+                            format!("get_num_groups: dimension {} out of range [0,2]", d))) }
                     }
                     Intrinsic::SubGroupBarrier => {
                         Ok(Value::Bool(true))
@@ -6574,15 +6583,27 @@ impl Interpreter {
         match (&val, target) {
             // Int ↔ Float
             (Value::Int(n), Type::Custom(__t)) if __t == "Float" => Ok(Value::Float(*n as f64)),
-            (Value::Float(f), Type::Custom(__t)) if __t == "Int" => Ok(Value::Int(*f as i64)),
+            (Value::Bits(_), Type::Custom(__t)) if __t == "Float" => {
+                let n = value_as_i64(&val).unwrap();
+                Ok(Value::Float(n as f64))
+            }
+            (Value::Float(f), Type::Custom(__t)) if __t == "Int" => Ok(Value::Bits(i64_to_bits(*f as i64))),
 
             // Int ↔ Char
-            (Value::Char(c), Type::Custom(__t)) if __t == "Int" => Ok(Value::Int(*c as i64)),
+            (Value::Char(c), Type::Custom(__t)) if __t == "Int" => Ok(Value::Bits(i64_to_bits(*c as i64))),
             (Value::Int(n), Type::Custom(__t)) if __t == "Char" => {
                 if *n < 0 || *n > 0x10FFFF {
                     return Err(RuntimeError::TypeMismatch("integer value out of valid Char range".into()));
                 }
                 let ch = char::from_u32(*n as u32).unwrap_or('\0');
+                Ok(Value::Char(ch))
+            }
+            (Value::Bits(_), Type::Custom(__t)) if __t == "Char" => {
+                let n = value_as_i64(&val).unwrap();
+                if n < 0 || n > 0x10FFFF {
+                    return Err(RuntimeError::TypeMismatch("integer value out of valid Char range".into()));
+                }
+                let ch = char::from_u32(n as u32).unwrap_or('\0');
                 Ok(Value::Char(ch))
             }
 
@@ -6600,30 +6621,46 @@ impl Interpreter {
 
             // Int → String
             (Value::Int(n), Type::Custom(__t)) if __t == "String" => Ok(Value::String(n.to_string())),
+            (Value::Bits(_), Type::Custom(__t)) if __t == "String" => {
+                let n = value_as_i64(&val).unwrap();
+                Ok(Value::String(n.to_string()))
+            }
 
             // String → Int
             (Value::String(s), Type::Custom(__t)) if __t == "Int" => {
                 let n = s.trim().parse::<i64>()
                     .map_err(|_| RuntimeError::TypeMismatch(format!("cannot parse '{}' as Int", s)))?;
-                Ok(Value::Int(n))
+                Ok(Value::Bits(i64_to_bits(n)))
             }
 
             // Bool → Int
-            (Value::Bool(b), Type::Custom(__t)) if __t == "Int" => Ok(Value::Int(if *b { 1 } else { 0 })),
+            (Value::Bool(b), Type::Custom(__t)) if __t == "Int" => Ok(Value::Bits(i64_to_bits(if *b { 1 } else { 0 }))),
 
             // Int → Bool
             (Value::Int(n), Type::Custom(__t)) if __t == "Bool" => Ok(Value::Bool(*n != 0)),
+            (Value::Bits(_), Type::Custom(__t)) if __t == "Bool" => {
+                Ok(Value::Bool(value_as_i64(&val).unwrap() != 0))
+            }
 
             // Ptr ↔ Int
-            (Value::Ptr(p), Type::Custom(__t)) if __t == "Int" => Ok(Value::Int(*p as i64)),
+            (Value::Ptr(p), Type::Custom(__t)) if __t == "Int" => Ok(Value::Bits(i64_to_bits(*p as i64))),
             // 2026-07-03: Int → Ptr<T> or Int → LayoutPtr
             (Value::Int(n), Type::Applied(name, _)) if name == "Ptr" => {
                 Ok(Value::Ptr(*n as u64))
             }
+            (Value::Bits(_), Type::Applied(name, _)) if name == "Ptr" => {
+                let n = value_as_i64(&val).unwrap();
+                Ok(Value::Ptr(n as u64))
+            }
             (Value::Int(n), Type::LayoutPtr(_)) => Ok(Value::Ptr(*n as u64)),
+            (Value::Bits(_), Type::LayoutPtr(_)) => {
+                let n = value_as_i64(&val).unwrap();
+                Ok(Value::Ptr(n as u64))
+            }
 
             // Identity casts (no-op)
             (Value::Int(_), Type::Custom(__t)) if __t == "Int" => Ok(val.clone()),
+            (Value::Bits(_), Type::Custom(__t)) if __t == "Int" => Ok(val.clone()),
             (Value::Float(_), Type::Custom(__t)) if __t == "Float" => Ok(val.clone()),
             (Value::Bool(_), Type::Custom(__t)) if __t == "Bool" => Ok(val.clone()),
             // 2026-07-03: Ptr value → Ptr<T> or LayoutPtr (identity)
@@ -6738,7 +6775,14 @@ impl Interpreter {
                 (Value::String(as_), Value::String(bs)) => as_.cmp(bs),
                 (Value::Int(ai), Value::Float(bf)) => (*ai as f64).partial_cmp(bf).unwrap_or(std::cmp::Ordering::Equal),
                 (Value::Float(af), Value::Int(bi)) => af.partial_cmp(&(*bi as f64)).unwrap_or(std::cmp::Ordering::Equal),
-                _ => std::cmp::Ordering::Equal,
+                (ai, bi) => {
+                    let a_int = value_as_i64(ai);
+                    let b_int = value_as_i64(bi);
+                    match (a_int, b_int) {
+                        (Some(a), Some(b)) => a.cmp(&b),
+                        _ => std::cmp::Ordering::Equal,
+                    }
+                }
             }
         }
 
@@ -6750,7 +6794,14 @@ impl Interpreter {
                 (Value::String(as_), Value::String(bs)) => as_ == bs,
                 (Value::Bool(ab), Value::Bool(bb)) => ab == bb,
                 (Value::Tuple(av), Value::Tuple(bv)) => av.len() == bv.len() && av.iter().zip(bv.iter()).all(|(x, y)| values_equal(x, y)),
-                _ => std::mem::discriminant(a) == std::mem::discriminant(b),
+                (ai, bi) => {
+                    let a_int = value_as_i64(ai);
+                    let b_int = value_as_i64(bi);
+                    match (a_int, b_int) {
+                        (Some(a), Some(b)) => a == b,
+                        _ => std::mem::discriminant(a) == std::mem::discriminant(b),
+                    }
+                }
             }
         }
 

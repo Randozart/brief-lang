@@ -1,6 +1,7 @@
 use crate::ast::{BracketOp, Expr, SliceCoordinate, Type};
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
+use crate::interpreter::{value_as_i64, i64_to_bits};
 
 /// Evaluate a mask condition against an item value.
 /// Supports both Bool predicates and Regex matching.
@@ -32,6 +33,7 @@ fn eval_mask_condition(ctx: &mut Interpreter, mask_expr: &Expr, item_value: &Val
 fn decompose_atomic_to_chars(val: &Value) -> Option<Vec<char>> {
     match val {
         Value::Int(n) => Some(n.to_string().chars().collect()),
+        Value::Bits(_) => value_as_i64(val).map(|n| n.to_string().chars().collect()),
         Value::Float(f) => Some({
             let s = format!("{:.}", f);
             // Format without trailing zeros for cleaner reconstruction
@@ -54,6 +56,10 @@ fn reconstruct_from_chars(chars: &[char], original: &Value) -> Option<Value> {
         Value::Int(_) => {
             let s: String = chars.iter().collect();
             s.parse::<i64>().ok().map(Value::Int)
+        }
+        Value::Bits(_) => {
+            let s: String = chars.iter().collect();
+            s.parse::<i64>().ok().map(|n| Value::Bits(i64_to_bits(n)))
         }
         Value::Float(_) => {
             let s: String = chars.iter().collect();
@@ -148,22 +154,32 @@ impl ExprEval for ListIndexExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _: &ExprDispatch) -> Result<Value, RuntimeError> {
         let list_val = ctx.eval_expr(&self.list)?;
         let index_val = ctx.eval_expr(&self.index)?;
-        match (list_val, index_val) {
-            (Value::List(items), Value::Int(idx)) => {
-                if idx < 0 || idx as usize >= items.len() {
+        let idx = match value_as_i64(&index_val) {
+            Some(i) if i >= 0 => i as usize,
+            Some(i) => return Err(RuntimeError::TypeMismatch(format!("Negative index {}", i))),
+            None => {
+                // Non-integer index: try DbvlTable string key
+                match (&list_val, &index_val) {
+                    (Value::DbvlTable(table), Value::String(key)) => {
+                        let results = ctx.resolve_dbvl_key(table, key)?;
+                        return if results.len() == 1 { Ok(results.into_iter().next().unwrap()) }
+                        else if results.is_empty() { Err(RuntimeError::TypeMismatch(format!("Key '{}' not found", key))) }
+                        else { Ok(Value::List(results)) };
+                    }
+                    _ => return Err(RuntimeError::TypeMismatch("List indexing requires List and Int".into())),
+                }
+            }
+        };
+        match list_val {
+            Value::List(items) => {
+                if idx >= items.len() {
                     Err(RuntimeError::TypeMismatch("Index out of bounds".into()))
-                } else { Ok(items[idx as usize].clone()) }
+                } else { Ok(items[idx].clone()) }
             }
-            (Value::Tuple(items), Value::Int(idx)) => {
-                if idx < 0 || idx as usize >= items.len() {
+            Value::Tuple(items) => {
+                if idx >= items.len() {
                     Err(RuntimeError::TypeMismatch("Tuple index out of bounds".into()))
-                } else { Ok(items[idx as usize].clone()) }
-            }
-            (Value::DbvlTable(table), Value::String(key)) => {
-                let results = ctx.resolve_dbvl_key(&table, &key)?;
-                if results.len() == 1 { Ok(results.into_iter().next().unwrap()) }
-                else if results.is_empty() { Err(RuntimeError::TypeMismatch(format!("Key '{}' not found", key))) }
-                else { Ok(Value::List(results)) }
+                } else { Ok(items[idx].clone()) }
             }
             _ => Err(RuntimeError::TypeMismatch("List indexing requires List and Int".into())),
         }
@@ -174,20 +190,31 @@ impl ExprEval for SliceExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _: &ExprDispatch) -> Result<Value, RuntimeError> {
         let list_val = ctx.eval_expr(&self.value)?;
 
+        // Helper to extract index from option expression with negative-index support
+        let mut eval_idx = |opt: &Option<Box<Expr>>, len: usize| -> Option<usize> {
+            match opt {
+                Some(s) => match ctx.eval_expr(s) {
+                    Ok(v) => value_as_i64(&v).map(|n| if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }),
+                    _ => None,
+                },
+                None => None,
+            }
+        };
+
         // Handle String atomically (existing behavior)
         if let Value::String(ref s) = list_val {
             let len = s.len();
-            let start_idx = self.start.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }, _ => len }).unwrap_or(0);
-            let end_idx = self.end.as_ref().map(|e| match ctx.eval_expr(e) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }, _ => len }).unwrap_or(len);
-            return Ok(Value::String(if start_idx < end_idx { s[start_idx..end_idx.min(len)].to_string() } else { String::new() }));
+            let start_idx = eval_idx(&self.start, len).unwrap_or(0);
+            let end_idx = eval_idx(&self.end, len).unwrap_or(len);
+            return Ok(Value::String(if start_idx < end_idx && start_idx < len { s[start_idx..end_idx.min(len)].to_string() } else { String::new() }));
         }
 
         // Handle atomic types (Int, Float, Bool, Char) via visual char decomposition
         if let Some(chars) = decompose_atomic_to_chars(&list_val) {
             let len = chars.len();
-            let start_idx = self.start.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }, _ => len }).unwrap_or(0);
-            let end_idx = self.end.as_ref().map(|e| match ctx.eval_expr(e) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n).max(0) as usize } else { n as usize }, _ => len }).unwrap_or(len);
-            let stride = self.stride.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => n as usize, _ => 1 }).unwrap_or(1);
+            let start_idx = eval_idx(&self.start, len).unwrap_or(0);
+            let end_idx = eval_idx(&self.end, len).unwrap_or(len);
+            let stride = self.stride.as_ref().and_then(|s| ctx.eval_expr(s).ok().and_then(|v| value_as_i64(&v)).map(|n| n as usize)).unwrap_or(1);
             let mut result: Vec<char> = Vec::new();
             let mut idx = start_idx;
             while idx < end_idx && idx < len { result.push(chars[idx]); if stride == 0 { break; } idx += stride; }
@@ -204,9 +231,9 @@ impl ExprEval for SliceExpr {
 
         let list = match list_val { Value::List(vec) => vec, _ => return Err(RuntimeError::TypeMismatch("Cannot slice non-list".into())) };
         let len = list.len();
-        let start_idx = self.start.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n) as usize } else { n as usize }, _ => 0 }).unwrap_or(0);
-        let end_idx = self.end.as_ref().map(|e| match ctx.eval_expr(e) { Ok(Value::Int(n)) => if n < 0 { (len as i64 + n) as usize } else { n as usize }, _ => len }).unwrap_or(len);
-        let stride = self.stride.as_ref().map(|s| match ctx.eval_expr(s) { Ok(Value::Int(n)) => n as usize, _ => 1 }).unwrap_or(1);
+        let start_idx = eval_idx(&self.start, len).unwrap_or(0);
+        let end_idx = eval_idx(&self.end, len).unwrap_or(len);
+        let stride = self.stride.as_ref().and_then(|s| ctx.eval_expr(s).ok().and_then(|v| value_as_i64(&v)).map(|n| n as usize)).unwrap_or(1);
         let mut result = Vec::new();
         let mut idx = start_idx;
         while idx < end_idx && idx < len { result.push(list[idx].clone()); if stride == 0 { break; } idx += stride; }
@@ -225,8 +252,8 @@ impl ExprEval for MultiSliceExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _: &ExprDispatch) -> Result<Value, RuntimeError> {
         let base = ctx.eval_expr(&self.value)?;
 
-        // Atomic types (Int, Float, Bool, Char): decompose, apply ops, reconstruct
-        if matches!(base, Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_)) {
+        // Atomic types (Int, Bits, Float, Bool, Char): decompose, apply ops, reconstruct
+        if matches!(base, Value::Int(_) | Value::Bits(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_)) {
             // Type-directed desugar: single string coord -> treat as regex filter
             // e.g., 15561["[15]"] is equivalent to 15561[;@"[15]"]
             if self.ops.len() == 1 {
@@ -259,7 +286,9 @@ impl ExprEval for MultiSliceExpr {
                 match op {
                     BracketOp::Coord(_) => {}
                     BracketOp::Stride(stride_expr) => {
-                        match ctx.eval_expr(stride_expr)? { Value::Int(n) if n > 0 => current = current.into_iter().step_by(n as usize).collect(), _ => return Err(RuntimeError::TypeMismatch("Stride must be positive Int".into())) }
+                        let n = ctx.eval_expr(stride_expr).ok().and_then(|v| value_as_i64(&v)).filter(|n| *n > 0).map(|n| n as usize)
+                            .ok_or_else(|| RuntimeError::TypeMismatch("Stride must be positive Int".into()))?;
+                        current = current.into_iter().step_by(n).collect();
                     }
                     BracketOp::Mask(mask_expr) => {
                         let mut filtered = Vec::new();
@@ -294,10 +323,10 @@ impl ExprEval for MultiSliceExpr {
                 BracketOp::Coord(_) => {}
                 BracketOp::Stride(stride_expr) => {
                     let items = match current { Value::List(ref items) => items.clone(), Value::Tuple(ref items) => items.clone(), _ => return Err(RuntimeError::TypeMismatch("Stride requires list or tuple".into())) };
-                    match ctx.eval_expr(stride_expr)? { Value::Int(n) if n > 0 => {
-                        let stepped: Vec<Value> = items.into_iter().step_by(n as usize).collect();
-                        current = if is_tuple_type { Value::Tuple(stepped) } else { Value::List(stepped) };
-                    }, _ => return Err(RuntimeError::TypeMismatch("Stride must be positive Int".into())) }
+                    let n = ctx.eval_expr(stride_expr).ok().and_then(|v| value_as_i64(&v)).filter(|n| *n > 0).map(|n| n as usize)
+                        .ok_or_else(|| RuntimeError::TypeMismatch("Stride must be positive Int".into()))?;
+                    let stepped: Vec<Value> = items.into_iter().step_by(n).collect();
+                    current = if is_tuple_type { Value::Tuple(stepped) } else { Value::List(stepped) };
                 }
                 BracketOp::Mask(mask_expr) => {
                     let items = match current { Value::List(ref items) => items.clone(), Value::Tuple(ref items) => items.clone(), _ => return Err(RuntimeError::TypeMismatch("Mask requires list or tuple".into())) };

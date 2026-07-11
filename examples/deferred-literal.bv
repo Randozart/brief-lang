@@ -1,0 +1,73 @@
+// ── Deferred Literals (Phase 5) ────────────────────────────────────
+//
+// When a variable is declared with a type that has a codec containing
+// a `parse <~` handler, the compiler detects bare identifiers in the
+// initializer position and rewrites them as deferred literals that
+// typecheck against the expected type.
+//
+// Currently deferred literals emit a zero-initialized value during
+// codegen. Full interpreter-mediated parse handler invocation is
+// planned — at that point `let c: Color = FF00FF` will actually
+// call `parse_hex_color("FF00FF")` at compile time.
+
+codec PositiveInt {
+    [value > 0];
+    parse <~ parse_positive;
+};
+
+type PositiveInt <: Int {
+    codec <~ PositiveInt;
+};
+
+// Handler: parse a positive integer string.
+// The compiler will call this at compile time when a
+// deferred literal is encountered with the PositiveInt type.
+defn parse_positive(input: String) -> Int {
+    let result: Int = 42;  // placeholder
+    term result;
+};
+
+codec HexColor {
+    [value >= 0];
+    [value <= 0xFFFFFF];
+    parse <~ parse_hex_color;
+};
+
+type Color <: Int {
+    codec <~ HexColor;
+};
+
+defn parse_hex_color(input: String) -> Int {
+    // Real implementation would convert "FF00FF" → 16711935
+    // using hex digit parsing and bit shifting.
+    let result: Int = 0;
+    term result;
+};
+
+codec Version {
+    [value > 0];
+    parse <~ parse_semver;
+};
+
+type SemanticVersion <: Int {
+    codec <~ Version;
+};
+
+defn parse_semver(input: String) -> Int {
+    // Would parse "1.2.3" → encoded integer.
+    term 0;
+};
+
+txn main() [true][true] {
+    // These identifiers will be detected as deferred literals by the
+    // NormalizeTypes pass and typecheck as the expected type:
+    //   let count:  PositiveInt     = FortyTwo;
+    //   let bg:     Color           = FF00FF;
+    //   let ver:    SemanticVersion = OneTwoThree;
+    //
+    // For now, use explicit values:
+    let count: Int = 42;
+    let bg:    Int = 0xFF00FF;
+    let ver:   Int = 1002003;
+    term;
+};

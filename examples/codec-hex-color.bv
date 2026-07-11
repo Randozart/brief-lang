@@ -1,0 +1,44 @@
+// ── Hex Color Codec with Parse/Format Handlers ─────────────────────
+//
+// A codec for 24-bit RGB colors stored as Int values.
+// Declares parse and format handler references for custom literal
+// conversion (Phase 5). The parse handler is a defn that converts
+// a hex string (e.g. "FF00FF") to an integer; the format handler
+// converts back.
+
+codec HexColor {
+    [value >= 0];
+    [value <= 0xFFFFFF];
+    parse  <~ parse_hex_color;
+    format <~ format_hex_color;
+};
+
+type Color <: Int {
+    bytes  <~ 4;
+    codec  <~ HexColor;
+};
+
+// Parse a hex string like "FF00FF" to an integer.
+defn parse_hex_color(input: String) -> Int {
+    // Convert each hex character to its nibble value.
+    // In real usage this would be a proper hex parser.
+    let result: Int = 0;
+    let i: Int = 0;
+    term result;
+};
+
+// Format an integer to a 6-character hex string like "FF00FF".
+defn format_hex_color(value: Int) -> String {
+    // Convert integer to hex string representation.
+    // In real usage this would produce "RRGGBB" format.
+    let result: String = "000000";
+    term result;
+};
+
+txn main() [true][true] {
+    // With Phase 5, this would be a deferred literal:
+    //   let bg: Color = FF00FF;
+    // For now, use explicit construction:
+    let bg: Int = 0xFF00FF;
+    term;
+};

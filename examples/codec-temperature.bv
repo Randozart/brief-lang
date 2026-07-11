@@ -1,0 +1,51 @@
+// ── Temperature Codec ──────────────────────────────────────────────
+//
+// Codecs can model domain-specific validation rules for scientific,
+// industrial, or business data. Multiple codecs can constrain the
+// same base type in different ways.
+
+codec Celsius {
+    [value >= -273];    // Absolute zero in °C
+    [value <= 5000];    // Practical upper bound
+};
+
+codec Fahrenheit {
+    [value >= -459];    // Absolute zero in °F
+    [value <= 9000];
+};
+
+type TempC <: Float {
+    codec <~ Celsius;
+};
+
+type TempF <: Float {
+    codec <~ Fahrenheit;
+};
+
+codec WaterLiquid {
+    [value >= 0];       // Freezing point of water
+    [value <= 100];     // Boiling point of water
+};
+
+type WaterTempC <: Float {
+    codec <~ WaterLiquid;
+};
+
+// Compound codec: combines multiple constraint sets.
+// A reaction temperature must be hot but not damaging.
+codec ReactionTemp {
+    [value >= 150];
+    [value <= 450];
+};
+
+type ReactorTemp <: Float {
+    bytes  <~ 8;
+    codec  <~ ReactionTemp;
+};
+
+txn monitor_reactor() [true][true] {
+    let current: Float = 320.0;
+    // In Phase 5, reactor temperatures could use custom literals:
+    // let target: ReactorTemp = 375C;
+    term;
+};

@@ -1,0 +1,53 @@
+// ── Stock Ticker Codec ─────────────────────────────────────────────
+//
+// A real-world example combining codec validation with custom parsing.
+// Stock prices must be positive and within a reasonable range.
+// Ticker symbols follow specific formatting rules.
+
+codec StockPrice {
+    [value > 0];
+    [value < 1000000];
+    parse <~ parse_price;
+    format <~ format_price;
+};
+
+type Price <: Float {
+    bytes  <~ 8;
+    codec  <~ StockPrice;
+};
+
+defn parse_price(input: String) -> Float {
+    // Parse "$1,234.56" → 1234.56
+    term 0.0;
+};
+
+defn format_price(value: Float) -> String {
+    // Format 1234.56 → "$1,234.56"
+    term "$0.00";
+};
+
+codec TickerSymbol {
+    parse <~ parse_ticker;
+};
+
+type Symbol <: String {
+    bytes  <~ 8;
+    codec  <~ TickerSymbol;
+};
+
+defn parse_ticker(input: String) -> String {
+    // Validate and normalize ticker: "aapl" → "AAPL"
+    term input;
+};
+
+txn main() [true][true] {
+    // With full Phase 5 support, these would use deferred literals:
+    //   let price:  Price  = OneThousand;
+    //   let ticker: Symbol = AAPL;
+    //
+    // The compiler would detect the codec parse handlers and invoke
+    // them at compile time to resolve the literal values.
+    let price:  Float  = 150.25;
+    let ticker: String = "AAPL";
+    term;
+};

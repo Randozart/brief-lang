@@ -1,0 +1,29 @@
+// ── Positive Integer Codec ──────────────────────────────────────────
+//
+// A simple validation codec that constrains an Int to positive values.
+// The codec's constraints are merged into the type's guards at compile
+// time — every value of `PositiveInt` is guaranteed to be > 0.
+
+codec PositiveInt {
+    [value > 0];
+};
+
+type PositiveInt <: Int {
+    codec <~ PositiveInt;
+};
+
+// A range-constrained variant using the same codec field but with
+// an additional local constraint baked into the type.
+codec SmallInt {
+    [value > 0];
+    [value < 100];
+};
+
+type Age <: Int {
+    codec <~ SmallInt;
+};
+
+txn main() [true][true] {
+    let age: Int = 25;
+    term;
+};
