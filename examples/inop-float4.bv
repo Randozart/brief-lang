@@ -5,10 +5,10 @@
 // LLVM SIMD support.
 
 type Float4 <: Bits {
-    Bytes = 16;
-    Alignment = 16;
-    LLVMType = ptr;
-    Storage = Native;
+    Bytes <~ 16;
+    Alignment <~ 16;
+    LLVMType <~ ptr;
+    Storage <~ Native;
 
     op Add(Float4) -> Float4 = my_fadd;
     op Sub(Float4) -> Float4 = my_fsub;

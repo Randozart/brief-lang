@@ -667,6 +667,15 @@ conflict — they occupy different namespaces on different AST nodes
 This keeps a clean separation: "what the compiler must do" (annotations,
 with `!`/`?`) vs "what this item is" (metadata, with `<~`).
 
+**Additional constraint**: `<~` is reserved for compile-time metadata. It
+is never a runtime operator. All runtime data movement uses other tokens:
+- Channel/stream writes: `<-` (ArrowLeft)
+- Assignment: `=` (Eq)
+- Transfer: `->` (Arrow)
+
+This means the lookahead in Step 1A.1c is always safe — `identifier <~`
+can only mean "metadata key" in every context.
+
 ### Step 1A.2 — Restructure TypeDefBody: metadata vs projections
 
 **What**: `TypeDefBody.bindings` is split into `metadata` and `projections`.
@@ -1219,6 +1228,71 @@ Change String's validation table:
 bash benchmarks/build_and_bench.sh --correctness
 bash benchmarks/build_and_bench.sh --runtime
 ```
+
+### Step 3.4 — FFI boundary handling for String
+
+**What**: The String ABI changes from `i8*` (pointer-width boxed) to
+`%String*` (pointer to `{ ptr, i64, i8 }` struct). Every FFI call site
+that passes or receives a String must now unpack/pack the struct pointer,
+because foreign code expects a `char*` / `i8*`, not a `%String*`.
+
+**Affected files**:
+- `src/backend/llvm/helpers.rs` — FFI parameter marshaling
+- `src/glue/export.rs` — C type mapping for exported functions
+- `src/backend/bindgen.rs` — FFI type mapping for imported functions
+- Any `frgn` call site passing a String argument or receiving a String return
+
+**Marshaling rules**:
+
+*Calling a foreign function with a String argument* (`Boxed` → `%String*`):
+- Before: emit `i8*` directly (String was already a pointer)
+- After: emit `ptrtoint (%String* to i64)`, then check `storage` property:
+  - If `storage == "Native"` (new): String is a struct pointer, so box it
+    to `i64` for the state, then unbox to `%String*`, then GEP `.ptr` field,
+    then bitcast to `i8*`, then pass to the foreign function
+  - If `storage == "Boxed"` (legacy fallback during migration): String is
+    already `i8*`, emit as before
+
+*Receiving a String return from a foreign function* (`i8*` → `%String*`):
+- Before: emit `i8*` directly
+- After: receive `i8*`, then construct a `%String` struct: set `.ptr` to
+  the received pointer, `.len` to `strlen` (via `__strlen#` intrinsic or
+  equivalent), `.codec` to 0 (default). Then `alloca` the struct and store.
+
+The GLUE-generated glue code must be updated to handle this conversion.
+The `--library` flag's emitted bindings must also account for the change.
+
+**Helper function** (add to `emit_toplevel.rs` or `helpers.rs`):
+
+```rust
+/// Emit FFI marshaling code for a String-typed parameter.
+/// 2026-07-11: Phase 3 — String is now %String*, not i8*.
+fn emit_string_ffi_param(builder: &mut LlvmBuilder, reg: &TypedRegister, out: &mut String) {
+    if reg.ty == Type::Custom("String".to_string()) {
+        let universe = builder.ctx.type_universe.as_ref().unwrap();
+        let rt = universe.get("String").unwrap();
+        if rt.get_storage() == "Native" {
+            // New: String is %String* — extract .ptr field
+            writeln!(out, "  %unboxed = call i64 @__unbox_string(i64 %{})", reg.name)?;
+            writeln!(out, "  %str_ptr = inttoptr i64 %unboxed to %String*")?;
+            writeln!(out, "  %c_str = getelementptr %String, %String* %str_ptr, i32 0, i32 0")?;
+            writeln!(out, "  %c_char_ptr = bitcast i64* %c_str to i8*")?;
+        } else {
+            // Legacy: still i8*
+            writeln!(out, "  %c_char_ptr = inttoptr i64 %{} to i8*", reg.name)?;
+        }
+    }
+}
+```
+
+**Tests**:
+- `test_string_ffi_param_native`: compile a `frgn` call passing String,
+  verify emitted FFI marshaling extracts `.ptr`
+- `test_string_ffi_param_legacy`: same with legacy `storage == "Boxed"`
+- `test_string_ffi_return`: compile a `frgn` returning String, verify
+  struct construction from `i8*`
+- `test_glue_export_string`: exported function with String parameter,
+  verify C header uses `char*`
 
 ---
 

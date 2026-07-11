@@ -3552,12 +3552,17 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            // Otherwise it's a binding: ident [ ( params ) ]? = expr ; or ident [ ( params ) ]? <~ expr ;
-            // Accept `=` or `<~` (Annotation Arrow) as the binding separator
+            // Otherwise it's a binding: ident [ ( params ) ]? <~ expr ; or ident [ ( params ) ]? = expr ;
+            // 2026-07-11: Phase 0.2 — <~ for metadata, = only valid with params (projections)
             if matches!(self.current_token(), Some(Ok(Token::TildeArrow))) {
                 self.advance(); // consume <~
+            } else if matches!(self.current_token(), Some(Ok(Token::Eq))) {
+                if params.is_empty() {
+                    return self.spanned_err("use '<~' for metadata in type bodies".to_string());
+                }
+                self.advance(); // consume =
             } else {
-                self.expect(Token::Eq)?;
+                return self.spanned_err("expected '<~' or '=' in type body binding".to_string());
             }
             let value = self.parse_expression()?;
 
@@ -11185,7 +11190,7 @@ mod parser_tests {
 
     #[test]
     fn test_parse_typedef_bits_bitrange() {
-        let s = "type MyInt <: Bits @/0..63 { Bytes = 8; };";
+        let s = "type MyInt <: Bits @/0..63 { Bytes <~ 8; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse Bits @/0..63 base: {:?}", result.err());
@@ -11331,7 +11336,7 @@ defn fallback() -> Int { term 0; };
     // ── Phase 7B: Operator Declaration Tests ─────────────────
     #[test]
     fn test_parse_operator_add_declaration() {
-        let s = "type MyFloat <: Bits { Bytes = 4; op Add(MyFloat) -> MyFloat = my_add; };";
+        let s = "type MyFloat <: Bits { Bytes <~ 4; op Add(MyFloat) -> MyFloat = my_add; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse op declaration: {:?}", result.err());
@@ -11343,7 +11348,7 @@ defn fallback() -> Int { term 0; };
 
     #[test]
     fn test_parse_operator_unary_neg() {
-        let s = "type Fixed <: Bits { Bytes = 4; op Neg -> Fixed = my_neg; };";
+        let s = "type Fixed <: Bits { Bytes <~ 4; op Neg -> Fixed = my_neg; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse unary op: {:?}", result.err());
@@ -11355,7 +11360,7 @@ defn fallback() -> Int { term 0; };
 
     #[test]
     fn test_parse_multiple_operators() {
-        let s = "type Float4 <: Bits { Bytes = 16; op Add(Float4) -> Float4 = my_add; op Sub(Float4) -> Float4 = my_sub; };";
+        let s = "type Float4 <: Bits { Bytes <~ 16; op Add(Float4) -> Float4 = my_add; op Sub(Float4) -> Float4 = my_sub; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse multiple ops: {:?}", result.err());
@@ -11368,7 +11373,7 @@ defn fallback() -> Int { term 0; };
 
     #[test]
     fn test_parse_operator_unknown_rune_fails() {
-        let s = "type Bad <: Bits { Bytes = 4; op Unknown() -> Int = identity; };";
+        let s = "type Bad <: Bits { Bytes <~ 4; op Unknown() -> Int = identity; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_err(), "Unknown rune should fail");
@@ -11780,7 +11785,7 @@ fn test_parse_typedef_slot_between_bindings_and_constraints_proper() {
 
 #[test]
 fn test_parse_typedef_bits_bitrange_again() {
-    let s = "type MyInt <: Bits @/0..63 { Bytes = 8; };";
+    let s = "type MyInt <: Bits @/0..63 { Bytes <~ 8; };";
     let mut parser = Parser::new(s);
     let result = parser.parse();
     assert!(result.is_ok(), "Should parse Bits @/0..63 base: {:?}", result.err());
@@ -12239,7 +12244,7 @@ mod kani_full_tests {
 
     #[test]
     fn test_parse_typedef_underscore_bitrange() {
-        let s = "type MyType <: Bits { Field = _ @/0..7; };";
+        let s = "type MyType <: Bits { Field <~ _ @/0..7; };";
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse _ @/ in TypeDef: {:?}", result.err());
