@@ -49,6 +49,7 @@ pub mod manifest;
 pub mod memory_spec;
 pub mod normalize_types;
 pub mod parser;
+pub mod plugin;
 pub mod proof_engine;
 pub mod rbv;
 pub mod reactor;
