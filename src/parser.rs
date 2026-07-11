@@ -5974,6 +5974,14 @@ let span = self.current_span();
                     None
                 };
                 self.expect(Token::Semicolon)?;
+
+                // 2026-07-11: Phase 1A.5 — variable metadata reserved
+                if let Some(Ok(Token::Identifier(next_name))) = self.current_token() {
+                    if next_name == &name && self.peek_token().map_or(false, |t| matches!(t, Ok(Token::TildeArrow))) {
+                        return self.spanned_err("variable metadata not yet implemented — use type-level or item-level annotations instead".to_string());
+                    }
+                }
+
                 Ok(Statement::Let {
                     name,
                     ty,
@@ -10113,6 +10121,20 @@ mod parser_tests {
     #[test]
     fn test_parse_speculative_hashtag_with_negative_value() {
         // Negative values in hashtags not supported — skip this test
+    }
+    #[test]
+    fn test_variable_metadata_reserved() {
+        let s = r#"txn Foo [true][n >= 0] { let x: Int = 42; x <~ (jira: "x"); term; };"#;
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_err(), "Variable metadata should produce error");
+        let err = format!("{}", result.unwrap_err());
+        assert!(err.contains("variable metadata not yet implemented"),
+            "Error should mention variable metadata. Got: {}", err);
+        // Verify bare let still works without variable metadata
+        let ok_s = r#"txn Bar [true][n >= 0] { let x: Int = 42; term; };"#;
+        let mut ok_parser = Parser::new(ok_s);
+        assert!(ok_parser.parse().is_ok(), "Let without metadata should still parse");
     }
     #[test]
     fn test_parse_multi_body_transaction() {
