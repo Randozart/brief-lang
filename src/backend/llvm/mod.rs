@@ -283,7 +283,7 @@ impl TypedRegister {
 }
 
 use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
+use std::fmt::{Display, Write};
 
 /// Collect all unique string literal values from the program for global emission.
 fn collect_strings(program: &Program) -> Vec<String> {
@@ -966,6 +966,26 @@ impl LlvmBackend {
             }
         };
         self
+    }
+
+    /// Emit a ptrtoint instruction with the correct pointer-width integer type.
+    /// Uses i64 on x86_64, i32 on wasm32.
+    /// Uses `&dyn Display` for dest/src so any Display-able type (String, &str,
+    /// u64, TypedRegister, etc.) can be passed without manual conversion.
+    /// 2026-07-11: Phase 6 — WASM pointer width.
+    pub(super) fn emit_ptrtoint(&self, out: &mut String, indent: &str, dest: &dyn Display, src: &dyn Display) {
+        let ptr_ty = self.ctx.pointer_llvm_type();
+        writeln!(out, "{}{} = ptrtoint {} {} to ptr", indent, dest, ptr_ty, src).ok();
+    }
+
+    /// Emit an inttoptr instruction with the correct pointer-width integer type.
+    /// Uses i64 on x86_64, i32 on wasm32.
+    /// Uses `&dyn Display` for dest/src so any Display-able type (String, &str,
+    /// u64, TypedRegister, etc.) can be passed without manual conversion.
+    /// 2026-07-11: Phase 6 — WASM pointer width.
+    pub(super) fn emit_inttoptr(&self, out: &mut String, indent: &str, dest: &dyn Display, src: &dyn Display) {
+        let ptr_ty = self.ctx.pointer_llvm_type();
+        writeln!(out, "{}{} = inttoptr {} {} to ptr", indent, dest, ptr_ty, src).ok();
     }
 
     /// Produce a human-readable layout summary for all state fields.

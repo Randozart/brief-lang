@@ -1171,7 +1171,7 @@ fn run_build(
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
             
             // Run LLVM compile with sensible defaults
-            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000, None);
+            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000, None, &[]);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1194,7 +1194,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000, None);
+            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload, gpu_backend, None, None, 10_000, None, &[]);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1223,7 +1223,7 @@ fn run_build(
             }
             let stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
             let out = out_dir.unwrap_or_else(|| std::path::Path::new("."));
-            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend, None, None, 10_000, None);
+            let result = run_llvm_compile(file_path, Some(out), false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "sebv", gpu_backend, None, None, 10_000, None, &[]);
             match result {
                 Ok(ll_path) => {
                     let exe_path = out.join(stem);
@@ -1746,6 +1746,8 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
         .and_then(|i| args.get(i + 1))
         .map(PathBuf::from);
 
+    let mut plugin_paths: Vec<String> = Vec::new();
+
     // Parse arguments
     let mut i = 2;
     while i < args.len() {
@@ -1755,6 +1757,9 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
             i += 2;
         } else if arg == "--triple" && i + 1 < args.len() {
             llvm_triple = Some(&args[i + 1]);
+            i += 2;
+        } else if arg == "--plugin" && i + 1 < args.len() {
+            plugin_paths.push(args[i + 1].clone());
             i += 2;
         } else if arg == "--out" && i + 1 < args.len() {
             out_dir = Some(PathBuf::from(&args[i + 1]));
@@ -1875,7 +1880,7 @@ fn run_compile_unified(args: &[String], strict_flag: bool, optimize_flag: bool) 
 
     let result: Option<PathBuf> = match backend.as_str() {
         "llvm" => {
-            match run_llvm_compile(&file_path, out_dir.as_deref(), false, target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, false, None, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan", None, emit_bindings_dir.clone(), 10_000, llvm_triple) {
+            match run_llvm_compile(&file_path, out_dir.as_deref(), false, target_spec.as_ref(), is_strict, 256, false, None, false, None, false, explain, false, false, None, no_stdlib, stdlib_path.clone(), false, None, false, false, "vulkan", None, emit_bindings_dir.clone(), 10_000, llvm_triple, &plugin_paths) {
                 Ok(p) => Some(p),
                 Err(e) => { eprintln!("Error: {}", e); None }
             }
@@ -2357,6 +2362,9 @@ fn link_and_optimize(
       // LLVM target triple override (e.g. "wasm32-unknown-wasi").
       // 2026-07-11: Phase 6.
       llvm_triple: Option<&str>,
+      // Plugin file paths (.so/.wasm) loaded at compile time.
+      // 2026-07-11: Phase 7.
+      plugin_paths: &[String],
   ) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let is_gpu = is_gpu_extension(file_path);
     let is_embedded = is_embedded_extension(file_path);
@@ -2592,11 +2600,45 @@ fn link_and_optimize(
 
     // Run simplify pass (expression-level algebraic rewriting)
     // Only enabled in --prod/--release mode, or when --simplify-budget is explicitly set.
+    // ── Phase 7: Plugin hooks ─────────────────────────────────────
+    // 2026-07-11: Load and run plugins at pipeline extension points.
+    let plugin_manager = {
+        let mut pm = brief_compiler::plugin::PluginManager::new();
+        for plugin_path in plugin_paths {
+            match brief_compiler::plugin::loader::load_plugin(std::path::Path::new(plugin_path)) {
+                Ok(plugin) => {
+                    eprintln!("info: loaded plugin: {}", plugin.name());
+                    pm.register(plugin);
+                }
+                Err(e) => {
+                    eprintln!("warning: failed to load plugin '{}': {}", plugin_path, e);
+                }
+            }
+        }
+        if pm.len() > 0 {
+            eprintln!("info: {} plugin(s) loaded", pm.len());
+        }
+        pm
+    };
+    if let brief_compiler::plugin::PluginAction::Abort(msg) =
+        plugin_manager.run_hooks(brief_compiler::plugin::PluginHook::AfterTypeCheck, &mut program, &tu)
+    {
+        eprintln!("error: plugin hook {}: {}", "AfterTypeCheck", msg);
+        std::process::exit(1);
+    }
+
     {
         let sb = simplify_budget.unwrap_or(if prod_mode { u64::MAX } else { 0 });
         if sb > 0 {
             analysis::equality_saturation::simplify_program(&mut program, sb);
         }
+    }
+
+    if let brief_compiler::plugin::PluginAction::Abort(msg) =
+        plugin_manager.run_hooks(brief_compiler::plugin::PluginHook::BeforeCodegen, &mut program, &tu)
+    {
+        eprintln!("error: plugin hook {}: {}", "BeforeCodegen", msg);
+        std::process::exit(1);
     }
 
     let mut llvm_backend = crate::backend::llvm::LlvmBackend::new()
@@ -3922,7 +3964,7 @@ fn main() {
                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                     match ext {
                         "bv" | "sbv" | "ebv" | "sebv" | "abv" => {
-                            let result = run_llvm_compile(&path, out, false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None, 10_000, None);
+                            let result = run_llvm_compile(&path, out, false, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None, 10_000, None, &[]);
                             match result {
                                 Ok(ll_path) => {
                                     println!("  LLVM IR emitted: {}", ll_path.display());
@@ -3948,7 +3990,7 @@ fn main() {
                     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
                     match ext {
                         "bv" | "sbv" | "ebv" | "sebv" | "abv" => {
-                            let result = run_llvm_compile(&path, out, true, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None, 10_000, None);
+                            let result = run_llvm_compile(&path, out, true, None, strict, 256, false, None, true, None, false, false, false, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), false, None, false, gpu_offload || ext == "abv", &gpu_backend, None, None, 10_000, None, &[]);
                             match result {
                                 Ok(ll_path) => {
                                     println!("  Library LLVM IR emitted: {}", ll_path.display());
@@ -4002,6 +4044,7 @@ fn main() {
             let mut out_dir = None;
             let mut target = None;
             let mut llvm_triple: Option<String> = None;
+            let mut plugin_paths: Vec<String> = Vec::new();
 
             let mut i = 2;
             let mut optimize_budget: Option<u64> = None;
@@ -4031,6 +4074,9 @@ fn main() {
                     i += 2;
                 } else if arg == "--triple" && i + 1 < args.len() {
                     llvm_triple = Some(args[i + 1].clone());
+                    i += 2;
+                } else if arg == "--plugin" && i + 1 < args.len() {
+                    plugin_paths.push(args[i + 1].clone());
                     i += 2;
                 } else if arg == "--hw-handoff" && i + 1 < args.len() {
                     hw_handoff = Some(args[i + 1].clone());
@@ -4125,7 +4171,7 @@ fn main() {
                 }
                 let txn_max_iter = txn_convergence_max_iterations.unwrap_or(10_000);
                 let result = run_llvm_compile(&path, out_dir.as_deref(), false, None, strict,
-                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, dump_layout, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget, emit_remarks, gpu_offload, &gpu_backend, None, None, txn_max_iter, llvm_triple.as_deref());
+                    optimize_budget.unwrap_or(256), optimize_report, optimize_size, dead_info_disabled, mmio_addresses, pgo_generate, explain, dump_layout, prod_mode, simplify_budget, no_stdlib, stdlib_path.clone(), safe_compile, macro_budget, emit_remarks, gpu_offload, &gpu_backend, None, None, txn_max_iter, llvm_triple.as_deref(), &plugin_paths);
                 if let Err(e) = result {
                     eprintln!("Error: {}", e);
                     std::process::exit(1);

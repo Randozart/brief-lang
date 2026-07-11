@@ -794,7 +794,7 @@ impl LlvmBackend {
                     let tag_o = field_reg("o");
                     writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
                     let tag_b = field_reg("b");
-                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, tag_b, tag_o).ok();
+                    self.emit_inttoptr(out, indent, &tag_b, &tag_o);
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
                 } else {
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
@@ -814,7 +814,7 @@ impl LlvmBackend {
                     let tag_o = field_reg("o");
                     writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
                     let tag_b = field_reg("b");
-                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, tag_b, tag_o).ok();
+                    self.emit_inttoptr(out, indent, &tag_b, &tag_o);
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
                 } else {
                     // 2026-06-29: No tagging for @init_state path — the init_state
@@ -894,7 +894,7 @@ impl LlvmBackend {
         };
         for (addr, expr) in mmio_inits {
             let p = format!("%mio{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "  {} = inttoptr i64 {} to ptr", p, addr).ok();
+            self.emit_inttoptr(out, "  ", &p, &addr.to_string());
             let val_reg = self.emit_expr(out, &expr, "  ");
             writeln!(out, "  store volatile i64 {}, ptr {}, align 1", val_reg, p).ok();
         }

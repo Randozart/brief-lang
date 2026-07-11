@@ -150,6 +150,13 @@ impl CompilerContext {
         if self.is_wasm() { 4 } else { 8 }
     }
 
+    /// Get the LLVM integer type name for pointer-width integers.
+    /// Used in ptrtoint/inttoptr casts: `i64` on x86_64, `i32` on wasm32.
+    /// 2026-07-11: Phase 6.
+    pub fn pointer_llvm_type(&self) -> &'static str {
+        if self.is_wasm() { "i32" } else { "i64" }
+    }
+
     pub fn new() -> Self {
         CompilerContext {
             spec: None,

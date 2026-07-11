@@ -74,19 +74,19 @@ pub fn emit_call(
                     Type::Custom(__t) if __t == "String" => {
                         let boxed = backend.adapt_to_i64(out, indent, &raw);
                         let p = format!("%fp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
+                        backend.emit_inttoptr(out, indent, &p, &boxed);
                         // Phase 3: String is %String* struct { ptr, len, codec }.
                         // Extract .ptr field (first 8 bytes) for C char* ABI.
                         let ld = format!("%fld{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                         writeln!(out, "{}{} = load i64, ptr {}", indent, ld, p).ok();
                         let cp = format!("%fcp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, ld).ok();
+                        backend.emit_inttoptr(out, indent, &cp, &ld);
                         marshaled.push(format!("ptr {}", cp));
                     }
                     Type::Custom(__t) if __t == "Data" => {
                         let boxed = backend.adapt_to_i64(out, indent, &raw);
                         let p = format!("%fp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
+                        backend.emit_inttoptr(out, indent, &p, &boxed);
                         marshaled.push(format!("ptr {}", p));
                     }
                     _ => marshaled.push(format!("i64 {}", raw)),
@@ -121,7 +121,7 @@ pub fn emit_call(
                     let is_null = format!("%pipe_null{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     // call_result is i64 (boxed ptr). Convert to ptr for null check.
                     let ptr = format!("%pipe_ptr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, call_result).ok();
+                    backend.emit_inttoptr(out, indent, &ptr, &call_result);
                     writeln!(out, "{}{} = icmp eq ptr {}, null", indent, is_null, ptr).ok();
                     // 2026-06-28: Use txn_counter to prevent %t{N} collision
                     let select_reg = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -189,7 +189,7 @@ pub fn emit_call(
                         Type::Custom(__t) if __t == "String" || __t == "Data" => {
                             let boxed = backend.adapt_to_i64(out, indent, &raw);
                             let p = format!("%cip{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
+                            backend.emit_inttoptr(out, indent, &p, &boxed);
                             a_strs.push(format!("ptr {}", p));
                         }
                     Type::Custom(__t) if __t == "Float" => {
@@ -309,7 +309,7 @@ fn try_fn_ptr_call(
     } else {
         let p = format!("%ic_ptr{}", backend.fun.txn_counter);
         backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, fn_reg).ok();
+        backend.emit_inttoptr(out, indent, &p, &fn_reg);
         p
     };
     // Marshal arguments matching internal call convention: %state + typed args
@@ -339,7 +339,7 @@ fn try_fn_ptr_call(
                 let boxed = backend.adapt_to_i64(out, indent, &val);
                 let p = format!("%ic_p{}", backend.fun.txn_counter);
                 backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
+                backend.emit_inttoptr(out, indent, &p, &boxed);
                 arg_strs.push(format!("ptr {}", p));
             }
             _ => arg_strs.push(format!("i64 {}", val)),

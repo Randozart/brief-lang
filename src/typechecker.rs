@@ -2908,6 +2908,8 @@ Expr::ObjectLiteral(fields) => {
                     }
                 }
             }
+            // 2026-07-11: Phase 5 — DeferredLiteral typechecks as its expected type.
+            Expr::DeferredLiteral { expected_type, .. } => *expected_type.clone(),
             _ => Type::Custom("unknown".to_string()),
         }
     }

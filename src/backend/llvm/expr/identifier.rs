@@ -105,7 +105,7 @@ pub fn emit_identifier(
     if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
         let p = format!("%gep_exit_{}", backend.fun.txn_counter);
         backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+        backend.emit_inttoptr(out, indent, &p, &addr);
         writeln!(out, "{}{} = load volatile i64, ptr {}, align 1", indent, v, p).ok();
     } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
             let ll_ty = &backend.ctx.field_types[idx];
@@ -233,7 +233,7 @@ pub fn emit_identifier(
                     // emit_trg_load_finish expects i8* for String; convert here.
                     if t.ty == Type::string() || t.ty == Type::data() {
                         let ip = format!("%tip_{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, ev).ok();
+                        backend.emit_inttoptr(out, indent, &ip, &ev);
                         writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, ip).ok();
                     } else {
                         backend.emit_trg_load_finish(out, indent, &v, ev, &t.ty);
@@ -302,7 +302,7 @@ pub fn emit_identifier(
         }
     } else if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
         let p = format!("%mio{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+        backend.emit_inttoptr(out, indent, &p, &addr);
         writeln!(out, "{}{} = load volatile i64, ptr {}, align 1", indent, v, p).ok();
     } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
         let ty = &backend.ctx.field_types[idx];

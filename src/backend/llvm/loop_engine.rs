@@ -2900,7 +2900,7 @@ impl LlvmBackend {
                 let cln = format!("%ppl_cln{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = and i64 {}, -4", indent, cln, reg).ok();
                 let ptr_reg = format!("%ppl_ptr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_reg, cln).ok();
+                self.emit_inttoptr(out, indent, &ptr_reg, &cln);
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, ptr {})",
                     indent, res, so, fmt_reg, ptr_reg).ok();
                 writeln!(out, "{}{} = call i32 @fflush(ptr {})", indent, res_ff, so2).ok();

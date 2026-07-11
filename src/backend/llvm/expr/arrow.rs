@@ -58,7 +58,7 @@ pub fn emit_arrow_push(
             let dv = format!("%rbdv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dv, dg).ok();
             let dp = format!("%rbdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, dp, dv).ok();
+            backend.emit_inttoptr(out, indent, &dp, &dv);
             let sl = format!("%rbsl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, sl, dp, tv).ok();
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, elem_boxed, sl).ok();
@@ -124,7 +124,7 @@ pub fn emit_arrow_push(
     let prepend = matches!(push_strategy, Some(crate::type_universe::InsertStrategy::Prepend));
     // Unbox list header: inttoptr i64 to ptr
     let hp = format!("%ahp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_boxed).ok();
+    backend.emit_inttoptr(out, indent, &hp, &list_boxed);
     // Read current length from header slot 1
     let lp = format!("%alp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
@@ -210,7 +210,7 @@ pub fn emit_arrow_push(
     // (standalone call), free the old buffer normally.
     if backend.fun.arena_slots.is_none() {
         let old_ptr = format!("%aop{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, old_ptr, list_boxed).ok();
+        backend.emit_inttoptr(out, indent, &old_ptr, &list_boxed);
         writeln!(out, "{}call void @free(ptr {})", indent, old_ptr).ok();
     }
     // Set header: data_ptr at slot 0, new length at slot 1
@@ -344,7 +344,7 @@ pub fn emit_arrow_pop(
     let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
     // Unbox list header
     let hp = format!("%php{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_boxed).ok();
+    backend.emit_inttoptr(out, indent, &hp, &list_boxed);
     // Read length
     let lp = format!("%plp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
@@ -375,7 +375,7 @@ pub fn emit_arrow_pop(
     // Free old buffer: arena-active skips per-op free; standalone frees
     if backend.fun.arena_slots.is_none() {
         let old_ptr = format!("%pop{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, old_ptr, list_boxed).ok();
+        backend.emit_inttoptr(out, indent, &old_ptr, &list_boxed);
         writeln!(out, "{}call void @free(ptr {})", indent, old_ptr).ok();
     }
     // Allocate new buffer: (len + 1) * 8 (2 header + len - 1 elements)
@@ -474,7 +474,7 @@ pub fn emit_arrow_discard(
             let dv = format!("%rbdv{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dv, dg).ok();
             let dp = format!("%rbdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, dp, dv).ok();
+            backend.emit_inttoptr(out, indent, &dp, &dv);
             // Check empty: head == tail → return 0 (and don't advance head)
             let rem = format!("%rbem{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, rem, hv, tv).ok();
@@ -519,7 +519,7 @@ pub fn emit_arrow_discard(
     let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
     // Unbox list header, read length
     let hp = format!("%dhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_boxed).ok();
+    backend.emit_inttoptr(out, indent, &hp, &list_boxed);
     let lp = format!("%dlp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
     let len = format!("%dln{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -536,7 +536,7 @@ pub fn emit_arrow_discard(
     // Free old buffer: arena-active skips per-op free; standalone frees
     if backend.fun.arena_slots.is_none() {
         let old_ptr = format!("%dop{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, old_ptr, list_boxed).ok();
+        backend.emit_inttoptr(out, indent, &old_ptr, &list_boxed);
         writeln!(out, "{}call void @free(ptr {})", indent, old_ptr).ok();
     }
     // Allocate new buffer: (len + 1) slots (2 header + len - 1 elements)
@@ -620,9 +620,9 @@ pub fn emit_arrow_transfer(
     let dest_boxed = backend.adapt_to_i64(out, indent, &dest_val);
     let src_boxed = backend.adapt_to_i64(out, indent, &src_val);
     let dhp = format!("%tdh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, dhp, dest_boxed).ok();
+    backend.emit_inttoptr(out, indent, &dhp, &dest_boxed);
     let shp = format!("%tsh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, shp, src_boxed).ok();
+    backend.emit_inttoptr(out, indent, &shp, &src_boxed);
     // Read lengths
     let dlp = format!("%tdl{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, dlp, dhp).ok();
@@ -638,10 +638,10 @@ pub fn emit_arrow_transfer(
     // Free old buffers: arena skips per-op free; standalone frees
     if backend.fun.arena_slots.is_none() {
         let dold = format!("%tdop{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, dold, dest_boxed).ok();
+        backend.emit_inttoptr(out, indent, &dold, &dest_boxed);
         writeln!(out, "{}call void @free(ptr {})", indent, dold).ok();
         let sold = format!("%tsop{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sold, src_boxed).ok();
+        backend.emit_inttoptr(out, indent, &sold, &src_boxed);
         writeln!(out, "{}call void @free(ptr {})", indent, sold).ok();
     }
     // Allocate new dest buffer: (total + 2) * 8
@@ -743,7 +743,7 @@ pub fn emit_arrow_peek(
     let list_val = backend.emit_expr(out, value_target, indent);
     let list_boxed = backend.adapt_to_i64(out, indent, &list_val);
     let hp = format!("%lhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_boxed).ok();
+    backend.emit_inttoptr(out, indent, &hp, &list_boxed);
     // Read header fields: data_ptr (offset 0) and length (offset 1)
     let dp = format!("%ldp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, dp, hp).ok();
@@ -766,7 +766,7 @@ pub fn emit_arrow_peek(
     };
     // Load element at pos (peek: DON'T update state — just return the value)
     let cp = format!("%lcp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, dp).ok();
+    backend.emit_inttoptr(out, indent, &cp, &dp);
     let ep = format!("%lep{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, cp, pos).ok();
     let ev = format!("%lev{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -795,7 +795,7 @@ pub fn emit_arrow_copy(
     let src_val = backend.emit_expr(out, value_target, indent);
     let src_boxed = backend.adapt_to_i64(out, indent, &src_val);
     let shp = format!("%sch{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, shp, src_boxed).ok();
+    backend.emit_inttoptr(out, indent, &shp, &src_boxed);
     // Read source header: data_ptr (offset 0) and length (offset 1)
     let sdp = format!("%csdp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, sdp, shp).ok();
@@ -821,9 +821,9 @@ pub fn emit_arrow_copy(
     writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, sln, nh_lngp).ok();
     // Memcpy source data into new buffer
     let sdp_ptr = format!("%csdpp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sdp_ptr, sdp).ok();
+    backend.emit_inttoptr(out, indent, &sdp_ptr, &sdp);
     let nbp_ptr = format!("%cnbpp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, nbp_ptr, nbp).ok();
+    backend.emit_inttoptr(out, indent, &nbp_ptr, &nbp);
     let bytes = format!("%cbytes{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = mul i64 8, {}", indent, bytes, sln).ok();
     writeln!(out, "{}call void @llvm.memcpy(ptr {}, ptr {}, i64 {}, i1 false)", indent, nbp_ptr, sdp_ptr, bytes).ok();

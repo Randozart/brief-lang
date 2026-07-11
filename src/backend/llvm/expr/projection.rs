@@ -50,7 +50,7 @@ pub fn emit_projection(
                 writeln!(out, "{}{} = add i64 0, 1", indent, v).ok();
             } else {
                 let hp = format!("%php{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
+                backend.emit_inttoptr(out, indent, &hp, &src_val.name);
                 let lp = format!("%plp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
                 writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, lp).ok();
@@ -122,7 +122,7 @@ pub fn emit_projection(
         }
         ProjectionTarget::PtrBang => {
             let hp = format!("%pbhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
+            backend.emit_inttoptr(out, indent, &hp, &src_val.name);
             writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, hp).ok();
         }
         ProjectionTarget::Contains(expr) => {
@@ -130,7 +130,7 @@ pub fn emit_projection(
             let search_val = backend.emit_expr(out, expr, indent);
             let search_boxed = backend.adapt_to_i64(out, indent, &search_val);
             let hp = format!("%pchp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
+            backend.emit_inttoptr(out, indent, &hp, &src_val.name);
             let lp = format!("%pclp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
             let len = format!("%pcln{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -171,7 +171,7 @@ pub fn emit_projection(
         ProjectionTarget::Range => {
             // Return list length (same as Size) — Range = [0, len)
             let hp = format!("%prhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
+            backend.emit_inttoptr(out, indent, &hp, &src_val.name);
             let lp = format!("%prlp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
             writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, lp).ok();
@@ -192,7 +192,7 @@ pub fn emit_projection(
         }
         ProjectionTarget::IsEmpty => {
             let hp = format!("%ieh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
-            writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, src_val.name).ok();
+            backend.emit_inttoptr(out, indent, &hp, &src_val.name);
             let lp = format!("%iel{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
             let len = format!("%ien{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;

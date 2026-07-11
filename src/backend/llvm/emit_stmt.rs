@@ -199,7 +199,7 @@ impl LlvmBackend {
             }
             s if s == "i8*" || s == "ptr" => {
                 let fp = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, fp, val).ok();
+                self.emit_inttoptr(out, indent, &fp, &val);
                 fp
             }
             _ => val.to_string(),
@@ -227,7 +227,7 @@ impl LlvmBackend {
             }
             // String/Data: inttoptr i64 → ptr (was converted ptr → i64 via ptrtoint)
             "ptrtoint#" => {
-                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, r, val).ok();
+                self.emit_inttoptr(out, indent, &r, &val);
             }
             // Float: trunc i64 to i32, then bitcast i32 to float
             // (was bitcast float→i32, then zext i32→i64)
@@ -739,7 +739,7 @@ impl LlvmBackend {
                 if let Some(Expr::TupleDestructure(names, tuple_expr)) = expr {
                     let tuple_val = self.emit_expr(out, tuple_expr, indent);
                     let hp = format!("%tdh{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, tuple_val.name).ok();
+                    self.emit_inttoptr(out, indent, &hp, &tuple_val.name);
                     for (i, n) in names.iter().enumerate() {
                         let ep = format!("%tde{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
@@ -849,11 +849,11 @@ impl LlvmBackend {
                                     return;
                                 };
                                 let hp = format!("%lhp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_ptr).ok();
+                                self.emit_inttoptr(out, indent, &hp, &list_ptr);
                                 let dp = format!("%ldp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                                 writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                                 let de = format!("%lde{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
+                                self.emit_inttoptr(out, indent, &de, &dp);
                                 let idx_boxed = self.adapt_to_i64(out, indent, &idx_val);
                                 let ep = format!("%lep{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                                 writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, de, idx_boxed).ok();
@@ -921,11 +921,11 @@ impl LlvmBackend {
                             return;
                         };
                         let hp = format!("%lhp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, list_ptr).ok();
+                        self.emit_inttoptr(out, indent, &hp, &list_ptr);
                         let dp = format!("%ldp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, hp).ok();
                         let de = format!("%lde{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, de, dp).ok();
+                        self.emit_inttoptr(out, indent, &de, &dp);
                         let ep = format!("%lep{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, de, idx_val.name).ok();
                         writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, val_reg, ep).ok();
@@ -933,7 +933,7 @@ impl LlvmBackend {
                     }
                     Expr::TupleDestructure(names, _) => {
                         let hp = format!("%tdh{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, hp, val).ok();
+                        self.emit_inttoptr(out, indent, &hp, &val);
                         for (i, name) in names.iter().enumerate() {
                             let ep = format!("%tde{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                             writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, hp, (i as i64) + 2).ok();
@@ -949,7 +949,7 @@ impl LlvmBackend {
                             }
                             if let Some(&addr) = self.ctx.mmio_fields.get(name) {
                                 let p = format!("%mio{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+                                self.emit_inttoptr(out, indent, &p, &addr);
                                 writeln!(out, "{}store volatile i64 {}, ptr {}, align 1", indent, elem, p).ok();
                                 continue;
                             }
@@ -1013,7 +1013,7 @@ impl LlvmBackend {
                                 }
                                 "i8*" => {
                                     let p = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, val_boxed).ok();
+                                    self.emit_inttoptr(out, indent, &p, &val_boxed);
                                     writeln!(out, "{}{} = insertvalue %State {}, ptr {}, {}", indent, new_reg, ssa_reg, p, idx).ok();
                                 }
                                 _ => {
@@ -1035,7 +1035,7 @@ impl LlvmBackend {
                 }
                 if let Some(&addr) = self.ctx.mmio_fields.get(&fname) {
                     let p = format!("%mio{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, addr).ok();
+                    self.emit_inttoptr(out, indent, &p, &addr);
                     writeln!(out, "{}store volatile i64 {}, ptr {}, align 1", indent, val, p).ok();
                     return;
                 }

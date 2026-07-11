@@ -86,7 +86,7 @@ pub fn emit_string(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &
     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, pi, bp).ok();
     let ori = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = or i64 {}, 1", indent, ori, pi).ok();
-    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, ori).ok();
+    backend.emit_inttoptr(out, indent, &v, &ori);
     TypedRegister { name: v.to_string(), ty: Type::string() }
 }
 
