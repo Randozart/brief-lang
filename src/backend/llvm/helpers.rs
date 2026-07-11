@@ -32,6 +32,13 @@ use crate::features::unary_op::UnaryOpExpr;
 use std::collections::HashMap;
 use std::fmt::Write;
 
+/// Phase 2 migration helper: check if a type matches a canonical name
+/// via property system (preferred) with hardcoded legacy fallback.
+fn type_is(universe: &Option<crate::type_universe::TypeUniverse>, ty: &Type, name: &str) -> bool {
+    universe.as_ref().map_or(false, |u| u.type_is(ty, name))
+        || *ty == Type::Custom(name.to_string())
+}
+
 impl LlvmBackend {
     pub(super) fn rewrite_cell_identifiers(expr: &Expr, cell_name: &str) -> Expr {
         let p = |name: &str| -> String { format!("cell${}${}", cell_name, name) };
@@ -699,7 +706,8 @@ impl LlvmBackend {
 
     /// If `reg` is an i64 (Int), truncate to i1. Otherwise return its name as-is.
     pub(super) fn as_bool_reg(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
-        if reg.ty == Type::Custom("Int".to_string()) {
+        // Phase 2: property system with legacy fallback
+        if type_is(&self.ctx.type_universe, &reg.ty, "Int") {
             let t = format!("%tb{}", self.fun.txn_counter);
             self.fun.txn_counter += 1;
             writeln!(out, "{}{} = trunc i64 {} to i1", indent, t, reg.name).ok();
@@ -712,7 +720,8 @@ impl LlvmBackend {
     /// Convert a String/Data typed register to i64 for C ABI calls.
     /// Int/Bool/Char/Float registers are passed through as-is.
     fn ptrtoint_if_string(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
-        if reg.ty == Type::Custom("String".to_string()) || reg.ty == Type::Custom("Data".to_string()) {
+        if type_is(&self.ctx.type_universe, &reg.ty, "String")
+            || type_is(&self.ctx.type_universe, &reg.ty, "Data") {
             let p = format!("%ptri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, reg.name).ok();
             p
@@ -957,11 +966,11 @@ impl LlvmBackend {
         let a_is_native = self.ctx.type_universe.as_ref()
             .and_then(|u| u.get_by_type(&a.ty))
             .map(|r| r.storage == "Native")
-            .unwrap_or_else(|| a.ty == Type::Custom("Float".to_string()) || a.ty == Type::Custom("Float64".to_string()));
+            .unwrap_or_else(|| type_is(&self.ctx.type_universe, &a.ty, "Float") || type_is(&self.ctx.type_universe, &a.ty, "Float64"));
         let b_is_native = self.ctx.type_universe.as_ref()
             .and_then(|u| u.get_by_type(&b.ty))
             .map(|r| r.storage == "Native")
-            .unwrap_or_else(|| b.ty == Type::Custom("Float".to_string()) || b.ty == Type::Custom("Float64".to_string()));
+            .unwrap_or_else(|| type_is(&self.ctx.type_universe, &b.ty, "Float") || type_is(&self.ctx.type_universe, &b.ty, "Float64"));
 
         // ── Expression hash-consing dedup cache lookup ─────────────
         // 2026-07-01: Check if we already emitted this (op, lhs, rhs) within
@@ -1042,7 +1051,8 @@ impl LlvmBackend {
     fn is_linked_string_trigger(&self, expr: &Expr) -> bool {
         if let Expr::Identifier(name) = expr {
             if let Some(trg) = self.ctx.triggers.get(name) {
-                return trg.ty == Type::Custom("String".to_string()) || trg.ty == Type::Custom("Data".to_string());
+                return type_is(&self.ctx.type_universe, &trg.ty, "String")
+                    || type_is(&self.ctx.type_universe, &trg.ty, "Data");
             }
         }
         false
@@ -1198,7 +1208,7 @@ impl LlvmBackend {
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
         let c = format!("%c{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        if a.ty == Type::Custom("Float".to_string()) || b.ty == Type::Custom("Float".to_string()) {
+        if type_is(&self.ctx.type_universe, &a.ty, "Float") || type_is(&self.ctx.type_universe, &b.ty, "Float") {
             let fa = self.ensure_float_reg(out, indent, &a);
             let fb = self.ensure_float_reg(out, indent, &b);
             writeln!(out, "{}{} = fcmp fast {} float {}, {}", indent, c, cond, fa, fb).ok();
@@ -1233,8 +1243,8 @@ impl LlvmBackend {
             Expr::String(_) => true,
             Expr::Literal(lit) => matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)),
             Expr::Identifier(name) => {
-                matches!(self.fun.let_binding_types.get(name), Some(t) if *t == Type::Custom("String".to_string()) || *t == Type::Custom("Data".to_string()))
-                || matches!(self.fun.let_original_types.get(name), Some(t) if *t == Type::Custom("String".to_string()) || *t == Type::Custom("Data".to_string()))
+                matches!(self.fun.let_binding_types.get(name), Some(t) if type_is(&self.ctx.type_universe, t, "String") || type_is(&self.ctx.type_universe, t, "Data"))
+                || matches!(self.fun.let_original_types.get(name), Some(t) if type_is(&self.ctx.type_universe, t, "String") || type_is(&self.ctx.type_universe, t, "Data"))
                 || {
                     // Check state fields whose LLVM type is i8* (String/Data)
                     self.ctx.field_index_map.get(name)
@@ -1247,7 +1257,7 @@ impl LlvmBackend {
                 self.is_string_chain(l) || self.is_string_chain(r)
             }
             Expr::Cast(inner, target_ty) => {
-                *target_ty == Type::Custom("String".to_string()) || *target_ty == Type::Custom("Data".to_string())
+                type_is(&self.ctx.type_universe, target_ty, "String") || type_is(&self.ctx.type_universe, target_ty, "Data")
                     || self.is_string_chain(inner)
             }
             Expr::BinaryOp(bo) if bo.kind == crate::features::binary_op::BinaryOpKind::Add => {
@@ -1255,7 +1265,7 @@ impl LlvmBackend {
             }
             Expr::Call(name, _) => {
                 self.ctx.defn_return_types.get(name.as_str())
-                    .map(|types| types.iter().any(|t| *t == Type::Custom("String".to_string()) || *t == Type::Custom("Data".to_string())))
+                    .map(|types| types.iter().any(|t| type_is(&self.ctx.type_universe, t, "String") || type_is(&self.ctx.type_universe, t, "Data")))
                     .unwrap_or(false)
             }
             _ => false,
@@ -1899,7 +1909,7 @@ impl LlvmBackend {
             Expr::Div(_, _) => "sdiv",
             _ => return None,
         };
-        if cast_ty == Type::Custom("Float".to_string()) || cast_ty == Type::Custom("Float64".to_string()) {
+        if type_is(&self.ctx.type_universe, &cast_ty, "Float") || type_is(&self.ctx.type_universe, &cast_ty, "Float64") {
             let fl_a = self.ensure_float_reg(out, indent, &a);
             let fl_b = self.ensure_float_reg(out, indent, &b);
             writeln!(out, "{}{} = {} float {}, {}", indent, v, fl_op, fl_a, fl_b).ok();

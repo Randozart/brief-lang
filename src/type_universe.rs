@@ -881,6 +881,17 @@ impl TypeUniverse {
         self.get_by_type(ty)?.get_property_int("alignment").map(|n| n as u64)
     }
 
+    /// Check if a type has a given canonical name (property system + legacy fallback).
+    /// Phase 2: replaces `ty == Type::Custom("Int".to_string())` etc.
+    pub fn type_is(&self, ty: &crate::ast::Type, name: &str) -> bool {
+        // Property system check
+        if let Some(rt) = self.get_by_type(ty) {
+            if rt.name == name { return true; }
+        }
+        // Legacy fallback
+        *ty == crate::ast::Type::Custom(name.to_string())
+    }
+
     // 2026-07-08: Phase 2B — compute LLVM type string from base type + width.
     // For Int<8>: base "Int" + width 8 → "i8"
     // For Float<32>: base "Float" + width 32 → "float"
