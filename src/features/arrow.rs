@@ -102,8 +102,6 @@ impl ExprTypecheck for ArrowTransferExpr { fn typecheck(&self, _: &mut TypeCheck
                         ctx.store_arrow_value(&root_name, &field_path, Value::HashSet(c.clone()));
                         Ok(Value::HashSet(c))
                     }
-                    Value::Stack(stack) => { stack.push(v); let c = stack.clone(); ctx.store_arrow_value(&root_name, &field_path, Value::Stack(c.clone())); Ok(Value::Stack(c)) }
-                    Value::Queue(queue) => { queue.push_back(v); let c = queue.clone(); ctx.store_arrow_value(&root_name, &field_path, Value::Queue(c.clone())); Ok(Value::Queue(c)) }
                     _ => Err(RuntimeError::TypeMismatch("ArrowMut Push requires a compatible collection type".into())),
                 }
             }
@@ -165,16 +163,6 @@ impl ExprTypecheck for ArrowTransferExpr { fn typecheck(&self, _: &mut TypeCheck
                             else { Err(RuntimeError::TypeMismatch(format!("Element '{}' not found", elem))) }
                         }
                     }
-                    Value::Stack(stack) => {
-                        let removed = stack.pop().ok_or_else(|| RuntimeError::TypeMismatch("Cannot pop from empty Stack".into()))?;
-                        ctx.store_arrow_value(&root_name, &field_path, Value::Stack(stack.clone()));
-                        Ok(removed)
-                    }
-                    Value::Queue(queue) => {
-                        let removed = queue.pop_front().ok_or_else(|| RuntimeError::TypeMismatch("Cannot dequeue from empty Queue".into()))?;
-                        ctx.store_arrow_value(&root_name, &field_path, Value::Queue(queue.clone()));
-                        Ok(removed)
-                    }
                     _ => Err(RuntimeError::TypeMismatch("ArrowMut Pop requires a compatible collection type".into())),
                 }
             }
@@ -209,8 +197,6 @@ impl ExprEval for ArrowDiscardExpr {
                 }
                 ctx.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
             }
-            Value::Stack(stack) => { stack.pop(); ctx.store_arrow_value(&root_name, &field_path, Value::Stack(stack.clone())); }
-            Value::Queue(queue) => { queue.pop_front(); ctx.store_arrow_value(&root_name, &field_path, Value::Queue(queue.clone())); }
             _ => return Err(RuntimeError::TypeMismatch("ArrowDiscard requires compatible collection".into())),
         }
         Ok(Value::Void)

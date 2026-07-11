@@ -38,9 +38,6 @@ impl ExprEval for ProjectionExpr {
                 Value::String(s) => Ok(Value::Int(s.len() as i64)),
                 Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
                 Value::HashSet(s) => Ok(Value::Int(s.len() as i64)),
-                Value::Stack(v) => Ok(Value::Int(v.len() as i64)),
-                Value::Queue(q) => Ok(Value::Int(q.len() as i64)),
-                Value::StringBuilder(sb) => Ok(Value::Int(sb.len() as i64)),
                 _ => Err(RuntimeError::TypeMismatch("Size projection requires List, String, or collection type".into())),
             },
             ProjectionTarget::Bytes => {
@@ -52,9 +49,6 @@ impl ExprEval for ProjectionExpr {
                     Value::Bits(d) => d.len() as i64,
                     Value::Instance { fields, .. } => fields.len() as i64 * 8,
                     Value::Tuple(items) => items.len() as i64 * 8,
-                    Value::Stack(v) => v.len() as i64 * 8,
-                    Value::Queue(q) => q.len() as i64 * 8,
-                    Value::StringBuilder(sb) => sb.len() as i64,
                     _ => 0,
                 };
                 Ok(Value::Int(size))
@@ -67,8 +61,8 @@ impl ExprEval for ProjectionExpr {
                     Value::Char(_) => 4,
                     Value::Bits(_) | Value::String(_) | Value::List(_) | Value::Tuple(_)
                         | Value::HashMap(_) | Value::HashSet(_)
-                        | Value::Stack(_) | Value::Queue(_) | Value::Enum(..)
-                        | Value::Instance { .. } | Value::StringBuilder(_)
+                        | Value::Enum(..)
+                        | Value::Instance { .. }
                         | Value::Defn(_) | Value::DbvlTable(_) | Value::Regex(_)
                         | Value::Ptr(_) | Value::Ref(_) => 8,
                     Value::Void => 0,
@@ -134,9 +128,8 @@ impl ExprEval for ProjectionExpr {
                     Value::Int(_) => 1, Value::Bits(_) => 8, Value::Float(_) => 2, Value::Bool(_) => 3,
                     Value::Char(_) => 4, Value::String(_) => 5, Value::List(_) => 6,
                     Value::Tuple(_) => 7, Value::HashMap(_) => 9,
-                    Value::HashSet(_) => 10, Value::StringBuilder(_) => 11,
-                    Value::Stack(_) => 12, Value::Queue(_) => 13,
-                    Value::Instance { .. } => 14, Value::Enum(..) => 15,
+                    Value::HashSet(_) => 10,
+                    Value::Instance { .. } => 11, Value::Enum(..) => 12,
                     Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Regex(_) => 18,
                     Value::Ptr(_) | Value::Ref(_) => 19, Value::Void => 0,
                     Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
@@ -191,24 +184,24 @@ impl ExprEval for ProjectionExpr {
                 }
             }
             ProjectionTarget::Top => match &source_val {
-                Value::Stack(s) => {
+                Value::List(items) => {
                     let mut fields = std::collections::HashMap::new();
-                    match s.last() {
+                    match items.last() {
                         Some(val) => { fields.insert("field_0".into(), val.clone()); Ok(Value::Enum("Option".into(), "Some".into(), fields)) }
                         None => Ok(Value::Enum("Option".into(), "None".into(), std::collections::HashMap::new())),
                     }
                 }
-                _ => Err(RuntimeError::TypeMismatch("Top requires Stack".into())),
+                _ => Err(RuntimeError::TypeMismatch("Top requires List".into())),
             },
             ProjectionTarget::Front => match &source_val {
-                Value::Queue(q) => {
+                Value::List(items) => {
                     let mut fields = std::collections::HashMap::new();
-                    match q.front() {
+                    match items.first() {
                         Some(val) => { fields.insert("field_0".into(), val.clone()); Ok(Value::Enum("Option".into(), "Some".into(), fields)) }
                         None => Ok(Value::Enum("Option".into(), "None".into(), std::collections::HashMap::new())),
                     }
                 }
-                _ => Err(RuntimeError::TypeMismatch("Front requires Queue".into())),
+                _ => Err(RuntimeError::TypeMismatch("Front requires List".into())),
             },
             ProjectionTarget::Elements => match &source_val {
                 Value::HashSet(s) => {
@@ -219,11 +212,11 @@ impl ExprEval for ProjectionExpr {
                 _ => Err(RuntimeError::TypeMismatch("Elements requires HashSet".into())),
             },
             ProjectionTarget::AsStack => match &source_val {
-                Value::List(items) => Ok(Value::Stack(items.clone())),
+                Value::List(items) => Ok(Value::List(items.clone())),
                 _ => Err(RuntimeError::TypeMismatch("AsStack requires List".into())),
             },
             ProjectionTarget::AsQueue => match &source_val {
-                Value::List(items) => Ok(Value::Queue(std::collections::VecDeque::from(items.clone()))),
+                Value::List(items) => Ok(Value::List(items.clone())),
                 _ => Err(RuntimeError::TypeMismatch("AsQueue requires List".into())),
             },
             // Function metadata projections — handled by Interpreter::try_eval_fn_projection

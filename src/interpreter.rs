@@ -75,9 +75,8 @@ pub enum Value {
     Tuple(Vec<Value>),  // True tuple type (not flattened to List)
     HashMap(HashMap<String, Value>),  // HashMap (string keys for simplicity)
     HashSet(HashSet<String>),  // HashSet (string values for simplicity)
-    StringBuilder(String),  // StringBuilder (internal buffer as String)
-    Stack(Vec<Value>),  // Stack<T>
-    Queue(VecDeque<Value>),  // Queue<T> (VecDeque for efficient pop_front)
+    // StringBuilder, Stack, Queue removed in Phase 8D.2 — defined as
+    // stdlib types with op InsertAt/ExtractFrom, not compiler primitives.
     Instance {
         typename: String,
         fields: HashMap<String, Value>,
@@ -148,9 +147,6 @@ impl PartialEq for Value {
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::HashMap(a), Value::HashMap(b)) => a == b,
             (Value::HashSet(a), Value::HashSet(b)) => a == b,
-            (Value::StringBuilder(a), Value::StringBuilder(b)) => a == b,
-            (Value::Stack(a), Value::Stack(b)) => a == b,
-            (Value::Queue(a), Value::Queue(b)) => a == b,
             (Value::Instance { typename: a1, fields: a2 }, Value::Instance { typename: b1, fields: b2 }) => a1 == b1 && a2 == b2,
             (Value::Enum(a1, a2, a3), Value::Enum(b1, b2, b3)) => a1 == b1 && a2 == b2 && a3 == b3,
             (Value::Defn(a), Value::Defn(b)) => a == b,
@@ -185,9 +181,6 @@ impl fmt::Display for Value {
             Value::Tuple(items) => write!(f, "({})", items.len()),
             Value::HashMap(map) => write!(f, "<HashMap {}>", map.len()),
             Value::HashSet(set) => write!(f, "<HashSet {}>", set.len()),
-            Value::StringBuilder(s) => write!(f, "<StringBuilder {}>", s.len()),
-            Value::Stack(stack) => write!(f, "<Stack {}>", stack.len()),
-            Value::Queue(queue) => write!(f, "<Queue {}>", queue.len()),
             Value::Instance { typename, fields } => {
                 write!(f, "<{} {{}}>", typename)
             }
@@ -253,9 +246,6 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
                 .collect();
             JsonValue::Array(arr)
         }
-        Value::StringBuilder(s) => JsonValue::String(s.clone()),
-        Value::Stack(stack) => JsonValue::Array(stack.iter().map(value_to_json_value).collect()),
-        Value::Queue(queue) => JsonValue::Array(queue.iter().map(value_to_json_value).collect()),
         Value::Ptr(p) => JsonValue::Number((*p).into()),
         Value::Ref(v) => value_to_json_value(v),
         Value::Instance { fields, .. } => {
@@ -2569,7 +2559,6 @@ impl Interpreter {
             Pattern::Tuple(elements) => {
                 let items = match value {
                     Value::List(v) => v,
-                    Value::Stack(v) => v,
                     _ => return false,
                 };
                 if elements.len() != items.len() {
@@ -3041,8 +3030,6 @@ impl Interpreter {
             // Complex types from FFI handlers: always valid
             (Value::List(_) | Value::Tuple(_), _) => true,
             (Value::HashMap(_) | Value::HashSet(_), _) => true,
-            (Value::Stack(_) | Value::Queue(_), _) => true,
-            (Value::StringBuilder(_), _) => true,
             (Value::Instance { .. }, _) => true,
             (Value::Enum(..), _) => true,
             (Value::DbvlTable(_) | Value::Regex(_), _) => true,
@@ -3351,9 +3338,6 @@ impl Interpreter {
                             Value::Bits(d) => Ok(Value::Int(d.len() as i64)),
                             Value::Instance { fields, .. } => Ok(Value::Int((fields.len() * 8) as i64)),
                             Value::Tuple(t) => Ok(Value::Int((t.len() * 8) as i64)),
-                            Value::Stack(v) => Ok(Value::Int((v.len() * 8) as i64)),
-                            Value::Queue(q) => Ok(Value::Int((q.len() * 8) as i64)),
-                            Value::StringBuilder(sb) => Ok(Value::Int(sb.len() as i64)),
                             v => Err(RuntimeError::TypeMismatch(format!("bytes not implemented for {:?}", v))),
                         }
                     }

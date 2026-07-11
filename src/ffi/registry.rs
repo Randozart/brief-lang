@@ -1221,7 +1221,7 @@ fn json_is_array_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn json_is_string_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(_)) | Some(Value::StringBuilder(_)) => Ok(Value::Bool(true)),
+        Some(Value::String(_)) => Ok(Value::Bool(true)),
         _ => Ok(Value::Bool(false)),
     }
 }
