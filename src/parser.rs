@@ -4559,16 +4559,17 @@ let span = self.current_span();
         // Capture closing-brace span for better error messages on missing ';'
         let closing_brace_span;
         // Lambda-style: allow ; termination (no body)
-        let body = if let Some(Ok(Token::Semicolon)) = self.current_token() {
+        let (body, txn_metadata) = if let Some(Ok(Token::Semicolon)) = self.current_token() {
             // Lambda-style transaction: no body, just contract
             closing_brace_span = Span::dummy();
-            Vec::new()
+            (Vec::new(), HashMap::new())
         } else {
             self.expect(Token::LBrace)?;
+            let metadata = self.parse_body_metadata()?;
             let body = self.parse_body()?;
             closing_brace_span = self.current_span().unwrap_or_else(Span::dummy);
             self.expect(Token::RBrace)?;
-            body
+            (body, metadata)
         };
 
         let is_lambda = body.is_empty();
@@ -4669,7 +4670,7 @@ let span = self.current_span();
             is_lambda,
             dependencies,
             annotations: txn_annotations,
-            metadata: HashMap::new(),
+            metadata: txn_metadata,
             modifiers: Vec::new(),
             variant_bodies,
             outputs: txn_outputs,
@@ -4782,13 +4783,14 @@ let span = self.current_span();
         };
 
         // Lambda-style: allow ; termination (no body)
-        let body = if let Some(Ok(Token::Semicolon)) = self.current_token() {
-            Vec::new()
+        let (body, metadata) = if let Some(Ok(Token::Semicolon)) = self.current_token() {
+            (Vec::new(), HashMap::new())
         } else {
             self.expect(Token::LBrace)?;
+            let metadata = self.parse_body_metadata()?;
             let body = self.parse_body()?;
             self.expect(Token::RBrace)?;
-            body
+            (body, metadata)
         };
 
         let is_lambda = body.is_empty();
@@ -4816,7 +4818,7 @@ let span = self.current_span();
             body,
             is_lambda,
             annotations: defn_annotations,
-            metadata: HashMap::new(),
+            metadata,
             modifiers: Vec::new(),
             variant_bodies,
         })
@@ -5534,6 +5536,33 @@ let span = self.current_span();
         }
         Ok(statements)
     }
+
+    /// Parse inline metadata statements at the start of a body block.
+    /// Consumes `identifier <~ expr ;` entries and returns them as a map.
+    /// 2026-07-11: Phase 1A.1c.
+    fn parse_body_metadata(&mut self) -> Result<HashMap<String, PropertyValue>, SyntaxError> {
+        let mut metadata = HashMap::new();
+        loop {
+            match self.current_token() {
+                Some(Ok(Token::Identifier(name))) => {
+                    if self.peek_token().map_or(false, |t| matches!(t, Ok(Token::TildeArrow))) {
+                        let name = name.clone();
+                        self.advance(); // consume ident
+                        self.advance(); // consume <~
+                        let value = self.parse_expression()?;
+                        self.expect(Token::Semicolon)?;
+                        let prop_value = expr_to_property_value(&value)?;
+                        metadata.insert(name, prop_value);
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+            break;
+        }
+        Ok(metadata)
+    }
+
 
     /// Parse a time unit keyword. Returns an error if no time unit is found.
     fn parse_time_unit(&mut self) -> Result<TimeUnit, SyntaxError> {
@@ -9173,6 +9202,31 @@ let span = self.current_span();
 
 struct MultiSliceResult {
     ops: Vec<crate::ast::BracketOp>,
+}
+
+/// Convert a compile-time-constant expression to a PropertyValue.
+/// Returns an error if the expression is not a compile-time constant.
+/// 2026-07-11: Phase 1A.1c.
+fn expr_to_property_value(expr: &Expr) -> Result<PropertyValue, SyntaxError> {
+    match expr {
+        Expr::Integer(n) => Ok(PropertyValue::Int(*n)),
+        Expr::Float(f) => Ok(PropertyValue::Float(*f)),
+        Expr::String(s) => Ok(PropertyValue::String(s.clone())),
+        Expr::Bool(b) => Ok(PropertyValue::Bool(*b)),
+        Expr::Identifier(name) => Ok(PropertyValue::Identifier(name.clone())),
+        Expr::ListLiteral(list) => {
+            let mut vals = Vec::new();
+            for elem in list {
+                vals.push(expr_to_property_value(elem)?);
+            }
+            Ok(PropertyValue::List(vals))
+        }
+        _ => Err(SyntaxError::InvalidStatement {
+            reason: "metadata value must be a compile-time constant \
+                (literal, identifier, or list of literals)".to_string(),
+            span: expr.span().unwrap_or_else(Span::dummy),
+        }),
+    }
 }
 
 #[cfg(test)]
