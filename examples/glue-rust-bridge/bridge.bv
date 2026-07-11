@@ -13,12 +13,19 @@ type Int <: Bits {
     alignment <~ 8;
 };
 
-#export
-defn add(a: Int, b: Int) -> Int {
+struct CBuffer {
+    ptr: Int;
+    len: Int;
+};
+
+export defn add(a: Int, b: Int) -> Int {
     term a + b;
 };
 
-#export
-defn multiply(a: Int, b: Int) -> Int {
+export defn multiply(a: Int, b: Int) -> Int {
     term a * b;
+};
+
+export defn first_len(buf: CBuffer) -> Int {
+    term buf.ptr + buf.len;
 };

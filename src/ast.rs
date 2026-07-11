@@ -590,9 +590,26 @@ pub struct TypeBinding {
     pub span: Option<Span>,
 }
 
+/// A slot declaration inside a type body: `name: Type;`
+/// Slots declare how the type's bits are partitioned — they are the
+/// structural fields of a type (as opposed to properties, which are
+/// metadata or projections). 2026-07-11: Type slot syntax.
+#[derive(Debug, Clone)]
+pub struct TypeSlot {
+    /// The slot name (field identifier).
+    pub name: String,
+    /// The type expression for this slot.
+    pub ty: Type,
+    /// Source span for error reporting.
+    pub span: Option<Span>,
+}
+
 /// Body of a `Type Name <: Base { ... }` declaration.
 #[derive(Debug, Clone)]
 pub struct TypeDefBody {
+    /// Slot declarations: `name: Type;` that partition the type's bits.
+    /// 2026-07-11: Type slot syntax.
+    pub slots: Vec<TypeSlot>,
     /// Unified bindings: every `Name = Expr;` entry, including both metadata
     /// properties and user-defined projections.
     pub bindings: Vec<TypeBinding>,

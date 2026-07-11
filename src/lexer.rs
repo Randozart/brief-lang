@@ -30,6 +30,10 @@ pub enum Token {
     #[token("sig")]
     Sig,
 
+    // Export keyword (Phase 4 — replaces #export annotation)
+    #[token("export")]
+    Export,
+
     // Defn aliases: defn, def, definition (lowercase and UPPERCASE)
     #[token("defn")]
     Defn,
@@ -496,6 +500,7 @@ impl std::fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Token::Sig => write!(f, "sig"),
+            Token::Export => write!(f, "export"),
             Token::Defn => write!(f, "defn"),
             Token::Let => write!(f, "let"),
             Token::Const => write!(f, "const"),

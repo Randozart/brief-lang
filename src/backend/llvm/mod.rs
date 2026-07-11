@@ -1571,7 +1571,65 @@ impl LlvmBackend {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect();
+                    let byte_size: u64 = fields.iter()
+                        .map(|(_, t)| t.to_bits().unwrap_or(64) / 8)
+                        .sum();
                     self.ctx.struct_types.insert(s.name.clone(), fields);
+
+                    // 2026-07-11: Struct auto-registration in TypeUniverse.
+                    // Structs are product types — register a minimal ResolvedType entry
+                    // so they participate in meld lookups and type universe queries.
+                    if let Some(ref mut universe) = self.ctx.type_universe {
+                        if !universe.types.contains_key(&s.name) {
+                            let rt = crate::type_universe::ResolvedType {
+                                name: s.name.clone(),
+                                type_params: s.type_params.clone(),
+                                base: "Bits".to_string(),
+                                bytes: byte_size,
+                                alignment: 8,
+                                llvm_type: format!("%{}", s.name),
+                                storage: "Boxed".to_string(),
+                                tbaa_node: "Int".to_string(),
+                                box_op: None,
+                                unbox_op: None,
+                                endian: 0,
+                                volatile: false,
+                                atomic: false,
+                                element_type: None,
+                                fixed_size: None,
+                                insert_at: None,
+                                extract_from: None,
+                                allow_index: true,
+                                allow_slice: true,
+                                allow_arrow: true,
+                                codec: None,
+                                on_exit: None,
+                                guards: vec![],
+                                operators: std::collections::HashMap::new(),
+                                projections: std::collections::HashMap::new(),
+                                default_params: vec![],
+                                commuting: true,
+                                constant_time: false,
+                                struct_layout: None,
+                                source: crate::ast::TypeDef {
+                                    name: s.name.clone(),
+                                    type_params: Vec::new(),
+                                    base: Box::new(crate::ast::Expr::TypeRef("Bits".to_string())),
+                                    bit_range: None,
+                                    body: crate::ast::TypeDefBody {
+                                        slots: vec![],
+                                        bindings: vec![],
+                                        operators: vec![],
+                                        constraints: vec![],
+                                        span: None,
+                                    },
+                                    span: None,
+                                },
+                                defining_module: "user".to_string(),
+                            };
+                            universe.types.insert(s.name.clone(), rt);
+                        }
+                    }
                 }
                 TopLevel::Enum(e) => {
                     self.ctx.enum_types.insert(e.name.clone(), e.clone());
@@ -1609,6 +1667,21 @@ impl LlvmBackend {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        // 2026-07-11: Populate struct_types from TypeUniverse types with struct_layout.
+        // This allows type declarations with slot syntax to participate in LLVM named
+        // type emission and struct field access codegen, matching the existing struct
+        // code path.
+        if let Some(ref universe) = self.ctx.type_universe {
+            for (name, rt) in &universe.types {
+                if rt.struct_layout.is_some() && !self.ctx.struct_types.contains_key(name) {
+                    let fields: Vec<(String, Type)> = rt.struct_layout.as_ref().unwrap().fields.iter()
+                        .map(|f| (f.name.clone(), f.ty.clone()))
+                        .collect();
+                    self.ctx.struct_types.insert(name.clone(), fields);
+                }
             }
         }
 
@@ -1689,7 +1762,10 @@ impl LlvmBackend {
 
         let mut out = String::new();
         self.emit_header(&mut out);
-self.emit_declares(&mut out);
+        // 2026-07-10: Phase 1 — emit struct type declarations before
+        // function definitions so foreign callers see named types.
+        self.declare_struct_types(&mut out);
+        self.emit_declares(&mut out);
 
         // Emit foreign declares inline (frgn_map is populated from the scan above)
         // Skip names that are also linked triggers — they'll be emitted as global variables below.

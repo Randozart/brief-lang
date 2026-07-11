@@ -103,6 +103,38 @@ impl LlvmBackend {
         writeln!(out, "target triple = \"x86_64-unknown-linux-gnu\"").ok();
     }
 
+    /// Emit LLVM struct type declarations for user-defined struct types.
+    /// Each struct becomes a named LLVM type so foreign callers (Rust via LTO,
+    /// Python via ctypes) can match the memory layout. All fields are boxed
+    /// as i64 (Brief's universal scalar storage type).
+    ///
+    /// Called after `emit_header()` and before `emit_declares()` so that
+    /// struct types are available for use in function signatures emitted
+    /// later. Structs with no fields are emitted as `{}` (empty type).
+    ///
+    /// 2026-07-10: Phase 1 — zero-copy GLUE bridge struct type declarations.
+    pub(super) fn declare_struct_types(&self, out: &mut String) {
+        if self.ctx.struct_types.is_empty() {
+            return;
+        }
+        writeln!(out).ok();
+        // Iteration order MUST be sorted by key for deterministic IR emission.
+        // Rust's HashMap iteration order is randomized per process — sorting
+        // by name ensures identical .ll output across compilations.
+        let mut sorted: Vec<(String, Vec<(String, Type)>)> = self.ctx.struct_types.iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        sorted.sort_by_key(|(k, _)| k.clone());
+        for (name, fields) in &sorted {
+            if fields.is_empty() {
+                writeln!(out, "%{} = type {{}}", name).ok();
+            } else {
+                let field_tys: Vec<&str> = fields.iter().map(|_| "i64").collect();
+                writeln!(out, "%{} = type {{ {} }}", name, field_tys.join(", ")).ok();
+            }
+        }
+    }
+
     pub(super) fn emit_declares(&self, out: &mut String) {
         writeln!(out).ok();
         writeln!(out, "declare void @llvm.assume(i1) #1").ok();
@@ -248,6 +280,15 @@ impl LlvmBackend {
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> &str {
+        // 2026-07-10: Phase 1 — check for user-defined struct types first.
+        // Struct types are passed by pointer at the FFI boundary, so return
+        // "ptr" (LLVM opaque pointer). The named struct type is declared in
+        // `declare_struct_types()` for the foreign caller's reference.
+        if let Type::Custom(name) = ty {
+            if self.ctx.struct_types.contains_key(name) {
+                return "ptr";
+            }
+        }
         // 2026-06-29: Phase 7A — universe query replaces match arms.
         // Falls back to a minimal inline match when universe is not available
         // (e.g., in unit tests that construct LlvmBackend directly).
@@ -1047,7 +1088,15 @@ impl LlvmBackend {
             // matches! check below), but the HOW-to-box decision now comes from
             // the universe's box_op field rather than hardcoded LLVM IR.
             let param_llvm_ty = self.llvm_type(t);
-            if param_llvm_ty == "i64" {
+            // 2026-07-10: Phase 1 — struct params are passed by pointer (ptr).
+            // Convert to i64 via ptrtoint so downstream field access code
+            // (which does inttoptr + GEP) works unchanged. The round-trip
+            // ptrtoint→inttoptr is eliminated by LLVM's optimizer.
+            if param_llvm_ty == "ptr" {
+                let conv = format!("%ac{}", i);
+                writeln!(out, "  {} = ptrtoint ptr {} to i64", conv, raw).ok();
+                reg = conv;
+            } else if param_llvm_ty == "i64" {
                 reg = raw;
             } else if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
                 // 2026-07-01: Query universe for box_op. If available, use
@@ -1421,7 +1470,13 @@ impl LlvmBackend {
             // Same approach as emit_definition — keeps signature and boxing
             // consistent through universe data.
             let param_llvm_ty = self.llvm_type(t);
-            if param_llvm_ty == "i64" {
+            // 2026-07-10: Phase 1 — struct params are passed by pointer (ptr).
+            // Convert to i64 via ptrtoint for storage in param_slots.
+            if param_llvm_ty == "ptr" {
+                let ac = format!("%ac{}", i);
+                writeln!(out, "  {} = ptrtoint ptr {} to i64", ac, raw).ok();
+                conv = ac;
+            } else if param_llvm_ty == "i64" {
                 conv = raw;
             } else if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
                 let ac = format!("%ac{}", i);

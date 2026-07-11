@@ -10541,6 +10541,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Int".into())),
             body: crate::ast::TypeDefBody {
+                slots: vec![],
                 bindings: vec![],
                 operators: vec![],
             constraints: vec![Expr::Gt(
@@ -10590,6 +10591,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Int".into())),
             body: crate::ast::TypeDefBody {
+                slots: vec![],
                 bindings: vec![],
                 operators: vec![],
             constraints: vec![Expr::Gt(
@@ -10805,6 +10807,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![TypeBinding {
                     name: "InsertAt".into(),
                     params: vec![],
@@ -10884,6 +10887,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![TypeBinding {
                     name: "ExtractFrom".into(),
                     params: vec![],
@@ -10966,6 +10970,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![TypeBinding {
                     name: "InsertAt".into(),
                     params: vec![],

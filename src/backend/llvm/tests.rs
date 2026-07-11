@@ -2666,6 +2666,74 @@ let spec = crate::target_spec::TargetSpec {
         assert_eq!(backend.ctx.struct_types["Point"].len(), 2);
     }
 
+    #[test]
+    fn test_type_with_slots_populates_struct_types() {
+        let program = Program {
+            items: vec![
+                TopLevel::TypeDef(Box::new(TypeDef {
+                    name: "MyBuffer".to_string(),
+                    type_params: vec![],
+                    bit_range: None,
+                    base: Box::new(Expr::TypeRef("Bits".into())),
+                    body: TypeDefBody {
+                        slots: vec![
+                            TypeSlot { name: "ptr".into(), ty: Type::Applied("Ptr".into(), vec![Type::Custom("UInt8".into())]), span: None },
+                            TypeSlot { name: "len".into(), ty: Type::Custom("Int".into()), span: None },
+                        ],
+                        bindings: vec![],
+                        operators: vec![], constraints: vec![],
+                        span: None,
+                    },
+                    span: None,
+                })),
+            ],
+            ..empty_program()
+        };
+        let tu = crate::type_universe::TypeUniverse::build(&program);
+        let mut backend = LlvmBackend::new().with_type_universe(tu);
+        let output = backend.generate(&program);
+        assert!(output.contains("ModuleID"), "Output should be valid IR");
+        assert!(backend.ctx.struct_types.contains_key("MyBuffer"),
+            "Type with slots 'MyBuffer' should be registered in struct_types");
+        assert_eq!(backend.ctx.struct_types["MyBuffer"].len(), 2);
+    }
+
+    #[test]
+    fn test_struct_auto_registered_in_type_universe() {
+        let program = Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Point".to_string(),
+                    type_params: vec![],
+                    parent: None,
+                    fields: vec![
+                        StructField { name: "x".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                        StructField { name: "y".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                    ],
+                    transactions: vec![],
+                    view_html: None,
+                    span: None,
+                    modifiers: vec![],
+                    variants: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let tu = crate::type_universe::TypeUniverse::build(&program);
+        let mut backend = LlvmBackend::new().with_type_universe(tu);
+        let _output = backend.generate(&program);
+        // Struct should be auto-registered in TypeUniverse
+        if let Some(ref universe) = backend.ctx.type_universe {
+            assert!(universe.types.contains_key("Point"),
+                "Struct 'Point' should be auto-registered in TypeUniverse");
+            let rt = universe.types.get("Point").unwrap();
+            assert_eq!(rt.bytes, 16); // two Int fields, 8 bytes each
+            assert_eq!(rt.base, "Bits");
+        } else {
+            panic!("TypeUniverse should exist after generate");
+        }
+    }
+
     fn make_point_program(body: Vec<Statement>) -> Program {
         Program {
             items: vec![
@@ -2813,6 +2881,227 @@ let spec = crate::target_spec::TargetSpec {
             ..empty_program()
         };
         backend.generate(&program);
+    }
+
+    // ── Phase 1: Struct Type Declarations ──────────────────────────
+
+    #[test]
+    fn test_struct_type_declaration_in_ir() {
+        // Phase 1: Verify that declare_struct_types() emits
+        // %Point = type { i64, i64 } in the generated LLVM IR.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Point".to_string(),
+                    type_params: vec![],
+                    parent: None,
+                    fields: vec![
+                        StructField { name: "x".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                        StructField { name: "y".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                    ],
+                    transactions: vec![],
+                    view_html: None, span: None, modifiers: vec![], variants: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("%Point = type { i64, i64 }"),
+            "Struct type declaration should appear in IR.\nGot:\n{}", output);
+    }
+
+    #[test]
+    fn test_struct_param_uses_ptr_in_signature() {
+        // Phase 1: Verify that export defn with struct-typed param uses
+        // "ptr" in the LLVM function signature instead of "i64".
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Point".to_string(),
+                    type_params: vec![],
+                    parent: None,
+                    fields: vec![
+                        StructField { name: "x".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                        StructField { name: "y".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                    ],
+                    transactions: vec![],
+                    view_html: None, span: None, modifiers: vec![], variants: vec![],
+                }),
+                TopLevel::Definition(Definition {
+                    name: "process".to_string(),
+                    type_params: vec![],
+                    parameters: vec![("p".to_string(), Type::Custom("Point".to_string()))],
+                    outputs: vec![Type::Custom("Bool".to_string())],
+                    output_type: None, output_names: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None, watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None },
+                    ],
+                    is_lambda: false,
+                    // Bare #export (no explicit name) — no wrapper emitted, inner keeps own name.
+                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Mandatory }],
+                    annotations: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // The inner definition should have ptr for the struct param
+        assert!(output.contains("define i64 @process(ptr noalias nocapture align 8 %state, ptr %arg0"),
+            "Struct param should be 'ptr' in function signature.\nGot:\n{}", output);
+    }
+
+    #[test]
+    fn test_struct_param_ptrtoint_at_entry() {
+        // Phase 1: Verify that ptrtoint is emitted for struct params at entry.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Point".to_string(),
+                    type_params: vec![],
+                    parent: None,
+                    fields: vec![
+                        StructField { name: "x".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                        StructField { name: "y".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                    ],
+                    transactions: vec![],
+                    view_html: None, span: None, modifiers: vec![], variants: vec![],
+                }),
+                TopLevel::Definition(Definition {
+                    name: "process".to_string(),
+                    type_params: vec![],
+                    parameters: vec![("p".to_string(), Type::Custom("Point".to_string()))],
+                    outputs: vec![Type::Custom("Bool".to_string())],
+                    output_type: None, output_names: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None, watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None },
+                    ],
+                    is_lambda: false,
+                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Mandatory }],
+                    annotations: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("ptrtoint ptr %arg0 to i64"),
+            "Struct param should have ptrtoint at entry.\nGot:\n{}", output);
+    }
+
+    #[test]
+    fn test_struct_param_field_access_works() {
+        // Phase 1: Verify that field access on a struct param works
+        // (ptrtoint → inttoptr → GEP → load path, eliminated by optimizer).
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Point".to_string(),
+                    type_params: vec![],
+                    parent: None,
+                    fields: vec![
+                        StructField { name: "x".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                        StructField { name: "y".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public },
+                    ],
+                    transactions: vec![],
+                    view_html: None, span: None, modifiers: vec![], variants: vec![],
+                }),
+                TopLevel::Definition(Definition {
+                    name: "get_x".to_string(),
+                    type_params: vec![],
+                    parameters: vec![("p".to_string(), Type::Custom("Point".to_string()))],
+                    outputs: vec![Type::Custom("Int".to_string())],
+                    output_type: None, output_names: vec![],
+                    contract: Contract {
+                        pre_condition: Expr::Bool(true),
+                        post_condition: Expr::Bool(true),
+                        span: None, watchdog: None,
+                    },
+                    body: vec![
+                        Statement::Term { values: vec![Some(Expr::FieldAccess(
+                            Box::new(Expr::Identifier("p".to_string())),
+                            "x".to_string(),
+                        ))], modifiers: vec![], swan_song: None },
+                    ],
+                    is_lambda: false,
+                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::String("get_x".to_string()), mode: AnnotationMode::Mandatory }],
+                    annotations: vec![],
+                    variant_bodies: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        // The field access should emit inttoptr + GEP (even though the optimizer
+        // will eliminate the ptrtoint→inttoptr round-trip; this tests that the
+        // existing field access code path works with struct-typed params).
+        assert!(output.contains("getelementptr"),
+            "Field access on struct param should emit GEP.\nGot:\n{}", output);
+        // Should NOT fail with "field 'x' not found on object"
+        assert!(!output.contains("not found on object"),
+            "Field access on struct param should succeed.\nGot:\n{}", output);
+    }
+
+    #[test]
+    fn test_struct_type_declaration_empty_struct() {
+        // Phase 1: Empty struct emits %Empty = type {}
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Empty".to_string(),
+                    type_params: vec![],
+                    parent: None,
+                    fields: vec![],
+                    transactions: vec![],
+                    view_html: None, span: None, modifiers: vec![], variants: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        assert!(output.contains("%Empty = type {}"),
+            "Empty struct should emit %Empty = type {{}}.\nGot:\n{}", output);
+    }
+
+    #[test]
+    fn test_struct_type_declaration_sorted_order() {
+        // Phase 1: Struct declarations should be sorted by name.
+        let mut backend = LlvmBackend::new();
+        let program = Program {
+            items: vec![
+                TopLevel::Struct(StructDefinition {
+                    name: "Zebra".to_string(), type_params: vec![], parent: None,
+                    fields: vec![StructField { name: "s".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public }],
+                    transactions: vec![], view_html: None, span: None, modifiers: vec![], variants: vec![],
+                }),
+                TopLevel::Struct(StructDefinition {
+                    name: "Alpha".to_string(), type_params: vec![], parent: None,
+                    fields: vec![StructField { name: "s".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Public }],
+                    transactions: vec![], view_html: None, span: None, modifiers: vec![], variants: vec![],
+                }),
+            ],
+            ..empty_program()
+        };
+        let output = backend.generate(&program);
+        let alpha_pos = output.find("%Alpha = type { i64 }").unwrap();
+        let zebra_pos = output.find("%Zebra = type { i64 }").unwrap();
+        assert!(alpha_pos < zebra_pos,
+            "Struct declarations should be sorted: Alpha before Zebra. Got:\n{}", output);
     }
 
     #[test]
@@ -5376,6 +5665,7 @@ let spec = crate::target_spec::TargetSpec {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Int".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![],
                 operators: vec![],
             constraints: vec![Expr::Gt(
@@ -5763,7 +6053,7 @@ let spec = crate::target_spec::TargetSpec {
                     type_params: vec![],
                     base: Box::new(Expr::Identifier("Int".into())),
                     bit_range: None,
-                    body: TypeDefBody { bindings: vec![], operators: vec![], constraints: vec![], span: None },
+                    body: TypeDefBody { slots: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None },
                     span: None,
                 })),
             ],

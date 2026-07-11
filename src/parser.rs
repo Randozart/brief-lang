@@ -1346,6 +1346,69 @@ impl<'a> Parser<'a> {
                 Ok(wrap_test(TopLevel::Transaction(txn), &test_groups))
             }
 
+            // ── Phase 4: `export` keyword ─────────────────────
+            // `export defn` / `export("name") defn` replaces `#export` annotation.
+            // `export txn` for callable (non-reactive) transactions.
+            Some(Ok(Token::Export)) => {
+                self.advance(); // consume export keyword
+                // Parse optional ("name") for explicit export symbol
+                let export_name = if let Some(Ok(Token::LParen)) = self.current_token() {
+                    self.advance();
+                    let name = self.expect_string()?;
+                    self.expect(Token::RParen)?;
+                    name
+                } else {
+                    String::new()
+                };
+                let export_annotation = Annotation {
+                    name: "export".to_string(),
+                    value: if export_name.is_empty() {
+                        Expr::Bool(true)
+                    } else {
+                        Expr::String(export_name)
+                    },
+                    mode: AnnotationMode::Mandatory,
+                };
+                // Reject `export rct txn` — reactive txns have no single-entry FFI.
+                if matches!(self.current_token(), Some(Ok(Token::Rct))) {
+                    return self.spanned_err(
+                        "export rct txn is not supported; use `export txn` for callable transactions".to_string()
+                    );
+                }
+                match self.current_token().cloned() {
+                    Some(Ok(Token::Defn)) => {
+                        let mut defn = self.parse_definition()?;
+                        let mut merged = modifiers.clone();
+                        merged.push(export_annotation);
+                        defn.modifiers = merged;
+                        Ok(wrap_test(TopLevel::Definition(defn), &test_groups))
+                    }
+                    Some(Ok(Token::Txn)) | Some(Ok(Token::Async)) => {
+                        let mut txn = self.parse_transaction()?;
+                        let mut merged = modifiers.clone();
+                        merged.push(export_annotation);
+                        txn.modifiers = merged;
+                        Ok(wrap_test(TopLevel::Transaction(txn), &test_groups))
+                    }
+                    Some(Ok(tok)) => {
+                        return self.spanned_err(format!(
+                            "expected 'defn' or 'txn' after export keyword, got '{}'", tok
+                        ));
+                    }
+                    Some(Err(_)) => {
+                        return self.spanned_err(
+                            "expected 'defn' or 'txn' after export keyword".to_string()
+                        );
+                    }
+                    None => {
+                        return Err(SyntaxError::UnexpectedEOF {
+                            expected: "defn or txn after export keyword".to_string(),
+                            span,
+                        });
+                    }
+                }
+            }
+
             Some(Ok(Token::Defn)) => {
                 let mut defn = self.parse_definition()?;
                 defn.modifiers = modifiers;
@@ -3432,6 +3495,7 @@ impl<'a> Parser<'a> {
         // Parse body `{ ... }`
         self.expect(Token::LBrace)?;
 
+        let mut slots = Vec::new();
         let mut bindings = Vec::new();
         let mut constraints = Vec::new();
         let mut operators = Vec::new();
@@ -3483,8 +3547,8 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            // Parse a binding: ident [ ( params ) ]? = expr ;
-            let binding_name = self.expect_identifier()?;
+            // Parse a slot or binding: ident : Type ;  OR  ident [ ( params ) ]? = expr ;
+            let item_name = self.expect_identifier()?;
 
             // Check for optional params: Name(param1, param2)
             let params = if matches!(self.current_token(), Some(Ok(Token::LParen))) {
@@ -3504,6 +3568,30 @@ impl<'a> Parser<'a> {
                 Vec::new()
             };
 
+            // 2026-07-11: Type slot syntax — `name : Type ;` declares a structural field.
+            // Distinguish from bindings by checking for `:` vs `=` / `<~`.
+            if matches!(self.current_token(), Some(Ok(Token::Colon))) {
+                // Slot declaration: ident : Type ;
+                if !params.is_empty() {
+                    return self.spanned_err("Slot declarations do not support parameters".to_string());
+                }
+                self.advance(); // consume `:`
+                let ty = self.parse_type()?;
+                // Expect semicolon after slot
+                if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                    self.advance();
+                } else {
+                    return self.spanned_err("Expected ';' after type slot".to_string());
+                }
+                slots.push(TypeSlot {
+                    name: item_name,
+                    ty,
+                    span: self.current_span(),
+                });
+                continue;
+            }
+
+            // Otherwise it's a binding: ident [ ( params ) ]? = expr ; or ident [ ( params ) ]? <~ expr ;
             // Accept `=` or `<~` (Annotation Arrow) as the binding separator
             if matches!(self.current_token(), Some(Ok(Token::TildeArrow))) {
                 self.advance(); // consume <~
@@ -3514,7 +3602,7 @@ impl<'a> Parser<'a> {
 
             // Create binding
             bindings.push(TypeBinding {
-                name: binding_name,
+                name: item_name,
                 params,
                 value: Box::new(value),
                 span: self.current_span(),
@@ -3539,6 +3627,7 @@ impl<'a> Parser<'a> {
             base,
             bit_range,
             body: TypeDefBody {
+                slots,
                 bindings,
                 operators,
                 constraints,
@@ -9170,6 +9259,7 @@ struct MultiSliceResult {
 mod parser_tests {
     use super::*;
     use crate::ast::LayoutConstraint;
+    use crate::ast::TypeSlot;
 
     // ── Ptr/PtrN LayoutPtr parsing tests ──────────────────────────
 
@@ -11460,6 +11550,84 @@ defn fallback() -> Int { term 0; };
         }
     }
 
+    // ── Phase 4: `export` keyword tests ────────────────────────────
+
+    #[test]
+    fn test_parse_export_defn_basic() {
+        // export defn without explicit name — bare export
+        let src = "export defn add(x: Int) -> Int { term x + 1; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Definition(d) => {
+                assert_eq!(d.name, "add");
+                assert_eq!(d.modifiers.len(), 1);
+                assert_eq!(d.modifiers[0].name, "export");
+                assert_eq!(d.modifiers[0].value, Expr::Bool(true));
+            }
+            other => panic!("Expected Definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_export_defn_with_name() {
+        // export("my_add") defn with explicit export symbol
+        let src = r#"export("my_add_api") defn add(x: Int) -> Int { term x + 1; };"#;
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Definition(d) => {
+                assert_eq!(d.name, "add");
+                assert_eq!(d.modifiers.len(), 1);
+                assert_eq!(d.modifiers[0].name, "export");
+                assert_eq!(d.modifiers[0].value, Expr::String("my_add_api".to_string()));
+            }
+            other => panic!("Expected Definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_export_txn_callable() {
+        // export txn — callable transaction with convergence loop
+        let src = "export txn count(n: Int, i: Int) [i < n][i == n] -> Int { term i; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Transaction(t) => {
+                assert_eq!(t.name, "count");
+                assert!(!t.is_reactive, "export txn must be non-reactive");
+                assert_eq!(t.modifiers.len(), 1);
+                assert_eq!(t.modifiers[0].name, "export");
+            }
+            other => panic!("Expected Transaction, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_hash_export_still_works() {
+        // Backward compat: #export defn still parses (Phase 4 is additive)
+        let src = "#export defn add(x: Int) -> Int { term x + 1; };";
+        let mut parser = Parser::new(src);
+        let prog = parser.parse().unwrap();
+        match &prog.items[0] {
+            TopLevel::Definition(d) => {
+                assert_eq!(d.name, "add");
+                assert!(d.modifiers.iter().any(|m| m.name == "export"),
+                    "#export should produce export annotation");
+            }
+            other => panic!("Expected Definition, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_export_rct_txn_rejected() {
+        // export rct txn is not supported — must produce error
+        let src = "export rct txn tick [x < 100][x == 100] { };";
+        let mut parser = Parser::new(src);
+        let result = parser.parse();
+        assert!(result.is_err(), "export rct txn should be rejected");
+    }
+
     // ── #fuzz pragma tests ─────────────────────────────────────────
 
     #[test]
@@ -11576,6 +11744,91 @@ defn fallback() -> Int { term 0; };
         }
     }
 } // end parser_tests
+
+// ── Type slot syntax tests ──────────────────────────────────────────
+
+#[test]
+fn test_parse_typedef_slot_syntax_proper() {
+    let s = "type MyStruct <: Bits { x: Int; y: Int; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse slot syntax: {:?}", result.err());
+    if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+        assert_eq!(td.name, "MyStruct");
+        assert_eq!(td.body.slots.len(), 2);
+        assert_eq!(td.body.slots[0].name, "x");
+        assert_eq!(td.body.slots[1].name, "y");
+    } else {
+        panic!("Expected TypeDef");
+    }
+}
+
+#[test]
+fn test_parse_typedef_slot_syntax_with_param_type_proper() {
+    let s = "type MyStruct <: Bits { ptr: Ptr<UInt8>; len: Int; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse slot with Ptr<UInt8>: {:?}", result.err());
+    if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+        assert_eq!(td.body.slots.len(), 2);
+        assert_eq!(td.body.slots[0].name, "ptr");
+        assert_eq!(td.body.slots[1].name, "len");
+        assert!(matches!(&td.body.slots[0].ty, crate::ast::Type::Applied(name, _) if name == "Ptr"));
+    } else {
+        panic!("Expected TypeDef");
+    }
+}
+
+#[test]
+fn test_parse_typedef_mixed_slots_and_bindings_proper() {
+    let s = "type MyStruct <: Bits { x: Int; y: Int; bytes <~ 16; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse mixed slots+bindings: {:?}", result.err());
+    if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+        assert_eq!(td.body.slots.len(), 2);
+        assert_eq!(td.body.bindings.len(), 1);
+        assert_eq!(td.body.bindings[0].name, "bytes");
+    } else {
+        panic!("Expected TypeDef");
+    }
+}
+
+#[test]
+fn test_parse_typedef_slot_error_with_params_proper() {
+    let s = "type MyStruct <: Bits { x(a): Int; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_err(), "Slot with params should fail to parse");
+}
+
+#[test]
+fn test_parse_typedef_slot_between_bindings_and_constraints_proper() {
+    let s = "type MyStruct <: Bits { bytes <~ 16; x: Int; [x > 0] }";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse slot between binding and constraint: {:?}", result.err());
+    if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+        assert_eq!(td.body.slots.len(), 1);
+        assert_eq!(td.body.bindings.len(), 1);
+        assert_eq!(td.body.constraints.len(), 1);
+    } else {
+        panic!("Expected TypeDef");
+    }
+}
+
+#[test]
+fn test_parse_typedef_bits_bitrange_again() {
+    let s = "type MyInt <: Bits @/0..63 { Bytes = 8; };";
+    let mut parser = Parser::new(s);
+    let result = parser.parse();
+    assert!(result.is_ok(), "Should parse Bits @/0..63 base: {:?}", result.err());
+    if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
+        assert_eq!(td.bit_range, Some(crate::ast::BitRange::Range(0, 63)));
+    } else {
+        panic!("Expected TypeDef");
+    }
+}
 
 enum BracketElement {
     Start,
@@ -12049,19 +12302,6 @@ mod kani_full_tests {
         let mut parser = Parser::new(s);
         let result = parser.parse();
         assert!(result.is_ok(), "Should parse x @/0..7: {:?}", result.err());
-    }
-
-    #[test]
-    fn test_parse_typedef_bits_bitrange() {
-        let s = "type MyInt <: Bits @/0..63 { Bytes = 8; };";
-        let mut parser = Parser::new(s);
-        let result = parser.parse();
-        assert!(result.is_ok(), "Should parse Bits @/0..63 base: {:?}", result.err());
-        if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
-            assert_eq!(td.bit_range, Some(crate::ast::BitRange::Range(0, 63)));
-        } else {
-            panic!("Expected TypeDef");
-        }
     }
 
 } // end parser_tests

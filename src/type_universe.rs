@@ -221,7 +221,7 @@ impl TypeUniverse {
         };
         for item in &program.items {
             if let crate::ast::TopLevel::TypeDef(td) = item {
-                if let Some(resolved) = self.resolve_type_def(td) {
+                if let Some(resolved) = self.resolve_type_def(&td) {
                     let name = resolved.name.clone();
                     let mut resolved = resolved;
                     resolved.defining_module = "builtin".to_string();
@@ -377,6 +377,7 @@ impl TypeUniverse {
                 base: Box::new(Expr::TypeRef("Bits".into())),
                 bit_range: None,
                 body: crate::ast::TypeDefBody {
+                    slots: vec![],
                     bindings: vec![],
                     operators: vec![],
                     constraints: vec![],
@@ -483,20 +484,6 @@ impl TypeUniverse {
                 }
                 universe.melds.insert(key, meld.clone());
             }
-        }
-
-        // ── Phase 2G: Add struct_layout to String type ─────────
-        if let Some(rt) = universe.types.get_mut("String") {
-            rt.struct_layout = Some(StructLayout {
-                fields: vec![
-                    StructField { name: "ptr".into(), ty: crate::ast::Type::Applied("Ptr".into(), vec![crate::ast::Type::Bits(8)]), offset_bits: 0, size_bits: 64 },
-                    StructField { name: "len".into(), ty: crate::ast::Type::Bits(64), offset_bits: 64, size_bits: 64 },
-                    StructField { name: "codec".into(), ty: crate::ast::Type::Bits(8), offset_bits: 128, size_bits: 8 },
-                ],
-                packed: false,
-                total_bytes: 24,
-                alignment: 8,
-            });
         }
 
         universe
@@ -614,6 +601,33 @@ impl TypeUniverse {
                 });
             let key = (op_decl.rune, param_name);
             rt.operators.insert(key, op_decl.clone());
+        }
+
+        // 2026-07-11: Compute struct_layout from slot declarations.
+        // Slots declare how the type's bits are partitioned: `name: Type;`
+        // Each slot's offset is computed sequentially from the previous slot,
+        // using the slot type's byte size from the universe.
+        if !td.body.slots.is_empty() {
+            let mut offset_bits: u64 = 0;
+            let mut fields: Vec<StructField> = Vec::new();
+            for slot in &td.body.slots {
+                let slot_bytes = self.byte_size(&slot.ty).unwrap_or(8);
+                let slot_bits = slot_bytes * 8;
+                fields.push(StructField {
+                    name: slot.name.clone(),
+                    ty: slot.ty.clone(),
+                    offset_bits,
+                    size_bits: slot_bits,
+                });
+                offset_bits += slot_bits;
+            }
+            let total_bytes = if offset_bits == 0 { 0 } else { (offset_bits + 7) / 8 };
+            rt.struct_layout = Some(StructLayout {
+                fields,
+                packed: true,
+                total_bytes,
+                alignment: rt.alignment,
+            });
         }
 
         Some(rt)
@@ -1169,7 +1183,7 @@ pub fn is_mutable_location(expr: &Expr) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Comment, DispatchMode, Expr, MeldDeclaration, OpDeclaration, OpRune, StrictMode, TopLevel, TypeBinding, TypeDef, TypeDefBody, Program};
+    use crate::ast::{Comment, DispatchMode, Expr, MeldDeclaration, OpDeclaration, OpRune, StrictMode, TopLevel, TypeBinding, TypeDef, TypeDefBody, TypeSlot, Program};
 
     fn make_program(items: Vec<TopLevel>) -> Program {
         Program {
@@ -1194,6 +1208,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
                     TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
@@ -1212,6 +1227,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                     TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
@@ -1262,6 +1278,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
                     TypeBinding { name: "ElementType".into(), params: vec![], value: Box::new(Expr::TypeRef("T".into())), span: None },
@@ -1278,6 +1295,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("BaseList".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(false)), span: None },
                 ],
@@ -1306,6 +1324,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(false)), span: None },
                 ],
@@ -1328,6 +1347,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("U32".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Volatile".into(), params: vec![], value: Box::new(Expr::Bool(true)), span: None },
                 ],
@@ -1354,6 +1374,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
                 ],
@@ -1376,6 +1397,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                     TypeBinding { name: "Endian".into(), params: vec![], value: Box::new(Expr::Identifier("Big".into())), span: None },
@@ -1398,6 +1420,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("String".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
                 ],
@@ -1420,6 +1443,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Int".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![],
                 operators: vec![],
             constraints: vec![Expr::Gt(
@@ -1445,6 +1469,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "InsertAt".into(), params: vec![], value: Box::new(Expr::Identifier("append".into())), span: None },
                     TypeBinding { name: "ExtractFrom".into(), params: vec![], value: Box::new(Expr::Identifier("shift".into())), span: None },
@@ -1470,6 +1495,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "InsertAt".into(), params: vec![], value: Box::new(Expr::Identifier("custom_strat".into())), span: None },
                 ],
@@ -1507,6 +1533,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                 ],
@@ -1539,6 +1566,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
                 ],
@@ -1562,6 +1590,7 @@ mod tests {
             bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                 ],
@@ -1596,6 +1625,7 @@ mod tests {
             name: "TestType".into(), type_params: vec![], bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None }],
                 operators: vec![OpDeclaration {
                     rune: OpRune::Add,
@@ -1684,5 +1714,91 @@ mod tests {
     fn test_is_mutable_location_literal_returns_false() {
         assert!(!is_mutable_location(&Expr::Integer(42)));
         assert!(!is_mutable_location(&Expr::Bool(true)));
+    }
+
+    // ── Type slot syntax tests ─────────────────────────────────
+
+    #[test]
+    fn test_slot_struct_layout_computed() {
+        let td = TypeDef {
+            name: "MyPoint".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Bits".into())),
+            body: TypeDefBody {
+                slots: vec![
+                    TypeSlot { name: "x".into(), ty: crate::ast::Type::Custom("Int".into()), span: None },
+                    TypeSlot { name: "y".into(), ty: crate::ast::Type::Custom("Int".into()), span: None },
+                ],
+                bindings: vec![],
+                operators: vec![], constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        let rt = universe.types.get("MyPoint").expect("MyPoint should be resolved");
+        let layout = rt.struct_layout.as_ref().expect("MyPoint should have struct_layout");
+        assert_eq!(layout.fields.len(), 2);
+        assert_eq!(layout.fields[0].name, "x");
+        assert_eq!(layout.fields[0].offset_bits, 0);
+        assert_eq!(layout.fields[0].size_bits, 64);
+        assert_eq!(layout.fields[1].name, "y");
+        assert_eq!(layout.fields[1].offset_bits, 64);
+        assert_eq!(layout.fields[1].size_bits, 64);
+        assert!(layout.packed);
+    }
+
+    #[test]
+    fn test_slot_struct_layout_with_ptr() {
+        let td = TypeDef {
+            name: "CBuffer".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Bits".into())),
+            body: TypeDefBody {
+                slots: vec![
+                    TypeSlot { name: "ptr".into(), ty: crate::ast::Type::Applied("Ptr".into(), vec![crate::ast::Type::Custom("UInt8".into())]), span: None },
+                    TypeSlot { name: "len".into(), ty: crate::ast::Type::Custom("Int".into()), span: None },
+                ],
+                bindings: vec![],
+                operators: vec![], constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        let rt = universe.types.get("CBuffer").expect("CBuffer should be resolved");
+        let layout = rt.struct_layout.as_ref().expect("CBuffer should have struct_layout");
+        assert_eq!(layout.fields.len(), 2);
+        assert_eq!(layout.fields[0].size_bits, 64);
+        assert_eq!(layout.fields[0].offset_bits, 0);
+        assert_eq!(layout.fields[1].size_bits, 64);
+        assert_eq!(layout.fields[1].offset_bits, 64);
+    }
+
+    #[test]
+    fn test_no_slots_no_struct_layout() {
+        let td = TypeDef {
+            name: "U64".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Bits".into())),
+            body: TypeDefBody {
+                slots: vec![],
+                bindings: vec![
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
+                ],
+                operators: vec![], constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
+        let universe = TypeUniverse::build(&program);
+        let rt = universe.types.get("U64").expect("U64 should be resolved");
+        assert!(rt.struct_layout.is_none(), "U64 without slots should have no struct_layout");
     }
 }

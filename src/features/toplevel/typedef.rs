@@ -134,6 +134,7 @@ mod tests {
     #[test]
     fn test_type_def_body_with_bindings() {
         let body = TypeDefBody {
+            slots: vec![],
             bindings: vec![
                 make_binding("Bytes", Expr::Integer(8)),
                 make_binding("Alignment", Expr::Integer(8)),
@@ -153,6 +154,7 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             bit_range: None,
             body: TypeDefBody {
+                slots: vec![],
                 bindings: vec![
                     make_binding("Bytes", Expr::Integer(8)),
                     make_binding("Alignment", Expr::Integer(8)),
@@ -227,6 +229,7 @@ mod kani_full_tests {
     #[kani::proof]
     fn verify_type_def_body_with_bindings() {
         let body = TypeDefBody {
+            slots: vec![],
             bindings: vec![TypeBinding {
                 name: "Bytes".into(),
                 params: vec![],

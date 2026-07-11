@@ -9,10 +9,17 @@
 // The first argument is the Brief state pointer (opaque).
 // Call __brief_init_state() once before any export to initialize.
 
+#[repr(C)]
+struct CBuffer {
+    ptr: i64,
+    len: i64,
+}
+
 extern "C" {
     fn __brief_init_state() -> *mut std::ffi::c_void;
     fn add(state: *mut std::ffi::c_void, a: i64, b: i64) -> i64;
     fn multiply(state: *mut std::ffi::c_void, a: i64, b: i64) -> i64;
+    fn first_len(state: *mut std::ffi::c_void, buf: *const CBuffer) -> i64;
 }
 
 fn main() {
@@ -28,6 +35,11 @@ fn main() {
     let product = unsafe { multiply(state, 6, 7) };
     println!("  multiply(6, 7) = {}", product);
     assert_eq!(product, 42);
+
+    let buf = CBuffer { ptr: 100, len: 200 };
+    let first = unsafe { first_len(state, &buf as *const CBuffer) };
+    println!("  first_len({{ptr:100, len:200}}) = {}", first);
+    assert_eq!(first, 300);
 
     println!("═══ All bridge calls passed ═══");
 }
