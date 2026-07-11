@@ -126,6 +126,9 @@ impl PartialEq for Value {
             (Value::Bool(a), Value::Bits(b)) | (Value::Bits(b), Value::Bool(a)) => {
                 b.len() >= 1 && *a == (b[0] != 0)
             }
+            (Value::Char(a), Value::Bits(b)) | (Value::Bits(b), Value::Char(a)) => {
+                b.len() >= 4 && *a == char::from_u32(u32::from_le_bytes(b[..4].try_into().unwrap_or([0; 4]))).unwrap_or('\0')
+            }
             (Value::Bits(a), Value::Bits(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
@@ -3138,7 +3141,7 @@ impl Interpreter {
                     Err(e) => Err(RuntimeError::TypeMismatch(format!("Invalid regex: {}", e))),
                 }
             }
-            Expr::Char(v) => Ok(Value::Char(*v)),
+            Expr::Char(v) => Ok(Value::Bits((*v as u32).to_le_bytes().to_vec())),
             Expr::Bool(v) => Ok(Value::Bits(vec![if *v { 1u8 } else { 0u8 }])),
             Expr::Term => self.state.get("term").cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable("term".to_string())),
@@ -9533,7 +9536,10 @@ mod tests {
                     Box::new(Expr::Integer(10)))
             ))],
         };
-        assert!(i.eval_expr(&expr).is_err());
+        // Int is atomic — decomposes to chars, applies mask, reconstructs.
+        // '4'=52 > 10, '2'=50 > 10 → both kept → Int(42)
+        let result = i.eval_expr(&expr).unwrap();
+        assert_eq!(result, Value::Int(42));
     }
 
     #[test]

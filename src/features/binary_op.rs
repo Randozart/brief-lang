@@ -41,10 +41,12 @@ impl BinaryOpExpr {
     }
 }
 
-/// Convert Value::Bits to Value::Int for legacy typed dispatch.
-/// Temporary shim — deleted once all ops dispatch through properties.
-/// 2026-07-11: Phase 8C.0.
-fn bits_to_int_fallback(v: Value) -> Value {
+/// Normalize numeric-like values to Value::Int for the legacy typed dispatch.
+/// Both Value::Bits and Value::Char are converted to i64 so the 50-arm match
+/// (Value::Int × Value::Int) can handle them. Temporary shim — deleted once
+/// all ops dispatch through properties.
+/// 2026-07-11: Phase 8C.
+fn legacy_normalize(v: Value) -> Value {
     match v {
         Value::Bits(b) => {
             let mut arr = [0u8; 8];
@@ -98,10 +100,9 @@ impl ExprEval for BinaryOpExpr {
             return result;
         }
 
-        // Fallback: convert Bits to Int for legacy typed dispatch.
-        // Temporary shim — deleted once all ops dispatch through properties.
-        let l = bits_to_int_fallback(l);
-        let r = bits_to_int_fallback(r);
+        // Fallback: normalize numeric-like values to Int for legacy dispatch.
+        let l = legacy_normalize(l);
+        let r = legacy_normalize(r);
 
         use BinaryOpKind::*;
         Ok(match (self.kind, &l, &r) {
@@ -143,16 +144,28 @@ impl ExprEval for BinaryOpExpr {
             (Mod,  Value::Int(a), Value::Int(b)) => Value::Int(a % b),
             (Eq,   Value::Int(a), Value::Int(b)) => Value::Bool(a == b),
             (Eq,   Value::Char(a), Value::Char(b)) => Value::Bool(a == b),
+            (Eq,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) == *b),
+            (Eq,   Value::Int(a), Value::Char(b)) => Value::Bool(*a == (*b as i64)),
             (Ne,   Value::Int(a), Value::Int(b)) => Value::Bool(a != b),
             (Ne,   Value::Char(a), Value::Char(b)) => Value::Bool(a != b),
+            (Ne,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) != *b),
+            (Ne,   Value::Int(a), Value::Char(b)) => Value::Bool(*a != (*b as i64)),
             (Lt,   Value::Int(a), Value::Int(b)) => Value::Bool(a < b),
             (Lt,   Value::Char(a), Value::Char(b)) => Value::Bool(a < b),
+            (Lt,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) < *b),
+            (Lt,   Value::Int(a), Value::Char(b)) => Value::Bool(*a < (*b as i64)),
             (Le,   Value::Int(a), Value::Int(b)) => Value::Bool(a <= b),
             (Le,   Value::Char(a), Value::Char(b)) => Value::Bool(a <= b),
+            (Le,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) <= *b),
+            (Le,   Value::Int(a), Value::Char(b)) => Value::Bool(*a <= (*b as i64)),
             (Gt,   Value::Int(a), Value::Int(b)) => Value::Bool(a > b),
             (Gt,   Value::Char(a), Value::Char(b)) => Value::Bool(a > b),
+            (Gt,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) > *b),
+            (Gt,   Value::Int(a), Value::Char(b)) => Value::Bool(*a > (*b as i64)),
             (Ge,   Value::Int(a), Value::Int(b)) => Value::Bool(a >= b),
             (Ge,   Value::Char(a), Value::Char(b)) => Value::Bool(a >= b),
+            (Ge,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) >= *b),
+            (Ge,   Value::Int(a), Value::Char(b)) => Value::Bool(*a >= (*b as i64)),
             (And,  Value::Bool(a), Value::Bool(b)) => Value::Bool(*a && *b),
             (Or,   Value::Bool(a), Value::Bool(b)) => Value::Bool(*a || *b),
             (BitAnd, Value::Int(a), Value::Int(b)) => Value::Int(a & b),
