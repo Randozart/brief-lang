@@ -41,6 +41,21 @@ impl BinaryOpExpr {
     }
 }
 
+/// Convert Value::Bits to Value::Int for legacy typed dispatch.
+/// Temporary shim — deleted once all ops dispatch through properties.
+/// 2026-07-11: Phase 8C.0.
+fn bits_to_int_fallback(v: Value) -> Value {
+    match v {
+        Value::Bits(b) => {
+            let mut arr = [0u8; 8];
+            let copy_len = b.len().min(8);
+            arr[..copy_len].copy_from_slice(&b[..copy_len]);
+            Value::Int(i64::from_le_bytes(arr))
+        }
+        other => other,
+    }
+}
+
 /// Try to dispatch a binary op through property-based intrinsic lookup.
 /// Both operands must be Value::Bits and the expected type must have an
 /// operator binding. Returns None to fall back to legacy typed dispatch.
@@ -82,6 +97,11 @@ impl ExprEval for BinaryOpExpr {
         if let Some(result) = try_bits_dispatch(&l, &r, self.kind_name(), ctx) {
             return result;
         }
+
+        // Fallback: convert Bits to Int for legacy typed dispatch.
+        // Temporary shim — deleted once all ops dispatch through properties.
+        let l = bits_to_int_fallback(l);
+        let r = bits_to_int_fallback(r);
 
         use BinaryOpKind::*;
         Ok(match (self.kind, &l, &r) {

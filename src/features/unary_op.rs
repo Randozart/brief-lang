@@ -50,6 +50,17 @@ impl ExprEval for UnaryOpExpr {
             return result;
         }
 
+        // Fallback: convert Bits to Int for legacy typed dispatch.
+        let v = match v {
+            Value::Bits(b) => {
+                let mut arr = [0u8; 8];
+                let copy_len = b.len().min(8);
+                arr[..copy_len].copy_from_slice(&b[..copy_len]);
+                Value::Int(i64::from_le_bytes(arr))
+            }
+            other => other,
+        };
+
         use UnaryOpKind::*;
         Ok(match (self.kind, v) {
             (Neg,    Value::Int(a)) => Value::Int(-a),
