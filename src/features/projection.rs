@@ -30,7 +30,9 @@ impl ExprEval for ProjectionExpr {
         };
         match &self.target {
             ProjectionTarget::Size => match &source_val {
-                Value::Int(_) | Value::Bits(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
+                Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
+                // 2026-07-11: Bits from Expr::String carry UTF-8 bytes; return byte length.
+                Value::Bits(d) => Ok(Value::Int(d.len() as i64)),
                 Value::List(items) => Ok(Value::Int(items.len() as i64)),
                 Value::Tuple(items) => Ok(Value::Int(items.len() as i64)),
                 Value::String(s) => Ok(Value::Int(s.len() as i64)),
@@ -171,7 +173,8 @@ impl ExprEval for ProjectionExpr {
                 Value::HashMap(m) => m.is_empty(),
                 Value::HashSet(s) => s.is_empty(),
                 Value::String(s) => s.is_empty(),
-                _ => return Err(RuntimeError::TypeMismatch("IsEmpty requires List, Tuple, HashMap, HashSet, or String".into())),
+                Value::Bits(d) => d.is_empty(),
+                _ => return Err(RuntimeError::TypeMismatch("IsEmpty requires List, Tuple, HashMap, HashSet, String, or Bits".into())),
             })),
             ProjectionTarget::Get(key_expr) => {
                 let key_val = ctx.eval_expr(key_expr)?;

@@ -159,9 +159,15 @@ impl ExprEval for ListIndexExpr {
             Some(i) => return Err(RuntimeError::TypeMismatch(format!("Negative index {}", i))),
             None => {
                 // Non-integer index: try DbvlTable string key
-                match (&list_val, &index_val) {
-                    (Value::DbvlTable(table), Value::String(key)) => {
-                        let results = ctx.resolve_dbvl_key(table, key)?;
+                // 2026-07-11: Expr::String produces Value::Bits; check both.
+                let dbvl_key = match &index_val {
+                    Value::String(k) => Some(k.clone()),
+                    Value::Bits(b) => String::from_utf8(b.clone()).ok(),
+                    _ => None,
+                };
+                match (&list_val, dbvl_key) {
+                    (Value::DbvlTable(table), Some(key)) => {
+                        let results = ctx.resolve_dbvl_key(table, &key)?;
                         return if results.len() == 1 { Ok(results.into_iter().next().unwrap()) }
                         else if results.is_empty() { Err(RuntimeError::TypeMismatch(format!("Key '{}' not found", key))) }
                         else { Ok(Value::List(results)) };
@@ -258,7 +264,14 @@ impl ExprEval for MultiSliceExpr {
             // e.g., 15561["[15]"] is equivalent to 15561[;@"[15]"]
             if self.ops.len() == 1 {
                 if let BracketOp::Coord(crate::ast::SliceCoordinate::Index(coord_expr)) = &self.ops[0] {
-                    if let Ok(Value::String(ref pattern)) = ctx.eval_expr(coord_expr) {
+                    // 2026-07-11: Expr::String produces Value::Bits; check both.
+                    let coord_val = ctx.eval_expr(coord_expr)?;
+                    let pattern = match &coord_val {
+                        Value::String(s) => Some(s.clone()),
+                        Value::Bits(b) => String::from_utf8(b.clone()).ok(),
+                        _ => None,
+                    };
+                    if let Some(ref pattern) = pattern {
                         if let Ok(dfa) = crate::analysis::dfa::compile_to_dfa(pattern) {
                             // Desugar: single string coord on atomic = per-char regex filter
                             // e.g., 15561["[15]"] → decompose to ['1','5','5','6','1'],

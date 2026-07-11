@@ -48,12 +48,28 @@ impl BinaryOpExpr {
 /// 2026-07-11: Phase 8C.
 fn legacy_normalize(v: Value) -> Value {
     match v {
-        Value::Bits(b) => {
+        // 2026-07-11: Only normalize 8-byte Bits (integer-sized) to Int.
+        // Variable-length Bits (strings, bools, chars) must not be converted.
+        Value::Bits(b) if b.len() == 8 => {
             let mut arr = [0u8; 8];
-            let copy_len = b.len().min(8);
-            arr[..copy_len].copy_from_slice(&b[..copy_len]);
+            arr.copy_from_slice(&b);
             Value::Int(i64::from_le_bytes(arr))
         }
+        other => other,
+    }
+}
+
+/// Normalize 4-byte char-originated Bits and 1-byte bool-originated Bits to their
+/// Value variants so existing comparison arms (Char+Char, Bool+Bool) match correctly.
+/// 2026-07-11: Expr::Char produces 4-byte Bits, Expr::Bool produces 1-byte Bits.
+fn normalize_bits_to_char_bool(v: Value) -> Value {
+    match v {
+        Value::Bits(b) if b.len() == 4 && (b[1] | b[2] | b[3]) == 0 => {
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(&b);
+            Value::Char(char::from_u32(u32::from_le_bytes(arr)).unwrap_or('\0'))
+        }
+        Value::Bits(b) if b.len() == 1 => Value::Bool(b[0] != 0),
         other => other,
     }
 }
@@ -103,6 +119,10 @@ impl ExprEval for BinaryOpExpr {
         // Fallback: normalize numeric-like values to Int for legacy dispatch.
         let l = legacy_normalize(l);
         let r = legacy_normalize(r);
+        // Also normalize char-like Bits (4 bytes, trailing NULs → Char) and
+        // bool-like Bits (1 byte → Bool) so comparison arms match correctly.
+        let l = normalize_bits_to_char_bool(l);
+        let r = normalize_bits_to_char_bool(r);
 
         use BinaryOpKind::*;
         Ok(match (self.kind, &l, &r) {
@@ -135,6 +155,31 @@ impl ExprEval for BinaryOpExpr {
                 let mut s = String::with_capacity(30 + b.len());
                 s.push_str(&a.to_string());
                 s.push_str(b);
+                s
+            }),
+            // 2026-07-11: String concatenation arms for Value::Bits (from Expr::String).
+            // Bits operands carry UTF-8 bytes; decode, concat, return String for downstream
+            // compatibility with Size/IsEmpty projections that need Value::String.
+            (Add,  Value::Bits(a), Value::String(b)) => Value::String({
+                let sa = String::from_utf8(a.clone()).unwrap_or_default();
+                let mut s = String::with_capacity(sa.len() + b.len());
+                s.push_str(&sa);
+                s.push_str(b);
+                s
+            }),
+            (Add,  Value::String(a), Value::Bits(b)) => Value::String({
+                let sb = String::from_utf8(b.clone()).unwrap_or_default();
+                let mut s = String::with_capacity(a.len() + sb.len());
+                s.push_str(a);
+                s.push_str(&sb);
+                s
+            }),
+            (Add,  Value::Bits(a), Value::Bits(b)) => Value::String({
+                let sa = String::from_utf8(a.clone()).unwrap_or_default();
+                let sb = String::from_utf8(b.clone()).unwrap_or_default();
+                let mut s = String::with_capacity(sa.len() + sb.len());
+                s.push_str(&sa);
+                s.push_str(&sb);
                 s
             }),
             (Add,  Value::Float(a), Value::Float(b)) => Value::Float(a + b),
@@ -195,6 +240,9 @@ impl ExprEval for BinaryOpExpr {
             (_, Value::Regex(_), _) | (_, _, Value::Regex(_)) => {
                 return Err(RuntimeError::TypeMismatch(format!("binary op {:?} on Regex", self.kind)))
             }
+            // 2026-07-11: Fall back to PartialEq for Eq/Ne — handles Bits↔Char, Bits↔Bool etc.
+            (Eq, _, _) => Value::Bool(l == r),
+            (Ne, _, _) => Value::Bool(l != r),
             _ => return Err(RuntimeError::TypeMismatch(format!("binary op {:?} on ({:?}, {:?})", self.kind, self.left, self.right))),
         })
     }

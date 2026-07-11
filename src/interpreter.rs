@@ -136,6 +136,9 @@ impl PartialEq for Value {
                     *a == f64::from_le_bytes(arr)
                 }
             }
+            (Value::String(a), Value::Bits(b)) | (Value::Bits(b), Value::String(a)) => {
+                *a == String::from_utf8_lossy(b)
+            }
             (Value::Bits(a), Value::Bits(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
@@ -1365,10 +1368,19 @@ impl Interpreter {
             Value::Float(f) => Ok(f.to_string()),
             Value::Bool(b) => Ok(b.to_string()),
             Value::Char(c) => Ok(c.to_string()),
-            Value::Bits(_) => {
-                value_as_i64(val).map(|i| i.to_string()).ok_or_else(|| RuntimeError::TypeMismatch(
-                    "Value cannot be used as a HashMap key".to_string()
-                ))
+            // 2026-07-11: Bits from Expr::String carry UTF-8 bytes (variable length).
+            // Bits from Expr::Integer are always 8 bytes (little-endian i64).
+            // Heuristic: length != 8 → try UTF-8 decode; length == 8 → integer conversion.
+            Value::Bits(b) => {
+                if b.len() != 8 {
+                    String::from_utf8(b.clone()).map_err(|_| RuntimeError::TypeMismatch(
+                        "Value cannot be used as a HashMap key".to_string()
+                    ))
+                } else {
+                    value_as_i64(val).map(|i| i.to_string()).ok_or_else(|| RuntimeError::TypeMismatch(
+                        "Value cannot be used as a HashMap key".to_string()
+                    ))
+                }
             }
             _ => Err(RuntimeError::TypeMismatch(
                 "Value cannot be used as a HashMap key".to_string()
@@ -2569,7 +2581,11 @@ impl Interpreter {
             }
             Pattern::LitInt(n) => value_as_i64(value) == Some(*n),
             Pattern::LitFloat(f) => matches!(value, Value::Float(v) if *v == *f),
-            Pattern::LitString(s) => matches!(value, Value::String(v) if v == s),
+            // 2026-07-11: Expr::String produces Value::Bits; match both representations.
+            Pattern::LitString(s) => {
+                matches!(value, Value::String(v) if v == s)
+                || matches!(value, Value::Bits(v) if v == s.as_bytes())
+            }
             Pattern::LitChar(c) => matches!(value, Value::Char(v) if v == c),
             Pattern::LitBool(b) => matches!(value, Value::Bool(v) if v == b),
         }
@@ -3138,7 +3154,7 @@ impl Interpreter {
             Expr::IntegerSuffixed(v, _) => Ok(Value::Bits(i64_to_bits(*v))),
             Expr::Float(v) => Ok(Value::Bits(f64_to_bits(*v))),
             Expr::Float64(v) => Ok(Value::Bits(f64_to_bits(*v))),
-            Expr::String(v) => Ok(Value::String(v.clone())),
+            Expr::String(v) => Ok(Value::Bits(v.as_bytes().to_vec())),
             Expr::RegexLiteral(v) => {
                 match crate::analysis::dfa::compile_to_dfa(v) {
                     Ok(dfa) => Ok(Value::Regex(dfa)),
@@ -6689,34 +6705,46 @@ impl Interpreter {
 
     /// Evaluate a `<:` subtype projection: applies a sequence of ops to a source value.
     pub(crate) fn eval_subtype_projection(&mut self, mut source: Value, ops: &[crate::ast::SubtypeOp]) -> Result<Value, RuntimeError> {
-        // Check for string match projection
-        if let Value::String(ref s) = source {
+        // 2026-07-11: Expr::String produces Value::Bits; check both representations.
+        let source_str = match &source {
+            Value::String(s) => Some(s.clone()),
+            Value::Bits(b) => String::from_utf8(b.clone()).ok(),
+            _ => None,
+        };
+        if let Some(ref s) = source_str {
             for op in ops {
                 if let crate::ast::SubtypeOp::Match(pattern_expr) = op {
                     let pattern_val = self.eval_expr(pattern_expr)?;
-                    if let Value::String(pattern) = pattern_val {
-                        let re = Regex::new(&pattern)
-                            .map_err(|e| RuntimeError::TypeMismatch(format!("Invalid regex: {}", e)))?;
-                        if let Some(caps) = re.captures(s) {
-                            // Count groups
-                            let group_count = caps.iter().len().saturating_sub(1);
-                            if group_count == 0 {
-                                return Ok(Value::Bool(true));
-                            }
-                            let mut groups = Vec::new();
-                            for i in 1..caps.iter().len() {
-                                if let Some(m) = caps.get(i) {
-                                    groups.push(Value::String(m.as_str().to_string()));
-                                }
-                            }
-                            match groups.len() {
-                                0 => return Ok(Value::Bool(true)),
-                                1 => return Ok(groups.into_iter().next().unwrap()),
-                                _ => return Ok(Value::Tuple(groups)),
-                            }
-                        } else {
-                            return Ok(Value::Bool(false));
+                    // 2026-07-11: Expr::String produces Value::Bits; convert both representations.
+                    let pattern = match pattern_val {
+                        Value::String(s) => s,
+                        Value::Bits(b) => String::from_utf8(b).map_err(|_| RuntimeError::TypeMismatch(
+                            "Regex pattern must be a valid UTF-8 string".to_string()
+                        ))?,
+                        _ => return Err(RuntimeError::TypeMismatch(
+                            "Regex pattern must be a string".to_string()
+                        )),
+                    };
+                    let re = Regex::new(&pattern)
+                        .map_err(|e| RuntimeError::TypeMismatch(format!("Invalid regex: {}", e)))?;
+                    if let Some(caps) = re.captures(s) {
+                        let group_count = caps.iter().len().saturating_sub(1);
+                        if group_count == 0 {
+                            return Ok(Value::Bool(true));
                         }
+                        let mut groups = Vec::new();
+                        for i in 1..caps.iter().len() {
+                            if let Some(m) = caps.get(i) {
+                                groups.push(Value::String(m.as_str().to_string()));
+                            }
+                        }
+                        match groups.len() {
+                            0 => return Ok(Value::Bool(true)),
+                            1 => return Ok(groups.into_iter().next().unwrap()),
+                            _ => return Ok(Value::Tuple(groups)),
+                        }
+                    } else {
+                        return Ok(Value::Bool(false));
                     }
                 }
             }
