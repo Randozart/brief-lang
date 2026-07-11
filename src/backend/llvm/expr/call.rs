@@ -71,7 +71,19 @@ pub fn emit_call(
                         let fl = backend.ensure_float_reg(out, indent, &raw);
                         marshaled.push(format!("float {}", fl));
                     }
-                    Type::Custom(__t) if __t == "String" || __t == "Data" => {
+                    Type::Custom(__t) if __t == "String" => {
+                        let boxed = backend.adapt_to_i64(out, indent, &raw);
+                        let p = format!("%fp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
+                        // Phase 3: String is %String* struct { ptr, len, codec }.
+                        // Extract .ptr field (first 8 bytes) for C char* ABI.
+                        let ld = format!("%fld{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = load i64, ptr {}", indent, ld, p).ok();
+                        let cp = format!("%fcp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, cp, ld).ok();
+                        marshaled.push(format!("ptr {}", cp));
+                    }
+                    Type::Custom(__t) if __t == "Data" => {
                         let boxed = backend.adapt_to_i64(out, indent, &raw);
                         let p = format!("%fp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                         writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
@@ -180,7 +192,7 @@ pub fn emit_call(
                             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, boxed).ok();
                             a_strs.push(format!("ptr {}", p));
                         }
-                        Type::Custom(__t) if __t == "Float" => {
+                    Type::Custom(__t) if __t == "Float" => {
                             let fl = backend.ensure_float_reg(out, indent, &raw);
                             a_strs.push(format!("float {}", fl));
                         }
