@@ -765,7 +765,7 @@ impl WebstackGenerator {
                 }
                 out.push_str("return;\n");
             }
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 let cond = self.expr_to_ts(condition);
                 out.push_str(&format!("if ({}) {{\n", cond));
                 for s in statements {
@@ -1196,7 +1196,7 @@ impl WebstackGenerator {
                 }
                 out.push_str("return true;\n");
             }
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 let cond = self.expr_to_rust(condition);
                 out.push_str(&format!("if {} {{\n", cond));
                 for s in statements {
@@ -1659,6 +1659,7 @@ mod tests {
                     dependencies: vec![],
 
                     annotations: vec![],
+                    metadata: HashMap::new(),
                     modifiers: vec![],
                     variant_bodies: vec![],
                     outputs: vec![],
@@ -1809,6 +1810,7 @@ mod tests {
                     modifiers: vec![],
                 },
             ],
+            metadata: HashMap::new(),
         });
         assert!(out.contains("if"));
         assert!(out.contains("state.count < 10"));
@@ -1865,6 +1867,7 @@ mod tests {
                     dependencies: vec![],
 
                     annotations: vec![],
+                    metadata: HashMap::new(),
                     modifiers: vec![],
                     variant_bodies: vec![],
                     outputs: vec![],

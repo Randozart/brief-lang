@@ -1,5 +1,6 @@
 use crate::ast::{Expr, Statement};
 use crate::features::macros::context::{MacroContext, MacroDef, TemplateDef};
+use std::collections::HashMap;
 
 /// Expand a template by substituting @-interpolation markers, then executing
 /// the body in a sandboxed interpreter.  This evaluates [guard] conditions,
@@ -165,10 +166,11 @@ fn substitute_in_stmt(stmt: &Statement, bindings: &[(String, Expr)]) -> Statemen
                 modifiers: modifiers.clone(),
             }
         }
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             Statement::Guarded {
                 condition: substitute_in_expr(condition, bindings),
                 statements: statements.iter().map(|s| substitute_in_stmt(s, bindings)).collect(),
+                metadata: HashMap::new(),
             }
         }
         Statement::Term { values, swan_song, modifiers } => {

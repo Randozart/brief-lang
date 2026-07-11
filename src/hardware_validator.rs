@@ -662,6 +662,7 @@ impl ReadGraph {
                 Statement::Guarded {
                     condition,
                     statements,
+                    ..
                 } => {
                     read.extend(condition.extract_dependencies());
                     Self::collect_reads_stmts(statements, read);
@@ -693,6 +694,7 @@ impl ReadGraph {
 mod tests {
     use super::*;
     use crate::ast::*;
+use std::collections::HashMap;
     use crate::errors::Severity;
 
     fn make_program(items: Vec<TopLevel>) -> Program {
@@ -720,6 +722,7 @@ mod tests {
             body, reactor_speed: None, span: None,
             is_lambda: false, dependencies: vec![],
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![], variant_bodies: vec![], outputs: vec![], output_type: None,
         })
     }

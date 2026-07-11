@@ -234,6 +234,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),

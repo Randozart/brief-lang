@@ -64,7 +64,7 @@ fn collect_constraints_recursive(
 ) {
     for stmt in stmts {
         match stmt {
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 let involves_trigger = expr_involves_trigger(condition);
                 constraints.push(PathConstraintInfo {
                     condition: condition.clone(),

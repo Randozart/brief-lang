@@ -333,9 +333,10 @@ impl LlvmBackend {
                 fields: fields.clone(),
                 expr: Self::rewrite_cell_identifiers(expr, cell_name),
             },
-            Statement::Guarded { condition, statements } => Statement::Guarded {
+            Statement::Guarded { condition, statements, .. } => Statement::Guarded {
                 condition: Self::rewrite_cell_identifiers(condition, cell_name),
                 statements: statements.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                metadata: HashMap::new(),
             },
             Statement::Term { values, swan_song, modifiers } => Statement::Term {
                 values: values.iter().map(|v| v.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name))).collect(),

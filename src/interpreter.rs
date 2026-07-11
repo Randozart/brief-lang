@@ -2272,9 +2272,10 @@ impl Interpreter {
                 fields: fields.clone(),
                 expr: self.rewrite_identifiers(expr, uid, cell_name),
             },
-            Statement::Guarded { condition, statements } => Statement::Guarded {
+            Statement::Guarded { condition, statements, .. } => Statement::Guarded {
                 condition: self.rewrite_identifiers(condition, uid, cell_name),
                 statements: statements.iter().map(|s| self.rewrite_statement_identifiers(s, uid, cell_name)).collect(),
+                metadata: HashMap::new(),
             },
             Statement::Term { values, swan_song, modifiers } => Statement::Term {
                 values: values.iter().map(|v| v.as_ref().map(|e| self.rewrite_identifiers(e, uid, cell_name))).collect(),
@@ -2569,6 +2570,7 @@ impl Interpreter {
             Statement::Guarded {
                 condition,
                 statements,
+                ..
             } => {
                 let cond_val = self.eval_expr(condition)?;
                 if self.profile_mode {
@@ -7948,6 +7950,7 @@ mod tests {
             }],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -8743,6 +8746,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -8797,6 +8801,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -8854,6 +8859,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -9416,6 +9422,7 @@ mod tests {
                         timeout: None,
                         modifiers: vec![],
                     }],
+                    metadata: HashMap::new(),
                 },
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".to_string()))),
@@ -10017,6 +10024,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -10090,6 +10098,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -11018,6 +11027,7 @@ mod tests {
             ],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -11095,6 +11105,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![Type::Custom("Int".to_string())], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
@@ -11128,6 +11139,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
@@ -11161,6 +11173,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
@@ -11193,6 +11206,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
@@ -11228,6 +11242,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![Type::Custom("Int".to_string())], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
@@ -11290,6 +11305,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
@@ -11317,6 +11333,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
@@ -11388,6 +11405,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![],
@@ -11461,6 +11479,7 @@ mod tests {
                             Statement::Assignment { lhs: Expr::Identifier("line_id".to_string()), expr: Expr::Identifier("seq".to_string()), timeout: None, modifiers: vec![] },
                             Statement::Assignment { lhs: Expr::Identifier("buffer".to_string()), expr: Expr::String(String::new()), timeout: None, modifiers: vec![] },
                         ],
+                        metadata: HashMap::new(),
                     },
                     Statement::Guarded {
                         condition: Expr::And(
@@ -11482,6 +11501,7 @@ mod tests {
                                 timeout: None, modifiers: vec![],
                             },
                         ],
+                        metadata: HashMap::new(),
                     },
                     Statement::Guarded {
                         condition: Expr::And(
@@ -11498,6 +11518,7 @@ mod tests {
                                 timeout: None, modifiers: vec![],
                             },
                         ],
+                        metadata: HashMap::new(),
                     },
                     Statement::Assignment { lhs: Expr::Identifier("prev_key".to_string()), expr: Expr::Identifier("raw".to_string()), timeout: None, modifiers: vec![] },
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
@@ -11505,6 +11526,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 outputs: vec![], output_type: None,
             }],
             definitions: vec![],

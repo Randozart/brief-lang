@@ -247,7 +247,7 @@ impl<'a> DataflowAnalyzer<'a> {
             Statement::Unification { expr, .. } => {
                 self.extract_ids_recursive(expr, ids);
             }
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 self.extract_ids_recursive(condition, ids);
                 for s in statements {
                     self.extract_ids_from_statement(s, ids);

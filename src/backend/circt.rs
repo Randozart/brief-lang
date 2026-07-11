@@ -888,6 +888,7 @@ mod tests {
             reactor_speed: None, span: None, is_lambda: false,
             dependencies: vec![],
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],

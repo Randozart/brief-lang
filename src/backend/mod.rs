@@ -10,6 +10,7 @@ use crate::analysis::dataflow::DataflowError;
 use crate::analysis::region::RegionAnalyzer;
 use crate::analysis::transition_graph::ReactorTransitionGraph;
 use crate::ast::{Annotation, Expr, Hashtag, Program, Statement, TopLevel, Transaction, Definition, StructDefinition};
+use std::collections::HashMap;
 
 /// Intent: Container for all shared analysis results that backends can consume.
 /// Backends check `optimize_mode` to decide whether to use optimized paths
@@ -422,11 +423,12 @@ fn peephole_optimize_body(body: &[Statement]) -> Vec<Statement> {
 
 fn peephole_optimize_stmt(stmt: &Statement) -> Option<Statement> {
     match stmt {
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             let opt_body: Vec<Statement> = statements.iter().filter_map(peephole_optimize_stmt).collect();
             Some(Statement::Guarded {
                 condition: peephole_optimize_expr(condition),
                 statements: opt_body,
+                metadata: HashMap::new(),
             })
         }
         Statement::Assignment { lhs, expr, timeout, modifiers } => {
@@ -595,6 +597,7 @@ fn peephole_simplify_guard(condition: &Expr, body: &[Statement]) -> Option<Vec<S
             Some(vec![Statement::Guarded {
                 condition: peephole_optimize_expr(condition),
                 statements: opt_body,
+                metadata: HashMap::new(),
             }])
         }
     }

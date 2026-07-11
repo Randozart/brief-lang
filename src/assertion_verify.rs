@@ -81,6 +81,7 @@ fn check_all_paths(
             Statement::Guarded {
                 condition,
                 statements,
+                ..
             } => {
                 // Check TRUE branch: guarded statements must independently produce true
                 let mut branch_vars = vars.clone();
@@ -224,6 +225,7 @@ mod tests {
             body: vec![Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -258,6 +260,7 @@ mod tests {
             body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -300,6 +303,7 @@ mod tests {
             ],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -336,6 +340,7 @@ mod tests {
             ))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -370,6 +375,7 @@ mod tests {
             body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };

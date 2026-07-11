@@ -428,6 +428,7 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
                 Statement::Guarded {
                     condition,
                     statements,
+                    ..
                 } => {
                     // Path 1: Guard taken - execute the statements
                     let mut true_state = state.clone();

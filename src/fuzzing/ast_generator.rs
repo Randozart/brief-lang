@@ -18,6 +18,7 @@
 //! Uses depth limiting to prevent stack overflow during generation.
 
 use crate::ast::*;
+use std::collections::HashMap;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
 use proptest::test_runner::TestRunner;
@@ -129,6 +130,7 @@ pub fn arb_transaction(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             dependencies: Vec::new(),
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),
@@ -172,6 +174,7 @@ pub fn arb_definition(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             body: vec![Statement::Term { values: vec![Some(body)], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         })
@@ -311,6 +314,7 @@ fn arb_guarded_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
         Statement::Guarded {
             condition,
             statements,
+            metadata: HashMap::new(),
         }
     })
 }

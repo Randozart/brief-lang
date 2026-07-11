@@ -120,7 +120,7 @@ impl Reactor {
     /// Recursively check if a statement contains a guarded escape that would fire
     fn contains_escape_guard(&self, stmt: &Statement, interp: &mut Interpreter) -> bool {
         match stmt {
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 // Check if this guard's condition is currently true
                 if let Ok(cond_val) = interp.eval_expr(condition) {
                     if cond_val == Value::Bool(true) {
@@ -322,6 +322,7 @@ impl Reactor {
             Statement::Guarded {
                 condition,
                 statements,
+                ..
             } => {
                 let cond_val = interp.eval_expr(condition)?;
                 if cond_val == Value::Bool(true) {
@@ -459,6 +460,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -480,6 +482,7 @@ mod tests {
             dependencies: deps,
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -519,6 +522,7 @@ mod tests {
                 output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 annotations: vec![],
+                metadata: HashMap::new(),
                 body: vec![], is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
             TopLevel::Transaction(Transaction {
@@ -527,6 +531,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![], outputs: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 output_type: None,
             }),
         ]);
@@ -595,6 +600,7 @@ mod tests {
             Statement::Guarded {
                 condition: Expr::Bool(true),
                 statements: vec![Statement::Escape(None)],
+                metadata: HashMap::new(),
             },
         ];
         let txn = make_rct_txn("escape_test", Expr::Bool(true), Expr::Bool(true), body);
@@ -607,7 +613,7 @@ mod tests {
     fn test_run_escape_triggers_rollback() {
         let body = vec![
             Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(10), timeout: None, modifiers: vec![] },
-            Statement::Guarded { condition: Expr::Bool(true), statements: vec![Statement::Escape(None)] },
+            Statement::Guarded { condition: Expr::Bool(true), statements: vec![Statement::Escape(None)], metadata: HashMap::new() },
         ];
         let txn = make_rct_txn("rollback", Expr::Bool(true), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
@@ -656,6 +662,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -687,6 +694,7 @@ mod tests {
             dependencies: vec!["x".into()],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -718,6 +726,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],

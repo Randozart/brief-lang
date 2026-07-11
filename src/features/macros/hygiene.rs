@@ -30,7 +30,7 @@ fn apply_to_stmt(
                 }
             }
         }
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             for s in statements.iter_mut() {
                 apply_to_stmt(s, sym_map, gensym);
             }
@@ -87,7 +87,7 @@ fn rename_stmt(stmt: &mut Statement, sym_map: &HashMap<String, String>) {
                 rename_stmt(ss, sym_map);
             }
         }
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             rename_expr(condition, sym_map);
             for s in statements.iter_mut() {
                 rename_stmt(s, sym_map);

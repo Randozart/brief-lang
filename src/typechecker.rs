@@ -1923,6 +1923,7 @@ impl TypeChecker {
             Statement::Guarded {
                 condition,
                 statements,
+                ..
             } => {
                 let cond_ty = self.infer_expression(condition);
                 if !self.types_compatible(&cond_ty, &Type::Custom("Bool".to_string())) {
@@ -3830,6 +3831,7 @@ Expr::ObjectLiteral(fields) => {
 #[cfg(test)]
 mod tests {
     use crate::ast::*;
+    use std::collections::HashMap;
 
     fn make_program(items: Vec<TopLevel>) -> Program {
         Program { items, comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None) }
@@ -3856,6 +3858,7 @@ mod tests {
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -3872,6 +3875,7 @@ mod tests {
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -3891,6 +3895,7 @@ mod tests {
                     Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None },
                 ],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -3961,6 +3966,7 @@ mod tests {
                 reactor_speed: None, span: None, is_lambda: false,
                 dependencies: vec![], modifiers: vec![],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 variant_bodies: vec![], outputs: vec![], output_type: None,
             }),
         ]);
@@ -4061,6 +4067,7 @@ mod tests {
                     Statement::Term { values: vec![Some(Expr::Identifier("x".into()))], modifiers: vec![], swan_song: None },
                 ],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -4083,6 +4090,7 @@ mod tests {
                     Statement::Term { values: vec![Some(Expr::Identifier("x".into()))], modifiers: vec![], swan_song: None },
                 ],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
             TopLevel::Definition(Definition {
@@ -4097,6 +4105,7 @@ mod tests {
                     Statement::Term { values: vec![Some(Expr::Call("needs_int".into(), vec![Expr::String("hello".into())]))], modifiers: vec![], swan_song: None },
                 ],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);
@@ -4122,6 +4131,7 @@ mod tests {
                     Statement::Expression(Expr::Call("undefined_fn".into(), vec![Expr::Integer(42)])),
                 ],
                 annotations: vec![],
+                metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![],
             }),
         ]);

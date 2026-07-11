@@ -56,6 +56,7 @@ impl Annotator {
                 Statement::Guarded {
                     condition,
                     statements,
+                    ..
                 } => {
                     self.collect_calls_from_expr(condition, calls);
                     self.collect_calls_from_body(statements, calls);
@@ -352,6 +353,7 @@ impl Annotator {
             Statement::Guarded {
                 condition,
                 statements,
+                ..
             } => {
                 let mut output = format!("{}[{}] {{\n", spaces, self.format_expr(condition));
                 for s in statements {
@@ -643,6 +645,7 @@ use crate::ast::*;
             body,
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         })
@@ -697,6 +700,7 @@ use crate::ast::*;
         let guarded = Statement::Guarded {
             condition: Expr::Bool(true),
             statements: vec![Statement::Expression(make_call_expr("inside_guard"))],
+            metadata: HashMap::new(),
         };
         let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);
@@ -715,6 +719,7 @@ use crate::ast::*;
                 timeout: None,
                 modifiers: vec![],
             }],
+            metadata: HashMap::new(),
         };
         let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);

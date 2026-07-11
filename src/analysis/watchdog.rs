@@ -1,5 +1,5 @@
 use crate::ast::{Contract, Expr, Program, Statement, TopLevel, WatchdogSpec};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub enum WatchdogError {
@@ -451,6 +451,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
             outputs: vec![],
@@ -701,6 +702,7 @@ mod tests {
                     Statement::Guarded {
                         condition: Expr::PriorState("btn".to_string()),
                         statements: vec![assign("ready", Expr::Bool(false))],
+                        metadata: HashMap::new(),
                     },
                 ]),
             make_txn("main", Expr::Identifier("ready".to_string()), Expr::Bool(true),

@@ -524,9 +524,10 @@ fn simplify_stmt(stmt: &Statement) -> Statement {
             constraint: None,
         },
         Statement::Expression(e) => Statement::Expression(simplify_expr(e)),
-        Statement::Guarded { condition, statements } => Statement::Guarded {
+        Statement::Guarded { condition, statements, .. } => Statement::Guarded {
             condition: simplify_expr(condition),
             statements: statements.iter().map(|s| simplify_stmt(s)).collect(),
+            metadata: HashMap::new(),
         },
         other => other.clone(),
     }
@@ -550,9 +551,9 @@ pub fn simplify_body(body: &[Statement]) -> Vec<Statement> {
             Statement::Assignment { lhs, expr, timeout, modifiers } => {
                 Statement::Assignment { lhs: lhs.clone(), expr: lit_to_int(expr), timeout: timeout.clone(), modifiers: modifiers.clone() }
             }
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 let stmts: Vec<Statement> = statements.iter().map(|s| lit_stmt(s)).collect();
-                Statement::Guarded { condition: lit_to_int(condition), statements: stmts }
+                Statement::Guarded { condition: lit_to_int(condition), statements: stmts, metadata: HashMap::new() }
             }
             other => other.clone(),
         }
@@ -812,7 +813,7 @@ fn is_pure_body(
                 }
             }
             Statement::Escape(_) => return false,
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 if references_triggers_or_ffi_with_decls(condition, inop_decls) {
                     return false;
                 }
@@ -1314,7 +1315,7 @@ fn scan_for_ffi_args(stmt: &Statement, out: &mut HashSet<String>) {
         Statement::Expression(expr) | Statement::Let { expr: Some(expr), .. } => {
             collect_ffi_identifiers(expr, out);
         }
-        Statement::Guarded { condition: _, statements } => {
+        Statement::Guarded { condition: _, statements, .. } => {
             for s in statements {
                 scan_for_ffi_args(s, out);
             }
@@ -1408,7 +1409,7 @@ pub(crate) fn statement_contains_ffi_with_decls(stmt: &Statement, inop_decls: &H
             values.iter().any(|v| v.as_ref().map_or(false, |e| references_triggers_or_ffi_with_decls(e, inop_decls)))
                 || swan_song.as_ref().map_or(false, |s| statement_contains_ffi_with_decls(s, inop_decls))
         }
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             references_triggers_or_ffi_with_decls(condition, inop_decls)
                 || statements.iter().any(|s| statement_contains_ffi_with_decls(s, inop_decls))
         }
@@ -1716,6 +1717,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),
@@ -1764,6 +1766,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),
@@ -1802,6 +1805,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),
@@ -1846,6 +1850,7 @@ mod tests {
                     dependencies: vec![],
 
                     annotations: vec![],
+                    metadata: HashMap::new(),
                     modifiers: vec![],
                     variant_bodies: vec![],
                                  outputs: Vec::new(),
@@ -1885,6 +1890,7 @@ mod tests {
                     is_async: false, is_reactive: false, reactor_speed: None, span: None,
                     is_lambda: false, dependencies: vec![],
                     annotations: vec![],
+                    metadata: HashMap::new(),
                     modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None,
                 }),
             ],
@@ -1915,6 +1921,7 @@ mod tests {
                     is_async: false, is_reactive: false, reactor_speed: None, span: None,
                     is_lambda: false, dependencies: vec![],
                     annotations: vec![],
+                    metadata: HashMap::new(),
                     modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None,
                 }),
             ],

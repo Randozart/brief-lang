@@ -155,7 +155,7 @@ fn expand_template_in_stmts_inner(
                 }
             }
         }
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             if let Some(e) = expand_template_in_expr(condition, ctx)? {
                 *condition = e;
                 *changed = true;
@@ -362,7 +362,7 @@ fn expand_macro_in_stmts_inner(
                 }
             }
         }
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             if let Some(e) = expand_macro_in_expr(condition, ctx)? {
                 *condition = e;
                 *changed = true;
@@ -477,7 +477,7 @@ fn check_stmt_for_intrinsics(stmt: &Statement) -> Result<(), String> {
         Statement::Let { expr, .. } => {
             if let Some(e) = expr { check_expr_for_intrinsics(e) } else { Ok(()) }
         }
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             check_expr_for_intrinsics(condition)?;
             for s in statements { check_stmt_for_intrinsics(s)?; }
             Ok(())
@@ -777,7 +777,7 @@ mod tests {
                     assert_no_macro_call_in_expr(e);
                 }
             }
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 assert_no_macro_call_in_expr(condition);
                 for s in statements {
                     assert_no_macro_call_in_stmt(s);

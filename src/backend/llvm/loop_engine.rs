@@ -2513,7 +2513,7 @@ impl LlvmBackend {
             let body = &txns[0].1.body;
             let mut found_m: Option<i64> = None;
             for s in body {
-                if let Statement::Guarded { condition, statements } = s {
+                if let Statement::Guarded { condition, statements, .. } = s {
                     let norm = condition.normalize_to_old_recursive();
                     if let Expr::Eq(lhs, rhs) = &norm {
                         // Check: lhs = count % M, rhs = M - 1
@@ -4060,7 +4060,7 @@ fn seed_observable_idents(
     // field refs (like `count` in [count == bound]) are never seeded
     // as live, so filter_dead_assignments removes the counter increment
     // and ssa_old_int_regs is never updated (nbody_newton bug).
-    if let Statement::Guarded { condition, statements } = stmt {
+    if let Statement::Guarded { condition, statements, .. } = stmt {
         let has_observable = statements.iter().any(|gs| {
             let mut sink = HashSet::new();
             seed_observable_idents(gs, let_fields, field_index_map, &mut sink);
@@ -4207,7 +4207,7 @@ fn filter_dead_assignments(body: &[Statement], live_fields: &HashSet<String>) ->
                     result.push(stmt.clone());
                 }
             }
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 let filtered: Vec<Statement> = statements.iter()
                     .filter(|gs| {
                         if let Statement::Assignment { lhs, .. } = gs {
@@ -4222,6 +4222,7 @@ fn filter_dead_assignments(body: &[Statement], live_fields: &HashSet<String>) ->
                     result.push(Statement::Guarded {
                         condition: condition.clone(),
                         statements: filtered,
+                        metadata: HashMap::new(),
                     });
                 }
             }

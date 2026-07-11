@@ -1664,10 +1664,11 @@ fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statemen
                 constraint: None,
             }
         }
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             Statement::Guarded {
                 condition: substitute_expr(&condition, old_var, new_expr),
                 statements: substitute_var(&statements, old_var, new_expr),
+                metadata: HashMap::new(),
             }
         }
         Statement::Expression(e) => Statement::Expression(substitute_expr(e, old_var, new_expr)),
@@ -2049,6 +2050,7 @@ mod tests {
             dependencies: vec![],
 
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),

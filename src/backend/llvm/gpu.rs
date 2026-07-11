@@ -1352,6 +1352,7 @@ mod tests {
                         args: vec![Expr::String("test".to_string())],
                     }),
                 ],
+                metadata: HashMap::new(),
             },
         ];
         let result = check_eligibility(&body);

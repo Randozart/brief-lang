@@ -908,6 +908,7 @@ impl SymbolicExecutor {
             Statement::Guarded {
                     condition,
                     statements,
+                    ..
                 } => {
                     let true_state = current_state
                         .clone()
@@ -3220,6 +3221,7 @@ impl ProofEngine {
                 Statement::Guarded {
                 condition,
                 statements,
+                ..
             } => {
                 self.collect_read_vars_from_expr(condition, vars);
                 for stmt in statements {
@@ -3517,6 +3519,7 @@ impl ProofEngine {
                 Statement::Guarded {
                     condition: _,
                     statements,
+                    ..
                 } => {
                     self.collect_term_values(statements, results);
                 }
@@ -3656,7 +3659,7 @@ fn estimate_stmt_cost(stmt: &Statement) -> u64 {
         Statement::Assignment { expr, .. } => expr_cost(expr) + 2,
         Statement::Expression(expr) => expr_cost(expr) + 1,
         Statement::Term { .. } | Statement::TermBang { .. } => 2,
-        Statement::Guarded { condition, statements } => {
+        Statement::Guarded { condition, statements, .. } => {
             expr_cost(condition) + statements.iter().map(estimate_stmt_cost).sum::<u64>() + 2
         }
         Statement::Oracle { body, handler, .. } => {
@@ -3823,7 +3826,7 @@ pub fn estimate_body_cost(
                 total += cost;
                 if let Some(e) = expr { count_calls(e, &mut intrinsics, &mut includes_io); }
             }
-            Statement::Guarded { condition, statements } => {
+            Statement::Guarded { condition, statements, .. } => {
                 guards += 1;
                 total += expr_cost(condition) + 2;
                 for s in statements { total += estimate_stmt_cost(s); }
@@ -4031,7 +4034,7 @@ pub fn collect_guard_conditions(stmts: &[crate::ast::Statement]) -> Vec<Expr> {
     let mut conds = Vec::new();
     for s in stmts {
         match s {
-            crate::ast::Statement::Guarded { condition, statements } => {
+            crate::ast::Statement::Guarded { condition, statements, .. } => {
                 conds.push(condition.clone());
                 conds.extend(collect_guard_conditions(statements));
             }
