@@ -96,11 +96,12 @@ impl LlvmBackend {
     pub(super) fn emit_header(&self, out: &mut String) {
         writeln!(out, "; ModuleID = 'program.ll'").ok();
         writeln!(out, "source_filename = \"program.bv\"").ok();
-        // 2026-06-29: Target triple is hardcoded to x86_64-unknown-linux-gnu for now.
-        // When TargetSpec gains target triple/data layout fields (TODO: add to
-        // target_spec/mod.rs), read them dynamically here instead.
-        writeln!(out, "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"").ok();
-        writeln!(out, "target triple = \"x86_64-unknown-linux-gnu\"").ok();
+        // 2026-07-11: Phase 6 — target triple and data layout are now
+        // configurable via CompilerContext.target_triple / .data_layout.
+        if let Some(ref dl) = self.ctx.data_layout {
+            writeln!(out, "target datalayout = \"{}\"", dl).ok();
+        }
+        writeln!(out, "target triple = \"{}\"", self.ctx.target_triple).ok();
     }
 
     /// Emit LLVM struct type declarations for user-defined struct types.

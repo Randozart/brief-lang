@@ -951,6 +951,23 @@ impl LlvmBackend {
         self
     }
 
+    /// Set the LLVM target triple for generated IR.
+    /// Also updates the data layout to match.
+    /// 2026-07-11: Phase 6 — WASM target support.
+    pub fn with_target_triple(mut self, triple: &str) -> Self {
+        self.ctx.target_triple = triple.to_string();
+        self.ctx.data_layout = match triple {
+            "wasm32-unknown-wasi" | "wasm32-unknown-unknown" => {
+                Some("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".to_string())
+            }
+            _ => {
+                // Default x86_64 data layout
+                Some("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128".to_string())
+            }
+        };
+        self
+    }
+
     /// Produce a human-readable layout summary for all state fields.
     pub fn dump_layout_str(&self) -> String {
         let mut out = String::new();

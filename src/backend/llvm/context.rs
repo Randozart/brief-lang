@@ -116,6 +116,14 @@ pub struct CompilerContext {
     pub has_cycles: bool,
     pub slp_hazard_fns: HashSet<String>,
 
+    // Target triple config (Phase 6 — WASM support)
+    /// LLVM target triple (e.g. "x86_64-unknown-linux-gnu", "wasm32-unknown-wasi").
+    /// 2026-07-11: Phase 6 — read by emit_header() for dynamic target configuration.
+    pub target_triple: String,
+    /// LLVM data layout string. None = use default for target triple.
+    /// 2026-07-11: Phase 6.
+    pub data_layout: Option<String>,
+
     // GPU config
     pub gpu_offload: bool,
     pub gpu_backend: String,
@@ -129,6 +137,19 @@ pub struct CompilerContext {
 }
 
 impl CompilerContext {
+    /// Check if the target is WASM (32-bit).
+    /// 2026-07-11: Phase 6 — used to adjust pointer width and calling convention.
+    pub fn is_wasm(&self) -> bool {
+        self.target_triple.starts_with("wasm32")
+    }
+
+    /// Get the pointer width in bytes for the current target.
+    /// WASM32 uses 32-bit pointers; x86_64 uses 64-bit.
+    /// 2026-07-11: Phase 6.
+    pub fn pointer_bytes(&self) -> u64 {
+        if self.is_wasm() { 4 } else { 8 }
+    }
+
     pub fn new() -> Self {
         CompilerContext {
             spec: None,
@@ -174,6 +195,8 @@ impl CompilerContext {
             emit_remarks: false,
             has_cycles: false,
             slp_hazard_fns: HashSet::new(),
+            target_triple: "x86_64-unknown-linux-gnu".to_string(),
+            data_layout: Some("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128".to_string()),
             gpu_offload: false,
             gpu_backend: "vulkan".to_string(),
             is_embedded: false,
