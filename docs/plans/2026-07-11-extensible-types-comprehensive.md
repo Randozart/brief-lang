@@ -1530,17 +1530,20 @@ metadata-driven: types carry properties, codecs handle custom
 serialization, plugins extend the compiler at every stage. The next
 two major efforts build directly on this foundation:
 
-### Next: Derivation & Synthesis (Phases 8–14)
+### Next: Derivation & Synthesis (Phases 8–8G–14)
 
 **Plan**: `docs/plans/2026-07-11-derivation-synthesis-comprehensive.md`
 
 Adds `:=` derivation blocks, compile-time assertions, SMT-guided program
-synthesis, sad-path FFI error recovery, contract-guided deduction, and
-the `.dbvl` semantic archive for decoupled backends.
+synthesis, sad-path FFI error recovery, contract-guided deduction, the
+`.dbvl` semantic archive for decoupled backends, and **Phase 8G** which
+removes the `Intrinsic` enum, `inop` keyword, and `Expr::IntrinsicCall` —
+completing the frontend/backend split by routing all operator dispatch
+through metadata strings.
 
 **Prerequisites from this plan**:
 - Phase 1B (Generic Property System): synthesis uses operator cost models
-  derived from type properties
+  derived from type properties; 8G uses metadata properties for dispatch
 - Phase 5 (Custom Literal Parsers): compile-time interpreter reuse for
   assertion execution
 - Phase 7 (Plugin System): SMT solver integration via WASM plugin;

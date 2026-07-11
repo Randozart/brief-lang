@@ -2,10 +2,12 @@
 
 **Date:** 2026-07-11
 **Status:** Plan — pre-implementation
-**Depends on:** Completion of Extensible Types (Phases 0–7) and GLUE v2
+**Depends on:** Completion of Extensible Types (Phases 0–7); Pure Bits
+Interpreter Refactor (Phases 7.5, 8A–8G, `docs/plans/2026-07-11-pure-bits-refactor.md`); GLUE v2
 **See also:** `docs/plans/2026-07-11-extensible-types-comprehensive.md` for
 the prerequisite phases. This plan builds directly on the property system
-(Phase 1B), plugin system (Phase 7), and the `.dbvl` archive format.
+(Phase 1B), plugin system (Phase 7), Pure Bits interpreter dispatch
+(Phases 8A–8G), and the `.dbvl` archive format.
 
 ---
 
@@ -546,10 +548,258 @@ support:
 
 ---
 
+## Phase 8G — Remove Intrinsic/Inop, Modularize Frontend & Backend
+
+**Proposal by:** [@revred](https://github.com/revred) — review identified
+that the `Intrinsic` enum, `InopDeclaration`, and `Expr::IntrinsicCall` are
+the last remaining compiler-level hardcoded special cases. Removing them
+completes the frontend/backend split: the frontend emits only standard
+`defn` entries with metadata, and backends dispatch on metadata strings.
+
+**Depends on:** Pure Bits Refactor Phases 8A–8F (provides
+`execute_intrinsic()`, `get_operator_intrinsic()`, property-based operator
+dispatch). Phase 8G deletes the legacy intrinsic paths that 8A–8F built
+alongside.
+
+**Strategy:** Delete-and-compile. Remove the old enum/variant/AST node, let
+the compiler report every match arm, replace each with
+metadata-plus-`execute_intrinsic` dispatch. Zero new features — pure
+deletion and rewriting.
+
+### Goal
+
+Remove four legacy components that block the frontend/backend modularization:
+
+| Component | Replaced by |
+|-----------|-------------|
+| `Intrinsic` enum (~50 variants) | String-based `execute_intrinsic()` dispatch (Phase 8A) |
+| `InopDeclaration` AST node | Standard `defn` with `llvm_instr`/`interpreter_impl` metadata |
+| `Expr::IntrinsicCall` (~356 match arms) | Standard `Expr::Call` to metadata-decorated `defn` |
+| `#` suffix syntax on identifiers | Standard function call `f(x)` not `f#(x)` |
+
+### Step 8G.0 — Remove `Intrinsic` enum
+
+**File:** `src/ast.rs` — `pub enum Intrinsic { ... }` line ~897
+
+Delete the entire enum (~50 variants). All match arms on `Intrinsic` become
+unreachable. The `Intrinsic::name()` method added in Phase 8A is also
+deleted — its mapping is now only in `execute_intrinsic()`.
+
+**Replacement:** Every site that previously matched on `Intrinsic::AddI64`
+now calls `execute_intrinsic("__add_i64", args)`. The function already
+exists (Phase 8A.2). The `execute_intrinsic` function is promoted from
+interpreter-internal to a public API in `src/interpreter.rs`.
+
+**Files affected:**
+- `src/ast.rs` — delete `Intrinsic` enum, delete `intrinsic_name` list
+- `src/interpreter.rs` — replace `Intrinsic::AddI64 =>` with
+  `execute_intrinsic(name, args)` in all eval sites; promote
+  `execute_intrinsic` to `pub`
+- `src/features/binary_op.rs` — remove `Intrinsic` match, already
+  replaced by property dispatch in Phase 8B
+- `src/features/unary_op.rs` — same as binary_op
+- `src/parser.rs` — remove any `Intrinsic`-related parsing
+- `src/desugarer.rs` — replace intrinsic name resolution with
+  string-based resolution
+
+When `cargo build` succeeds, the `Intrinsic` enum is gone for good.
+
+**Nesting check:** Each replacement is a one-line substitution at the call
+site. No new nesting introduced.
+
+**Tests:**
+- `test_no_intrinsic_enum`: The type `Intrinsic` does not exist
+- `test_execute_intrinsic_public`: `execute_intrinsic("__add_i64", &[a, b])`
+  returns correct result
+
+### Step 8G.1 — Remove `InopDeclaration` AST node + `inop` keyword
+
+**File:** `src/ast.rs:1227`, `src/lexer.rs`, `src/parser.rs`
+
+Delete `InopDeclaration` struct. Remove `TopLevel::Inop(InopDeclaration)`
+variant from the `TopLevel` enum. Remove `inop` / `inop!` from the lexer
+token set. Remove the `parse_inop_declaration()` parser path.
+
+**Replacement:** All existing `inop` declarations in `lib/std/os/*.bv` are
+rewritten as standard `defn` with metadata:
+
+```brief
+// Before (inop):
+// inop! getpid() -> Int;
+
+// After (defn with metadata):
+defn getpid() -> Int {
+    llvm_instr <~ "call i64 @getpid()";
+    interpreter_impl <~ "posix_getpid";
+}
+```
+
+**Migration:** The stdlib files in `lib/std/os/` are rewritten in the same
+commit. The `inop` keyword is removed from the lexer — any old source files
+using it will get a clear parse error.
+
+**Files affected:**
+- `src/ast.rs` — delete `InopDeclaration`, delete `TopLevel::Inop`
+- `src/lexer.rs` — remove `inop`/`inop!` tokens
+- `src/parser.rs` — remove `parse_inop_declaration()`, remove dispatch in
+  `parse_top_level()`
+- `lib/std/os/*.bv` — rewrite all `inop` declarations as `defn`s with
+  metadata
+- `lib/std/types/bootstrap.bv` — update any references
+
+**Tests:**
+- `test_inop_keyword_rejected`: `inop foo() -> Int;` → parse error
+- `test_os_defn_has_llvm_instr`: `getpid` defn has `llvm_instr` metadata
+
+### Step 8G.2 — Remove `Expr::IntrinsicCall` variant
+
+**File:** `src/ast.rs` (Expr enum), all ~356 match sites
+
+`Expr::IntrinsicCall { intrinsic, args }` is replaced by
+`Expr::Call { name, args }`. The `#` suffix in the parser
+(`sqrt#(x)` → `Expr::IntrinsicCall`) is removed — the parser produces
+`Expr::Call` for all function calls.
+
+**Replacement pattern** (in the interpreter and all eval sites):
+
+```rust
+// Before:
+Expr::IntrinsicCall { intrinsic, args } => {
+    let intrinsic_name = intrinsic.name();
+    let evaluated_args: Vec<Value> = args.iter()
+        .map(|a| ctx.eval_expr(a, &None))
+        .collect::<Result<_, _>>()?;
+    execute_intrinsic(intrinsic_name, &evaluated_args)
+}
+
+// After:
+Expr::Call { name, args } => {
+    let evaluated_args: Vec<Value> = args.iter()
+        .map(|a| ctx.eval_expr(a, &None))
+        .collect::<Result<_, _>>()?;
+    // Check if the called defn has interpreter_impl metadata
+    if let Some(impl_name) = ctx.lookup_interpreter_impl(&name) {
+        execute_intrinsic(impl_name, &evaluated_args)
+    } else {
+        // Standard function call path (already exists)
+        ctx.call_function(&name, evaluated_args)
+    }
+}
+```
+
+**Key change:** The `interpreter_impl` metadata lookup replaces the
+`Intrinsic` enum dispatch. If a function has `interpreter_impl <~ "..."`,
+the interpreter calls `execute_intrinsic` directly — no enum needed.
+Otherwise, it falls through to the standard function call path.
+
+**Files affected:**
+- `src/ast.rs` — remove `IntrinsicCall` from `Expr` enum
+- `src/interpreter.rs` — replace all `Expr::IntrinsicCall` match arms
+  (~300 sites) with `Expr::Call` + metadata lookup
+- `src/parser.rs` — remove `#` suffix in identifier parsing
+- `src/desugarer.rs` — remove `intrinsic_name_from_expr`, replace with
+  `operator_to_defn_name` (maps `Add` → `"add_i64"` etc.)
+- `src/backend/llvm/*.rs` — replace `Expr::IntrinsicCall` with
+  `Expr::Call` in codegen
+- `src/backend/webstack.rs`, `src/backend/circt.rs` — same replacement
+
+**Nesting check:** The replacement pattern has a single `if let` (metadata
+lookup) with a guard clause — max 2 levels.
+
+**Tests:**
+- `test_intrinsic_call_becomes_call`: Parse `sqrt(x)` and verify AST has
+  `Expr::Call` not `Expr::IntrinsicCall`
+- `test_interpreter_dispatch_via_metadata`: Function with
+  `interpreter_impl <~ "rust_add_i64"` dispatches through
+  `execute_intrinsic` at runtime
+
+### Step 8G.3 — Remove `#` suffix from lexer
+
+**File:** `src/lexer.rs`, `src/parser.rs`
+
+Remove the `Hash` token recognition at the end of identifiers (the `sqrt#`
+lexer path). The `#` character remains for:
+- `#[` (HashBracket) — attributes
+- `#![` (HashBangBracket) — inner attributes
+- `#` (Hash) — pragma prefix (`#no_derive`, `#export`)
+- `#!` (HashBang) — shebang
+- `#?` (HashQuestion) — diagnostic qualifier
+- `#pragma` (Pragma) — pragma keyword
+
+The `#` is no longer recognized as an intrinsic suffix on identifiers.
+
+**Files affected:**
+- `src/lexer.rs` — remove the identifier-ends-with-`#` check
+- `src/parser.rs` — remove `IntrinsicCall` construction in call
+  expression parsing
+- `src/ast.rs` — verify `Expr::IntrinsicCall` is gone (caught by
+  compile if missed)
+
+**Tests:**
+- `test_hash_no_longer_intrinsic_suffix`: `sqrt#(x)` is parsed as
+  `sqrt # ( x )` (syntax error) or `#(x)` is a pragma-then-parens error,
+  not an intrinsic call
+
+### Step 8G.4 — Verify `.dbvl` archive carries metadata
+
+**File:** (test addition — Phase 12 archive test suite)
+
+Add a round-trip test that a `defn` with `llvm_instr`, `interpreter_impl`,
+and `circt_op` metadata survives the archive serialization and
+deserialization. A backend reading the archive can dispatch on these
+strings without any shared enum with the frontend.
+
+```rust
+#[test]
+fn test_archive_carries_metadata() {
+    let source = r#"
+        defn add_i64(a: Int, b: Int) -> Int {
+            llvm_instr <~ "add nsw i64";
+            interpreter_impl <~ "rust_add_i64";
+            circt_op <~ "comb.add";
+        };
+    "#;
+    // 1. Parse → write archive → read archive
+    // 2. Verify defn entry has metadata strings intact
+    // 3. Verify no Intrinsic enum or InopDeclaration in output
+}
+```
+
+**This is the modularization proof:** the frontend emits only `defn`
+entries with metadata strings; the backend consumes the archive and
+dispatches on those strings. No shared `Intrinsic` enum between them.
+
+**Tests:**
+- `test_archive_carries_metadata`: Metadata round-trips correctly
+- `test_archive_no_intrinsic_entries`: No `IntrinsicCall` or `Inop`
+  references in archive output
+
+### Arrow Elimination Summary
+
+| File | Before 8G | After 8G | Arms removed |
+|------|-----------|----------|--------------|
+| `src/ast.rs` | `Intrinsic` enum (50 vars) + `InopDeclaration` + `IntrinsicCall` | **Deleted** | ~60 enum variants/nodes |
+| `src/interpreter.rs` | ~300 `Expr::IntrinsicCall` match arms | `Expr::Call` + metadata check | ~300 |
+| `src/lexer.rs` | `#` suffix in identifier lexing | Standard lexer | ~5 lines |
+| `src/parser.rs` | `inop` parse path + `#` call syntax | Removed | ~30 lines |
+| `lib/std/os/*.bv` | `inop` declarations | Standard `defn` + metadata | All `inop` keywords |
+
+### Gate: Phase 8G
+
+```
+cargo build            # clean (no Intrinsic, InopDeclaration, or
+                       #        Expr::IntrinsicCall in the AST)
+cargo test --lib       # 1497+ pass (all existing tests migrated)
+bash benchmarks/build_and_bench.sh --correctness  # all benchmarks match
+```
+
+---
+
 ## Phase 9 — Synthesis Engine
 
-**Depends on**: Phase 8 (AST + parsing), Phase 7 (plugin system for external
-SMT solver), Phase 1B (property system for operator cost model)
+**Depends on**: Phase 8 (AST + parsing), Phase 8G (intrinsic/inop removal,
+metadata-dispatch for interpreted execution), Phase 7 (plugin system for
+external SMT solver), Phase 1B (property system for operator cost model)
 
 ### Goal
 
@@ -2409,9 +2659,10 @@ pub enum DeriveHook {
 
 ## Phase 15 and Beyond — Library Mode and FFI Export
 
-After Phases 8–14 are complete, the compiler has compile-time assertions,
-program synthesis, sad-path derivation, and the `.dbvl` semantic archive.
-The next major effort builds the **consumable C-callable library** path:
+After Phases 8–8G–14 are complete, the compiler has compile-time assertions,
+program synthesis, sad-path derivation, intrinsic-free metadata dispatch,
+and the `.dbvl` semantic archive. The next major effort builds the
+**consumable C-callable library** path:
 
 ### Next: Phase 15 — Library Mode Completion
 
@@ -2432,6 +2683,9 @@ end-to-end C driver integration test.
   that `--library` mode can consume as an alternative to direct AST input
 - Phase 8 (derivation syntax): `export` parsing follows the same
   parser-extension pattern as `:=`
+- Phase 8G (intrinsic/inop removal): backends now dispatch on metadata
+  strings (`llvm_instr`, `interpreter_impl`) not hardcoded enums —
+  `--library` mode's LLVM backend uses `llvm_instr` metadata
 - Flat control flow, doc comments, and rationale comment conventions
   are carried forward
 
@@ -2447,6 +2701,7 @@ Detailed in the existing plan at
 | Phase | Focus | Test count delta |
 |-------|-------|-----------------|
 | 8 | Lexer + parser + AST for `:=` | ~+25 (lexing, parsing, type-check, compile-time assertions) |
+| 8G | Remove Intrinsic/Inop, modularize | ~-60 (delete Intrinsic enum, InopDecl, IntrinsicCall; zero new code) |
 | 9 | Synthesis engine + SMT bridge | ~+35 (enumerative search, SMT, `#no_derive`, write-back, DAG, directory) |
 | 10 | Contract-guided synthesis | ~+15 (SyGuS, LLVM metadata emission) |
 | 11 | Sad-path derivation | ~+15 (exhaustiveness, match synthesis, fallback verification) |
@@ -2461,9 +2716,10 @@ Detailed in the existing plan at
 | Doc | Phase | What |
 |-----|-------|------|
 | `docs/architecture/features/derivation.md` | 8 | Derivation block syntax, lifecycle, `:=` semantics, drafting vs resolved |
+| `docs/architecture/features/intrinsic-removal.md` | 8G | Removal of `Intrinsic` enum, `inop`, `IntrinsicCall`, `#` suffix; metadata-dispatch architecture |
 | `docs/architecture/features/synthesis.md` | 9 | Synthesis engine, DSL grammar, cost model, SMT bridge, enumerative fallback |
 | `docs/architecture/features/sad-path.md` | 11 | FFI error recovery via derivation, exhaustiveness, contract verification |
-| `docs/architecture/archive.md` | 12 | Archive schema, tagged `.dbvl` format, backend decoupling, ArchiveWriter/Reader |
+| `docs/architecture/archive.md` | 8G, 12 | Archive schema, tagged `.dbvl` format, backend decoupling, ArchiveWriter/Reader; 8G adds metadata round-trip proof |
 | `docs/architecture/features/contracts-synthesis.md` | 10 | Contract-guided synthesis, SyGuS, LLVM metadata emission |
 | `docs/architecture/features/derive-cli.md` | 13 | `brief derive` CLI commands, modes, surgical write-back |
 | `docs/architecture/features/derive-plugins.md` | 14 | WASM synthesis plugin WIT interface and hooks |
@@ -2483,6 +2739,10 @@ Detailed in the existing plan at
 | Archive format drifts from AST | 12 | Roundtrip tests in CI; backwards-compat reader; single format (`.dbvl`) means no extension drift |
 | Off-by-one errors in byte-offset insertion | 9, 13 | Test with files with BOM, mixed line endings, no trailing newline |
 | Parallel directory derives conflict | 13 | File-level locking; or sequential fallback when lock unavailable |
+| `Intrinsic` enum deletion misses a match arm | 8G | Delete-and-compile technique: remove the enum, let the compiler report every site. Fix each. |
+| `inop` removal breaks existing stdlib | 8G | Rewrite all `lib/std/os/*.bv` in the same commit. CI tests verify before and after. |
+| `Expr::IntrinsicCall` → `Expr::Call` breaks backend | 8G | Replace all match arms in lockstep. Every backend gets the same treatment. Gate with `cargo build` before `cargo test`. |
+| `#` suffix removal confuses existing parsers for `#pragma` | 8G | Only remove the identifier-suffix-`#` path. `#` at token-start is unaffected. |
 
 ---
 
@@ -2495,6 +2755,12 @@ Detailed in the existing plan at
 | `DerivationBlock` | New struct | `:= { examples }` | 8.1 |
 | `DerivationExample` | New struct | `inputs -> output` | 8.1 |
 | `Token::ColonEq` | New token variant | `:=` | 8.0 |
+| `Intrinsic` enum | **Deleted** | Replaced by `execute_intrinsic()` string dispatch | 8G |
+| `InopDeclaration` | **Deleted** | Replaced by standard `defn` with metadata | 8G |
+| `Expr::IntrinsicCall` | **Deleted** | Replaced by `Expr::Call` + metadata lookup | 8G |
+| `TopLevel::Inop` | **Deleted** | No longer needed | 8G |
+| `inop`/`inop!` tokens | **Deleted** | Removed from lexer | 8G |
+| `#` intrinsic suffix | **Deleted** | Removed from identifier lexing | 8G |
 
 ---
 
