@@ -851,6 +851,36 @@ impl TypeUniverse {
         self.get(ty.universe_key())
     }
 
+    /// Get the LLVM type string from the property system.
+    /// Phase 2: replaces hardcoded `Custom("Float")` etc. matches.
+    pub fn llvm_type_for(&self, ty: &crate::ast::Type) -> Option<&str> {
+        self.get_by_type(ty)?.get_property_str("llvm")
+    }
+
+    /// Get byte size from the property system.
+    /// Phase 2: replaces hardcoded `Custom("Int") → 8` etc. matches.
+    pub fn byte_size_for(&self, ty: &crate::ast::Type) -> Option<u64> {
+        self.get_by_type(ty)?.get_property_int("bytes").map(|n| n as u64)
+    }
+
+    /// Check if a type has Native storage from the property system.
+    /// Phase 2: replaces hardcoded `Custom("Float")` etc. matches.
+    pub fn is_native(&self, ty: &crate::ast::Type) -> Option<bool> {
+        self.get_by_type(ty).map(|rt| rt.get_property_str("storage") == Some("Native"))
+    }
+
+    /// Get TBAA tag from the property system.
+    /// Phase 2: replaces hardcoded `Custom("String") → "String"` matches.
+    pub fn tbaa_for(&self, ty: &crate::ast::Type) -> Option<&str> {
+        self.get_by_type(ty)?.get_property_str("tbaa")
+    }
+
+    /// Get alignment from the property system.
+    /// Phase 2: replaces hardcoded alignment matches.
+    pub fn alignment_for(&self, ty: &crate::ast::Type) -> Option<u64> {
+        self.get_by_type(ty)?.get_property_int("alignment").map(|n| n as u64)
+    }
+
     // 2026-07-08: Phase 2B — compute LLVM type string from base type + width.
     // For Int<8>: base "Int" + width 8 → "i8"
     // For Float<32>: base "Float" + width 32 → "float"
