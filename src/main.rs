@@ -2333,6 +2333,99 @@ fn link_and_optimize(
     Some(obj_path)
 }
 
+/// Resolve DeferredLiteral nodes by invoking their codec parse handlers
+/// via the interpreter at compile time. Replaces each DeferredLiteral with
+/// a concrete Expr (Integer, Float, Bool, String, etc.) so downstream
+/// passes (typechecker, codegen) never see deferred expressions.
+/// 2026-07-11: Phase 5 — deferred literal resolution.
+fn resolve_deferred_literals(program: &mut ast::Program, tu: &type_universe::TypeUniverse) {
+
+    // Collect positions first (avoid borrow conflicts with mutable iteration)
+    let mut replacements: Vec<(usize, ast::Expr)> = Vec::new();
+
+    for (i, item) in program.items.iter().enumerate() {
+        let decl = match item {
+            ast::TopLevel::StateDecl(d) => d,
+            _ => continue,
+        };
+        let expr = match &decl.expr {
+            Some(e) => e,
+            None => continue,
+        };
+        let deferred = match expr {
+            ast::Expr::DeferredLiteral { text, expected_type } => (text, expected_type),
+            _ => continue,
+        };
+        let (text, expected_type) = deferred;
+        let type_name = match expected_type.as_ref() {
+            ast::Type::Custom(n) => n.as_str(),
+            _ => "",
+        };
+        let resolved = resolve_single_deferred_literal(text, type_name, program, tu);
+        replacements.push((i, resolved));
+    }
+
+    for (i, resolved) in replacements {
+        if let ast::TopLevel::StateDecl(ref mut decl) = program.items[i] {
+            if let Some(ref mut expr) = decl.expr {
+                *expr = resolved;
+            }
+        }
+    }
+}
+
+/// Resolve a single DeferredLiteral by calling its codec parse handler.
+/// Extracted for flat control flow (max 2 nesting levels).
+fn resolve_single_deferred_literal(
+    text: &str,
+    type_name: &str,
+    program: &ast::Program,
+    tu: &type_universe::TypeUniverse,
+) -> ast::Expr {
+    // Look up the parse handler function name from the type's codec
+    let parse_fn = match tu.get(type_name) {
+        Some(rt) => match &rt.codec {
+            Some(codec_name) => match tu.codecs.get(codec_name) {
+                Some(codec) => codec.parse_handler.clone(),
+                None => None,
+            },
+            None => None,
+        },
+        None => None,
+    };
+    let fn_name = match &parse_fn {
+        Some(n) => n.clone(),
+        None => {
+            eprintln!("warning: deferred literal '{}' for type '{}' has no parse handler, using 0",
+                      text, type_name);
+            return ast::Expr::Integer(0);
+        }
+    };
+    // Call the parse handler via the interpreter using eval_expr
+    let mut interp = interpreter::Interpreter::new();
+    interp.load_program(program);
+    let call_expr = ast::Expr::Call(fn_name.clone(), vec![ast::Expr::String(text.to_string())]);
+    match interp.eval_expr(&call_expr) {
+        Ok(value) => match value {
+            interpreter::Value::Int(i) => ast::Expr::Integer(i),
+            interpreter::Value::Float(f) => ast::Expr::Float64(f),
+            interpreter::Value::Bool(b) => ast::Expr::Bool(b),
+            interpreter::Value::String(s) => ast::Expr::String(s),
+            interpreter::Value::Char(c) => ast::Expr::Char(c),
+            _ => {
+                eprintln!("warning: deferred literal '{}': handler '{}' returned unsupported type, using 0",
+                          text, fn_name);
+                ast::Expr::Integer(0)
+            }
+        },
+        Err(e) => {
+            eprintln!("warning: deferred literal '{}': handler '{}' failed: {:?}, using 0",
+                      text, fn_name, e);
+            ast::Expr::Integer(0)
+        }
+    }
+}
+
  fn run_llvm_compile(
      file_path: &PathBuf,
      out_dir: Option<&Path>,
@@ -2579,6 +2672,10 @@ fn link_and_optimize(
     // Phase 3.6: Normalize types (resolve defaults for user-defined types)
     normalize_types::normalize_types(&mut program, &tu);
     normalize_types::desugar_string_literals(&mut program, &tu);
+
+    // Phase 5: Resolve deferred literals — invoke codec parse handlers
+    // via the interpreter to convert literal text to concrete Expr values.
+    resolve_deferred_literals(&mut program, &tu);
 
     let comp_target = if is_embedded {
         typechecker::CompilationTarget::Embedded

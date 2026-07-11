@@ -369,6 +369,9 @@ pub struct Interpreter {
     pub cell_wires: Vec<CellWire>,
     /// Handle for cell thread — joined on drop or program exit.
     pub cell_thread_handle: Option<thread::JoinHandle<()>>,
+    /// Virtual heap for compile-time memory allocation.
+    /// 2026-07-11: Phase 7.5 — Bits thesis.
+    pub virtual_heap: VirtualHeap,
 }
 
 impl Clone for Interpreter {
@@ -404,7 +407,55 @@ impl Clone for Interpreter {
             trg_bindings: Vec::new(),
             cell_wires: Vec::new(),
             cell_thread_handle: None,
+            virtual_heap: self.virtual_heap.clone(),
         }
+    }
+}
+
+/// Sandboxed virtual memory space for compile-time execution.
+/// Maps virtual addresses to allocated byte blocks.
+/// Used by List, HashMap, Box, and any type that manages heap memory.
+/// Same pattern as Miri (Rust's compile-time interpreter).
+/// 2026-07-11: Phase 7.5 — Bits thesis.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VirtualHeap {
+    allocations: std::collections::HashMap<u64, Vec<u8>>,
+    next_address: u64,
+}
+
+impl VirtualHeap {
+    pub fn new() -> Self {
+        VirtualHeap {
+            allocations: std::collections::HashMap::new(),
+            next_address: 0x1000,
+        }
+    }
+
+    /// Allocate a block and return its virtual address.
+    pub fn alloc(&mut self, bytes: &[u8]) -> u64 {
+        let addr = self.next_address;
+        self.allocations.insert(addr, bytes.to_vec());
+        self.next_address = addr.wrapping_add(bytes.len() as u64).max(addr + 1);
+        addr
+    }
+
+    /// Read bytes from a virtual address.
+    pub fn read(&self, addr: u64, size: u64) -> Option<&[u8]> {
+        let block = self.allocations.get(&addr)?;
+        Some(&block[..block.len().min(size as usize)])
+    }
+
+    /// Write bytes to a virtual address.
+    pub fn write(&mut self, addr: u64, data: &[u8]) -> Result<(), ()> {
+        let block = self.allocations.get_mut(&addr).ok_or(())?;
+        let end = data.len().min(block.len());
+        block[..end].copy_from_slice(&data[..end]);
+        Ok(())
+    }
+
+    /// Free a virtual address.
+    pub fn free(&mut self, addr: u64) {
+        self.allocations.remove(&addr);
     }
 }
 
@@ -565,6 +616,7 @@ impl Interpreter {
             trg_bindings: Vec::new(),
             cell_wires: Vec::new(),
             cell_thread_handle: None,
+            virtual_heap: VirtualHeap::new(),
         }
     }
 
