@@ -3,6 +3,9 @@
 **Date:** 2026-07-10
 **Status:** Plan — pre-implementation
 **Depends on:** GLUE v2 FFI Unification (commit `45a5b1b`, plan `2026-07-10-glue-v2-ffi-unification.md`)
+**Superseded by:** `docs/plans/2026-07-11-library-mode-completion.md` — Phase 15
+of the overall roadmap extends this plan with `.o`/`.a` packaging, bindgen
+completeness, type marshaling, and end-to-end testing.
 
 ---
 

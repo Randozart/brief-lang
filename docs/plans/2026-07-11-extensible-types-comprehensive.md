@@ -1520,3 +1520,63 @@ fn process(x: Option<Value>) -> Option<i64> {
 Phase 0, Step 0.0: Remove `TildeArrowRight` from the lexer.
 Phase 0, Step 0.1: Delete dead parser tests at `parser.rs:12247-12305`.
 Phase 0, Step 0.2: Remove `=` as metadata delimiter in type body parsing.
+
+---
+
+## Phase 8 and Beyond — Roadmap After Extensible Types
+
+After Phases 0–7 are complete, the compilation pipeline is fully
+metadata-driven: types carry properties, codecs handle custom
+serialization, plugins extend the compiler at every stage. The next
+two major efforts build directly on this foundation:
+
+### Next: Derivation & Synthesis (Phases 8–14)
+
+**Plan**: `docs/plans/2026-07-11-derivation-synthesis-comprehensive.md`
+
+Adds `:=` derivation blocks, compile-time assertions, SMT-guided program
+synthesis, sad-path FFI error recovery, contract-guided deduction, and
+the `.dbvl` semantic archive for decoupled backends.
+
+**Prerequisites from this plan**:
+- Phase 1B (Generic Property System): synthesis uses operator cost models
+  derived from type properties
+- Phase 5 (Custom Literal Parsers): compile-time interpreter reuse for
+  assertion execution
+- Phase 7 (Plugin System): SMT solver integration via WASM plugin;
+  `.dbvl` archive enables decoupled backends
+
+### After That: Phase 15 — Library Mode Completion
+
+**Plan**: `docs/plans/2026-07-11-library-mode-completion.md`
+
+**Proposal by**: [@revred](https://github.com/revred) — reviewed Brief's
+`--library` infrastructure and identified five gaps between the existing
+`.ll`-level library mode and a consumable C-callable library.
+
+Adds the `export` keyword, `.ll` → `.o` → `.a` packaging,
+`__brief_init_state`/`__glue_release` in generated headers,
+`Bool`/`String` marshaling at the FFI boundary, and an end-to-end
+C driver test.
+
+**Prerequisites from this plan**:
+- Phase 1B (Generic Property System): type properties determine
+  marshaling (e.g., `String.bytes == 24` triggers struct-to-pointer
+  conversion at the boundary)
+- Phase 2 (codegen migration to universe queries): the export wrapper
+  emission queries the universe for type layout rather than hardcoding
+
+### Then: GLUE v2 — FFI Metadata Pipeline
+
+**Plan**: `docs/plans/2026-07-10-glue-v2-ffi-unification.md`
+
+The `bridge-exports.dbvl` metadata format for foreign build systems.
+Complementary to Phase 15: Phase 15 produces the linkable binary, GLUE
+v2 produces the metadata that tells the foreign build system how to
+call it.
+
+### Then: Zero-Copy Meld and Cross-Language LTO
+
+Detailed in `docs/plans/2026-07-10-zero-copy-glue-bridge-phases.md`.
+Extends zero-copy from scalars to composites via LLVM struct signatures,
+meld projections for non-LLVM targets, and cross-language LTO.

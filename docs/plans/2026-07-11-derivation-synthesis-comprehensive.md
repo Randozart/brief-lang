@@ -2407,7 +2407,42 @@ pub enum DeriveHook {
 
 ---
 
-## Testing Strategy Summary
+## Phase 15 and Beyond — Library Mode and FFI Export
+
+After Phases 8–14 are complete, the compiler has compile-time assertions,
+program synthesis, sad-path derivation, and the `.dbvl` semantic archive.
+The next major effort builds the **consumable C-callable library** path:
+
+### Next: Phase 15 — Library Mode Completion
+
+**Plan**: `docs/plans/2026-07-11-library-mode-completion.md`
+
+**Proposal by**: [@revred](https://github.com/revred) — reviewed the
+existing `--library` infrastructure and identified five gaps between
+Brief's `.ll`-level library mode and a linkable `.a`/`.so` with proper
+headers and type marshaling.
+
+Adds the `export` keyword (replacing `#export` pragma), `.ll` → `.o` →
+`.a` packaging, `__brief_init_state`/`__glue_release` in generated
+headers, `Bool`/`String` marshaling at the FFI boundary, and an
+end-to-end C driver integration test.
+
+**Prerequisites from this plan**:
+- Phase 12 (`.dbvl` archive): the archive carries the resolved program
+  that `--library` mode can consume as an alternative to direct AST input
+- Phase 8 (derivation syntax): `export` parsing follows the same
+  parser-extension pattern as `:=`
+- Flat control flow, doc comments, and rationale comment conventions
+  are carried forward
+
+### After That: Zero-Copy Meld and Cross-Language LTO
+
+Follows Phase 15. Extends zero-copy from scalars to composite types via
+LLVM struct signatures at the FFI boundary, meld projections for non-LLVM
+targets (Python PyObject*, Node v8::Value), and cross-language LLVM LTO.
+Detailed in the existing plan at
+`docs/plans/2026-07-10-zero-copy-glue-bridge-phases.md`.
+
 
 | Phase | Focus | Test count delta |
 |-------|-------|-----------------|

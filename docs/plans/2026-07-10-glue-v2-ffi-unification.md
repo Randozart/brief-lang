@@ -535,13 +535,24 @@ let file = parse_dbvl(&source);
 
 ---
 
-## 11. Future Work (Out of Scope)
+## 11. Future Work (Covered by Phase 15)
 
-- `brief build --library` / `--emit-llvm` — LLVM IR module production from bridge
-  files. This is the necessary companion to `brief export` but requires the
-  LLVM backend modifications. The export pipeline described here produces the
-  metadata; a follow-up plan will cover library-mode IR emission.
+### Phase 15 — Library Mode Completion
+
+**Plan**: `docs/plans/2026-07-11-library-mode-completion.md`
+**Proposal by**: [@revred](https://github.com/revred) — reviewed the
+`--library` infrastructure and identified five gaps to a consumable
+C-callable library.
+
+The `--library` mode, `.ll` → `.o` → `.a` packaging, bindgen completeness
+(`__brief_init_state`/`__glue_release`), type marshaling (`Bool`/`String`),
+and the end-to-end C driver test are now specified as Phase 15 of the
+overall roadmap, building on top of both this plan's `bridge-exports.dbvl`
+output and the derivation plan's `.dbvl` archive format.
+
+### Other Out-of-Scope Items
+
 - Python meld layouts for PyLongObject, PyUnicodeObject, PyListObject — requires
   C struct definitions + meld routes, covered in a future plan.
 - Rust dogfooding test — linking a Brief bridge into the Brief compiler's own
-  build. Requires the `--emit-llvm` mode from the follow-up plan.
+  build. Requires the Phase 15 library artifact as a prerequisite.
