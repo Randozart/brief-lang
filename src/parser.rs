@@ -570,37 +570,11 @@ impl<'a> Parser<'a> {
                         mods.push(h);
                     }
                 }
-                // 2026-07-07: Phase 1 — structured annotation syntax: <~ (name: expr, ...)
-                Some(Ok(Token::TildeArrow)) => {
-                    self.advance();
-                    self.expect(Token::LParen)?;
-                    loop {
-                        let name = self.expect_identifier()?;
-                        self.expect(Token::Colon)?;
-                        let value = self.parse_expression()?;
-                        mods.push(Annotation {
-                            name,
-                            value,
-                            mode: AnnotationMode::Advisory,
-                        });
-                        if matches!(self.current_token(), Some(Ok(Token::Comma))) {
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
-                    self.expect(Token::RParen)?;
-                }
+                // 2026-07-11: Phase 1A.0 — <~ (...) removed from hashtag modifiers.
+                // TildeArrow is still valid in type bodies and defn/txn bodies.
                 _ => return Ok(mods),
             }
         }
-    }
-
-    /// 2026-07-11: Phase 0.0 — dead, removed in Phase 1A.0.
-    /// The ~> token was removed from the lexer. This method now returns None
-    /// unconditionally until it is fully deleted.
-    fn parse_prefix_annotation(&mut self) -> Result<Option<Vec<Annotation>>, SyntaxError> {
-        Ok(None)
     }
 
     fn expect_type_identifier(&mut self) -> Result<String, crate::errors::SyntaxError> {
@@ -6356,32 +6330,7 @@ let span = self.current_span();
                 //     }
                 // }
                 // Expression statement or Assignment/Unification/Arrow
-                // 2026-07-07: Phase 1 — check for prefix annotations before expression
-                if let Some(prefix_mods) = self.parse_prefix_annotation()? {
-                    if !prefix_mods.is_empty() {
-                        // Prefix annotations before a guarded statement
-                        if let Some(Ok(Token::LBracket)) = self.current_token() {
-                            self.advance();
-                            let condition = self.parse_expression()?;
-                            self.expect(Token::RBracket)?;
-                            let statements = if let Some(Ok(Token::LBrace)) = self.current_token() {
-                                let mut body = Vec::new();
-                                self.advance();
-                                while !matches!(self.current_token(), Some(Ok(Token::RBrace))) {
-                                    body.push(self.parse_statement()?);
-                                }
-                                self.expect(Token::RBrace)?;
-                                self.expect(Token::Semicolon)?;
-                                body
-                            } else {
-                                vec![self.parse_statement()?]
-                            };
-                            return Ok(Statement::Guarded { condition, statements });
-                        } else {
-                            return self.spanned_err("Expected '[condition]' after prefix annotation".to_string());
-                        }
-                    }
-                }
+                // 2026-07-11: Phase 1A.0 — prefix annotation handler removed.
                 let expr = self.parse_expression()?;
 
                 if let Some(Ok(Token::Eq)) = self.current_token() {
