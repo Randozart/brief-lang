@@ -26,6 +26,43 @@ impl BinaryOpExpr {
     pub fn new(kind: BinaryOpKind, left: Expr, right: Expr) -> Self {
         BinaryOpExpr { kind, left: Box::new(left), right: Box::new(right) }
     }
+
+    /// Map operator kind to its property name (e.g. Add → "Add").
+    /// 2026-07-11: Phase 8B — property-based operator dispatch.
+    pub fn kind_name(&self) -> &'static str {
+        use BinaryOpKind::*;
+        match self.kind {
+            Add => "Add", Sub => "Sub", Mul => "Mul", Div => "Div", Mod => "Mod",
+            Eq => "Eq", Ne => "Ne", Lt => "Lt", Le => "Le", Gt => "Gt", Ge => "Ge",
+            And => "And", Or => "Or",
+            BitAnd => "BitAnd", BitOr => "BitOr", BitXor => "BitXor",
+            Shl => "Shl", Shr => "Shr",
+        }
+    }
+}
+
+/// Try to dispatch a binary op through property-based intrinsic lookup.
+/// Both operands must be Value::Bits and the expected type must have an
+/// operator binding. Returns None to fall back to legacy typed dispatch.
+/// 2026-07-11: Phase 8B — flat control flow, max 2 levels.
+fn try_bits_dispatch(
+    l: &Value,
+    r: &Value,
+    op_name: &str,
+    ctx: &Interpreter,
+) -> Option<Result<Value, RuntimeError>> {
+    let (Value::Bits(_), Value::Bits(_)) = (l, r) else { return None; };
+    let expected_type = ctx.current_expected_type.as_ref()?;
+    let type_name = match expected_type {
+        Type::Custom(n) => n.as_str(),
+        _ => return None,
+    };
+    if type_name.is_empty() {
+        return None;
+    }
+    let universe = ctx.type_universe.as_ref()?;
+    let intrinsic = universe.get_operator_intrinsic(type_name, op_name)?;
+    Some(crate::interpreter::execute_intrinsic(intrinsic, &[l.clone(), r.clone()]))
 }
 
 impl ExprTypecheck for BinaryOpExpr {
@@ -40,6 +77,12 @@ impl ExprEval for BinaryOpExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
         let l = ctx.eval_expr(&self.left)?;
         let r = ctx.eval_expr(&self.right)?;
+
+        // Phase 8B: property-based dispatch for Bits operands
+        if let Some(result) = try_bits_dispatch(&l, &r, self.kind_name(), ctx) {
+            return result;
+        }
+
         use BinaryOpKind::*;
         Ok(match (self.kind, &l, &r) {
             (Add,  Value::Int(a), Value::Int(b)) => Value::Int(a + b),

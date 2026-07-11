@@ -2366,11 +2366,15 @@ fn resolve_deferred_literals(program: &mut ast::Program, tu: &type_universe::Typ
     }
 
     for (i, resolved) in replacements {
-        if let ast::TopLevel::StateDecl(ref mut decl) = program.items[i] {
-            if let Some(ref mut expr) = decl.expr {
-                *expr = resolved;
-            }
-        }
+        let decl = match &mut program.items[i] {
+            ast::TopLevel::StateDecl(d) => d,
+            _ => continue,
+        };
+        let expr = match &mut decl.expr {
+            Some(e) => e,
+            None => continue,
+        };
+        *expr = resolved;
     }
 }
 
@@ -2382,48 +2386,47 @@ fn resolve_single_deferred_literal(
     program: &ast::Program,
     tu: &type_universe::TypeUniverse,
 ) -> ast::Expr {
-    // Look up the parse handler function name from the type's codec
-    let parse_fn = match tu.get(type_name) {
-        Some(rt) => match &rt.codec {
-            Some(codec_name) => match tu.codecs.get(codec_name) {
-                Some(codec) => codec.parse_handler.clone(),
-                None => None,
-            },
-            None => None,
-        },
-        None => None,
-    };
-    let fn_name = match &parse_fn {
-        Some(n) => n.clone(),
+    let fn_name = match lookup_parse_handler(type_name, tu) {
+        Some(n) => n,
         None => {
             eprintln!("warning: deferred literal '{}' for type '{}' has no parse handler, using 0",
                       text, type_name);
             return ast::Expr::Integer(0);
         }
     };
-    // Call the parse handler via the interpreter using eval_expr
     let mut interp = interpreter::Interpreter::new();
     interp.load_program(program);
-    // Set the expected type so the interpreter can dispatch operators via properties
-    let expected_ty = ast::Type::Custom(type_name.to_string());
-    interp.current_expected_type = Some(expected_ty);
-    let call_expr = ast::Expr::Call(fn_name.clone(), vec![ast::Expr::String(text.to_string())]);
+    interp.current_expected_type = Some(ast::Type::Custom(type_name.to_string()));
+    let call_expr = ast::Expr::Call(fn_name, vec![ast::Expr::String(text.to_string())]);
     match interp.eval_expr(&call_expr) {
-        Ok(value) => match value {
-            interpreter::Value::Int(i) => ast::Expr::Integer(i),
-            interpreter::Value::Float(f) => ast::Expr::Float64(f),
-            interpreter::Value::Bool(b) => ast::Expr::Bool(b),
-            interpreter::Value::String(s) => ast::Expr::String(s),
-            interpreter::Value::Char(c) => ast::Expr::Char(c),
-            _ => {
-                eprintln!("warning: deferred literal '{}': handler '{}' returned unsupported type, using 0",
-                          text, fn_name);
-                ast::Expr::Integer(0)
-            }
-        },
+        Ok(value) => value_to_expr(&value, text),
         Err(e) => {
-            eprintln!("warning: deferred literal '{}': handler '{}' failed: {:?}, using 0",
-                      text, fn_name, e);
+            eprintln!("warning: deferred literal '{}': handler failed: {:?}, using 0", text, e);
+            ast::Expr::Integer(0)
+        }
+    }
+}
+
+/// Look up the codec parse handler for a type. Returns None if not found.
+/// 2026-07-11: Phase 8B — flat helper, max 2 levels.
+fn lookup_parse_handler(type_name: &str, tu: &type_universe::TypeUniverse) -> Option<String> {
+    let rt = tu.get(type_name)?;
+    let codec_name = rt.codec.as_ref()?;
+    let codec = tu.codecs.get(codec_name)?;
+    codec.parse_handler.clone()
+}
+
+/// Convert an interpreter Value to an AST Expr. Warnings on mismatch.
+/// 2026-07-11: Phase 8B — extracted for flat control flow.
+fn value_to_expr(value: &interpreter::Value, text: &str) -> ast::Expr {
+    match value {
+        interpreter::Value::Int(i) => ast::Expr::Integer(*i),
+        interpreter::Value::Float(f) => ast::Expr::Float64(*f),
+        interpreter::Value::Bool(b) => ast::Expr::Bool(*b),
+        interpreter::Value::String(s) => ast::Expr::String(s.clone()),
+        interpreter::Value::Char(c) => ast::Expr::Char(*c),
+        _ => {
+            eprintln!("warning: deferred literal '{}': handler returned unsupported type, using 0", text);
             ast::Expr::Integer(0)
         }
     }
