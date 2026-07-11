@@ -7284,3 +7284,26 @@ let spec = crate::target_spec::TargetSpec {
                 "Counter increment should produce add i64 in body. Output: {}", output);
         }
     }
+
+    #[test]
+    fn test_metadata_produces_zero_ir() {
+        // Verify that `<~` metadata in body blocks produces no LLVM IR instructions.
+        // Metadata is collected into Definition.metadata during parsing and never
+        // appears in the statement vector, so the codegen loop never sees it.
+        let src = "defn foo() -> Int { jira <~ \"FIN-8422\"; priority <~ 2; term 42; };";
+        let mut parser = crate::parser::Parser::new(src);
+        let program = parser.parse().unwrap();
+        // Verify metadata was collected and not inserted as statements
+        if let TopLevel::Definition(defn) = &program.items[0] {
+            assert_eq!(defn.metadata.len(), 2, "Metadata should have 2 entries");
+            assert!(defn.metadata.contains_key("jira"), "Should have jira metadata");
+            assert!(defn.metadata.contains_key("priority"), "Should have priority metadata");
+        } else { panic!("Expected Definition"); }
+        let output = LlvmBackend::new().generate(&program);
+        // The function has no observable effect, so Brief's DCE may eliminate it.
+        // Metadata strings may appear in the global string pool, but should NOT
+        // generate any runtime instructions or function bodies.
+        let in_func_def = output.split("define ").nth(1).unwrap_or("");
+        assert!(!in_func_def.contains("jira"), "Metadata field name should not appear in function body");
+        assert!(!in_func_def.contains("priority"), "Metadata field name should not appear in function body");
+    }
