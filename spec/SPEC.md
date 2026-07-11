@@ -2250,7 +2250,29 @@ txn compute [count < N][count == N] {
 **Variable metadata** is reserved for future use (`x <~ (key: val);` after a
 `let` binding is recognized syntax but produces a compile-time error).
 
-### 5.7 Resource Lifecycle
+### 5.7 Type Property System
+
+Every type carries a `properties` map at runtime (`HashMap<String, PropertyValue>`)
+populated from `<~` declarations in the type body. Well-known property names
+like `bytes`, `alignment`, `llvm`, `storage`, and `tbaa` are dual-written to
+both the map AND the corresponding hardcoded `ResolvedType` field during the
+Phase 1B–2 migration window.
+
+| Property | Type | Example | Purpose |
+|----------|------|---------|---------|
+| `bytes` | `Int` | `bytes <~ 8;` | Physical width in bytes |
+| `alignment` | `Int` | `alignment <~ 4;` | Memory alignment |
+| `llvm` | `String` | `llvm <~ "i64";` | LLVM IR type string |
+| `storage` | `Identifier` | `storage <~ Native;` | "Boxed" (i64) or "Native" (float regs) |
+| `tbaa` | `String` | `tbaa <~ "Int";` | TBAA type tree node name |
+| `box` | `String` | `box <~ "ptrtoint#";` | Boxing intrinsic (Native → Boxed) |
+| `unbox` | `String` | `unbox <~ "inttoptr#";` | Unboxing intrinsic (Boxed → Native) |
+
+Codegen queries the property system via `TypeUniverse` convenience methods:
+`llvm_type_for()`, `byte_size_for()`, `is_native()`, `tbaa_for()`,
+`alignment_for()` — each with hardcoded fallback during migration.
+
+### 5.8 Resource Lifecycle
 
 Resources are declared and managed:
 

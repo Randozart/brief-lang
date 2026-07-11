@@ -52,7 +52,9 @@ type MyInt <: Int {
 `TypeUniverse::build()` collects all `TopLevel::TypeDef` items, resolves each:
 1. Create `ResolvedType` with defaults
 2. Inherit from base type (if resolved)
-3. Apply bindings — known names → fields, unknown → `projections` HashMap
+3. Apply bindings from `TypeDefBody.bindings` (legacy) — known names → hardcoded fields, unknown → `projections`
+4. Dual-write to `ResolvedType.properties` HashMap (Phase 1B) — every `<~` metadata entry AND every `apply_binding()` result also populates the generic properties map
+5. After Phase 2 migration completes, step 3 will read from `metadata` + `projections` separately and the hardcoded fields will be removed
 
 ## User-Defined Projections
 

@@ -64,6 +64,40 @@ all metadata now uses inline `<~` inside body blocks.
 Hashtag pragmas (`#volatile` → `volatile <~ true`) remain as shorthand inside
 type bodies.
 
+## Generic Property System (Phase 1B)
+
+**Added 2026-07-11 (Phase 1B).** Every `ResolvedType` now carries a
+`properties: HashMap<String, PropertyValue>` alongside its ~30 hardcoded
+fields. During the migration (Phases 1B–2), ALL bindings are dual-written:
+known metadata names set both the hardcoded field AND the properties map;
+`apply_binding()` inserts into both.
+
+Accessor methods prefer the properties map with legacy fallback:
+```rust
+impl ResolvedType {
+    pub fn get_property_str(&self, key: &str) -> Option<&str>;
+    pub fn get_property_int(&self, key: &str) -> Option<i64>;
+    pub fn get_property_bool(&self, key: &str) -> Option<bool>;
+    pub fn get_property(&self, key: &str) -> Option<&PropertyValue>;
+    pub fn has_property(&self, key: &str) -> bool;
+}
+```
+
+Convenience methods on `TypeUniverse` wrap property queries for common
+codegen patterns, replacing `Custom("Int")` matches:
+```rust
+impl TypeUniverse {
+    pub fn llvm_type_for(&self, ty: &Type) -> Option<&str>;
+    pub fn byte_size_for(&self, ty: &Type) -> Option<u64>;
+    pub fn is_native(&self, ty: &Type) -> Option<bool>;
+    pub fn tbaa_for(&self, ty: &Type) -> Option<&str>;
+    pub fn alignment_for(&self, ty: &Type) -> Option<u64>;
+}
+```
+
+After Phase 2 completes, the ~30 hardcoded fields on `ResolvedType` will be
+removed entirely — the properties map will be the single source of truth.
+
 ## Bootstrap Type Universe
 
 **Added 2026-06-30 (Phase C).** The 14 built-in primitive types (`Int`,
