@@ -315,6 +315,76 @@ impl Clone for EnumVariantInfo {
     }
 }
 
+/// Execute a named intrinsic on raw byte-slice arguments.
+/// This is the pure-Bits dispatch engine. It operates on Value::Bits
+/// byte arrays and returns Value::Bits results, with no knowledge of
+/// Int/Float/Bool/etc. variants.
+/// 2026-07-11: Phase 8A.2 — property-based operator dispatch.
+pub fn execute_intrinsic(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    match name {
+        "__add_i64" => {
+            let a = bits_to_i64(&args[0])?;
+            let b = bits_to_i64(&args[1])?;
+            Ok(Value::Bits(i64_to_bits(a.wrapping_add(b))))
+        }
+        "__sub_i64" => {
+            let a = bits_to_i64(&args[0])?;
+            let b = bits_to_i64(&args[1])?;
+            Ok(Value::Bits(i64_to_bits(a.wrapping_sub(b))))
+        }
+        "__mul_i64" => {
+            let a = bits_to_i64(&args[0])?;
+            let b = bits_to_i64(&args[1])?;
+            Ok(Value::Bits(i64_to_bits(a.wrapping_mul(b))))
+        }
+        "__eq_i64" => {
+            let a = bits_to_i64(&args[0])?;
+            let b = bits_to_i64(&args[1])?;
+            Ok(Value::Bits(if a == b { vec![1] } else { vec![0] }))
+        }
+        "__fadd_f64" => {
+            let a = bits_to_f64(&args[0])?;
+            let b = bits_to_f64(&args[1])?;
+            Ok(Value::Bits(f64_to_bits(a + b)))
+        }
+        _ => Err(RuntimeError::UnsupportedProjection(
+            format!("unknown intrinsic: {}", name)))
+    }
+}
+
+fn bits_to_i64(v: &Value) -> Result<i64, RuntimeError> {
+    let b = match v {
+        Value::Bits(b) => b,
+        _ => return Err(RuntimeError::TypeMismatch("expected Bits".into())),
+    };
+    let mut arr = [0u8; 8];
+    let copy_len = b.len().min(8);
+    arr[..copy_len].copy_from_slice(&b[..copy_len]);
+    Ok(i64::from_le_bytes(arr))
+}
+
+fn i64_to_bits(i: i64) -> Vec<u8> {
+    i.to_le_bytes().to_vec()
+}
+
+fn bits_to_f64(v: &Value) -> Result<f64, RuntimeError> {
+    let b = match v {
+        Value::Bits(b) => b,
+        _ => return Err(RuntimeError::TypeMismatch("expected Bits".into())),
+    };
+    if b.len() < 8 {
+        return Err(RuntimeError::TypeMismatch(
+            format!("expected 8 bytes for f64, got {}", b.len())));
+    }
+    let mut arr = [0u8; 8];
+    arr.copy_from_slice(&b[..8]);
+    Ok(f64::from_le_bytes(arr))
+}
+
+fn f64_to_bits(f: f64) -> Vec<u8> {
+    f.to_le_bytes().to_vec()
+}
+
 /// Metadata for a callable declaration (defn/inop/txn).
 /// Used by function metadata projections (Address, Name, etc.).
 #[derive(Debug, Clone)]
