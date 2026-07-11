@@ -268,15 +268,16 @@ type Char <: Bits {
 };
 
 type String <: Bits {
-    bytes <~ 8;
+    ptr: Ptr<UInt8>;
+    len: Int;
+    codec: UInt8;
+    bytes <~ 24;
     alignment <~ 8;
-    llvm <~ "i8*";
-    storage <~ "Boxed";
+    llvm <~ "%String";
+    storage <~ "Native";
     tbaa <~ "String";
     box <~ "ptrtoint#";
     unbox <~ "inttoptr#";
-    default_width <~ 64;
-    default_codec <~ 0;
 };
 
 type Data <: Bits {
