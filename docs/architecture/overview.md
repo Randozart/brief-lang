@@ -46,20 +46,23 @@ flowchart LR
 | Backend | `backend/` | Code generation for target (LLVM, CIRCT, Webstack, etc.) |
 | Interpreter | `interpreter.rs` | Reference implementation — evaluates Brief directly |
 
-## Announcement Arrow (`<~`) — Compile-Time Metadata
+## Annotation Arrow (`<~`) — Compile-Time Metadata
 
-**Added 2026-06-30 (Phase C/D).** The `<~` token (TildeArrow) provides a
-uniform mechanism for compile-time annotations on declarations:
+**Added 2026-07-11 (Phase 1A).** The `<~` token (TildeArrow) is Brief's
+universal metadata attachment mechanism. Inside any body block
+(type/definition/transaction/guard), `name <~ expr;` declares compile-time
+metadata:
 
-- **Type body bindings**: `bytes <~ 8;` replaces `Bytes = 8;`
-- **Definition annotations**: `defn compute <~ priority: 2 (x: Int) -> Int`
-- **Transaction annotations**: `txn process <~ retry: 3, #atomic [pre][post]`
-- **Trigger annotations**: `trigger tick: Int <~ period: 100 @timer#(1000)`
-- **Hashtag shorthand**: `#volatile` inside a type body desugars to `volatile <~ true`
+- **Type bodies**: `bytes <~ 8; alignment <~ 4;` — type properties
+- **Definition bodies**: `jira <~ "FIN-8422";` — item metadata
+- **Transaction bodies**: `priority <~ 2;` — item metadata
+- **Guard branches**: `priority <~ 1;` — branch-scoped metadata
 
-Annotation values are arbitrary expressions (integers, strings, bools,
-identifiers). Unknown annotation names are preserved as user-defined
-projections on the `ResolvedType` in the TypeUniverse.
+The `~>` prefix annotation syntax `(name: val) ~> item` has been removed;
+all metadata now uses inline `<~` inside body blocks.
+
+Hashtag pragmas (`#volatile` → `volatile <~ true`) remain as shorthand inside
+type bodies.
 
 ## Bootstrap Type Universe
 

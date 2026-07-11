@@ -1,7 +1,7 @@
 # Brief Language Specification
 
-**Version:** v0.16.0  
-**Date:** 2026-07-09  
+**Version:** v0.17.0  
+**Date:** 2026-07-11  
 **Status:** Development (Phase 2/3 complete: Strong Bits thesis, intrinsic reduction. Three canonical backends: LLVM, Webstack, CIRCT.)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
@@ -138,9 +138,11 @@ top_level ::= definition
             | render_block
             | exit_condition
 
-type_def ::= "type" identifier type_params? "<:" type_expr "{" (type_property | constraint)* "}" ";"
-type_property ::= identifier "=" expression ";"
+type_def ::= "type" identifier type_params? "<:" type_expr "{" (slot_decl | type_property | op_decl | constraint)* "}" ";"
+slot_decl ::= identifier ":" type_expr ";"
+type_property ::= identifier ("(" params? ")")? "<~" expression ";"
 constraint ::= "[" expression "]"
+op_decl ::= "op" rune_name "(" param_type? ")" "->" return_type "=" intrinsic ";"
 
 exit_condition ::= "#!exit" expression
 
@@ -1929,17 +1931,17 @@ Unrecognized expression forms produce a compile-time error in Pass 1.
 
 ```brief
 // Scalar derivation
-Type U8  <: Bits { Bytes = 1; Alignment = 1; };
-Type U32 <: Bits { Bytes = 4; Alignment = 4; };
+Type U8  <: Bits { Bytes <~ 1; Alignment <~ 1; };
+Type U32 <: Bits { Bytes <~ 4; Alignment <~ 4; };
 Type Int <: U64;
-Type MmioReg <: U32 { Volatile = true; };
+Type MmioReg <: U32 { Volatile <~ true; };
 
 // Collection derivation
 Type List<T> <: Bits {
-    ElementType = T;
-    FixedSize = false;
-    InsertAt = :> Size;
-    ExtractFrom = :> Size - 1;
+    ElementType <~ T;
+    FixedSize <~ false;
+    InsertAt <~ :> Size;
+    ExtractFrom <~ :> Size - 1;
 };
 
 Type Stack<T> <: List<T> { AllowIndex = false; };
@@ -2172,7 +2174,83 @@ rct txn [*][*] {
 when the guard is proven to hold. Currently the guard is a constant `true`
 and only the rollback action infrastructure is emitted.
 
-### 5.5 Resource Lifecycle
+### 5.5 Annotations (`#`, `#!`, `#?`)
+
+Brief provides a lightweight annotation system for attaching compiler directives
+to items (definitions, transactions, types). Annotations are distinct from
+metadata (`<~`) — they tell the compiler **what to do**, not **what something is**.
+
+| Form | Mode | Meaning |
+|------|------|---------|
+| `#gpu` | Advisory | Hint: prefer GPU offloading |
+| `#!out` | Mandatory | Requirement: has observable external effects |
+| `#?gpu` | Advisory + diagnostic | Hint + explain the compiler's decision |
+| `#?!gpu` | Mandatory + diagnostic | Requirement + explain the compiler's decision |
+| `#!?gpu` | Mandatory + diagnostic | Same as `#?!gpu` (alternative ordering) |
+| bare `#?` | Advisory + diagnostic | Enable diagnostics for ALL passes on this item |
+
+**Diagnostic output**: When `#?` is present, the compiler emits pass-level
+explanations at compile time:
+```
+[my_func] gpu: NOT offloaded (body contains non-GPU-safe intrinsic)
+[my_func] vectorize: vectorized by factor 4 (trip count >= 4)
+```
+
+Annotations appear on the signature line, before the item keyword:
+```brief
+#?gpu defn my_compute() -> Int { term 42; };
+#!out txn write_port() [*][*] { &port = value; term; };
+```
+
+### 5.6 Inline Metadata (`<~`)
+
+The `<~` (Annotation Arrow) attaches compile-time metadata to items. Unlike
+`#` annotations (which are compiler directives), `<~` declarations are
+declarative data — they describe properties of the annotated item.
+
+**Inside type bodies**, `<~` declares type properties:
+```brief
+type UInt32 <: Bits {
+    bytes <~ 4;
+    alignment <~ 4;
+    storage <~ Native;
+};
+```
+
+Slots use `:` instead:
+```brief
+type String {
+    ptr: Ptr<UInt8>;
+    len: Int;
+    codec: UInt8;
+    bytes <~ 24;
+};
+```
+
+**Inside definition/transaction bodies**, `<~` at the body top declares
+item-level metadata:
+```brief
+defn process() -> Int {
+    jira <~ "FIN-8422";
+    priority <~ 2;
+    term 42;
+};
+```
+
+**Inside guard branches**, `<~` declares branch-scoped metadata:
+```brief
+txn compute [count < N][count == N] {
+    [count % 2 == 0] {
+        priority <~ 1;
+        &even = even + 1;
+    };
+};
+```
+
+**Variable metadata** is reserved for future use (`x <~ (key: val);` after a
+`let` binding is recognized syntax but produces a compile-time error).
+
+### 5.7 Resource Lifecycle
 
 Resources are declared and managed:
 

@@ -1,22 +1,31 @@
 # TypeDef — The Derivation Lens Operator
 
-**Date:** 2026-06-20  
-**Phase:** 2 (Unified TypeDef Bodies)  
-**Status:** Implemented (TypeBinding replaces TypeProperty, TypeUniverse Pass 1 resolver works, backend synthesis deferred)
+**Date:** 2026-07-11  
+**Phase:** 1A (Generic Property System)  
+**Status:** Refactored — TypeDefBody.split into metadata + projections, slot syntax added.
 
 ## Design
 
-`Type Name <: Base { ... }` — a top-level declaration that defines a new type by deriving from an existing one using the **Derivation lens** (`<:`). The compiler natively recognizes well-known metadata binding names (~13); everything else is a user-defined projection stored in `ResolvedType::projections`.
+`Type Name <: Base { ... }` — a top-level declaration that defines a new type by deriving from an existing one using the **Derivation lens** (`<:`). The compiler natively recognizes well-known metadata names (~13); everything else is a user-defined projection stored in `ResolvedType::projections`.
 
-Phase 2 replaced the 13-variant `TypeProperty` enum with a unified `TypeBinding` struct. Every TypeDef body entry is parsed as `Name[(params)] = Expr;`. The `TypeUniverse::apply_binding` method dispatches known names to `ResolvedType` fields and stores unknown names as projections.
+The type body supports four kinds of entries:
+
+| Entry | Syntax | Storage |
+|-------|--------|---------|
+| **Slot** | `name: Type;` | `TypeDefBody.slots` — structural bit partitions |
+| **Metadata** | `name <~ expr;` | `TypeDefBody.metadata` — compile-time constants |
+| **Projection** | `name(params) = expr;` | `TypeDefBody.projections` — lazy computed properties |
+| **Operator** | `op Rune(Param) -> Ret = impl;` | `TypeDefBody.operators` — intrinsic dispatch |
+
+The old `TypeDefBody.bindings` field is retained as a migration compat field (dual-written).
 
 ## Syntax
 
 ```brief
 type MyInt <: Int {
-    Bytes = 8;                    // known metadata → ResolvedType::bytes
-    Alignment = 8;                // known → ResolvedType::alignment
-    IsPositive(x) = x > 0;        // user-defined projection → projections["IsPositive"]
+    bytes <~ 8;                    // known metadata → PropertyValue::Int(8)
+    alignment <~ 8;                // known metadata → PropertyValue::Int(8)
+    IsPositive(x) = x > 0;         // user-defined projection → projections["IsPositive"]
 };
 ```
 
@@ -56,11 +65,11 @@ Any binding name not in the known-metadata table is stored as a `TypeBinding` in
 
 | File | Responsibility |
 |------|---------------|
-| `src/ast.rs` | `TypeBinding` struct, `TypeDefBody.bindings: Vec<TypeBinding>`, `ProjectionTarget::UserDefined` / `UserDefinedWithArg` |
+| `src/ast.rs` | `PropertyValue` enum, `TypeBinding` struct, `TypeDefBody.metadata: HashMap<String, PropertyValue>` + `projections: Vec<TypeBinding>`, slot/op/constraint fields |
 | `src/type_universe.rs` | Pass 1 resolver — collect, chain-derive, inherit/override, apply_binding, freeze |
 | `src/features/toplevel/typedef.rs` | 5 trait impls (evaluate returns error, typecheck returns Void, LLVM returns %void, webstack returns undefined) |
-| `src/parser.rs` | `parse_type_def()` — all entries parsed as `Name[(params)] = Expr;` |
-| `src/lexer.rs` | `Type` keyword token, `LtColon` token |
+| `src/parser.rs` | `parse_type_def()` — `name <~ expr;` for metadata, `name(params) = expr;` for projections |
+| `src/lexer.rs` | `Type` keyword token, `LtColon` token, `TildeArrow` token |
 
 ## Deferred Items
 
@@ -77,7 +86,7 @@ Marked `DEFERRED` in code:
 
 ### D-3: InsertAt/ExtractFrom Custom strategy (implemented 2026-06-25)
 
-When a TypeDef declares `InsertAt = fn_name` or `ExtractFrom = fn_name`
+When a TypeDef declares `InsertAt <~ fn_name` or `ExtractFrom <~ fn_name`
 and the strategy string doesn't match any built-in name (`append`, `prepend`,
 `sorted`, `hash`, `pop`, `shift`), the resolver returns
 `InsertStrategy::Custom(fn_name)` instead of `None`.
@@ -95,8 +104,8 @@ then as a `defn` (executes body).
 Example:
 ```brief
 type SkipList<T> <: List<T> {
-    InsertAt = sl_insert;
-    ExtractFrom = sl_remove;
+    InsertAt <~ sl_insert;
+    ExtractFrom <~ sl_remove;
 };
 
 inop sl_insert<T>(list: SkipList<T>, val: T) -> SkipList<T>
@@ -113,8 +122,8 @@ correctly maps `sl` to `SkipList` for strategy resolution.
 
 ```brief
 type MyCollection <: List {
-    InsertAt = sl_insert;       // Custom(strategy) → calls sl_insert#(list, val)
-    ExtractFrom = sl_remove;    // Custom(strategy) → calls sl_remove#(list)
+    InsertAt <~ sl_insert;       // Custom(strategy) → calls sl_insert#(list, val)
+    ExtractFrom <~ sl_remove;    // Custom(strategy) → calls sl_remove#(list)
 };
 ```
 

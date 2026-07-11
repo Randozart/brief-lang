@@ -143,27 +143,62 @@ New syntax (preferred):
 
 ---
 
-## Annotation Arrow (`<~`) and `#hashtag` Shorthand
+## Annotations (`#`, `#!`, `#?`) — Compiler Directives
 
-**Added 2026-06-30 (Phase C/D).** The `<~` token provides a uniform syntax for
-compile-time metadata on declarations:
-
-- **Type bodies**: `type Foo <: Bits { bytes <~ 8; alignment <~ 4; };`
-- **Definitions**: `defn compute <~ priority: 2, #cached (x: Int) -> Int`
-- **Transactions**: `txn process <~ retry: 3, #atomic [pre][post]`
-- **Triggers**: `trigger tick: Int <~ period: 100 @timer#(1000)`
-
-Inside a `<~` annotation list, `#name` is shorthand for `name <~ true`:
+Annotations use `#` before an item to tell the compiler what to do, not what
+the item is. They appear on the signature line before the keyword:
 
 ```brief
-defn compute <~ priority: 2, #cached (x: Int) -> Int { ... }
-// #cached is equivalent to cached <~ true
+#?gpu defn my_compute() -> Int { term 42; };
+#!out txn write_port() [*][*] { &port = value; term; };
 ```
 
-Inside a type body, a bare `#name` also desugars to a binding:
+| Form | Meaning |
+|------|---------|
+| `#gpu` | Advisory hint: prefer GPU offloading |
+| `#!out` | Mandatory: this has external effects |
+| `#?gpu` | Advisory + **explain** why the compiler chose its path |
+| `#?!gpu` | Mandatory + explain |
+| bare `#?` | Enable pass diagnostics for all decisions on this item |
+
+Diagnostic output shows the compiler's reasoning at compile time:
+```
+[my_func] gpu: NOT offloaded (body contains non-GPU-safe intrinsic)
+```
+
+## Inline Metadata (`<~`) in Body Blocks
+
+The `<~` token attaches declarative metadata inside body blocks. Unlike `#`
+(directives), `<~` data describes properties of the item.
+
+**Type bodies**: `name <~ value;` declares a type property:
 
 ```brief
-type Bar <: Bits {
-    #volatile;  // → volatile <~ true  (stored as binding name "volatile")
+type Foo <: Bits {
+    bytes <~ 8;
+    alignment <~ 4;
+    storage <~ Native;
+    #volatile;  // shorthand for volatile <~ true
+};
+```
+
+**Definition bodies**: `<~` at the top of a function body declares metadata:
+
+```brief
+defn process() -> Int {
+    jira <~ "FIN-8422";   // Documentation metadata
+    priority <~ 2;
+    term 42;
+};
+```
+
+**Guard branches**: `<~` inside a guard block scopes metadata to that branch:
+
+```brief
+txn compute [count < N][count == N] {
+    [count % 2 == 0] {
+        priority <~ 1;
+        &even = even + 1;
+    };
 };
 ```
