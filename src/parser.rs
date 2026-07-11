@@ -596,50 +596,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// 2026-07-07: Phase 1 — prefix annotation syntax: (name: expr, ...) ~> [guard]
-    /// Parses parenthesized annotation tuples before guarded statements.
-    /// Returns None if the current token is not a LParen followed by identifiers and ~>.
+    /// 2026-07-11: Phase 0.0 — dead, removed in Phase 1A.0.
+    /// The ~> token was removed from the lexer. This method now returns None
+    /// unconditionally until it is fully deleted.
     fn parse_prefix_annotation(&mut self) -> Result<Option<Vec<Annotation>>, SyntaxError> {
-        // Check if we have (name: ...) ~> pattern
-        if !matches!(self.current_token(), Some(Ok(Token::LParen))) {
-            return Ok(None);
-        }
-        // Peek: try to parse parenthesized annotations
-        let saved_pos = self.pos;
-        
-        self.advance(); // consume (
-        let name = match self.current_token() {
-            Some(Ok(Token::Identifier(n))) => n.clone(),
-            _ => { self.pos = saved_pos; return Ok(None); }
-        };
-        // Must be followed by : for annotation syntax
-        if !matches!(self.current_token(), Some(Ok(Token::Colon))) {
-            self.pos = saved_pos; return Ok(None);
-        }
-        
-        // We have annotation syntax — parse it
-        self.pos = saved_pos;
-        self.advance(); // consume (
-        
-        let mut mods = Vec::new();
-        loop {
-            let name = self.expect_identifier()?;
-            self.expect(Token::Colon)?;
-            let value = self.parse_expression()?;
-            mods.push(Annotation {
-                name,
-                value,
-                mode: AnnotationMode::Advisory,
-            });
-            if matches!(self.current_token(), Some(Ok(Token::Comma))) {
-                self.advance();
-            } else {
-                break;
-            }
-        }
-        self.expect(Token::RParen)?;
-        self.expect(Token::TildeArrowRight)?; // consume ~>
-        Ok(Some(mods))
+        Ok(None)
     }
 
     fn expect_type_identifier(&mut self) -> Result<String, crate::errors::SyntaxError> {

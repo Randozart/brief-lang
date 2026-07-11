@@ -248,9 +248,7 @@ pub enum Token {
     /// `<~` — Annotation Arrow: compile-time metadata on declarations
     #[token("<~")]
     TildeArrow,
-    /// `~>` — Prefix Annotation Arrow: annotation body before a guarded condition
-    #[token("~>")]
-    TildeArrowRight,
+    // 2026-07-11: Phase 0.0 — TildeArrowRight removed (~> no longer used)
     #[token("_")]
     Underscore,
 
@@ -589,7 +587,6 @@ impl std::fmt::Display for Token {
             Token::Arrow => write!(f, "->"),
             Token::ArrowLeft => write!(f, "<-"),
             Token::TildeArrow => write!(f, "<~"),
-            Token::TildeArrowRight => write!(f, "~>"),
             Token::Underscore => write!(f, "_"),
             Token::HashBracket => write!(f, "#["),
             Token::HashBangBracket => write!(f, "#!["),
