@@ -11,6 +11,6 @@
 // enables bitwise wrap: (ptr + 1) & mask.
 
 type RingBuffer<T> <: List<T> {
-    InsertAt = ring_push;
-    ExtractFrom = ring_pop;
+    InsertAt <~ ring_push;
+    ExtractFrom <~ ring_pop;
 };

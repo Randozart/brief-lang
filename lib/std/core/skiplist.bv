@@ -9,8 +9,8 @@
 // the inop declarations below.
 
 type SkipList<T> <: List<T> {
-    InsertAt = sl_insert;
-    ExtractFrom = sl_remove;
+    InsertAt <~ sl_insert;
+    ExtractFrom <~ sl_remove;
 };
 
 // -- Inop declarations (dispatched by Custom strategy) --
