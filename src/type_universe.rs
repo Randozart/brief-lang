@@ -114,6 +114,48 @@ pub struct ResolvedType {
 
     /// Source TypeDef for reference.
     pub source: TypeDef,
+    /// Generic property map populated from `<~` bindings during resolution.
+    /// 2026-07-11: Phase 1B — dual-written alongside hardcoded fields during
+    /// migration. After Phase 2, only this map remains.
+    pub properties: HashMap<String, crate::ast::PropertyValue>,
+}
+
+impl ResolvedType {
+    /// Get a string property from the generic properties map.
+    /// 2026-07-11: Phase 1B.
+    pub fn get_property_str(&self, key: &str) -> Option<&str> {
+        self.properties.get(key).and_then(|v| {
+            if let crate::ast::PropertyValue::String(s) = v { Some(s.as_str()) } else { None }
+        })
+    }
+
+    /// Get an integer property from the generic properties map.
+    /// 2026-07-11: Phase 1B.
+    pub fn get_property_int(&self, key: &str) -> Option<i64> {
+        self.properties.get(key).and_then(|v| {
+            if let crate::ast::PropertyValue::Int(n) = v { Some(*n) } else { None }
+        })
+    }
+
+    /// Get a bool property from the generic properties map.
+    /// 2026-07-11: Phase 1B.
+    pub fn get_property_bool(&self, key: &str) -> Option<bool> {
+        self.properties.get(key).and_then(|v| {
+            if let crate::ast::PropertyValue::Bool(b) = v { Some(*b) } else { None }
+        })
+    }
+
+    /// Get a PropertyValue by key, or None.
+    /// 2026-07-11: Phase 1B.
+    pub fn get_property(&self, key: &str) -> Option<&crate::ast::PropertyValue> {
+        self.properties.get(key)
+    }
+
+    /// Check if a property key exists.
+    /// 2026-07-11: Phase 1B.
+    pub fn has_property(&self, key: &str) -> bool {
+        self.properties.contains_key(key)
+    }
 }
 
 /// 2026-07-08: Phase 2B — struct layout for compound types.
@@ -367,10 +409,12 @@ impl TypeUniverse {
             guards: vec![],
             operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
+            properties: HashMap::new(),
             default_params: vec![],
             commuting: true,
             constant_time: false,
             struct_layout: None,
+            defining_module: "builtin".to_string(),
             source: crate::ast::TypeDef {
                 name: String::new(),
                 type_params: vec![],
@@ -387,7 +431,6 @@ impl TypeUniverse {
                 },
                 span: None,
             },
-            defining_module: "builtin".to_string(),
         }
     }
 
@@ -528,6 +571,7 @@ impl TypeUniverse {
             guards: vec![],
             operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
+            properties: HashMap::new(),
             default_params: vec![],
             commuting: true,
             constant_time: false,
@@ -579,6 +623,12 @@ impl TypeUniverse {
         // Phase 1B will read from metadata + projections separately.
         for binding in &td.body.bindings {
             self.apply_binding(&mut rt, binding);
+        }
+
+        // Populate generic properties map from TypeDefBody metadata.
+        // 2026-07-11: Phase 1B — enables property-system queries in codegen.
+        for (key, value) in &td.body.metadata {
+            rt.properties.insert(key.clone(), value.clone());
         }
 
         // D-7: Synthesize runtime guard expressions from constraints
@@ -781,6 +831,11 @@ impl TypeUniverse {
             _ => {
                 rt.projections.insert(binding.name.clone(), binding.clone());
             }
+        }
+
+        // Phase 1B: Dual-write to generic properties map.
+        if let Some(pv) = crate::ast::binding_to_property_value(binding) {
+            rt.properties.insert(binding.name.to_lowercase(), pv);
         }
     }
 

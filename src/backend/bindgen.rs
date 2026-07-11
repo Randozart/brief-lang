@@ -377,6 +377,7 @@ mod tests {
             guards: vec![],
             operators: std::collections::HashMap::new(),
             projections: HashMap::new(),
+            properties: HashMap::new(),
             // 2026-07-08: Phase 2B — test defaults
             default_params: vec![],
             commuting: true,
