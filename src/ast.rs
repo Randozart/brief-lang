@@ -574,6 +574,24 @@ pub enum BracketOp {
     Stride(Box<Expr>),
 }
 
+/// A compile-time-constant metadata value attached to an item via `<~`.
+/// 2026-07-11: Phase 1A — unified metadata representation.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PropertyValue {
+    /// Integer literal: `24`, `-1`
+    Int(i64),
+    /// Float literal: `3.14`
+    Float(f64),
+    /// String literal: `"%String"`
+    String(String),
+    /// Boolean literal: `true`, `false`
+    Bool(bool),
+    /// Bare identifier (symbol): `Native`, `C`, `LittleEndian`
+    Identifier(String),
+    /// List of property values: `[1, 2, 3]`
+    List(Vec<PropertyValue>),
+}
+
 /// A named binding inside a `Type Name <: Base { ... }` block.
 /// Each binding is a `Name = Expr;` or `Name(args) = Expr;` assignment.
 /// This is the unified representation — both built-in metadata properties
@@ -2220,9 +2238,13 @@ pub enum Statement {
     },
 
     // Guarded statement: [expr] statement or [expr] { statements }
+    // Phase 1A: metadata scoped to this guard branch via `<~`.
     Guarded {
         condition: Expr,
         statements: Vec<Statement>,
+        /// Inline metadata scoped to this guard branch via `<~`.
+        /// 2026-07-11: Phase 1A.
+        metadata: HashMap<String, PropertyValue>,
     },
 
     // Term statement: term expr?, expr?, ...
@@ -2470,6 +2492,9 @@ pub struct Definition {
     pub is_lambda: bool,
     pub modifiers: Vec<Annotation>,
     pub annotations: Vec<TypeBinding>,
+    /// Inline metadata declared via `<~ expr;` inside the body.
+    /// 2026-07-11: Phase 1A.
+    pub metadata: HashMap<String, PropertyValue>,
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
 }
 
@@ -2486,6 +2511,9 @@ pub struct Transaction {
     pub is_lambda: bool,
     pub dependencies: Vec<String>,
     pub annotations: Vec<TypeBinding>,
+    /// Inline metadata declared via `<~ expr;` inside the body.
+    /// 2026-07-11: Phase 1A.
+    pub metadata: HashMap<String, PropertyValue>,
     pub modifiers: Vec<Annotation>,
     pub variant_bodies: Vec<(Option<Contract>, Vec<Statement>)>,
     pub outputs: Vec<Type>,
@@ -3097,6 +3125,7 @@ impl Program {
             variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
+            metadata: HashMap::new(),
         });
 
         // Prepend the state decl (declarations must precede transactions)

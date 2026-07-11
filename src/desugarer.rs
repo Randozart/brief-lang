@@ -1,4 +1,5 @@
 use crate::ast::*;
+use std::collections::HashMap;
 
 pub struct Desugarer {
     generated_signatures: Vec<Signature>,
@@ -579,6 +580,7 @@ impl Desugarer {
 
         let new_txn = Transaction {
                     annotations: vec![],
+                    metadata: HashMap::new(),
             is_async: txn.is_async,
             is_reactive: txn.is_reactive,
             name: txn.name.clone(),
@@ -1150,9 +1152,11 @@ impl Desugarer {
             Statement::Guarded {
                 condition,
                 statements,
+                ..
             } => Statement::Guarded {
                 condition: self.desugar_expr(condition),
                 statements: statements.into_iter().map(|s| self.desugar_stmt(s)).collect(),
+                metadata: HashMap::new(),
             },
             Statement::Escape(e) => Statement::Escape(e.map(|e| self.desugar_expr(e))),
             Statement::SyncBlock { body } => {
@@ -1253,6 +1257,7 @@ mod tests {
             body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };
@@ -1286,6 +1291,7 @@ mod tests {
             is_lambda: false,
             dependencies: vec![],
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
                  outputs: Vec::new(),
@@ -1320,6 +1326,7 @@ mod tests {
             body: vec![Statement::Term { values: vec![Some(Expr::Integer(1))], modifiers: vec![], swan_song: None }],
             is_lambda: true,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         };

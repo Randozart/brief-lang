@@ -27,6 +27,7 @@ use crate::features::literal::LiteralExpr;
 use crate::features::unary_op::{UnaryOpExpr, UnaryOpKind};
 use crate::lexer::Token;
 use logos::{Lexer, Logos};
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Flatten `#!cfg` guards in a program's items list by evaluating conditions
@@ -4668,6 +4669,7 @@ let span = self.current_span();
             is_lambda,
             dependencies,
             annotations: txn_annotations,
+            metadata: HashMap::new(),
             modifiers: Vec::new(),
             variant_bodies,
             outputs: txn_outputs,
@@ -4814,6 +4816,7 @@ let span = self.current_span();
             body,
             is_lambda,
             annotations: defn_annotations,
+            metadata: HashMap::new(),
             modifiers: Vec::new(),
             variant_bodies,
         })
@@ -6235,6 +6238,7 @@ let span = self.current_span();
                     Ok(Statement::Guarded {
                         condition,
                         statements,
+                        metadata: HashMap::new(),
                     })
                 } else {
                     // Flat guard: [condition] statement
@@ -6242,6 +6246,7 @@ let span = self.current_span();
                     Ok(Statement::Guarded {
                         condition,
                         statements: vec![statement],
+                        metadata: HashMap::new(),
                     })
                 }
             }
@@ -11223,6 +11228,7 @@ defn fallback() -> Int { term 0; };
             body: vec![],
             is_lambda: false,
             annotations: vec![],
+            metadata: HashMap::new(),
             modifiers: vec![],
             variant_bodies: vec![],
         }
