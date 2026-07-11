@@ -254,7 +254,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_txn("inline_txn", vec![Annotation { name: "inline".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }]),
+                make_txn("inline_txn", vec![Annotation { name: "inline".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory , diagnostic: false }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -277,7 +277,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_txn("hinted_txn", vec![Annotation { name: "inline".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Speculative }]),
+                make_txn("hinted_txn", vec![Annotation { name: "inline".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Speculative , diagnostic: false }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -365,7 +365,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_gpu_txn("gpu_test", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }]),
+                make_gpu_txn("gpu_test", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory , diagnostic: false }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -389,7 +389,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_gpu_txn("embed_test", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }]),
+                make_gpu_txn("embed_test", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory , diagnostic: false }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -552,7 +552,7 @@ fn empty_program() -> Program {
         let program = Program {
             items: vec![
                 state_count(),
-                make_gpu_txn("e2e_add", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }]),
+                make_gpu_txn("e2e_add", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory , diagnostic: false }]),
             ],
             comments: vec![],
             reactor_speed: None,
@@ -2971,7 +2971,7 @@ let spec = crate::target_spec::TargetSpec {
                     ],
                     is_lambda: false,
                     // Bare #export (no explicit name) — no wrapper emitted, inner keeps own name.
-                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Mandatory }],
+                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Mandatory , diagnostic: false }],
                     annotations: vec![],
                     metadata: HashMap::new(),
                     variant_bodies: vec![],
@@ -3017,7 +3017,7 @@ let spec = crate::target_spec::TargetSpec {
                         Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None },
                     ],
                     is_lambda: false,
-                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Mandatory }],
+                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Mandatory , diagnostic: false }],
                     annotations: vec![],
                     metadata: HashMap::new(),
                     variant_bodies: vec![],
@@ -3066,7 +3066,7 @@ let spec = crate::target_spec::TargetSpec {
                         ))], modifiers: vec![], swan_song: None },
                     ],
                     is_lambda: false,
-                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::String("get_x".to_string()), mode: AnnotationMode::Mandatory }],
+                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::String("get_x".to_string()), mode: AnnotationMode::Mandatory , diagnostic: false }],
                     annotations: vec![],
                     metadata: HashMap::new(),
                     variant_bodies: vec![],

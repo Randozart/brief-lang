@@ -2957,11 +2957,16 @@ pub struct Annotation {
     pub name: String,
     pub value: Expr,
     pub mode: AnnotationMode,
+    /// When true, the compiler emits verbose diagnostic output explaining
+    /// WHY it chose or rejected the annotated decision.
+    /// 2026-07-11: Phase 1A.1d — set by `#?` prefix.
+    pub diagnostic: bool,
 }
 
 impl Annotation {
     pub fn mandatory(&self) -> bool { self.mode == AnnotationMode::Mandatory }
     pub fn speculative(&self) -> bool { self.mode == AnnotationMode::Speculative }
+    pub fn diagnostic(&self) -> bool { self.diagnostic }
     /// Convenience: extract string value for common patterns (was `Option<String>` on old Hashtag)
     pub fn string_value(&self) -> Option<String> {
         match &self.value {

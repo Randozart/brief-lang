@@ -243,11 +243,11 @@ mod tests {
     use super::*;
 
     fn tag(name: &str) -> Annotation {
-        Annotation { name: name.into(), value: Expr::Bool(true), mode: AnnotationMode::Advisory }
+        Annotation { name: name.into(), value: Expr::Bool(true), mode: AnnotationMode::Advisory, diagnostic: false }
     }
 
     fn spec_tag(name: &str) -> Annotation {
-        Annotation { name: name.into(), value: Expr::Bool(true), mode: AnnotationMode::Speculative }
+        Annotation { name: name.into(), value: Expr::Bool(true), mode: AnnotationMode::Speculative, diagnostic: false }
     }
 
     #[test]
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_gpu_directive_with_value() {
-        let t = Annotation { name: "gpu".into(), value: Expr::String("threshold=1000".into()), mode: AnnotationMode::Advisory };
+        let t = Annotation { name: "gpu".into(), value: Expr::String("threshold=1000".into()), mode: AnnotationMode::Advisory, diagnostic: false };
         let effects = resolve_directives(&[t], DirectiveCtx::Transaction);
         assert_eq!(effects.len(), 1);
         match &effects[0] {

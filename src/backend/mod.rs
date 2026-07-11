@@ -831,7 +831,7 @@ mod tests {
     /// Intent: Verify a speculative hashtag on a supported directive succeeds.
     #[test]
     fn test_speculative_hashtag_supported() {
-        let tag = Annotation { name: "inline".into(), value: Expr::Bool(true), mode: AnnotationMode::Speculative };
+        let tag = Annotation { name: "inline".into(), value: Expr::Bool(true), mode: AnnotationMode::Speculative, diagnostic: false };
         let results = validate_hashtags(&[tag], "llvm");
         assert_eq!(results[0], HashtagValidation::Supported,
             "Speculative inline should be supported by LLVM backend");
@@ -841,7 +841,7 @@ mod tests {
     #[test]
     fn test_llvm_backend_supports_new_directives() {
         for name in &["inline", "unroll", "vectorize", "gpu"] {
-            let tag = Annotation { name: name.to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory };
+            let tag = Annotation { name: name.to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory, diagnostic: false };
             let results = validate_hashtags(&[tag], "llvm");
             assert_eq!(results[0], HashtagValidation::Supported,
                 "LLVM backend should support #{}", name);

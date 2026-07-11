@@ -425,42 +425,54 @@ impl<'a> Parser<'a> {
             match self.current_token() {
                 Some(Ok(Token::HashQuestion)) => {
                     self.advance();
-                    let name = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
-                        let n = n.clone();
+                    // Check for #?! (mandatory diagnostic) or #? (advisory diagnostic)
+                    let mode = if matches!(self.current_token(), Some(Ok(Token::Not))) {
                         self.advance();
-                        n
+                        AnnotationMode::Mandatory
                     } else {
-                        return Ok(mods);
+                        AnnotationMode::Advisory
                     };
-                    let value = if let Some(Ok(Token::LParen)) = self.current_token() {
+                    if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                        let name = n.clone();
                         self.advance();
-                        let val = if let Some(Ok(Token::String(s))) = self.current_token() {
-                            let s = s.clone();
+                        let value = if let Some(Ok(Token::LParen)) = self.current_token() {
                             self.advance();
-                            s
-                        } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
-                            let s = n.to_string();
-                            self.advance();
-                            s
-                        } else if let Some(Ok(Token::Identifier(n))) = self.current_token() {
-                            let n = n.clone();
-                            self.advance();
-                            n
+                            let val = if let Some(Ok(Token::String(s))) = self.current_token() {
+                                let s = s.clone();
+                                self.advance();
+                                s
+                            } else if let Some(Ok(Token::Integer(n))) = self.current_token() {
+                                let s = n.to_string();
+                                self.advance();
+                                s
+                            } else if let Some(Ok(Token::Identifier(n))) = self.current_token() {
+                                let n = n.clone();
+                                self.advance();
+                                n
+                            } else {
+                                String::new()
+                            };
+                            if let Some(Ok(Token::RParen)) = self.current_token() {
+                                self.advance();
+                            }
+                            Some(val)
                         } else {
-                            String::new()
+                            None
                         };
-                        if let Some(Ok(Token::RParen)) = self.current_token() {
-                            self.advance();
-                        }
-                        Some(val)
+                        let value_expr = match &value {
+                            Some(val) => Expr::String(val.clone()),
+                            None => Expr::Bool(true),
+                        };
+                        mods.push(Annotation { name, value: value_expr, mode, diagnostic: true });
                     } else {
-                        None
-                    };
-                    let value_expr = match &value {
-                        Some(val) => Expr::String(val.clone()),
-                        None => Expr::Bool(true),
-                    };
-                    mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Speculative });
+                        // Bare #? — diagnose all passes for this item
+                        mods.push(Annotation {
+                            name: "?diagnostic-all".to_string(),
+                            value: Expr::Bool(true),
+                            mode,
+                            diagnostic: true,
+                        });
+                    }
                 }
                 Some(Ok(Token::Hash)) => {
                     // If this is #fuzz, stop — caller handles it specially
@@ -503,10 +515,17 @@ impl<'a> Parser<'a> {
                         Some(val) => Expr::String(val.clone()),
                         None => Expr::Bool(true),
                     };
-                    mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Advisory });
+                    mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Advisory, diagnostic: false });
                 }
                 Some(Ok(Token::HashBang)) => {
                     self.advance();
+                    // Check for #!? (mandatory diagnostic)
+                    let diagnostic = if matches!(self.current_token(), Some(Ok(Token::Question))) {
+                        self.advance();
+                        true
+                    } else {
+                        false
+                    };
                     let name = if let Some(Ok(Token::Identifier(n))) = self.current_token() {
                         let n = n.clone();
                         self.advance();
@@ -553,7 +572,7 @@ impl<'a> Parser<'a> {
                         Some(val) => Expr::String(val.clone()),
                         None => Expr::Bool(true),
                     };
-                    mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Mandatory });
+                    mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Mandatory, diagnostic });
                 }
                 Some(Ok(Token::HashBracket)) => {
                     self.advance();
@@ -1304,6 +1323,7 @@ impl<'a> Parser<'a> {
                         Expr::String(export_name)
                     },
                     mode: AnnotationMode::Mandatory,
+                    diagnostic: false,
                 };
                 // Reject `export rct txn` — reactive txns have no single-entry FFI.
                 if matches!(self.current_token(), Some(Ok(Token::Rct))) {
@@ -6322,6 +6342,7 @@ let span = self.current_span();
                             name: "hz".to_string(),
                             value: Expr::Bool(true),
                             mode: AnnotationMode::Advisory,
+                            diagnostic: false,
                         });
                     }
                     self.expect(Token::Semicolon)?;
@@ -9999,8 +10020,8 @@ mod parser_tests {
             match &txn.body[0] {
                 Statement::Assignment { modifiers, .. } => {
                     assert_eq!(modifiers.len(), 1);
-                    assert!(modifiers[0].speculative(), "Annotation should be speculative");
-                    assert!(!modifiers[0].mandatory(), "Speculative annotation should not be mandatory");
+                    assert!(modifiers[0].diagnostic(), "Annotation should have diagnostic");
+                    assert!(!modifiers[0].mandatory(), "Diagnostic annotation should not be mandatory");
                     assert_eq!(modifiers[0].name, "inline");
                 }
                 _ => panic!("Expected Assignment"),
@@ -10018,7 +10039,7 @@ mod parser_tests {
             match &txn.body[0] {
                 Statement::Let { modifiers, .. } => {
                     assert_eq!(modifiers.len(), 1);
-                    assert!(modifiers[0].speculative());
+                    assert!(modifiers[0].diagnostic());
                     assert_eq!(modifiers[0].name, "volatile");
                 }
                 _ => panic!("Expected Let"),
@@ -10036,7 +10057,7 @@ mod parser_tests {
             match &txn.body[0] {
                 Statement::Assignment { modifiers, .. } => {
                     assert_eq!(modifiers.len(), 1);
-                    assert!(modifiers[0].speculative());
+                    assert!(modifiers[0].diagnostic());
                     assert_eq!(modifiers[0].name, "gpu");
                     assert_eq!(modifiers[0].string_value(), Some("1024".to_string()));
                 }
