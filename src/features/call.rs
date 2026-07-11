@@ -27,7 +27,7 @@ impl ExprTypecheck for CallExpr {
         for arg in &self.args {
             ctx.infer_expression(arg);
         }
-        Ok(Type::Custom("Int".to_string()))
+        Ok(Type::int())
     }
 }
 

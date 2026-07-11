@@ -414,7 +414,7 @@ mod tests {
             name: name.to_string(),
             type_params: vec![],
             params: params.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
-            outputs: vec![Type::Custom("Int".to_string())],
+            outputs: vec![Type::int()],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: body.into_iter().map(|s| s.to_string()).collect(),
             fallback,
@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_sadd_matches_fallback() {
-        let inop = make_inop("sadd", vec![("a", Type::Custom("Int".to_string())), ("b", Type::Custom("Int".to_string()))], vec![
+        let inop = make_inop("sadd", vec![("a", Type::int()), ("b", Type::int())], vec![
             "%res = add i64 %a, %b;",
             "term %res;",
         ], Some(Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into())))));
@@ -439,7 +439,7 @@ mod tests {
 
     #[test]
     fn test_mismatch_detected() {
-        let inop = make_inop("bad", vec![("a", Type::Custom("Int".to_string()))], vec![
+        let inop = make_inop("bad", vec![("a", Type::int())], vec![
             "%res = add i64 %a, %a;",
             "term %res;",
         ], Some(Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Integer(1)))));
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn test_opaque_instruction_detected() {
-        let inop = make_inop("loader", vec![("p", Type::Custom("Int".to_string()))], vec![
+        let inop = make_inop("loader", vec![("p", Type::int())], vec![
             "%res = load i64, i8* %p;",
             "term %res;",
         ], Some(Expr::Identifier("p".into())));
@@ -461,7 +461,7 @@ mod tests {
 
     #[test]
     fn test_missing_fallback() {
-        let inop = make_inop("nofb", vec![("a", Type::Custom("Int".to_string()))], vec![
+        let inop = make_inop("nofb", vec![("a", Type::int())], vec![
             "term %a;",
         ], None);
         let msg = compare_bild_with_fallback(&Some(SymExpr::Var("a".into())), &None, "nofb");
@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn test_sdiv_srem_matches() {
-        let inop = make_inop("divmod", vec![("a", Type::Custom("Int".to_string())), ("b", Type::Custom("Int".to_string()))], vec![
+        let inop = make_inop("divmod", vec![("a", Type::int()), ("b", Type::int())], vec![
             "%q = sdiv i64 %a, %b;",
             "%r = srem i64 %a, %b;",
             "term %q;",
@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     fn test_icmp_select_matches() {
-        let inop = make_inop("max", vec![("a", Type::Custom("Int".to_string())), ("b", Type::Custom("Int".to_string()))], vec![
+        let inop = make_inop("max", vec![("a", Type::int()), ("b", Type::int())], vec![
             "%cmp = icmp sgt i64 %a, %b;",
             "%res = select i1 %cmp, i64 %a, i64 %b;",
             "term %res;",

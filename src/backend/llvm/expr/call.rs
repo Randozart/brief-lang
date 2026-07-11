@@ -27,11 +27,11 @@ pub fn emit_call(
         match val.ty {
             Type::Custom(__t) if __t == "Float" => {
                 writeln!(out, "{}{} = fneg float {}", indent, v, val.name).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) };
+                return TypedRegister { name: v.to_string(), ty: Type::float() };
             }
             Type::Custom(__t) if __t == "Float64" => {
                 writeln!(out, "{}{} = fneg double {}", indent, v, val.name).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Custom("Float64".to_string()) };
+                return TypedRegister { name: v.to_string(), ty: Type::float64() };
             }
             _ => {
                 writeln!(out, "{}{} = sub i64 0, {}", indent, v, val.name).ok();
@@ -116,7 +116,7 @@ pub fn emit_call(
                     let fbr = fallback_reg.as_ref().map(|r| r.name.as_str()).unwrap_or("null");
                     writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}",
                         indent, select_reg, is_null, fbr, call_result).ok();
-                    return TypedRegister { name: select_reg, ty: Type::Custom("Int".to_string()) };
+                    return TypedRegister { name: select_reg, ty: Type::int() };
                 }
                 (Type::Custom(__t), _) if __t == "Float" => {
                     // NaN check for float returns
@@ -132,7 +132,7 @@ pub fn emit_call(
                     writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, select_reg).ok();
                     writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
                     backend.fun.reg_float_cache.insert(ze.clone(), select_reg.clone());
-                    return TypedRegister { name: ze, ty: Type::Custom("Float".to_string()) };
+                    return TypedRegister { name: ze, ty: Type::float() };
                 }
                 _ => {
                     // Int/UInt/Bool/Char: always valid, just pass through
@@ -142,9 +142,9 @@ pub fn emit_call(
                         writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, call_result).ok();
                         writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
                         backend.fun.reg_float_cache.insert(ze.clone(), call_result.clone());
-                        return TypedRegister { name: ze, ty: Type::Custom("Float".to_string()) };
+                        return TypedRegister { name: ze, ty: Type::float() };
                     }
-                    return TypedRegister { name: call_result, ty: Type::Custom("Int".to_string()) };
+                    return TypedRegister { name: call_result, ty: Type::int() };
                 }
             }
         }
@@ -155,9 +155,9 @@ pub fn emit_call(
             writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, call_result).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
             backend.fun.reg_float_cache.insert(ze.clone(), call_result.clone());
-            return TypedRegister { name: ze, ty: Type::Custom("Float".to_string()) };
+            return TypedRegister { name: ze, ty: Type::float() };
         }
-        return TypedRegister { name: call_result, ty: Type::Custom("Int".to_string()) };
+        return TypedRegister { name: call_result, ty: Type::int() };
     } else {
         // Internal call — marshal i64 back to real types per definition
         let def_tys: Option<Vec<Type>> = backend.ctx.defn_params.get(name).cloned();
@@ -191,14 +191,14 @@ pub fn emit_call(
                 }
             } else {
                 // 2026-06-17: zext Bool/Char/Float to i64 for enum variant storage
-                let stored = if raw.ty == Type::Custom("Bool".to_string()) {
+                let stored = if raw.ty == Type::bool_() {
                     let z = format!("%cz{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = zext i1 {} to i64", indent, z, raw.name).ok();
                     z
-                } else if raw.ty == Type::Custom("Char".to_string()) {
+                } else if raw.ty == Type::char_() {
                     // Char registers are already i64 from emit_expr
                     raw.name.clone()
-                } else if raw.ty == Type::Custom("Float".to_string()) {
+                } else if raw.ty == Type::float() {
                     let bi = format!("%cfb{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                     writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, raw.name).ok();
                     let ze = format!("%cfz{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -244,7 +244,7 @@ pub fn emit_call(
                 }
             }
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, p).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::int() };
         } else {
             // 2026-06-13: Pass %state to defns/callable txns — functions need
             // the state pointer to access module-level fields (SSA is function-scoped).
@@ -258,10 +258,10 @@ pub fn emit_call(
             let call_ret = if is_float_ret { "float" } else { "i64" };
             writeln!(out, "{}{} = call {} @{}({})", indent, v, call_ret, fn_name, a_strs.join(", ")).ok();
             if is_float_ret {
-                return TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) };
+                return TypedRegister { name: v.to_string(), ty: Type::float() };
             }
-            // Internal calls return i64 (boxed), so mark as Type::Custom("Int".to_string()).
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+            // Internal calls return i64 (boxed), so mark as Type::int().
+            return TypedRegister { name: v.to_string(), ty: Type::int() };
         }
     }
 }
@@ -310,7 +310,7 @@ fn try_fn_ptr_call(
     };
     for (i, arg) in args.iter().enumerate() {
         let val = backend.emit_expr(out, arg, indent);
-        let expected = params.get(i).cloned().unwrap_or(Type::Custom("Int".to_string()));
+        let expected = params.get(i).cloned().unwrap_or(Type::int());
         match &expected {
             Type::Custom(__t) if __t == "Bool" => {
                 let boxed = backend.adapt_to_i64(out, indent, &val);
@@ -359,9 +359,9 @@ fn emit_indirect_return(
         writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, call_result).ok();
         writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
         backend.fun.reg_float_cache.insert(ze.clone(), call_result);
-        TypedRegister { name: ze, ty: Type::Custom("Float".to_string()) }
+        TypedRegister { name: ze, ty: Type::float() }
     } else {
         writeln!(out, "{}{} = add i64 0, {}", indent, v, call_result).ok();
-        TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
+        TypedRegister { name: v.to_string(), ty: Type::int() }
     }
 }

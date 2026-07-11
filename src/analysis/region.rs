@@ -1998,7 +1998,7 @@ mod tests {
     fn make_state(name: &str, val: Expr) -> TopLevel {
         TopLevel::StateDecl(StateDecl {
             name: name.to_string(),
-            ty: Type::Custom("Int".to_string()),
+            ty: Type::int(),
             expr: Some(val),
             address: None,
             bit_range: None,
@@ -2110,7 +2110,7 @@ mod tests {
 
     #[test]
     fn test_trigger_seeded_as_opaque() {
-        let program = mk_program(vec![make_trigger("btn", Type::Custom("Bool".to_string()))]);
+        let program = mk_program(vec![make_trigger("btn", Type::bool_())]);
         let ra = RegionAnalyzer::analyze(&program);
         assert_eq!(ra.classification_of("btn"), Some(VarClass::Bounded)); // Bool → tight → Bounded
     }
@@ -2119,7 +2119,7 @@ mod tests {
     fn test_trigger_dependency_propagates() {
         // trg: Bool → x depends on trg → x becomes Bounded
         let program = mk_program(vec![
-            make_trigger("trg", Type::Custom("Bool".to_string())),
+            make_trigger("trg", Type::bool_()),
             make_state("x", int(0)),
             make_txn(
                 "t1",
@@ -2138,8 +2138,8 @@ mod tests {
     fn test_two_independent_trigs_two_regions() {
         // trg_a → x, trg_b → y — two regions
         let program = mk_program(vec![
-            make_trigger("trg_a", Type::Custom("Bool".to_string())),
-            make_trigger("trg_b", Type::Custom("Bool".to_string())),
+            make_trigger("trg_a", Type::bool_()),
+            make_trigger("trg_b", Type::bool_()),
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn("tx_a", Expr::Bool(true), Expr::Bool(true), vec![
@@ -2167,7 +2167,7 @@ mod tests {
     fn test_chained_dependency_one_region() {
         // trg → x → y: all in same region
         let program = mk_program(vec![
-            make_trigger("trg", Type::Custom("Bool".to_string())),
+            make_trigger("trg", Type::bool_()),
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn(
@@ -2196,7 +2196,7 @@ mod tests {
     #[test]
     fn test_int_trigger_opaque() {
         // Int trigger has no bound → stays Opaque (not tight)
-        let program = mk_program(vec![make_trigger("sensor", Type::Custom("Int".to_string()))]);
+        let program = mk_program(vec![make_trigger("sensor", Type::int())]);
         let ra = RegionAnalyzer::analyze(&program);
         assert_eq!(ra.classification_of("sensor"), Some(VarClass::Opaque));
     }
@@ -2224,7 +2224,7 @@ mod tests {
     fn test_constant_interval() {
         let program = mk_program(vec![TopLevel::Constant(Constant {
             name: "total".to_string(),
-            ty: Type::Custom("Int".to_string()),
+            ty: Type::int(),
             expr: int(100),
         })]);
         let ra = RegionAnalyzer::analyze(&program);
@@ -2249,7 +2249,7 @@ mod tests {
     fn make_const(name: &str, val: i64) -> TopLevel {
         TopLevel::Constant(Constant {
             name: name.to_string(),
-            ty: Type::Custom("Int".to_string()),
+            ty: Type::int(),
             expr: int(val),
         })
     }
@@ -2257,7 +2257,7 @@ mod tests {
     #[test]
     fn test_complexity_trivial() {
         let program = mk_program(vec![
-            make_trigger("btn", Type::Custom("Bool".to_string())),
+            make_trigger("btn", Type::bool_()),
             make_state("count", int(0)),
             make_txn_with_body("bump", vec![assign("count", ident("btn"))]),
         ]);
@@ -2269,7 +2269,7 @@ mod tests {
     #[test]
     fn test_complexity_light() {
         let program = mk_program(vec![
-            make_trigger("btn", Type::Custom("Bool".to_string())),
+            make_trigger("btn", Type::bool_()),
             make_state("a", int(0)),
             make_state("b", int(0)),
             make_txn_with_body("proc", vec![
@@ -2286,7 +2286,7 @@ mod tests {
     #[test]
     fn test_complexity_unbounded() {
         let program = mk_program(vec![
-            make_trigger("btn", Type::Custom("Bool".to_string())),
+            make_trigger("btn", Type::bool_()),
             make_state("x", int(0)),
             make_txn_with_body("exit", vec![
                 assign("x", ident("btn")),
@@ -2301,7 +2301,7 @@ mod tests {
     #[test]
     fn test_region_scoring() {
         let program = mk_program(vec![
-            make_trigger("trg", Type::Custom("Bool".to_string())),
+            make_trigger("trg", Type::bool_()),
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn("t1", Expr::Bool(true), Expr::Bool(true), vec![
@@ -2320,8 +2320,8 @@ mod tests {
     #[test]
     fn test_region_independent() {
         let program = mk_program(vec![
-            make_trigger("ta", Type::Custom("Bool".to_string())),
-            make_trigger("tb", Type::Custom("Bool".to_string())),
+            make_trigger("ta", Type::bool_()),
+            make_trigger("tb", Type::bool_()),
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn("tx_a", Expr::Bool(true), Expr::Bool(true), vec![
@@ -2338,8 +2338,8 @@ mod tests {
     #[test]
     fn test_budget_plan_fit() {
         let program = mk_program(vec![
-            make_trigger("ta", Type::Custom("Bool".to_string())),
-            make_trigger("tb", Type::Custom("Bool".to_string())),
+            make_trigger("ta", Type::bool_()),
+            make_trigger("tb", Type::bool_()),
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn("tx_a", Expr::Bool(true), Expr::Bool(true), vec![
@@ -2360,7 +2360,7 @@ mod tests {
     #[test]
     fn test_budget_plan_exceeds() {
         let program = mk_program(vec![
-            make_trigger("ta", Type::Custom("Bool".to_string())),
+            make_trigger("ta", Type::bool_()),
             make_state("x", int(0)),
             make_txn("tx_a", Expr::Bool(true), Expr::Bool(true), vec![
                 assign("x", ident("ta")),
@@ -2419,7 +2419,7 @@ mod tests {
     #[test]
     fn test_chain_branching() {
         let program = mk_program(vec![
-            make_trigger("sensor", Type::Custom("Bool".to_string())),
+            make_trigger("sensor", Type::bool_()),
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn("step_a", Expr::Bool(true), Expr::Bool(true), vec![
@@ -2527,7 +2527,7 @@ mod tests {
     #[test]
     fn test_is_not_precomputable_no_chains() {
         let program = mk_program(vec![
-            make_trigger("btn", Type::Custom("Bool".to_string())),
+            make_trigger("btn", Type::bool_()),
             make_state("x", int(0)),
             make_txn("t1", Expr::Bool(true), Expr::Bool(true), vec![
                 assign("x", ident("btn")),
@@ -2597,7 +2597,7 @@ mod tests {
     fn test_collect_final_values_with_trigger() {
         let program = mk_program(vec![
             make_const("total", 50),
-            make_trigger("sensor", Type::Custom("Bool".to_string())),
+            make_trigger("sensor", Type::bool_()),
             make_state("count", int(0)),
             make_state("x", int(0)),
             make_state("y", int(0)),

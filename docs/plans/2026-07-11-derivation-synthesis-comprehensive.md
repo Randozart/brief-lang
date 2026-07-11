@@ -1,0 +1,2530 @@
+# Derivation & Synthesis — Comprehensive Implementation Plan
+
+**Date:** 2026-07-11
+**Status:** Plan — pre-implementation
+**Depends on:** Completion of Extensible Types (Phases 0–7) and GLUE v2
+**See also:** `docs/plans/2026-07-11-extensible-types-comprehensive.md` for
+the prerequisite phases. This plan builds directly on the property system
+(Phase 1B), plugin system (Phase 7), and the `.dbvl` archive format.
+
+---
+
+## Overview
+
+This plan adds **Derivation-as-a-First-Class-Feature** to Brief. The `:=`
+operator introduces three capabilities from a single syntactic primitive:
+
+| Capability | What | Phase |
+|------------|------|-------|
+| **Compile-Time Assertions** | `:= { 2, 2 -> 4 }` verifies function body against examples | Phase 8 |
+| **Program Synthesis** | `:= { 2, 2 -> 4 }` with empty body infers the minimal formula | Phase 9 |
+| **Sad-Path Derivation** | `:= { Err(e) -> fallback }` resolves FFI error types | Phase 11 |
+| **Deductive Synthesis** | `[pre][post]` contracts synthesize provably correct bodies | Phase 10 |
+
+### Core Design Principles
+
+1. **The `:=` block is immortal** — never consumed or removed from source.
+   It remains the permanent specification / single source of truth.
+
+2. **No body overwriting** — `brief derive` only fills holes (`body: None`).
+   An existing body is never modified by the tool.
+
+3. **Additive-only optimization** — Existing optimization paths are never
+   modified. New match arms only. The `_ => return None;` fallthrough must
+   remain unchanged.
+
+4. **Byte-offset surgical insertion** — Source write-back uses byte offsets,
+   not AST pretty-printing. 100% of formatting, comments, and spacing is
+   preserved.
+
+5. **SMT solver is optional** — A fallback enumerative search (depth-bounded)
+   ensures `brief derive` works offline. The SMT solver is a performance
+   accelerator, not a hard dependency.
+
+---
+
+## Golden Rules (All Phases)
+
+1. **Flat control flow**: All new/modified code must nest at most 2 levels
+   deep. Arrowhead code is forbidden. Use `?`, guard clauses, early returns,
+   and extracted helper functions.
+
+2. **Contract-first**: Never weaken contract guarantees. If a function had
+   `[result > 0]` before the refactor, it must still have it after.
+
+3. **Additive only**: Existing optimization paths must NOT be modified. New
+   match arms only. The `_ => return None;` fallthrough must remain unchanged.
+
+4. **Tests or it doesn't exist**: Every new code path, every match arm,
+   every feature must have corresponding tests. `cargo test --lib` before
+   every commit.
+
+5. **Doc comments on every definition**: Every `fn`, `struct`, `enum`,
+   `trait` added or modified must have a `///` doc comment.
+
+6. **Rationale comments at every change site**: Format:
+   `// YYYY-MM-DD: Phase N.M — <what and why>`
+
+7. **HashMap iteration determinism**: All HashMap iterations that produce
+   IR instructions must be sorted by key before the loop.
+
+8. **Do not ask "shall I commit?" — just commit**: After every logical step
+   where tests pass, commit. No amend, no squash. One commit per step.
+
+---
+
+## Phase 8 — Lexer + Parser + AST for Derivation Blocks
+
+### Goal
+
+Add `:=` (`ColonEq`) as a new token, parse derivation blocks after function
+signatures or bodies, and store them in the AST as `DerivationBlock` objects
+that coexist with function bodies.
+
+### Step 8.0 — Add `ColonEq` (`:=`) to the lexer
+
+**File**: `src/lexer.rs`
+
+**What**: Add a new token variant for the `:=` operator. Brief currently has
+`Colon` (`:`), `ColonColon` (`::`), `ColonGreaterThan` (`:>`), and
+`LtColon` (`<:`). `ColonEq` slots naturally between `ColonGreaterThan` and
+`ColonColon` in the enum ordering.
+
+**Changes**:
+
+1. Add to the `Token` enum (around line 280):
+```rust
+/// `:=` — derivation / compile-time assertion block
+/// 2026-07-11: Phase 8.0
+ColonEq,
+```
+
+2. Add `Display` impl (around line 590):
+```rust
+Token::ColonEq => write!(f, ":="),
+```
+
+3. Add lexer match in the multi-character token sequence (around the colon
+   handling at line 380):
+```rust
+Token::Colon => {
+    // Check for :=, ::, :>, :  (longest match first)
+    if self.peek_char() == '=' {
+        self.advance();
+        Token::ColonEq
+    } else if self.peek_char() == ':' {
+        self.advance();
+        Token::ColonColon
+    } else if self.peek_char() == '>' {
+        self.advance();
+        Token::ColonGreaterThan
+    } else {
+        Token::Colon
+    }
+}
+```
+
+4. Update any match on `Token` that needs a wildcard to handle the new
+   variant (add `Token::ColonEq => { }` to dead-code branches).
+
+**Search before adding** — verify no existing code assumes `:` and `=` are
+adjacent tokens (which would now be lexed as a single token):
+```bash
+grep -rn 'Token::Colon' src/ | grep -v 'ColonGreaterThan\|ColonColon\|Display\|//'
+```
+
+Expected: All `Token::Colon` usages are for single `:` tokens (type
+annotations, contracts, ternary). No code constructs `:=` as two separate
+tokens.
+
+**Nesting check**: Token variant addition — no nesting concern. Lexer match
+uses guard clauses (`if/else if` chain) at depth 1.
+
+**Tests**:
+- `test_lexer_colon_eq`: `":="` → `Token::ColonEq`
+- `test_lexer_colon_eq_in_context`: `"x := { 1 -> 2 };"` → tokens: Ident,
+  ColonEq, LBrace, Int, Arrow, Int, RBrace, Semicolon
+- `test_lexer_colon_not_confused`: `"x: Int"` → tokens: Ident, Colon,
+  Ident (ColonEq not produced)
+- `test_lexer_colon_colon_not_confused`: `"::"` → ColonColon (not ColonEq)
+
+### Step 8.1 — Add `DerivationBlock` struct to AST
+
+**File**: `src/ast.rs`
+
+**What**: Define the AST node for derivation blocks and add an optional
+`DerivationBlock` field to `Definition` and `Transaction`.
+
+**Changes**:
+
+Add new structs (after `TypeDefBody`, around line 627):
+
+```rust
+/// A single input-output pair in a derivation block.
+/// `2, 2 -> 4` becomes `inputs: [2, 2], output: 4`.
+/// 2026-07-11: Phase 8.1.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DerivationExample {
+    /// Input expressions (one per function parameter).
+    pub inputs: Vec<Expr>,
+    /// Expected output expression.
+    pub output: Expr,
+    /// Source span for error messages.
+    pub span: Span,
+}
+
+/// A derivation block attached to a definition or transaction.
+/// Contains input-output examples (inductive synthesis) or sad-path mappings.
+/// 2026-07-11: Phase 8.1.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DerivationBlock {
+    /// List of example pairs: (inputs, expected_output).
+    pub examples: Vec<DerivationExample>,
+    /// Source span for error messages.
+    pub span: Span,
+}
+```
+
+Add field to `Definition` (around line 2501):
+```rust
+/// Optional derivation block `:= { ... }` attached after the body.
+/// 2026-07-11: Phase 8.1.
+pub derivation: Option<DerivationBlock>,
+```
+
+Add field to `Transaction` (around line 2520):
+```rust
+/// Optional derivation block `:= { ... }` attached after the body.
+/// 2026-07-11: Phase 8.1.
+pub derivation: Option<DerivationBlock>,
+```
+
+Update existing constructors and test fixtures for `Definition` and
+`Transaction` to set `derivation: None` by default.
+
+**Nesting check**: Two new structs, two new optional fields on existing
+structs — no nesting concern.
+
+**Tests**:
+- `test_derivation_example_construct`: Build a DerivationExample, verify
+  fields
+- `test_definition_with_derivation`: Build a Definition with
+  `derivation: Some(...)`, verify serialization
+- `test_definition_without_derivation`: Default `derivation: None`
+
+### Step 8.2 — Parse derivation blocks in `parse_definition()`
+
+**File**: `src/parser.rs`
+
+**What**: Modify `parse_definition()` to accept an optional derivation
+block after the function body, and to accept `:=` immediately after the
+signature when the body is omitted (drafting state).
+
+**Two syntactic states**:
+
+**State A — Drafting (body omitted)**:
+```brief
+defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; 3, 5 -> 8; };
+```
+
+**State B — Resolved (body present)**:
+```brief
+defn add(x: Int, y: Int) -> Int { term x + y; } := { 2, 2 -> 4; 3, 5 -> 8; };
+```
+
+**Changes to `parse_definition()`** (line 4718):
+
+After parsing the signature `-> ReturnType`, the parser looks at the next
+token:
+
+```rust
+/// Phase 8.2: After signature, check for body or derivation.
+let body = if self.current_token_is(Token::LBrace) {
+    // State B: Body is present — parse it
+    let body = self.parse_body()?;
+    Some(body)
+} else if self.current_token_is(Token::Semicolon) {
+    // Lambda-style terminator: `defn f(x) -> Int;` (no body, no derivation)
+    self.advance();
+    None
+} else {
+    // Expect either body or derivation
+    return self.spanned_err("expected '{' or ':=' after function signature");
+};
+
+// Check for trailing derivation block
+let derivation = if self.current_token_is(Token::ColonEq) {
+    self.advance(); // consume :=
+    Some(self.parse_derivation_block()?)
+} else {
+    None
+};
+```
+
+New parser method:
+
+```rust
+/// Parse a derivation block: `{ 2, 2 -> 4; 3, 5 -> 8; }`
+/// 2026-07-11: Phase 8.2
+fn parse_derivation_block(&mut self) -> Result<DerivationBlock, SyntaxError> {
+    let start = self.current_span().start;
+    self.expect(Token::LBrace)?;
+    let mut examples = Vec::new();
+
+    while !self.check(Token::RBrace) {
+        let example = self.parse_derivation_example()?;
+        examples.push(example);
+
+        // Semicolon between examples, but not after the last one
+        if self.current_token_is(Token::Semicolon) {
+            self.advance();
+        } else if !self.check(Token::RBrace) {
+            return self.spanned_err("expected ';' between derivation examples");
+        }
+    }
+    self.expect(Token::RBrace)?;
+
+    let end = self.current_span().end;
+    Ok(DerivationBlock {
+        examples,
+        span: Span::new(start, end),
+    })
+}
+
+/// Parse a single example: `2, 2 -> 4` or `0x1234 -> 0x3412`
+/// 2026-07-11: Phase 8.2
+fn parse_derivation_example(&mut self) -> Result<DerivationExample, SyntaxError> {
+    let start = self.current_span().start;
+
+    // Parse inputs (comma-separated expressions until `->`)
+    let mut inputs = Vec::new();
+    inputs.push(self.parse_expression()?);
+    while self.current_token_is(Token::Comma) {
+        self.advance();
+        inputs.push(self.parse_expression()?);
+    }
+
+    // Expect `->` separator
+    self.expect(Token::Arrow)?;
+
+    // Parse expected output
+    let output = self.parse_expression()?;
+
+    let end = self.current_span().end;
+    Ok(DerivationExample {
+        inputs,
+        output,
+        span: Span::new(start, end),
+    })
+}
+```
+
+**Note on `Token::Semicolon` after derivation block**: When the function has
+a body and a trailing derivation, the final `;` after `}` is the definition
+terminator. When there is no body (State A), the `;` after `}` is also the
+terminator. The parse flow:
+- State A: `defn f() -> Ret := { ... };` → signature → no body → derivation
+  block → semicolon (consumed by `parse_definition` after)
+- State B: `defn f() -> Ret { ... } := { ... };` → signature → body →
+  derivation block → semicolon
+
+The existing terminator handling in `parse_definition()` already consumes
+the final `;` — no change needed there.
+
+**Nesting check**: The `parse_derivation_block` method has a single loop
+with guard clauses — depth 2. `parse_derivation_example` is sequential
+(push, push, expect, parse) — depth 1.
+
+**Tests**:
+- `test_parse_defn_with_body_and_derivation`: Body + derivation → both present
+- `test_parse_defn_draft_with_derivation`: No body, derivation → body is None,
+  derivation is Some
+- `test_parse_defn_no_derivation`: Body, no derivation → existing behavior
+- `test_parse_txn_with_derivation`: Transaction with derivation block
+- `test_parse_derivation_multiple_examples`: Two examples with semicolons
+- `test_parse_derivation_no_semicolon_after_last`: `{ a -> b; c -> d }` valid
+- `test_parse_derivation_rejects_empty`: `:= {}` → parse error (no examples)
+- `test_parse_derivation_example_syntax_error`: `2 -> -> 4` → parse error
+
+### Step 8.3 — Parse `:=` in lambda-style definitions
+
+**What**: Lambda-style definitions (`defn f(x) -> Int;`) can also have
+derivation blocks. Extend the lambda parsing to check for `:=` before `;`:
+
+```brief
+defn f(x: Int) -> Int := { 0 -> 0; };
+```
+
+**File**: `src/parser.rs` (the lambda branch in `parse_definition`)
+
+When the current token after the signature is `;`:
+```rust
+if self.current_token_is(Token::Semicolon) {
+    // Lambda-style: check if there's a derivation before the semicolon
+    // Actually, for lambda-style, derivation comes before ; too:
+    // defn f(x) -> Int := { 0 -> 0; };
+    // But here ; is the terminator. So we must check for := BEFORE the ;
+    // This case is already handled by the general flow — the parser
+    // checks for := before the body, which handles the no-body case.
+    self.advance();
+    return Ok(Definition { body: None, derivation: None, ... });
+}
+```
+
+Actually, re-read: `defn f(x) -> Int := { 0 -> 0; };` — the `;` after `}`
+terminates the definition. The `=` in `:=` means `=` is the second character
+which is NOT a standalone `;`. So the `:=` case triggers before we'd see `;`.
+The flow is already correct from Step 8.2.
+
+**Tests**:
+- `test_parse_lambda_with_derivation`: `defn f(x) -> Int := { 0 -> 0; };` →
+  body: None, derivation: Some
+
+### Step 8.4 — Validate derivation examples at type-check time
+
+**File**: `src/typechecker.rs`
+
+**What**: After type-checking the function signature and body (if present),
+validate each derivation example:
+1. Number of input expressions matches the function's parameter count
+2. Each input expression type-checks against the corresponding parameter type
+3. The output expression type-checks against the function's return type
+
+**Changes**:
+
+Add a new function `check_derivation()` called from the type-check pass:
+
+```rust
+/// Validate that all derivation examples are well-typed for this function.
+/// 2026-07-11: Phase 8.4
+fn check_derivation(
+    derivation: &DerivationBlock,
+    params: &[Parameter],
+    ret_type: &Type,
+    ctx: &TypeCheckContext,
+) -> Result<(), Vec<TypeError>> {
+    let mut errors = Vec::new();
+
+    for (i, example) in derivation.examples.iter().enumerate() {
+        // Check parameter count
+        if example.inputs.len() != params.len() {
+            errors.push(TypeError::new(
+                &example.span,
+                format!(
+                    "derivation example {}: expected {} input(s), got {}",
+                    i + 1,
+                    params.len(),
+                    example.inputs.len()
+                ),
+            ));
+            continue;
+        }
+
+        // Check each input expression type
+        for (j, (input_expr, param)) in example.inputs.iter().zip(params.iter()).enumerate() {
+            let input_ty = infer_expr_type(input_expr, ctx)?;
+            if !types_compatible(&input_ty, &param.ty) {
+                errors.push(TypeError::new(
+                    &input_expr.span(),
+                    format!(
+                        "derivation example {} input {}: expected type {:?}, got {:?}",
+                        i + 1, j + 1, param.ty, input_ty
+                    ),
+                ));
+            }
+        }
+
+        // Check output expression type
+        let output_ty = infer_expr_type(&example.output, ctx)?;
+        if !types_compatible(&output_ty, ret_type) {
+            errors.push(TypeError::new(
+                &example.output.span(),
+                format!(
+                    "derivation example {} output: expected type {:?}, got {:?}",
+                    i + 1, ret_type, output_ty
+                ),
+            ));
+        }
+    }
+
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+```
+
+**Nesting check**: The function has a loop (level 1) with two inner loops
+(level 2) — the `continue` is a guard clause pattern. The inner loops use
+`zip`, which is flat. Acceptable.
+
+**Tests**:
+- `test_derivation_example_count_mismatch`: 3 inputs for 2-param function →
+  error
+- `test_derivation_example_type_mismatch`: `"hello"` for Int param → error
+- `test_derivation_example_output_type_mismatch`: Output is String but return
+  is Int → error
+- `test_derivation_examples_all_valid`: All examples well-typed → passes
+
+### Step 8.5 — Execute derivation examples as compile-time tests
+
+**File**: New function in `src/typechecker.rs` or `src/derive.rs`
+
+**What**: When a definition has BOTH a body and a derivation block, execute
+each example through the compile-time interpreter. This provides
+**Compile-Time Assertions** — zero-runtime-cost verification that the
+function body produces the expected outputs for the provided inputs.
+
+**Changes**:
+
+Add a function `execute_derivation_tests()`:
+
+```rust
+/// Execute all derivation examples through the compile-time interpreter.
+/// Each example's inputs are injected as constants, the function body is
+/// interpreted, and the result is compared to the expected output.
+/// 2026-07-11: Phase 8.5
+fn execute_derivation_tests(
+    defn: &Definition,
+    universe: &TypeUniverse,
+    interpreter: &mut Interpreter,
+) -> Result<(), Vec<CompileError>> {
+    let Some(derivation) = &defn.derivation else {
+        return Ok(());
+    };
+    let Some(body) = &defn.body else {
+        return Ok(()); // No body yet — synthesis phase handles this
+    };
+
+    let mut errors = Vec::new();
+
+    for (i, example) in derivation.examples.iter().enumerate() {
+        // Bind parameter names to input values in the interpreter
+        let mut env = InterpreterEnv::new();
+        for (param, input) in defn.parameters.iter().zip(example.inputs.iter()) {
+            let value = interpreter.eval_expr(input, &env)?;
+            env.bind(&param.name, value);
+        }
+
+        // Interpret the function body
+        let result = interpreter.eval_body(body, &env)?;
+
+        // Evaluate the expected output expression
+        let expected = interpreter.eval_expr(&example.output, &env)?;
+
+        // Compare
+        if result != expected {
+            errors.push(CompileError::new(
+                &example.span,
+                format!(
+                    "derivation test {} failed: expected {:?}, got {:?}",
+                    i + 1, expected, result
+                ),
+            ));
+        }
+    }
+
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+```
+
+This reuses the existing compile-time interpreter infrastructure (already
+used for custom literal codec evaluation in Phase 5). The interpreter must
+support:
+- Injecting constant values for function parameters
+- Evaluating the body statements and returning the final value
+- Comparing values (the interpreter already handles this)
+
+**Nesting check**: The function has a loop (level 1) with an inner env setup
+(level 2) — flat enough. Each error path is a guard clause.
+
+**Tests**:
+- `test_compile_time_assertion_passes`: `add { 2, 2 -> 4; }` → compiles
+- `test_compile_time_assertion_fails`: `add { 2, 2 -> 5; }` → compile error
+- `test_compile_time_assertion_multi_example`: Both pass → compiles
+- `test_compile_time_assertion_one_fails`: Second example fails → error
+  with correct example number
+- `test_compile_time_no_body_skips`: No body → tests skipped (handled in
+  synthesis phase)
+
+---
+
+## Phase 9 — Synthesis Engine
+
+**Depends on**: Phase 8 (AST + parsing), Phase 7 (plugin system for external
+SMT solver), Phase 1B (property system for operator cost model)
+
+### Goal
+
+When a definition has a derivation block but NO body (`body: None`), the
+`brief derive` command invokes the synthesis engine to infer the minimal
+formula satisfying all examples.
+
+### Step 9.0 — Create `src/derive.rs` module
+
+**File**: `src/derive.rs` (new)
+
+**What**: Create the top-level derivation module with three sub-modules:
+
+```rust
+//! Derivation & synthesis engine.
+//! 2026-07-11: Phase 9.0
+
+pub mod engine;   // Synthesis orchestration, cost model, enumerative search
+pub mod smt;      // SMT solver interface (via WASM plugin)
+pub mod cli;      // CLI command handlers for `brief derive`
+```
+
+Also create `src/derive/` directory with `mod.rs`, `engine.rs`, `smt.rs`,
+and `cli.rs`.
+
+Register the module in `src/lib.rs`:
+```rust
+pub mod derive;
+```
+
+**Nesting check**: Three sibling sub-modules — no nesting.
+
+### Step 9.1 — Define DSL of primitive operations for synthesis
+
+**File**: `src/derive/engine.rs`
+
+**What**: Define the grammar of valid Brief expressions that the synthesizer
+can generate. Each operator has a cost weight (Occam's Razor) — the
+synthesizer searches for the lowest-cost program satisfying all examples.
+
+**The DSL grammar**:
+
+```
+Program  ::= Term(Expr)
+Expr     ::= Const(i64 | bool | float)
+           | Var(String)
+           | BinOp(Expr, BinOp, Expr)
+           | UnOp(UnOp, Expr)
+           | Cmp(Expr, CmpOp, Expr)
+           | Cond(Expr, Expr, Expr)   // if-else
+Const    ::= integer literal | float literal | true | false
+BinOp    ::= + | - | * | / | % | & | | | ^ | << | >>
+UnOp     ::= - (negate) | ! (not)
+CmpOp    ::= == | != | < | > | <= | >=
+```
+
+**Data structures**:
+
+```rust
+/// Cost weights for the Occam's Razor heuristic.
+/// Lower cost = preferred by the synthesizer.
+/// 2026-07-11: Phase 9.1
+#[derive(Debug, Clone)]
+pub struct CostModel {
+    pub constant: u64,   // cost of a literal (default: 1)
+    pub variable: u64,   // cost of reading a parameter (default: 1)
+    pub unary_op: u64,   // cost of a unary operation (default: 2)
+    pub binary_op: u64,  // cost of a binary operation (default: 3)
+    pub branch: u64,     // cost of an if/else (default: 5)
+}
+
+impl Default for CostModel {
+    fn default() -> Self {
+        Self {
+            constant: 1,
+            variable: 1,
+            unary_op: 2,
+            binary_op: 3,
+            branch: 5,
+        }
+    }
+}
+
+/// A synthesized program — the minimal expression tree satisfying examples.
+/// 2026-07-11: Phase 9.1
+#[derive(Debug, Clone)]
+pub struct SynthesizedProgram {
+    pub body: Vec<Statement>,   // The synthesized function body
+    pub cost: u64,              // Total cost of this program
+    pub operators_used: Vec<String>,  // Which operators were used (for diagnostics)
+}
+```
+
+**Nesting check**: Three data structures, one default impl — no nesting.
+
+**Tests**:
+- `test_cost_model_defaults`: Default costs match expected values
+- `test_cost_model_constant_lower_than_binary`: constant(1) < binary_op(3)
+
+### Step 9.2 — Enumerative search (fallback when SMT unavailable)
+
+**File**: `src/derive/engine.rs`
+
+**What**: Implement depth-bounded enumerative search over the DSL grammar.
+This is the fallback when no SMT solver is available. It enumerates all
+valid program trees up to a maximum depth and returns the lowest-cost match.
+
+**Algorithm**:
+
+```rust
+/// Enumerate all programs up to `max_depth` and return the lowest-cost
+/// match for the given examples.
+/// 2026-07-11: Phase 9.2
+pub fn synthesize_enumerative(
+    param_names: &[String],
+    examples: &[DerivationExample],
+    cost_model: &CostModel,
+    max_depth: u8,
+) -> Result<SynthesizedProgram, SynthesisError> {
+    // Generate candidate expressions up to max_depth
+    let mut best: Option<SynthesizedProgram> = None;
+    let mut candidates = generate_expressions(param_names, max_depth, cost_model);
+
+    // Sort by cost (lowest first)
+    candidates.sort_by_key(|c| c.cost);
+
+    for candidate in &candidates {
+        if matches_all_examples(candidate, examples) {
+            return Ok(candidate.clone());
+        }
+    }
+
+    Err(SynthesisError::NoSolutionFound {
+        examples_checked: examples.len(),
+        max_depth,
+    })
+}
+
+/// Generate all valid expressions up to `depth`.
+/// 2026-07-11: Phase 9.2
+fn generate_expressions(
+    params: &[String],
+    depth: u8,
+    cost: &CostModel,
+) -> Vec<SynthesizedProgram> {
+    if depth == 0 {
+        return vec![];
+    }
+    let mut results = Vec::new();
+
+    // Base: constants and variables
+    // (In a full implementation, this enumerates a bounded set of
+    //  constants like 0, 1, -1, and all parameter names)
+
+    // Recursive: unary and binary ops
+    // (Combine sub-expressions via BinOp, UnOp, Cond)
+
+    results
+}
+```
+
+**Key constraint**: The search for constants is bounded to a small set
+(0, 1, -1, likely-relevant powers of 2). Full constant enumeration is
+handled by the SMT solver path. This enumerative path is intended for
+simple programs only.
+
+**Nesting check**: The `generate_expressions` function builds results
+sequentially — depth is variable but the code structure is flat (collect
+base, collect recursive, return).
+
+**Tests**:
+- `test_synthesize_simple_add`: `{ 2, 2 -> 4; 3, 5 -> 8; }` with
+  max_depth=2 → `x + y`
+- `test_synthesize_constant_only`: `{ _ -> 42; _ -> 42 }` → constant
+- `test_synthesize_no_solution`: Impossible constraints with low max_depth →
+  Err
+- `test_synthesize_prefers_lowest_cost`: Multiple valid programs, cheapest
+  returned
+- `test_synthesize_max_depth_increases_search`: depth=1 fails, depth=2
+  succeeds
+
+### Step 9.3 — SMT solver interface
+
+**File**: `src/derive/smt.rs`
+
+**What**: Interface to an external SMT solver (e.g., Z3) via the Phase 7
+WASM plugin system. The plugin sends an SMT-LIB query in QF_BV
+(quantifier-free bitvector logic) and receives a synthesized expression.
+
+**Note**: The SMT solver may not be available at build time. The engine
+gracefully falls back to enumerative search (Step 9.2).
+
+**Interface**:
+
+```rust
+/// Result of an SMT synthesis query.
+/// 2026-07-11: Phase 9.3
+#[derive(Debug, Clone)]
+pub enum SynthesisResult {
+    /// A valid program was found.
+    Program(SynthesizedProgram),
+    /// No program exists satisfying the constraints (unsat).
+    Unsat,
+    /// The solver timed out or was unavailable.
+    Unknown(String),
+}
+
+/// Attempt to synthesize via the SMT WASM plugin.
+/// Falls back to enumerative if the plugin is unavailable.
+/// 2026-07-11: Phase 9.3
+pub fn synthesize_via_smt(
+    params: &[TypedParameter],
+    ret_type: &Type,
+    examples: &[DerivationExample],
+    plugin_host: &PluginHost,
+) -> Result<SynthesisResult, SynthesisError> {
+    // 1. Build the SMT-LIB query string
+    let query = build_smt_query(params, ret_type, examples)?;
+
+    // 2. Call the plugin (Phase 7 provides the WASM plugin interface)
+    let response = match plugin_host.call("smt/synth", &query) {
+        Ok(resp) => resp,
+        Err(e) => return Ok(SynthesisResult::Unknown(format!(
+            "SMT plugin unavailable: {}. Falling back to enumerative search.", e
+        ))),
+    };
+
+    // 3. Parse the SMT response into a SynthesizedProgram
+    parse_smt_response(&response)
+}
+```
+
+**SMT-LIB query structure** (for `defn swap(x: UInt16) -> UInt16; { 0x1234 -> 0x3412 }`):
+
+```lisp
+; QF_BV synthesis query for swap
+(declare-const x (_ BitVec 16))
+
+; Constraints from examples
+(assert (= (f #x1234) #x3412))
+(assert (= (f #x00FF) #xFF00))
+
+; Synthesis directive
+(synth-fun f ((x (_ BitVec 16))) (_ BitVec 16)
+    ((Start Symbol) (
+        (Constant (_ BitVec 16))
+        (Variable x)
+        (bvadd Start Start)
+        (bvsub Start Start)
+        (bvmul Start Start)
+        (bvand Start Start)
+        (bvor Start Start)
+        (bvxor Start Start)
+        (bvshl Start Start)
+        (bvlshr Start Start)
+        (bvneg Start)
+        (bvnot Start)
+    ))
+)
+
+(check-synth)
+```
+
+**Building the query**: The function maps Brief types to SMT-LIB sorts:
+- `UInt8`, `Int8` → `(_ BitVec 8)`
+- `UInt16`, `Int16` → `(_ BitVec 16)`
+- `UInt32`, `Int32`, `Float32` → `(_ BitVec 32)`
+- `UInt64`, `Int64`, `Float64` → `(_ BitVec 64)`
+- `Bool` → `Bool`
+
+For each example, emit an `(assert (= (f <inputs>) <output>))` constraint.
+
+**Parsing the response**: The SMT solver returns either:
+- `(define-fun f (...) ...)` — a synthesized function definition
+- `unsat` — no program exists (should not happen for inductive synthesis
+  with consistent examples)
+- `unknown` — solver could not decide
+
+Parse the `define-fun` body back into a Brief `Vec<Statement>`.
+
+**Nesting check**: Sequential logic: build query → try plugin → parse
+response. Depth 1.
+
+**Tests**:
+- `test_build_smt_query_simple`: Build query for `add(x, y)`, verify
+  constraints contain `(= (f #x02 #x02) #x04)`
+- `test_build_smt_query_single_param`: Build for `swap(x)`
+- `test_parse_smt_response_define_fun`: Parse `(define-fun f ((x (_ BitVec 16))) (_ BitVec 16) (bvadd x x))` → `term x + x;`
+- `test_smt_plugin_unavailable_fallback`: Plugin returns error →
+  SynthesisResult::Unknown
+- `test_end_to_end_swap_synthesis`: `{ 0x1234 -> 0x3412; 0x00FF -> 0xFF00; }`
+  → `term (x << 8) | (x >> 8);`
+
+### Step 9.4 — `#no_derive` pragma handler
+
+**What**: The `#no_derive` pragma tells the compiler to skip synthesis for
+a specific definition, keeping the body empty during active drafting.
+
+**File**: `src/derive/engine.rs`
+
+```rust
+/// Check whether a definition should be derived (synthesized) or skipped.
+/// 2026-07-11: Phase 9.4
+pub fn should_derive(defn: &Definition) -> bool {
+    // Never overwrite an existing body
+    if defn.body.is_some() {
+        return false;
+    }
+    // Nothing to synthesize from
+    if defn.derivation.is_none() {
+        return false;
+    }
+    // Respect #no_derive pragma
+    if has_pragma(&defn.annotations, "no_derive") {
+        return false;
+    }
+    true
+}
+
+/// Check if the annotation list contains a specific pragma.
+/// 2026-07-11: Phase 9.4
+fn has_pragma(annotations: &[Annotation], name: &str) -> bool {
+    annotations.iter().any(|a| a.name == name)
+}
+```
+
+**Note**: The `#no_derive` pragma is parsed by the existing
+`parse_hashtag_modifiers()` infrastructure (from Phase 1A). No parser
+changes are needed — the pragma is simply a `#` annotation on the
+definition.
+
+**Usage in source**:
+```brief
+#no_derive
+defn complex_fn(x: Int) -> Int := {
+    0 -> 0; // Still drafting — leave the body empty
+};
+```
+
+**Nesting check**: Three guard clauses — depth 1.
+
+**Tests**:
+- `test_no_derive_pragma_blocks_synthesis`: `#no_derive defn f(x) := {0->0;};`
+  → should_derive returns false
+- `test_no_derive_pragma_absent`: No pragma → should_derive returns true
+- `test_no_derive_respects_existing_body`: Body present → should_derive false
+  (regardless of pragma)
+- `test_has_pragma_true`: Annotation list contains `"no_derive"` → true
+- `test_has_pragma_false`: No match → false
+
+### Step 9.5 — Orchestrate synthesis in the derive engine
+
+**File**: `src/derive/engine.rs`
+
+**What**: The top-level synthesis function that coordinates the SMT solver
+and enumerative search, with proper fallback:
+
+```rust
+/// Synthesize a function body from its derivation block.
+/// 2026-07-11: Phase 9.5
+pub fn synthesize_body(
+    defn: &Definition,
+    universe: &TypeUniverse,
+    plugin_host: Option<&PluginHost>,
+    depth_limit: u8,
+) -> Result<SynthesizedProgram, SynthesisError> {
+    let Some(derivation) = &defn.derivation else {
+        return Err(SynthesisError::NoDerivationBlock);
+    };
+
+    let param_names: Vec<String> = defn.parameters.iter()
+        .map(|p| p.name.clone())
+        .collect();
+
+    // Try SMT first if plugin is available
+    if let Some(host) = plugin_host {
+        let result = smt::synthesize_via_smt(
+            &defn.parameters,
+            &defn.output_type,
+            &derivation.examples,
+            host,
+        )?;
+        match result {
+            SynthesisResult::Program(prog) => return Ok(prog),
+            SynthesisResult::Unsat => return Err(SynthesisError::Unsat),
+            SynthesisResult::Unknown(_) => {
+                // Fall through to enumerative
+            }
+        }
+    }
+
+    // Fallback: enumerative search
+    engine::synthesize_enumerative(
+        &param_names,
+        &derivation.examples,
+        &CostModel::default(),
+        depth_limit,
+    )
+}
+```
+
+**Nesting check**: The function uses early returns for each decision point
+— depth 1 throughout.
+
+**Tests**:
+- `test_synthesize_via_smt_first`: SMT available and succeeds → uses SMT
+  result
+- `test_synthesize_fallback_on_smt_failure`: SMT unavailable → enumerative
+  search
+
+### Step 9.6 — Surgical source-file write-back
+
+**What**: After synthesis, insert the generated body into the source file
+at the correct byte offset, preserving all existing formatting and comments.
+
+**File**: `src/derive/cli.rs`
+
+**The core challenge**: AST pretty-printing destroys formatting. Instead,
+record byte offsets during parsing and use surgical byte-level insertion.
+
+**How it works**:
+
+1. **During parsing**, the parser records the end offset of the signature
+   (for State A / drafting) or the end offset of the derivation block's
+   opening `{` ... `}` (for State B). This is stored in the
+   `DerivationBlock.span`.
+
+2. **During write-back**, the CLI:
+   a. Reads the entire source file into a `Vec<u8>`
+   b. Locates the insertion point (the byte offset of `end` in the
+      derivation block's span — this is the character AFTER the closing `}`)
+   c. Generates the body string: ` { term x + y; }`
+   d. Splits the bytes at the insertion point, inserts the body string,
+      and writes the result back
+   e. For State A: Also replaces the final `;` handling — the body is
+      inserted before the `;`
+
+**State A — Drafting to Resolved**:
+
+Before:
+```
+defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; 3, 5 -> 8; };
+                                                              ^-- insertion point (after })
+```
+
+After:
+```
+defn add(x: Int, y: Int) -> Int := { 2, 2 -> 4; 3, 5 -> 8; } {
+    term x + y;
+};
+```
+
+Note: The original `}` was the closing brace of the derivation block. The
+original `;` terminated the definition. After insertion, the `}` of the
+derivation block is still present, followed by the synthesized body, then
+`;` terminates the definition.
+
+**State B — Already resolved** (no change, additive-only rule):
+```
+defn add(x: Int, y: Int) -> Int { term x + y; } := { 2, 2 -> 4; ... };
+```
+→ Write-back does nothing (body already present).
+
+**Implementation**:
+
+```rust
+/// Write the synthesized body back into the source file.
+/// Uses byte-level surgical insertion — does NOT pretty-print the AST.
+/// 2026-07-11: Phase 9.6
+fn write_back_body(
+    source_path: &Path,
+    derivation: &DerivationBlock,
+    body_str: &str,
+) -> Result<(), DeriveError> {
+    let source = fs::read(source_path).map_err(|e| DeriveError::Io {
+        path: source_path.to_path_buf(),
+        error: e,
+    })?;
+
+    // Insertion point: byte offset after the derivation block's closing `}`
+    let insert_at = derivation.span.end as usize;
+
+    // Build the new content: before derivation + body + after derivation
+    let mut new_source = Vec::with_capacity(source.len() + body_str.len() + 4);
+    new_source.extend_from_slice(&source[..insert_at]);
+    new_source.extend_from_slice(body_str.as_bytes());
+    new_source.extend_from_slice(&source[insert_at..]);
+
+    // Write back
+    fs::write(source_path, &new_source).map_err(|e| DeriveError::Io {
+        path: source_path.to_path_buf(),
+        error: e,
+    })?;
+
+    Ok(())
+}
+```
+
+**Important**: The insertion point must be computed so that:
+- The derivation block's `}` is preserved
+- The body is inserted between `}` and `;`
+- The final `;` remains as the definition terminator
+
+The span stored in `DerivationBlock` should point to the exact byte after
+the closing `}`:
+
+```
+defn f() := { ... };
+            ^         ^
+            start     end (= position of ;)
+```
+
+If the derivation block has `span = (start_of_brace, end_of_brace)`, and
+the closing `}` is at byte `end_of_brace`, then insertion at
+`end_of_brace` + 1 (after the `}`) is correct. The `;` follows.
+
+Actually, let's be precise:
+```
+defn f(x: Int) -> Int := { 0 -> 0; };
+                         ^             ^
+                         brace_open    brace_close = end
+```
+The span of the derivation block is `(brace_open, brace_close)`. After
+`brace_close` comes `;`. We insert between `brace_close` and `;`.
+
+So the insertion point is `derivation.span.end` (the byte after `}`).
+
+Wait: `Span` in Rust is typically `(start, end)` where `start` is the byte
+of the first token and `end` is the byte AFTER the last token. So
+`derivation.span.end` is already past the `}`. Then we insert there, and
+the `;` is at `derivation.span.end`.
+
+This means `insert_at = derivation.span.end` is correct for insertion
+between the `}` and `;`.
+
+**Body string format**:
+```rust
+fn format_synthesized_body(program: &SynthesizedProgram) -> String {
+    let mut out = String::new();
+    out.push_str(" {\n");
+    for stmt in &program.body {
+        out.push_str("    ");
+        out.push_str(&format!("{};\n", stmt));
+    }
+    out.push_str("}");
+    out
+}
+```
+
+**Nesting check**: The write-back function is sequential (read, split,
+extend, write) — depth 1. The body formatter is a loop — depth 1.
+
+**Tests**:
+- `test_write_back_draft_to_resolved`: Draft source → after write-back,
+  body is present between derivation and `;`
+- `test_write_back_preserves_formatting`: Leading whitespace, comments,
+  indentation all intact after write-back
+- `test_write_back_no_change_already_bodied`: Body present → file unchanged
+- `test_write_back_nonexistent_file`: Missing file → Io error
+
+### Step 9.7 — Build import DAG for `--all`
+
+**File**: `src/derive/cli.rs`
+
+**What**: When `--all` is passed, `brief derive` must process all
+transitive imports in dependency order (topological sort of the DAG).
+
+**Algorithm**:
+
+```rust
+/// Derive all definitions in the given source file AND all its transitive
+/// imports, processed in topological order (leaf modules first).
+/// 2026-07-11: Phase 9.7
+pub fn derive_all(source_path: &Path) -> Result<(), DeriveError> {
+    // 1. Parse the source and build the import DAG
+    let program = parse_file(source_path)?;
+    let import_graph = build_import_graph(&program, source_path)?;
+
+    // 2. Topological sort (Kahn's algorithm)
+    let order = topological_sort(&import_graph)?;
+
+    // 3. Process each file in order
+    for file_path in &order {
+        derive_file(file_path)?;
+    }
+
+    Ok(())
+}
+```
+
+The import graph is a DAG where:
+- Vertices = `.bv` files
+- Edges = `import` statements
+
+The existing `ImportResolver` (Phase 1A) already parses imports and
+resolves them. This step reuses that infrastructure.
+
+```rust
+/// Build a DAG of imports for the given program.
+/// Returns a list of (file_path, imports) pairs.
+/// 2026-07-11: Phase 9.7
+fn build_import_graph(
+    program: &Program,
+    source_path: &Path,
+) -> Result<Vec<(PathBuf, Vec<PathBuf>)>, DeriveError> {
+    let mut graph = Vec::new();
+    let source_dir = source_path.parent().unwrap_or(Path::new("."));
+
+    for import in &program.imports {
+        let resolved = resolve_import_path(&import.path, source_dir)?;
+        let sub_program = parse_file(&resolved)?;
+        graph.push((resolved.clone(), Vec::new()));
+
+        // Recurse into sub-imports
+        let sub_graph = build_import_graph(&sub_program, &resolved)?;
+        graph.extend(sub_graph);
+    }
+
+    graph.push((source_path.to_path_buf(), Vec::new()));
+    Ok(graph)
+}
+```
+
+**Nesting check**: The `build_import_graph` function iterates imports and
+recurses — the recursion depth equals import depth, but the function body
+is flat (push, recurse, push). Acceptable.
+
+**Tests**:
+- `test_derive_all_single_file`: No imports → single file processed
+- `test_derive_all_simple_chain`: `A -> B -> C` → C processed first, then B,
+  then A
+- `test_derive_all_diamond`: `A -> B, A -> C, B -> D, C -> D` → D first,
+  B and C in any order, A last
+- `test_derive_all_cycle`: `A -> B -> A` → error (cycle detected)
+
+### Step 9.8 — Directory scanning mode
+
+**File**: `src/derive/cli.rs`
+
+```rust
+/// Derive all .bv files in a directory (recursive).
+/// 2026-07-11: Phase 9.8
+pub fn derive_directory(dir_path: &Path) -> Result<(), DeriveError> {
+    let entries = walkdir::WalkDir::new(dir_path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| {
+            e.path().extension().map(|ext| ext == "bv").unwrap_or(false)
+        })
+        .collect::<Vec<_>>();
+
+    // Process files in parallel (they may be independent)
+    let results: Vec<Result<(), DeriveError>> = entries
+        .par_iter()
+        .map(|entry| derive_file(entry.path()))
+        .collect();
+
+    // Collect errors (if any)
+    let errors: Vec<DeriveError> = results.iter()
+        .filter_map(|r| r.as_ref().err().cloned())
+        .collect();
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(DeriveError::Multiple(errors))
+    }
+}
+```
+
+**Note**: Directory scanning does NOT analyze inter-file dependencies. Each
+file is processed independently. For dependency-aware derivation, use
+`--all <entry_point>`.
+
+**Nesting check**: The function collects entries (iterator chain) then
+processes in parallel (iterator chain). Depth 1.
+
+**Tests**:
+- `test_derive_directory_empty`: Empty directory → ok (no files)
+- `test_derive_directory_single_file`: One .bv file → derived
+- `test_derive_directory_multiple_files`: Multiple .bv files → all derived
+- `test_derive_directory_mixed_extensions`: `.bv` and `.txt` files → only
+  `.bv` processed
+- `test_derive_directory_nested`: Subdirectories → all `.bv` files found
+
+---
+
+## Phase 10 — Contract-Guided Synthesis (Deductive)
+
+**Depends on**: Phase 9 (synthesis engine), existing proof engine
+
+### Goal
+
+Synthesize function bodies from contracts alone, without example pairs. The
+SMT solver finds a body satisfying `∀x. P(x) ⇒ Q(x, f(x))`. This is
+**Deductive Synthesis** — correctness for ALL valid inputs, not just the
+provided examples.
+
+### Step 10.0 — Translate contracts to SyGuS queries
+
+**File**: `src/derive/engine.rs`
+
+**What**: When a definition has contracts `[pre][post]` but neither body
+nor examples (or an empty `:= {}`), synthesize a body from the contracts.
+
+```brief
+defn abs(val: Int) -> Int
+    [true]
+    [result >= 0]
+    [result == val || result == -val]
+:= {};  // Empty derivation — synthesize from contracts
+```
+
+**SyGuS (Syntax-Guided Synthesis) query**:
+
+```lisp
+; SyGuS query for abs
+(set-logic LIA)
+
+(declare-const val Int)
+
+(define-fun pre ((val Int)) Bool
+    true)
+
+(define-fun post ((val Int) (result Int)) Bool
+    (and (>= result 0) (or (= result val) (= result (- val)))))
+
+(synth-fun f ((val Int)) Int
+    ((Start Int (
+        val
+        0 1 (- 0) (- 1)
+        (+ Start Start)
+        (- Start Start)
+        (* Start Start)
+        (ite (<= Start Start) Start Start)
+        (ite (< Start Start) Start Start)
+        (ite (= Start Start) Start Start)
+        (ite (>= Start Start) Start Start)
+        (ite (> Start Start) Start Start)
+    )))
+)
+
+(constraint (forall ((val Int))
+    (=> (pre val) (post val (f val)))))
+
+(check-synth)
+```
+
+**Implementation**:
+
+```rust
+/// Synthesize a body from contracts when no examples are provided.
+/// 2026-07-11: Phase 10.0
+pub fn synthesize_from_contracts(
+    defn: &Definition,
+    universe: &TypeUniverse,
+    plugin_host: Option<&PluginHost>,
+) -> Result<SynthesizedProgram, SynthesisError> {
+    let Some(contract) = &defn.contract else {
+        return Err(SynthesisError::NoContract);
+    };
+
+    // Build the SyGuS query from the contract
+    let query = build_sygus_query(defn, contract)?;
+
+    // Try SMT solver via plugin
+    if let Some(host) = plugin_host {
+        let response = host.call("smt/synth", &query)?;
+        return parse_smt_response(&response);
+    }
+
+    // Without SMT solver, contract-guided synthesis is not possible
+    Err(SynthesisError::SmtUnavailable)
+}
+```
+
+**Nesting check**: Sequential logic — depth 1.
+
+**Tests**:
+- `test_synthesize_abs_from_contracts`: Contracts for `abs` with empty
+  derivation → `if val < 0 { -val } else { val }`
+- `test_synthesize_clamp_from_contracts`: `[result >= 0]` `[result <= 100]`
+  → `if val < 0 { 0 } else if val > 100 { 100 } else { val }`
+- `test_synthesize_no_contract`: No contract on definition → error
+- `test_synthesize_no_smt_plugin`: No SMT available → SmtUnavailable error
+
+### Step 10.1 — Contract + Example hybrid synthesis
+
+**What**: When BOTH contracts and examples are present, use examples as
+test oracles and contracts as the search-space boundary. The synthesizer
+finds the cheapest program that:
+1. Satisfies all input-output examples
+2. Respects the precondition-postcondition for ALL inputs
+
+This is strictly more powerful than examples alone — it acts as a formal
+generalization guarantee.
+
+```brief
+defn clamp(val: Int) -> Int
+    [result >= 0]
+    [result <= 100]
+:= {
+    0 -> 0;
+    200 -> 100;
+};
+```
+
+**File**: `src/derive/engine.rs`
+
+```rust
+/// Synthesize from both contracts and examples.
+/// The SMT query includes both constraints.
+/// 2026-07-11: Phase 10.1
+pub fn synthesize_hybrid(
+    defn: &Definition,
+    examples: &[DerivationExample],
+    plugin_host: Option<&PluginHost>,
+) -> Result<SynthesizedProgram, SynthesisError> {
+    // Build a query with both example constraints AND contract constraints
+    let query = build_hybrid_query(defn, examples)?;
+    // ... send to SMT solver
+}
+```
+
+**Tests**:
+- `test_hybrid_synthesis_satisfies_both`: Output matches examples AND
+  contracts
+- `test_hybrid_synthesis_broken_contract`: Examples suggest a solution that
+  violates the contract → solver finds different solution
+- `test_hybrid_synthesis_unsat`: No program satisfies both examples and
+  contracts → error
+
+### Step 10.2 — LLVM optimization metadata from proven contracts
+
+**File**: `src/backend/llvm/` (various emission sites)
+
+**What**: When contracts are proven (either by the proof engine or by SMT
+synthesis), emit them as LLVM metadata for optimizer leverage. This is the
+"positive incentive loop": more contracts → more metadata → faster code.
+
+**Supported metadata types**:
+
+| Contract Pattern | LLVM Metadata | Effect |
+|-----------------|---------------|--------|
+| `[result >= min && result <= max]` | `!range !{min, max}` | GVN, jump threading, loop optimization |
+| `[ptr != null]` | `nonnull` attribute | Null check elimination, register promotion |
+| `[val % 2 == 0]` | `@llvm.assume` | Division → shift optimization |
+| `[index < len]` | `!range` on index | Bounds check elimination, vectorization |
+
+**Implementation** (in `emit_stmt.rs`, `emit_expr.rs`, or `mod.rs`):
+
+```rust
+/// Emit LLVM metadata for contract-proven invariants.
+/// 2026-07-11: Phase 10.2
+fn emit_contract_metadata(
+    contract: &Contract,
+    builder: &mut LlvmBuilder,
+    function_context: &FunctionContext,
+    out: &mut String,
+) {
+    // Extract range constraints from postcondition
+    if let Some((min, max)) = extract_range_constraint(&contract.post) {
+        writeln!(out, "  !range !{{ {} , {} }}", min, max).ok();
+    }
+
+    // Extract non-null constraints
+    if has_nonnull_constraint(&contract.post) {
+        writeln!(out, "  !nonnull").ok();
+    }
+}
+```
+
+**Helper to extract range constraints**:
+
+```rust
+/// Extract a `[result >= min && result <= max]` pattern from a postcondition.
+/// Returns `Some((min, max))` if the pattern matches.
+/// 2026-07-11: Phase 10.2
+fn extract_range_constraint(expr: &Expr) -> Option<(i64, i64)> {
+    // Normalize to handle old-style vs new-style BinaryOp
+    let expr = expr.normalize_to_old();
+
+    match expr {
+        // result >= min && result <= max
+        Expr::And(left, right) => {
+            let left_range = extract_single_bound(left)?;
+            let right_range = extract_single_bound(right)?;
+            // Combine: one must be lower bound, the other upper bound
+            match (left_range, right_range) {
+                ((a, Geq), (b, Leq)) if a <= b => Some((a, b)),
+                ((a, Leq), (b, Geq)) if b <= a => Some((b, a)),
+                _ => None,
+            }
+        }
+        // Simple single bound
+        _ => {
+            let (val, op) = extract_single_bound(expr)?;
+            match op {
+                Geq => Some((val, i64::MAX)),
+                Leq => Some((i64::MIN, val)),
+                _ => None,
+            }
+        }
+    }
+}
+
+enum BoundOp { Geq, Leq }
+```
+
+**Nesting check**: The `extract_range_constraint` function uses guard
+clauses and match patterns — depth 1.
+
+**Tests**:
+- `test_contract_range_metadata`: `[result >= 0 && result <= 100]` →
+  `!range !{ 0, 101 }`
+- `test_contract_nonnull_metadata`: `[ptr != null]` → `nonnull` attribute
+  on parameter
+- `test_contract_metadata_emitted_in_ir`: Compile a function with contract,
+  verify LLVM output contains the metadata
+- `test_contract_no_metadata_for_tautology`: `[true]` → no metadata emitted
+
+---
+
+## Phase 11 — Sad-Path Derivation (FFI Error Recovery)
+
+**Depends on**: Phase 8 (derivation AST), Phase 9 (synthesis engine),
+existing FFI/frgn infrastructure
+
+### Goal
+
+When a `frgn` call returns `Result<T, E>` but the function signature
+returns `T`, the derivation block provides the error-to-value mapping, and
+the compiler synthesizes the `match` boilerplate.
+
+### Background
+
+Foreign function calls are inherently unpredictable — they can fail due to
+network timeouts, missing files, or memory limits. Brief's `frgn` signature
+returns a monadic `Result<T, E>` to model this. However, writing the
+boilerplate `match` statement for every FFI call pollutes the happy path.
+
+**Sad-path derivation** lets the developer write only the happy path in the
+body, and declare the error-to-value mapping in a `:=` block.
+
+### Step 11.0 — Detect monadic return type from `frgn` calls
+
+**File**: `src/typechecker.rs` and `src/derive/sad_path.rs`
+
+**What**: When type-checking a function body, if any `frgn` call returns
+`Result<T, E>` and the function's declared return type is `T`, check for a
+derivation block that provides the `E -> T` mapping.
+
+```brief
+frgn read_config_file(path: String) -> Result<Config, FileError>;
+
+defn load_config(path: String) -> Config {
+    let cfg = frgn read_config_file(path);
+    term cfg;
+} := {
+    FileError::NotFound -> Config::Default();
+    FileError::PermissionDenied -> Config::SecureDefault();
+};
+```
+
+**Detection logic** (added to type-checking of `frgn` calls):
+
+```rust
+/// Check if a frgn call returns a Result type that needs sad-path handling.
+/// Returns Some((ok_type, error_type)) if the return type is Result<T, E>.
+/// 2026-07-11: Phase 11.0
+fn check_frgn_result_type(
+    call: &FrgnCall,
+    return_type: &Type,
+    defn_return_type: &Type,
+) -> Option<(Type, Type)> {
+    // Check: return_type is Result<ok_ty, err_ty>
+    // AND defn_return_type == ok_ty
+    if let Some((ok_ty, err_ty)) = extract_result_types(return_type) {
+        if types_equivalent(defn_return_type, &ok_ty) {
+            return Some((ok_ty, err_ty));
+        }
+    }
+    None
+}
+```
+
+**During type-checking**: If a sad-path is detected:
+1. No derivation block → compile error:
+   `"frgn call returns Result<T, E> but function expects T. Add a derivation
+    block or handle the Result explicitly."`
+2. Derivation block present → validate exhaustiveness (Step 11.1)
+
+**Tests**:
+- `test_sad_path_detected`: `frgn f() -> Result<Int, Err>` in `defn g() -> Int`
+  → detection returns Some
+- `test_sad_path_not_detected_no_result`: `frgn f() -> Int` → no detection
+- `test_sad_path_not_detected_matching_result`: Function also returns
+  `Result<Int, Err>` → no detection (handled normally)
+- `test_sad_path_no_derivation_error`: Require derivation → compile error
+
+### Step 11.1 — Validate exhaustiveness of sad-path mapping
+
+**File**: `src/derive/sad_path.rs` (new)
+
+**What**: Verify that the derivation block covers ALL variants of the error
+type `E`.
+
+```rust
+/// Validate that the derivation block covers every variant of the error type.
+/// 2026-07-11: Phase 11.1
+fn validate_sad_path_exhaustiveness(
+    error_type: &Type,
+    examples: &[DerivationExample],
+    universe: &TypeUniverse,
+) -> Result<(), Vec<DeriveError>> {
+    // 1. Get all variants of the error type
+    let error_variants = get_enum_variants(error_type, universe)?;
+
+    // 2. Collect which variants are covered by the derivation
+    let covered: HashSet<&str> = examples.iter()
+        .filter_map(|ex| extract_error_variant(&ex.inputs[0]))
+        .collect();
+
+    // 3. Check each variant is covered
+    let mut uncovered = Vec::new();
+    for variant in &error_variants {
+        if !covered.contains(variant.as_str()) {
+            uncovered.push(variant.clone());
+        }
+    }
+
+    if uncovered.is_empty() {
+        Ok(())
+    } else {
+        Err(vec![DeriveError::UncoveredErrorVariants(uncovered)])
+    }
+}
+```
+
+**Helper — extract error variant from input expression**:
+
+```rust
+/// Given `FileError::NotFound`, extract `"NotFound"`.
+/// 2026-07-11: Phase 11.1
+fn extract_error_variant(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Path(path) if path.segments.len() == 2 => {
+            Some(path.segments[1].clone())
+        }
+        _ => None,
+    }
+}
+```
+
+**Tests**:
+- `test_exhaustiveness_all_covered`: Error has 3 variants, derivation covers
+  all 3 → Ok
+- `test_exhaustiveness_missing_variant`: 3 variants, derivation covers 2 →
+  error with uncovered variant name
+- `test_exhaustiveness_no_error_type`: Not an enum type → Ok (no variants)
+- `test_extract_error_variant`: `FileError::NotFound` → `"NotFound"`
+
+### Step 11.2 — Synthesize match statement from sad-path derivation
+
+**File**: `src/derive/sad_path.rs`
+
+**What**: Generate the `match` statement that replaces the raw `frgn` call
+result with the happy-path/sad-path branching.
+
+```rust
+/// Generate a match statement that wraps a frgn call result.
+/// 2026-07-11: Phase 11.2
+fn synthesize_match_statement(
+    frgn_call: &FrgnCall,
+    ok_type: &Type,
+    examples: &[DerivationExample],
+) -> Vec<Statement> {
+    let result_var = format!("%__result_{}", frgn_call.id);
+    let ok_var = format!("%__ok_{}", frgn_call.id);
+
+    // match <result_var> {
+    //     Ok(<ok_var>) => <ok_var>,
+    //     Err(FileError::NotFound) => Config::Default(),
+    //     Err(FileError::PermissionDenied) => Config::SecureDefault(),
+    // }
+    let mut cases = Vec::new();
+    cases.push(MatchCase {
+        pattern: MatchPattern::Constructor {
+            name: "Ok".to_string(),
+            bindings: vec![ok_var.clone()],
+        },
+        body: vec![Statement::Term(Box::new(Expr::Identifier(ok_var)))],
+    });
+
+    for example in examples {
+        let error_pattern = example.inputs[0].clone();
+        cases.push(MatchCase {
+            pattern: MatchPattern::Constructor {
+                name: "Err".to_string(),
+                bindings: vec![],
+            },
+            guard: Some(error_pattern), // Err(FileError::NotFound)
+            body: vec![Statement::Term(Box::new(example.output.clone()))],
+        });
+    }
+
+    vec![
+        Statement::Let {
+            name: result_var.clone(),
+            value: Box::new(frgn_call.clone().into_expr()),
+        },
+        Statement::Match {
+            expr: Box::new(Expr::Identifier(result_var)),
+            cases,
+        },
+    ]
+}
+```
+
+**Note**: This requires the `Statement::Match` and `MatchCase` /
+`MatchPattern` AST nodes to already exist (from Pattern Matching feature,
+which should be in the existing feature set). If pattern matching is not
+yet implemented, this step is deferred.
+
+**Alternative without pattern matching**: Emit an `if-else` chain:
+
+```rust
+fn synthesize_if_else_chain(...) -> Vec<Statement> {
+    // if (result is Err(NotFound)) { term Config::Default(); }
+    // else if (result is Err(PermissionDenied)) { term Config::SecureDefault(); }
+    // else { term ok_value; }
+}
+```
+
+**Tests**:
+- `test_sad_path_synthesize_match`: Generate match statement, verify all
+  error variants present
+- `test_sad_path_synthesize_if_else`: Without pattern matching, generate
+  if-else chain
+- `test_sad_path_integration`: Full pipeline: frgn + derivation →
+  synthesized body passes compile-time tests
+
+### Step 11.3 — SMT verify fallback values satisfy downstream contracts
+
+**File**: `src/derive/sad_path.rs`
+
+**What**: If the function has a postcondition `[result.url != ""]`, verify
+that ALL sad-path fallback values also satisfy the contract.
+
+```rust
+/// Verify that all sad-path fallback values satisfy the function's contract.
+/// 2026-07-11: Phase 11.3
+fn verify_fallbacks_satisfy_contract(
+    function_return_type: &Type,
+    examples: &[DerivationExample],
+    postcondition: &Expr,
+    interpreter: &mut Interpreter,
+) -> Result<(), Vec<DeriveError>> {
+    let mut violations = Vec::new();
+
+    for (i, example) in examples.iter().enumerate() {
+        // Evaluate the fallback value
+        let fallback_value = interpreter.eval_expr(&example.output, &InterpreterEnv::new())?;
+
+        // Check it against the postcondition
+        let env = InterpreterEnv::with_result(fallback_value);
+        let satisfied = interpreter.eval_expr(postcondition, &env)?;
+
+        if satisfied != Value::Bool(true) {
+            violations.push(DeriveError::FallbackViolatesContract {
+                example_index: i,
+                variant: /* extract variant name */,
+                value: fallback_value,
+            });
+        }
+    }
+
+    if violations.is_empty() { Ok(()) } else { Err(violations) }
+}
+```
+
+**Tests**:
+- `test_fallback_satisfies_contract`: `Config::Default()` has non-empty URL
+  → passes
+- `test_fallback_violates_contract`: `Config::Default()` has empty URL
+  → compile error
+- `test_fallback_contract_mixed`: Some pass, some fail → error with indexes
+
+---
+
+## Phase 12 — `.dbvl` Semantic Archive and Decoupled Backend Architecture
+
+**Depends on**: Phases 0–7 (especially Phase 7 for plugin system), Phase 5
+for `.dbvl` format support
+
+### Goal
+
+Decouple the compiler front-end from backends via a serialized archive
+in `.dbvl` format. The archive is just a `.dbvl` file with a specific tag
+convention — any tool that already reads `.dbvl` (GLUE system, interpreter's
+`dbvl_cache`, any backend) can consume it without changes. Backends become
+independent executables that consume this archive.
+
+### Step 12.0 — Define archive schema
+
+**What**: The archive file is a `.dbvl` file following the same format
+conventions as `glue.dbvl` and `bridge-exports.dbvl` — each line is a
+**tagged, comma-separated entry** with `{ }` brace blocks for complex
+structures (maps, lists). The first field is the tag, which dispatches the
+entry type to the consumer. No new file extension or parsing infrastructure
+is needed — any existing `.dbvl` reader can consume the archive.
+
+**File**: `docs/architecture/archive.md` (new)
+
+**Format** (inline, no `.dbvs` schema needed initially):
+
+```dbvl
+// Semantic archive — a .dbvl file with tagged entries.
+// Tag is first field: type, defn, txn, frgn.
+//
+// Conventions:
+//   - Lists of simple values:  `{item1 item2 item3}` (space-separated inside braces)
+//   - Pairs/maps:              `{key1:val1 key2:val2}` (space-separated inside braces)
+//   - Nested structures:       `{name1:{k:v} name2:{k:v}}`
+//   - Strings with commas:     `"quoted, string"`
+//
+// Type entries:
+type,String,{ptr:Ptr<UInt8> len:Int},{bytes:24 alignment:8 llvm:%String tbaa:String}
+type,Config,{url:String retries:Int},{bytes:24 alignment:8}
+
+// Definition entries (name, sig_params|pipe|separated, sig_ret, body, derivation,
+// metadata, contracts):
+defn,swap,x:UInt16,UInt16,"{term (x << 8) | (x >> 8)}",{ex:{inputs:0x1234 output:0x3412} ex:{inputs:0x00FF output:0xFF00}},{jira:SEC-42},{pre:true post:result==(x<<8)|(x>>8)}
+defn,add,x:Int|y:Int,Int,"{term x + y}",{ex:{inputs:2|2 output:4} ex:{inputs:3|5 output:8}},,{pre:true post:result==x+y}
+
+// Transaction entries:
+txn,withdraw,amount:Int,Void,"{balance = balance - amount; term}",,{pre:amount>0&&balance>=amount post:balance'==balance-amount}
+
+// Foreign function entries:
+frgn,read_config_file,path:String,Result<Config,FileError>,libruntime
+```
+
+**Key formatting rules**:
+
+1. **Body field**: Enclosed in `" "` double quotes when it contains commas
+   or braces that should not be parsed as structure delimiters. The body is
+   an opaque string — the backend parses it.
+2. **Derivation field**: A `{ }` brace block containing space-separated
+   example entries, each prefixed with `ex:` and containing `inputs:` and
+   `output:` inline.
+3. **Metadata/contracts**: Simple `{key:val key2:val2}` map format matching
+   the existing `dbvl_reader::parse_map()` parser in `src/glue/dbvl_reader.rs`.
+4. **Parameter lists**: Pipe-separated (`param:type|param2:type2`) to avoid
+   ambiguity with the comma field separator.
+5. **Inputs in examples**: Pipe-separated within the braces for the same
+   reason: `inputs:2|2`.
+
+**Existing infrastructure reused**: The `dbvl_reader.rs` parser already
+supports all of this — no new parsing code needed. The archive consumer
+splits by `,`, dispatches on `tag`, and uses `parse_map()` for structured
+fields.
+
+### Step 12.1 — Build `PackageWriter` and `PackageReader`
+
+**New files**: `src/archive/mod.rs`, `src/archive/writer.rs`,
+`src/archive/reader.rs`
+
+**What**: The writer serializes the resolved `Program` into a `.dbvl` archive
+file. The reader deserializes it for any backend.
+
+**PackageWriter**:
+
+```rust
+/// Writes a fully resolved Program to a .dbvl archive file.
+/// Emits tagged comma-separated lines matching dbvl_reader conventions.
+/// 2026-07-11: Phase 12.1
+pub struct ArchiveWriter {
+    output_path: PathBuf,
+}
+
+impl ArchiveWriter {
+    pub fn new(output_path: PathBuf) -> Self {
+        Self { output_path }
+    }
+
+    /// Serialize the program to a .dbvl archive.
+    pub fn write(&self, program: &Program) -> Result<(), ArchiveError> {
+        let mut out = BufWriter::new(File::create(&self.output_path)?);
+
+        // Optional: emit a comment header with version info
+        writeln!(out, "// archive generated by briefc {}", env!("CARGO_PKG_VERSION"))?;
+
+        // Write type entries: type,<name>,<slots_map>,<properties_map>
+        for (name, resolved_type) in &program.type_universe.types {
+            let slots = serialize_slots_map(resolved_type);
+            let props = serialize_properties_map(resolved_type);
+            writeln!(out, "type,{},{}", name, slots, props)?;
+        }
+
+        // Write definition entries:
+        // defn,<name>,<params|pipe|sep>,<ret>,<body>,<derivation>,<metadata>,<contracts>
+        for defn in &program.definitions {
+            let params: Vec<String> = defn.parameters.iter()
+                .map(|p| format!("{}:{}", p.name, p.ty))
+                .collect();
+            let sig_params = params.join("|");
+            let body = serialize_body(&defn.body);
+            let derivation = serialize_derivation(&defn.derivation);
+            let meta = serialize_map(&defn.metadata);
+            let contracts = serialize_contracts(&defn.contract);
+            writeln!(
+                out,
+                "defn,{},{},{},{},{},{},{}",
+                defn.name, sig_params, defn.output_type,
+                body, derivation, meta, contracts
+            )?;
+        }
+
+        // Write transaction entries (similar to defn)
+        for txn in &program.transactions {
+            let params: Vec<String> = txn.parameters.iter()
+                .map(|p| format!("{}:{}", p.name, p.ty))
+                .collect();
+            let sig_params = params.join("|");
+            let body = serialize_body(&txn.body);
+            let contracts = serialize_contracts(&txn.contract);
+            let derivation = serialize_derivation(&txn.derivation);
+            writeln!(
+                out,
+                "txn,{},{},{},{},{},{}",
+                txn.name, sig_params, "Void",
+                body, contracts, derivation
+            )?;
+        }
+
+        // Write frgn entries: frgn,<name>,<params|pipe|sep>,<ret>,<linking>
+        for frgn in &program.frgns {
+            let params: Vec<String> = frgn.params.iter()
+                .map(|(n, t)| format!("{}:{}", n, t))
+                .collect();
+            let sig_params = params.join("|");
+            writeln!(
+                out,
+                "frgn,{},{},{},{}",
+                frgn.name, sig_params, frgn.return_type, frgn.linking
+            )?;
+        }
+
+        Ok(())
+    }
+}
+```
+
+**PackageReader**:
+
+```rust
+/// Reads a .dbvl archive file into a consumable archive.
+/// Uses the existing dbvl_reader to parse lines.
+/// 2026-07-11: Phase 12.1
+pub struct ArchiveReader {
+    entries: Vec<ArchiveEntry>,
+}
+
+impl ArchiveReader {
+    /// Parse a .dbvl archive file, reading line-by-line (streaming-friendly).
+    pub fn read(path: &Path) -> Result<Self, ArchiveError> {
+        let source = fs::read_to_string(path)
+            .map_err(|e| ArchiveError::Io(path.to_path_buf(), e))?;
+
+        // Reuse the existing dbvl_reader to split lines by commas
+        // with proper { } brace and " " quote handling
+        let dbvl = dbvl_reader::parse_dbvl(&source);
+        let mut entries = Vec::new();
+
+        for dbvl_entry in &dbvl.entries {
+            let tokens = match dbvl_entry {
+                DbvlEntry::Raw(tokens) => tokens,
+                DbvlEntry::Validated { fields, .. } => fields,
+            };
+            if tokens.is_empty() {
+                continue;
+            }
+
+            let entry = ArchiveEntry::from_tokens(tokens)?;
+            entries.push(entry);
+        }
+
+        Ok(Self { entries })
+    }
+
+    /// Iterate over all entries of a specific type.
+    pub fn entries_of_type(&self, entry_type: &str) -> Vec<&ArchiveEntry> {
+        self.entries.iter()
+            .filter(|e| e.tag() == entry_type)
+            .collect()
+    }
+
+    /// Find a specific definition by name.
+    pub fn find_definition(&self, name: &str) -> Option<&ArchiveEntry> {
+        self.entries.iter().find(|e| e.matches_name(name))
+    }
+}
+
+/// Parse a single comma-split token list into an ArchiveEntry.
+/// Tag is tokens[0]: "type", "defn", "txn", "frgn".
+/// 2026-07-11: Phase 12.1
+impl ArchiveEntry {
+    pub fn from_tokens(tokens: &[String]) -> Result<Self, ArchiveError> {
+        let tag = tokens.first().ok_or(ArchiveError::EmptyLine)?;
+        match tag.as_str() {
+            "type" => {
+                let name = tokens.get(1).ok_or(ArchiveError::MissingField("name"))?;
+                Ok(ArchiveEntry::Type {
+                    name: name.clone(),
+                    slots_map: tokens.get(2).cloned().unwrap_or_default(),
+                    properties_map: tokens.get(3).cloned().unwrap_or_default(),
+                })
+            }
+            "defn" => {
+                let name = tokens.get(1).ok_or(ArchiveError::MissingField("name"))?;
+                Ok(ArchiveEntry::Defn {
+                    name: name.clone(),
+                    params: tokens.get(2).cloned().unwrap_or_default(),
+                    ret: tokens.get(3).cloned().unwrap_or_default(),
+                    body: tokens.get(4).cloned().unwrap_or_default(),
+                    derivation: tokens.get(5).cloned().unwrap_or_default(),
+                    metadata: tokens.get(6).cloned().unwrap_or_default(),
+                    contracts: tokens.get(7).cloned().unwrap_or_default(),
+                })
+            }
+            "txn" => { /* similar to defn */ }
+            "frgn" => { /* frgn,<name>,<params>,<ret>,<linking> */ }
+            _ => Err(ArchiveError::UnknownTag(tag.clone())),
+        }
+    }
+}
+```
+
+**Nesting check**: Both Writer and Reader iterate with simple loops —
+depth 1.
+
+**Tests**:
+- `test_archive_roundtrip`: Write program → read back → compare key fields
+  (name, param count, return type)
+- `test_archive_comments_skipped`: Lines starting with `//` are ignored
+  (reuses dbvl_reader's existing behavior)
+- `test_archive_tags_dispatched_correctly`: Each tag routes to the correct
+  ArchiveEntry variant
+- `test_archive_multiple_types`: Archive with types, defns, txns, frgns —
+  all present after read
+- `test_archive_quoted_body_field`: Body with `" "` quotes is parsed as
+  single token despite containing commas
+- `test_archive_missing_field`: Parse error on invalid entry
+
+### Step 12.2 — Integrate archive emission into compile pipeline
+
+**File**: `src/compile.rs` or `src/main.rs`
+
+**What**: Add `--archive` flag to `brief compile` to produce the `.dbvl`
+archive file instead of (or in addition to) final binary output.
+
+```rust
+/// CLI flag: --archive <path>
+/// 2026-07-11: Phase 12.2
+if let Some(archive_path) = matches.get_one::<String>("archive") {
+    let writer = ArchiveWriter::new(PathBuf::from(archive_path));
+    writer.write(&program)?;
+}
+```
+
+**Tests**:
+- `test_emit_archive_flag`: `brief compile main.bv --archive out.dbvl`
+  → file exists, valid
+- `test_emit_archive_roundtrip_compile`: Emit archive → read back → compile
+  again → same binary
+
+### Step 12.3 — Decoupled backend execution model
+
+**What**: Backends become independent executables that receive a `.dbvl`
+archive file path and produce output. The compiler frontend (Phase 12.2)
+produces the archive; backends consume it. Because the archive IS a `.dbvl`
+file, any language with a comma-split + `{ }` brace parser can consume it.
+
+**CLI model**:
+
+```bash
+# 1. Frontend: Parse, run plugins, resolve derivations, emit archive
+brief compile main.bv --archive build/main.dbvl
+
+# 2. CPU backend (independent binary)
+brief-llvm build/main.dbvl --output a.out
+
+# 3. Hardware backend (independent binary)
+brief-circt build/main.dbvl --output design.v
+
+# 4. Documentation generator (independent script)
+brief-doc build/main.dbvl --output docs/
+```
+
+**Backend interface** (backends read archive via `ArchiveReader` — can be
+any language, not just Rust):
+
+```rust
+/// Trait for backends that consume .dbvl semantic archives.
+/// Backends dispatch on the tag field of each entry:
+///   "type"  → register type layout
+///   "defn"  → compile function
+///   "txn"   → compile transaction
+///   "frgn"  → declare external symbol
+/// 2026-07-11: Phase 12.3
+pub trait ArchiveBackend {
+    /// The name of this backend (e.g., "llvm", "circt").
+    fn name(&self) -> &str;
+
+    /// Process the archive and produce output.
+    fn process(&self, archive: &ArchiveReader, output_path: &Path) -> Result<(), BackendError>;
+}
+```
+
+**Migration path for existing backends**:
+
+1. Add `--archive` to `brief compile` (Step 12.2)
+2. Create `brief-llvm` wrapper binary that reads the archive and calls the
+   existing LLVM codegen
+3. Keep the old in-process path for backwards compatibility
+4. After all users migrate, remove in-process linking — `brief compile`
+   only produces the archive, backends handle codegen
+
+**Dead backends**: `verilog.rs`, `vhdl.rs`, `c.rs`, `rust.rs`, `cobol.rs`,
+`x86_64.rs`, `aarch64.rs`, `wasm.rs`, `tcl_generator.rs` — not migrated.
+They continue to exist with their current (dead) status.
+
+**Tests**:
+- `test_backend_process_archive`: Create an archive, run `brief-llvm` on it,
+  verify output binary
+- `test_backend_unknown_entry_ignored`: Backend ignores entries it doesn't
+  understand (forward compat)
+- `test_backend_missing_type_error`: Backend reports if a required type is
+  missing
+
+---
+
+## Phase 13 — CLI: `brief derive` Commands
+
+**Depends on**: Phases 8, 9, 10, 11, 12
+
+### Goal
+
+Implement the `brief derive` subcommand with three modes (file, `--all`,
+directory), all using the surgical write-back from Phase 9.6.
+
+### Step 13.0 — Register `derive` subcommand in CLI
+
+**File**: `src/main.rs`
+
+**What**: Add the `derive` subcommand alongside existing commands (`check`,
+`compile`, `build`, etc.).
+
+```rust
+// Phase 13.0: Add derive subcommand
+. subcommand(
+    Command::new("derive")
+        .about("Synthesize function bodies from derivation blocks")
+        .arg(Arg::new("input")
+            .help("Source file or directory")
+            .required(true))
+        .arg(Arg::new("all")
+            .long("all")
+            .short('a')
+            .help("Derive all transitive imports recursively"))
+        .arg(Arg::new("depth")
+            .long("depth")
+            .short('d')
+            .help("Maximum search depth for enumerative synthesis")
+            .default_value("5"))
+)
+```
+
+**Handler**:
+
+```rust
+// In main() dispatch:
+Some(("derive", sub_m)) => {
+    let input = sub_m.get_one::<String>("input").unwrap();
+    let all = sub_m.get_flag("all");
+    let depth: u8 = sub_m.get_one::<String>("depth")
+        .unwrap()
+        .parse()
+        .unwrap_or(5);
+
+    let path = Path::new(input);
+    if path.is_dir() {
+        derive::cli::derive_directory(path)?;
+    } else if all {
+        derive::cli::derive_all(path)?;
+    } else {
+        derive::cli::derive_file(path, depth)?;
+    }
+}
+```
+
+**Tests**:
+- `test_cli_derive_file_exists`: Run `brief derive test.bv` → exit 0
+- `test_cli_derive_all_flag`: Run `brief derive --all test.bv` → processes
+  imports
+- `test_cli_derive_directory`: Run `brief derive ./src` → processes all
+  `.bv` files
+- `test_cli_derive_nonexistent_file`: Run on missing file → exit 1 with
+  error
+
+### Step 13.1 — Single-file derive mode
+
+**File**: `src/derive/cli.rs`
+
+**What**: `brief derive <file>` — process a single file.
+
+```rust
+/// Derive all body-less definitions in a single file.
+/// 2026-07-11: Phase 13.1
+pub fn derive_file(path: &Path, depth: u8) -> Result<(), DeriveError> {
+    // 1. Parse the file, recording byte offsets for each definition
+    let (program, source_bytes) = parse_file_with_offsets(path)?;
+
+    // 2. For each definition with derivation and no body, synthesize
+    let mut modifications = Vec::new();
+    for defn in &program.definitions {
+        if !engine::should_derive(defn) {
+            continue;
+        }
+
+        let synthesized = engine::synthesize_body(
+            defn,
+            &program.type_universe,
+            &plugin_host,
+            depth,
+        )?;
+
+        let body_str = format_synthesized_body(&synthesized);
+        modifications.push((defn.derivation.as_ref().unwrap(), body_str));
+    }
+
+    // 3. Apply all modifications (write-back)
+    // Sort by descending offset to avoid offset invalidation
+    modifications.sort_by(|a, b| b.0.span.end.cmp(&a.0.span.end));
+
+    let mut source = source_bytes.clone();
+    for (derivation, body_str) in &modifications {
+        let insert_at = derivation.span.end as usize;
+        let mut new_source = Vec::with_capacity(source.len() + body_str.len());
+        new_source.extend_from_slice(&source[..insert_at]);
+        new_source.extend_from_slice(body_str.as_bytes());
+        new_source.extend_from_slice(&source[insert_at..]);
+        source = new_source;
+    }
+
+    // 4. Write the modified source back
+    fs::write(path, &source).map_err(|e| DeriveError::Io {
+        path: path.to_path_buf(),
+        error: e,
+    })?;
+
+    // 5. Verify: re-parse and run compile-time tests
+    let (reparsed, _) = parse_file_with_offsets(path)?;
+    for defn in &reparsed.definitions {
+        execute_derivation_tests(defn, &reparsed.type_universe, &mut interpreter)?;
+    }
+
+    Ok(())
+}
+```
+
+**Nesting check**: The function has sequential phases: parse → collect →
+sort → write → verify. Each phase is a loop with guard clauses — depth 2
+max.
+
+**Tests**:
+- `test_derive_file_single_definition`: One definition with derivation →
+  body filled
+- `test_derive_file_multiple_definitions`: Multiple definitions → all filled
+- `test_derive_file_skip_bodied`: Existing body → no modification
+- `test_derive_file_skip_no_derive`: `#no_derive` → skipped
+- `test_derive_file_verify_after`: Post-verify passes → file unchanged
+- `test_derive_file_verify_fails`: Synthesized body fails verification →
+  error, file unchanged
+
+### Step 13.2 — Derive with `--all` (recursive imports)
+
+**File**: `src/derive/cli.rs`
+
+```rust
+/// Derive all transitive imports in dependency order.
+/// 2026-07-11: Phase 13.2
+pub fn derive_all(source_path: &Path, depth: u8) -> Result<(), DeriveError> {
+    // 1. Build import graph
+    let import_order = build_import_dag(source_path)?;
+
+    // 2. Process in topological order (leaf modules first)
+    for file_path in &import_order {
+        derive_file(file_path, depth)?;
+    }
+
+    Ok(())
+}
+```
+
+**Topological sort**: Reuse the existing `ImportResolver` (from Phase 1A /
+existing codebase).
+
+**Tests**:
+- `test_derive_all_dag_order`: A imports B, B has derivation → B processed
+  before A
+- `test_derive_all_circular`: Circular import → error
+- `test_derive_all_no_imports`: Single file → same as derive_file
+
+### Step 13.3 — Derive directory mode
+
+**File**: `src/derive/cli.rs`
+
+```rust
+/// Derive all .bv files in a directory (non-recursive by default).
+/// 2026-07-11: Phase 13.3
+pub fn derive_directory(dir_path: &Path, depth: u8, recursive: bool) -> Result<(), DeriveError> {
+    let walk_fn = if recursive {
+        walkdir::WalkDir::new(dir_path)
+    } else {
+        walkdir::WalkDir::new(dir_path).max_depth(1)
+    };
+
+    let files: Vec<PathBuf> = walk_fn
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| e.path().extension().map(|ext| ext == "bv").unwrap_or(false))
+        .map(|e| e.path().to_path_buf())
+        .collect();
+
+    // Process files in parallel
+    let results: Vec<Result<(), DeriveError>> = files.par_iter()
+        .map(|path| derive_file(path, depth))
+        .collect();
+
+    // Report errors
+    let errors: Vec<DeriveError> = results.iter()
+        .filter_map(|r| r.as_ref().err().cloned())
+        .collect();
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(DeriveError::Multiple(errors))
+    }
+}
+```
+
+**Tests**:
+- `test_derive_directory_single_file`: Dir with one `.bv`
+- `test_derive_directory_multi_file`: Multiple `.bv` files
+- `test_derive_directory_nested`: Subdir with `.bv` file (recursive vs
+  non-recursive)
+- `test_derive_directory_non_bv`: `.txt`, `.rs` files → ignored
+
+---
+
+## Phase 14 — Derivation in the WASM Plugin Architecture
+
+**Depends on**: Phase 7 (plugin system), Phase 9 (synthesis via plugin)
+
+### Goal
+
+Make the `brief derive` synthesis engine accessible as a WASM plugin, so
+that the SMT solver (and eventually user-defined synthesis strategies) can
+run as sandboxed plugins.
+
+### Step 14.0 — Define the synthesis plugin WIT interface
+
+**File**: `wit/synthesis.wit` (new)
+
+```wit
+// Synthesis plugin interface for Brief.
+// 2026-07-11: Phase 14.0
+
+/// A single derivation example.
+record derivation-example {
+    /// Input expressions as S-expressions.
+    inputs: list<string>,
+    /// Expected output as S-expression.
+    output: string,
+}
+
+/// Result of a synthesis attempt.
+variant synthesis-result {
+    /// Synthesized body as a list of S-expressions.
+    program(list<string>),
+    /// No program exists (unsat).
+    unsat,
+    /// Solver could not decide.
+    unknown(string),
+}
+
+/// The synthesis plugin.
+resource synthesizer {
+    /// Synthesize a function body from examples.
+    /// Params: name, param-types, return-type, examples, depth-limit.
+    synthesize: func(
+        name: string,
+        param-types: list<string>,
+        return-type: string,
+        examples: list<derivation-example>,
+        depth-limit: u8,
+    ) -> synthesis-result;
+
+    /// Check if a program satisfies a set of examples.
+    verify: func(
+        body: list<string>,
+        param-types: list<string>,
+        return-type: string,
+        examples: list<derivation-example>,
+    ) -> bool;
+}
+```
+
+**Tests**:
+- `test_wit_interface_valid`: WIT file parses without error
+- `test_wit_synthesize_call`: Call synthesizer plugin, verify result
+
+### Step 14.1 — Add derive hooks to plugin lifecycle
+
+**File**: `src/plugin/hooks.rs`
+
+**What**: Add derivation hooks to the plugin lifecycle so synthesis
+plugins are called during `brief derive`.
+
+```rust
+/// Plugin hooks for derivation.
+/// 2026-07-11: Phase 14.1
+pub enum DeriveHook {
+    /// Called to synthesize a body from examples.
+    Synthesize {
+        defn: Definition,
+        examples: Vec<DerivationExample>,
+    },
+    /// Called to verify a synthesized body against examples.
+    Verify {
+        body: Vec<Statement>,
+        examples: Vec<DerivationExample>,
+    },
+}
+```
+
+**Tests**:
+- `test_derive_hook_synthesize`: Plugin receives Synthesize hook, returns
+  program
+- `test_derive_hook_verify`: Plugin receives Verify hook, returns true/false
+
+---
+
+## Testing Strategy Summary
+
+| Phase | Focus | Test count delta |
+|-------|-------|-----------------|
+| 8 | Lexer + parser + AST for `:=` | ~+25 (lexing, parsing, type-check, compile-time assertions) |
+| 9 | Synthesis engine + SMT bridge | ~+35 (enumerative search, SMT, `#no_derive`, write-back, DAG, directory) |
+| 10 | Contract-guided synthesis | ~+15 (SyGuS, LLVM metadata emission) |
+| 11 | Sad-path derivation | ~+15 (exhaustiveness, match synthesis, fallback verification) |
+| 12 | `.dbvl` archive + decoupled backends | ~+25 (roundtrip, streaming, backend isolation, writer/reader) |
+| 13 | CLI + derive commands | ~+15 (derive modes, write-back, rollback, parallel) |
+| 14 | WASM plugin integration | ~+5 (WIT interface, plugin hooks) |
+
+---
+
+## Documentation Updates
+
+| Doc | Phase | What |
+|-----|-------|------|
+| `docs/architecture/features/derivation.md` | 8 | Derivation block syntax, lifecycle, `:=` semantics, drafting vs resolved |
+| `docs/architecture/features/synthesis.md` | 9 | Synthesis engine, DSL grammar, cost model, SMT bridge, enumerative fallback |
+| `docs/architecture/features/sad-path.md` | 11 | FFI error recovery via derivation, exhaustiveness, contract verification |
+| `docs/architecture/archive.md` | 12 | Archive schema, tagged `.dbvl` format, backend decoupling, ArchiveWriter/Reader |
+| `docs/architecture/features/contracts-synthesis.md` | 10 | Contract-guided synthesis, SyGuS, LLVM metadata emission |
+| `docs/architecture/features/derive-cli.md` | 13 | `brief derive` CLI commands, modes, surgical write-back |
+| `docs/architecture/features/derive-plugins.md` | 14 | WASM synthesis plugin WIT interface and hooks |
+| `docs/plans/2026-07-11-derivation-synthesis-comprehensive.md` | All | This document |
+
+---
+
+## Risk Register
+
+| Risk | Phase | Mitigation |
+|------|-------|------------|
+| SMT solver dependency unavailable | 9 | Fallback enumerative search (depth-bounded, works offline) |
+| Synthesis produces wrong program from limited examples | 9 | Require ≥2 examples; user can always add more or write body manually; contracts add generalization guarantee |
+| Source write-back corrupts formatting | 9, 13 | Byte-offset surgical insertion (not AST pretty-print); re-parse verification after write; rollback on failure |
+| Sad-path derivation not exhaustive | 11 | Compile-time error listing uncovered variants |
+| Contract synthesis too slow | 10 | Timeout + fallback to example-only synthesis or user writes body manually |
+| Archive format drifts from AST | 12 | Roundtrip tests in CI; backwards-compat reader; single format (`.dbvl`) means no extension drift |
+| Off-by-one errors in byte-offset insertion | 9, 13 | Test with files with BOM, mixed line endings, no trailing newline |
+| Parallel directory derives conflict | 13 | File-level locking; or sequential fallback when lock unavailable |
+
+---
+
+## Summary of New/Modified AST Fields
+
+| AST node | New/Changed field | Source | Phase |
+|----------|-------------------|--------|-------|
+| `Definition` | `derivation: Option<DerivationBlock>` | `:=` block after body | 8.1 |
+| `Transaction` | `derivation: Option<DerivationBlock>` | `:=` block after body | 8.1 |
+| `DerivationBlock` | New struct | `:= { examples }` | 8.1 |
+| `DerivationExample` | New struct | `inputs -> output` | 8.1 |
+| `Token::ColonEq` | New token variant | `:=` | 8.0 |
+
+---
+
+## Flat Control Flow Check
+
+Every function added or modified in this plan must be reviewed for nesting
+depth. The standard pattern is:
+
+```rust
+// ACCEPTABLE (2 levels):
+fn process(x: Option<Value>) -> Option<i64> {
+    let val = x?;               // level 1: guard
+    let result = val.as_i64()?; // level 1: guard
+    if result <= 0 {            // level 1: guard
+        return None;
+    }
+    Some(result)                // level 1: return
+}
+
+// ACCEPTABLE (2 levels):
+fn process_opt(x: Option<Value>, y: Option<Value>) -> Option<i64> {
+    let x = x?;
+    let y = y?;
+    helper(x, y)
+}
+
+fn helper(a: Value, b: Value) -> Option<i64> {
+    let a = a.as_i64()?;
+    let b = b.as_i64()?;
+    Some(a + b)
+}
+
+// FORBIDDEN (3 levels):
+fn process(x: Option<Value>) -> Option<i64> {
+    if let Some(val) = x {           // level 1
+        if let Some(result) = val.as_i64() { // level 2
+            if result > 0 {          // level 3 ← FORBIDDEN
+                return Some(result);
+            }
+        }
+    }
+    None
+}
+```
+
+---
+
+## Committing Strategy
+
+1. Commit after EACH step within each phase
+2. `cargo test --lib` before every commit
+3. `cargo build` must produce no warnings
+4. `bash benchmarks/build_and_bench.sh --correctness` before every phase
+   boundary commit
+5. Commit messages: `"YYYY-MM-DD: Phase N.M — <description>"`
+6. Do not ask "shall I commit?" — the instructions from AGENTS.md say
+   auto-commit
+
+---
+
+## Immediate Next Action
+
+Phase 8, Step 8.0: Add `ColonEq` (`:=`) to the lexer token enum and
+multi-character token matching in `src/lexer.rs`.
+Phase 8, Step 8.1: Add `DerivationBlock` and `DerivationExample` structs
+to `src/ast.rs`.
+Phase 8, Step 8.2: Parse derivation blocks in `parse_definition()` in
+`src/parser.rs`.

@@ -225,13 +225,13 @@ impl LlvmBackend {
             Expr::Identifier(name) => {
                 self.is_float_field(name)
                     || local_floats.contains(name.as_str())
-                    || self.ctx.constants.get(name.as_str()).map_or(false, |(t, _)| *t == Type::Custom("Float".to_string()))
+                    || self.ctx.constants.get(name.as_str()).map_or(false, |(t, _)| *t == Type::float())
             }
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
                 self.is_float_expr_pre_cg(l, local_floats) || self.is_float_expr_pre_cg(r, local_floats)
             }
             Expr::Neg(e) => self.is_float_expr_pre_cg(e, local_floats),
-            Expr::Cast(_, ty) => *ty == Type::Custom("Float".to_string()),
+            Expr::Cast(_, ty) => *ty == Type::float(),
             Expr::Block(_, last) => self.is_float_expr_pre_cg(last, local_floats),
             _ => false,
         }
@@ -263,7 +263,7 @@ impl LlvmBackend {
         for stmt in body {
             match stmt {
                 Statement::Let { name, ty, expr, .. } => {
-                    let is_float = ty.as_ref() == Some(&Type::Custom("Float".to_string()))
+                    let is_float = ty.as_ref() == Some(&Type::float())
                         || expr.as_ref().map_or(false, |e| self.is_float_expr_pre_cg(e, local_floats));
                     if is_float {
                         local_floats.insert(name.clone());
@@ -344,7 +344,7 @@ impl LlvmBackend {
             }
 
             for f in reads.iter() {
-                if self.ctx.constants.get(f.as_str()).map_or(false, |(t, _)| *t == Type::Custom("Float".to_string())) {
+                if self.ctx.constants.get(f.as_str()).map_or(false, |(t, _)| *t == Type::float()) {
                     accessed_constants.insert(f.clone());
                 }
             }
@@ -478,7 +478,7 @@ impl LlvmBackend {
         let mut local_floats = std::collections::HashSet::new();
         for stmt in body {
             if let Statement::Let { name, ty, expr, .. } = stmt {
-                let is_float = ty.as_ref() == Some(&Type::Custom("Float".to_string()))
+                let is_float = ty.as_ref() == Some(&Type::float())
                     || expr.as_ref().map_or(false, |e| self.is_float_expr_pre_cg(e, &local_floats));
                 if is_float {
                     local_floats.insert(name.clone());
@@ -524,7 +524,7 @@ mod tests {
     fn let_stmt(name: &str, expr: Expr) -> Statement {
         Let {
             name: name.to_string(),
-            ty: Some(Type::Custom("Float".to_string())),
+            ty: Some(Type::float()),
             expr: Some(expr),
             address: None,
             address_expr: None,

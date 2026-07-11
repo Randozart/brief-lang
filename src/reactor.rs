@@ -631,7 +631,7 @@ mod tests {
     fn test_build_from_program_with_triggers() {
         let trg = TopLevel::Trigger(TriggerDeclaration {
             name: "keypress".to_string(),
-            ty: Type::Custom("String".to_string()),
+            ty: Type::string(),
             address: crate::ast::LinkRef::Explicit(0),
             bit_range: None,
             stages: vec![],

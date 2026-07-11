@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn test_box_bool_to_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::box_to_i64(&mut b, "%b", &BriefType::Custom("Bool".to_string()), None);
+        let r = TypeConverter::box_to_i64(&mut b, "%b", &BriefType::bool_(), None);
         let ir = b.finish(2);
         assert!(ir.contains(&format!("{} = zext i1 %b to i64", r)));
     }
@@ -685,7 +685,7 @@ mod tests {
     #[test]
     fn test_box_float_to_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::box_to_i64(&mut b, "%f", &BriefType::Custom("Float".to_string()), None);
+        let r = TypeConverter::box_to_i64(&mut b, "%f", &BriefType::float(), None);
         let ir = b.finish(2);
         // Float boxing: bitcast float→i32, then zext i32→i64
         assert!(ir.contains("bitcast float %f to i32"));
@@ -695,7 +695,7 @@ mod tests {
     #[test]
     fn test_unbox_bool_from_i64() {
         let mut b = LLVMBuilder::new();
-        let r = TypeConverter::unbox_from_i64(&mut b, "%v", &BriefType::Custom("Bool".to_string()), None);
+        let r = TypeConverter::unbox_from_i64(&mut b, "%v", &BriefType::bool_(), None);
         let ir = b.finish(2);
         assert!(ir.contains(&format!("{} = trunc i64 %v to i1", r)));
     }

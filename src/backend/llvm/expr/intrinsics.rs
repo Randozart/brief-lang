@@ -23,12 +23,12 @@ pub fn emit_intrinsic_call(
         let raw = backend.emit_expr(out, arg, indent);
         let fl = backend.ensure_float_reg(out, indent, &raw);
         // 2026-06-29: Dispatch to f64 variant for Float64 args, f32 for Float args
-        if raw.ty == Type::Custom("Float64".to_string()) {
+        if raw.ty == Type::float64() {
             writeln!(out, "{}{} = call double @llvm.{}.f64(double {})", indent, v, llvm_name, fl).ok();
-            TypedRegister { name: v.to_string(), ty: Type::Custom("Float64".to_string()) }
+            TypedRegister { name: v.to_string(), ty: Type::float64() }
         } else {
             writeln!(out, "{}{} = call float @llvm.{}.f32(float {})", indent, v, llvm_name, fl).ok();
-            TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
+            TypedRegister { name: v.to_string(), ty: Type::float() }
         }
     };
     match intrinsic {
@@ -38,12 +38,12 @@ pub fn emit_intrinsic_call(
         Intrinsic::Pow => {
             let a = backend.emit_expr(out, &args[0], indent);
             let b = backend.emit_expr(out, &args[1], indent);
-            if a.ty == Type::Custom("Float64".to_string()) {
+            if a.ty == Type::float64() {
                 writeln!(out, "{}{} = call double @pow(double {}, double {})", indent, v, a.name, b.name).ok();
-                return TypedRegister { name: v.to_string(), ty: Type::Custom("Float64".to_string()) };
+                return TypedRegister { name: v.to_string(), ty: Type::float64() };
             }
             writeln!(out, "{}{} = call double @pow(double {}, double {})", indent, v, a.name, b.name).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::float() };
         }
         Intrinsic::Fabs => { return emit_intrinsic_float_unary(backend, out, indent, &v, "fabs", &args[0]); }
         Intrinsic::Ceil => { return emit_intrinsic_float_unary(backend, out, indent, &v, "ceil", &args[0]); }
@@ -53,20 +53,20 @@ pub fn emit_intrinsic_call(
                 let a_raw = backend.emit_expr(out, &args[0], indent);
                 let a_f = backend.ensure_float_reg(out, indent, &a_raw);
                 // 2026-06-29: Float64 → __float64_to_str, Float → __float_to_str
-                if a_raw.ty == Type::Custom("Float64".to_string()) {
+                if a_raw.ty == Type::float64() {
                     writeln!(out, "{}{} = call i64 @__float64_to_str(double {})", indent, v, a_f).ok();
                 } else {
                     writeln!(out, "{}{} = call i64 @__float_to_str(float {})", indent, v, a_f).ok();
                 }
             }
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("String".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::string() };
         }
         Intrinsic::ToStr => {
             if !args.is_empty() {
                 let a_raw = backend.emit_expr(out, &args[0], indent);
                 writeln!(out, "{}{} = call i64 @__to_str(i64 {})", indent, v, a_raw.name).ok();
             }
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("String".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::string() };
         }
         Intrinsic::Ctpop => {
             let raw = backend.emit_expr(out, &args[0], indent);
@@ -287,7 +287,7 @@ pub fn emit_intrinsic_call(
             let wf_ret = format!("%wfr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = call i64 @__write_file__(i64 {}, i64 {})", indent, wf_ret, path_boxed, data_boxed).ok();
             writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, v, wf_ret).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::bool_() };
         }
         Intrinsic::Sleep => {
             // Sleep takes milliseconds, converts to seconds + nanoseconds for nanosleep
@@ -322,7 +322,7 @@ pub fn emit_intrinsic_call(
             let raw = format!("%trm{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = call i64 @__tty_raw_mode__(i64 {})", indent, raw, arg64).ok();
             writeln!(out, "{}{} = trunc i64 {} to i1", indent, v, raw).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::bool_() };
         }
         Intrinsic::TtySize => {
             let ws = format!("%ttywsp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -387,7 +387,7 @@ pub fn emit_intrinsic_call(
             let phi_r = format!("%trkp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = phi i32 [ -1, %{} ], [ {}, %{} ]", indent, phi_r, err_l, tmp, ok_l).ok();
             writeln!(out, "{}{} = zext i32 {} to i64", indent, v, phi_r).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Char".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::char_() };
         }
         Intrinsic::IoCtl => {
             let fd = backend.emit_expr(out, &args[0], indent);
@@ -408,7 +408,7 @@ pub fn emit_intrinsic_call(
             writeln!(out, "{}{} = trunc i64 {} to i32", indent, fdt, fd.name).ok();
             writeln!(out, "{}{} = call i32 @isatty(i32 {})", indent, rv, fdt).ok();
             writeln!(out, "{}{} = trunc i32 {} to i1", indent, v, rv).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::bool_() };
         }
         // ===== Phase A: Process (intrinsics.md D5) =====
         Intrinsic::SpawnWithOutput => {
@@ -417,7 +417,7 @@ pub fn emit_intrinsic_call(
             let raw = format!("%sp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             // brief_spawn_with_output takes i64 (Brief string ptr), returns i64
             writeln!(out, "{}{} = call i64 @__spawn_with_output__(i64 {})", indent, raw, boxed).ok();
-            return TypedRegister { name: raw, ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: raw, ty: Type::int() };
         }
         Intrinsic::Spawn => {
             let cmd = backend.emit_expr(out, &args[0], indent);
@@ -1585,7 +1585,7 @@ pub fn emit_intrinsic_call(
             let fmt = format!("%pff{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             let pf = format!("%ppf{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             // 2026-06-29: Float64 is already double, skip fpext
-            if d.ty == Type::Custom("Float64".to_string()) {
+            if d.ty == Type::float64() {
                 writeln!(out, "{}{} = load volatile ptr, ptr @stdout", indent, so).ok();
                 writeln!(out, "{}{} = getelementptr [6 x i8], [6 x i8]* @FMT_FLOAT, i64 0, i64 0", indent, fmt).ok();
                 writeln!(out, "{}{} = call i32 (ptr, ptr, ...) @fprintf(ptr {}, ptr {}, double {})",
@@ -1885,15 +1885,15 @@ pub fn emit_intrinsic_call(
             // Extract pointee type from Ptr<T> or LayoutPtr
             let t = match &addr.ty {
                 Type::LayoutPtr(lc) => match lc.bytes {
-                    1 => Type::Custom("Int8".to_string()),
-                    2 => Type::Custom("Int16".to_string()),
-                    4 => Type::Custom("Int32".to_string()),
-                    _ => Type::Custom("Int".to_string()),
+                    1 => Type::int8(),
+                    2 => Type::int16(),
+                    4 => Type::int32(),
+                    _ => Type::int(),
                 },
                 Type::Applied(name, inners) if name == "Ptr" => {
-                    inners.first().cloned().unwrap_or(Type::Custom("Int".to_string()))
+                    inners.first().cloned().unwrap_or(Type::int())
                 }
-                _ => Type::Custom("Int".to_string()),
+                _ => Type::int(),
             };
             let llvm_t = backend.llvm_type(&t).to_string();
             // 2026-07-04: !noalias !{!99} tells LLVM this volatile load through
@@ -1906,11 +1906,11 @@ pub fn emit_intrinsic_call(
             let raw = format!("%vlraw{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = load volatile {}, ptr {}{}", indent, raw, llvm_t, ptr, noalias).ok();
             // Box result to i64 if needed
-            if t == Type::Custom("Bool".to_string()) {
+            if t == Type::bool_() {
                 writeln!(out, "{}{} = zext {} {} to i64", indent, v, llvm_t, raw).ok();
-            } else if t == Type::Custom("Char".to_string()) {
+            } else if t == Type::char_() {
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, raw).ok();
-            } else if t == Type::Custom("Float".to_string()) {
+            } else if t == Type::float() {
                 let bi = format!("%vlbi{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, raw).ok();
                 writeln!(out, "{}{} = zext i32 {} to i64", indent, v, bi).ok();
@@ -1933,27 +1933,27 @@ pub fn emit_intrinsic_call(
             // Extract pointee type from Ptr<T> or LayoutPtr
             let t = match &addr.ty {
                 Type::LayoutPtr(lc) => match lc.bytes {
-                    1 => Type::Custom("Int8".to_string()),
-                    2 => Type::Custom("Int16".to_string()),
-                    4 => Type::Custom("Int32".to_string()),
-                    _ => Type::Custom("Int".to_string()),
+                    1 => Type::int8(),
+                    2 => Type::int16(),
+                    4 => Type::int32(),
+                    _ => Type::int(),
                 },
                 Type::Applied(name, inners) if name == "Ptr" => {
-                    inners.first().cloned().unwrap_or(Type::Custom("Int".to_string()))
+                    inners.first().cloned().unwrap_or(Type::int())
                 }
-                _ => Type::Custom("Int".to_string()),
+                _ => Type::int(),
             };
             let llvm_t = backend.llvm_type(&t).to_string();
             // Unbox val from i64 to native type T
-            let native_val = if t == Type::Custom("Bool".to_string()) {
+            let native_val = if t == Type::bool_() {
                 let tr = format!("%vstr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = trunc i64 {} to {}", indent, tr, val.name, llvm_t).ok();
                 tr
-            } else if t == Type::Custom("Char".to_string()) {
+            } else if t == Type::char_() {
                 let tr = format!("%vstr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val.name).ok();
                 tr
-            } else if t == Type::Custom("Float".to_string()) {
+            } else if t == Type::float() {
                 let tr = format!("%vstr{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 let bi = format!("%vsbi{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
                 writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val.name).ok();
@@ -1969,7 +1969,7 @@ pub fn emit_intrinsic_call(
             let noalias = format!(", !noalias !{{!{}}}", backend.ctx.state_alias_scope_md);
             writeln!(out, "{}store volatile {} {}, ptr {}{}", indent, llvm_t, native_val, ptr, noalias).ok();
             writeln!(out, "{}{} = add i64 0, 1 ; volatile_store success", indent, v).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::bool_() };
         }
         // ── Ring Buffer intrinsics (2026-07-01) ──────────────────────
         //
@@ -1992,7 +1992,7 @@ pub fn emit_intrinsic_call(
         //
         Intrinsic::RingPush => {
             let handle = backend.emit_expr(out, &args[0], indent);
-            let value = if args.len() > 1 { backend.emit_expr(out, &args[1], indent) } else { return TypedRegister { name: handle.name.clone(), ty: Type::Custom("Int".to_string()) }; };
+            let value = if args.len() > 1 { backend.emit_expr(out, &args[1], indent) } else { return TypedRegister { name: handle.name.clone(), ty: Type::int() }; };
             let h_ptr = format!("%rhp{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, h_ptr, handle.name).ok();
             let tail_gep = format!("%rtg{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
@@ -2017,7 +2017,7 @@ pub fn emit_intrinsic_call(
             let new_tail = format!("%rnt{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = and i64 {}, {}", indent, new_tail, tail_next, mask).ok();
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_tail, tail_gep).ok();
-            return TypedRegister { name: handle.name.clone(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: handle.name.clone(), ty: Type::int() };
         }
         Intrinsic::RingPop => {
             // Unbox handle → load head, tail, mask, buf → load value at head
@@ -2060,7 +2060,7 @@ pub fn emit_intrinsic_call(
             let new_head = format!("%rnh{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, new_head, empty, head, wrapped).ok();
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, new_head, head_gep).ok();
-            return TypedRegister { name: result, ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: result, ty: Type::int() };
         }
         // 2026-07-03: Spatial memory intrinsics
         Intrinsic::Memcpy => {
@@ -2075,7 +2075,7 @@ pub fn emit_intrinsic_call(
             writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, src_ptr, src.name).ok();
             writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(ptr {}, ptr {}, i64 {}, i1 false)", indent, dst_ptr, src_ptr, n.name).ok();
             writeln!(out, "{}{} = add i64 0, 1 ; memcpy success", indent, v).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::bool_() };
         }
         Intrinsic::Memcmp => {
             let a = backend.emit_expr(out, &args[0], indent);
@@ -2090,7 +2090,7 @@ pub fn emit_intrinsic_call(
             // sign-extend i32 to i64 for Brief's Int representation
             let ext = format!("%mc_ext{}", backend.fun.txn_counter);
             writeln!(out, "{}{} = sext i32 {} to i64", indent, ext, v).ok();
-            return TypedRegister { name: ext, ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: ext, ty: Type::int() };
         }
         Intrinsic::Memset => {
             let ptr = backend.emit_expr(out, &args[0], indent);
@@ -2103,7 +2103,7 @@ pub fn emit_intrinsic_call(
             writeln!(out, "{}{} = trunc i64 {} to i8", indent, val_trunc, val.name).ok();
             writeln!(out, "{}call void @llvm.memset.p0i8.i64(ptr {}, i8 {}, i64 {}, i1 false)", indent, ptr_cast, val_trunc, n.name).ok();
             writeln!(out, "{}{} = add i64 0, 1 ; memset success", indent, v).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::bool_() };
         }
         Intrinsic::Hash => {
             let ptr = backend.emit_expr(out, &args[0], indent);
@@ -2144,7 +2144,7 @@ pub fn emit_intrinsic_call(
             writeln!(out, "{}:", done).ok();
             writeln!(out, "{}{} = phi i64 [ {}, %{} ]", indent, result, mult, loop_lbl).ok();
             writeln!(out, "{}{} = add i64 0, {}", indent, v, result).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::int() };
         }
         Intrinsic::UserDefined(name) => {
             // 2026-07-08: Phase 3 — remap to avoid libc symbol conflicts
@@ -2285,5 +2285,5 @@ pub fn emit_intrinsic_call(
             }
         }
     }
-    return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+    return TypedRegister { name: v.to_string(), ty: Type::int() };
 }

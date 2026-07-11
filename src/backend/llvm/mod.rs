@@ -102,20 +102,20 @@ fn llvm_type_byte_size(t: &str) -> i64 {
 /// Used by `resolve_bild_type` to resolve aliases and melds.
 fn primitive_from_name(name: &str) -> Option<Type> {
     match name {
-        "Int" | "UInt" | "Signed" | "Unsigned" => Some(Type::Custom("Int".to_string())),
+        "Int" | "UInt" | "Signed" | "Unsigned" => Some(Type::int()),
         // 2026-06-29: Fixed-width type aliases for BILD type resolution
-        "Int8" | "I8" => Some(Type::Custom("Int8".to_string())),
-        "Int16" | "I16" => Some(Type::Custom("Int16".to_string())),
-        "Int32" | "I32" => Some(Type::Custom("Int32".to_string())),
-        "UInt8" | "U8" => Some(Type::Custom("UInt8".to_string())),
-        "UInt16" | "U16" => Some(Type::Custom("UInt16".to_string())),
-        "UInt32" | "U32" => Some(Type::Custom("UInt32".to_string())),
-        "Float" => Some(Type::Custom("Float".to_string())),
-        "Float64" | "F64" | "Double" => Some(Type::Custom("Float64".to_string())),
-        "Bool" => Some(Type::Custom("Bool".to_string())),
-        "Char" => Some(Type::Custom("Char".to_string())),
-        "String" => Some(Type::Custom("String".to_string())),
-        "Data" | "Bytes" => Some(Type::Custom("Data".to_string())),
+        "Int8" | "I8" => Some(Type::int8()),
+        "Int16" | "I16" => Some(Type::int16()),
+        "Int32" | "I32" => Some(Type::int32()),
+        "UInt8" | "U8" => Some(Type::uint8()),
+        "UInt16" | "U16" => Some(Type::uint16()),
+        "UInt32" | "U32" => Some(Type::uint32()),
+        "Float" => Some(Type::float()),
+        "Float64" | "F64" | "Double" => Some(Type::float64()),
+        "Bool" => Some(Type::bool_()),
+        "Char" => Some(Type::char_()),
+        "String" => Some(Type::string()),
+        "Data" | "Bytes" => Some(Type::data()),
         _ => None,
     }
 }
@@ -266,15 +266,15 @@ impl std::fmt::Display for TypedRegister {
 /// This is the single source of truth — eliminates i64 boxing for strings, chars, bools.
 impl TypedRegister {
     pub fn llvm(&self) -> &'static str {
-        if self.ty == Type::Custom("Bool".to_string()) {
+        if self.ty == Type::bool_() {
             "i1"
-        } else if self.ty == Type::Custom("Char".to_string()) {
+        } else if self.ty == Type::char_() {
             "i32"
-        } else if self.ty == Type::Custom("Int".to_string()) || self.ty == Type::Custom("UInt".to_string()) {
+        } else if self.ty == Type::int() || self.ty == Type::uint() {
             "i64"
-        } else if self.ty == Type::Custom("Float".to_string()) {
+        } else if self.ty == Type::float() {
             "float"
-        } else if self.ty == Type::Custom("String".to_string()) || self.ty == Type::Custom("Data".to_string()) {
+        } else if self.ty == Type::string() || self.ty == Type::data() {
             "i8*"
         } else {
             "i64"
@@ -1515,7 +1515,7 @@ impl LlvmBackend {
             let idx = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("__trg_epfd".to_string(), idx);
             self.ctx.field_types.push("i32".to_string());
-            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
+            self.ctx.field_brief_types.push(Type::int());
             self.ctx.field_initializers.insert("__trg_epfd".to_string(), None);
         }
         // Inject synthetic cycle_count field for watchdog timing
@@ -1523,7 +1523,7 @@ impl LlvmBackend {
             let idx = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("cycle_count".to_string(), idx);
             self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
+            self.ctx.field_brief_types.push(Type::int());
             self.ctx.field_initializers.insert("cycle_count".to_string(), Some(Expr::Integer(0)));
         }
         self.validate_schema_types();
@@ -1654,7 +1654,7 @@ impl LlvmBackend {
                                 name.clone(), cell_name.clone(), resolved_port.clone()
                             ));
                             // Register the trigger so its storage is allocated in %State
-                            let trig_ty = ty.clone().unwrap_or(crate::ast::Type::Custom("String".to_string()));
+                            let trig_ty = ty.clone().unwrap_or(crate::ast::Type::string());
                             self.ctx.trigger_names.push(name.clone());
                             let trg_decl = crate::ast::TriggerDeclaration {
                                 name: name.clone(),
@@ -1747,9 +1747,9 @@ impl LlvmBackend {
             .map(|(k, v)| (k.clone(), v.clone())).collect();
         for (name, (ty, expr)) in consts_snapshot {
             // 2026-06-29: Fold both Float and Float64 constant expressions
-            if ty == Type::Custom("Float".to_string()) || ty == Type::Custom("Float64".to_string()) {
+            if ty == Type::float() || ty == Type::float64() {
                 if let Some(val) = try_eval_cfloat(&expr, &self.ctx.constants) {
-                    let new_expr = if ty == Type::Custom("Float64".to_string()) { Expr::Float64(val) } else { Expr::Float(val) };
+                    let new_expr = if ty == Type::float64() { Expr::Float64(val) } else { Expr::Float(val) };
                     self.ctx.constants.insert(name, (ty.clone(), new_expr));
                 }
             }
@@ -2078,15 +2078,15 @@ impl LlvmBackend {
                         if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
                             format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f))
                         } else {
-                            if *ty == Type::Custom("Float".to_string()) { "0.0".to_string() } else { "0".to_string() }
+                            if *ty == Type::float() { "0.0".to_string() } else { "0".to_string() }
                         }
                     }
                     Expr::Integer(n) => format!("-{}", n),
-                    _ => if *ty == Type::Custom("Float".to_string()) { "0.0".to_string() } else { "0".to_string() },
+                    _ => if *ty == Type::float() { "0.0".to_string() } else { "0".to_string() },
                 },
                 Expr::String(_) => "null".to_string(),
                 _ => {
-                    if *ty == Type::Custom("Float".to_string()) {
+                    if *ty == Type::float() {
                         "0.0".to_string()
                     } else {
                         "0".to_string()
@@ -3314,22 +3314,22 @@ impl LlvmBackend {
                             let data_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
                             self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
+                            self.ctx.field_brief_types.push(Type::int());
                             self.ctx.field_initializers.insert(format!("{}_data", s.name), None);
                             let head_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_head", s.name), head_idx);
                             self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
+                            self.ctx.field_brief_types.push(Type::int());
                             self.ctx.field_initializers.insert(format!("{}_head", s.name), None);
                             let tail_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_tail", s.name), tail_idx);
                             self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
+                            self.ctx.field_brief_types.push(Type::int());
                             self.ctx.field_initializers.insert(format!("{}_tail", s.name), None);
                             let mask_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_mask", s.name), mask_idx);
                             self.ctx.field_types.push("i64".to_string());
-                            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
+                            self.ctx.field_brief_types.push(Type::int());
                             self.ctx.field_initializers.insert(format!("{}_mask", s.name), None);
                             self.ctx.ringbuf_inline.insert(s.name.clone(),
                                 crate::backend::llvm::context::RingbufInlineFields {
@@ -3348,7 +3348,7 @@ impl LlvmBackend {
             } else if let TopLevel::TriggerBinding { name, ty, .. } = item {
                 // Trigger bindings (trg name: Type @ Console!) get a state slot
                 // like regular triggers, so emit_expr can load their value.
-                let trig_ty = ty.clone().unwrap_or(crate::ast::Type::Custom("String".to_string()));
+                let trig_ty = ty.clone().unwrap_or(crate::ast::Type::string());
                 self.ctx.field_index_map
                     .insert(name.clone(), self.ctx.field_types.len());
                 self.push_field_type(&trig_ty);
@@ -3533,7 +3533,7 @@ impl LlvmBackend {
                     self.ctx.field_types.push(old_types[orig_type_idx].clone());
                     // 2026-06-29: Preserve the original Brief type alongside LLVM type
                     self.ctx.field_brief_types.push(
-                        old_brief_types.get(orig_type_idx).cloned().unwrap_or(Type::Custom("Int".to_string()))
+                        old_brief_types.get(orig_type_idx).cloned().unwrap_or(Type::int())
                     );
                 }
             }
@@ -3548,10 +3548,10 @@ impl LlvmBackend {
                     for target_name in targets {
                         let cache_idx = self.ctx.field_types.len();
                         self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
+            self.ctx.field_brief_types.push(Type::int());
                         let valid_idx = self.ctx.field_types.len();
                         self.ctx.field_types.push("i8".to_string());
-                        self.ctx.field_brief_types.push(Type::Custom("Bool".to_string()));
+                        self.ctx.field_brief_types.push(Type::bool_());
                         target_map.insert(target_name.clone(), (cache_idx, valid_idx));
                     }
                 }
@@ -3559,10 +3559,10 @@ impl LlvmBackend {
                 if target_map.is_empty() {
                     let cache_idx = self.ctx.field_types.len();
                     self.ctx.field_types.push("i64".to_string());
-            self.ctx.field_brief_types.push(Type::Custom("Int".to_string()));
+            self.ctx.field_brief_types.push(Type::int());
                     let valid_idx = self.ctx.field_types.len();
                     self.ctx.field_types.push("i8".to_string());
-                        self.ctx.field_brief_types.push(Type::Custom("Bool".to_string()));
+                        self.ctx.field_brief_types.push(Type::bool_());
                     target_map.insert("_".to_string(), (cache_idx, valid_idx));
                 }
                 self.ctx.cache_slots.insert(name.clone(), target_map);

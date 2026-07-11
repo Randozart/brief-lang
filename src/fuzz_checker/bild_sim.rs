@@ -446,7 +446,7 @@ mod tests {
     fn run(body: &[&str], params: &[(&str, &str)], bindings: &[(&str, Value)]) -> Result<Vec<Value>, FuzzError> {
         let body: Vec<String> = body.iter().map(|s| format!("{};", s)).collect();
         let params: Vec<(String, crate::ast::Type)> = params.iter()
-            .map(|(n, _t)| (n.to_string(), crate::ast::Type::Custom("Int".to_string())))
+            .map(|(n, _t)| (n.to_string(), crate::ast::Type::int()))
             .collect();
         let bindings: HashMap<String, Value> = bindings.iter()
             .map(|(n, v)| (n.to_string(), v.clone()))
@@ -552,7 +552,7 @@ mod tests {
     #[test]
     fn test_float_add() {
         let body: Vec<String> = vec!["%r = fadd float %a, %b;".to_string(), "term %r;".to_string()];
-        let params = vec![("a".to_string(), crate::ast::Type::Custom("Float".to_string())), ("b".to_string(), crate::ast::Type::Custom("Float".to_string()))];
+        let params = vec![("a".to_string(), crate::ast::Type::float()), ("b".to_string(), crate::ast::Type::float())];
         let mut bindings = HashMap::new();
         bindings.insert("a".to_string(), f(1.5));
         bindings.insert("b".to_string(), f(2.5));

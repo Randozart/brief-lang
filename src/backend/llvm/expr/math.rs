@@ -45,14 +45,14 @@ pub fn emit_mod(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Ex
             let b = backend.emit_expr(out, r, indent);
             let v = alloc_reg(backend, out, indent);
             writeln!(out, "{}{} = srem i64 {}, {}", indent, v, a.name, b.name).ok();
-            TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+            TypedRegister { name: v, ty: Type::int() }
         }
         _ => emit_zero(backend, out, indent),
     }
 }
 
-// 2026-07-01: Added Type::Custom("Float64".to_string()) check to emit fneg double instead of
-// sub i64 0, <double> (type error). Previously only Type::Custom("Float".to_string()) was checked,
+// 2026-07-01: Added Type::float64() check to emit fneg double instead of
+// sub i64 0, <double> (type error). Previously only Type::float() was checked,
 // causing all Float64 negations to produce invalid LLVM IR (sub i64 with
 // double operand). The fneg instruction works for both float and double —
 // the LLVM type string selects the correct encoding.
@@ -65,9 +65,9 @@ pub fn emit_neg(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Ex
     match expr {
         Expr::Neg(e) => {
             let inner = backend.emit_expr(out, e, indent);
-            let inner_op = if inner.ty == Type::Custom("Float".to_string()) {
+            let inner_op = if inner.ty == Type::float() {
                 "fneg_float"
-            } else if inner.ty == Type::Custom("Float64".to_string()) {
+            } else if inner.ty == Type::float64() {
                 "fneg_double"
             } else {
                 "neg_i64"
@@ -77,9 +77,9 @@ pub fn emit_neg(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Ex
                 return TypedRegister { name: cached.clone(), ty: inner.ty.clone() };
             }
             let v = alloc_reg(backend, out, indent);
-            if inner.ty == Type::Custom("Float".to_string()) {
+            if inner.ty == Type::float() {
                 writeln!(out, "{}{} = fneg float {}", indent, v, inner.name).ok();
-            } else if inner.ty == Type::Custom("Float64".to_string()) {
+            } else if inner.ty == Type::float64() {
                 writeln!(out, "{}{} = fneg double {}", indent, v, inner.name).ok();
             } else {
                 writeln!(out, "{}{} = sub nsw i64 0, {}", indent, v, inner.name).ok();
@@ -99,7 +99,7 @@ pub fn emit_bitand(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: 
             let (a, b) = (backend.emit_expr(out, l, indent), backend.emit_expr(out, r, indent));
             let v = alloc_reg(backend, out, indent);
             writeln!(out, "{}{} = and i64 {}, {}", indent, v, a.name, b.name).ok();
-            TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+            TypedRegister { name: v, ty: Type::int() }
         }
         _ => emit_zero(backend, out, indent),
     }
@@ -111,7 +111,7 @@ pub fn emit_bitor(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &
             let (a, b) = (backend.emit_expr(out, l, indent), backend.emit_expr(out, r, indent));
             let v = alloc_reg(backend, out, indent);
             writeln!(out, "{}{} = or i64 {}, {}", indent, v, a.name, b.name).ok();
-            TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+            TypedRegister { name: v, ty: Type::int() }
         }
         _ => emit_zero(backend, out, indent),
     }
@@ -123,7 +123,7 @@ pub fn emit_bitxor(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: 
             let (a, b) = (backend.emit_expr(out, l, indent), backend.emit_expr(out, r, indent));
             let v = alloc_reg(backend, out, indent);
             writeln!(out, "{}{} = xor i64 {}, {}", indent, v, a.name, b.name).ok();
-            TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+            TypedRegister { name: v, ty: Type::int() }
         }
         _ => emit_zero(backend, out, indent),
     }
@@ -135,7 +135,7 @@ pub fn emit_bitnot(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: 
             let inner = backend.emit_expr(out, e, indent);
             let v = alloc_reg(backend, out, indent);
             writeln!(out, "{}{} = xor i64 {}, -1", indent, v, inner.name).ok();
-            TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+            TypedRegister { name: v, ty: Type::int() }
         }
         _ => emit_zero(backend, out, indent),
     }
@@ -147,7 +147,7 @@ pub fn emit_shl(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Ex
             let (a, b) = (backend.emit_expr(out, l, indent), backend.emit_expr(out, r, indent));
             let v = alloc_reg(backend, out, indent);
             writeln!(out, "{}{} = shl i64 {}, {}", indent, v, a.name, b.name).ok();
-            TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+            TypedRegister { name: v, ty: Type::int() }
         }
         _ => emit_zero(backend, out, indent),
     }
@@ -159,7 +159,7 @@ pub fn emit_shr(backend: &mut LlvmBackend, out: &mut String, _v: &str, expr: &Ex
             let (a, b) = (backend.emit_expr(out, l, indent), backend.emit_expr(out, r, indent));
             let v = alloc_reg(backend, out, indent);
             writeln!(out, "{}{} = lshr i64 {}, {}", indent, v, a.name, b.name).ok();
-            TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+            TypedRegister { name: v, ty: Type::int() }
         }
         _ => emit_zero(backend, out, indent),
     }
@@ -177,5 +177,5 @@ fn alloc_reg(backend: &mut LlvmBackend, out: &mut String, indent: &str) -> Strin
 fn emit_zero(backend: &mut LlvmBackend, out: &mut String, indent: &str) -> TypedRegister {
     let v = alloc_reg(backend, out, indent);
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-    TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+    TypedRegister { name: v, ty: Type::int() }
 }

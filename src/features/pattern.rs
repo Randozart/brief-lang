@@ -23,8 +23,8 @@ pub struct MatchExpr {
     pub arms: Vec<MatchArm>,
 }
 
-impl ExprTypecheck for PatternMatchExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
-impl ExprTypecheck for MatchExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
+impl ExprTypecheck for PatternMatchExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::int()) } }
+impl ExprTypecheck for MatchExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::int()) } }
 
 impl ExprEval for PatternMatchExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _: &ExprDispatch) -> Result<Value, RuntimeError> {

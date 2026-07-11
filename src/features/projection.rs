@@ -17,7 +17,7 @@ impl ProjectionExpr {
 
 impl ExprTypecheck for ProjectionExpr {
     fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> {
-        Ok(Type::Custom("Int".to_string()))
+        Ok(Type::int())
     }
 }
 

@@ -1819,8 +1819,8 @@ mod tests {
     fn test_graph_single_counter_txn() {
         let program = Program {
             items: vec![
-                make_state("count", Type::Custom("Int".to_string())),
-                make_state("total", Type::Custom("Int".to_string())),
+                make_state("count", Type::int()),
+                make_state("total", Type::int()),
                 TopLevel::Transaction(Transaction {
                     name: "inc".to_string(),
                     is_reactive: true,
@@ -1881,7 +1881,7 @@ mod tests {
     fn test_compute_projection_usage_none() {
         let program = Program {
             items: vec![
-                make_state("x", Type::Custom("Int".to_string())),
+                make_state("x", Type::int()),
                 TopLevel::Transaction(Transaction {
                     name: "t".into(),
                     parameters: vec![],
@@ -1906,7 +1906,7 @@ mod tests {
     fn test_compute_projection_usage_single() {
         let program = Program {
             items: vec![
-                make_state("x", Type::Custom("Int".to_string())),
+                make_state("x", Type::int()),
                 TopLevel::Transaction(Transaction {
                     name: "t".into(),
                     parameters: vec![],

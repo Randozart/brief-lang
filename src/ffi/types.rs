@@ -219,14 +219,14 @@ pub fn brief_type_to_ffi(t: &Type) -> Result<FfiType, String> {
 /// Convert FFI type back to Brief type
 pub fn ffi_type_to_brief(t: &FfiType) -> Type {
     match t {
-        FfiType::String => Type::Custom("String".to_string()),
-        FfiType::Int => Type::Custom("Int".to_string()),
-        FfiType::Float => Type::Custom("Float".to_string()),
-        FfiType::Bool => Type::Custom("Bool".to_string()),
+        FfiType::String => Type::string(),
+        FfiType::Int => Type::int(),
+        FfiType::Float => Type::float(),
+        FfiType::Bool => Type::bool_(),
         FfiType::Void => Type::Void,
         FfiType::Struct(name, _) => Type::Custom(name.clone()),
         FfiType::Generic(name, _) => Type::Custom(name.clone()),
-        FfiType::Array(_) => Type::Custom("Data".to_string()), // Use Data as generic array type
+        FfiType::Array(_) => Type::data(), // Use Data as generic array type
     }
 }
 
@@ -236,10 +236,10 @@ mod tests {
 
     #[test]
     fn test_brief_type_to_ffi_basic() {
-        assert_eq!(brief_type_to_ffi(&Type::Custom("String".to_string())).unwrap(), FfiType::String);
-        assert_eq!(brief_type_to_ffi(&Type::Custom("Int".to_string())).unwrap(), FfiType::Int);
-        assert_eq!(brief_type_to_ffi(&Type::Custom("Float".to_string())).unwrap(), FfiType::Float);
-        assert_eq!(brief_type_to_ffi(&Type::Custom("Bool".to_string())).unwrap(), FfiType::Bool);
+        assert_eq!(brief_type_to_ffi(&Type::string()).unwrap(), FfiType::String);
+        assert_eq!(brief_type_to_ffi(&Type::int()).unwrap(), FfiType::Int);
+        assert_eq!(brief_type_to_ffi(&Type::float()).unwrap(), FfiType::Float);
+        assert_eq!(brief_type_to_ffi(&Type::bool_()).unwrap(), FfiType::Bool);
         assert_eq!(brief_type_to_ffi(&Type::Void).unwrap(), FfiType::Void);
     }
 
@@ -247,7 +247,7 @@ mod tests {
     fn test_ffi_type_roundtrip() {
         let ffi = FfiType::String;
         let brief = ffi_type_to_brief(&ffi);
-        assert_eq!(brief, Type::Custom("String".to_string()));
+        assert_eq!(brief, Type::string());
     }
 
     #[test]

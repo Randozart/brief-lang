@@ -367,17 +367,17 @@ fn parse_type_string(type_str: &str) -> Result<Type, FfiError> {
     let type_str = type_str.trim();
 
     match type_str {
-        "String" => Ok(Type::Custom("String".to_string())),
-        "Int" => Ok(Type::Custom("Int".to_string())),
-        "Float" => Ok(Type::Custom("Float".to_string())),
-        "Bool" => Ok(Type::Custom("Bool".to_string())),
+        "String" => Ok(Type::string()),
+        "Int" => Ok(Type::int()),
+        "Float" => Ok(Type::float()),
+        "Bool" => Ok(Type::bool_()),
         "void" => Ok(Type::Void),
-        "Data" => Ok(Type::Custom("Data".to_string())),
+        "Data" => Ok(Type::data()),
         s if s.starts_with('[') && s.ends_with(']') => {
             let inner_str = &s[1..s.len() - 1];
             let inner_type = parse_type_string(inner_str)?;
             // Represent arrays as Data for now
-            Ok(Type::Custom("Data".to_string()))
+            Ok(Type::data())
         }
         s => {
             // Custom type
@@ -392,10 +392,10 @@ mod tests {
 
     #[test]
     fn test_parse_type_string_basic() {
-        assert_eq!(parse_type_string("String").unwrap(), Type::Custom("String".to_string()));
-        assert_eq!(parse_type_string("Int").unwrap(), Type::Custom("Int".to_string()));
-        assert_eq!(parse_type_string("Float").unwrap(), Type::Custom("Float".to_string()));
-        assert_eq!(parse_type_string("Bool").unwrap(), Type::Custom("Bool".to_string()));
+        assert_eq!(parse_type_string("String").unwrap(), Type::string());
+        assert_eq!(parse_type_string("Int").unwrap(), Type::int());
+        assert_eq!(parse_type_string("Float").unwrap(), Type::float());
+        assert_eq!(parse_type_string("Bool").unwrap(), Type::bool_());
         assert_eq!(parse_type_string("void").unwrap(), Type::Void);
     }
 

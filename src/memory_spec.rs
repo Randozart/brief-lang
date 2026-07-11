@@ -300,18 +300,18 @@ mod tests {
 
     #[test]
     fn test_estimate_type_size() {
-        assert_eq!(estimate_type_size(&Type::Custom("Bool".to_string())), 1);
-        assert_eq!(estimate_type_size(&Type::Custom("Int".to_string())), 8);
+        assert_eq!(estimate_type_size(&Type::bool_()), 1);
+        assert_eq!(estimate_type_size(&Type::int()), 8);
         assert_eq!(
             estimate_type_size(&Type::Constrained(
-                Box::new(Type::Custom("UInt".to_string())),
+                Box::new(Type::uint()),
                 BitRange::Any(8)
             )),
             1
         );
         assert_eq!(
             estimate_type_size(&Type::Constrained(
-                Box::new(Type::Custom("UInt".to_string())),
+                Box::new(Type::uint()),
                 BitRange::Any(32)
             )),
             4

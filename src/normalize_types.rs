@@ -121,7 +121,7 @@ pub fn desugar_string_literals(program: &mut Program, universe: &TypeUniverse) {
 fn desugar_toplevel_strings(item: &mut TopLevel, universe: &TypeUniverse) {
     match item {
         TopLevel::StateDecl(decl) => {
-            if decl.ty == Type::Custom("String".to_string()) {
+            if decl.ty == Type::string() {
                 if let Some(expr) = &mut decl.expr {
                     if let Expr::String(s) = expr {
                         *expr = make_string_struct(s.clone());
@@ -130,7 +130,7 @@ fn desugar_toplevel_strings(item: &mut TopLevel, universe: &TypeUniverse) {
             }
         }
         TopLevel::Constant(constant) => {
-            if constant.ty == Type::Custom("String".to_string()) {
+            if constant.ty == Type::string() {
                 if let Expr::String(s) = &constant.expr {
                     constant.expr = make_string_struct(s.clone());
                 }

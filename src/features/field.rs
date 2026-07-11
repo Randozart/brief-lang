@@ -22,13 +22,13 @@ pub struct ObjectLiteralExpr {
 }
 
 impl ExprTypecheck for FieldAccessExpr {
-    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) }
+    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::int()) }
 }
 impl ExprTypecheck for StructInstanceExpr {
-    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) }
+    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::int()) }
 }
 impl ExprTypecheck for ObjectLiteralExpr {
-    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) }
+    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::int()) }
 }
 
 impl ExprEval for FieldAccessExpr {

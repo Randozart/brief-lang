@@ -35,7 +35,7 @@ pub fn verify_true_assertion(sig: &Signature, defn: &Definition) -> Result<(), S
     }
 
     // Check that definition produces Bool
-    if !defn.outputs.is_empty() && defn.outputs[0] != Type::Custom("Bool".to_string()) {
+    if !defn.outputs.is_empty() && defn.outputs[0] != Type::bool_() {
         return Err(format!(
             "Assertion '{}' requires Bool output, but definition produces {:?}",
             sig.name, defn.outputs[0]
@@ -213,7 +213,7 @@ mod tests {
             name: "always_true_defn".to_string(),
             type_params: vec![],
             parameters: vec![],
-            outputs: vec![Type::Custom("Bool".to_string())],
+            outputs: vec![Type::bool_()],
             output_type: None,
             output_names: vec![],
             contract: Contract {
@@ -248,7 +248,7 @@ mod tests {
             name: "always_false_defn".to_string(),
             type_params: vec![],
             parameters: vec![],
-            outputs: vec![Type::Custom("Bool".to_string())],
+            outputs: vec![Type::bool_()],
             output_type: None,
             output_names: vec![],
             contract: Contract {
@@ -272,7 +272,7 @@ mod tests {
     fn test_variable_assigned_true() {
         let sig = Signature {
             name: "check_x".to_string(),
-            params: vec![("".to_string(), Type::Custom("Bool".to_string()))], modifier: None, output_type: None,
+            params: vec![("".to_string(), Type::bool_())], modifier: None, output_type: None,
             result_type: ResultType::TrueAssertion,
             source: Some("check_x_defn".to_string()),
             alias: None,
@@ -282,8 +282,8 @@ mod tests {
         let defn = Definition {
             name: "check_x_defn".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Custom("Bool".to_string()))],
-            outputs: vec![Type::Custom("Bool".to_string())],
+            parameters: vec![("x".to_string(), Type::bool_())],
+            outputs: vec![Type::bool_()],
             output_type: None,
             output_names: vec![],
             contract: Contract {
@@ -326,7 +326,7 @@ mod tests {
             name: "not_bool_defn".to_string(),
             type_params: vec![],
             parameters: vec![],
-            outputs: vec![Type::Custom("String".to_string())],
+            outputs: vec![Type::string()],
             output_type: None,
             output_names: vec![],
             contract: Contract {
@@ -353,7 +353,7 @@ mod tests {
         let sig = Signature {
             name: "regular_sig".to_string(),
             params: vec![], modifier: None, output_type: None,
-            result_type: ResultType::Projection(vec![Type::Custom("Bool".to_string())]),
+            result_type: ResultType::Projection(vec![Type::bool_()]),
             source: Some("regular_sig_defn".to_string()),
             alias: None,
             bound_defn: None,
@@ -363,7 +363,7 @@ mod tests {
             name: "regular_sig_defn".to_string(),
             type_params: vec![],
             parameters: vec![],
-            outputs: vec![Type::Custom("Bool".to_string())],
+            outputs: vec![Type::bool_()],
             output_type: None,
             output_names: vec![],
             contract: Contract {

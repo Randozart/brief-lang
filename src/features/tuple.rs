@@ -15,7 +15,7 @@ pub struct TupleDestructureExpr {
 }
 
 impl ExprTypecheck for TupleExpr {
-    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) }
+    fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::int()) }
 }
 impl ExprTypecheck for TupleDestructureExpr {
     fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Void) }

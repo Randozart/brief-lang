@@ -20,7 +20,7 @@ pub fn emit_integer(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: 
     } else {
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     }
-    TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
+    TypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
 pub fn emit_integer_suffixed(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Expr, indent: &str) -> TypedRegister {
@@ -42,7 +42,7 @@ pub fn emit_bool(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Ex
             } else {
                 writeln!(out, "{}{} = xor i1 true, true", indent, v).ok();
             }
-            TypedRegister { name: v.to_string(), ty: Type::Custom("Bool".to_string()) }
+            TypedRegister { name: v.to_string(), ty: Type::bool_() }
         }
         _ => emit_integer(backend, out, v, expr, indent),
     }
@@ -53,7 +53,7 @@ pub fn emit_float64(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: 
         Expr::Float64(f) => {
             let bits = float64_to_llvm_hex(*f);
             writeln!(out, "{}{} = bitcast i64 {} to double", indent, v, bits).ok();
-            TypedRegister { name: v.to_string(), ty: Type::Custom("Float64".to_string()) }
+            TypedRegister { name: v.to_string(), ty: Type::float64() }
         }
         _ => emit_integer(backend, out, v, expr, indent),
     }
@@ -65,7 +65,7 @@ pub fn emit_float(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &E
             let bits = float_to_llvm_hex(*f);
             writeln!(out, "{}{} = bitcast i32 {} to float", indent, v, bits).ok();
             backend.fun.reg_float_cache.insert(v.to_string(), v.to_string());
-            TypedRegister { name: v.to_string(), ty: Type::Custom("Float".to_string()) }
+            TypedRegister { name: v.to_string(), ty: Type::float() }
         }
         _ => emit_integer(backend, out, v, expr, indent),
     }
@@ -87,7 +87,7 @@ pub fn emit_string(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &
     let ori = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = or i64 {}, 1", indent, ori, pi).ok();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, v, ori).ok();
-    TypedRegister { name: v.to_string(), ty: Type::Custom("String".to_string()) }
+    TypedRegister { name: v.to_string(), ty: Type::string() }
 }
 
 pub fn emit_char(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Expr, indent: &str) -> TypedRegister {
@@ -96,10 +96,10 @@ pub fn emit_char(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Ex
     } else {
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     }
-    TypedRegister { name: v.to_string(), ty: Type::Custom("Char".to_string()) }
+    TypedRegister { name: v.to_string(), ty: Type::char_() }
 }
 
 pub fn emit_term(backend: &mut LlvmBackend, out: &mut String, v: &str, indent: &str) -> TypedRegister {
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-    TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) }
+    TypedRegister { name: v.to_string(), ty: Type::int() }
 }

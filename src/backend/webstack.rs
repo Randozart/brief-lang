@@ -1500,7 +1500,7 @@ mod tests {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "count".into(),
-                    ty: Type::Custom("Int".to_string()),
+                    ty: Type::int(),
                     expr: None,
                     address: None,
                     bit_range: None,
@@ -1512,7 +1512,7 @@ mod tests {
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "name".into(),
-                    ty: Type::Custom("String".to_string()),
+                    ty: Type::string(),
                     expr: None,
                     address: None,
                     bit_range: None,
@@ -1546,7 +1546,7 @@ mod tests {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".into(),
-                    ty: Type::Custom("Int".to_string()),
+                    ty: Type::int(),
                     expr: Some(Expr::Integer(42)),
                     address: None,
                     bit_range: None,
@@ -1607,7 +1607,7 @@ mod tests {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "count".into(),
-                    ty: Type::Custom("Int".to_string()),
+                    ty: Type::int(),
                     expr: Some(Expr::Integer(0)),
                     address: None,
                     bit_range: None,
@@ -1824,7 +1824,7 @@ mod tests {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".into(),
-                    ty: Type::Custom("Int".to_string()),
+                    ty: Type::int(),
                     expr: Some(Expr::Integer(0)),
                     address: None,
                     bit_range: None,

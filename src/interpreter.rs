@@ -7931,8 +7931,8 @@ mod tests {
             name: "len".to_string(),
             type_params: vec![],
             parameters: vec![("list".to_string(), Type::Custom("List".to_string()))],
-            outputs: vec![Type::Custom("Int".to_string())],
-            output_type: Some(crate::ast::OutputType::Single(Type::Custom("Int".to_string()))),
+            outputs: vec![Type::int()],
+            output_type: Some(crate::ast::OutputType::Single(Type::int())),
             output_names: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
@@ -8699,9 +8699,9 @@ mod tests {
             is_reactive: false,
             name: "count_up".to_string(),
             parameters: vec![
-                ("n".to_string(), Type::Custom("Int".to_string())),
-                ("result".to_string(), Type::Custom("Int".to_string())),
-                ("i".to_string(), Type::Custom("Int".to_string())),
+                ("n".to_string(), Type::int()),
+                ("result".to_string(), Type::int()),
+                ("i".to_string(), Type::int()),
             ],
             contract: Contract {
                 pre_condition: Expr::Lt(
@@ -8769,9 +8769,9 @@ mod tests {
             is_reactive: false,
             name: "noop".to_string(),
             parameters: vec![
-                ("n".to_string(), Type::Custom("Int".to_string())),
-                ("result".to_string(), Type::Custom("Int".to_string())),
-                ("i".to_string(), Type::Custom("Int".to_string())),
+                ("n".to_string(), Type::int()),
+                ("result".to_string(), Type::int()),
+                ("i".to_string(), Type::int()),
             ],
             contract: Contract {
                 pre_condition: Expr::Lt(
@@ -8824,7 +8824,7 @@ mod tests {
             is_async: false,
             is_reactive: false,
             name: "mutate".to_string(),
-            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
+            parameters: vec![("x".to_string(), Type::int())],
             contract: Contract {
                 pre_condition: Expr::Lt(
                     Box::new(Expr::Identifier("x".to_string())),
@@ -9994,7 +9994,7 @@ mod tests {
             is_reactive: false,
             name: "bad_post".to_string(),
             parameters: vec![
-                ("x".to_string(), Type::Custom("Int".to_string())),
+                ("x".to_string(), Type::int()),
             ],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
@@ -10051,9 +10051,9 @@ mod tests {
             is_reactive: false,
             name: "count_to_n".to_string(),
             parameters: vec![
-                ("n".to_string(), Type::Custom("Int".to_string())),
-                ("acc".to_string(), Type::Custom("Int".to_string())),
-                ("i".to_string(), Type::Custom("Int".to_string())),
+                ("n".to_string(), Type::int()),
+                ("acc".to_string(), Type::int()),
+                ("i".to_string(), Type::int()),
             ],
             contract: Contract {
                 pre_condition: Expr::Lt(
@@ -10359,8 +10359,8 @@ mod tests {
             location: "mock:integration_pipe".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("Int".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+            success_output: vec![("result".into(), Type::int())],
+            result_type: ResultType::Projection(vec![Type::int()]),
             error_type_name: "".into(), error_fields: vec![],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
@@ -10391,8 +10391,8 @@ mod tests {
             location: "mock:integration_pipe_nan".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("Float".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Float".to_string())]),
+            success_output: vec![("result".into(), Type::float())],
+            result_type: ResultType::Projection(vec![Type::float()]),
             error_type_name: "".into(), error_fields: vec![],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
@@ -10441,8 +10441,8 @@ mod tests {
             location: "libc.so.6".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("Int".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+            success_output: vec![("result".into(), Type::int())],
+            result_type: ResultType::Projection(vec![Type::int()]),
             error_type_name: "".into(), error_fields: vec![],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
@@ -10496,8 +10496,8 @@ mod tests {
             location: "libc.so.6".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("Int".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+            success_output: vec![("result".into(), Type::int())],
+            result_type: ResultType::Projection(vec![Type::int()]),
             error_type_name: "".into(), error_fields: vec![],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
@@ -10524,7 +10524,7 @@ mod tests {
         // let x: Int <: [_ > 0] = -5; — should fail
         let stmt = Statement::Let {
             name: "x".to_string(),
-            ty: Some(Type::Custom("Int".to_string())),
+            ty: Some(Type::int()),
             expr: Some(Expr::Integer(-5)),
             address: None,
             address_expr: None,
@@ -10745,8 +10745,8 @@ mod tests {
         let inop = InopDeclaration {
             name: "test_add".into(),
             type_params: vec![],
-            params: vec![("x".into(), Type::Custom("Int".to_string())), ("y".into(), Type::Custom("Int".to_string()))],
-            outputs: vec![Type::Custom("Int".to_string())],
+            params: vec![("x".into(), Type::int()), ("y".into(), Type::int())],
+            outputs: vec![Type::int()],
             contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: vec!["%res = add i64 %x, %y;".into(), "term %res;".into()],
             fallback: Some(Expr::Add(
@@ -10787,8 +10787,8 @@ mod tests {
         let inop = InopDeclaration {
             name: "no_fallback".into(),
             type_params: vec![],
-            params: vec![("x".into(), Type::Custom("Int".to_string()))],
-            outputs: vec![Type::Custom("Int".to_string())],
+            params: vec![("x".into(), Type::int())],
+            outputs: vec![Type::int()],
             contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: vec!["%res = add i64 %x, %x;".into(), "term %res;".into()],
             fallback: None,
@@ -10853,7 +10853,7 @@ mod tests {
             name: "my_insert".into(),
             type_params: vec![],
             params: vec![("list".into(), Type::Void), ("val".into(), Type::Void)],
-            outputs: vec![Type::Custom("Int".to_string())],
+            outputs: vec![Type::int()],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: vec![],
             fallback: Some(Expr::Integer(999)),
@@ -10935,7 +10935,7 @@ mod tests {
             name: "my_extract".into(),
             type_params: vec![],
             params: vec![("list".into(), Type::Void)],
-            outputs: vec![Type::Custom("Int".to_string()), Type::Void],
+            outputs: vec![Type::int(), Type::Void],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: vec![],
             fallback: Some(Expr::ListLiteral(vec![
@@ -11100,10 +11100,10 @@ mod tests {
         let cell_def = CellDef {
             is_persistent: false,
             name: "add_one".to_string(), type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
-            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::Custom("Int".to_string()))))),
+            parameters: vec![("x".to_string(), Type::int())],
+            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "val".to_string(), ty: Type::Custom("Int".to_string()), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "compute".to_string(), is_async: false, is_reactive: true,
@@ -11116,7 +11116,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![Type::Custom("Int".to_string())], output_type: None,
+                outputs: vec![Type::int()], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![],
             span: None, modifiers: vec![],
@@ -11133,10 +11133,10 @@ mod tests {
         let cell_def = CellDef {
             is_persistent: false,
             name: "countdown".to_string(), type_params: vec![],
-            parameters: vec![("start".to_string(), Type::Custom("Int".to_string()))],
-            output_type: Some(OutputType::Named("counter".to_string(), Box::new(OutputType::Single(Type::Custom("Int".to_string()))))),
+            parameters: vec![("start".to_string(), Type::int())],
+            output_type: Some(OutputType::Named("counter".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "counter".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Private },
+                StructField { name: "counter".to_string(), ty: Type::int(), default: None, visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "dec".to_string(), is_async: false, is_reactive: true,
@@ -11170,7 +11170,7 @@ mod tests {
             parameters: vec![],
             output_type: None,
             fields: vec![
-                StructField { name: "ran".to_string(), ty: Type::Custom("Bool".to_string()), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
+                StructField { name: "ran".to_string(), ty: Type::bool_(), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "do_it".to_string(), is_async: false, is_reactive: true,
@@ -11202,9 +11202,9 @@ mod tests {
             is_persistent: false,
             name: "early_exit".to_string(), type_params: vec![],
             parameters: vec![],
-            output_type: Some(OutputType::Named("counter".to_string(), Box::new(OutputType::Single(Type::Custom("Int".to_string()))))),
+            output_type: Some(OutputType::Named("counter".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "counter".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Private },
+                StructField { name: "counter".to_string(), ty: Type::int(), default: None, visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "stop_early".to_string(), is_async: false, is_reactive: true,
@@ -11235,10 +11235,10 @@ mod tests {
             is_persistent: true,
             name: "counter".to_string(), type_params: vec![],
             parameters: vec![],
-            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::Custom("Int".to_string()))))),
+            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "val".to_string(), ty: Type::Custom("Int".to_string()), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
-                StructField { name: "fired".to_string(), ty: Type::Custom("Bool".to_string()), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
+                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "fired".to_string(), ty: Type::bool_(), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "inc".to_string(), is_async: false, is_reactive: true,
@@ -11253,7 +11253,7 @@ mod tests {
  modifiers: vec![], variant_bodies: vec![],
                 annotations: vec![],
                 metadata: HashMap::new(),
-                outputs: vec![Type::Custom("Int".to_string())], output_type: None,
+                outputs: vec![Type::int()], output_type: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
         };
@@ -11299,10 +11299,10 @@ mod tests {
             is_persistent: true,
             name: "producer".to_string(), type_params: vec![],
             parameters: vec![],
-            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::Custom("Int".to_string()))))),
+            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "val".to_string(), ty: Type::Custom("Int".to_string()), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
-                StructField { name: "fired".to_string(), ty: Type::Custom("Bool".to_string()), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
+                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "fired".to_string(), ty: Type::bool_(), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "inc".to_string(), is_async: false, is_reactive: true,
@@ -11325,12 +11325,12 @@ mod tests {
         let consumer = CellDef {
             is_persistent: true,
             name: "consumer".to_string(), type_params: vec![],
-            parameters: vec![("input".to_string(), Type::Custom("Int".to_string()))],
-            output_type: Some(OutputType::Named("out".to_string(), Box::new(OutputType::Single(Type::Custom("Int".to_string()))))),
+            parameters: vec![("input".to_string(), Type::int())],
+            output_type: Some(OutputType::Named("out".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "out".to_string(), ty: Type::Custom("Int".to_string()), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
-                StructField { name: "input".to_string(), ty: Type::Custom("Int".to_string()), default: None, visibility: Visibility::Private },
-                StructField { name: "fired".to_string(), ty: Type::Custom("Bool".to_string()), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
+                StructField { name: "out".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "input".to_string(), ty: Type::int(), default: None, visibility: Visibility::Private },
+                StructField { name: "fired".to_string(), ty: Type::bool_(), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "forward".to_string(), is_async: false, is_reactive: true,
@@ -11394,9 +11394,9 @@ mod tests {
             name: "reader".to_string(),
             type_params: vec![],
             parameters: vec![],
-            output_type: Some(OutputType::Named("captured".to_string(), Box::new(OutputType::Single(Type::Custom("Char".to_string()))))),
+            output_type: Some(OutputType::Named("captured".to_string(), Box::new(OutputType::Single(Type::char_())))),
             fields: vec![
-                StructField { name: "captured".to_string(), ty: Type::Custom("Char".to_string()), default: Some(Expr::Char('\0')), visibility: Visibility::Private },
+                StructField { name: "captured".to_string(), ty: Type::char_(), default: Some(Expr::Char('\0')), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "capture".to_string(), is_async: false, is_reactive: true,
@@ -11421,7 +11421,7 @@ mod tests {
             definitions: vec![],
             internal_triggers: vec![TriggerDeclaration {
                 name: "raw".to_string(),
-                ty: Type::Custom("Char".to_string()),
+                ty: Type::char_(),
                 address: LinkRef::Stdin,
                 bit_range: None,
                 stages: vec![],
@@ -11459,18 +11459,18 @@ mod tests {
             name: "Console".to_string(), type_params: vec![],
             parameters: vec![],
             output_type: Some(OutputType::Tuple(vec![
-                OutputType::Named("line".to_string(), Box::new(OutputType::Single(Type::Custom("String".to_string())))),
-                OutputType::Named("line_id".to_string(), Box::new(OutputType::Single(Type::Custom("Int".to_string())))),
+                OutputType::Named("line".to_string(), Box::new(OutputType::Single(Type::string()))),
+                OutputType::Named("line_id".to_string(), Box::new(OutputType::Single(Type::int()))),
             ])),
             fields: vec![
-                StructField { name: "buffer".to_string(), ty: Type::Custom("String".to_string()), default: Some(Expr::String(String::new())), visibility: Visibility::Private },
-                StructField { name: "prev_key".to_string(), ty: Type::Custom("Char".to_string()), default: Some(Expr::Char('\0')), visibility: Visibility::Private },
-                StructField { name: "seq".to_string(), ty: Type::Custom("Int".to_string()), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "buffer".to_string(), ty: Type::string(), default: Some(Expr::String(String::new())), visibility: Visibility::Private },
+                StructField { name: "prev_key".to_string(), ty: Type::char_(), default: Some(Expr::Char('\0')), visibility: Visibility::Private },
+                StructField { name: "seq".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
                 // line and line_id are output ports — registered as fields with defaults
-                StructField { name: "line".to_string(), ty: Type::Custom("String".to_string()), default: Some(Expr::String(String::new())), visibility: Visibility::Private },
-                StructField { name: "line_id".to_string(), ty: Type::Custom("Int".to_string()), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "line".to_string(), ty: Type::string(), default: Some(Expr::String(String::new())), visibility: Visibility::Private },
+                StructField { name: "line_id".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
                 // raw is the trigger input — managed manually in this test
-                StructField { name: "raw".to_string(), ty: Type::Custom("Char".to_string()), default: Some(Expr::Char('\0')), visibility: Visibility::Private },
+                StructField { name: "raw".to_string(), ty: Type::char_(), default: Some(Expr::Char('\0')), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "process".to_string(), is_async: false, is_reactive: true,
@@ -11523,7 +11523,7 @@ mod tests {
                                 lhs: Expr::Identifier("buffer".to_string()),
                                 expr: Expr::Add(
                                     Box::new(Expr::Identifier("buffer".to_string())),
-                                    Box::new(Expr::Cast(Box::new(Expr::Identifier("raw".to_string())), Type::Custom("String".to_string()))),
+                                    Box::new(Expr::Cast(Box::new(Expr::Identifier("raw".to_string())), Type::string())),
                                 ),
                                 timeout: None, modifiers: vec![],
                             },
@@ -11689,7 +11689,7 @@ mod tests {
     #[test]
     fn test_eval_cast_int_to_ptr() {
         let mut i = Interpreter::new();
-        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Custom("Int".to_string())]);
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
         let expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Ptr(0x40011000), "Int -> Ptr should wrap address");
@@ -11698,9 +11698,9 @@ mod tests {
     #[test]
     fn test_eval_cast_ptr_to_int() {
         let mut i = Interpreter::new();
-        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Custom("Int".to_string())]);
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
         let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011004)), ptr_ty);
-        let cast_back = Expr::Cast(ptr_expr.into(), Type::Custom("Int".to_string()));
+        let cast_back = Expr::Cast(ptr_expr.into(), Type::int());
         let result = i.eval_expr(&cast_back).unwrap();
         assert_eq!(result, Value::Int(0x40011004), "Ptr -> Int should extract address");
     }
@@ -11713,7 +11713,7 @@ mod tests {
 
     #[test]
     fn test_is_valid_ffi_return_ptr() {
-        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Custom("Int".to_string())]);
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
         assert!(Interpreter::is_valid_ffi_return(&Value::Ptr(0x1000), &ptr_ty));
         assert!(!Interpreter::is_valid_ffi_return(&Value::Int(0), &ptr_ty));
     }
@@ -11723,7 +11723,7 @@ mod tests {
     #[test]
     fn test_volatile_load_returns_zero() {
         let mut i = Interpreter::new();
-        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Custom("Int".to_string())]);
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
         let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
         let vl = Expr::IntrinsicCall {
             intrinsic: Intrinsic::VolatileLoad,
@@ -11747,7 +11747,7 @@ mod tests {
     #[test]
     fn test_volatile_store_returns_true() {
         let mut i = Interpreter::new();
-        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::Custom("Int".to_string())]);
+        let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
         let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
         let vs = Expr::IntrinsicCall {
             intrinsic: Intrinsic::VolatileStore,
@@ -13283,7 +13283,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IsType(
             Box::new(Expr::Integer(42)),
-            crate::ast::IsTarget::Type(Type::Custom("Int".to_string())),
+            crate::ast::IsTarget::Type(Type::int()),
         );
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(true), "42 is Int should be true");
@@ -13294,7 +13294,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IsType(
             Box::new(Expr::String("hello".to_string())),
-            crate::ast::IsTarget::Type(Type::Custom("Int".to_string())),
+            crate::ast::IsTarget::Type(Type::int()),
         );
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(false), "string is Int should be false");
@@ -13428,7 +13428,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_to_string() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::Custom("String".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::string());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::String("42".to_string()), "Int -> String should format as decimal");
     }
@@ -13436,7 +13436,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_string_to_int() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::String("42".to_string())), Type::Custom("Int".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::String("42".to_string())), Type::int());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(42), "String -> Int should parse decimal");
     }
@@ -13444,7 +13444,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_char_to_string() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Char('A')), Type::Custom("String".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Char('A')), Type::string());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::String("A".to_string()), "Char -> String should be single-char");
     }
@@ -13452,7 +13452,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_string_to_char() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::String("hello".to_string())), Type::Custom("Char".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::String("hello".to_string())), Type::char_());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Char('h'), "String -> Char should take first char");
     }
@@ -13460,7 +13460,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_to_float() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::Custom("Float".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::float());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Float(42.0), "Int -> Float should be exact");
     }
@@ -13468,7 +13468,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_float_to_int() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Float(3.14)), Type::Custom("Int".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Float(3.14)), Type::int());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(3), "Float -> Int should truncate");
     }
@@ -13476,7 +13476,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_to_char() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(65)), Type::Custom("Char".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Integer(65)), Type::char_());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Char('A'), "Int 65 -> Char should be 'A'");
     }
@@ -13484,7 +13484,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_char_to_int() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Char('A')), Type::Custom("Int".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Char('A')), Type::int());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(65), "Char 'A' -> Int should be 65");
     }
@@ -13492,7 +13492,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_bool_to_int() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Bool(true)), Type::Custom("Int".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Bool(true)), Type::int());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Int(1), "Bool true -> Int should be 1");
     }
@@ -13500,7 +13500,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_to_bool() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::Custom("Bool".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::bool_());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(true), "Int 42 -> Bool should be true");
     }
@@ -13508,7 +13508,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_zero_to_bool() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(0)), Type::Custom("Bool".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::Integer(0)), Type::bool_());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bool(false), "Int 0 -> Bool should be false");
     }
@@ -13516,7 +13516,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_unsupported() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::List(vec![])), Type::Custom("Int".to_string()));
+        let expr = Expr::Cast(Box::new(Expr::List(vec![])), Type::int());
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "List -> Int should be an error");
     }
@@ -13525,42 +13525,42 @@ mod kani_full_tests {
 
     #[test]
     fn test_is_valid_ffi_return_string_valid() {
-        assert!(Interpreter::is_valid_ffi_return(&Value::String("hello".into()), &Type::Custom("String".to_string())));
-        assert!(Interpreter::is_valid_ffi_return(&Value::String("".into()), &Type::Custom("String".to_string())));
+        assert!(Interpreter::is_valid_ffi_return(&Value::String("hello".into()), &Type::string()));
+        assert!(Interpreter::is_valid_ffi_return(&Value::String("".into()), &Type::string()));
     }
 
     #[test]
     fn test_is_valid_ffi_return_int_valid() {
-        assert!(Interpreter::is_valid_ffi_return(&Value::Int(42), &Type::Custom("Int".to_string())));
-        assert!(Interpreter::is_valid_ffi_return(&Value::Int(0), &Type::Custom("Int".to_string())));
-        assert!(Interpreter::is_valid_ffi_return(&Value::Int(-1), &Type::Custom("Int".to_string())));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Int(42), &Type::int()));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Int(0), &Type::int()));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Int(-1), &Type::int()));
     }
 
     #[test]
     fn test_is_valid_ffi_return_float_valid() {
-        assert!(Interpreter::is_valid_ffi_return(&Value::Float(3.14), &Type::Custom("Float".to_string())));
-        assert!(Interpreter::is_valid_ffi_return(&Value::Float(0.0), &Type::Custom("Float".to_string())));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Float(3.14), &Type::float()));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Float(0.0), &Type::float()));
     }
 
     #[test]
     fn test_is_valid_ffi_return_float_nan_invalid() {
-        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::NAN), &Type::Custom("Float".to_string())));
-        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::INFINITY), &Type::Custom("Float".to_string())));
-        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::NEG_INFINITY), &Type::Custom("Float".to_string())));
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::NAN), &Type::float()));
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::INFINITY), &Type::float()));
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(f64::NEG_INFINITY), &Type::float()));
     }
 
     #[test]
     fn test_is_valid_ffi_return_bool_valid() {
-        assert!(Interpreter::is_valid_ffi_return(&Value::Bool(true), &Type::Custom("Bool".to_string())));
-        assert!(Interpreter::is_valid_ffi_return(&Value::Bool(false), &Type::Custom("Bool".to_string())));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Bool(true), &Type::bool_()));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Bool(false), &Type::bool_()));
     }
 
     #[test]
     fn test_is_valid_ffi_return_type_mismatch() {
         // An Int value is not valid when String is expected
-        assert!(!Interpreter::is_valid_ffi_return(&Value::Int(42), &Type::Custom("String".to_string())));
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Int(42), &Type::string()));
         // A float is not valid when Int is expected
-        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(1.0), &Type::Custom("Int".to_string())));
+        assert!(!Interpreter::is_valid_ffi_return(&Value::Float(1.0), &Type::int()));
     }
 
     #[test]
@@ -13570,8 +13570,8 @@ mod kani_full_tests {
             name: "test_pipe_ok".into(), location: "test".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("Int".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+            success_output: vec![("result".into(), Type::int())],
+            result_type: ResultType::Projection(vec![Type::int()]),
             error_type_name: "".into(), error_fields: vec![],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
@@ -13600,8 +13600,8 @@ mod kani_full_tests {
             name: "test_pipe_err".into(), location: "test".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("Float".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Float".to_string())]),
+            success_output: vec![("result".into(), Type::float())],
+            result_type: ResultType::Projection(vec![Type::float()]),
             error_type_name: "".into(), error_fields: vec![],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
@@ -13629,8 +13629,8 @@ mod kani_full_tests {
             name: "test_pipe_f".into(), location: "test".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("Float".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Float".to_string())]),
+            success_output: vec![("result".into(), Type::float())],
+            result_type: ResultType::Projection(vec![Type::float()]),
             error_type_name: "".into(), error_fields: vec![],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
@@ -13661,8 +13661,8 @@ mod kani_full_tests {
             name: "test_pipe_null_str".into(), location: "test".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("String".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("String".to_string())]),
+            success_output: vec![("result".into(), Type::string())],
+            result_type: ResultType::Projection(vec![Type::string()]),
             error_type_name: "".into(), error_fields: vec![],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
@@ -13780,7 +13780,7 @@ mod kani_full_tests {
         // let x: Int <: [0..100] = 50;
         let stmt = Statement::Let {
             name: "x".to_string(),
-            ty: Some(Type::Custom("Int".to_string())),
+            ty: Some(Type::int()),
             expr: Some(Expr::Integer(50)),
             address: None,
             address_expr: None,
@@ -13808,7 +13808,7 @@ mod kani_full_tests {
         // let x: Int <: [0..100] = 200; — should fail
         let stmt = Statement::Let {
             name: "x".to_string(),
-            ty: Some(Type::Custom("Int".to_string())),
+            ty: Some(Type::int()),
             expr: Some(Expr::Integer(200)),
             address: None,
             address_expr: None,
@@ -13874,7 +13874,7 @@ mod kani_full_tests {
         interp.definitions.insert("add_one".to_string(), Definition {
             name: "add_one".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
+            parameters: vec![("x".to_string(), Type::int())],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
@@ -13894,7 +13894,7 @@ mod kani_full_tests {
         interp.definitions.insert("double".to_string(), Definition {
             name: "double".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
+            parameters: vec![("x".to_string(), Type::int())],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
@@ -13942,7 +13942,7 @@ mod kani_full_tests {
         interp.definitions.insert("add_one".to_string(), Definition {
             name: "add_one".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
+            parameters: vec![("x".to_string(), Type::int())],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
@@ -13962,7 +13962,7 @@ mod kani_full_tests {
         interp.definitions.insert("double".to_string(), Definition {
             name: "double".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
+            parameters: vec![("x".to_string(), Type::int())],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
@@ -14004,7 +14004,7 @@ mod kani_full_tests {
         interp.definitions.insert("sum".to_string(), Definition {
             name: "sum".to_string(),
             type_params: vec![],
-            parameters: vec![("a".to_string(), Type::Custom("Int".to_string())), ("b".to_string(), Type::Custom("Int".to_string()))],
+            parameters: vec![("a".to_string(), Type::int()), ("b".to_string(), Type::int())],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
@@ -14052,15 +14052,15 @@ mod kani_full_tests {
 
         let mut interp = Interpreter::new();
         for (name, params, body_expr) in vec![
-            ("square", vec![("x", Type::Custom("Int".to_string()))], Expr::Mul(
+            ("square", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Identifier("x".to_string())),
             )),
-            ("add_one", vec![("x", Type::Custom("Int".to_string()))], Expr::Add(
+            ("add_one", vec![("x", Type::int())], Expr::Add(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Integer(1)),
             )),
-            ("double", vec![("x", Type::Custom("Int".to_string()))], Expr::Mul(
+            ("double", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Integer(2)),
             )),
@@ -14109,7 +14109,7 @@ mod kani_full_tests {
         interp.definitions.insert("add_one".to_string(), Definition {
             name: "add_one".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
+            parameters: vec![("x".to_string(), Type::int())],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
@@ -14167,7 +14167,7 @@ mod kani_full_tests {
         interp.definitions.insert("add_one".to_string(), Definition {
             name: "add_one".to_string(),
             type_params: vec![],
-            parameters: vec![("x".to_string(), Type::Custom("Int".to_string()))],
+            parameters: vec![("x".to_string(), Type::int())],
             outputs: vec![],
             output_type: None,
             output_names: vec![],
@@ -14215,15 +14215,15 @@ mod kani_full_tests {
 
         let mut interp = Interpreter::new();
         for (name, params, body_expr) in vec![
-            ("square", vec![("x", Type::Custom("Int".to_string()))], Expr::Mul(
+            ("square", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Identifier("x".to_string())),
             )),
-            ("add_one", vec![("x", Type::Custom("Int".to_string()))], Expr::Add(
+            ("add_one", vec![("x", Type::int())], Expr::Add(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Integer(1)),
             )),
-            ("double", vec![("x", Type::Custom("Int".to_string()))], Expr::Mul(
+            ("double", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Integer(2)),
             )),
@@ -14271,15 +14271,15 @@ mod kani_full_tests {
 
         let mut interp = Interpreter::new();
         for (name, params, body_expr) in vec![
-            ("square", vec![("x", Type::Custom("Int".to_string()))], Expr::Mul(
+            ("square", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Identifier("x".to_string())),
             )),
-            ("add_one", vec![("x", Type::Custom("Int".to_string()))], Expr::Add(
+            ("add_one", vec![("x", Type::int())], Expr::Add(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Integer(1)),
             )),
-            ("double", vec![("x", Type::Custom("Int".to_string()))], Expr::Mul(
+            ("double", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Integer(2)),
             )),
@@ -14332,9 +14332,9 @@ mod kani_full_tests {
         i.definitions.insert("add".to_string(), Definition {
             name: "add".into(),
             type_params: vec![],
-            parameters: vec![("x".into(), Type::Custom("Int".to_string())), ("y".into(), Type::Custom("Int".to_string()))],
-            outputs: vec![Type::Custom("Int".to_string())],
-            output_type: Some(OutputType::Single(Box::new(Type::Custom("Int".to_string())))),
+            parameters: vec![("x".into(), Type::int()), ("y".into(), Type::int())],
+            outputs: vec![Type::int()],
+            output_type: Some(OutputType::Single(Box::new(Type::int()))),
             output_names: vec![],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body: vec![],
@@ -14356,9 +14356,9 @@ mod kani_full_tests {
         i.definitions.insert("add".to_string(), Definition {
             name: "add".into(),
             type_params: vec![],
-            parameters: vec![("x".into(), Type::Custom("Int".to_string())), ("y".into(), Type::Custom("Int".to_string()))],
-            outputs: vec![Type::Custom("Int".to_string())],
-            output_type: Some(OutputType::Single(Box::new(Type::Custom("Int".to_string())))),
+            parameters: vec![("x".into(), Type::int()), ("y".into(), Type::int())],
+            outputs: vec![Type::int()],
+            output_type: Some(OutputType::Single(Box::new(Type::int()))),
             output_names: vec![],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body: vec![],
@@ -14381,8 +14381,8 @@ mod kani_full_tests {
             name: "pure_fn".into(),
             type_params: vec![],
             parameters: vec![],
-            outputs: vec![Type::Custom("Int".to_string())],
-            output_type: Some(OutputType::Single(Box::new(Type::Custom("Int".to_string())))),
+            outputs: vec![Type::int()],
+            output_type: Some(OutputType::Single(Box::new(Type::int()))),
             output_names: vec![],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body: vec![],
@@ -14404,8 +14404,8 @@ mod kani_full_tests {
         i.inop_decls.insert("write_buf".to_string(), InopDeclaration {
             name: "write_buf".into(),
             type_params: vec![],
-            params: vec![("buf".into(), Type::Custom("Int".to_string()))],
-            outputs: vec![Type::Custom("Int".to_string())],
+            params: vec![("buf".into(), Type::int())],
+            outputs: vec![Type::int()],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: vec![],
             llvm_body_spans: vec![],

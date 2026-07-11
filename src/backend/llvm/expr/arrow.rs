@@ -67,7 +67,7 @@ pub fn emit_arrow_push(
             let nt = format!("%rbnt{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = and i64 {}, {}", indent, nt, tn, mk).ok();
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, nt, tg).ok();
-            return TypedRegister { name: elem_boxed.to_string(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: elem_boxed.to_string(), ty: Type::int() };
         }
     }
     // 2026-07-09: Unwrap AddrOf to emit the inner expression (value load).
@@ -104,7 +104,7 @@ pub fn emit_arrow_push(
                     writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, result.name, slot).ok();
                 }
             }
-            return TypedRegister { name: result.name.clone(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: result.name.clone(), ty: Type::int() };
         }
         // Custom push: emit call @fn_name(i64, i64) -> i64
         writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})", indent, v, fn_name, list_boxed, elem_boxed).ok();
@@ -119,7 +119,7 @@ pub fn emit_arrow_push(
                 writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, v, slot).ok();
             }
         }
-        return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+        return TypedRegister { name: v.to_string(), ty: Type::int() };
     }
     let prepend = matches!(push_strategy, Some(crate::type_universe::InsertStrategy::Prepend));
     // Unbox list header: inttoptr i64 to ptr
@@ -182,7 +182,7 @@ pub fn emit_arrow_push(
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base_fast, buf_i64).ok();
             writeln!(out, "{}store i64 {}, i64* {}, align 8, !tbaa !{}", indent, base_fast, ap, tn).ok();
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, buf_i64).ok();
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::int() };
         }
     }
     }
@@ -277,7 +277,7 @@ pub fn emit_arrow_push(
     }
     // Return new list handle (ptrtoint of new buffer)
     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, new_buf).ok();
-    return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+    return TypedRegister { name: v.to_string(), ty: Type::int() };
 }
 
 // ── emit_arrow_pop ──────────────────────────────────────────────
@@ -308,7 +308,7 @@ pub fn emit_arrow_pop(
             // Ring buffer handle is immutable (mutates in-place in heap).
             // The handle in %State does NOT change — no store or backedge
             // tracking needed. The phi will pass through the same handle.
-            return TypedRegister { name: result.name.clone(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: result.name.clone(), ty: Type::int() };
         }
         // Custom extract: call @fn_name(i64) -> { i64, i64 }
         let value_target = match target.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
@@ -335,7 +335,7 @@ pub fn emit_arrow_pop(
             }
         }
         let popped = v.to_string();
-        return TypedRegister { name: popped, ty: Type::Custom("Int".to_string()) };
+        return TypedRegister { name: popped, ty: Type::int() };
     }
     // Determine pop index: Shift strategy removes from front (0), otherwise end (len-1)
     let should_shift = matches!(pop_strategy, Some(crate::type_universe::ExtractStrategy::Shift));
@@ -431,7 +431,7 @@ pub fn emit_arrow_pop(
             writeln!(out, "{}store i64 {}, i64* {}, align 8", indent, base, slot).ok();
         }
     }
-    return TypedRegister { name: popped.to_string(), ty: Type::Custom("Int".to_string()) };
+    return TypedRegister { name: popped.to_string(), ty: Type::int() };
 }
 
 // ── emit_arrow_discard ──────────────────────────────────────────
@@ -496,7 +496,7 @@ pub fn emit_arrow_discard(
             writeln!(out, "{}{} = add i64 0, 0", indent, zv).ok();
             let po = format!("%rbpo{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
             writeln!(out, "{}{} = select i1 {}, i64 {}, i64 {}", indent, po, rem, zv, rv).ok();
-            return TypedRegister { name: po.to_string(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: po.to_string(), ty: Type::int() };
         }
     }
     // 2026-07-01: Check for custom discard strategy (e.g., ring_pop for RingBuffer).
@@ -511,7 +511,7 @@ pub fn emit_arrow_discard(
             };
             let _result = backend.emit_expr(out, &call_expr, indent);
             // Discard: result is not needed, ring buffer handle is unchanged.
-            return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: v.to_string(), ty: Type::int() };
         }
     }
     let value_target = match target.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
@@ -595,7 +595,7 @@ pub fn emit_arrow_discard(
         }
     }
     writeln!(out, "{}{} = add i64 0, {} ; discard", indent, v, base).ok();
-    return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+    return TypedRegister { name: v.to_string(), ty: Type::int() };
 }
 
 // ── emit_arrow_transfer ─────────────────────────────────────────
@@ -710,7 +710,7 @@ pub fn emit_arrow_transfer(
         }
     }
     writeln!(out, "{}{} = add i64 0, {} ; transfer", indent, v, dbase).ok();
-    return TypedRegister { name: v.to_string(), ty: Type::Custom("Int".to_string()) };
+    return TypedRegister { name: v.to_string(), ty: Type::int() };
 }
 
 // ── emit_arrow_peek ─────────────────────────────────────────────
@@ -736,7 +736,7 @@ pub fn emit_arrow_peek(
                 args: vec![target.as_ref().clone()],
             };
             let result = backend.emit_expr(out, &call_expr, indent);
-            return TypedRegister { name: result.name.clone(), ty: Type::Custom("Int".to_string()) };
+            return TypedRegister { name: result.name.clone(), ty: Type::int() };
         }
     }
     let value_target = match target.as_ref() { Expr::AddrOf(inner) => inner.as_ref(), other => other };
@@ -771,7 +771,7 @@ pub fn emit_arrow_peek(
     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, ep, cp, pos).ok();
     let ev = format!("%lev{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, ev, ep).ok();
-    return TypedRegister { name: ev.to_string(), ty: Type::Custom("Int".to_string()) };
+    return TypedRegister { name: ev.to_string(), ty: Type::int() };
 }
 
 // ── emit_arrow_copy ─────────────────────────────────────────────
@@ -841,5 +841,5 @@ pub fn emit_arrow_copy(
     }
     let ptr_val = format!("%cnpn{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr_val, new_hp).ok();
-    return TypedRegister { name: ptr_val.to_string(), ty: Type::Custom("Int".to_string()) };
+    return TypedRegister { name: ptr_val.to_string(), ty: Type::int() };
 }

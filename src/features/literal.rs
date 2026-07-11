@@ -39,16 +39,16 @@ pub enum LiteralExpr {
 impl ExprTypecheck for LiteralExpr {
     fn typecheck(&self, ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> {
         match self {
-            LiteralExpr::Integer(_) => Ok(Type::Custom("Int".to_string())),
+            LiteralExpr::Integer(_) => Ok(Type::int()),
             LiteralExpr::Float(_) => {
                 if ctx.target == crate::typechecker::CompilationTarget::Verilog {
                     // Verilog doesn't support native floats
                 }
-                Ok(Type::Custom("Float".to_string()))
+                Ok(Type::float())
             }
-            LiteralExpr::String(_) => Ok(Type::Custom("String".to_string())),
-            LiteralExpr::Char(_) => Ok(Type::Custom("Char".to_string())),
-            LiteralExpr::Bool(_) => Ok(Type::Custom("Bool".to_string())),
+            LiteralExpr::String(_) => Ok(Type::string()),
+            LiteralExpr::Char(_) => Ok(Type::char_()),
+            LiteralExpr::Bool(_) => Ok(Type::bool_()),
             LiteralExpr::Term => Ok(Type::Void),
         }
     }
@@ -91,7 +91,7 @@ impl ExprCodegenLLVM for LiteralExpr {
         match self {
             LiteralExpr::Integer(n) => {
                 writeln!(out, "{indent}{v} = add i64 0, {n}", indent = "", v = v, n = n).ok();
-                crate::backend::llvm::TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+                crate::backend::llvm::TypedRegister { name: v, ty: Type::int() }
             }
             LiteralExpr::Bool(b) => {
                 if *b {
@@ -99,17 +99,17 @@ impl ExprCodegenLLVM for LiteralExpr {
                 } else {
                     writeln!(out, "{indent}{v} = xor i1 true, true", indent = "", v = v).ok();
                 }
-                crate::backend::llvm::TypedRegister { name: v, ty: Type::Custom("Bool".to_string()) }
+                crate::backend::llvm::TypedRegister { name: v, ty: Type::bool_() }
             }
             // 2026-06-20: Return native float register, matching Expr::Float (emit_expr.rs:22-28).
-            // Previously returned the i64-boxed value with Type::Custom("Float".to_string()), which caused adapt_to_i64
+            // Previously returned the i64-boxed value with Type::float(), which caused adapt_to_i64
             // to bitcast an i64 register as float. See docs/plans/2026-06-20-float-boxing-dual-path-plan.md
             LiteralExpr::Float(f) => {
                 let bits = crate::backend::llvm::float_to_llvm_hex(*f);
                 let fl = format!("%ff{}", ctx.fun.txn_counter); ctx.fun.txn_counter += 1;
                 writeln!(out, "{indent}{fl} = bitcast i32 {bits} to float", indent = "", fl = fl, bits = bits).ok();
                 ctx.fun.reg_float_cache.insert(fl.clone(), fl.clone());
-                crate::backend::llvm::TypedRegister { name: fl, ty: Type::Custom("Float".to_string()) }
+                crate::backend::llvm::TypedRegister { name: fl, ty: Type::float() }
             }
             LiteralExpr::String(s) => {
                 let si = ctx.ctx.string_constants.iter().position(|x| x == s).unwrap_or(0);
@@ -118,20 +118,20 @@ impl ExprCodegenLLVM for LiteralExpr {
                 writeln!(out, "{indent}{p} = getelementptr inbounds [{len} x i8], [{len} x i8]* {g}, i64 0, i64 0",
                     indent = "", p = p, len = s.len() + 1, g = g).ok();
                 writeln!(out, "{indent}{v} = ptrtoint i8* {p} to i64", indent = "", v = v, p = p).ok();
-                // v is already i64 (boxed). Return Type::Custom("Int".to_string()) so adapt_to_i64
+                // v is already i64 (boxed). Return Type::int() so adapt_to_i64
                 // doesn't try to ptrtoint an already-boxed value.
-                crate::backend::llvm::TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+                crate::backend::llvm::TypedRegister { name: v, ty: Type::int() }
             }
             LiteralExpr::Char(c) => {
                 let ci = format!("%cc{}", ctx.fun.txn_counter); ctx.fun.txn_counter += 1;
                 writeln!(out, "{indent}{ci} = add i32 0, {cval}", indent = "", ci = ci, cval = *c as i32).ok();
                 writeln!(out, "{indent}{v} = zext i32 {ci} to i64", indent = "", v = v, ci = ci).ok();
-                // v is i64 (boxed Char). Type::Custom("Int".to_string()) so adapt_to_i64 passes through.
-                crate::backend::llvm::TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+                // v is i64 (boxed Char). Type::int() so adapt_to_i64 passes through.
+                crate::backend::llvm::TypedRegister { name: v, ty: Type::int() }
             }
             LiteralExpr::Term => {
                 writeln!(out, "{indent}{v} = add i64 0, 0", indent = "", v = v).ok();
-                crate::backend::llvm::TypedRegister { name: v, ty: Type::Custom("Int".to_string()) }
+                crate::backend::llvm::TypedRegister { name: v, ty: Type::int() }
             }
         }
     }

@@ -13,7 +13,7 @@ pub struct DbvlTableExpr {
     pub schema_name: Option<String>,
 }
 
-impl ExprTypecheck for DbvlTableExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::Custom("Int".to_string())) } }
+impl ExprTypecheck for DbvlTableExpr { fn typecheck(&self, _: &mut TypeChecker, _: &ExprDispatch) -> Result<Type, crate::errors::TypeError> { Ok(Type::int()) } }
 
 impl ExprEval for DbvlTableExpr {
     fn evaluate(&self, _ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {

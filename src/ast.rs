@@ -170,6 +170,37 @@ pub enum Type {
 // and Bits(u64) width directly. The Interpretation enum is removed —
 // the TypeUniverse carries type semantics.
 impl Type {
+    /// Factory: Int type (i64, boxed).
+    pub fn int() -> Type { Type::Custom("Int".to_string()) }
+    /// Factory: Float type (f32, native).
+    pub fn float() -> Type { Type::Custom("Float".to_string()) }
+    /// Factory: Float64 type (f64, native).
+    pub fn float64() -> Type { Type::Custom("Float64".to_string()) }
+    /// Factory: Bool type (i1, boxed).
+    pub fn bool_() -> Type { Type::Custom("Bool".to_string()) }
+    /// Factory: String type (i8*, boxed → %String*, native after Phase 3).
+    pub fn string() -> Type { Type::Custom("String".to_string()) }
+    /// Factory: Char type (i32, boxed).
+    pub fn char_() -> Type { Type::Custom("Char".to_string()) }
+    /// Factory: Data type (i8*, opaque).
+    pub fn data() -> Type { Type::Custom("Data".to_string()) }
+    /// Factory: Int8 type (i8, boxed).
+    pub fn int8() -> Type { Type::Custom("Int8".to_string()) }
+    /// Factory: Int16 type (i16, boxed).
+    pub fn int16() -> Type { Type::Custom("Int16".to_string()) }
+    /// Factory: Int32 type (i32, boxed).
+    pub fn int32() -> Type { Type::Custom("Int32".to_string()) }
+    /// Factory: UInt8 type (u8, boxed).
+    pub fn uint8() -> Type { Type::Custom("UInt8".to_string()) }
+    /// Factory: UInt16 type (u16, boxed).
+    pub fn uint16() -> Type { Type::Custom("UInt16".to_string()) }
+    /// Factory: UInt32 type (u32, boxed).
+    pub fn uint32() -> Type { Type::Custom("UInt32".to_string()) }
+    /// Factory: UInt type (u64, boxed).
+    pub fn uint() -> Type { Type::Custom("UInt".to_string()) }
+    /// Factory: StringBuilder type.
+    pub fn string_builder() -> Type { Type::Custom("StringBuilder".to_string()) }
+
     /// Bridge table mapping known type names to their bit width.
     /// Temporary until NormalizeTypes pass resolves all Custom types to Bits.
     pub fn bit_width_for_name(name: &str) -> Option<u64> {
@@ -274,7 +305,7 @@ impl Type {
             Type::Applied(name, mut args) if name == "Ptr" && args.len() == 1 => {
                 let inner = args.remove(0);
                 match inner {
-                    Type::Constrained(inner_ty, br) if *inner_ty == Type::Custom("Data".to_string()) => {
+                    Type::Constrained(inner_ty, br) if *inner_ty == Type::data() => {
                         let bits = match br {
                             BitRange::Range(start, end) => end - start + 1,
                             BitRange::Single(_) => 1,
@@ -3133,7 +3164,7 @@ impl Program {
         // Create state declaration: let __booted_N: Bool = false;
         let state_decl = TopLevel::StateDecl(StateDecl {
             name: booted_name.clone(),
-            ty: Type::Custom("Int".to_string()),
+            ty: Type::int(),
             expr: Some(Expr::Integer(0)),
             address: None,
             bit_range: None,
@@ -4212,7 +4243,7 @@ mod tests {
     #[test]
     fn test_normalize_layout_ptr_bits_range() {
         let ty = Type::Applied("Ptr".into(), vec![
-            Type::Constrained(Box::new(Type::Custom("Data".to_string())), BitRange::Range(0, 63))
+            Type::Constrained(Box::new(Type::data()), BitRange::Range(0, 63))
         ]);
         let result = ty.normalize_layout_ptr();
         assert_eq!(result, Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 }));
@@ -4221,7 +4252,7 @@ mod tests {
     #[test]
     fn test_normalize_layout_ptr_bits_any() {
         let ty = Type::Applied("Ptr".into(), vec![
-            Type::Constrained(Box::new(Type::Custom("Data".to_string())), BitRange::Any(32))
+            Type::Constrained(Box::new(Type::data()), BitRange::Any(32))
         ]);
         let result = ty.normalize_layout_ptr();
         assert_eq!(result, Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }));
@@ -4230,9 +4261,9 @@ mod tests {
     #[test]
     fn test_normalize_layout_ptr_typed_stays_applied() {
         // Ptr<Int> should stay as Applied("Ptr", [Int])
-        let ty = Type::Applied("Ptr".into(), vec![Type::Custom("Int".to_string())]);
+        let ty = Type::Applied("Ptr".into(), vec![Type::int()]);
         let result = ty.normalize_layout_ptr();
-        assert_eq!(result, Type::Applied("Ptr".into(), vec![Type::Custom("Int".to_string())]));
+        assert_eq!(result, Type::Applied("Ptr".into(), vec![Type::int()]));
     }
 
     #[test]
@@ -4246,14 +4277,14 @@ mod tests {
     #[test]
     fn test_normalize_layout_ptr_in_union() {
         let ty = Type::Union(vec![
-            Type::Custom("Int".to_string()),
+            Type::int(),
             Type::Applied("Ptr".into(), vec![
-                Type::Constrained(Box::new(Type::Custom("Data".to_string())), BitRange::Range(0, 31))
+                Type::Constrained(Box::new(Type::data()), BitRange::Range(0, 31))
             ]),
         ]);
         let result = ty.normalize_layout_ptr();
         assert_eq!(result, Type::Union(vec![
-            Type::Custom("Int".to_string()),
+            Type::int(),
             Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 }),
         ]));
     }

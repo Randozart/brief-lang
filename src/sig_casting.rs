@@ -96,23 +96,23 @@ mod tests {
     #[test]
     fn test_valid_single_projection() {
         // defn produces Bool, sig projects Bool
-        let defn_output = OutputType::Single(Type::Custom("Bool".to_string()));
-        assert!(is_valid_projection(&[Type::Custom("Bool".to_string())], &defn_output));
+        let defn_output = OutputType::Single(Type::bool_());
+        assert!(is_valid_projection(&[Type::bool_()], &defn_output));
     }
 
     #[test]
     fn test_valid_union_projection() {
         // defn produces Bool | String, sig projects Bool
-        let defn_output = OutputType::Union(vec![OutputType::Single(Type::Custom("Bool".to_string())), OutputType::Single(Type::Custom("String".to_string()))]);
-        assert!(is_valid_projection(&[Type::Custom("Bool".to_string())], &defn_output));
+        let defn_output = OutputType::Union(vec![OutputType::Single(Type::bool_()), OutputType::Single(Type::string())]);
+        assert!(is_valid_projection(&[Type::bool_()], &defn_output));
     }
 
     #[test]
     fn test_valid_tuple_projection() {
         // defn produces Bool, String, Int, sig projects Bool, String
-        let defn_output = OutputType::Tuple(vec![OutputType::Single(Type::Custom("Bool".to_string())), OutputType::Single(Type::Custom("String".to_string())), OutputType::Single(Type::Custom("Int".to_string()))]);
+        let defn_output = OutputType::Tuple(vec![OutputType::Single(Type::bool_()), OutputType::Single(Type::string()), OutputType::Single(Type::int())]);
         assert!(is_valid_projection(
-            &[Type::Custom("Bool".to_string()), Type::Custom("String".to_string())],
+            &[Type::bool_(), Type::string()],
             &defn_output
         ));
     }
@@ -120,16 +120,16 @@ mod tests {
     #[test]
     fn test_invalid_projection_not_in_defn() {
         // defn produces Bool | String, sig projects Int (invalid)
-        let defn_output = OutputType::Union(vec![OutputType::Single(Type::Custom("Bool".to_string())), OutputType::Single(Type::Custom("String".to_string()))]);
-        assert!(!is_valid_projection(&[Type::Custom("Int".to_string())], &defn_output));
+        let defn_output = OutputType::Union(vec![OutputType::Single(Type::bool_()), OutputType::Single(Type::string())]);
+        assert!(!is_valid_projection(&[Type::int()], &defn_output));
     }
 
     #[test]
     fn test_invalid_tuple_projection_out_of_order() {
         // defn produces Bool, String, Int, sig requests String, Bool (wrong order)
-        let defn_output = OutputType::Tuple(vec![OutputType::Single(Type::Custom("Bool".to_string())), OutputType::Single(Type::Custom("String".to_string())), OutputType::Single(Type::Custom("Int".to_string()))]);
+        let defn_output = OutputType::Tuple(vec![OutputType::Single(Type::bool_()), OutputType::Single(Type::string()), OutputType::Single(Type::int())]);
         // This should fail because tuple order matters
-        let result = is_valid_projection(&[Type::Custom("String".to_string()), Type::Custom("Bool".to_string())], &defn_output);
+        let result = is_valid_projection(&[Type::string(), Type::bool_()], &defn_output);
         // For now this passes (simplified), but real implementation would validate order
         assert!(result);
     }

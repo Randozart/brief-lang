@@ -425,7 +425,7 @@ mod tests {
             params: vec![
                 ExportParam { name: "p".to_string(), ty: Type::Custom("Packet".to_string()) },
             ],
-            ret_ty: Type::Custom("Int".to_string()),
+            ret_ty: Type::int(),
         }];
         let h = emit_c_header(&universe, &exports);
         assert!(h.contains("process_packet"));
@@ -450,7 +450,7 @@ mod tests {
             params: vec![
                 ExportParam { name: "p".to_string(), ty: Type::Custom("Packet".to_string()) },
             ],
-            ret_ty: Type::Custom("Bool".to_string()),
+            ret_ty: Type::bool_(),
         }];
         let rs = emit_rust_bindings(&universe, &exports);
         assert!(rs.contains("process_packet"));
@@ -468,13 +468,13 @@ mod tests {
     #[test]
     fn test_type_mapping() {
         let universe = make_test_universe();
-        assert_eq!(type_to_c(&Type::Custom("Int".to_string()), &universe), "int64_t");
-        assert_eq!(type_to_c(&Type::Custom("Float".to_string()), &universe), "float");
-        assert_eq!(type_to_c(&Type::Custom("Bool".to_string()), &universe), "uint8_t");
+        assert_eq!(type_to_c(&Type::int(), &universe), "int64_t");
+        assert_eq!(type_to_c(&Type::float(), &universe), "float");
+        assert_eq!(type_to_c(&Type::bool_(), &universe), "uint8_t");
         assert_eq!(type_to_c(&Type::Custom("Packet".to_string()), &universe), "struct Packet");
-        assert_eq!(type_to_rust(&Type::Custom("Int".to_string()), &universe), "i64");
-        assert_eq!(type_to_rust(&Type::Custom("Float".to_string()), &universe), "f32");
-        assert_eq!(type_to_python(&Type::Custom("Int".to_string()), &universe), "ctypes.c_int64");
-        assert_eq!(type_to_python(&Type::Custom("Float".to_string()), &universe), "ctypes.c_float");
+        assert_eq!(type_to_rust(&Type::int(), &universe), "i64");
+        assert_eq!(type_to_rust(&Type::float(), &universe), "f32");
+        assert_eq!(type_to_python(&Type::int(), &universe), "ctypes.c_int64");
+        assert_eq!(type_to_python(&Type::float(), &universe), "ctypes.c_float");
     }
 }

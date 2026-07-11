@@ -11,7 +11,7 @@ pub struct BlockExpr {
 
 impl ExprTypecheck for BlockExpr {
     fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> {
-        Ok(Type::Custom("Int".to_string()))
+        Ok(Type::int())
     }
 }
 

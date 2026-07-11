@@ -143,13 +143,13 @@ mod tests {
             location: "std::fs::read_to_string".to_string(),
             wasm_impl: None,
             wasm_setup: None,
-            inputs: vec![("path".to_string(), Type::Custom("String".to_string()))],
-            success_output: vec![("content".to_string(), Type::Custom("String".to_string()))],
+            inputs: vec![("path".to_string(), Type::string())],
+            success_output: vec![("content".to_string(), Type::string())],
             result_type: ResultType::TrueAssertion,
             error_type_name: "IoError".to_string(),
             error_fields: vec![
-                ("code".to_string(), Type::Custom("Int".to_string())),
-                ("message".to_string(), Type::Custom("String".to_string())),
+                ("code".to_string(), Type::int()),
+                ("message".to_string(), Type::string()),
             ],
             input_layout: None,
             output_layout: None,
@@ -173,12 +173,12 @@ mod tests {
             path: None,
             wasm_impl: None,
             wasm_setup: None,
-            inputs: vec![("path".to_string(), Type::Custom("String".to_string()))],
-            success_output: vec![("content".to_string(), Type::Custom("String".to_string()))],
+            inputs: vec![("path".to_string(), Type::string())],
+            success_output: vec![("content".to_string(), Type::string())],
             error_type: "IoError".to_string(),
             error_fields: vec![
-                ("code".to_string(), Type::Custom("Int".to_string())),
-                ("message".to_string(), Type::Custom("String".to_string())),
+                ("code".to_string(), Type::int()),
+                ("message".to_string(), Type::string()),
             ],
             input_layout: None,
             output_layout: None,
@@ -214,10 +214,10 @@ mod tests {
 
     #[test]
     fn test_is_valid_ffi_type() {
-        assert!(is_valid_ffi_type(&Type::Custom("String".to_string())));
-        assert!(is_valid_ffi_type(&Type::Custom("Int".to_string())));
-        assert!(is_valid_ffi_type(&Type::Custom("Float".to_string())));
-        assert!(is_valid_ffi_type(&Type::Custom("Bool".to_string())));
+        assert!(is_valid_ffi_type(&Type::string()));
+        assert!(is_valid_ffi_type(&Type::int()));
+        assert!(is_valid_ffi_type(&Type::float()));
+        assert!(is_valid_ffi_type(&Type::bool_()));
         assert!(is_valid_ffi_type(&Type::Void));
         assert!(is_valid_ffi_type(&Type::Custom("IoError".to_string())));
     }

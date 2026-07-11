@@ -150,7 +150,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
             // Emit base constant
             result.push(ast::TopLevel::Constant(ast::Constant {
                 name: format!("{}_base", key),
-                ty: ast::Type::Custom("Int".to_string()),
+                ty: ast::Type::int(),
                 expr: ast::Expr::Integer(base),
             }));
 
@@ -162,7 +162,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
             }) {
                 result.push(ast::TopLevel::Constant(ast::Constant {
                     name: format!("{}_end", key),
-                    ty: ast::Type::Custom("Int".to_string()),
+                    ty: ast::Type::int(),
                     expr: ast::Expr::Integer(base + sz),
                 }));
             }
@@ -196,7 +196,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
                     let const_name = format!("{}_{}", key, stem);
                     result.push(ast::TopLevel::Constant(ast::Constant {
                         name: const_name,
-                        ty: ast::Type::Custom("Int".to_string()),
+                        ty: ast::Type::int(),
                         expr: ast::Expr::Integer(base + off),
                     }));
                 }
@@ -239,11 +239,11 @@ fn schema_to_struct(schema: &SchemaDef) -> ast::TopLevel {
 /// Convert a FieldType → ast::Type
 fn field_type_to_brief(ft: &FieldType) -> ast::Type {
     match ft {
-        FieldType::String => ast::Type::Custom("String".to_string()),
-        FieldType::Int => ast::Type::Custom("Int".to_string()),
-        FieldType::Float => ast::Type::Custom("Float".to_string()),
-        FieldType::Bool => ast::Type::Custom("Bool".to_string()),
-        FieldType::UInt(_) => ast::Type::Custom("Int".to_string()),
+        FieldType::String => ast::Type::string(),
+        FieldType::Int => ast::Type::int(),
+        FieldType::Float => ast::Type::float(),
+        FieldType::Bool => ast::Type::bool_(),
+        FieldType::UInt(_) => ast::Type::int(),
         FieldType::Vec(inner) => {
             ast::Type::Applied("List".to_string(), vec![field_type_to_brief(inner)])
         }

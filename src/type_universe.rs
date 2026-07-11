@@ -882,7 +882,7 @@ impl TypeUniverse {
     }
 
     /// Check if a type has a given canonical name (property system + legacy fallback).
-    /// Phase 2: replaces `ty == Type::Custom("Int".to_string())` etc.
+    /// Phase 2: replaces `ty == Type::int()` etc.
     pub fn type_is(&self, ty: &crate::ast::Type, name: &str) -> bool {
         // Property system check
         if let Some(rt) = self.get_by_type(ty) {
@@ -980,7 +980,7 @@ impl TypeUniverse {
                 let inner = &args[0];
                 // For Ptr<Bits @/range>, compute from the bit range
                 if let crate::ast::Type::Constrained(inner, br) = inner {
-                    if **inner == crate::ast::Type::Custom("Data".to_string()) {
+                    if **inner == crate::ast::Type::data() {
                         let bits = match br {
                             crate::ast::BitRange::Range(start, end) => end - start + 1,
                             crate::ast::BitRange::Single(_) => 1,
@@ -1776,39 +1776,39 @@ mod tests {
 
     #[test]
     fn test_is_const_ptr_on_ptr_returns_false() {
-        let ty = crate::ast::Type::Applied("Ptr".to_string(), vec![crate::ast::Type::Custom("Int".to_string())]);
+        let ty = crate::ast::Type::Applied("Ptr".to_string(), vec![crate::ast::Type::int()]);
         assert!(!is_const_ptr(&ty), "Ptr<T> is not const");
     }
 
     #[test]
     fn test_is_const_ptr_on_ptr_const_returns_true() {
-        let ty = crate::ast::Type::Applied("PtrConst".to_string(), vec![crate::ast::Type::Custom("Int".to_string())]);
+        let ty = crate::ast::Type::Applied("PtrConst".to_string(), vec![crate::ast::Type::int()]);
         assert!(is_const_ptr(&ty), "PtrConst<T> is const");
     }
 
     #[test]
     fn test_is_const_ptr_on_other_returns_false() {
-        assert!(!is_const_ptr(&crate::ast::Type::Custom("Int".to_string())));
+        assert!(!is_const_ptr(&crate::ast::Type::int()));
         assert!(!is_const_ptr(&crate::ast::Type::Void));
     }
 
     #[test]
     fn test_pointee_type_ptr() {
-        let inner = crate::ast::Type::Custom("Int".to_string());
+        let inner = crate::ast::Type::int();
         let ty = crate::ast::Type::Applied("Ptr".to_string(), vec![inner.clone()]);
         assert_eq!(pointee_type(&ty), Some(inner));
     }
 
     #[test]
     fn test_pointee_type_ptr_const() {
-        let inner = crate::ast::Type::Custom("Bool".to_string());
+        let inner = crate::ast::Type::bool_();
         let ty = crate::ast::Type::Applied("PtrConst".to_string(), vec![inner.clone()]);
         assert_eq!(pointee_type(&ty), Some(inner));
     }
 
     #[test]
     fn test_pointee_type_non_ptr_returns_none() {
-        assert_eq!(pointee_type(&crate::ast::Type::Custom("Int".to_string())), None);
+        assert_eq!(pointee_type(&crate::ast::Type::int()), None);
         assert_eq!(pointee_type(&crate::ast::Type::Void), None);
     }
 

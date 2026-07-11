@@ -798,7 +798,7 @@ use std::collections::HashMap;
 
     #[test]
     fn test_hebv_rejects_float_type() {
-        let program = make_program(vec![state("x", Type::Custom("Float".to_string()))]);
+        let program = make_program(vec![state("x", Type::float())]);
         let diags = HardwareValidator::check_hebv_restrictions(&program);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].title.contains("Float"));
@@ -806,7 +806,7 @@ use std::collections::HashMap;
 
     #[test]
     fn test_hebv_rejects_string_type() {
-        let program = make_program(vec![state("s", Type::Custom("String".to_string()))]);
+        let program = make_program(vec![state("s", Type::string())]);
         let diags = HardwareValidator::check_hebv_restrictions(&program);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].title.contains("String"));
@@ -814,7 +814,7 @@ use std::collections::HashMap;
 
     #[test]
     fn test_hebv_rejects_unsized_int() {
-        let program = make_program(vec![state("x", Type::Custom("Int".to_string()))]);
+        let program = make_program(vec![state("x", Type::int())]);
         let diags = HardwareValidator::check_hebv_restrictions(&program);
         let int_errors: Vec<_> = diags.iter().filter(|d| d.title.contains("Int/UInt")).collect();
         assert!(!int_errors.is_empty(), "Expected rejection of unsized Int");
@@ -823,7 +823,7 @@ use std::collections::HashMap;
     #[test]
     fn test_hebv_accepts_synthesizable_types() {
         let program = make_program(vec![
-            state("a", Type::Custom("Bool".to_string())),
+            state("a", Type::bool_()),
             txn("good",
                 Expr::Identifier("a".to_string()),
                 Expr::Not(Box::new(Expr::Identifier("a".to_string()))),

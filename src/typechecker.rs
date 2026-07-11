@@ -145,7 +145,7 @@ impl TypeChecker {
             Signature {
                 name: "to_json".to_string(),
                 params: vec![("".to_string(), Type::Custom("Object".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("String".to_string())]),
+                result_type: ResultType::Projection(vec![Type::string()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -157,10 +157,10 @@ impl TypeChecker {
             "from_json".to_string(),
             Signature {
                 name: "from_json".to_string(),
-                params: vec![("".to_string(), Type::Custom("String".to_string()))], modifier: None, output_type: None,
+                params: vec![("".to_string(), Type::string())], modifier: None, output_type: None,
                 result_type: ResultType::Projection(vec![Type::Applied(
                     "Result".to_string(),
-                    vec![Type::Custom("Object".to_string()), Type::Custom("String".to_string())],
+                    vec![Type::Custom("Object".to_string()), Type::string()],
                 )]),
                 source: None,
                 alias: None,
@@ -174,7 +174,7 @@ impl TypeChecker {
             Signature {
                 name: "new_builder".to_string(),
                 params: vec![], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
+                result_type: ResultType::Projection(vec![Type::string_builder()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -185,8 +185,8 @@ impl TypeChecker {
             "append_str".to_string(),
             Signature {
                 name: "append_str".to_string(),
-                params: vec![("".to_string(), Type::Custom("StringBuilder".to_string())), ("".to_string(), Type::Custom("String".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
+                params: vec![("".to_string(), Type::string_builder()), ("".to_string(), Type::string())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::string_builder()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -197,8 +197,8 @@ impl TypeChecker {
             "append_char".to_string(),
             Signature {
                 name: "append_char".to_string(),
-                params: vec![("".to_string(), Type::Custom("StringBuilder".to_string())), ("".to_string(), Type::Custom("Char".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
+                params: vec![("".to_string(), Type::string_builder()), ("".to_string(), Type::char_())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::string_builder()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -209,8 +209,8 @@ impl TypeChecker {
             "append_int".to_string(),
             Signature {
                 name: "append_int".to_string(),
-                params: vec![("".to_string(), Type::Custom("StringBuilder".to_string())), ("".to_string(), Type::Custom("Int".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("StringBuilder".to_string())]),
+                params: vec![("".to_string(), Type::string_builder()), ("".to_string(), Type::int())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::string_builder()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -221,8 +221,8 @@ impl TypeChecker {
             "to_string".to_string(),
             Signature {
                 name: "to_string".to_string(),
-                params: vec![("".to_string(), Type::Custom("StringBuilder".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("String".to_string())]),
+                params: vec![("".to_string(), Type::string_builder())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::string()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -233,8 +233,8 @@ impl TypeChecker {
             "String".to_string(),
             Signature {
                 name: "String".to_string(),
-                params: vec![("".to_string(), Type::Custom("Int".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("String".to_string())]),
+                params: vec![("".to_string(), Type::int())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::string()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -245,8 +245,8 @@ impl TypeChecker {
             "char_to_string".to_string(),
             Signature {
                 name: "char_to_string".to_string(),
-                params: vec![("".to_string(), Type::Custom("Char".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("String".to_string())]),
+                params: vec![("".to_string(), Type::char_())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::string()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -326,8 +326,8 @@ impl TypeChecker {
             "is_whitespace".to_string(),
             Signature {
                 name: "is_whitespace".to_string(),
-                params: vec![("".to_string(), Type::Custom("Char".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Bool".to_string())]),
+                params: vec![("".to_string(), Type::char_())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::bool_()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -338,8 +338,8 @@ impl TypeChecker {
             "is_digit".to_string(),
             Signature {
                 name: "is_digit".to_string(),
-                params: vec![("".to_string(), Type::Custom("Char".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Bool".to_string())]),
+                params: vec![("".to_string(), Type::char_())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::bool_()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -350,8 +350,8 @@ impl TypeChecker {
             "is_alpha".to_string(),
             Signature {
                 name: "is_alpha".to_string(),
-                params: vec![("".to_string(), Type::Custom("Char".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Bool".to_string())]),
+                params: vec![("".to_string(), Type::char_())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::bool_()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -362,8 +362,8 @@ impl TypeChecker {
             "is_alphanumeric".to_string(),
             Signature {
                 name: "is_alphanumeric".to_string(),
-                params: vec![("".to_string(), Type::Custom("Char".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Bool".to_string())]),
+                params: vec![("".to_string(), Type::char_())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::bool_()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -374,8 +374,8 @@ impl TypeChecker {
             "is_hex_digit".to_string(),
             Signature {
                 name: "is_hex_digit".to_string(),
-                params: vec![("".to_string(), Type::Custom("Char".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Bool".to_string())]),
+                params: vec![("".to_string(), Type::char_())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::bool_()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -387,8 +387,8 @@ impl TypeChecker {
             "to_int".to_string(),
             Signature {
                 name: "to_int".to_string(),
-                params: vec![("".to_string(), Type::Custom("String".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+                params: vec![("".to_string(), Type::string())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::int()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -399,8 +399,8 @@ impl TypeChecker {
             "to_float".to_string(),
             Signature {
                 name: "to_float".to_string(),
-                params: vec![("".to_string(), Type::Custom("String".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Float".to_string())]),
+                params: vec![("".to_string(), Type::string())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::float()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -412,8 +412,8 @@ impl TypeChecker {
             "len".to_string(),
             Signature {
                 name: "len".to_string(),
-                params: vec![("".to_string(), Type::Custom("String".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+                params: vec![("".to_string(), Type::string())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::int()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -425,7 +425,7 @@ impl TypeChecker {
             Signature {
                 name: "len".to_string(),
                 params: vec![("".to_string(), Type::Applied("List".to_string(), vec![Type::TypeVar("T".to_string())]))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+                result_type: ResultType::Projection(vec![Type::int()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -448,8 +448,8 @@ impl TypeChecker {
             "char_to_string".to_string(),
             Signature {
                 name: "char_to_string".to_string(),
-                params: vec![("".to_string(), Type::Custom("Char".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("String".to_string())]),
+                params: vec![("".to_string(), Type::char_())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::string()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -460,8 +460,8 @@ impl TypeChecker {
             "String".to_string(),
             Signature {
                 name: "String".to_string(),
-                params: vec![("".to_string(), Type::Custom("Int".to_string()))], modifier: None, output_type: None,
-                result_type: ResultType::Projection(vec![Type::Custom("String".to_string())]),
+                params: vec![("".to_string(), Type::int())], modifier: None, output_type: None,
+                result_type: ResultType::Projection(vec![Type::string()]),
                 source: None,
                 alias: None,
                 bound_defn: None,
@@ -722,7 +722,7 @@ impl TypeChecker {
                     self.trigger_names.insert(trg.name.clone());
                 }
                 TopLevel::TriggerBinding { name, ty, .. } => {
-                    let trig_ty = ty.clone().unwrap_or(crate::ast::Type::Custom("String".to_string()));
+                    let trig_ty = ty.clone().unwrap_or(crate::ast::Type::string());
                     self.declare_variable(name, trig_ty);
                     self.trigger_names.insert(name.clone());
                 }
@@ -1926,7 +1926,7 @@ impl TypeChecker {
                 ..
             } => {
                 let cond_ty = self.infer_expression(condition);
-                if !self.types_compatible(&cond_ty, &Type::Custom("Bool".to_string())) {
+                if !self.types_compatible(&cond_ty, &Type::bool_()) {
                     self.errors.borrow_mut().push(TypeError::TypeMismatch {
                         expected: "Bool".to_string(),
                         found: self.type_to_string(&cond_ty),
@@ -1969,7 +1969,7 @@ impl TypeChecker {
                 // 2026-06-28: Cell identifiers (e.g., Console in trg inp @ Console!)
                 // resolve to Custom("CellName"), not Int. Accept cell names too.
                 let is_cell_ref = matches!(instance, Expr::Identifier(cn) if self.cell_defs.contains_key(cn));
-                if !is_cell_ref && !self.types_compatible(&instance_ty, &Type::Custom("Int".to_string())) {
+                if !is_cell_ref && !self.types_compatible(&instance_ty, &Type::int()) {
                     self.errors.borrow_mut().push(TypeError::TypeMismatch {
                         expected: "Int (cell instance handle)".to_string(),
                         found: self.type_to_string(&instance_ty),
@@ -2011,7 +2011,7 @@ impl TypeChecker {
                 if let Some(decl_ty) = ty {
                     self.declare_variable(name, decl_ty.clone());
                 } else {
-                    self.declare_variable(name, Type::Custom("Int".to_string()));
+                    self.declare_variable(name, Type::int());
                 }
             }
             Statement::Foreach { item, list, body, .. } => {
@@ -2039,8 +2039,8 @@ impl TypeChecker {
 
     pub(crate) fn infer_expression(&self, expr: &Expr) -> Type {
         match expr {
-            Expr::Integer(_) => Type::Custom("Int".to_string()),
-            // 2026-06-29: IntegerSuffixed carries its type from the parser (e.g. 42i8 → Type::Custom("Int8".to_string()))
+            Expr::Integer(_) => Type::int(),
+            // 2026-06-29: IntegerSuffixed carries its type from the parser (e.g. 42i8 → Type::int8())
             Expr::IntegerSuffixed(_, ty) => ty.clone(),
             Expr::Float(_) => {
                 match self.target {
@@ -2067,14 +2067,14 @@ impl TypeChecker {
                     }
                     _ => {}
                 }
-                Type::Custom("Float".to_string())
+                Type::float()
             }
             // 2026-06-29: Float64 is a separate AST variant for explicit f64 literals (e.g. 3.14f64)
-            Expr::Float64(_) => Type::Custom("Float64".to_string()),
-            Expr::String(_) => Type::Custom("String".to_string()),
-            Expr::RegexLiteral(_) => Type::Custom("String".to_string()),
-            Expr::Char(_) => Type::Custom("Char".to_string()),
-            Expr::Bool(_) => Type::Custom("Bool".to_string()),
+            Expr::Float64(_) => Type::float64(),
+            Expr::String(_) => Type::string(),
+            Expr::RegexLiteral(_) => Type::string(),
+            Expr::Char(_) => Type::char_(),
+            Expr::Bool(_) => Type::bool_(),
             Expr::Identifier(name) | Expr::PriorState(name) => {
                 let lookup = self.lookup_variable(name);
                 if let Some(ty) = lookup { ty }
@@ -2110,7 +2110,7 @@ impl TypeChecker {
                 }
             }
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
-                self.binary_op_type(l, r, Type::Custom("Int".to_string()), Type::Custom("Float".to_string()))
+                self.binary_op_type(l, r, Type::int(), Type::float())
             }
             Expr::Eq(_, _)
             | Expr::Ne(_, _)
@@ -2119,7 +2119,7 @@ impl TypeChecker {
             | Expr::Gt(_, _)
             | Expr::Ge(_, _)
             | Expr::Or(_, _)
-            | Expr::And(_, _) => Type::Custom("Bool".to_string()),
+            | Expr::And(_, _) => Type::bool_(),
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.infer_expression(e),
             Expr::IntrinsicCall { intrinsic, args } => {
                 for arg in args {
@@ -2128,22 +2128,22 @@ impl TypeChecker {
                 match intrinsic {
                     Intrinsic::Sqrt | Intrinsic::Fabs | Intrinsic::Ceil | Intrinsic::Floor => {
                         if args.is_empty() {
-                            Type::Custom("Float".to_string())
+                            Type::float()
                         } else {
                             let arg_ty = self.infer_expression(&args[0]);
                             // 2026-06-29: Match input type — Float64 arg → Float64 return, Float arg → Float return
-                            if arg_ty == Type::Custom("Float64".to_string()) { Type::Custom("Float64".to_string()) } else { Type::Custom("Float".to_string()) }
+                            if arg_ty == Type::float64() { Type::float64() } else { Type::float() }
                         }
                     }
-                    Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz | Intrinsic::Abs | Intrinsic::Bitreverse => Type::Custom("Int".to_string()),
-                    Intrinsic::ByteCount | Intrinsic::Size | Intrinsic::Strlen => Type::Custom("Int".to_string()),
+                    Intrinsic::Ctpop | Intrinsic::Ctlz | Intrinsic::Cttz | Intrinsic::Abs | Intrinsic::Bitreverse => Type::int(),
+                    Intrinsic::ByteCount | Intrinsic::Size | Intrinsic::Strlen => Type::int(),
                     Intrinsic::StrBytes => Type::Custom("List".to_string()),
-                    Intrinsic::Pop => Type::Custom("Int".to_string()),
-                    Intrinsic::Contains => Type::Custom("Bool".to_string()),
+                    Intrinsic::Pop => Type::int(),
+                    Intrinsic::Contains => Type::bool_(),
                     Intrinsic::Keys | Intrinsic::Values => Type::Custom("List".to_string()),
-                    Intrinsic::Println | Intrinsic::WriteFile | Intrinsic::Sleep | Intrinsic::Bind | Intrinsic::Listen => Type::Custom("Bool".to_string()),
-                    Intrinsic::Readln | Intrinsic::ReadFile => Type::Custom("String".to_string()),
-                    Intrinsic::Exit | Intrinsic::Halt => Type::Custom("Bool".to_string()),
+                    Intrinsic::Println | Intrinsic::WriteFile | Intrinsic::Sleep | Intrinsic::Bind | Intrinsic::Listen => Type::bool_(),
+                    Intrinsic::Readln | Intrinsic::ReadFile => Type::string(),
+                    Intrinsic::Exit | Intrinsic::Halt => Type::bool_(),
                     Intrinsic::VolatileLoad => {
                         // Return type is T from Ptr<T> argument
                         if args.len() != 1 {
@@ -2184,7 +2184,7 @@ impl TypeChecker {
                                 found: format!("{} arguments", args.len()),
                                 context: "volatile_store# requires (Ptr<T>, T) arguments".to_string(),
                             });
-                            Type::Custom("Bool".to_string())
+                            Type::bool_()
                         } else {
                             let ptr_ty = self.infer_expression(&args[0]);
                             let val_ty = self.infer_expression(&args[1]);
@@ -2212,37 +2212,37 @@ impl TypeChecker {
                                     context: "volatile_store# requires a Ptr<T> as the first argument".to_string(),
                                 });
                             }
-                            Type::Custom("Bool".to_string())
+                            Type::bool_()
                         }
                     }
                     // 2026-07-03: Spatial memory intrinsics
-                    Intrinsic::Memcpy | Intrinsic::Memset => Type::Custom("Bool".to_string()),
-                    Intrinsic::Memcmp | Intrinsic::Hash => Type::Custom("Int".to_string()),
-                    Intrinsic::Sort | Intrinsic::Reverse => Type::Custom("Bool".to_string()),
+                    Intrinsic::Memcpy | Intrinsic::Memset => Type::bool_(),
+                    Intrinsic::Memcmp | Intrinsic::Hash => Type::int(),
+                    Intrinsic::Sort | Intrinsic::Reverse => Type::bool_(),
                     Intrinsic::Range => Type::Custom("List".to_string()),
                     // String intrinsics (2026-06-18)
-                    Intrinsic::Print => Type::Custom("Bool".to_string()),
-                    Intrinsic::TrimLeft | Intrinsic::TrimRight | Intrinsic::ToLower => Type::Custom("String".to_string()),
-                    Intrinsic::ContainsAt => Type::Custom("Bool".to_string()),
-                    Intrinsic::FindFrom => Type::Custom("Int".to_string()),
+                    Intrinsic::Print => Type::bool_(),
+                    Intrinsic::TrimLeft | Intrinsic::TrimRight | Intrinsic::ToLower => Type::string(),
+                    Intrinsic::ContainsAt => Type::bool_(),
+                    Intrinsic::FindFrom => Type::int(),
                     Intrinsic::SplitN => Type::Custom("List".to_string()),
-                    Intrinsic::IntToStr => Type::Custom("String".to_string()),
+                    Intrinsic::IntToStr => Type::string(),
                     // Macro/template intrinsics (compile-time only)
                     Intrinsic::Compile | Intrinsic::MacroError
-                    | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Custom("Data".to_string()),
+                    | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::data(),
                     // GLUE file emission intrinsic
-                    Intrinsic::EmitFile => Type::Custom("Bool".to_string()),
+                    Intrinsic::EmitFile => Type::bool_(),
                     // Valid compiler intrinsics (not relocated to std/os/)
-                    Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat => Type::Custom("Bool".to_string()),
-                    Intrinsic::GetEnvInt => Type::Custom("Int".to_string()),
-                    Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow => Type::Custom("Float".to_string()),
+                    Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat => Type::bool_(),
+                    Intrinsic::GetEnvInt => Type::int(),
+                    Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow => Type::float(),
                     Intrinsic::GetGlobalId | Intrinsic::GetLocalId
-                    | Intrinsic::GetGroupId | Intrinsic::GetNumGroups => Type::Custom("Int".to_string()),
-                    Intrinsic::SubGroupBarrier => Type::Custom("Bool".to_string()),
-                    Intrinsic::FloatToStr | Intrinsic::ToStr => Type::Custom("String".to_string()),
+                    | Intrinsic::GetGroupId | Intrinsic::GetNumGroups => Type::int(),
+                    Intrinsic::SubGroupBarrier => Type::bool_(),
+                    Intrinsic::FloatToStr | Intrinsic::ToStr => Type::string(),
                     Intrinsic::Compile | Intrinsic::MacroError
-                    | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::Custom("Data".to_string()),
-                    Intrinsic::EmitFile => Type::Custom("Bool".to_string()),
+                    | Intrinsic::MacroWarn | Intrinsic::MacroGenSym => Type::data(),
+                    Intrinsic::EmitFile => Type::bool_(),
                     Intrinsic::UserDefined(name) => {
                         // 2026-07-08: Phase 3 — remap user-visible names to inop names
                         // to avoid conflicts with libc functions declared in the preamble.
@@ -2291,7 +2291,7 @@ impl TypeChecker {
                     // Handle generic type substitution for signatures
                     let result_types = match &sig.result_type {
                         ResultType::Projection(types) => types.clone(),
-                        ResultType::TrueAssertion => vec![Type::Custom("Bool".to_string())],
+                        ResultType::TrueAssertion => vec![Type::bool_()],
                         ResultType::VoidType => vec![Type::Void],
                     };
                     // Try to substitute TypeVars based on input types
@@ -2402,7 +2402,7 @@ impl TypeChecker {
             Expr::Slice { value, mask, .. } => {
                 if let Some(mask_expr) = mask {
                     let mask_type = self.infer_expression(mask_expr);
-                    if mask_type != Type::Custom("Bool".to_string()) {
+                    if mask_type != Type::bool_() {
                         self.errors.borrow_mut().push(TypeError::TypeMismatch {
                             expected: "Bool".to_string(),
                             found: format!("{:?}", mask_type),
@@ -2445,15 +2445,15 @@ impl TypeChecker {
                 let src_ty = self.infer_expression(source);
                 // For aggregates, return Int; for collections, return source type
                 let is_aggregate = ops.iter().any(|op| matches!(op, SubtypeOp::Count | SubtypeOp::Sum(_) | SubtypeOp::Avg(_) | SubtypeOp::Min(_) | SubtypeOp::Max(_)));
-                if is_aggregate { Type::Custom("Int".to_string()) } else { src_ty }
+                if is_aggregate { Type::int() } else { src_ty }
             },
             Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r) => {
                 let l_ty = self.infer_expression(l);
                 let r_ty = self.infer_expression(r);
-                if self.types_compatible(&l_ty, &Type::Custom("Int".to_string())) || self.types_compatible(&l_ty, &Type::Custom("UInt".to_string())) {
+                if self.types_compatible(&l_ty, &Type::int()) || self.types_compatible(&l_ty, &Type::uint()) {
                     l_ty
                 } else {
-                    Type::Custom("Int".to_string())
+                    Type::int()
                 }
             },
             Expr::Projection { source, target } => {
@@ -2473,9 +2473,9 @@ impl TypeChecker {
                                 });
                             }
                         }
-                        Type::Custom("Int".to_string())
+                        Type::int()
                     }
-                    ProjectionTarget::Bytes => Type::Custom("Int".to_string()),
+                    ProjectionTarget::Bytes => Type::int(),
                     ProjectionTarget::Ptr => {
                         // &x :> Ptr → Ptr<typeof(x)>
                         // list :> Ptr → Ptr<element_type>
@@ -2484,22 +2484,22 @@ impl TypeChecker {
                         match &src_ty {
                             Type::Applied(name, inner) if name == "Ptr" => {
                                 // ptr :> Ptr on a Ptr<T> → raw Int address
-                                Type::Custom("Int".to_string())
+                                Type::int()
                             }
                             // 2026-07-03: LayoutPtr :> Ptr → raw Int address
-                            Type::LayoutPtr(_) => Type::Custom("Int".to_string()),
+                            Type::LayoutPtr(_) => Type::int(),
                             Type::Applied(name, inner) if name == "List" || name == "Vector" => {
                                 // list :> Ptr → Ptr<element_type>
-                                let elem_ty = inner.first().cloned().unwrap_or(Type::Custom("Int".to_string()));
+                                let elem_ty = inner.first().cloned().unwrap_or(Type::int());
                                 Type::Applied("Ptr".to_string(), vec![elem_ty])
                             }
                             Type::Custom(__t) if __t == "String" => {
                                 // string :> Ptr → Ptr<Char>
-                                Type::Applied("Ptr".to_string(), vec![Type::Custom("Char".to_string())])
+                                Type::Applied("Ptr".to_string(), vec![Type::char_()])
                             }
                             Type::Custom(n) if n == "String" || n == "str" => {
                                 // string :> Ptr → Ptr<Char>
-                                Type::Applied("Ptr".to_string(), vec![Type::Custom("Char".to_string())])
+                                Type::Applied("Ptr".to_string(), vec![Type::char_()])
                             }
                             _ => {
                                 // 2026-07-03: Check if source is a function reference
@@ -2526,8 +2526,8 @@ impl TypeChecker {
                             }
                         }
                     }
-                    ProjectionTarget::Alignment => Type::Custom("Int".to_string()),
-                    ProjectionTarget::Range => Type::Custom("Int".to_string()),
+                    ProjectionTarget::Alignment => Type::int(),
+                    ProjectionTarget::Range => Type::int(),
                     ProjectionTarget::Popcount |
                     ProjectionTarget::LeadingZeros |
                     ProjectionTarget::TrailingZeros |
@@ -2542,7 +2542,7 @@ impl TypeChecker {
                                 });
                             }
                         }
-                        Type::Custom("Int".to_string())
+                        Type::int()
                     }
                     ProjectionTarget::Absolute => {
                         match &src_ty {
@@ -2555,15 +2555,15 @@ impl TypeChecker {
                                 });
                             }
                         }
-                        Type::Custom("Int".to_string())
+                        Type::int()
                     }
                     ProjectionTarget::Type => {
                         // Type projection returns the type itself as a value
-                        Type::Custom("Int".to_string())
+                        Type::int()
                     }
                     ProjectionTarget::PtrBang => {
                         // Raw pointer — returns Int address
-                        Type::Custom("Int".to_string())
+                        Type::int()
                     }
                     ProjectionTarget::Keys => {
                         match &src_ty {
@@ -2576,12 +2576,12 @@ impl TypeChecker {
                                 });
                             }
                         }
-                        Type::Applied("List".to_string(), vec![Type::Custom("String".to_string())])
+                        Type::Applied("List".to_string(), vec![Type::string()])
                     }
                     ProjectionTarget::Values => {
                         match &src_ty {
                             Type::Applied(name, inner) if name == "HashMap" => {
-                                let val_ty = inner.get(1).cloned().unwrap_or(Type::Custom("String".to_string()));
+                                let val_ty = inner.get(1).cloned().unwrap_or(Type::string());
                                 Type::Applied("List".to_string(), vec![val_ty])
                             }
                             _ => {
@@ -2590,7 +2590,7 @@ impl TypeChecker {
                                     found: self.type_to_string(&src_ty),
                                     context: "Values projection".to_string(),
                                 });
-                                Type::Applied("List".to_string(), vec![Type::Custom("String".to_string())])
+                                Type::Applied("List".to_string(), vec![Type::string()])
                             }
                         }
                     }
@@ -2605,7 +2605,7 @@ impl TypeChecker {
                                 });
                             }
                         }
-                        Type::Custom("Bool".to_string())
+                        Type::bool_()
                     }
                     ProjectionTarget::IsEmpty => {
                         match &src_ty {
@@ -2620,12 +2620,12 @@ impl TypeChecker {
                                 });
                             }
                         }
-                        Type::Custom("Bool".to_string())
+                        Type::bool_()
                     }
                     ProjectionTarget::Get(_) => {
                         match &src_ty {
                             Type::Applied(name, inner) if name == "HashMap" => {
-                                let val_ty = inner.get(1).cloned().unwrap_or(Type::Custom("String".to_string()));
+                                let val_ty = inner.get(1).cloned().unwrap_or(Type::string());
                                 Type::Applied("Option".to_string(), vec![val_ty])
                             }
                             _ => {
@@ -2634,14 +2634,14 @@ impl TypeChecker {
                                     found: self.type_to_string(&src_ty),
                                     context: "Get projection".to_string(),
                                 });
-                                Type::Applied("Option".to_string(), vec![Type::Custom("String".to_string())])
+                                Type::Applied("Option".to_string(), vec![Type::string()])
                             }
                         }
                     }
                     ProjectionTarget::Top => {
                         match &src_ty {
                             Type::Applied(name, inner) if name == "Stack" => {
-                                let val_ty = inner.first().cloned().unwrap_or(Type::Custom("String".to_string()));
+                                let val_ty = inner.first().cloned().unwrap_or(Type::string());
                                 Type::Applied("Option".to_string(), vec![val_ty])
                             }
                             _ => {
@@ -2650,14 +2650,14 @@ impl TypeChecker {
                                     found: self.type_to_string(&src_ty),
                                     context: "Top projection".to_string(),
                                 });
-                                Type::Applied("Option".to_string(), vec![Type::Custom("String".to_string())])
+                                Type::Applied("Option".to_string(), vec![Type::string()])
                             }
                         }
                     }
                     ProjectionTarget::Front => {
                         match &src_ty {
                             Type::Applied(name, inner) if name == "Queue" => {
-                                let val_ty = inner.first().cloned().unwrap_or(Type::Custom("String".to_string()));
+                                let val_ty = inner.first().cloned().unwrap_or(Type::string());
                                 Type::Applied("Option".to_string(), vec![val_ty])
                             }
                             _ => {
@@ -2666,14 +2666,14 @@ impl TypeChecker {
                                     found: self.type_to_string(&src_ty),
                                     context: "Front projection".to_string(),
                                 });
-                                Type::Applied("Option".to_string(), vec![Type::Custom("String".to_string())])
+                                Type::Applied("Option".to_string(), vec![Type::string()])
                             }
                         }
                     }
                     ProjectionTarget::Elements => {
                         match &src_ty {
                             Type::Applied(name, inner) if name == "HashSet" => {
-                                let elem_ty = inner.first().cloned().unwrap_or(Type::Custom("String".to_string()));
+                                let elem_ty = inner.first().cloned().unwrap_or(Type::string());
                                 Type::Applied("List".to_string(), vec![elem_ty])
                             }
                             _ => {
@@ -2682,7 +2682,7 @@ impl TypeChecker {
                                     found: self.type_to_string(&src_ty),
                                     context: "Elements projection".to_string(),
                                 });
-                                Type::Applied("List".to_string(), vec![Type::Custom("String".to_string())])
+                                Type::Applied("List".to_string(), vec![Type::string()])
                             }
                         }
                     }
@@ -2692,7 +2692,7 @@ impl TypeChecker {
                             "AsStack is deprecated, use InsertAt/ExtractFrom type metadata instead"));
                         match &src_ty {
                             Type::Applied(name, inner) if name == "List" => {
-                                let elem_ty = inner.first().cloned().unwrap_or(Type::Custom("String".to_string()));
+                                let elem_ty = inner.first().cloned().unwrap_or(Type::string());
                                 Type::Applied("Stack".to_string(), vec![elem_ty])
                             }
                             _ => {
@@ -2701,7 +2701,7 @@ impl TypeChecker {
                                     found: self.type_to_string(&src_ty),
                                     context: "AsStack projection".to_string(),
                                 });
-                                Type::Applied("Stack".to_string(), vec![Type::Custom("String".to_string())])
+                                Type::Applied("Stack".to_string(), vec![Type::string()])
                             }
                         }
                     }
@@ -2710,27 +2710,27 @@ impl TypeChecker {
                             Severity::Warning,
                             "AsQueue is deprecated, use InsertAt/ExtractFrom type metadata instead"));
                         match &src_ty {
-                            Type::Applied(n, _) if n == "List" => Type::Applied("Queue".to_string(), vec![Type::Custom("String".to_string())]),
+                            Type::Applied(n, _) if n == "List" => Type::Applied("Queue".to_string(), vec![Type::string()]),
                             _ => {
                                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
                                     expected: "List".to_string(),
                                     found: self.type_to_string(&src_ty),
                                     context: "AsQueue projection".to_string(),
                                 });
-                                Type::Applied("Queue".to_string(), vec![Type::Custom("String".to_string())])
+                                Type::Applied("Queue".to_string(), vec![Type::string()])
                             }
                         }
                     }
                     ProjectionTarget::BitRange(_) => {
                         match &src_ty {
-                            Type::Custom(__t) if __t == "Int" || __t == "UInt" => Type::Custom("Int".to_string()),
+                            Type::Custom(__t) if __t == "Int" || __t == "UInt" => Type::int(),
                             _ => {
                                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
                                     expected: "Int".to_string(),
                                     found: self.type_to_string(&src_ty),
                                     context: "BitRange projection requires integer source".to_string(),
                                 });
-                                Type::Custom("Int".to_string())
+                                Type::int()
                             }
                         }
                     }
@@ -2766,14 +2766,14 @@ impl TypeChecker {
                     }
                     // ── Phase 2F: Metadata projections ──────────
                     ProjectionTarget::Width | ProjectionTarget::Ops => {
-                        Type::Custom("Int".to_string())
+                        Type::int()
                     }
                     ProjectionTarget::Endian | ProjectionTarget::Codec => {
-                        Type::Custom("String".to_string())
+                        Type::string()
                     }
                 }
             }
-            Expr::PatternMatch { .. } => Type::Custom("Bool".to_string()),
+            Expr::PatternMatch { .. } => Type::bool_(),
             Expr::Block(_stmts, last_expr) => self.infer_expression(last_expr),
             Expr::Match { value: _, arms } => {
                 // Try to infer from the last arm first (usually _ = default)
@@ -2784,7 +2784,7 @@ impl TypeChecker {
 Expr::ObjectLiteral(fields) => {
                 fields.first().map(|(_, v)| self.infer_expression(v)).unwrap_or(Type::Custom("Object".to_string()))
             },
-            Expr::IsType(_, _) | Expr::FromCheck(_, _) | Expr::Like(_, _) => Type::Custom("Bool".to_string()),
+            Expr::IsType(_, _) | Expr::FromCheck(_, _) | Expr::Like(_, _) => Type::bool_(),
             Expr::Cast(inner, target_ty) => {
                 let src_ty = self.infer_expression(inner);
                 if !self.is_cast_valid(&src_ty, target_ty) {
@@ -2805,24 +2805,24 @@ Expr::ObjectLiteral(fields) => {
                     BinaryOpKind::Eq | BinaryOpKind::Ne
                     | BinaryOpKind::Lt | BinaryOpKind::Le
                     | BinaryOpKind::Gt | BinaryOpKind::Ge
-                    | BinaryOpKind::And | BinaryOpKind::Or => Type::Custom("Bool".to_string()),
+                    | BinaryOpKind::And | BinaryOpKind::Or => Type::bool_(),
                     _ => {
                         let l_ty = self.infer_expression(&bop.left);
                         let r_ty = self.infer_expression(&bop.right);
                         // String concatenation: handle + on two strings
                         if bop.kind == BinaryOpKind::Add
-                            && (l_ty == Type::Custom("String".to_string()) || r_ty == Type::Custom("String".to_string()))
+                            && (l_ty == Type::string() || r_ty == Type::string())
                         {
-                            if l_ty == Type::Custom("String".to_string()) && r_ty == Type::Custom("String".to_string()) {
-                                Type::Custom("String".to_string())
+                            if l_ty == Type::string() && r_ty == Type::string() {
+                                Type::string()
                             } else {
-                                Type::Custom("String".to_string()) // allow String + other (resolved at runtime)
+                                Type::string() // allow String + other (resolved at runtime)
                             }
                         // 2026-06-29: Handle Float64 binary ops (same-type only)
-                        } else if l_ty == Type::Custom("Float64".to_string()) && r_ty == Type::Custom("Float64".to_string()) {
-                            Type::Custom("Float64".to_string())
-                        } else if l_ty == Type::Custom("Float".to_string()) || r_ty == Type::Custom("Float".to_string()) {
-                            Type::Custom("Float".to_string())
+                        } else if l_ty == Type::float64() && r_ty == Type::float64() {
+                            Type::float64()
+                        } else if l_ty == Type::float() || r_ty == Type::float() {
+                            Type::float()
                         // 2026-06-29: Handle fixed-width integer type preservation
                         // If both operands are the same fixed-width type, preserve it.
                         // Mixed-width ops will be caught as type errors during codegen.
@@ -2842,10 +2842,10 @@ Expr::ObjectLiteral(fields) => {
                                 else {
                                     let r_key = r_ty.universe_key();
                                     if universe.types.contains_key(r_key) { r_ty }
-                                    else { Type::Custom("Int".to_string()) }
+                                    else { Type::int() }
                                 }
                             }
-                            else { Type::Custom("Int".to_string()) }
+                            else { Type::int() }
                         }
                     }
                 }
@@ -2853,16 +2853,16 @@ Expr::ObjectLiteral(fields) => {
             Expr::UnaryOp(uop) => {
                 let inner = self.infer_expression(&uop.operand);
                 match uop.kind {
-                    crate::features::unary_op::UnaryOpKind::Not => Type::Custom("Bool".to_string()),
+                    crate::features::unary_op::UnaryOpKind::Not => Type::bool_(),
                     _ => inner,
                 }
             }
             Expr::Literal(lit) => match lit.as_ref() {
-                LiteralExpr::Integer(_) => Type::Custom("Int".to_string()),
-                LiteralExpr::Float(_) => Type::Custom("Float".to_string()),
-                LiteralExpr::String(_) => Type::Custom("String".to_string()),
-                LiteralExpr::Char(_) => Type::Custom("Char".to_string()),
-                LiteralExpr::Bool(_) => Type::Custom("Bool".to_string()),
+                LiteralExpr::Integer(_) => Type::int(),
+                LiteralExpr::Float(_) => Type::float(),
+                LiteralExpr::String(_) => Type::string(),
+                LiteralExpr::Char(_) => Type::char_(),
+                LiteralExpr::Bool(_) => Type::bool_(),
                 LiteralExpr::Term => Type::Void,
             },
             Expr::ProjectionExpr(_) | Expr::CallExpr(_)
@@ -2948,22 +2948,22 @@ Expr::ObjectLiteral(fields) => {
     // 2026-07-03: Look up the return type of a function by name.
     fn function_return_type(&self, name: &str) -> Type {
         if let Some(defn) = self.definitions.get(name) {
-            return defn.outputs.first().cloned().unwrap_or(Type::Custom("Int".to_string()));
+            return defn.outputs.first().cloned().unwrap_or(Type::int());
         }
         if let Some(txn) = self.transactions.get(name) {
-            return txn.outputs.first().cloned().unwrap_or(Type::Custom("Int".to_string()));
+            return txn.outputs.first().cloned().unwrap_or(Type::int());
         }
         if let Some(sig) = self.signatures.get(name) {
             // Signatures use ResultType for their output specification
             match &sig.result_type {
                 crate::ast::ResultType::Projection(types) => {
-                    return types.first().cloned().unwrap_or(Type::Custom("Int".to_string()));
+                    return types.first().cloned().unwrap_or(Type::int());
                 }
-                crate::ast::ResultType::TrueAssertion => return Type::Custom("Bool".to_string()),
+                crate::ast::ResultType::TrueAssertion => return Type::bool_(),
                 crate::ast::ResultType::VoidType => return Type::Void,
             }
         }
-        Type::Custom("Int".to_string())
+        Type::int()
     }
 
     // 2026-07-03: Try to resolve an indirect call through a function pointer variable.
@@ -2979,7 +2979,7 @@ Expr::ObjectLiteral(fields) => {
             return Some(ret_type.clone());
         };
         for (i, arg) in args.iter().enumerate() {
-            let expected = params.get(i).cloned().unwrap_or(Type::Custom("Int".to_string()));
+            let expected = params.get(i).cloned().unwrap_or(Type::int());
             let actual = self.infer_expression(arg);
             if !self.types_compatible(&actual, &expected) {
                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
@@ -3144,21 +3144,21 @@ Expr::ObjectLiteral(fields) => {
             (Type::Custom(__a), Type::Custom(__b))
                 if (__a == "UInt" && __b == "UInt") || (__a == "Int" && __b == "UInt") || (__a == "UInt" && __b == "Int")
             => {
-                Type::Custom("UInt".to_string())
+                Type::uint()
             }
             (Type::Custom(__t), Type::Custom(__s)) if __t == "Int" && __s == "Int" => int_type,
             (Type::Custom(__t), _) if __t == "Float" => float_type,
             (_, Type::Custom(__t)) if __t == "Float" => float_type,
             // 2026-06-29: Fixed-width same-type binary ops (no implicit widening)
             // Each pair must match exactly — Int8 + Int16 is a type error.
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Int8" && __s == "Int8" => Type::Custom("Int8".to_string()),
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Int16" && __s == "Int16" => Type::Custom("Int16".to_string()),
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Int32" && __s == "Int32" => Type::Custom("Int32".to_string()),
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "UInt8" && __s == "UInt8" => Type::Custom("UInt8".to_string()),
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "UInt16" && __s == "UInt16" => Type::Custom("UInt16".to_string()),
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "UInt32" && __s == "UInt32" => Type::Custom("UInt32".to_string()),
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Float64" && __s == "Float64" => Type::Custom("Float64".to_string()),
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "String" && __s == "String" => Type::Custom("String".to_string()),
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Int8" && __s == "Int8" => Type::int8(),
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Int16" && __s == "Int16" => Type::int16(),
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Int32" && __s == "Int32" => Type::int32(),
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "UInt8" && __s == "UInt8" => Type::uint8(),
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "UInt16" && __s == "UInt16" => Type::uint16(),
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "UInt32" && __s == "UInt32" => Type::uint32(),
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "Float64" && __s == "Float64" => Type::float64(),
+            (Type::Custom(__t), Type::Custom(__s)) if __t == "String" && __s == "String" => Type::string(),
             (Type::Custom(__t), other) | (other, Type::Custom(__t)) if __t == "String" => {
                 let type_name = format!("{:?}", other);
                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
@@ -3186,7 +3186,7 @@ Expr::ObjectLiteral(fields) => {
                 Type::Custom("type_error".to_string())
             }
             // 2026-07-03: LayoutPtr + non-Int → error
-            (Type::LayoutPtr(_), other) | (other, Type::LayoutPtr(_)) if *other != Type::Custom("Int".to_string()) => {
+            (Type::LayoutPtr(_), other) | (other, Type::LayoutPtr(_)) if *other != Type::int() => {
                 self.errors.borrow_mut().push(TypeError::TypeMismatch {
                     expected: "Int".to_string(),
                     found: self.type_to_string(other),
@@ -3362,11 +3362,11 @@ Expr::ObjectLiteral(fields) => {
             return true;
         }
         // Ptr ↔ Int cast: any Int can become Ptr<T>, any Ptr<T> can become Int
-        if let Type::Applied(name, _) = src { if name == "Ptr" && *dst == Type::Custom("Int".to_string()) { return true; } }
-        if let Type::Applied(name, _) = dst { if name == "Ptr" && *src == Type::Custom("Int".to_string()) { return true; } }
+        if let Type::Applied(name, _) = src { if name == "Ptr" && *dst == Type::int() { return true; } }
+        if let Type::Applied(name, _) = dst { if name == "Ptr" && *src == Type::int() { return true; } }
         // 2026-07-03: LayoutPtr ↔ Int cast: same as Ptr ↔ Int
-        if matches!(src, Type::LayoutPtr(_)) && *dst == Type::Custom("Int".to_string()) { return true; }
-        if matches!(dst, Type::LayoutPtr(_)) && *src == Type::Custom("Int".to_string()) { return true; }
+        if matches!(src, Type::LayoutPtr(_)) && *dst == Type::int() { return true; }
+        if matches!(dst, Type::LayoutPtr(_)) && *src == Type::int() { return true; }
         // 2026-07-03: Layout-compatible pointer casts.
         // Ptr<A> as Ptr<B>, Ptr<A> as LayoutPtr, LayoutPtr as Ptr<T>
         // when byte sizes and alignment requirements match.
@@ -3518,9 +3518,9 @@ Expr::ObjectLiteral(fields) => {
             return aw == bw;
         }
         // All 64-bit types without explicit bit_width
-        let wide = [Type::Custom("Int".to_string()), Type::Custom("UInt".to_string()), Type::Custom("Float".to_string()), Type::Custom("String".to_string()), Type::Custom("Data".to_string())];
+        let wide = [Type::int(), Type::uint(), Type::float(), Type::string(), Type::data()];
         // All 32-bit types without explicit bit_width
-        let narrow = [Type::Custom("Char".to_string()), Type::Custom("Bool".to_string())];
+        let narrow = [Type::char_(), Type::bool_()];
         // Check if both are in the same width category
         let a_wide = wide.iter().any(|t| self.types_compatible(a, t));
         let b_wide = wide.iter().any(|t| self.types_compatible(b, t));
@@ -3664,15 +3664,15 @@ Expr::ObjectLiteral(fields) => {
         // Fast-path: known built-in type + well-known operator name
         let known = match (src_ty, name) {
             (Type::Custom(__t), "Add" | "Sub" | "Mul" | "Div" | "Mod"
-                       | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr") if __t == "Int" => Some(Type::Custom("Int".to_string())),
+                       | "BitAnd" | "BitOr" | "BitXor" | "Shl" | "Shr") if __t == "Int" => Some(Type::int()),
             (Type::Custom(__t), "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge"
-                       | "And" | "Or" | "Not") if __t == "Int" => Some(Type::Custom("Bool".to_string())),
-            (Type::Custom(__t), "Neg" | "BitNot") if __t == "Int" => Some(Type::Custom("Int".to_string())),
-            (Type::Custom(__t), "Add" | "Sub" | "Mul" | "Div") if __t == "Float" => Some(Type::Custom("Float".to_string())),
-            (Type::Custom(__t), "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge") if __t == "Float" => Some(Type::Custom("Bool".to_string())),
-            (Type::Custom(__t), "Neg") if __t == "Float" => Some(Type::Custom("Float".to_string())),
-            (Type::Custom(__t), "And" | "Or" | "Eq" | "Ne" | "Not") if __t == "Bool" => Some(Type::Custom("Bool".to_string())),
-            (Type::Custom(__t), "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge") if __t == "Char" => Some(Type::Custom("Bool".to_string())),
+                       | "And" | "Or" | "Not") if __t == "Int" => Some(Type::bool_()),
+            (Type::Custom(__t), "Neg" | "BitNot") if __t == "Int" => Some(Type::int()),
+            (Type::Custom(__t), "Add" | "Sub" | "Mul" | "Div") if __t == "Float" => Some(Type::float()),
+            (Type::Custom(__t), "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge") if __t == "Float" => Some(Type::bool_()),
+            (Type::Custom(__t), "Neg") if __t == "Float" => Some(Type::float()),
+            (Type::Custom(__t), "And" | "Or" | "Eq" | "Ne" | "Not") if __t == "Bool" => Some(Type::bool_()),
+            (Type::Custom(__t), "Eq" | "Ne" | "Lt" | "Le" | "Gt" | "Ge") if __t == "Char" => Some(Type::bool_()),
             _ => None,
         };
         if let Some(ty) = known {
@@ -3684,7 +3684,7 @@ Expr::ObjectLiteral(fields) => {
             Type::Custom(n) => n.clone(),
             Type::Applied(n, _) => n.clone(),
             Type::Enum(n) => n.clone(),
-            _ => return Type::Custom("Int".to_string()),
+            _ => return Type::int(),
         };
 
         if let Some(ref universe) = self.type_universe {
@@ -3697,16 +3697,16 @@ Expr::ObjectLiteral(fields) => {
         }
 
         // Default fallback
-        Type::Custom("Int".to_string())
+        Type::int()
     }
 
     /// Return the default type for error recovery in Fn* projections.
     fn error_fn_projection_type(target: &ProjectionTarget) -> Type {
         match target {
-            ProjectionTarget::Arity | ProjectionTarget::Hash | ProjectionTarget::Address => Type::Custom("Int".to_string()),
-            ProjectionTarget::IsPure => Type::Custom("Bool".to_string()),
-            ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Custom("Int".to_string()), Type::Custom("Int".to_string())]),
-            _ => Type::Custom("String".to_string()),
+            ProjectionTarget::Arity | ProjectionTarget::Hash | ProjectionTarget::Address => Type::int(),
+            ProjectionTarget::IsPure => Type::bool_(),
+            ProjectionTarget::FnSpan => Type::Tuple(vec![Type::int(), Type::int()]),
+            _ => Type::string(),
         }
     }
 
@@ -3726,26 +3726,26 @@ Expr::ObjectLiteral(fields) => {
                 context: format!("{:?} projection requires a callable name", target),
             });
             return match target {
-                ProjectionTarget::Arity | ProjectionTarget::Hash | ProjectionTarget::Address => Type::Custom("Int".to_string()),
-                ProjectionTarget::IsPure => Type::Custom("Bool".to_string()),
-                ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Custom("Int".to_string()), Type::Custom("Int".to_string())]),
-                _ => Type::Custom("String".to_string()),
+                ProjectionTarget::Arity | ProjectionTarget::Hash | ProjectionTarget::Address => Type::int(),
+                ProjectionTarget::IsPure => Type::bool_(),
+                ProjectionTarget::FnSpan => Type::Tuple(vec![Type::int(), Type::int()]),
+                _ => Type::string(),
             };
         }
 
         match target {
-            ProjectionTarget::Address => Type::Custom("Int".to_string()),
-            ProjectionTarget::Name => Type::Custom("String".to_string()),
-            ProjectionTarget::Params => Type::Custom("String".to_string()),
-            ProjectionTarget::Returns => Type::Custom("String".to_string()),
-            ProjectionTarget::Arity => Type::Custom("Int".to_string()),
-            ProjectionTarget::Loc => Type::Custom("String".to_string()),
-            ProjectionTarget::Doc => Type::Custom("String".to_string()),
-            ProjectionTarget::Hash => Type::Custom("Int".to_string()),
-            ProjectionTarget::Contracts => Type::Custom("String".to_string()),
-            ProjectionTarget::Module => Type::Custom("String".to_string()),
-            ProjectionTarget::IsPure => Type::Custom("Bool".to_string()),
-            ProjectionTarget::FnSpan => Type::Tuple(vec![Type::Custom("Int".to_string()), Type::Custom("Int".to_string())]),
+            ProjectionTarget::Address => Type::int(),
+            ProjectionTarget::Name => Type::string(),
+            ProjectionTarget::Params => Type::string(),
+            ProjectionTarget::Returns => Type::string(),
+            ProjectionTarget::Arity => Type::int(),
+            ProjectionTarget::Loc => Type::string(),
+            ProjectionTarget::Doc => Type::string(),
+            ProjectionTarget::Hash => Type::int(),
+            ProjectionTarget::Contracts => Type::string(),
+            ProjectionTarget::Module => Type::string(),
+            ProjectionTarget::IsPure => Type::bool_(),
+            ProjectionTarget::FnSpan => Type::Tuple(vec![Type::int(), Type::int()]),
             _ => unreachable!("non-Fn* target passed to infer_fn_projection"),
         }
     }
@@ -3854,7 +3854,7 @@ mod tests {
         let mut prog = make_program(vec![
             TopLevel::Definition(Definition {
                 name: "foo".into(), type_params: vec![], parameters: vec![],
-                outputs: vec![Type::Custom("Int".to_string())], output_type: None, output_names: vec![],
+                outputs: vec![Type::int()], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
                 annotations: vec![],
@@ -3871,7 +3871,7 @@ mod tests {
         let mut prog = make_program(vec![
             TopLevel::Definition(Definition {
                 name: "foo".into(), type_params: vec![], parameters: vec![],
-                outputs: vec![Type::Custom("Bool".to_string())], output_type: None, output_names: vec![],
+                outputs: vec![Type::bool_()], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
                 annotations: vec![],
@@ -3888,10 +3888,10 @@ mod tests {
         let mut prog = make_program(vec![
             TopLevel::Definition(Definition {
                 name: "test".into(), type_params: vec![], parameters: vec![],
-                outputs: vec![Type::Custom("Int".to_string())], output_type: None, output_names: vec![],
+                outputs: vec![Type::int()], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![
-                    Statement::Let { name: "x".into(), ty: Some(Type::Custom("Int".to_string())), expr: Some(Expr::Identifier("y".into())), address: None, address_expr: None, bit_range: None, is_override: false, modifiers: vec![], constraint: None },
+                    Statement::Let { name: "x".into(), ty: Some(Type::int()), expr: Some(Expr::Identifier("y".into())), address: None, address_expr: None, bit_range: None, is_override: false, modifiers: vec![], constraint: None },
                     Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None },
                 ],
                 annotations: vec![],
@@ -3907,7 +3907,7 @@ mod tests {
     fn test_check_assignment_type_mismatch() {
         let mut prog = make_program(vec![
             TopLevel::StateDecl(StateDecl {
-                name: "x".into(), ty: Type::Custom("Int".to_string()), expr: Some(Expr::String("hello".into())),
+                name: "x".into(), ty: Type::int(), expr: Some(Expr::String("hello".into())),
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
             constraint: None,
             }),
@@ -3920,7 +3920,7 @@ mod tests {
     fn test_check_state_decl_initial_value() {
         let mut prog = make_program(vec![
             TopLevel::StateDecl(StateDecl {
-                name: "x".into(), ty: Type::Custom("Int".to_string()), expr: Some(Expr::Integer(5)),
+                name: "x".into(), ty: Type::int(), expr: Some(Expr::Integer(5)),
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
             constraint: None,
             }),
@@ -3933,7 +3933,7 @@ mod tests {
     fn test_check_state_decl_uninitialized_warning() {
         let mut prog = make_program(vec![
             TopLevel::StateDecl(StateDecl {
-                name: "x".into(), ty: Type::Custom("Int".to_string()), expr: None,
+                name: "x".into(), ty: Type::int(), expr: None,
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
             constraint: None,
             }),
@@ -3947,8 +3947,8 @@ mod tests {
     fn test_check_signature_registration() {
         let mut prog = make_program(vec![
             TopLevel::Signature(Signature {
-                name: "my_sig".into(), params: vec![("x".into(), Type::Custom("Int".to_string()))],
-                result_type: ResultType::Projection(vec![Type::Custom("Bool".to_string())]),
+                name: "my_sig".into(), params: vec![("x".into(), Type::int())],
+                result_type: ResultType::Projection(vec![Type::bool_()]),
                 source: None, alias: None, bound_defn: None, modifier: None, output_type: None,
             }),
         ]);
@@ -3981,7 +3981,7 @@ mod tests {
                 name: "Color".into(), type_params: vec![],
                 variants: vec![
                     EnumVariant::Unit("Red".into()),
-                    EnumVariant::Tuple("Rgb".into(), vec![Type::Custom("Int".to_string()), Type::Custom("Int".to_string()), Type::Custom("Int".to_string())]),
+                    EnumVariant::Tuple("Rgb".into(), vec![Type::int(), Type::int(), Type::int()]),
                 ],
                 span: None,
             }),
@@ -3994,7 +3994,7 @@ mod tests {
     fn test_check_constant_declaration() {
         let mut prog = make_program(vec![
             TopLevel::Constant(Constant {
-                name: "MAX".into(), ty: Type::Custom("Int".to_string()), expr: Expr::Integer(100),
+                name: "MAX".into(), ty: Type::int(), expr: Expr::Integer(100),
             }),
         ]);
         let errors = check(&mut prog);
@@ -4007,11 +4007,11 @@ mod tests {
         let sig = ForeignSignature {
             name: "my_fn".into(), location: "std::test::fn".into(),
             wasm_impl: None, wasm_setup: None,
-            inputs: vec![("x".into(), Type::Custom("Int".to_string()))],
-            success_output: vec![("result".into(), Type::Custom("Int".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+            inputs: vec![("x".into(), Type::int())],
+            success_output: vec![("result".into(), Type::int())],
+            result_type: ResultType::Projection(vec![Type::int()]),
             error_type_name: "Error".into(),
-            error_fields: vec![("msg".into(), Type::Custom("String".to_string()))],
+            error_fields: vec![("msg".into(), Type::string())],
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
@@ -4026,15 +4026,15 @@ mod tests {
     #[test]
     fn test_check_geometry_compatible() {
         let tc = super::TypeChecker::new();
-        assert!(tc.check_geometry(&Type::Custom("Int".to_string()), &Type::Custom("Int".to_string())));
-        assert!(tc.check_geometry(&Type::Custom("Bool".to_string()), &Type::Custom("Bool".to_string())));
+        assert!(tc.check_geometry(&Type::int(), &Type::int()));
+        assert!(tc.check_geometry(&Type::bool_(), &Type::bool_()));
     }
 
     #[test]
     fn test_check_geometry_incompatible() {
         let tc = super::TypeChecker::new();
-        assert!(!tc.check_geometry(&Type::Custom("Int".to_string()), &Type::Custom("Bool".to_string())));
-        assert!(!tc.check_geometry(&Type::Custom("String".to_string()), &Type::Custom("Int".to_string())));
+        assert!(!tc.check_geometry(&Type::int(), &Type::bool_()));
+        assert!(!tc.check_geometry(&Type::string(), &Type::int()));
     }
 
     #[test]
@@ -4042,7 +4042,7 @@ mod tests {
         let mut tc = super::TypeChecker::new();
         let mut prog = make_program(vec![
             TopLevel::StateDecl(StateDecl {
-                name: "unused".into(), ty: Type::Custom("Int".to_string()), expr: None,
+                name: "unused".into(), ty: Type::int(), expr: None,
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
             constraint: None,
             }),
@@ -4058,8 +4058,8 @@ mod tests {
             TopLevel::Definition(Definition {
                 name: "needs_int".into(),
                 type_params: vec![],
-                parameters: vec![("x".into(), Type::Custom("Int".to_string()))],
-                outputs: vec![Type::Custom("Int".to_string())],
+                parameters: vec![("x".into(), Type::int())],
+                outputs: vec![Type::int()],
                 output_type: None,
                 output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -4081,8 +4081,8 @@ mod tests {
             TopLevel::Definition(Definition {
                 name: "needs_int".into(),
                 type_params: vec![],
-                parameters: vec![("x".into(), Type::Custom("Int".to_string()))],
-                outputs: vec![Type::Custom("Int".to_string())],
+                parameters: vec![("x".into(), Type::int())],
+                outputs: vec![Type::int()],
                 output_type: None,
                 output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -4097,7 +4097,7 @@ mod tests {
                 name: "caller".into(),
                 type_params: vec![],
                 parameters: vec![],
-                outputs: vec![Type::Custom("Int".to_string())],
+                outputs: vec![Type::int()],
                 output_type: None,
                 output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
@@ -4146,9 +4146,9 @@ mod tests {
         let sig = ForeignSignature {
             name: "pipe_fn".into(), location: "".into(),
             wasm_impl: None, wasm_setup: None,
-            inputs: vec![("x".into(), Type::Custom("Int".to_string()))],
-            success_output: vec![("result".into(), Type::Custom("String".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("String".to_string())]),
+            inputs: vec![("x".into(), Type::int())],
+            success_output: vec![("result".into(), Type::string())],
+            result_type: ResultType::Projection(vec![Type::string()]),
             error_type_name: "".into(),
             error_fields: vec![],
             input_layout: None, output_layout: None,
@@ -4172,8 +4172,8 @@ mod tests {
             name: "no_toml_fn".into(), location: "".into(),
             wasm_impl: None, wasm_setup: None,
             inputs: vec![],
-            success_output: vec![("result".into(), Type::Custom("Int".to_string()))],
-            result_type: ResultType::Projection(vec![Type::Custom("Int".to_string())]),
+            success_output: vec![("result".into(), Type::int())],
+            result_type: ResultType::Projection(vec![Type::int()]),
             error_type_name: "".into(),
             error_fields: vec![],
             input_layout: None, output_layout: None,
@@ -4272,8 +4272,8 @@ mod tests {
         let inop = InopDeclaration {
             name: "test_sadd".into(),
             type_params: vec![],
-            params: vec![("a".into(), Type::Custom("Int".to_string())), ("b".into(), Type::Custom("Int".to_string()))],
-            outputs: vec![Type::Custom("Int".to_string())],
+            params: vec![("a".into(), Type::int()), ("b".into(), Type::int())],
+            outputs: vec![Type::int()],
             contract: crate::ast::Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: vec![],
             fallback: Some(crate::ast::Expr::Add(
@@ -4292,7 +4292,7 @@ mod tests {
             args: vec![Expr::Integer(1), Expr::Integer(2)],
         };
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "UserDefined inop should return output type Int");
+        assert_eq!(ty, Type::int(), "UserDefined inop should return output type Int");
     }
 
     #[test]
@@ -4378,9 +4378,9 @@ mod tests {
     fn test_layout_ptr_to_int_cast() {
         let ctx = super::TypeChecker::new();
         let layout_ptr = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
-        assert!(ctx.is_cast_valid(&layout_ptr, &Type::Custom("Int".to_string())),
+        assert!(ctx.is_cast_valid(&layout_ptr, &Type::int()),
             "LayoutPtr -> Int should be valid");
-        assert!(ctx.is_cast_valid(&Type::Custom("Int".to_string()), &layout_ptr),
+        assert!(ctx.is_cast_valid(&Type::int(), &layout_ptr),
             "Int -> LayoutPtr should be valid");
     }
 
@@ -4400,7 +4400,7 @@ mod tests {
     fn test_layout_ptr_arithmetic_preserves_type() {
         let layout_ptr = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
         let result = super::TypeChecker::new().binary_op_type_scalar(
-            &layout_ptr, &Type::Custom("Int".to_string()), Type::Custom("Int".to_string()), Type::Custom("Float".to_string())
+            &layout_ptr, &Type::int(), Type::int(), Type::float()
         );
         assert_eq!(result, layout_ptr,
             "LayoutPtr + Int should preserve LayoutPtr");
@@ -4410,7 +4410,7 @@ mod tests {
     fn test_layout_ptr_not_compatible_with_typed_ptr() {
         let ctx = super::TypeChecker::new();
         let layout_ptr = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
-        let typed_ptr = Type::Applied("Ptr".into(), vec![Type::Custom("Int".to_string())]);
+        let typed_ptr = Type::Applied("Ptr".into(), vec![Type::int()]);
         assert!(!ctx.types_compatible(&layout_ptr, &typed_ptr),
             "LayoutPtr should NOT be compatible with Ptr<Int> without explicit cast");
     }
@@ -4423,8 +4423,8 @@ mod tests {
         let ctx = super::TypeChecker::new().with_type_universe(
             crate::type_universe::TypeUniverse::build(&make_program(vec![]))
         );
-        let src = Type::Applied("Ptr".into(), vec![Type::Custom("Float".to_string())]);
-        let dst = Type::Applied("Ptr".into(), vec![Type::Custom("Int32".to_string())]);
+        let src = Type::Applied("Ptr".into(), vec![Type::float()]);
+        let dst = Type::Applied("Ptr".into(), vec![Type::int32()]);
         assert!(ctx.is_cast_valid(&src, &dst),
             "Ptr<Float> -> Ptr<Int32> should be valid (same layout)");
     }
@@ -4435,8 +4435,8 @@ mod tests {
         let ctx = super::TypeChecker::new().with_type_universe(
             crate::type_universe::TypeUniverse::build(&make_program(vec![]))
         );
-        let src = Type::Applied("Ptr".into(), vec![Type::Custom("Int".to_string())]);
-        let dst = Type::Applied("Ptr".into(), vec![Type::Custom("Float64".to_string())]);
+        let src = Type::Applied("Ptr".into(), vec![Type::int()]);
+        let dst = Type::Applied("Ptr".into(), vec![Type::float64()]);
         assert!(ctx.is_cast_valid(&src, &dst),
             "Ptr<Int> -> Ptr<Float64> should be valid (same layout)");
     }
@@ -4447,8 +4447,8 @@ mod tests {
         let ctx = super::TypeChecker::new().with_type_universe(
             crate::type_universe::TypeUniverse::build(&make_program(vec![]))
         );
-        let src = Type::Applied("Ptr".into(), vec![Type::Custom("Int".to_string())]);
-        let dst = Type::Applied("Ptr".into(), vec![Type::Custom("Int32".to_string())]);
+        let src = Type::Applied("Ptr".into(), vec![Type::int()]);
+        let dst = Type::Applied("Ptr".into(), vec![Type::int32()]);
         assert!(!ctx.is_cast_valid(&src, &dst),
             "Ptr<Int> -> Ptr<Int32> should be invalid (different sizes)");
     }
@@ -4458,7 +4458,7 @@ mod tests {
         let ctx = super::TypeChecker::new().with_type_universe(
             crate::type_universe::TypeUniverse::build(&make_program(vec![]))
         );
-        let src = Type::Applied("Ptr".into(), vec![Type::Custom("Float".to_string())]);
+        let src = Type::Applied("Ptr".into(), vec![Type::float()]);
         let dst = Type::LayoutPtr(LayoutConstraint { bytes: 4, alignment: 4 });
         assert!(ctx.is_cast_valid(&src, &dst),
             "Ptr<Float> -> LayoutPtr(4,4) should be valid");
@@ -4470,7 +4470,7 @@ mod tests {
             crate::type_universe::TypeUniverse::build(&make_program(vec![]))
         );
         let src = Type::LayoutPtr(LayoutConstraint { bytes: 8, alignment: 8 });
-        let dst = Type::Applied("Ptr".into(), vec![Type::Custom("Float64".to_string())]);
+        let dst = Type::Applied("Ptr".into(), vec![Type::float64()]);
         assert!(ctx.is_cast_valid(&src, &dst),
             "LayoutPtr(8,8) -> Ptr<Float64> should be valid");
     }
@@ -4504,7 +4504,7 @@ mod tests {
         let ctx = super::TypeChecker::new();
         let handle = Type::LayoutPtr(LayoutConstraint { bytes: 24, alignment: 8 });
         // Can cast to Int for passing to functions
-        assert!(ctx.is_cast_valid(&handle, &Type::Custom("Int".to_string())),
+        assert!(ctx.is_cast_valid(&handle, &Type::int()),
             "LayoutPtr -> Int should be valid for function argument passing");
         // Two handles with same layout can cast between each other
         let same = Type::LayoutPtr(LayoutConstraint { bytes: 24, alignment: 8 });
@@ -4534,13 +4534,13 @@ mod tests {
         let ctx = super::TypeChecker::new();
         let expr = Expr::Cast(
             Box::new(Expr::Add(
-                Box::new(Expr::Cast(Box::new(Expr::Integer(5)), Type::Custom("Int".to_string()))),
-                Box::new(Expr::Cast(Box::new(Expr::Integer(3)), Type::Custom("Int".to_string()))),
+                Box::new(Expr::Cast(Box::new(Expr::Integer(5)), Type::int())),
+                Box::new(Expr::Cast(Box::new(Expr::Integer(3)), Type::int())),
             )),
-            Type::Custom("Int".to_string()),
+            Type::int(),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()),
+        assert_eq!(ty, Type::int(),
             "EOR pattern (Int op Int) as Int should return Int");
     }
 
@@ -4578,7 +4578,7 @@ mod tests {
             name: "atomic_load".to_string(),
             type_params: vec![],
             params: vec![("ptr".to_string(), Type::Applied("Ptr".to_string(), vec![Type::Bits(8)]))],
-            outputs: vec![Type::Custom("Int".to_string())],
+            outputs: vec![Type::int()],
             contract: crate::ast::Contract::new(crate::ast::Expr::Bool(true), crate::ast::Expr::Bool(true)),
             llvm_body: vec!["%r = load atomic i64, ptr %ptr seq_cst;".to_string()],
             fallback: None,
@@ -4594,7 +4594,7 @@ mod tests {
             args: vec![Expr::Integer(0)],
         };
         let ret = ctx.infer_expression(&expr);
-        assert_eq!(ret, Type::Custom("Int".to_string()));
+        assert_eq!(ret, Type::int());
     }
 }
 
@@ -4608,7 +4608,7 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
         let result = ctx.infer_expression(&expr);
-        assert_eq!(result, Type::Custom("Int".to_string()));
+        assert_eq!(result, Type::int());
     }
 
     #[kani::proof]
@@ -4616,7 +4616,7 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
         let result = ctx.infer_expression(&expr);
-        assert_eq!(result, Type::Custom("Bool".to_string()));
+        assert_eq!(result, Type::bool_());
     }
 
     #[kani::proof]
@@ -4624,7 +4624,7 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Float(1.5)));
         let result = ctx.infer_expression(&expr);
-        assert_eq!(result, Type::Custom("Float".to_string()));
+        assert_eq!(result, Type::float());
     }
 
     #[kani::proof]
@@ -4632,7 +4632,7 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::String("x".to_string())));
         let result = ctx.infer_expression(&expr);
-        assert_eq!(result, Type::Custom("String".to_string()));
+        assert_eq!(result, Type::string());
     }
 
     #[kani::proof]
@@ -4640,7 +4640,7 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Literal(Box::new(LiteralExpr::Char('a')));
         let result = ctx.infer_expression(&expr);
-        assert_eq!(result, Type::Custom("Char".to_string()));
+        assert_eq!(result, Type::char_());
     }
 
     #[kani::proof]
@@ -4661,7 +4661,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Float".to_string()), "sqrt# should infer as Float");
+        assert_eq!(ty, Type::float(), "sqrt# should infer as Float");
     }
 
     #[test]
@@ -4672,7 +4672,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "abs# should infer as Int");
+        assert_eq!(ty, Type::int(), "abs# should infer as Int");
     }
 
     #[test]
@@ -4683,7 +4683,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "ctpop# should infer as Int");
+        assert_eq!(ty, Type::int(), "ctpop# should infer as Int");
     }
 
     #[test]
@@ -4697,7 +4697,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Bool".to_string()), "contains# should infer as Bool");
+        assert_eq!(ty, Type::bool_(), "contains# should infer as Bool");
     }
 
     #[test]
@@ -4708,7 +4708,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "size# should infer as Int");
+        assert_eq!(ty, Type::int(), "size# should infer as Int");
     }
 
     #[test]
@@ -4730,7 +4730,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "pop# should infer as Int");
+        assert_eq!(ty, Type::int(), "pop# should infer as Int");
     }
 
     #[test]
@@ -4741,7 +4741,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Float".to_string()), "fabs# should infer as Float");
+        assert_eq!(ty, Type::float(), "fabs# should infer as Float");
     }
 
     #[test]
@@ -4752,7 +4752,7 @@ mod kani_full_tests {
             intrinsic: Intrinsic::ByteCount,
             args: vec![Expr::String("hello".into())],
         });
-        assert_eq!(ty, Type::Custom("Int".to_string()), "bytes# should infer as Int");
+        assert_eq!(ty, Type::int(), "bytes# should infer as Int");
     }
 
     // ── Phase A: Terminal / TTY + Process type inference tests ─────
@@ -4765,7 +4765,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "tty_raw_mode# should infer as Int");
+        assert_eq!(ty, Type::int(), "tty_raw_mode# should infer as Int");
     }
 
     #[test]
@@ -4776,7 +4776,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "tty_size# should infer as Int");
+        assert_eq!(ty, Type::int(), "tty_size# should infer as Int");
     }
 
     #[test]
@@ -4787,7 +4787,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "tty_read_key# should infer as Int");
+        assert_eq!(ty, Type::int(), "tty_read_key# should infer as Int");
     }
 
     #[test]
@@ -4798,7 +4798,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "ioctl# should infer as Int");
+        assert_eq!(ty, Type::int(), "ioctl# should infer as Int");
     }
 
     #[test]
@@ -4809,7 +4809,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Bool".to_string()), "isatty# should infer as Bool");
+        assert_eq!(ty, Type::bool_(), "isatty# should infer as Bool");
     }
 
     #[test]
@@ -4820,7 +4820,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("String".to_string()), "spawn_with_output# should infer as String");
+        assert_eq!(ty, Type::string(), "spawn_with_output# should infer as String");
     }
 
     #[test]
@@ -4831,7 +4831,7 @@ mod kani_full_tests {
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "spawn# should infer as Int");
+        assert_eq!(ty, Type::int(), "spawn# should infer as Int");
     }
 
     // ── Phase B: Raw File I/O type inference tests ─────────────────
@@ -4843,7 +4843,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/t".into()), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "open# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "open# should infer as Int");
     }
 
     #[test]
@@ -4853,7 +4853,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "close# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "close# should infer as Int");
     }
 
     #[test]
@@ -4863,7 +4863,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(4096)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "read# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "read# should infer as Int");
     }
 
     #[test]
@@ -4873,7 +4873,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(8)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "write# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "write# should infer as Int");
     }
 
     #[test]
@@ -4883,7 +4883,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "lseek# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "lseek# should infer as Int");
     }
 
     #[test]
@@ -4893,7 +4893,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(16), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "pread# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "pread# should infer as Int");
     }
 
     #[test]
@@ -4903,7 +4903,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(8), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "pwrite# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "pwrite# should infer as Int");
     }
 
     #[test]
@@ -4913,7 +4913,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/t".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "stat# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "stat# should infer as Int");
     }
 
     #[test]
@@ -4923,7 +4923,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "fstat# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "fstat# should infer as Int");
     }
 
     #[test]
@@ -4933,7 +4933,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/t".into()), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "truncate# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "truncate# should infer as Int");
     }
 
     #[test]
@@ -4943,7 +4943,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "ftruncate# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "ftruncate# should infer as Int");
     }
 
     #[test]
@@ -4953,7 +4953,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "fsync# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "fsync# should infer as Int");
     }
 
     #[test]
@@ -4963,7 +4963,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "dup# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "dup# should infer as Int");
     }
 
     #[test]
@@ -4973,7 +4973,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(3)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "dup2# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "dup2# should infer as Int");
     }
 
     #[test]
@@ -4983,7 +4983,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "fcntl# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "fcntl# should infer as Int");
     }
 
     // ── Phase C: Filesystem type inference tests ───────────────────
@@ -4995,7 +4995,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/d".into()), Expr::Integer(0o755)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "mkdir# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "mkdir# should infer as Int");
     }
 
     #[test]
@@ -5005,7 +5005,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/d".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "rmdir# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "rmdir# should infer as Int");
     }
 
     #[test]
@@ -5015,7 +5015,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/f".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "unlink# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "unlink# should infer as Int");
     }
 
     #[test]
@@ -5025,7 +5025,7 @@ mod kani_full_tests {
             args: vec![Expr::String("a".into()), Expr::String("b".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "rename# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "rename# should infer as Int");
     }
 
     #[test]
@@ -5035,7 +5035,7 @@ mod kani_full_tests {
             args: vec![Expr::String("target".into()), Expr::String("link".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "symlink# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "symlink# should infer as Int");
     }
 
     #[test]
@@ -5045,7 +5045,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/l".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("String".to_string()), "readlink# should infer as String");
+        assert_eq!(ctx.infer_expression(&expr), Type::string(), "readlink# should infer as String");
     }
 
     #[test]
@@ -5055,7 +5055,7 @@ mod kani_full_tests {
             args: vec![Expr::String("old".into()), Expr::String("new".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "link# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "link# should infer as Int");
     }
 
     #[test]
@@ -5065,7 +5065,7 @@ mod kani_full_tests {
             args: vec![],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("String".to_string()), "getcwd# should infer as String");
+        assert_eq!(ctx.infer_expression(&expr), Type::string(), "getcwd# should infer as String");
     }
 
     #[test]
@@ -5075,7 +5075,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "chdir# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "chdir# should infer as Int");
     }
 
     #[test]
@@ -5095,7 +5095,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/f".into()), Expr::Integer(0o644)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "chmod# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "chmod# should infer as Int");
     }
 
     #[test]
@@ -5105,7 +5105,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp/f".into()), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "chown# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "chown# should infer as Int");
     }
 
     #[test]
@@ -5115,7 +5115,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0o022)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "umask# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "umask# should infer as Int");
     }
 
     #[test]
@@ -5125,7 +5125,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/tmp".into()), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "access# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "access# should infer as Int");
     }
 
     // ── Phase D: Memory + Synchronization type inference tests ─────
@@ -5137,7 +5137,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Integer(3), Expr::Integer(-1), Expr::Integer(-1), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()), "mmap# should infer as Int");
+        assert_eq!(ctx.infer_expression(&expr), Type::int(), "mmap# should infer as Int");
     }
 
     #[test]
@@ -5147,7 +5147,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(4096)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5157,7 +5157,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Integer(3)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5167,7 +5167,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5177,7 +5177,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(4096)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5187,7 +5187,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5197,7 +5197,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5207,7 +5207,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5217,7 +5217,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5227,7 +5227,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     // ── Phase 3: Atomic inop tests ─────────────────────────────
@@ -5242,7 +5242,7 @@ mod kani_full_tests {
             name: "atomic_load".to_string(),
             type_params: vec![],
             params: vec![("ptr".to_string(), Type::Applied("Ptr".to_string(), vec![Type::Bits(8)]))],
-            outputs: vec![Type::Custom("Int".to_string())],
+            outputs: vec![Type::int()],
             contract: crate::ast::Contract::new(crate::ast::Expr::Bool(true), crate::ast::Expr::Bool(true)),
             llvm_body: vec!["%r = load atomic i64, ptr %ptr seq_cst;".to_string()],
             fallback: None,
@@ -5257,7 +5257,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ret = ctx.infer_expression(&expr);
-        assert_eq!(ret, Type::Custom("Int".to_string()));
+        assert_eq!(ret, Type::int());
     }
 
     #[test]
@@ -5267,7 +5267,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5277,7 +5277,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     // ── Phase E: IPC type inference tests ──────────────────────────
@@ -5289,7 +5289,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5299,7 +5299,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/s".into()), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5309,7 +5309,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/s".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5319,7 +5319,7 @@ mod kani_full_tests {
             args: vec![Expr::String("/s".into()), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5329,7 +5329,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5339,7 +5339,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     // ── Phase F: Signals type inference tests ──────────────────────
@@ -5351,7 +5351,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5361,7 +5361,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5371,7 +5371,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5381,7 +5381,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5391,7 +5391,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(100)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     // ── Phase G: Networking type inference tests ───────────────────
@@ -5403,7 +5403,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5413,7 +5413,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5423,7 +5423,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5433,7 +5433,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5443,7 +5443,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5453,7 +5453,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5463,7 +5463,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5476,7 +5476,7 @@ mod kani_full_tests {
             ],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5489,7 +5489,7 @@ mod kani_full_tests {
             ],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5502,7 +5502,7 @@ mod kani_full_tests {
             ],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5515,7 +5515,7 @@ mod kani_full_tests {
             ],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5525,7 +5525,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(0), Expr::Integer(0)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5535,7 +5535,7 @@ mod kani_full_tests {
             args: vec![Expr::String("localhost".into()), Expr::String("80".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     // ── Phase H: Everything Else type inference tests ─────────────
@@ -5547,7 +5547,7 @@ mod kani_full_tests {
             args: vec![Expr::String("PATH".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5557,7 +5557,7 @@ mod kani_full_tests {
             args: vec![Expr::String("VAR".into()), Expr::String("val".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5567,7 +5567,7 @@ mod kani_full_tests {
             args: vec![Expr::String("VAR".into())],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5577,7 +5577,7 @@ mod kani_full_tests {
             args: vec![],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5587,7 +5587,7 @@ mod kani_full_tests {
             args: vec![],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5597,7 +5597,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(1)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5607,7 +5607,7 @@ mod kani_full_tests {
             args: vec![Expr::Integer(1000)],
         };
         let ctx = TypeChecker::new();
-        assert_eq!(ctx.infer_expression(&expr), Type::Custom("Int".to_string()));
+        assert_eq!(ctx.infer_expression(&expr), Type::int());
     }
 
     #[test]
@@ -5618,7 +5618,7 @@ mod kani_full_tests {
             TopLevel::Struct(StructDefinition {
                 name: "S".into(), type_params: vec![], parent: None,
                 fields: vec![StructField {
-                    name: "x".into(), ty: Type::Custom("Int".to_string()), default: None,
+                    name: "x".into(), ty: Type::int(), default: None,
                     visibility: Visibility::Sedentary,
                 }],
                 transactions: vec![], view_html: None, span: None,
@@ -5626,7 +5626,7 @@ mod kani_full_tests {
             }),
             TopLevel::Definition(Definition {
                 name: "f".into(), type_params: vec![], parameters: vec![],
-                outputs: vec![Type::Custom("Int".to_string())], output_type: None, output_names: vec![],
+                outputs: vec![Type::int()], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![Statement::Term {
                     values: vec![Some(Expr::FieldAccess(
@@ -5648,7 +5648,7 @@ mod kani_full_tests {
             TopLevel::Struct(StructDefinition {
                 name: "S".into(), type_params: vec![], parent: None,
                 fields: vec![StructField {
-                    name: "x".into(), ty: Type::Custom("Int".to_string()), default: None,
+                    name: "x".into(), ty: Type::int(), default: None,
                     visibility: Visibility::Public,
                 }],
                 transactions: vec![], view_html: None, span: None,
@@ -5656,7 +5656,7 @@ mod kani_full_tests {
             }),
             TopLevel::Definition(Definition {
                 name: "f".into(), type_params: vec![], parameters: vec![],
-                outputs: vec![Type::Custom("Int".to_string())], output_type: None, output_names: vec![],
+                outputs: vec![Type::int()], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![Statement::Term {
                     values: vec![Some(Expr::FieldAccess(
@@ -5676,10 +5676,10 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::IsType(
             Box::new(Expr::Integer(42)),
-            crate::ast::IsTarget::Type(Type::Custom("Int".to_string())),
+            crate::ast::IsTarget::Type(Type::int()),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Bool".to_string()), "IsType should infer as Bool");
+        assert_eq!(ty, Type::bool_(), "IsType should infer as Bool");
     }
 
     #[test]
@@ -5690,7 +5690,7 @@ mod kani_full_tests {
             crate::ast::IsTarget::Variant("Some".to_string()),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Bool".to_string()), "IsType(variant) should infer as Bool");
+        assert_eq!(ty, Type::bool_(), "IsType(variant) should infer as Bool");
     }
 
     #[test]
@@ -5701,7 +5701,7 @@ mod kani_full_tests {
             Type::Custom("Foo".to_string()),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Bool".to_string()), "FromCheck should infer as Bool");
+        assert_eq!(ty, Type::bool_(), "FromCheck should infer as Bool");
     }
 
     #[test]
@@ -5712,7 +5712,7 @@ mod kani_full_tests {
             Box::new(Expr::Integer(1)),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Bool".to_string()), "Like should infer as Bool");
+        assert_eq!(ty, Type::bool_(), "Like should infer as Bool");
     }
 
     #[test]
@@ -5720,10 +5720,10 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
             Box::new(Expr::Integer(42)),
-            Type::Custom("String".to_string()),
+            Type::string(),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("String".to_string()), "Cast Int -> String should return String");
+        assert_eq!(ty, Type::string(), "Cast Int -> String should return String");
         assert!(ctx.errors.borrow().is_empty(), "Int -> String should be valid");
     }
 
@@ -5732,10 +5732,10 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
             Box::new(Expr::String("42".to_string())),
-            Type::Custom("Int".to_string()),
+            Type::int(),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Int".to_string()), "Cast String -> Int should return Int");
+        assert_eq!(ty, Type::int(), "Cast String -> Int should return Int");
         assert!(ctx.errors.borrow().is_empty(), "String -> Int should be valid");
     }
 
@@ -5744,10 +5744,10 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
             Box::new(Expr::Char('A')),
-            Type::Custom("String".to_string()),
+            Type::string(),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("String".to_string()), "Cast Char -> String should return String");
+        assert_eq!(ty, Type::string(), "Cast Char -> String should return String");
         assert!(ctx.errors.borrow().is_empty(), "Char -> String should be valid");
     }
 
@@ -5756,10 +5756,10 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
             Box::new(Expr::String("hello".to_string())),
-            Type::Custom("Char".to_string()),
+            Type::char_(),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Char".to_string()), "Cast String -> Char should return Char");
+        assert_eq!(ty, Type::char_(), "Cast String -> Char should return Char");
         assert!(ctx.errors.borrow().is_empty(), "String -> Char should be valid");
     }
 
@@ -5768,10 +5768,10 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
             Box::new(Expr::Integer(42)),
-            Type::Custom("Float".to_string()),
+            Type::float(),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Float".to_string()), "Cast Int -> Float should return Float");
+        assert_eq!(ty, Type::float(), "Cast Int -> Float should return Float");
         assert!(ctx.errors.borrow().is_empty(), "Int -> Float should be valid");
     }
 
@@ -5780,10 +5780,10 @@ mod kani_full_tests {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
             Box::new(Expr::Integer(65)),
-            Type::Custom("Char".to_string()),
+            Type::char_(),
         );
         let ty = ctx.infer_expression(&expr);
-        assert_eq!(ty, Type::Custom("Char".to_string()), "Cast Int -> Char should return Char");
+        assert_eq!(ty, Type::char_(), "Cast Int -> Char should return Char");
         assert!(ctx.errors.borrow().is_empty(), "Int -> Char should be valid");
     }
 

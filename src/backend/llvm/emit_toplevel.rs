@@ -324,7 +324,7 @@ impl LlvmBackend {
             .map(|r| r.storage == "Native")
             .unwrap_or_else(|| {
                 // Fallback: Float and Float64 are always native
-                reg.ty == Type::Custom("Float".to_string()) || reg.ty == Type::Custom("Float64".to_string())
+                reg.ty == Type::float() || reg.ty == Type::float64()
             });
 
         if is_native {
@@ -969,7 +969,7 @@ impl LlvmBackend {
     // (e.g., i32 for Char, i8 for Bool). We widen them to i64 for uniform SSA
     // register storage. The boxing intrinsic (box_op) from the TypeUniverse
     // tells us exactly which LLVM operation to emit — no more hardcoded
-    // Type::Custom("Char".to_string())/Bool/String/Float match arms.
+    // Type::char_()/Bool/String/Float match arms.
     //
     // This mirrors adapt_via_box_op in emit_stmt.rs but operates on raw
     // parameter registers rather than TypedRegister SSA values. The key
@@ -1083,7 +1083,7 @@ impl LlvmBackend {
             // in its native LLVM type (fixed-width integers like Int32, Native
             // storage types like Float64).
             //
-            // This replaces the old pattern of matching on Type::Custom("Char".to_string())/Bool/etc.
+            // This replaces the old pattern of matching on Type::char_()/Bool/etc.
             // The WHETHER-to-box decision is still type-category based (the
             // matches! check below), but the HOW-to-box decision now comes from
             // the universe's box_op field rather than hardcoded LLVM IR.
@@ -1131,8 +1131,8 @@ impl LlvmBackend {
             }
             self.fun.let_bindings.insert(n.clone(), reg.clone());
             // Boxed params (Bool/Char/String/Data) are stored as i64 in
-            // let_bindings after boxing. Register as Type::Custom("Int".to_string()) so downstream
-            // doesn't treat them as native i1/i32/i8*. Float stays Type::Custom("Float".to_string())
+            // let_bindings after boxing. Register as Type::int() so downstream
+            // doesn't treat them as native i1/i32/i8*. Float stays Type::float()
             // (handled specially by ensure_float_reg via the cache).
             // 2026-07-01: This decision is type-category based (Bool/Char/
             // String/Data are semantically boxed types) and cannot be derived
@@ -1147,7 +1147,7 @@ impl LlvmBackend {
             // to the default List arena path, causing realloc on non-heap memory.
             self.fun.let_original_types.insert(n.clone(), t.clone());
             if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data") {
-                self.fun.let_binding_types.insert(n.clone(), Type::Custom("Int".to_string()));
+                self.fun.let_binding_types.insert(n.clone(), Type::int());
             } else {
                 self.fun.let_binding_types.insert(n.clone(), t.clone());
             }
@@ -1520,10 +1520,10 @@ impl LlvmBackend {
             self.fun.txn_counter += 1;
             writeln!(out, "  {} = load i64, ptr {}, align 8", loaded, slot).ok();
             self.fun.let_bindings.insert(n.clone(), loaded);
-            // loaded is i64 (boxed value from param slot). Store Type::Custom("Int".to_string())
+            // loaded is i64 (boxed value from param slot). Store Type::int()
             // for boxed types so downstream doesn't treat them as native.
             if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
-                self.fun.let_binding_types.insert(n.clone(), Type::Custom("Int".to_string()));
+                self.fun.let_binding_types.insert(n.clone(), Type::int());
             } else {
                 self.fun.let_binding_types.insert(n.clone(), t.clone());
             }
@@ -1539,7 +1539,7 @@ impl LlvmBackend {
         if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
             let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
             let i1 = format!("%pc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            if cond.ty == Type::Custom("Bool".to_string()) {
+            if cond.ty == Type::bool_() {
                 writeln!(out, "  {} = and i1 {}, true", i1, cond).ok();
             } else {
                 writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
@@ -1607,7 +1607,7 @@ impl LlvmBackend {
     pub(super) fn emit_precondition_check(&mut self, out: &mut String, pre: &Expr, indent: &str) {
         let cond = self.emit_expr(out, pre, indent);
         let i1 = format!("%pi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        if cond.ty == Type::Custom("Bool".to_string()) {
+        if cond.ty == Type::bool_() {
             // cond is already i1 (native bool)
             writeln!(out, "{}{} = and i1 {}, true", indent, i1, cond).ok();
         } else {
@@ -1703,7 +1703,7 @@ impl LlvmBackend {
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
-        if cond.ty == Type::Custom("Bool".to_string()) {
+        if cond.ty == Type::bool_() {
             writeln!(out, "  ret i1 {}", cond).ok();
         } else {
             let i1 = format!("%ri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -1749,7 +1749,7 @@ impl LlvmBackend {
         self.fun.ssa_old_int_regs.clear();
         self.fun.ssa_old_float_regs.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
-        let i1 = if cond.ty == Type::Custom("Bool".to_string()) {
+        let i1 = if cond.ty == Type::bool_() {
             cond.name.clone()
         } else {
             let i1 = format!("%ri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
@@ -2128,7 +2128,7 @@ impl LlvmBackend {
                 let cond_i1 = {
                     let r = format!("%cpct_{}_{}", name, txn.name);
                     self.fun.txn_counter += 1;
-                    if cond.ty == Type::Custom("Bool".to_string()) {
+                    if cond.ty == Type::bool_() {
                         writeln!(out, "  {} = and i1 {}, true", r, cond.name).ok();
                     } else {
                         writeln!(out, "  {} = icmp ne i64 {}, 0", r, cond.name).ok();
@@ -2270,7 +2270,7 @@ impl LlvmBackend {
             let cond_i1 = {
                 let r = format!("%cti_{}_{}", cell_name, txn.name);
                 self.fun.txn_counter += 1;
-                if cond.ty == Type::Custom("Bool".to_string()) {
+                if cond.ty == Type::bool_() {
                     writeln!(out, "  {} = and i1 {}, true", r, cond.name).ok();
                 } else {
                     writeln!(out, "  {} = icmp ne i64 {}, 0", r, cond.name).ok();
