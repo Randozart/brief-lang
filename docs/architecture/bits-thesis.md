@@ -125,35 +125,78 @@ From these three axioms, the entire language emerges.
 
 ### 1. The Universal Value: `Value::Bits(Vec<u8>)`
 
-The interpreter has a single representational value type:
+The interpreter has a single representational value type. Every value in the
+Brief universe — from a boolean to a 10-megabyte database index — is
+represented internally as a raw byte sequence:
 
 ```rust
 pub enum Value {
-    Bits(Vec<u8>),           // representational — the only compute cell
-    List(Vec<Value>),        // structural — heap-allocated array (optimization)
-    HashMap(HashMap<K,V>),   // structural — associative map (optimization)
-    Tuple(Vec<Value>),       // structural — fixed-size heterogeneous
-    Instance { typename, fields },  // structural — struct instance
-    Enum(name, variant, fields),    // structural — tagged union
-    Defn(String),            // compiler internal
-    Void,                    // compiler internal
-    Ref(Box<Value>),         // compiler internal
-    Expr(Box<Expr>),         // compiler internal (macro system)
-    Stmt(Box<Statement>),    // compiler internal
-    Block(Vec<Statement>),   // compiler internal
-    Items(Vec<TopLevel>),    // compiler internal
-    Type(Type),              // compiler internal
-    Regex(...),              // compiler internal
-    DbvlTable(...),          // compiler internal
+    /// The ONLY representational storage cell for program data.
+    /// 2026-07-11: All scalars, structs, and collections are bits.
+    Bits(Vec<u8>),
+
+    // Compiler-internal meta-objects (not representational data)
+    Defn(String),
+    Void,
+    Ref(Box<Value>),
+    Expr(Box<Expr>),
+    Stmt(Box<Statement>),
+    Block(Vec<Statement>),
+    Items(Vec<TopLevel>),
+    Type(Type),
+    Regex(RegexPattern),
+    DbvlTable(Arc<DbvlTableInner>),
 }
 ```
 
-The structural variants (`List`, `HashMap`, `Tuple`, `Instance`, `Enum`) are
-optimizations — the interpreter could theoretically represent everything as
-`Bits` with layout metadata, but doing so for dynamic collections would
-require a full memory allocator inside the interpreter. These variants are
-keepered for pragmatic efficiency reasons. They are *not* representational
-primitives — the type system does not know about them.
+No `List`, no `HashMap`, no `Tuple`, no `Instance`, no `Enum`. A `List<T>`
+containing a million elements is `Value::Bits(24 bytes)` — the struct layout
+`{ ptr: Ptr<T>, len: Int, cap: Int }`, where `ptr` is a **virtual memory
+address** into the interpreter's sandboxed heap (see §6).
+
+#### VirtualHeap: The Compile-Time Memory Model
+
+The interpreter maintains a sandboxed virtual memory space for compile-time
+execution. This is the same pattern used by Miri (Rust's compile-time
+interpreter) and every safe partial evaluator:
+
+```rust
+/// Sandboxed heap for compile-time allocation and pointer arithmetic.
+/// 2026-07-11: Phase 8A — enables List, HashMap, Box etc. as pure Bits.
+pub struct VirtualHeap {
+    allocations: HashMap<u64, Vec<u8>>,
+    next_address: u64,
+}
+```
+
+When compile-time code runs `list.push(val)`:
+1. The intrinsic `__list_insert#` receives `Value::Bits(24)` representing
+   `{ ptr, len, cap }` and `Value::Bits(N)` representing `val`
+2. It copies the virtual address from the struct, checks bounds, optionally
+   allocates new memory in the VirtualHeap
+3. It writes the new element's bytes at `ptr + len * sizeof<T>()` in the heap
+4. It returns a new `Value::Bits(24)` with updated `len`
+
+This is a `HashMap::get` + `Vec::extend_from_slice` at compile time —
+O(1), no different from the current `Value::List` access path.
+
+#### Prelude Cache
+
+To avoid re-evaluating the standard library on every compilation, the
+interpreter state is cached after first evaluation:
+
+```
+cache/prelude.bincode:
+  - VirtualHeap allocations (type structures, string constants)
+  - Type universe (resolved types, operator bindings)
+  - FFI registry entries
+
+Invalidation: file timestamps on lib/std/*.bv + compiler version hash
+```
+
+On subsequent compilations, the cached prelude is deserialized instead of
+re-evaluated. The VirtualHeap allocation cost for prelude types is paid
+once, not once per build.
 
 ### 2. `Void = Bits(0)`
 
@@ -228,24 +271,30 @@ Any property the frontend does not recognize is stored, serialized to the
 
 ### 6. The Complete Type Hierarchy from First Principles
 
+Every type is `Bits(N)` + metadata. Nothing is special-cased:
+
 ```
-Bits(axiom)          — 3 axioms
-  ├─ Void            — Bits(0), no properties
+Bits(axiom)          — 3 axioms, the only hardcoded type
+  │
+  ├─ Void            — Bits(0), llvm <~ "void"
   ├─ Int             — Bits(8), op Add = __add_i64#
   ├─ Float           — Bits(8), op Add = __fadd_f64#
   ├─ Bool            — Bits(1), op Eq = __eq_i1#
   ├─ Char            — Bits(4), op Eq = __eq_i32#
-  ├─ String          — Bits(24), struct { ptr, len, codec }, op Drop = __free_string#
-  ├─ Box<T>          — Bits(8), struct { ptr }, op Drop = __free_heap#
-  ├─ List<T>         — Bits(24), struct { ptr, len, cap }, op InsertAt/ExtractFrom
-  ├─ HashMap<K,V>    — Bits(24), struct { buckets, len, cap }, op ExtractFrom
-  └─ UserDefined     — any composition of the above
+  ├─ String          — Bits(24), op Drop = __free_string_allocation#
+  ├─ Box<T>          — Bits(8), op Drop = __free_heap_allocation#
+  ├─ List<T>         — Bits(24), op InsertAt/ExtractFrom
+  ├─ HashMap<K,V>    — Bits(24), op ExtractFrom
+  └─ MyCustomType    — same mechanism, user-defined
 ```
 
-Everything on the right side of `Bits` is defined in the standard library
+Everything on the right side of `│` is defined in the standard library
 prelude (`bootstrap.bv`), not in the compiler's Rust code. A user could
-omit the prelude, define their own `Int` with saturating arithmetic, and
-the compiler would handle it identically.
+omit the prelude entirely, define their own `Int` with saturating
+arithmetic, their own `List` with arena allocation, their own `String`
+with a different encoding — and the compiler would handle them identically
+because it only sees `Bits` + properties. There is no "stdlib" path and
+"user" path in the compiler. There is only one path.
 
 ---
 

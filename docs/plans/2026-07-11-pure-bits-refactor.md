@@ -3,7 +3,7 @@
 **Phase:** 8A–8F  
 **Plan doc:** `docs/plans/2026-07-11-pure-bits-refactor.md`  
 **Thesis doc:** `docs/architecture/bits-thesis.md`  
-**Total scope:** ~30 files, ~2000 lines changed  
+**Total scope:** ~34 files, ~2300 lines changed  
 **Strategy:** Strangler Fig — build new path alongside old, migrate one type at a time, delete dead code only after green tests
 
 ---
@@ -42,23 +42,84 @@ simpler interpreter with flat control flow.
 
 ---
 
+## Phase 7.5 — Prelude Cache (Preparatory)
+
+**Goal:** Cache the evaluated prelude so recompilation skips virtual-heap
+allocation and type resolution for `lib/std/`. Reduces the pain of
+VirtualHeap allocation (Phase 8A) by making it a one-time cost.
+
+### Step 7.5.0 — Define cache format
+
+**File:** `src/cache/mod.rs` (new) or add to `src/type_universe.rs`
+
+```rust
+/// Snapshot of the interpreter state after prelude evaluation.
+/// 2026-07-11: Phase 7.5 — eliminates prelude re-evaluation.
+struct PreludeCache {
+    compiler_version: u64,
+    prelude_timestamps: HashMap<String, SystemTime>,
+    virtual_heap: VirtualHeap,
+    type_universe: TypeUniverse,
+    ffi_registry: HashMap<String, FfiEntry>,
+}
+```
+
+Serialize via `bincode` with `serde` derives. Cache file at
+`cache/prelude.bincode`. On cache hit, skip loading `lib/std/*.bv`
+entirely — deserialize the cached state instead.
+
+### Step 7.5.1 — Add VirtualHeap
+
+**File:** `src/interpreter.rs`
+
+```rust
+/// Sandboxed virtual memory space for compile-time execution.
+/// Maps virtual addresses to allocated byte blocks.
+/// 2026-07-11: Phase 7.5.
+#[derive(Serialize, Deserialize)]
+pub struct VirtualHeap {
+    allocations: HashMap<u64, Vec<u8>>,
+    next_address: u64,
+}
+```
+
+Add `__malloc#` and `__free#` intrinsics that operate on this heap.
+
+### Step 7.5.2 — Cache invalidation
+
+- Check file timestamps of all `lib/std/*.bv` files
+- Compare against `compiler_version` (bumped when intrinsic registry changes)
+- `--no-prelude-cache` flag forces re-evaluation
+
+### Gate
+
+```
+cargo test --lib    # 1485 pass (no behavior change, cache not used yet)
+```
+
+---
+
 ## Phase Overview
 
 | Phase | What | Files touched | Lines changed | Arrow killed |
 |-------|------|---------------|---------------|--------------|
-| **8A** | Add `Value::Bits`, build intrinsic engine | 20 | ~200 | 0 (new code) |
+| **7.5** | Prelude cache + VirtualHeap | 4 | ~300 | 0 (new infrastructure) |
+| **8A** | Add `Value::Bits`, build intrinsic engine | 20 | ~200 | 0 (new code — parallel path) |
 | **8B** | Route operators through properties | 4 | ~150 | ~50 match arms in `binary_op.rs` |
 | **8C** | Migrate scalars one-by-one | 8 | ~600 | ~200 match arms across 6 files |
 | **8D** | Migrate String, Data, remove Stack/Queue/StringBuilder | 4 | ~300 | ~80 match arms in `ffi/registry.rs`, `arrow.rs` |
 | **8E** | Build `op Drop` pass, remove `storage`/`box`/`unbox` | 6 | ~400 | ~30 match arms in `emit_stmt.rs`, `mod.rs` |
-| **8F** | Legacy cleanup, Void declaration | 15 | ~350 | Remove dead code, flatten remaining |
+| **8F** | Legacy cleanup, Void declaration, structural variant removal | 15 | ~350 | Remove List/HashMap/Tuple etc. |
 
 ---
 
-## Phase 8A — Parallel Value Variant & Intrinsic Engine
+## Phase 8A — Parallel Value Variant, VirtualHeap & Intrinsic Engine
 
 **Goal:** Add `Value::Bits(Vec<u8>)` alongside all existing variants. Build
-the intrinsic dispatch engine. No behavior change — all legacy paths remain.
+the VirtualHeap sandbox and the intrinsic dispatch engine. No behavior
+change — all legacy paths remain. The VirtualHeap is seeded by the prelude
+cache (Phase 7.5) and handles the sandboxed pointer arithmetic needed for
+List, HashMap, and Box operations at compile time.
 **Verification:** 1485 tests still pass. `cargo build` clean.
 
 ### Step 8A.0 — Add Value::Bits variant
@@ -583,13 +644,19 @@ cargo build --release && bash benchmarks/build_and_bench.sh --correctness
 
 ## Phase 8F — Legacy Cleanup + Void
 
-### Step 8F.0 — Delete dead variants
+### Step 8F.0 — Delete all structural variants
 
 Remove from `Value` enum:
-- `Value::Ptr(u64)` — no longer needed; pointers are `Value::Bits` with
-  `bytes <~ 8` on 64-bit targets
+- `Value::List(Vec<Value>)` — collections are Bits structs with VirtualHeap
+- `Value::Tuple(Vec<Value>)` — tuples are Bits structs with sequential slots
+- `Value::HashMap(HashMap<String, Value>)` — maps are Bits structs with VirtualHeap
+- `Value::Instance { typename, fields }` — struct instances are Bits at their byte width
+- `Value::Enum(String, String, HashMap<String, Value>)` — enums are Bits at discriminant + data width
+- `Value::Ptr(u64)` — pointers are `Value::Bits` with `bytes <~ 8` on 64-bit targets
 
-Delete all now-unreachable match arms across the codebase.
+Delete all now-unreachable match arms across the codebase. The `arrow.rs`
+dispatch for collection operations (`match &mut collection { Value::List => ...,
+Value::HashMap => ..., }`) collapses to a single property lookup:
 
 ### Step 8F.1 — Add Void to bootstrap
 
@@ -630,10 +697,11 @@ cargo build --release && bash benchmarks/build_and_bench.sh --correctness
 | `src/features/binary_op.rs` | 3 (50-arm match) | 1 (property lookup) | Eliminates 50 match arms |
 | `src/features/unary_op.rs` | 3 (10-arm match) | 1 (property lookup) | Eliminates 10 match arms |
 | `src/interpreter.rs` eval_expr | 4 (nested if-let) | 2 (guard clauses) | 10+ match sites flattened |
-| `src/features/arrow.rs` | 3 (collection × dir × value) | 2 (property keyed) | Stack/Queue branches removed |
+| `src/features/arrow.rs` | 3 (6-variant × direction) | 1 (property lookup) | 5 collection variant branches gone |
 | `src/features/projection.rs` | 3 (type × projection) | 2 (property lookup) | Type-specific arms removed |
 | `src/ffi/registry.rs` | 3 (impl functions) | 1 (map/collect) | 15 functions flattened |
 | `src/type_universe.rs` apply_binding | 3 (200-line match) | 2 (removed storage/box/unbox) | ~30 branches deleted |
+| `Value` enum | 24 variants | **11** (Bits + 10 compiler-internal) | All structural/storage variants removed |
 
 ---
 
