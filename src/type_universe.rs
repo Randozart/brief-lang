@@ -380,6 +380,7 @@ impl TypeUniverse {
                     slots: vec![],
                     metadata: HashMap::new(),
                     projections: vec![],
+                    bindings: vec![],
                     operators: vec![],
                     constraints: vec![],
                     span: None,
@@ -573,9 +574,10 @@ impl TypeUniverse {
             rt.fixed_size = Some(true);
         }
 
-        // Apply projections — parameterized lazy bindings from `name(params) = expr;`.
-        // 2026-07-11: Phase 1A.2 — metadata stays on TypeDefBody until Phase 1B.
-        for binding in &td.body.projections {
+        // Apply bindings — known metadata names populate ResolvedType fields.
+        // Uses legacy bindings field during migration (Phase 1A.2).
+        // Phase 1B will read from metadata + projections separately.
+        for binding in &td.body.bindings {
             self.apply_binding(&mut rt, binding);
         }
 
@@ -1209,6 +1211,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
                     TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
@@ -1228,6 +1232,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                     TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
@@ -1279,6 +1285,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
                     TypeBinding { name: "ElementType".into(), params: vec![], value: Box::new(Expr::TypeRef("T".into())), span: None },
@@ -1296,6 +1304,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("BaseList".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(false)), span: None },
                 ],
@@ -1325,6 +1335,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(false)), span: None },
                 ],
@@ -1348,6 +1360,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("U32".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Volatile".into(), params: vec![], value: Box::new(Expr::Bool(true)), span: None },
                 ],
@@ -1375,6 +1389,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
                 ],
@@ -1398,6 +1414,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                     TypeBinding { name: "Endian".into(), params: vec![], value: Box::new(Expr::Identifier("Big".into())), span: None },
@@ -1421,6 +1439,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("String".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
                 ],
@@ -1446,6 +1466,7 @@ mod tests {
                 slots: vec![],
                 metadata: HashMap::new(),
                 projections: vec![],
+                bindings: vec![],
                 operators: vec![],
             constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".into())),
@@ -1471,6 +1492,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "InsertAt".into(), params: vec![], value: Box::new(Expr::Identifier("append".into())), span: None },
                     TypeBinding { name: "ExtractFrom".into(), params: vec![], value: Box::new(Expr::Identifier("shift".into())), span: None },
@@ -1497,6 +1520,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "InsertAt".into(), params: vec![], value: Box::new(Expr::Identifier("custom_strat".into())), span: None },
                 ],
@@ -1535,6 +1560,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                 ],
@@ -1568,6 +1595,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
                 ],
@@ -1592,6 +1621,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
                 ],
@@ -1732,6 +1763,8 @@ mod tests {
                     TypeSlot { name: "x".into(), ty: crate::ast::Type::Custom("Int".into()), span: None },
                     TypeSlot { name: "y".into(), ty: crate::ast::Type::Custom("Int".into()), span: None },
                 ],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![],
                 operators: vec![], constraints: vec![],
                 span: None,
@@ -1764,6 +1797,8 @@ mod tests {
                     TypeSlot { name: "ptr".into(), ty: crate::ast::Type::Applied("Ptr".into(), vec![crate::ast::Type::Custom("UInt8".into())]), span: None },
                     TypeSlot { name: "len".into(), ty: crate::ast::Type::Custom("Int".into()), span: None },
                 ],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![],
                 operators: vec![], constraints: vec![],
                 span: None,
@@ -1790,6 +1825,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
                 ],

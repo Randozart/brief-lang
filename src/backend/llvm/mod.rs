@@ -1620,6 +1620,7 @@ impl LlvmBackend {
                                         slots: vec![],
                                         metadata: HashMap::new(),
                                         projections: vec![],
+                                        bindings: vec![],
                                         operators: vec![],
                                         constraints: vec![],
                                         span: None,

@@ -10551,6 +10551,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Int".into())),
             body: crate::ast::TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![],
                 operators: vec![],
             constraints: vec![Expr::Gt(
@@ -10601,6 +10603,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Int".into())),
             body: crate::ast::TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![],
                 operators: vec![],
             constraints: vec![Expr::Gt(
@@ -10817,6 +10821,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![TypeBinding {
                     name: "InsertAt".into(),
                     params: vec![],
@@ -10897,6 +10903,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![TypeBinding {
                     name: "ExtractFrom".into(),
                     params: vec![],
@@ -10980,6 +10988,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("List".into())),
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![TypeBinding {
                     name: "InsertAt".into(),
                     params: vec![],

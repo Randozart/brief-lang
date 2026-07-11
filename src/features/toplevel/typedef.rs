@@ -21,6 +21,7 @@
 // collected and resolved by type_universe.rs in Pass 1, then become
 // read-only. The interpreter skips them at runtime.
 
+use std::collections::HashMap;
 use crate::ast::{Expr, Type, TypeBinding, TypeDef, TypeDefBody};
 use crate::errors::TypeError;
 use crate::features::traits::*;
@@ -135,6 +136,8 @@ mod tests {
     fn test_type_def_body_with_bindings() {
         let body = TypeDefBody {
             slots: vec![],
+            metadata: HashMap::new(),
+            projections: vec![],
             bindings: vec![
                 make_binding("Bytes", Expr::Integer(8)),
                 make_binding("Alignment", Expr::Integer(8)),
@@ -155,6 +158,8 @@ mod tests {
             bit_range: None,
             body: TypeDefBody {
                 slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 bindings: vec![
                     make_binding("Bytes", Expr::Integer(8)),
                     make_binding("Alignment", Expr::Integer(8)),
@@ -230,6 +235,8 @@ mod kani_full_tests {
     fn verify_type_def_body_with_bindings() {
         let body = TypeDefBody {
             slots: vec![],
+            metadata: HashMap::new(),
+            projections: vec![],
             bindings: vec![TypeBinding {
                 name: "Bytes".into(),
                 params: vec![],

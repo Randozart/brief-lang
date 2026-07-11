@@ -387,7 +387,8 @@ mod tests {
                 type_params: vec![],
                 base: Box::new(Expr::TypeRef("Bits".to_string())),
                 bit_range: None,
-                body: TypeDefBody { slots: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None },
+                body: TypeDefBody { slots: vec![], metadata: HashMap::new(),
+                projections: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None },
                 span: None,
             },
         }

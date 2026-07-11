@@ -3454,6 +3454,7 @@ impl<'a> Parser<'a> {
         let mut slots = Vec::new();
         let mut metadata = HashMap::new();
         let mut projections = Vec::new();
+        let mut bindings: Vec<TypeBinding> = Vec::new();
         let mut constraints = Vec::new();
         let mut operators = Vec::new();
 
@@ -3489,7 +3490,13 @@ impl<'a> Parser<'a> {
                 self.advance();
                 let pragma_name = self.expect_identifier()?;
                 let pragma_lower = pragma_name.to_lowercase();
-                metadata.insert(pragma_lower, PropertyValue::Bool(true));
+                metadata.insert(pragma_lower.clone(), PropertyValue::Bool(true));
+                bindings.push(TypeBinding {
+                    name: pragma_lower,
+                    params: vec![],
+                    value: Box::new(Expr::Bool(true)),
+                    span: self.current_span(),
+                });
                 if let Some(Ok(Token::Semicolon)) = self.current_token() {
                     self.advance();
                 } else {
@@ -3559,31 +3566,37 @@ impl<'a> Parser<'a> {
             };
             let value = self.parse_expression()?;
 
+            // Create the TypeBinding for backward compat
+            let tb = TypeBinding {
+                name: item_name.clone(),
+                params: params.clone(),
+                value: Box::new(value),
+                span: self.current_span(),
+            };
+
             // Route to metadata or projections based on separator
             if is_metadata {
-                let prop_value = expr_to_property_value(&value)?;
                 if params.is_empty() {
-                    // Constant metadata: name <~ value;
-                    metadata.insert(item_name, prop_value);
+                    match expr_to_property_value(&tb.value) {
+                        Ok(prop_value) => {
+                            metadata.insert(item_name, prop_value);
+                        }
+                        Err(_) => {
+                            // Non-constant expression — treat as projection
+                            projections.push(tb.clone());
+                        }
+                    }
                 } else {
-                    // Parameterized metadata: name(a, b) <~ value;
-                    projections.push(TypeBinding {
-                        name: item_name.clone(), params: params.clone(),
-                        value: Box::new(value),
-                        span: self.current_span(),
-                    });
-                    // Also store as metadata with param-qualified key
-                    let key = format!("{}({})", item_name, params.join(","));
-                    metadata.insert(key, prop_value);
+                    projections.push(tb.clone());
+                    if let Ok(prop_value) = expr_to_property_value(&tb.value) {
+                        let key = format!("{}({})", item_name, params.join(","));
+                        metadata.insert(key, prop_value);
+                    }
                 }
             } else {
-                // Projection: name(params) = expr;
-                projections.push(TypeBinding {
-                    name: item_name, params,
-                    value: Box::new(value),
-                    span: self.current_span(),
-                });
+                projections.push(tb.clone());
             }
+            bindings.push(tb);
 
             // Expect semicolon after binding
             if let Some(Ok(Token::Semicolon)) = self.current_token() {
@@ -3607,6 +3620,7 @@ impl<'a> Parser<'a> {
                 slots,
                 metadata,
                 projections,
+                bindings,
                 operators,
                 constraints,
                 span: self.current_span(),
@@ -9251,7 +9265,20 @@ fn expr_to_property_value(expr: &Expr) -> Result<PropertyValue, SyntaxError> {
         Expr::Float(f) => Ok(PropertyValue::Float(*f)),
         Expr::String(s) => Ok(PropertyValue::String(s.clone())),
         Expr::Bool(b) => Ok(PropertyValue::Bool(*b)),
+        Expr::IntegerSuffixed(n, _) => Ok(PropertyValue::Int(*n)),
         Expr::Identifier(name) => Ok(PropertyValue::Identifier(name.clone())),
+        Expr::Call(name, _) => Ok(PropertyValue::Identifier(format!("call:{}", name))),
+        Expr::Literal(lit) => match lit.as_ref() {
+            crate::features::literal::LiteralExpr::Integer(n) => Ok(PropertyValue::Int(*n)),
+            crate::features::literal::LiteralExpr::Float(f) => Ok(PropertyValue::Float(*f)),
+            crate::features::literal::LiteralExpr::String(s) => Ok(PropertyValue::String(s.clone())),
+            crate::features::literal::LiteralExpr::Bool(b) => Ok(PropertyValue::Bool(*b)),
+            _ => Err(SyntaxError::InvalidStatement {
+                reason: "metadata value must be a compile-time constant \
+                    (literal, identifier, or list of literals)".to_string(),
+                span: expr.span().unwrap_or_else(Span::dummy),
+            }),
+        },
         Expr::ListLiteral(list) => {
             let mut vals = Vec::new();
             for elem in list {
@@ -11535,9 +11562,9 @@ defn fallback() -> Int { term 0; };
             match &prog.items[0] {
                 TopLevel::TypeDef(td) => {
                     assert_eq!(td.name, "Foo");
-                    assert_eq!(td.body.projections.len(), 2);
-                    assert_eq!(td.body.projections[0].name, "bytes");
-                    assert_eq!(td.body.projections[1].name, "alignment");
+                    assert_eq!(td.body.bindings.len(), 2);
+                    assert_eq!(td.body.bindings[0].name, "bytes");
+                    assert_eq!(td.body.bindings[1].name, "alignment");
                 }
                 other => panic!("Expected TypeDef, got {:?}", other),
             }
@@ -11554,9 +11581,9 @@ defn fallback() -> Int { term 0; };
         if let Ok(prog) = result {
             match &prog.items[0] {
                 TopLevel::TypeDef(td) => {
-                    assert_eq!(td.body.projections.len(), 1);
-                    assert_eq!(td.body.projections[0].name, "volatile");
-                    assert_eq!(td.body.projections[0].value.as_ref(), &Expr::Bool(true));
+                    assert_eq!(td.body.bindings.len(), 1);
+                    assert_eq!(td.body.bindings[0].name, "volatile");
+                    assert_eq!(td.body.bindings[0].value.as_ref(), &Expr::Bool(true));
                 }
                 other => panic!("Expected TypeDef, got {:?}", other),
             }
@@ -11800,8 +11827,8 @@ fn test_parse_typedef_mixed_slots_and_bindings_proper() {
     assert!(result.is_ok(), "Should parse mixed slots+bindings: {:?}", result.err());
     if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
         assert_eq!(td.body.slots.len(), 2);
-        assert_eq!(td.body.projections.len(), 1);
-        assert_eq!(td.body.projections[0].name, "bytes");
+        assert_eq!(td.body.bindings.len(), 1);
+        assert_eq!(td.body.bindings[0].name, "bytes");
     } else {
         panic!("Expected TypeDef");
     }
@@ -11823,7 +11850,7 @@ fn test_parse_typedef_slot_between_bindings_and_constraints_proper() {
     assert!(result.is_ok(), "Should parse slot between binding and constraint: {:?}", result.err());
     if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
         assert_eq!(td.body.slots.len(), 1);
-        assert_eq!(td.body.projections.len(), 1);
+        assert_eq!(td.body.bindings.len(), 1);
         assert_eq!(td.body.constraints.len(), 1);
     } else {
         panic!("Expected TypeDef");
@@ -12297,9 +12324,9 @@ mod kani_full_tests {
         assert!(result.is_ok(), "Should parse _ @/ in TypeDef: {:?}", result.err());
         if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
             assert_eq!(td.name, "MyType");
-            assert_eq!(td.body.projections.len(), 1);
-            assert_eq!(td.body.projections[0].name, "Field");
-            let val = &td.body.projections[0].value;
+            assert_eq!(td.body.bindings.len(), 1);
+            assert_eq!(td.body.bindings[0].name, "Field");
+            let val = &td.body.bindings[0].value;
             assert!(matches!(val.as_ref(),
                 Expr::Projection { source, target: ProjectionTarget::BitRange(_) }
                 if matches!(source.as_ref(), Expr::Identifier(name) if name == "_")

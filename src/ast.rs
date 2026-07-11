@@ -642,6 +642,9 @@ pub struct TypeDefBody {
     pub constraints: Vec<Expr>,
     /// Source span for error reporting.
     pub span: Option<Span>,
+    /// Legacy: all bindings before split. Kept for migration compat.
+    /// 2026-07-11: Phase 1A.2 — will remove after all consumers migrate.
+    pub bindings: Vec<TypeBinding>,
 }
 
 impl TypeDefBody {
@@ -656,20 +659,20 @@ impl TypeDefBody {
     ) -> Self {
         let mut metadata = HashMap::new();
         let mut projections = Vec::new();
-        for b in bindings {
+        for b in &bindings {
             if b.params.is_empty() {
                 // Constant metadata: name <~ value;
-                if let Some(val) = binding_to_property_value(&b) {
+                if let Some(val) = binding_to_property_value(b) {
                     metadata.insert(b.name.clone(), val);
                 } else {
-                    projections.push(b);
+                    projections.push(b.clone());
                 }
             } else {
                 // Parameterized projection: name(params) = expr;
-                projections.push(b);
+                projections.push(b.clone());
             }
         }
-        TypeDefBody { slots, metadata, projections, operators, constraints, span }
+        TypeDefBody { slots, metadata, projections, operators, constraints, span, bindings }
     }
 }
 
