@@ -531,6 +531,8 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
         Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
             Expr::AddrOf(inner) => collect_expr_ids_inner(inner, ids),
             Expr::Deref(inner) => collect_expr_ids_inner(inner, ids),
+        // 2026-07-11: Phase 5 — deferred literal, no identifiers
+        Expr::DeferredLiteral { .. } => {},
     }
 }
 

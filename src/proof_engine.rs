@@ -2757,11 +2757,13 @@ impl ProofEngine {
             }
             // Pipe chains — desugared before this pass
             Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
-        Expr::AddrOf(inner) | Expr::Deref(inner) => self.collect_identifiers(inner, vars),
+            Expr::AddrOf(inner) | Expr::Deref(inner) => self.collect_identifiers(inner, vars),
             Expr::Within { body, fallback, .. } => {
                 self.collect_identifiers(body, vars);
                 self.collect_identifiers(fallback, vars);
             }
+            // 2026-07-11: Phase 5 — deferred literal has no identifiers to collect
+            Expr::DeferredLiteral { .. } => {},
         }
     }
 

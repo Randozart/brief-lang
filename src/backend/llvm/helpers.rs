@@ -323,6 +323,11 @@ impl LlvmBackend {
                 bound: 0, retries: 0, unit: crate::ast::TimeUnit::Cycles,
                 fallback: Box::new(Self::rewrite_cell_identifiers(fallback, cell_name)),
             },
+            // 2026-07-11: Phase 5 — deferred literal carries no cell identifiers
+            Expr::DeferredLiteral { text, expected_type } => Expr::DeferredLiteral {
+                text: text.clone(),
+                expected_type: expected_type.clone(),
+            },
         }
     }
 

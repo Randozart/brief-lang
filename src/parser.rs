@@ -2586,11 +2586,31 @@ impl<'a> Parser<'a> {
     fn parse_codec_decl(&mut self) -> Result<CodecDeclaration, SyntaxError> {
         let name = self.expect_identifier()?;
         let mut constraints = Vec::new();
+        let mut parse_handler: Option<String> = None;
+        let mut format_handler: Option<String> = None;
 
         if let Some(Ok(Token::LBrace)) = self.current_token() {
             self.advance();
-            // Parse constraint expressions: [expr];
             while !matches!(self.current_token(), Some(Ok(Token::RBrace)) | None) {
+                // Check for identifier <~ ... patterns (parse <~ fn_name;)
+                if let Some(Ok(Token::Identifier(keyword))) = self.current_token() {
+                    let kw = keyword.clone();
+                    if (kw == "parse" || kw == "format") && self.peek_token().map_or(false, |t| matches!(t, Ok(Token::TildeArrow))) {
+                        self.advance(); // consume keyword
+                        self.advance(); // consume <~
+                        let fn_name = self.expect_identifier()?;
+                        if let Some(Ok(Token::Semicolon)) = self.current_token() {
+                            self.advance();
+                        }
+                        if kw == "parse" {
+                            parse_handler = Some(fn_name);
+                        } else {
+                            format_handler = Some(fn_name);
+                        }
+                        continue;
+                    }
+                }
+                // Parse constraint expressions: [expr];
                 if let Some(Ok(Token::LBracket)) = self.current_token() {
                     self.advance();
                     let expr = self.parse_expression()?;
@@ -2610,7 +2630,7 @@ impl<'a> Parser<'a> {
             self.advance();
         }
 
-        Ok(CodecDeclaration { name, constraints, span: None })
+        Ok(CodecDeclaration { name, parse_handler, format_handler, constraints, span: None })
     }
 
     /// Parse a resource declaration: rsrc name: Type(args);
@@ -11891,6 +11911,43 @@ defn fallback() -> Int { term 0; };
         assert_eq!(items.len(), 2);
         assert!(matches!(&items[0], TopLevel::Codec(c) if c.name == "PositiveInt"));
         assert!(matches!(&items[1], TopLevel::TypeDef(td) if td.name == "MyInt"));
+    }
+
+    #[test]
+    /// 2026-07-11: Phase 5 — Parse a codec with parse/format handlers.
+    fn test_parse_codec_with_handlers() {
+        let s = "codec HexColor {
+                     [value >= 0];
+                     [value <= 0xFFFFFF];
+                     parse <~ parse_hex_color;
+                     format <~ format_hex_color;
+                 };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse codec with handlers: {:?}", result.err());
+        if let TopLevel::Codec(codec) = &result.unwrap().items[0] {
+            assert_eq!(codec.name, "HexColor");
+            assert_eq!(codec.constraints.len(), 2);
+            assert_eq!(codec.parse_handler.as_deref(), Some("parse_hex_color"));
+            assert_eq!(codec.format_handler.as_deref(), Some("format_hex_color"));
+        } else {
+            panic!("Expected TopLevel::Codec");
+        }
+    }
+
+    #[test]
+    /// 2026-07-11: Phase 5 — Parse a codec with only a parse handler (no format).
+    fn test_parse_codec_with_only_parse() {
+        let s = "codec HexColor { parse <~ parse_hex_color; };";
+        let mut parser = Parser::new(s);
+        let result = parser.parse();
+        assert!(result.is_ok(), "Should parse codec with only parse: {:?}", result.err());
+        if let TopLevel::Codec(codec) = &result.unwrap().items[0] {
+            assert_eq!(codec.parse_handler.as_deref(), Some("parse_hex_color"));
+            assert!(codec.format_handler.is_none());
+        } else {
+            panic!("Expected TopLevel::Codec");
+        }
     }
 
 } // end parser_tests

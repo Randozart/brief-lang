@@ -1709,10 +1709,18 @@ pub struct InopDeclaration {
 
 /// A `codec Name { ... }` declaration defining a serialization/validation codec.
 /// 2026-07-11: Phase 4 — codec system.
-/// Phases 5-6 will add parse/format handler bodies and WASM compilation.
+/// 2026-07-11: Phase 5 — added parse_handler and format_handler fields.
 #[derive(Debug, Clone)]
 pub struct CodecDeclaration {
     pub name: String,
+    /// Name of the parse handler function: `parse <~ function_name;`
+    /// Called at compile time to convert literal text to a value of the base type.
+    /// 2026-07-11: Phase 5.
+    pub parse_handler: Option<String>,
+    /// Name of the format handler function: `format <~ function_name;`
+    /// Called at compile time to convert a value to its text representation.
+    /// 2026-07-11: Phase 5.
+    pub format_handler: Option<String>,
     /// Validation constraints: `[expr]` — applied to values of types using this codec
     pub constraints: Vec<Expr>,
     pub span: Option<Span>,
@@ -1978,6 +1986,14 @@ pub enum Expr {
         unit: TimeUnit,
         retries: u64,
         fallback: Box<Expr>,
+    },
+    /// A literal value that must be resolved after type resolution.
+    /// Captured when a typed variable has a custom-type literal value
+    /// (e.g. `let c: Color = FF00FF;` where Color has a codec parse handler).
+    /// 2026-07-11: Phase 5 — custom literal parsers.
+    DeferredLiteral {
+        text: String,
+        expected_type: Box<Type>,
     },
 }
 

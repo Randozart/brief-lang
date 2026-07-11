@@ -279,8 +279,10 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             // Pipe chains — desugared before this pass
             Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
         Expr::AddrOf(_) | Expr::Deref(_) => SymbolicValue::Unknown,
+        // 2026-07-11: Phase 5 — deferred literal cannot be symbolically evaluated
+        Expr::DeferredLiteral { .. } => SymbolicValue::Unknown,
         }
-    }
+}
 
 /// Try to simplify a binary operation on symbolic values
 fn simplify_binary(op: &str, left: &SymbolicValue, right: &SymbolicValue) -> Option<SymbolicValue> {

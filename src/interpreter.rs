@@ -2255,6 +2255,11 @@ impl Interpreter {
                 bound: 0, retries: 0, unit: crate::ast::TimeUnit::Cycles,
                 fallback: Box::new(self.rewrite_identifiers(fallback, uid, cell_name)),
             },
+            // 2026-07-11: Phase 5 — deferred literal carries no identifiers to rewrite
+            Expr::DeferredLiteral { text, expected_type } => Expr::DeferredLiteral {
+                text: text.clone(),
+                expected_type: expected_type.clone(),
+            },
         }
     }
 
@@ -6200,6 +6205,8 @@ impl Interpreter {
                     }
                 }
             }
+            // 2026-07-11: Phase 5 — deferred literal not evaluable in interpreter
+            Expr::DeferredLiteral { .. } => Ok(Value::Int(0)),
         }
     }
 

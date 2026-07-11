@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{CodecDeclaration, Expr, MeldDeclaration, Program, TopLevel, TypeBinding, TypeDef, TypeDefBody};
+use crate::ast::{CodecDeclaration, Expr, MeldDeclaration, Program, StateDecl, TopLevel, Type, TypeBinding, TypeDef, TypeDefBody};
 use crate::features::binary_op::{BinaryOpExpr, BinaryOpKind};
 
 /// Resolved metadata for a single type in the universe.
@@ -1579,6 +1579,8 @@ mod tests {
     fn test_codec_declaration_collected() {
         let codec = TopLevel::Codec(CodecDeclaration {
             name: "PositiveInt".into(),
+            parse_handler: None,
+            format_handler: None,
             constraints: vec![
                 Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, Expr::Identifier("value".into()), Expr::Integer(0)))),
             ],
@@ -1595,6 +1597,8 @@ mod tests {
     fn test_codec_constraints_merged_into_type() {
         let codec = TopLevel::Codec(CodecDeclaration {
             name: "PositiveInt".into(),
+            parse_handler: None,
+            format_handler: None,
             constraints: vec![
                 Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, Expr::Identifier("value".into()), Expr::Integer(0)))),
             ],
@@ -1623,6 +1627,62 @@ mod tests {
         let my_int = universe.get("MyInt").unwrap();
         // Should have the codec's constraint merged into guards
         assert_eq!(my_int.guards.len(), 1);
+    }
+
+    #[test]
+    /// 2026-07-11: Phase 5 — Test deferred literal detection in normalize_types.
+    fn test_deferred_literal_from_codec() {
+        let codec = TopLevel::Codec(CodecDeclaration {
+            name: "HexColor".into(),
+            parse_handler: Some("parse_hex_color".into()),
+            format_handler: None,
+            constraints: vec![],
+            span: None,
+        });
+        let td = TypeDef {
+            name: "Color".into(),
+            type_params: vec![],
+            bit_range: None,
+            base: Box::new(Expr::TypeRef("Int".into())),
+            body: TypeDefBody {
+                slots: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
+                bindings: vec![
+                    TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::Identifier("HexColor".into())), span: None },
+                ],
+                operators: vec![],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        };
+        // A state decl: let c: Color = FF00FF;
+        let state_decl = TopLevel::StateDecl(StateDecl {
+            name: "c".into(),
+            ty: Type::Custom("Color".into()),
+            expr: Some(Expr::Identifier("FF00FF".into())),
+            address: None,
+            bit_range: None,
+            constraint: None,
+            is_override: false,
+            os_mode: false,
+            span: None,
+            attrs: vec![],
+        });
+        let mut program = make_program(vec![codec, TopLevel::TypeDef(Box::new(td)), state_decl]);
+        let universe = TypeUniverse::build(&program);
+        // Run normalize_types — it should convert the Identifier to DeferredLiteral
+        crate::normalize_types::normalize_types(&mut program, &universe);
+        if let TopLevel::StateDecl(decl) = &program.items[2] {
+            assert!(matches!(decl.expr, Some(Expr::DeferredLiteral { .. })));
+            if let Some(Expr::DeferredLiteral { text, expected_type }) = &decl.expr {
+                assert_eq!(text, "FF00FF");
+                assert_eq!(expected_type.as_ref(), &Type::Custom("Color".into()));
+            }
+        } else {
+            panic!("Expected StateDecl");
+        }
     }
 
     #[test]

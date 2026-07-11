@@ -508,6 +508,8 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
             collect_strings_expr(body, seen, out);
             collect_strings_expr(fallback, seen, out);
         }
+        // 2026-07-11: Phase 5 — deferred literal has no sub-expressions
+        Expr::DeferredLiteral { .. } => {},
     }
 }
 

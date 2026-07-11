@@ -20,6 +20,28 @@ pub fn normalize_types(program: &mut Program, universe: &TypeUniverse) {
 fn normalize_toplevel(item: &mut TopLevel, universe: &TypeUniverse) {
     match item {
         TopLevel::StateDecl(decl) => {
+            // 2026-07-11: Phase 5 — detect deferred literals BEFORE type normalization.
+            // The type name (e.g. "Color") is needed to look up the codec, but
+            // normalize_type may replace Custom("Color") with Bits(64), losing info.
+            if let Some(ref mut expr) = decl.expr {
+                if let Expr::Identifier(name) = &*expr {
+                    let type_name = match &decl.ty {
+                        Type::Custom(n) => n.as_str(),
+                        _ => "",
+                    };
+                    if !type_name.is_empty() {
+                        if let Some(rt) = universe.get(type_name) {
+                            if let Some(ref codec_name) = rt.codec {
+                                if universe.codecs.get(codec_name).and_then(|c| c.parse_handler.as_ref()).is_some() {
+                                    let text = name.to_string();
+                                    let expected_type = decl.ty.clone();
+                                    *expr = Expr::DeferredLiteral { text, expected_type: Box::new(expected_type) };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             decl.ty = normalize_type(&decl.ty, universe);
         }
         TopLevel::Constant(constant) => {
@@ -62,6 +84,18 @@ fn normalize_toplevel(item: &mut TopLevel, universe: &TypeUniverse) {
         }
         TopLevel::Test { item, .. } | TopLevel::Fuzzed { item, .. } => {
             normalize_toplevel(item, universe);
+        }
+        _ => {}
+    }
+}
+
+/// Normalize types inside expressions (recursive).
+/// 2026-07-11: Phase 5 — handles Expr::DeferredLiteral.
+fn normalize_expr(expr: &mut Expr, universe: &TypeUniverse) {
+    match expr {
+        Expr::DeferredLiteral { expected_type, .. } => {
+            let normalized = normalize_type(expected_type, universe);
+            *expected_type = Box::new(normalized);
         }
         _ => {}
     }
