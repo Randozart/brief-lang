@@ -2030,3 +2030,42 @@ which had two latent bugs never triggered before (no types had declared operator
 previously dead (no types had universe operators). Any new binding that makes a type "look
 resolved" can activate untested match arms. Always run `--runtime` benchmarks (without `| tail`)
 after adding operator bindings.
+
+---
+
+## 2026-07-11 — No borrow checker (alias safety gap)
+
+**Issue**: The compiler correctly injects `op Drop` destructor calls when variables
+go out of scope, but it does not prove the absence of dangling pointers. A user
+can write:
+
+```brief
+let list: List<Int> = [1, 2, 3];
+let first: Int = list[0];      // borrows from list
+list[5] = 42;                  // mutates list while first still active
+// first now dangles if list reallocated its backing buffer
+```
+
+The `op Drop` pass ensures every heap allocation is eventually freed, but it does
+not prevent use-after-free or double-free. Same class of problem as C++ without
+a borrow checker.
+
+**Root Cause**: The compiler was designed with `op Drop` for lifecycle management
+but has no alias analysis pass. Ownership tracking (which scope calls `Drop`) is
+sound, but mutation-while-borrowed is not detected.
+
+**Impact**: Memory safety depends on the programmer not aliasing pointers through
+collection accessors. This is acceptable for single-threaded reactive programs
+(common Brief use case) but unsound for general-purpose code with complex
+aliasing patterns.
+
+**Fix**: No immediate fix planned. A borrow checker pass would need to:
+1. Track borrow origins at the AST level (which expression produced each pointer)
+2. Reject mutations of a collection while an element reference is live
+3. This is a significant compiler pass (~1000+ lines)
+
+**Lesson**: Documented as a known limitation. The `op Drop` pass prevents leaks
+but does not prevent use-after-free. Future borrow checker work will address
+this.
+
+**Files**: N/A — gap in the compiler architecture, not a specific bug.
