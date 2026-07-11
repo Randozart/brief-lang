@@ -59,7 +59,7 @@ impl ExprEval for ProjectionExpr {
             ProjectionTarget::Ptr => Ok(Value::Int(0)),
             ProjectionTarget::Alignment => {
                 let align = match &source_val {
-                    Value::Int(_) | Value::Float(_) => 8,
+                    Value::Int(_) | Value::Float(_) | Value::Bits(_) => 8,
                     Value::Bool(_) => 1,
                     Value::Char(_) => 4,
                     Value::String(_) | Value::List(_) | Value::Tuple(_)
@@ -115,7 +115,7 @@ impl ExprEval for ProjectionExpr {
                     Value::Stack(_) => 12, Value::Queue(_) => 13,
                     Value::Instance { .. } => 14, Value::Enum(..) => 15,
                     Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Regex(_) => 18,
-                    Value::Ptr(_) | Value::Ref(_) => 19, Value::Void => 0,
+                    Value::Ptr(_) | Value::Ref(_) => 19, Value::Bits(_) => 20, Value::Void => 0,
                     Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
                         unreachable!("compile-time only value")
                     }

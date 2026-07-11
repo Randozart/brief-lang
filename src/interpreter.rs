@@ -68,6 +68,9 @@ pub enum Value {
     Char(char),
     Bool(bool),
     Data(Vec<u8>),
+    /// Universal bit-vector storage cell (Bits thesis).
+    /// 2026-07-11: Phase 8A — all representational values are Bits.
+    Bits(Vec<u8>),
     List(Vec<Value>),
     Tuple(Vec<Value>),  // True tuple type (not flattened to List)
     HashMap(HashMap<String, Value>),  // HashMap (string keys for simplicity)
@@ -155,6 +158,7 @@ impl fmt::Display for Value {
             Value::Char(v) => write!(f, "'{}'", v),
             Value::Bool(v) => write!(f, "{}", v),
             Value::Data(_) => write!(f, "<data>"),
+            Value::Bits(b) => write!(f, "<Bits {}>", b.len()),
             Value::List(items) => write!(f, "[{}]", items.len()),
             Value::Tuple(items) => write!(f, "({})", items.len()),
             Value::HashMap(map) => write!(f, "<HashMap {}>", map.len()),
@@ -258,6 +262,7 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
             JsonValue::Object(map)
         }
         Value::Regex(_) => JsonValue::Null,
+        Value::Bits(b) => JsonValue::Array(b.iter().map(|x| JsonValue::Number((*x).into())).collect()),
         Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
             unreachable!("compile-time only value")
         }
