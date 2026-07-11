@@ -1,8 +1,8 @@
 # Brief Language Specification
 
-**Version:** v0.17.0  
+**Version:** v0.18.0  
 **Date:** 2026-07-11  
-**Status:** Development (Phase 2/3 complete: Strong Bits thesis, intrinsic reduction. Three canonical backends: LLVM, Webstack, CIRCT.)  
+**Status:** Development (Phases 4-7 complete: codec declarations, custom literal parsers, WASM target, plugin system.)  
 **Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
 
 ## 1. Introduction and Philosophy
@@ -34,8 +34,8 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 
 ### 1.3 Versioning
 
-* **Semantic**: `v0.16.0` (development, Phase 2/3 complete)
-* **Date-based**: `2026-07-09`
+* **Semantic**: `v0.18.0` (development, Phases 4-7 complete)
+* **Date-based**: `2026-07-11`
 
 ### 1.4 Compiler Architecture
 
@@ -54,14 +54,20 @@ Type Universe Build (type_universe.rs)
   ↓ Frozen universe
 NormalizeTypes Pass (normalize_types.rs)
   ↓ Normalized AST (Custom→Applied→Bits resolved)
+  └─ Phase 5: detects DeferredLiteral from type codec parse handler
 Type Checker (typechecker.rs)
   ↓ Typed AST
+  └─ DeferredLiteral typechecks as its expected_type
+Plugin Hook: AfterTypeCheck ───→ loaded plugins can inspect/abort
 Proof Engine (proof_engine.rs)
   ↓ Verified AST
 Shared Analysis (CallGraph, Range, Dataflow, Protocol)
   ↓
+Plugin Hook: BeforeCodegen  ───→ loaded plugins can inspect/abort
+  ↓
 Three Canonical Backends:
   ├── LLVM (llvm/) → .bv → native binary, .ebv → MCU, .abv → SPIR-V
+  │   └── Phase 6: --triple wasm32-unknown-wasi → .wasm via llc + wasm-ld
   ├── Webstack (webstack.rs) → .rbv → TypeScript + WASM
   └── CIRCT (circt.rs) → .cbv → MLIR → Verilog/VHDL
 ```
@@ -70,7 +76,7 @@ Three Canonical Backends:
 
 | Backend | Input | Output | Status |
 |---------|-------|--------|--------|
-| LLVM | `.bv`, `.ebv`, `.abv` | Native binary, MCU binary, SPIR-V | Active |
+| LLVM | `.bv`, `.ebv`, `.abv` | Native binary, MCU binary, SPIR-V, WASM | Active |
 | Webstack | `.rbv` | TypeScript + WASM + view bindings | Active |
 | CIRCT | `.cbv` | MLIR → Verilog/VHDL | Active |
 
@@ -1658,6 +1664,118 @@ a digit from `"true"` may produce a non-Bool string).
 
 ---
 
+### 3.20 Codec Declarations \[2026-07-11: Phase 4\]
+
+A codec declaration defines a named codec that controls how values of a type are serialized, validated, and (in Phase 5) parsed from literal text.
+
+**Syntax:**
+
+```brief
+codec HexColor {
+    [value >= 0];               // validation constraint
+    [value <= 0xFFFFFF];        // validation constraint
+    parse  <~ parse_hex_color;   // Phase 5: custom literal parser
+    format <~ format_hex_color;  // Phase 5: custom formatter
+};
+```
+
+**Grammar:**
+
+```bnf
+codec_decl ::= "codec" ident "{" codec_body "}" ";"
+codec_body ::= (constraint | binding)*
+constraint ::= "[" expr "]"
+binding    ::= ("parse" | "format") "<~" ident ";"
+```
+
+**Semantics:**
+
+1. Constraints are expression guards that values of types referencing this codec must satisfy. They are merged into the type's guards during type resolution.
+2. `parse <~ fn_name;` registers a function that converts a literal string to a value of the codec's associated type. Used by the custom literal parser system (Phase 5).
+3. `format <~ fn_name;` registers a function that converts a value to its string representation.
+4. A type references a codec via the `codec <~` property binding in its body:
+
+```brief
+type MyInt <: Int {
+    codec <~ PositiveInt;
+};
+```
+
+**Implementation:** `CodecDeclaration` in `src/ast.rs`, parsed in `src/parser.rs`, collected into `TypeUniverse.codecs` during `build()` Phase 1, constraints merged via Phase 4 linking in `resolve_type_def()`.
+
+### 3.21 Custom Literal Parsers \[2026-07-11: Phase 5\]
+
+When a variable is declared with a type that has a codec containing a `parse <~` handler, the compiler detects bare identifiers in the initializer position and rewrites them as deferred literals:
+
+```brief
+codec HexColor {
+    [value >= 0];
+    [value <= 0xFFFFFF];
+    parse <~ parse_hex_color;
+};
+
+type Color <: Int {
+    codec <~ HexColor;
+};
+
+let c: Color = FF00FF;   // FF00FF is a DeferredLiteral
+```
+
+**Detection pipeline:**
+
+1. Parser: `FF00FF` is parsed as `Expr::Identifier("FF00FF")`.
+2. NormalizeTypes pass: detects that the bound type `Color` has a codec with a parse handler. Rewrites to `Expr::DeferredLiteral { text: "FF00FF", expected_type: Custom("Color") }`.
+3. Type checker: `DeferredLiteral` typechecks as its `expected_type`.
+4. Codegen: emits a zero-initialized value with a warning. Full parse-handler invocation via the interpreter is planned.
+
+**AST representation:** `Expr::DeferredLiteral { text: String, expected_type: Box<Type> }` in `src/ast.rs`.
+
+**Current limitations:**
+- The parse handler is not yet invoked via the interpreter. The literal produces a zero placeholder.
+- The format handler is declared but not yet consumed.
+- Only let-binding initializers are detected; other expression positions are deferred.
+
+### 3.22 Plugin System \[2026-07-11: Phase 7\]
+
+Compiler plugins are WASM (or native `.so`) modules loaded at compile time that can observe and optionally abort the compilation pipeline at defined hook points.
+
+**CLI:**
+
+```bash
+brief build file.bv --plugin ./my_plugin.wasm        # WASM plugin
+brief build file.bv --plugin ./my_plugin.so           # Native plugin
+brief build file.bv --plugin ./p1.wasm --plugin ./p2.wasm  # Multiple plugins
+```
+
+**Hook points:**
+
+| Hook | Pipeline Position | Purpose |
+|------|-------------------|---------|
+| `AfterParse` | After import resolution | Validate raw parse tree |
+| `AfterTypeCheck` | After type checking | Verify type-level invariants |
+| `BeforeCodegen` | Before code generation | Last transformation opportunity |
+| `AfterCodegen` | After LLVM IR generation | Post-process the IR |
+
+**Plugin interface:** See `src/plugin/mod.rs` for the `Plugin` trait and `PluginManager`.
+
+**Architecture:**
+
+```rust
+pub trait Plugin: Debug {
+    fn name(&self) -> &str;
+    fn on_hook(&self, hook: PluginHook, program: &mut Program,
+               universe: &TypeUniverse) -> PluginAction;
+}
+```
+
+**Native plugin ABI:** A `.so`/`.dylib`/`.dll` must export a `brief_plugin_create` function returning a `*mut dyn Plugin`. Loading uses `libloading`.
+
+**WASM plugin loading:** Requires the `plugins` Cargo feature (wasmtime runtime). The WIT interface is defined in `wit/` and compiled to WASM via Brief's own Phase 6 WASM target.
+
+**Why WASM for plugins?** See `docs/architecture/features/plugins.md`.
+
+---
+
 ## 4. Type System
 
 ### 4.1 Primitive Types
@@ -3140,4 +3258,4 @@ txn main() [true][true] {
 
 ---
 
-*Last updated: Brief v0.16.0 (2026-06-07)*
+*Last updated: Brief v0.18.0 (2026-07-11)*

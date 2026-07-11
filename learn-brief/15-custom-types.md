@@ -203,7 +203,48 @@ type Vec3 <: Bits {
 };
 ```
 
-## 7. Summary
+## 7. Codecs (Validation + Custom Literals)
+
+A **codec** packages validation constraints with optional parse/format
+handlers. Types reference a codec via the `codec <~` property:
+
+```brief
+codec PositiveInt {
+    [value > 0];
+    [value < 100];
+};
+
+type Age <: Int {
+    codec <~ PositiveInt;
+};
+```
+
+The codec's constraints are merged into the type's guards at compile time —
+every value of `Age` is guaranteed to be between 1 and 99.
+
+### Custom Literal Parsers (Phase 5)
+
+If the codec declares a `parse <~` handler, bare identifiers in typed
+let-bindings are captured as deferred literals:
+
+```brief
+codec HexColor {
+    parse <~ parse_hex_color;
+};
+
+type Color <: Int {
+    codec <~ HexColor;
+};
+
+let c: Color = FF00FF;  // FF00FF is parsed as a Color literal
+```
+
+The parser sees `FF00FF` as an identifier; the NormalizeTypes pass rewrites
+it to a `DeferredLiteral` when the target type has a codec with a parse
+handler. Currently emits a zero placeholder — full interpreter invocation
+is planned.
+
+## 8. Summary
 
 | Feature | Syntax | Purpose |
 |---------|--------|---------|
