@@ -144,4 +144,65 @@ mod tests {
         let result = load_plugin(Path::new("plugin.txt"));
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_plugin_manager_all_hooks_continue() {
+        let mut mgr = PluginManager::new();
+        mgr.register(Box::new(ValidationPlugin::new()));
+        let mut program = empty_program();
+        let universe = TypeUniverse::new();
+        for hook in &[PluginHook::AfterParse, PluginHook::AfterTypeCheck,
+                      PluginHook::BeforeCodegen, PluginHook::AfterCodegen] {
+            let result = mgr.run_hooks(*hook, &mut program, &universe);
+            assert!(matches!(result, PluginAction::Continue), "hook {:?} failed", hook);
+        }
+    }
+
+    /// A test plugin that aborts on AfterTypeCheck.
+    #[derive(Debug)]
+    struct AbortOnTypeCheck;
+
+    impl Plugin for AbortOnTypeCheck {
+        fn name(&self) -> &str { "test:abort_on_typecheck" }
+        fn on_hook(&self, hook: PluginHook, _program: &mut Program, _universe: &TypeUniverse) -> PluginAction {
+            if matches!(hook, PluginHook::AfterTypeCheck) {
+                PluginAction::Abort("type check failed (test)".into())
+            } else {
+                PluginAction::Continue
+            }
+        }
+    }
+
+    #[test]
+    fn test_plugin_aborts_at_hook() {
+        let mut mgr = PluginManager::new();
+        mgr.register(Box::new(AbortOnTypeCheck));
+        let mut program = empty_program();
+        let universe = TypeUniverse::new();
+        let result = mgr.run_hooks(PluginHook::AfterTypeCheck, &mut program, &universe);
+        assert!(matches!(result, PluginAction::Abort(msg) if msg.contains("type check failed")));
+    }
+
+    #[test]
+    fn test_plugin_passes_other_hooks() {
+        let mut mgr = PluginManager::new();
+        mgr.register(Box::new(AbortOnTypeCheck));
+        let mut program = empty_program();
+        let universe = TypeUniverse::new();
+        // Should not abort at BeforeCodegen (only aborts at AfterTypeCheck)
+        let result = mgr.run_hooks(PluginHook::BeforeCodegen, &mut program, &universe);
+        assert!(matches!(result, PluginAction::Continue));
+    }
+
+    #[test]
+    fn test_plugin_last_abort_wins() {
+        let mut mgr = PluginManager::new();
+        mgr.register(Box::new(AbortOnTypeCheck));
+        mgr.register(Box::new(ValidationPlugin::new()));
+        let mut program = empty_program();
+        let universe = TypeUniverse::new();
+        // AbortOnTypeCheck runs first (registered first) and aborts
+        let result = mgr.run_hooks(PluginHook::AfterTypeCheck, &mut program, &universe);
+        assert!(matches!(result, PluginAction::Abort(_)));
+    }
 }

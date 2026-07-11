@@ -620,3 +620,36 @@ impl FunctionGuard {
         fun.metadata_counter = md_ct;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compiler_context_default_triple() {
+        let ctx = CompilerContext::new();
+        assert_eq!(ctx.target_triple, "x86_64-unknown-linux-gnu");
+        assert!(!ctx.is_wasm());
+        assert_eq!(ctx.pointer_bytes(), 8);
+        assert_eq!(ctx.pointer_llvm_type(), "i64");
+    }
+
+    #[test]
+    fn test_compiler_context_wasm_triple() {
+        let mut ctx = CompilerContext::new();
+        ctx.target_triple = "wasm32-unknown-wasi".to_string();
+        assert!(ctx.is_wasm());
+        assert_eq!(ctx.pointer_bytes(), 4);
+        assert_eq!(ctx.pointer_llvm_type(), "i32");
+    }
+
+    #[test]
+    fn test_compiler_context_wasm_data_layout() {
+        let ctx = CompilerContext::new();
+        // Default x86_64 data layout
+        assert!(ctx.data_layout.as_ref().unwrap().contains("p270:32:32"));
+        // WASM would have different data layout
+        let wasm_dl = Some("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".to_string());
+        assert_ne!(ctx.data_layout, wasm_dl);
+    }
+}
