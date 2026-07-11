@@ -868,6 +868,19 @@ impl TypeUniverse {
         self.types.get(name)
     }
 
+    /// Look up the intrinsic mapped to an operator for a given type.
+    /// `op Add <~ "__add_i64#"` on the type → returns `Some("__add_i64")`.
+    /// 2026-07-11: Phase 8B — property-based operator dispatch.
+    pub fn get_operator_intrinsic(&self, type_name: &str, op: &str) -> Option<&str> {
+        let rt = self.types.get(type_name)?;
+        let key = format!("op {}", op);
+        let prop = rt.properties.get(&key)?;
+        match prop {
+            crate::ast::PropertyValue::String(s) => Some(s.trim_end_matches('#')),
+            _ => None,
+        }
+    }
+
     /// Look up a Type by its universe key (canonical name).
     /// Convenience wrapper around `get(ty.universe_key())`.
     /// 2026-06-29: Added for Phase 7A backend match arm replacement.
