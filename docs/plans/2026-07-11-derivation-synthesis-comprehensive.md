@@ -7,7 +7,8 @@ Interpreter Refactor (Phases 7.5, 8A–8G, `docs/plans/2026-07-11-pure-bits-refa
 **See also:** `docs/plans/2026-07-11-extensible-types-comprehensive.md` for
 the prerequisite phases. This plan builds directly on the property system
 (Phase 1B), plugin system (Phase 7), Pure Bits interpreter dispatch
-(Phases 8A–8G), and the `.dbvl` archive format.
+(Phases 8A–8G), and the `.dbvl` archive format. Backend metadata dispatch
+is documented in `docs/architecture/features/metadata-dispatch.md`.
 
 ---
 
@@ -555,6 +556,8 @@ that the `Intrinsic` enum, `InopDeclaration`, and `Expr::IntrinsicCall` are
 the last remaining compiler-level hardcoded special cases. Removing them
 completes the frontend/backend split: the frontend emits only standard
 `defn` entries with metadata, and backends dispatch on metadata strings.
+See `docs/architecture/features/metadata-dispatch.md` for the full
+architecture of metadata lifecycle and distributed backend verification.
 
 **Depends on:** Pure Bits Refactor Phases 8A–8F (provides
 `execute_intrinsic()`, `get_operator_intrinsic()`, property-based operator
@@ -747,7 +750,8 @@ The `#` is no longer recognized as an intrinsic suffix on identifiers.
 Add a round-trip test that a `defn` with `llvm_instr`, `interpreter_impl`,
 and `circt_op` metadata survives the archive serialization and
 deserialization. A backend reading the archive can dispatch on these
-strings without any shared enum with the frontend.
+strings without any shared enum with the frontend. The metadata dispatch
+architecture is documented in `docs/architecture/features/metadata-dispatch.md`.
 
 ```rust
 #[test]
