@@ -378,7 +378,8 @@ impl TypeUniverse {
                 bit_range: None,
                 body: crate::ast::TypeDefBody {
                     slots: vec![],
-                    bindings: vec![],
+                    metadata: HashMap::new(),
+                    projections: vec![],
                     operators: vec![],
                     constraints: vec![],
                     span: None,
@@ -572,10 +573,9 @@ impl TypeUniverse {
             rt.fixed_size = Some(true);
         }
 
-        // Apply bindings — known metadata names populate ResolvedType fields,
-        // unknown names are stored as user-defined projections
-        // DEFERRED (D-7): Evaluate constraint expressions
-        for binding in &td.body.bindings {
+        // Apply projections — parameterized lazy bindings from `name(params) = expr;`.
+        // 2026-07-11: Phase 1A.2 — metadata stays on TypeDefBody until Phase 1B.
+        for binding in &td.body.projections {
             self.apply_binding(&mut rt, binding);
         }
 
@@ -1444,7 +1444,8 @@ mod tests {
             base: Box::new(Expr::TypeRef("Int".into())),
             body: TypeDefBody {
                 slots: vec![],
-                bindings: vec![],
+                metadata: HashMap::new(),
+                projections: vec![],
                 operators: vec![],
             constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".into())),
@@ -1624,18 +1625,19 @@ mod tests {
         let td = TypeDef {
             name: "TestType".into(), type_params: vec![], bit_range: None,
             base: Box::new(Expr::TypeRef("Bits".into())),
-            body: TypeDefBody {
-                slots: vec![],
-                bindings: vec![TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None }],
-                operators: vec![OpDeclaration {
+            body: TypeDefBody::from_bindings(
+                vec![],
+                vec![TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None }],
+                vec![OpDeclaration {
                     rune: OpRune::Add,
                     param_type: Some(Box::new(Expr::TypeRef("TestType".into()))),
                     return_type: Box::new(Expr::TypeRef("TestType".into())),
                     implementation: Box::new(Expr::Identifier("my_op".into())),
                     span: None,
                 }],
-                constraints: vec![], span: None,
-            }, span: None,
+                vec![],
+                None,
+            ), span: None,
         };
         let program = make_program(vec![TopLevel::TypeDef(Box::new(td))]);
         let universe = TypeUniverse::build(&program);

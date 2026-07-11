@@ -1618,7 +1618,8 @@ impl LlvmBackend {
                                     bit_range: None,
                                     body: crate::ast::TypeDefBody {
                                         slots: vec![],
-                                        bindings: vec![],
+                                        metadata: HashMap::new(),
+                                        projections: vec![],
                                         operators: vec![],
                                         constraints: vec![],
                                         span: None,

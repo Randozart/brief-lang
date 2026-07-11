@@ -628,9 +628,13 @@ pub struct TypeDefBody {
     /// Slot declarations: `name: Type;` that partition the type's bits.
     /// 2026-07-11: Type slot syntax.
     pub slots: Vec<TypeSlot>,
-    /// Unified bindings: every `Name = Expr;` entry, including both metadata
-    /// properties and user-defined projections.
-    pub bindings: Vec<TypeBinding>,
+    /// Compile-time constant metadata: `name <~ expr;`.
+    /// 2026-07-11: Phase 1A.2.
+    pub metadata: HashMap<String, PropertyValue>,
+    /// Parameterized projections: `name(param1, param2) = expr;`.
+    /// These are lazy, may reference `self` slots.
+    /// 2026-07-11: Phase 1A.2.
+    pub projections: Vec<TypeBinding>,
     /// Operator declarations: `op Rune(Param) -> Ret = intrinsic;`
     /// 2026-06-29: Phase 7B — user-facing operator→intrinsic mappings.
     pub operators: Vec<OpDeclaration>,
@@ -638,6 +642,48 @@ pub struct TypeDefBody {
     pub constraints: Vec<Expr>,
     /// Source span for error reporting.
     pub span: Option<Span>,
+}
+
+impl TypeDefBody {
+    /// Construct from old-style Vec<TypeBinding>, splitting into metadata and projections.
+    /// 2026-07-11: Phase 1A.2 — migration helper.
+    pub fn from_bindings(
+        slots: Vec<TypeSlot>,
+        bindings: Vec<TypeBinding>,
+        operators: Vec<OpDeclaration>,
+        constraints: Vec<Expr>,
+        span: Option<Span>,
+    ) -> Self {
+        let mut metadata = HashMap::new();
+        let mut projections = Vec::new();
+        for b in bindings {
+            if b.params.is_empty() {
+                // Constant metadata: name <~ value;
+                if let Some(val) = binding_to_property_value(&b) {
+                    metadata.insert(b.name.clone(), val);
+                } else {
+                    projections.push(b);
+                }
+            } else {
+                // Parameterized projection: name(params) = expr;
+                projections.push(b);
+            }
+        }
+        TypeDefBody { slots, metadata, projections, operators, constraints, span }
+    }
+}
+
+/// Convert a TypeBinding with a simple value to a PropertyValue.
+/// 2026-07-11: Phase 1A.2 migration helper.
+pub fn binding_to_property_value(binding: &TypeBinding) -> Option<PropertyValue> {
+    match &*binding.value {
+        Expr::Integer(n) => Some(PropertyValue::Int(*n)),
+        Expr::Float(f) => Some(PropertyValue::Float(*f)),
+        Expr::String(s) => Some(PropertyValue::String(s.clone())),
+        Expr::Bool(b) => Some(PropertyValue::Bool(*b)),
+        Expr::Identifier(name) => Some(PropertyValue::Identifier(name.clone())),
+        _ => None,
+    }
 }
 
 /// Operator rune — the symbolic operator being overloaded.

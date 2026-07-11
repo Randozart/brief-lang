@@ -3452,7 +3452,8 @@ impl<'a> Parser<'a> {
         self.expect(Token::LBrace)?;
 
         let mut slots = Vec::new();
-        let mut bindings = Vec::new();
+        let mut metadata = HashMap::new();
+        let mut projections = Vec::new();
         let mut constraints = Vec::new();
         let mut operators = Vec::new();
 
@@ -3481,20 +3482,14 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            // Check for pragma shorthand: #ident  →  Name = true;
-            // Also accepts #!ident (mandatory) and ?#ident (speculative).
+            // Check for pragma shorthand: #ident  →  metadata: ident <~ true;
+            // 2026-07-11: Phase 1A.2 — push to metadata map instead of bindings.
             let is_pragma = matches!(self.current_token(), Some(Ok(Token::Hash | Token::HashBang | Token::HashQuestion)));
             if is_pragma {
                 self.advance();
                 let pragma_name = self.expect_identifier()?;
-                // Normalize to lowercase for apply_binding() case-insensitive matching
                 let pragma_lower = pragma_name.to_lowercase();
-                bindings.push(TypeBinding {
-                    name: pragma_lower,
-                    params: vec![],
-                    value: Box::new(Expr::Bool(true)),
-                    span: self.current_span(),
-                });
+                metadata.insert(pragma_lower, PropertyValue::Bool(true));
                 if let Some(Ok(Token::Semicolon)) = self.current_token() {
                     self.advance();
                 } else {
@@ -3549,25 +3544,46 @@ impl<'a> Parser<'a> {
 
             // Otherwise it's a binding: ident [ ( params ) ]? <~ expr ; or ident [ ( params ) ]? = expr ;
             // 2026-07-11: Phase 0.2 — <~ for metadata, = only valid with params (projections)
-            if matches!(self.current_token(), Some(Ok(Token::TildeArrow))) {
+            // 2026-07-11: Phase 1A.2 — split into metadata map and projections vec.
+            let is_metadata = if matches!(self.current_token(), Some(Ok(Token::TildeArrow))) {
                 self.advance(); // consume <~
+                true
             } else if matches!(self.current_token(), Some(Ok(Token::Eq))) {
                 if params.is_empty() {
                     return self.spanned_err("use '<~' for metadata in type bodies".to_string());
                 }
                 self.advance(); // consume =
+                false
             } else {
                 return self.spanned_err("expected '<~' or '=' in type body binding".to_string());
-            }
+            };
             let value = self.parse_expression()?;
 
-            // Create binding
-            bindings.push(TypeBinding {
-                name: item_name,
-                params,
-                value: Box::new(value),
-                span: self.current_span(),
-            });
+            // Route to metadata or projections based on separator
+            if is_metadata {
+                let prop_value = expr_to_property_value(&value)?;
+                if params.is_empty() {
+                    // Constant metadata: name <~ value;
+                    metadata.insert(item_name, prop_value);
+                } else {
+                    // Parameterized metadata: name(a, b) <~ value;
+                    projections.push(TypeBinding {
+                        name: item_name.clone(), params: params.clone(),
+                        value: Box::new(value),
+                        span: self.current_span(),
+                    });
+                    // Also store as metadata with param-qualified key
+                    let key = format!("{}({})", item_name, params.join(","));
+                    metadata.insert(key, prop_value);
+                }
+            } else {
+                // Projection: name(params) = expr;
+                projections.push(TypeBinding {
+                    name: item_name, params,
+                    value: Box::new(value),
+                    span: self.current_span(),
+                });
+            }
 
             // Expect semicolon after binding
             if let Some(Ok(Token::Semicolon)) = self.current_token() {
@@ -3589,7 +3605,8 @@ impl<'a> Parser<'a> {
             bit_range,
             body: TypeDefBody {
                 slots,
-                bindings,
+                metadata,
+                projections,
                 operators,
                 constraints,
                 span: self.current_span(),
@@ -11518,9 +11535,9 @@ defn fallback() -> Int { term 0; };
             match &prog.items[0] {
                 TopLevel::TypeDef(td) => {
                     assert_eq!(td.name, "Foo");
-                    assert_eq!(td.body.bindings.len(), 2);
-                    assert_eq!(td.body.bindings[0].name, "bytes");
-                    assert_eq!(td.body.bindings[1].name, "alignment");
+                    assert_eq!(td.body.projections.len(), 2);
+                    assert_eq!(td.body.projections[0].name, "bytes");
+                    assert_eq!(td.body.projections[1].name, "alignment");
                 }
                 other => panic!("Expected TypeDef, got {:?}", other),
             }
@@ -11537,9 +11554,9 @@ defn fallback() -> Int { term 0; };
         if let Ok(prog) = result {
             match &prog.items[0] {
                 TopLevel::TypeDef(td) => {
-                    assert_eq!(td.body.bindings.len(), 1);
-                    assert_eq!(td.body.bindings[0].name, "volatile");
-                    assert_eq!(td.body.bindings[0].value.as_ref(), &Expr::Bool(true));
+                    assert_eq!(td.body.projections.len(), 1);
+                    assert_eq!(td.body.projections[0].name, "volatile");
+                    assert_eq!(td.body.projections[0].value.as_ref(), &Expr::Bool(true));
                 }
                 other => panic!("Expected TypeDef, got {:?}", other),
             }
@@ -11783,8 +11800,8 @@ fn test_parse_typedef_mixed_slots_and_bindings_proper() {
     assert!(result.is_ok(), "Should parse mixed slots+bindings: {:?}", result.err());
     if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
         assert_eq!(td.body.slots.len(), 2);
-        assert_eq!(td.body.bindings.len(), 1);
-        assert_eq!(td.body.bindings[0].name, "bytes");
+        assert_eq!(td.body.projections.len(), 1);
+        assert_eq!(td.body.projections[0].name, "bytes");
     } else {
         panic!("Expected TypeDef");
     }
@@ -11806,7 +11823,7 @@ fn test_parse_typedef_slot_between_bindings_and_constraints_proper() {
     assert!(result.is_ok(), "Should parse slot between binding and constraint: {:?}", result.err());
     if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
         assert_eq!(td.body.slots.len(), 1);
-        assert_eq!(td.body.bindings.len(), 1);
+        assert_eq!(td.body.projections.len(), 1);
         assert_eq!(td.body.constraints.len(), 1);
     } else {
         panic!("Expected TypeDef");
@@ -12280,9 +12297,9 @@ mod kani_full_tests {
         assert!(result.is_ok(), "Should parse _ @/ in TypeDef: {:?}", result.err());
         if let TopLevel::TypeDef(td) = &result.unwrap().items[0] {
             assert_eq!(td.name, "MyType");
-            assert_eq!(td.body.bindings.len(), 1);
-            assert_eq!(td.body.bindings[0].name, "Field");
-            let val = &td.body.bindings[0].value;
+            assert_eq!(td.body.projections.len(), 1);
+            assert_eq!(td.body.projections[0].name, "Field");
+            let val = &td.body.projections[0].value;
             assert!(matches!(val.as_ref(),
                 Expr::Projection { source, target: ProjectionTarget::BitRange(_) }
                 if matches!(source.as_ref(), Expr::Identifier(name) if name == "_")
