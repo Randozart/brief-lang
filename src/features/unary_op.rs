@@ -30,9 +30,26 @@ impl ExprTypecheck for UnaryOpExpr {
     }
 }
 
+impl UnaryOpKind {
+    /// Map operator kind to its property name (e.g. Neg → "Neg").
+    /// 2026-07-11: Phase 8B — property-based operator dispatch.
+    pub fn name(&self) -> &'static str {
+        use UnaryOpKind::*;
+        match self {
+            Neg => "Neg", Not => "Not", BitNot => "BitNot",
+        }
+    }
+}
+
 impl ExprEval for UnaryOpExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
         let v = ctx.eval_expr(&self.operand)?;
+
+        // Phase 8B: property-based dispatch for Bits operands
+        if let Some(result) = try_unary_bits_dispatch(&v, self.kind.name(), ctx) {
+            return result;
+        }
+
         use UnaryOpKind::*;
         Ok(match (self.kind, v) {
             (Neg,    Value::Int(a)) => Value::Int(-a),
@@ -44,6 +61,29 @@ impl ExprEval for UnaryOpExpr {
             _ => return Err(RuntimeError::TypeMismatch(format!("unary op {:?}", self.kind))),
         })
     }
+}
+
+/// Try to dispatch a unary op through property-based intrinsic lookup.
+/// The operand must be Value::Bits and the expected type must have a
+/// binding for the operator. Returns None to fall back to legacy dispatch.
+/// 2026-07-11: Phase 8B — flat control flow, max 2 levels.
+fn try_unary_bits_dispatch(
+    v: &Value,
+    op_name: &str,
+    ctx: &Interpreter,
+) -> Option<Result<Value, RuntimeError>> {
+    let Value::Bits(_) = v else { return None; };
+    let expected_type = ctx.current_expected_type.as_ref()?;
+    let type_name = match expected_type {
+        Type::Custom(n) => n.as_str(),
+        _ => return None,
+    };
+    if type_name.is_empty() {
+        return None;
+    }
+    let universe = ctx.type_universe.as_ref()?;
+    let intrinsic = universe.get_operator_intrinsic(type_name, op_name)?;
+    Some(crate::interpreter::execute_intrinsic(intrinsic, &[v.clone()]))
 }
 
 impl ExprCodegenLLVM for UnaryOpExpr {
