@@ -103,7 +103,7 @@ impl FfiValue {
             crate::interpreter::Value::Float(f) => FfiValue::Float(*f),
             crate::interpreter::Value::Bool(b) => FfiValue::Bool(*b),
             crate::interpreter::Value::String(s) => FfiValue::String(s.clone()),
-            crate::interpreter::Value::Data(d) => FfiValue::Data(d.clone()),
+            crate::interpreter::Value::Bits(d) => FfiValue::Data(d.clone()),
             crate::interpreter::Value::List(l) => {
                 FfiValue::List(l.iter().map(Self::from_interpreter_value).collect())
             }
@@ -139,7 +139,7 @@ impl FfiValue {
             FfiValue::Float(f) => crate::interpreter::Value::Float(*f),
             FfiValue::Bool(b) => crate::interpreter::Value::Bool(*b),
             FfiValue::String(s) => crate::interpreter::Value::String(s.clone()),
-            FfiValue::Data(d) => crate::interpreter::Value::Data(d.clone()),
+            FfiValue::Data(d) => crate::interpreter::Value::Bits(d.clone()),
             FfiValue::List(l) => crate::interpreter::Value::List(
                 l.iter().map(|v| v.to_interpreter_value()).collect(),
             ),

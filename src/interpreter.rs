@@ -67,8 +67,8 @@ pub enum Value {
     String(String),
     Char(char),
     Bool(bool),
-    Data(Vec<u8>),
     /// Universal bit-vector storage cell (Bits thesis).
+    /// Data(Vec<u8>) merged into Bits — same type, one variant.
     /// 2026-07-11: Phase 8A — all representational values are Bits.
     Bits(Vec<u8>),
     List(Vec<Value>),
@@ -141,7 +141,6 @@ impl PartialEq for Value {
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Char(a), Value::Char(b)) => a == b,
             (Value::Bool(a), Value::Bool(b)) => a == b,
-            (Value::Data(a), Value::Data(b)) => a == b,
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::HashMap(a), Value::HashMap(b)) => a == b,
@@ -178,7 +177,6 @@ impl fmt::Display for Value {
             Value::String(v) => write!(f, "\"{}\"", v),
             Value::Char(v) => write!(f, "'{}'", v),
             Value::Bool(v) => write!(f, "{}", v),
-            Value::Data(_) => write!(f, "<data>"),
             Value::Bits(b) => write!(f, "<Bits {}>", b.len()),
             Value::List(items) => write!(f, "[{}]", items.len()),
             Value::Tuple(items) => write!(f, "({})", items.len()),
@@ -273,7 +271,6 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
             }
             JsonValue::Object(map)
         }
-        Value::Data(_) => JsonValue::Null,
         Value::Defn(_) => JsonValue::Null,
         Value::Void => JsonValue::Null,
         Value::DbvlTable(t) => {
@@ -3017,7 +3014,7 @@ impl Interpreter {
         match (value, expected) {
             // Primitive types: variant must match expected type
             (Value::String(_), Type::Custom(__t)) if __t == "String" => true,
-            (Value::Data(_), Type::Custom(__t)) if __t == "Data" => true,
+            (Value::Bits(_), Type::Custom(__t)) if __t == "Data" => true,
             // Float: NaN/Inf → invalid
             (Value::Float(f), Type::Custom(__t)) if __t == "Float" => f.is_finite(),
             // Int/UInt/Bool/Char: any valid value is accepted
@@ -3127,7 +3124,7 @@ impl Interpreter {
                 fields,
             } => fields.is_empty(),
             Value::Void => true,
-            Value::Data(d) => d.is_empty(),
+            Value::Bits(d) => d.is_empty(),
             _ => false,
         }
     }
@@ -3329,13 +3326,13 @@ impl Interpreter {
                     Intrinsic::ByteCount => {
                         let v = values.remove(0);
                         match v {
-                            Value::Float(_) | Value::Int(_) | Value::Bits(_) => Ok(Value::Int(8)),
+                            Value::Float(_) | Value::Int(_) => Ok(Value::Int(8)),
                             Value::Bool(_) => Ok(Value::Int(1)),
                             Value::Char(_) => Ok(Value::Int(4)),
                             Value::Ptr(_) => Ok(Value::Int(8)),
                             Value::String(s) => Ok(Value::Int(s.len() as i64)),
                             Value::List(l) => Ok(Value::Int((l.len() * 8) as i64)),
-                            Value::Data(d) => Ok(Value::Int(d.len() as i64)),
+                            Value::Bits(d) => Ok(Value::Int(d.len() as i64)),
                             Value::Instance { fields, .. } => Ok(Value::Int((fields.len() * 8) as i64)),
                             Value::Tuple(t) => Ok(Value::Int((t.len() * 8) as i64)),
                             Value::Stack(v) => Ok(Value::Int((v.len() * 8) as i64)),
@@ -8110,7 +8107,7 @@ mod tests {
     #[test]
     fn test_projection_bytes_on_data() {
         let mut i = Interpreter::new();
-        i.state.insert("d".to_string(), Value::Data(vec![1, 2, 3, 4]));
+        i.state.insert("d".to_string(), Value::Bits(vec![1, 2, 3, 4]));
         let expr = Expr::Projection {
             source: Box::new(Expr::Identifier("d".to_string())),
             target: ProjectionTarget::Bytes,

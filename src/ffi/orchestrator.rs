@@ -134,13 +134,13 @@ impl Orchestrator {
         // Note: For now, we still use the old ForeignFn signature which takes Vec<Value>.
         // In a true Metro system, we would pass the buffer pointer.
         // We simulate this by passing the buffer as Value::Data.
-        let result_value = foreign_fn(vec![Value::Data(buffer)])?;
+        let result_value = foreign_fn(vec![Value::Bits(buffer)])?;
 
         // 6. Fetch result from the pipe
         // The foreign function might have written directly to a buffer it received,
         // or returned a new buffer.
         let result_buffer = match result_value {
-            Value::Data(d) => d,
+            Value::Bits(d) => d,
             _ => return Ok(result_value), // Fallback for old functions that return direct values
         };
 
@@ -217,7 +217,7 @@ fn is_empty_value(value: &Value) -> bool {
         Value::List(l) => l.is_empty(),
         Value::Instance { fields, .. } => fields.is_empty(),
         Value::Void => true,
-        Value::Data(d) => d.is_empty(),
+        Value::Bits(d) => d.is_empty(),
         _ => false,
     }
 }

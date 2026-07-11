@@ -1016,7 +1016,7 @@ fn value_to_u32(args: &[Value], idx: usize) -> Result<u32, RuntimeError> {
 
 fn encoding_base64_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::Data(data)) => Ok(Value::Data(data.clone())),
+        Some(Value::Bits(data)) => Ok(Value::Bits(data.clone())),
         Some(Value::String(s)) => Ok(Value::String(s.clone())),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::base64_encode expects 1 argument".to_string())),
@@ -1025,7 +1025,7 @@ fn encoding_base64_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
 
 fn encoding_base64_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::Data(data)) => Ok(Value::Data(data.clone())),
+        Some(Value::Bits(data)) => Ok(Value::Bits(data.clone())),
         Some(Value::String(s)) => Ok(Value::String(s.clone())),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::base64_decode expects 1 argument".to_string())),
@@ -1034,7 +1034,7 @@ fn encoding_base64_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
 
 fn encoding_hex_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::Data(data)) => {
+        Some(Value::Bits(data)) => {
             let hex: String = data.iter().map(|b| format!("{:02x}", b)).collect();
             Ok(Value::String(hex))
         }
@@ -1057,9 +1057,9 @@ fn encoding_hex_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
                     u8::from_str_radix(&hex[i..(i + 2).min(hex.len())], 16).ok()
                 })
                 .collect();
-            Ok(Value::Data(data))
+            Ok(Value::Bits(data))
         }
-        Some(Value::Data(data)) => Ok(Value::Data(data.clone())),
+        Some(Value::Bits(data)) => Ok(Value::Bits(data.clone())),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::hex_decode expects 1 argument".to_string())),
     }
@@ -1138,7 +1138,7 @@ fn hash_bytes_sha512(data: &[u8]) -> String {
 fn encoding_md5_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::String(s)) => Ok(Value::String(hash_bytes_md5(s.as_bytes()))),
-        Some(Value::Data(d)) => Ok(Value::String(hash_bytes_md5(d))),
+        Some(Value::Bits(d)) => Ok(Value::String(hash_bytes_md5(d))),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::md5 expects 1 argument (string)".to_string())),
     }
@@ -1147,7 +1147,7 @@ fn encoding_md5_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 fn encoding_sha1_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha1(s.as_bytes()))),
-        Some(Value::Data(d)) => Ok(Value::String(hash_bytes_sha1(d))),
+        Some(Value::Bits(d)) => Ok(Value::String(hash_bytes_sha1(d))),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::sha1 expects 1 argument (string)".to_string())),
     }
@@ -1156,7 +1156,7 @@ fn encoding_sha1_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 fn encoding_sha256_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha256(s.as_bytes()))),
-        Some(Value::Data(d)) => Ok(Value::String(hash_bytes_sha256(d))),
+        Some(Value::Bits(d)) => Ok(Value::String(hash_bytes_sha256(d))),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::sha256 expects 1 argument (string)".to_string())),
     }
@@ -1165,7 +1165,7 @@ fn encoding_sha256_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 fn encoding_sha512_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha512(s.as_bytes()))),
-        Some(Value::Data(d)) => Ok(Value::String(hash_bytes_sha512(d))),
+        Some(Value::Bits(d)) => Ok(Value::String(hash_bytes_sha512(d))),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::sha512 expects 1 argument (string)".to_string())),
     }
@@ -1474,7 +1474,7 @@ mod tests {
 
     #[test]
     fn test_encoding_md5_data() {
-        let result = encoding_md5_impl(vec![Value::Data(vec![104, 101, 108, 108, 111])]);
+        let result = encoding_md5_impl(vec![Value::Bits(vec![104, 101, 108, 108, 111])]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::String("5d41402abc4b2a76b9719d911017c592".to_string()));
     }

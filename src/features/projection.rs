@@ -43,11 +43,11 @@ impl ExprEval for ProjectionExpr {
             },
             ProjectionTarget::Bytes => {
                 let size = match &source_val {
-                    Value::Int(_) | Value::Bits(_) | Value::Float(_) => 8,
+                    Value::Int(_) | Value::Float(_) => 8,
                     Value::Bool(_) => 1, Value::Char(_) => 4,
                     Value::String(s) => s.len() as i64,
                     Value::List(items) => items.len() as i64 * 8,
-                    Value::Data(d) => d.len() as i64,
+                    Value::Bits(d) => d.len() as i64,
                     Value::Instance { fields, .. } => fields.len() as i64 * 8,
                     Value::Tuple(items) => items.len() as i64 * 8,
                     Value::Stack(v) => v.len() as i64 * 8,
@@ -60,11 +60,11 @@ impl ExprEval for ProjectionExpr {
             ProjectionTarget::Ptr => Ok(Value::Int(0)),
             ProjectionTarget::Alignment => {
                 let align = match &source_val {
-                    Value::Int(_) | Value::Float(_) | Value::Bits(_) => 8,
+                    Value::Int(_) | Value::Float(_) => 8,
                     Value::Bool(_) => 1,
                     Value::Char(_) => 4,
-                    Value::String(_) | Value::List(_) | Value::Tuple(_)
-                        | Value::HashMap(_) | Value::HashSet(_) | Value::Data(_)
+                    Value::Bits(_) | Value::String(_) | Value::List(_) | Value::Tuple(_)
+                        | Value::HashMap(_) | Value::HashSet(_)
                         | Value::Stack(_) | Value::Queue(_) | Value::Enum(..)
                         | Value::Instance { .. } | Value::StringBuilder(_)
                         | Value::Defn(_) | Value::DbvlTable(_) | Value::Regex(_)
@@ -129,9 +129,9 @@ impl ExprEval for ProjectionExpr {
             },
             ProjectionTarget::Type => {
                 let discriminant = match &source_val {
-                    Value::Int(_) | Value::Bits(_) => 1, Value::Float(_) => 2, Value::Bool(_) => 3,
+                    Value::Int(_) => 1, Value::Bits(_) => 8, Value::Float(_) => 2, Value::Bool(_) => 3,
                     Value::Char(_) => 4, Value::String(_) => 5, Value::List(_) => 6,
-                    Value::Tuple(_) => 7, Value::Data(_) => 8, Value::HashMap(_) => 9,
+                    Value::Tuple(_) => 7, Value::HashMap(_) => 9,
                     Value::HashSet(_) => 10, Value::StringBuilder(_) => 11,
                     Value::Stack(_) => 12, Value::Queue(_) => 13,
                     Value::Instance { .. } => 14, Value::Enum(..) => 15,
