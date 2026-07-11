@@ -123,6 +123,9 @@ impl PartialEq for Value {
                 arr[..copy_len].copy_from_slice(&b[..copy_len]);
                 *a == i64::from_le_bytes(arr)
             }
+            (Value::Bool(a), Value::Bits(b)) | (Value::Bits(b), Value::Bool(a)) => {
+                b.len() >= 1 && *a == (b[0] != 0)
+            }
             (Value::Bits(a), Value::Bits(b)) => a == b,
             (Value::Float(a), Value::Float(b)) => a == b,
             (Value::String(a), Value::String(b)) => a == b,
@@ -3136,7 +3139,7 @@ impl Interpreter {
                 }
             }
             Expr::Char(v) => Ok(Value::Char(*v)),
-            Expr::Bool(v) => Ok(Value::Bool(*v)),
+            Expr::Bool(v) => Ok(Value::Bits(vec![if *v { 1u8 } else { 0u8 }])),
             Expr::Term => self.state.get("term").cloned()
                 .ok_or_else(|| RuntimeError::UndefinedVariable("term".to_string())),
             Expr::Identifier(name) => self.state.get(name).cloned()
