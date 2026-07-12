@@ -97,18 +97,14 @@ pub enum FfiValue {
 }
 
 impl FfiValue {
+    /// Convert interpreter Value to FFI value using byte-width to determine type.
+    /// 8 bytes → i64 (Int), other lengths → raw Data.
     pub fn from_interpreter_value(v: &crate::interpreter::Value) -> Self {
         match v {
             crate::interpreter::Value::Bits(d) if d.len() == 8 => {
                 let mut arr = [0u8; 8];
                 arr.copy_from_slice(&d[..8]);
-                let i = i64::from_le_bytes(arr);
-                // Check if first data byte is non-printable to distinguish ints from data
-                if d.iter().all(|b| *b == 0 || (*b >= b'0' && *b <= b'9') || *b == b'-') {
-                    FfiValue::Int(i)
-                } else {
-                    FfiValue::Data(d.clone())
-                }
+                FfiValue::Int(i64::from_le_bytes(arr))
             }
             crate::interpreter::Value::Bits(d) => FfiValue::Data(d.clone()),
             crate::interpreter::Value::List(l) => {
@@ -135,7 +131,7 @@ impl FfiValue {
                 meta.insert("entries".to_string(), FfiValue::Int(t.key_offsets.len() as i64));
                 FfiValue::Struct("DbvlTable".to_string(), meta)
             }
-            _ => FfiValue::Void, // Fallback for types we can't map easily
+            _ => FfiValue::Void,
         }
     }
 
