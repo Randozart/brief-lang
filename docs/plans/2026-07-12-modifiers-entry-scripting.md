@@ -754,50 +754,83 @@ implicit wrapping only applies when there are NO explicit declarations.
 
 ### Goal
 
-Provide a reusable, extensible CLI cell in the standard library for
-projects that outgrow the built-in `[#]` dispatch (nested subcommands,
-custom flag formats, help text, shell completions). Lives at
-`lib/std/cli.c.bv`.
+Provide a **pure convenience** cell in the standard library that wraps
+`argc`/`argv` parsing into a reactive interface via `trg` bindings.
+Lives at `lib/std/cli.c.bv`.
 
-### Design
+No interaction with `[#]` entry functions. No compiler changes. No archive
+dependencies. This is purely a stdlib utility — it reads `argv` internally
+via `frgn __get_argv()`, parses flags into structured values, and pushes
+them out through output ports for the rest of the program to consume.
 
-```brief
-// lib/std/cli.c.bv
-// Extensible CLI framework for Brief programs.
-// Uses .c.bv modifier so the file IS a cell named "cli".
-
-input name: String;       // Program name for help text
-input version: String;    // Version string
-
-output exit_code: Int;
-
-// Default flag parser — override per-project
-state parsers: List<Parser> = [];
-
-defn parse_flag(name: String, value: String) -> Value {
-    // Default: pass-through string value
-    // Override for custom flag types (lists, enums, paths)
-}
-```
-
-**Usage in a project:**
+A programmer building a CLI tool never writes argv parsing, never matches
+subcommands manually. They import the cell, wire it with a `trg` binding,
+and react to the outputs:
 
 ```brief
-// my_cli.c.bv
+// myapp.bv
 import cli from "std/cli";
 
-output result: Int;
+trg cli @ self.cli;
 
-// Override flag parser for project-specific types
-defn parse_flag(name: String, value: String) -> Value {
-    if name == "port" { term value.parse_int(); }
-    term value;
+txn handle_build {
+    [self.cli.command == "build"]
+    frgn printf("Building project: %s\n", self.cli.project);
+};
+
+txn handle_test {
+    [self.cli.command == "test"]
+    frgn printf("Running test suite: %s\n", self.cli.suite);
 };
 ```
 
-**Tests:**
+### Design sketch
+
+```brief
+// lib/std/cli.c.bv
+// Reactive CLI parser cell.
+// Reads argv internally, emits structured results via output ports.
+// No interaction with [#] — independent compiler feature.
+
+output command: String;       // First positional arg: "build", "test"
+output arg_count: Int;        // Number of flags parsed
+
+// Flag values (populated by name)
+output project: String;
+output suite: String;
+output verbose: Bool;
+output port: Int;
+
+// The cell reads argv on tick, parses --key value pairs,
+// pushes results to output ports. Program reacts via trg.
+```
+
+### Key constraints
+
+1. **No compiler changes** — the cell uses standard Brief: `frgn __get_argv()`,
+   `frgn __get_arg_count()`, string operations, and output ports.
+2. **No `[#]` interaction** — this is a separate utility from the compiler's
+   entry dispatch. They share no code, no state, no design.
+3. **Extensible by inheritance** — projects define `cell MyCli <: cli { ... }`
+   to override flag parsing for custom types.
+4. **Self-hosting irrelevant** — the Rust compiler can compile `.c.bv` files
+   (Phase 16D). The cell ships the moment `.c.bv` support is stable.
+
+### When to use which
+
+| Case | Use |
+|------|-----|
+| Simple flags, one or two subcommands | `[#]` — zero-boilerplate compiler feature |
+| Complex CLI, custom parsing, reactive dispatch | `cli.c.bv` — fully featured stdlib cell |
+| Both together in one project | `[#]` for simple commands, `cli.c.bv` for complex sub-parsing |
+
+### Tests
+
 - `test_cli_cell_roundtrip`: Import and instantiate the Cli cell
-- `test_cli_flag_parsing`: `--port 8080` → parsed as Int
+- `test_cli_flag_parsing`: `--port 8080` parsed through cell output port
+- `test_cli_subcommand_dispatch`: `myapp build --project ./src` → output
+  ports match expected values
+- `test_cli_extends_cell`: Custom cell inherits Cli, overrides flag parser
 
 ---
 
