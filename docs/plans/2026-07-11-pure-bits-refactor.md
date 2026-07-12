@@ -109,7 +109,7 @@ cargo test --lib    # 1485 pass (no behavior change, cache not used yet)
 | **8C** | Migrate scalars one-by-one | 8 | ~600 | ~200 match arms across 6 files |
 | **8D** | Migrate String, Data, remove Stack/Queue/StringBuilder | 4 | ~300 | ~80 match arms in `ffi/registry.rs`, `arrow.rs` |
 | **8E** | Build `op Drop` pass, remove `storage`/`box`/`unbox` | 6 | ~400 | ~30 match arms in `emit_stmt.rs`, `mod.rs` |
-| **8F** | Legacy cleanup, Void declaration, structural variant removal | 15 | ~350 | Remove List/HashMap/Tuple etc. |
+| **8F** | Token forms (Quoted/Decimal/Bareword) + `accepts` property + `@` prefix + structural variant removal | 15 | ~1000 | All remaining ~538 dead variant arms + all hardcoded name checks in type checker |
 
 ---
 
@@ -642,9 +642,154 @@ cargo build --release && bash benchmarks/build_and_bench.sh --correctness
 
 ---
 
-## Phase 8F — Legacy Cleanup + Void
+## Phase 8F — Token Forms & Compiler Axioms
 
-### Step 8F.0 — Delete all structural variants
+### The Three Intrinsic Token Forms
+
+The parser produces exactly three primitive token forms. These are the
+complete syntactic surface for literal values — no other forms exist:
+
+| Rune | Token form | What it produces | `accepts` value |
+|---|---|---|---|
+| `"..."` | `Expr::Quoted(bytes)` | Raw bytes between quotes | `"quoted"` |
+| `[0-9]` | `Expr::Decimal(bytes)` | Decimal digits, parsed as bytes | `"decimal"` |
+| `[a-zA-Z]` | `Expr::Bareword(name)` | Unquoted identifier text | `"bare"` |
+
+These are compiler axioms — the frontend hardcodes them because the lexer
+must produce SOMETHING. Every other literal concept (string, integer, float,
+hex color, Roman numeral) is a semantic interpretation of one of these three
+forms, driven by the type's codec.
+
+### The `@` Prefix Modifier
+
+The `@` prefix converts ANY token form to a `QuotedValue` containing the
+raw source bytes, bypassing any lexer-level interpretation:
+
+| Input | Without `@` | With `@` |
+|---|---|---|
+| `"hello"` | `QuotedValue("hello")` with escape processing | `QuotedValue("hello")` raw |
+| `42` | `DecimalValue(42)` — parsed integer | `QuotedValue("42")` — raw bytes |
+| `FF00FF` | `Bareword("FF00FF")` — variable or literal | `QuotedValue("FF00FF")` — forced literal |
+
+This disambiguates the variable-vs-literal problem: `let x: Color = @FF00FF`
+is unambiguously a custom literal even if `FF00FF` is in scope as a variable.
+
+### The `accepts` Codec Property
+
+A codec declares which token forms it accepts. The frontend type checker
+reads this property during assignment validation:
+
+```brief
+codec HexColor {
+    accepts <~ "bare";                   // ← accepts FF00FF as a bareword
+    parse   <~ parse_hex;                // converts "FF00FF" → Value::Bits
+};
+
+codec StringCodec {
+    accepts <~ "quoted";                 // ← accepts "hello" as a quoted value
+    parse   <~ identity_utf8;            // stores quoted bytes as-is
+};
+
+codec DefaultDecimal {
+    accepts <~ "decimal";                // ← accepts 42, 3.14
+    parse   <~ parse_decimal;            // converts decimal text → Value::Bits
+};
+```
+
+A type can accept multiple forms:
+
+```brief
+type FlexibleInt <: Int {
+    codec <~ FlexibleCodec;
+};
+
+codec FlexibleCodec {
+    accepts <~ ["decimal", "bare", "quoted"];
+    parse   <~ my_flexible_parse;
+};
+```
+
+### Bootstrap Codec Definitions
+
+The prelude defines three default codecs, one for each token form:
+
+```brief
+codec DefaultQuoted {
+    accepts <~ "quoted";
+    parse   <~ identity_utf8;
+};
+
+codec DefaultDecimal {
+    accepts <~ "decimal";
+    parse   <~ parse_decimal;
+};
+
+codec DefaultBare {
+    accepts <~ "bare";
+    parse   <~ parse_bare;    // default: variable lookup or error
+};
+```
+
+The standard types reference these:
+
+```brief
+type Int    <: Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "i64"; };
+type Float  <: Bits { codec <~ DefaultDecimal; bytes <~ 8; llvm <~ "double"; };
+type String <: Bits { codec <~ DefaultQuoted; bytes <~ 24; llvm <~ "%String"; };
+```
+
+No name-based magic. `String` accepts `"..."` because `DefaultQuoted` says
+`accepts <~ "quoted"`, not because of its name.
+
+### Custom Token Handler Example
+
+```brief
+type HexColor <: Int {
+    codec <~ HexCodec;
+};
+
+codec HexCodec {
+    accepts <~ "bare";
+    parse   <~ parse_hex;
+};
+
+type CustomFloat <: Float {
+    codec <~ CFPrefixCodec;
+};
+
+codec CFPrefixCodec {
+    accepts <~ "bare";
+    parse   <~ parse_cf;              // strips "cf" prefix, parses float
+};
+
+let bg: HexColor    = FF00FF;         // bareword → HexCodec.parse
+let cf: CustomFloat = cf3.14;         // bareword → CFPrefixCodec.parse
+let s: String       = "hello";        // quoted → DefaultQuoted.parse
+let n: Int          = 42;             // decimal → DefaultDecimal.parse
+```
+
+### Implementation
+
+1. Rename `Expr::String(s)` → `Expr::Quoted(Vec<u8>)` in the AST
+2. Rename `Expr::Integer(n)` → `Expr::Decimal(i64)` in the AST  
+3. Rename `Expr::Float(f)` → stays as `Expr::Decimal(i64)` with `.` in the text
+4. Keep `Expr::Identifier(name)` — this IS `Bareword`
+5. Add `@` lexer rule: read next token, produce `Expr::Quoted(raw_bytes)`
+6. Add `accepts` property to `CodecDeclaration` and `apply_binding`
+7. Modify type checker assignment validation to check `accepts` before
+   allowing a token form
+8. Remove old `Type::Custom("String") == Expr::String` hardcoded rules
+
+### Deprecation
+
+Old `Value::Int`, `Value::Float`, `Value::String`, `Value::Char`,
+`Value::Bool`, `Value::Ptr` variants are removed. The Value enum
+contains only `Bits(Vec<u8>)` + compiler-internal variants.
+All ~538 remaining match arm errors from the Phase 8F variant removal
+are fixed by the token form refactor (the match arms convert to
+`accepts`-driven property dispatch).
+
+### Step 8F.0 — Delete old structural variants
 
 Remove from `Value` enum:
 - `Value::List(Vec<Value>)` — collections are Bits structs with VirtualHeap
@@ -657,6 +802,8 @@ Remove from `Value` enum:
 Delete all now-unreachable match arms across the codebase. The `arrow.rs`
 dispatch for collection operations (`match &mut collection { Value::List => ...,
 Value::HashMap => ..., }`) collapses to a single property lookup:
+
+---
 
 ### Step 8F.1 — Add Void to bootstrap
 

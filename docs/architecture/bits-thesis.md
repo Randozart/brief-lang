@@ -269,7 +269,36 @@ Any property the frontend does not recognize is stored, serialized to the
 `.bvsa` archive, and ignored. Only backend-specific tooling (e.g.,
 `brief-llvm`, `brief-circt`) interprets it.
 
-### 6. The Complete Type Hierarchy from First Principles
+### 6. The Three Token Forms (Compiler Axioms)
+
+The parser produces exactly three primitive token forms, each representing
+raw bytes from source text with no semantic interpretation:
+
+| Form | AST node | Source | `accepts` value |
+|------|----------|--------|-----------------|
+| QuotedValue | `Expr::Quoted(Vec<u8>)` | `"..."` | `"quoted"` |
+| DecimalValue | `Expr::Decimal(i64)` | `[0-9]+`, `[0-9]+\.[0-9]+` | `"decimal"` |
+| Bareword | `Expr::Identifier(String)` | `[a-zA-Z][a-zA-Z0-9_]*` | `"bare"` |
+
+These are compiler axioms — they must exist because the lexer must produce
+something. All semantic meaning is attached by the type's codec via the
+`accepts` property:
+
+```brief
+codec HexColor {
+    accepts <~ "bare";     // ← FF00FF is accepted
+    parse   <~ parse_hex;  // converts text to Value::Bits
+};
+```
+
+The `@` prefix modifier converts any token to `QuotedValue(raw_bytes)`,
+bypassing lexer interpretation. `@FF00FF`, `@42`, `@"..."` all produce
+`Expr::Quoted(bytes)`.
+
+No name-based magic. `String` accepts `"..."` because `DefaultQuoted`
+declares `accepts <~ "quoted"`, not because the type is named `String`.
+
+### 7. The Complete Type Hierarchy from First Principles
 
 Every type is `Bits(N)` + metadata. Nothing is special-cased:
 
