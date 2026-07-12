@@ -318,15 +318,8 @@ impl LlvmBackend {
         if let Some(cached) = self.fun.reg_float_cache.get(&reg.name) {
             return cached.clone();
         }
-        // 2026-06-29: Phase 7A — query universe for storage mode.
-        // Fallback to Float/Float64 check when universe is not available.
-        let is_native = self.ctx.type_universe.as_ref()
-            .and_then(|u| u.get_by_type(&reg.ty))
-            .map(|r| r.storage == "Native")
-            .unwrap_or_else(|| {
-                // Fallback: Float and Float64 are always native
-                reg.ty == Type::float() || reg.ty == Type::float64()
-            });
+        // 2026-07-12: All types are native — use their llvm type directly.
+        let is_native = true;
 
         if is_native {
             return reg.name.clone();
@@ -1100,31 +1093,19 @@ impl LlvmBackend {
             } else if param_llvm_ty == "i64" {
                 reg = raw;
             } else if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
-                // 2026-07-01: Query universe for box_op. If available, use
-                // emit_box_param for universe-driven boxing. Falls back to
-                // hardcoded conversion when universe is unavailable (tests).
+                // 2026-07-12: box_op removed from ResolvedType — use hardcoded fallback.
                 let conv = format!("%ac{}", i);
-                let box_op: Option<String> = self.ctx.type_universe.as_ref()
-                    .and_then(|u| u.get_by_type(t))
-                    .and_then(|rt| rt.box_op.clone());
-                if let Some(ref op) = box_op {
-                    if !op.is_empty() {
-                        self.emit_box_param(out, "  ", &conv, &raw, op);
+                match t {
+                    Type::Custom(__t) if __t == "Bool" => { writeln!(out, "  {} = zext i8 {} to i64", conv, raw).ok(); }
+                    Type::Custom(__t) if __t == "Char" => { writeln!(out, "  {} = zext i32 {} to i64", conv, raw).ok(); }
+                    Type::Custom(__t) if __t == "String" || __t == "Data" => { writeln!(out, "  {} = ptrtoint ptr {} to i64", conv, raw).ok(); }
+                    Type::Custom(__t) if __t == "Float" => {
+                        let m = format!("%ai{}", i);
+                        writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
+                        writeln!(out, "  {} = zext i32 {} to i64", conv, m).ok();
+                        self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
                     }
-                } else {
-                    // No box_op in universe — use hardcoded fallback for tests
-                    match t {
-                        Type::Custom(__t) if __t == "Bool" => { writeln!(out, "  {} = zext i8 {} to i64", conv, raw).ok(); }
-                        Type::Custom(__t) if __t == "Char" => { writeln!(out, "  {} = zext i32 {} to i64", conv, raw).ok(); }
-                        Type::Custom(__t) if __t == "String" || __t == "Data" => { writeln!(out, "  {} = ptrtoint ptr {} to i64", conv, raw).ok(); }
-                        Type::Custom(__t) if __t == "Float" => {
-                            let m = format!("%ai{}", i);
-                            writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
-                            writeln!(out, "  {} = zext i32 {} to i64", conv, m).ok();
-                            self.fun.reg_float_cache.insert(conv.clone(), raw.to_string());
-                        }
-                        _ => {}
-                    }
+                    _ => {}
                 }
                 reg = conv;
             } else {
@@ -1480,27 +1461,18 @@ impl LlvmBackend {
             } else if param_llvm_ty == "i64" {
                 conv = raw;
             } else if matches!(t, Type::Custom(__t) if __t == "Bool" || __t == "Char" || __t == "String" || __t == "Data" || __t == "Float") {
+                // 2026-07-12: box_op removed from ResolvedType — use hardcoded fallback.
                 let ac = format!("%ac{}", i);
-                let box_op: Option<String> = self.ctx.type_universe.as_ref()
-                    .and_then(|u| u.get_by_type(t))
-                    .and_then(|rt| rt.box_op.clone());
-                if let Some(ref op) = box_op {
-                    if !op.is_empty() {
-                        self.emit_box_param(out, "  ", &ac, &raw, op);
+                match t {
+                    Type::Custom(__t) if __t == "Bool" => { writeln!(out, "  {} = zext i8 {} to i64", ac, raw).ok(); }
+                    Type::Custom(__t) if __t == "Char" => { writeln!(out, "  {} = zext i32 {} to i64", ac, raw).ok(); }
+                    Type::Custom(__t) if __t == "String" || __t == "Data" => { writeln!(out, "  {} = ptrtoint ptr {} to i64", ac, raw).ok(); }
+                    Type::Custom(__t) if __t == "Float" => {
+                        let m = format!("%ai{}", i);
+                        writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
+                        writeln!(out, "  {} = zext i32 {} to i64", ac, m).ok();
                     }
-                } else {
-                    // Fallback: universe not available (unit tests)
-                    match t {
-                        Type::Custom(__t) if __t == "Bool" => { writeln!(out, "  {} = zext i8 {} to i64", ac, raw).ok(); }
-                        Type::Custom(__t) if __t == "Char" => { writeln!(out, "  {} = zext i32 {} to i64", ac, raw).ok(); }
-                        Type::Custom(__t) if __t == "String" || __t == "Data" => { writeln!(out, "  {} = ptrtoint ptr {} to i64", ac, raw).ok(); }
-                        Type::Custom(__t) if __t == "Float" => {
-                            let m = format!("%ai{}", i);
-                            writeln!(out, "  {} = bitcast float {} to i32", m, raw).ok();
-                            writeln!(out, "  {} = zext i32 {} to i64", ac, m).ok();
-                        }
-                        _ => {}
-                    }
+                    _ => {}
                 }
                 conv = ac;
             } else {

@@ -47,16 +47,10 @@ pub struct ResolvedType {
 
     /// LLVM IR type string for register values (e.g. "float", "i64", "i8*").
     pub llvm_type: String,
-    /// How this type is stored in %State: "Native" or "Boxed".
-    /// Native = lives in its own registers (e.g., float in float regs).
-    /// Boxed = stored as i64 (e.g., Int, Bool, Char).
-    pub storage: String,
     /// TBAA type tree node name (e.g. "Int", "Float", "Bool", "Char", "String").
     pub tbaa_node: String,
-    /// Intrinsic name for boxing native→i64 (None = identity, already i64).
-    pub box_op: Option<String>,
-    /// Intrinsic name for unboxing i64→native (None = identity, already i64).
-    pub unbox_op: Option<String>,
+    // storage, box_op, unbox_op removed in Phase 8E — lifecycle is managed via
+    // op Drop contracts on the type, not compiler-level storage tags.
 
     // ── End Phase 7A properties ─────────────────────────────────
 
@@ -297,61 +291,28 @@ impl TypeUniverse {
         // bootstrap loading. Each entry: (type_name, property, expected_value).
         let checks: &[(&str, &str, &str)] = &[
             ("Int",     "llvm",    "i64"),
-            ("Int",     "storage", "Boxed"),
             ("Int",     "bytes",   "8"),
             ("Int",     "tbaa",    "Int"),
             ("UInt",    "llvm",    "i64"),
-            ("UInt",    "storage", "Boxed"),
             ("Int8",    "llvm",    "i8"),
-            ("Int8",    "storage", "Boxed"),
             ("Int8",    "bytes",   "1"),
-            ("Int8",    "box",     "sext.i8.to.i64#"),
-            ("Int8",    "unbox",   "trunc.i64.to.i8#"),
             ("UInt8",   "llvm",    "i8"),
-            ("UInt8",   "box",     "zext.i8.to.i64#"),
-            ("UInt8",   "unbox",   "trunc.i64.to.i8#"),
             ("Int16",   "llvm",    "i16"),
-            ("Int16",   "box",     "sext.i16.to.i64#"),
-            ("Int16",   "unbox",   "trunc.i64.to.i16#"),
             ("UInt16",  "llvm",    "i16"),
-            ("UInt16",  "box",     "zext.i16.to.i64#"),
-            ("UInt16",  "unbox",   "trunc.i64.to.i16#"),
             ("Int32",   "llvm",    "i32"),
-            ("Int32",   "box",     "sext.i32.to.i64#"),
-            ("Int32",   "unbox",   "trunc.i64.to.i32#"),
             ("UInt32",  "llvm",    "i32"),
-            ("UInt32",  "box",     "zext.i32.to.i64#"),
-            ("UInt32",  "unbox",   "trunc.i64.to.i32#"),
             ("Float",   "llvm",    "float"),
-            ("Float",   "storage", "Native"),
             ("Float",   "bytes",   "4"),
-            ("Float",   "box",     "bitcast.f32.to.i64#"),
-            ("Float",   "unbox",   "bitcast.i64.to.f32#"),
             ("Float64", "llvm",    "double"),
-            ("Float64", "storage", "Native"),
             ("Float64", "bytes",   "8"),
-            ("Float64", "box",     "bitcast.f64.to.i64#"),
-            ("Float64", "unbox",   "bitcast.i64.to.f64#"),
             ("Bool",    "llvm",    "i8"),
-            ("Bool",    "storage", "Boxed"),
             ("Bool",    "bytes",   "1"),
-            ("Bool",    "box",     "zext.i1.to.i64#"),
-            ("Bool",    "unbox",   "trunc.i64.to.i1#"),
             ("Char",    "llvm",    "i32"),
-            ("Char",    "storage", "Boxed"),
             ("Char",    "bytes",   "4"),
-            ("Char",    "box",     "zext.i32.to.i64#"),
-            ("Char",    "unbox",   "trunc.i64.to.i32#"),
             ("String",  "llvm",    "%String"),
-            ("String",  "storage", "Native"),
             ("String",  "bytes",   "24"),
-            ("String",  "box",     "ptrtoint#"),
-            ("String",  "unbox",   "inttoptr#"),
             ("Data",    "llvm",    "i8*"),
-            ("Data",    "storage", "Boxed"),
             ("Data",    "bytes",   "8"),
-            ("Data",    "box",     "ptrtoint#"),
-            ("Data",    "unbox",   "inttoptr#"),
         ];
         for &(type_name, property, expected) in checks {
             let rt = self.types.get(type_name).unwrap_or_else(|| {
@@ -363,7 +324,6 @@ impl TypeUniverse {
             });
             let actual: &str = match property {
                 "llvm" => &rt.llvm_type,
-                "storage" => &rt.storage,
                 "tbaa" => &rt.tbaa_node,
                 "bytes" => {
                     // bytes is a u64 — convert to string for comparison
@@ -372,8 +332,6 @@ impl TypeUniverse {
                     let leaked: &'static str = Box::leak(s.into_boxed_str());
                     leaked
                 }
-                "box" => rt.box_op.as_deref().unwrap_or("(missing)"),
-                "unbox" => rt.unbox_op.as_deref().unwrap_or("(missing)"),
                 _ => panic!("Unknown validation property '{}'", property),
             };
             assert_eq!(
@@ -395,10 +353,7 @@ impl TypeUniverse {
             bytes: 0,
             alignment: 1,
             llvm_type: "i64".into(),
-            storage: "Boxed".into(),
             tbaa_node: "Int".into(),
-            box_op: None,
-            unbox_op: None,
             endian: 0,
             volatile: false,
             atomic: false,
@@ -564,10 +519,7 @@ impl TypeUniverse {
             bytes: 0,
             alignment: 1,
             llvm_type: "i64".to_string(),
-            storage: "Boxed".to_string(),
             tbaa_node: "Int".to_string(),
-            box_op: None,
-            unbox_op: None,
             endian: 0,
             volatile: false,
             atomic: false,
@@ -598,10 +550,7 @@ impl TypeUniverse {
             rt.bytes = base.bytes;
             rt.alignment = base.alignment;
             rt.llvm_type = base.llvm_type.clone();
-            rt.storage = base.storage.clone();
             rt.tbaa_node = base.tbaa_node.clone();
-            rt.box_op = base.box_op.clone();
-            rt.unbox_op = base.unbox_op.clone();
             rt.endian = base.endian;
             rt.volatile = base.volatile;
             rt.atomic = base.atomic;
@@ -804,28 +753,9 @@ impl TypeUniverse {
                     rt.llvm_type = s.to_string();
                 }
             }
-            "storage" => {
-                if let Some(s) = binding.value.as_string() {
-                    rt.storage = s.to_string();
-                }
-            }
             "tbaa" => {
                 if let Some(s) = binding.value.as_string() {
                     rt.tbaa_node = s.to_string();
-                }
-            }
-            "box" => {
-                if let Some(s) = binding.value.as_string() {
-                    rt.box_op = Some(s.to_string());
-                } else if let Expr::Identifier(id) = binding.value.as_ref() {
-                    rt.box_op = Some(id.clone());
-                }
-            }
-            "unbox" => {
-                if let Some(s) = binding.value.as_string() {
-                    rt.unbox_op = Some(s.to_string());
-                } else if let Expr::Identifier(id) = binding.value.as_ref() {
-                    rt.unbox_op = Some(id.clone());
                 }
             }
             // ── Phase 2B binding handlers ────────────────────────
@@ -933,14 +863,9 @@ impl TypeUniverse {
     // For Int<8>: base "Int" + width 8 → "i8"
     // For Float<32>: base "Float" + width 32 → "float"
     pub fn llvm_type_for_width(&self, base_name: &str, width: u64) -> Option<std::borrow::Cow<'static, str>> {
-        let rt = self.get(base_name)?;
-        match rt.storage.as_str() {
-            "Native" => match base_name {
-                "Float" if width <= 32 => Some(std::borrow::Cow::Borrowed("float")),
-                "Float" if width <= 64 => Some(std::borrow::Cow::Borrowed("double")),
-                _ => Some(std::borrow::Cow::Owned(format!("i{}", width))),
-            },
-            "Boxed" => Some(std::borrow::Cow::Borrowed("i64")),
+        match base_name {
+            "Float" if width <= 32 => Some(std::borrow::Cow::Borrowed("float")),
+            "Float" if width <= 64 => Some(std::borrow::Cow::Borrowed("double")),
             _ => Some(std::borrow::Cow::Owned(format!("i{}", width))),
         }
     }
@@ -1196,9 +1121,9 @@ impl TypeUniverse {
         // 3-5. Check via i64 round-trip
         if let (Some(src_rt), Some(tgt_rt)) = (self.types.get(source), self.types.get(target)) {
             // Source can produce i64 (either via box_op or because it IS i64)
-            let src_to_i64 = src_rt.box_op.is_some() || src_rt.llvm_type == "i64";
-            // Target can receive i64 (either via unbox_op or because it IS i64)
-            let tgt_from_i64 = tgt_rt.unbox_op.is_some() || tgt_rt.llvm_type == "i64";
+            // All types can be adapted to/from i64
+            let src_to_i64 = true;
+            let tgt_from_i64 = true;
             if src_to_i64 && tgt_from_i64 {
                 return true;
             }

@@ -167,18 +167,6 @@ impl LlvmBackend {
                 return val.to_string();
             }
         }
-        // 2026-07-04: Try universe-driven unbox first.
-        // Clone unbox_op to avoid simultaneous immutable/mutable borrow of self.
-        let universe_unbox = brief_ty.as_ref().and_then(|brief| {
-            let u = self.ctx.type_universe.as_ref()?;
-            let rt = u.get_by_type(brief)?;
-            let op = rt.unbox_op.clone()?;
-            if op.is_empty() || op == "identity#" { return None; }
-            Some(op)
-        });
-        if let Some(ref op) = universe_unbox {
-            return self.emit_unbox_param(out, indent, ty, val, op);
-        }
         // Fallback: hardcoded LLVM type string matching.
         match ty {
             "i8" => {
@@ -401,20 +389,7 @@ impl LlvmBackend {
     /// see a float value stored in an i64 slot and produce invalid
     /// bitcast or pointer-to-int transforms during optimization.
     pub(super) fn adapt_to_i64(&mut self, out: &mut String, indent: &str, r: &TypedRegister) -> String {
-        // 2026-06-29: Phase 7A — query universe box_op instead of matching on Type.
-        // The universe stores the canonical boxing intrinsic for each type.
-        // Falls back to the old type match when universe is not available.
-        let box_op = self.ctx.type_universe.as_ref()
-            .and_then(|u| u.get_by_type(&r.ty))
-            .and_then(|rt| rt.box_op.clone())  // clone to avoid borrow conflict
-            .unwrap_or_default();
-
-        if box_op.is_empty() {
-            // Universe not available — fallback to old type-based dispatch
-            self.adapt_to_i64_fallback(out, indent, r)
-        } else {
-            self.adapt_via_box_op(out, indent, r, &box_op)
-        }
+        self.adapt_to_i64_fallback(out, indent, r)
     }
 
     /// Box a value via its universe-declared box_op intrinsic.

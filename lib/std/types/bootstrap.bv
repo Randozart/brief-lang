@@ -11,7 +11,6 @@ type Int <: Bits {
     bytes <~ 8;
     alignment <~ 8;
     llvm <~ "i64";
-    storage <~ "Boxed";
     tbaa <~ "Int";
     default_width <~ 64;
     commuting <~ true;
@@ -33,7 +32,6 @@ type UInt <: Bits {
     bytes <~ 8;
     alignment <~ 8;
     llvm <~ "i64";
-    storage <~ "Boxed";
     tbaa <~ "Int";
     default_width <~ 64;
     commuting <~ true;
@@ -54,10 +52,7 @@ type Int8 <: Bits {
     bytes <~ 1;
     alignment <~ 1;
     llvm <~ "i8";
-    storage <~ "Boxed";
     tbaa <~ "Int";
-    box <~ "sext.i8.to.i64#";
-    unbox <~ "trunc.i64.to.i8#";
     default_width <~ 8;
     commuting <~ true;
     op Add(Int8) -> Int8 = "add nsw";
@@ -78,10 +73,7 @@ type UInt8 <: Bits {
     bytes <~ 1;
     alignment <~ 1;
     llvm <~ "i8";
-    storage <~ "Boxed";
     tbaa <~ "Int";
-    box <~ "zext.i8.to.i64#";
-    unbox <~ "trunc.i64.to.i8#";
     default_width <~ 8;
     commuting <~ true;
     op Add(UInt8) -> UInt8 = "add";
@@ -101,10 +93,7 @@ type Int16 <: Bits {
     bytes <~ 2;
     alignment <~ 2;
     llvm <~ "i16";
-    storage <~ "Boxed";
     tbaa <~ "Int";
-    box <~ "sext.i16.to.i64#";
-    unbox <~ "trunc.i64.to.i16#";
     default_width <~ 16;
     commuting <~ true;
     op Add(Int16) -> Int16 = "add nsw";
@@ -125,10 +114,7 @@ type UInt16 <: Bits {
     bytes <~ 2;
     alignment <~ 2;
     llvm <~ "i16";
-    storage <~ "Boxed";
     tbaa <~ "Int";
-    box <~ "zext.i16.to.i64#";
-    unbox <~ "trunc.i64.to.i16#";
     default_width <~ 16;
     commuting <~ true;
     op Add(UInt16) -> UInt16 = "add";
@@ -148,10 +134,7 @@ type Int32 <: Bits {
     bytes <~ 4;
     alignment <~ 4;
     llvm <~ "i32";
-    storage <~ "Boxed";
     tbaa <~ "Int";
-    box <~ "sext.i32.to.i64#";
-    unbox <~ "trunc.i64.to.i32#";
     default_width <~ 32;
     commuting <~ true;
     op Add(Int32) -> Int32 = "add nsw";
@@ -172,10 +155,7 @@ type UInt32 <: Bits {
     bytes <~ 4;
     alignment <~ 4;
     llvm <~ "i32";
-    storage <~ "Boxed";
     tbaa <~ "Int";
-    box <~ "zext.i32.to.i64#";
-    unbox <~ "trunc.i64.to.i32#";
     default_width <~ 32;
     commuting <~ true;
     op Add(UInt32) -> UInt32 = "add";
@@ -195,10 +175,7 @@ type Float <: Bits {
     bytes <~ 4;
     alignment <~ 4;
     llvm <~ "float";
-    storage <~ "Native";
     tbaa <~ "Float";
-    box <~ "bitcast.f32.to.i64#";
-    unbox <~ "bitcast.i64.to.f32#";
     default_width <~ 32;
     commuting <~ true;
     op Add(Float) -> Float = "fadd fast";
@@ -219,10 +196,7 @@ type Float64 <: Bits {
     bytes <~ 8;
     alignment <~ 8;
     llvm <~ "double";
-    storage <~ "Native";
     tbaa <~ "Float";
-    box <~ "bitcast.f64.to.i64#";
-    unbox <~ "bitcast.i64.to.f64#";
     default_width <~ 64;
     commuting <~ true;
     op Add(Float64) -> Float64 = "fadd fast";
@@ -243,10 +217,7 @@ type Bool <: Bits {
     bytes <~ 1;
     alignment <~ 1;
     llvm <~ "i8";
-    storage <~ "Boxed";
     tbaa <~ "Bool";
-    box <~ "zext.i1.to.i64#";
-    unbox <~ "trunc.i64.to.i1#";
     default_width <~ 1;
     commuting <~ true;
     op Eq(Bool) -> Bool = "icmp eq";
@@ -260,10 +231,7 @@ type Char <: Bits {
     bytes <~ 4;
     alignment <~ 4;
     llvm <~ "i32";
-    storage <~ "Boxed";
     tbaa <~ "Char";
-    box <~ "zext.i32.to.i64#";
-    unbox <~ "trunc.i64.to.i32#";
     default_width <~ 32;
 };
 
@@ -274,19 +242,13 @@ type String <: Bits {
     bytes <~ 24;
     alignment <~ 8;
     llvm <~ "%String";
-    storage <~ "Native";
     tbaa <~ "String";
-    box <~ "ptrtoint#";
-    unbox <~ "inttoptr#";
 };
 
 type Data <: Bits {
     bytes <~ 8;
     alignment <~ 8;
     llvm <~ "i8*";
-    storage <~ "Boxed";
     tbaa <~ "String";
-    box <~ "ptrtoint#";
-    unbox <~ "inttoptr#";
     default_width <~ 64;
 };

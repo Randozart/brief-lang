@@ -910,16 +910,15 @@ impl LlvmBackend {
             // SSA violations (nbody %bfr errors). Integer types have no
             // such cache dependency — saving and reusing their registers
             // avoids the O(2^depth) double-emission (const_heavy fix).
-            // 2026-07-08: Phase 2D — use universe storage check for
-            // native type detection instead of hardcoded name matching.
-            let l_is_native = universe.get(&l_key).map(|r| r.storage == "Native").unwrap_or(false);
+            // 2026-07-12: Phase 8E — all types are native; check llvm_type for float detection.
+            let l_is_native = universe.get(&l_key).map(|r| r.llvm_type == "float" || r.llvm_type == "double").unwrap_or(false);
             if !l_is_native {
                 phase7b_l = Some(l_reg.clone());
             }
             if universe.types.contains_key(&l_key) {
                 let r_reg = self.emit_expr(out, r, indent);
                 let r_key = r_reg.ty.universe_key().to_string();
-                let r_is_native = universe.get(&r_key).map(|r| r.storage == "Native").unwrap_or(false);
+                let r_is_native = universe.get(&r_key).map(|r| r.llvm_type == "float" || r.llvm_type == "double").unwrap_or(false);
                 if !r_is_native {
                     phase7b_r = Some(r_reg.clone());
                 }
@@ -966,15 +965,14 @@ impl LlvmBackend {
             phase7b_r.unwrap_or_else(|| self.emit_expr(out, r, indent)),
         );
 
-        // 2026-07-08: Phase 2D — universe storage check for native types.
-        // Falls back to name-based Float/Float64 check when universe is absent (tests).
+        // 2026-07-12: Phase 8E — check llvm_type for float detection; all types are native.
         let a_is_native = self.ctx.type_universe.as_ref()
             .and_then(|u| u.get_by_type(&a.ty))
-            .map(|r| r.storage == "Native")
+            .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
             .unwrap_or_else(|| type_is(&self.ctx.type_universe, &a.ty, "Float") || type_is(&self.ctx.type_universe, &a.ty, "Float64"));
         let b_is_native = self.ctx.type_universe.as_ref()
             .and_then(|u| u.get_by_type(&b.ty))
-            .map(|r| r.storage == "Native")
+            .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
             .unwrap_or_else(|| type_is(&self.ctx.type_universe, &b.ty, "Float") || type_is(&self.ctx.type_universe, &b.ty, "Float64"));
 
         // ── Expression hash-consing dedup cache lookup ─────────────
@@ -1079,11 +1077,10 @@ impl LlvmBackend {
                           a: &TypedRegister, b: &TypedRegister,
                           op: &OpDeclaration) -> TypedRegister {
         let v = self.fun.next_reg();
-        // 2026-07-08: Determine LLVM type from operand's type storage.
-        // For Native storage (float/double), ensure operands are in native form.
+        // 2026-07-12: Determine if float type from llvm_type property.
         let is_native = self.ctx.type_universe.as_ref()
             .and_then(|u| u.get_by_type(&a.ty))
-            .map(|r| r.storage == "Native")
+            .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
             .unwrap_or(false);
         let (op_a, op_b) = if is_native {
             (self.ensure_float_reg(out, indent, a), self.ensure_float_reg(out, indent, b))
@@ -1135,13 +1132,14 @@ impl LlvmBackend {
     fn operator_llvm_type(&self, ty: &Type) -> &'static str {
         if let Some(ref universe) = self.ctx.type_universe {
             if let Some(rt) = universe.get_by_type(ty) {
-                return match rt.storage.as_str() {
-                    "Native" => match ty.bit_width() {
-                        Some(w) if w <= 32 => "float",
-                        _ => "double",
-                    },
-                    _ => "i64",
-                };
+                // 2026-07-12: Use llvm_type property directly — all types are native.
+                if rt.llvm_type == "float" {
+                    return "float";
+                } else if rt.llvm_type == "double" {
+                    return "double";
+                } else {
+                    return "i64";
+                }
             }
         }
         // Fallback for tests without universe

@@ -12,7 +12,6 @@ type Float16 <: Bits {
     bytes <~ 2;
     alignment <~ 2;
     llvm <~ "half";
-    storage <~ "Native";
     tbaa <~ "FloatNode";
 
     op Add(Float16) -> Float16 = fadd16#;
@@ -25,7 +24,6 @@ type Float4 <: Bits {
     bytes <~ 16;
     alignment <~ 16;
     llvm <~ "<4 x float>";
-    storage <~ "Native";
     tbaa <~ "FloatNode";
 
     op Add(Float4) -> Float4 = fadd_v4f32#;

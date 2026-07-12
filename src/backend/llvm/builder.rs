@@ -482,41 +482,8 @@ impl TypeConverter {
     /// Uses the type universe to determine the boxing strategy.
     /// Falls back to identity (already i64) when universe lookup fails.
     /// 2026-06-29: Phase 7A — universe-driven, replaces hardcoded match arms.
-    pub fn box_to_i64(builder: &mut LLVMBuilder, val: &str, ty: &BriefType, universe: Option<&TypeUniverse>) -> String {
-        let box_op = universe
-            .and_then(|u| u.get_by_type(ty))
-            .and_then(|rt| rt.box_op.as_deref());
-
-        match box_op {
-            None => Self::box_to_i64_fallback(builder, val, ty),
-
-            Some("zext.i1.to.i64#") => builder.emit_zext(LlvmType::I1, LlvmType::I64, val),
-
-            Some("ptrtoint#") => builder.emit_ptrtoint(val, LlvmType::I64),
-
-            Some("bitcast.f32.to.i64#") => {
-                let bi = builder.emit_bitcast(LlvmType::Float, LlvmType::I32, val);
-                builder.emit_zext(LlvmType::I32, LlvmType::I64, &bi)
-            }
-
-            Some("bitcast.f64.to.i64#") => builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val),
-
-            op if op.map_or(false, |o| o.starts_with("sext.")) => {
-                let w = if op == Some("sext.i8.to.i64#") { LlvmType::I8 }
-                        else if op == Some("sext.i16.to.i64#") { LlvmType::I16 }
-                        else { LlvmType::I32 };
-                builder.emit_sext(w, LlvmType::I64, val)
-            }
-
-            op if op.map_or(false, |o| o.starts_with("zext.") && o != "zext.i1.to.i64#") => {
-                let w = if op == Some("zext.i8.to.i64#") { LlvmType::I8 }
-                        else if op == Some("zext.i16.to.i64#") { LlvmType::I16 }
-                        else { LlvmType::I32 };
-                builder.emit_zext(w, LlvmType::I64, val)
-            }
-
-            _ => val.to_string(),
-        }
+    pub fn box_to_i64(builder: &mut LLVMBuilder, val: &str, ty: &BriefType, _universe: Option<&TypeUniverse>) -> String {
+        Self::box_to_i64_fallback(builder, val, ty)
     }
 
     /// Fallback boxing when universe is not available.
@@ -541,34 +508,8 @@ impl TypeConverter {
     /// Unbox an i64 value from %State back to its native type.
     /// Uses the type universe to determine the unboxing strategy.
     /// 2026-06-29: Phase 7A — universe-driven.
-    pub fn unbox_from_i64(builder: &mut LLVMBuilder, val: &str, target_ty: &BriefType, universe: Option<&TypeUniverse>) -> String {
-        let unbox_op = universe
-            .and_then(|u| u.get_by_type(target_ty))
-            .and_then(|rt| rt.unbox_op.as_deref());
-
-        match unbox_op {
-            None => Self::unbox_from_i64_fallback(builder, val, target_ty),
-
-            Some("trunc.i64.to.i1#") => builder.emit_trunc(LlvmType::I64, LlvmType::I1, val),
-
-            Some("inttoptr#") => builder.emit_inttoptr(val, LlvmType::I64),
-
-            Some("bitcast.i64.to.f32#") => {
-                let tr = builder.emit_trunc(LlvmType::I64, LlvmType::I32, val);
-                builder.emit_bitcast(LlvmType::I32, LlvmType::Float, &tr)
-            }
-
-            Some("bitcast.i64.to.f64#") => builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val),
-
-            op if op.map_or(false, |o| o.starts_with("trunc.")) => {
-                let w = if op == Some("trunc.i64.to.i8#") { LlvmType::I8 }
-                        else if op == Some("trunc.i64.to.i16#") { LlvmType::I16 }
-                        else { LlvmType::I32 };
-                builder.emit_trunc(LlvmType::I64, w, val)
-            }
-
-            _ => val.to_string(),
-        }
+    pub fn unbox_from_i64(builder: &mut LLVMBuilder, val: &str, target_ty: &BriefType, _universe: Option<&TypeUniverse>) -> String {
+        Self::unbox_from_i64_fallback(builder, val, target_ty)
     }
 
     /// Fallback unboxing when universe is not available.
