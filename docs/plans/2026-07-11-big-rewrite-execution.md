@@ -502,8 +502,6 @@ and NEVER appear in string quotes.
 3. No underscores, no hyphens
 4. Never in string quotes — `intrinsic_op <~ AddI64`, not `intrinsic_op <~ "AddI64"`
 5. Never user-definable — these are the compiler's vocabulary
-6. Functions carrying `intrinsic_op <~` CANNOT be called directly:
-   `let x = add_i64(a, b)` → compile error
 
 **Example `defn` carrying compiler primitives:**
 
