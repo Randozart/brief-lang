@@ -109,39 +109,44 @@ metadata; pass through unknowns.
 /// 2026-07-12: Phase A.1
 fn validate_alloc_annotations(program: &mut Program) -> Result<(), Vec<AllocError>> {
     let mut errors = Vec::new();
-
     for binding in program.all_bindings() {
-        let Some(alloc_value) = binding.get_metadata("alloc") else { continue; };
-
-        match alloc_value {
-            // Case 1: "Stack" — frontend must verify no-escape
-            PropertyValue::String(s) if s == "Stack" => {
-                if !escape_analysis::proves_no_escape(binding, program) {
-                    errors.push(AllocError::Escape {
-                        name: binding.name.clone(),
-                        span: binding.span,
-                    });
-                }
-                // Implicitly expand: alloc("Stack") → alloca
-                binding.set_metadata("alloca", PropertyValue::Bool(true));
-            }
-
-            // Case 2: Physical address literal (integer constant)
-            PropertyValue::Integer(addr) => {
-                // Must be a compile-time constant (already guaranteed by parser)
-                // Expand: alloc(0x...) → volatile + observable + fixed_addr
-                binding.set_metadata("volatile", PropertyValue::Bool(true));
-                binding.set_metadata("observable", PropertyValue::Bool(true));
-                binding.set_metadata("fixed_addr", PropertyValue::Integer(*addr));
-            }
-
-            // Case 3-5: Unknown values — pass through to backend
-            // "Arena", "Heap", raw pointer — frontend cannot validate
-            _ => { /* opaque — pass through */ }
+        let alloc_value = binding.get_metadata("alloc");
+        let Some(alloc_value) = alloc_value else { continue; };
+        if let Err(e) = expand_alloc(binding, alloc_value) {
+            errors.push(e);
         }
     }
-
     if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+
+/// Expand a single alloc annotation: validate what we can, set expanded metadata.
+/// 2026-07-12: Phase A.1
+fn expand_alloc(binding: &mut Binding, alloc_value: &PropertyValue) -> Result<(), AllocError> {
+    match alloc_value {
+        PropertyValue::String(s) if s == "Stack" => expand_stack(binding),
+        PropertyValue::Integer(addr) => expand_physical(binding, *addr),
+        _ => Ok(()), // Opaque — pass through to backend
+    }
+}
+
+/// Handle alloc("Stack") — verify no-escape, emit alloca metadata.
+fn expand_stack(binding: &mut Binding) -> Result<(), AllocError> {
+    if !escape_analysis::proves_no_escape(binding) {
+        return Err(AllocError::Escape {
+            name: binding.name.clone(),
+            span: binding.span,
+        });
+    }
+    binding.set_metadata("alloca", PropertyValue::Bool(true));
+    Ok(())
+}
+
+/// Handle alloc(0x...) — expand to volatile + observable + fixed_addr.
+fn expand_physical(binding: &mut Binding, addr: i64) -> Result<(), AllocError> {
+    binding.set_metadata("volatile", PropertyValue::Bool(true));
+    binding.set_metadata("observable", PropertyValue::Bool(true));
+    binding.set_metadata("fixed_addr", PropertyValue::Integer(addr));
+    Ok(())
 }
 ```
 
@@ -237,62 +242,80 @@ known keys produce errors.
 /// 2026-07-12: Phase A.3
 fn validate_alloc_metadata(defn: &Definition) -> Result<(), Vec<LlvmValidationError>> {
     let mut errors = Vec::new();
-
     for binding in defn.all_bindings() {
-        let Some(alloc_value) = binding.get_raw_metadata("alloc") else { continue; };
-
-        // Only validate values the LLVM backend knows about
-        // Unknown values are silently passed through (forward compat)
-        match alloc_value {
-            PropertyValue::String(s) => {
-                match s.as_str() {
-                    "Stack" | "Heap" => {} // known — validate structure (done)
-                    "Arena" => {
-                        // Validate that arena pointer exists and is non-null
-                        if !binding.has_metadata("arena_base") {
-                            errors.push(LlvmValidationError::MissingArenaPointer {
-                                binding: binding.name.clone(),
-                            });
-                        }
-                    }
-                    // Unknown string value → error: known key, unparseable value
-                    other => {
-                        errors.push(LlvmValidationError::UnknownAllocTarget {
-                            target: other.to_string(),
-                            binding: binding.name.clone(),
-                        });
-                    }
-                }
-            }
-            PropertyValue::Integer(_) => {
-                // Integer means physical address — validated by frontend in A.1
-                // Backend checks: is this address valid for the target?
-                if !ctx.target_memory_map().contains(alloc_value.as_int()) {
-                    errors.push(LlvmValidationError::AddressNotInMemoryMap {
-                        address: alloc_value.as_int(),
-                        target: ctx.target_triple().to_string(),
-                    });
-                }
-            }
-            // List values — unpack and check known cases
-            PropertyValue::List(items) => {
-                if let Some(PropertyValue::String(s)) = items.first() {
-                    if s == "Arena" {
-                        // "Arena", ptr → validate ptr exists
-                        if items.len() < 2 {
-                            errors.push(LlvmValidationError::MissingArenaPointer {
-                                binding: binding.name.clone(),
-                            });
-                        }
-                    }
-                }
-            }
-            // All other value types → pass through
-            _ => {}
+        let alloc_value = binding.get_raw_metadata("alloc");
+        let Some(alloc_value) = alloc_value else { continue; };
+        if let Err(e) = validate_binding_alloc(binding, alloc_value) {
+            errors.push(e);
         }
     }
-
     if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+
+/// Validate a single binding's alloc metadata against LLVM backend rules.
+/// Unknown string values → error (known key, unparseable value).
+/// Unknown keys are silently ignored (forward compat).
+/// 2026-07-12: Phase A.3
+fn validate_binding_alloc(
+    binding: &Binding,
+    alloc_value: &PropertyValue,
+) -> Result<(), LlvmValidationError> {
+    match alloc_value {
+        PropertyValue::String(s) => validate_alloc_string(binding, s),
+        PropertyValue::Integer(_) => validate_alloc_address(binding, *alloc_value.as_int()),
+        PropertyValue::List(items) => validate_alloc_list(binding, items),
+        _ => Ok(()), // Opaque — pass through
+    }
+}
+
+/// Validate a string alloc target: "Stack", "Heap", "Arena", or error.
+fn validate_alloc_string(binding: &Binding, target: &str) -> Result<(), LlvmValidationError> {
+    match target {
+        "Stack" | "Heap" => Ok(()), // Known, structure validated by frontend
+        "Arena" => validate_arena(binding),
+        other => Err(LlvmValidationError::UnknownAllocTarget {
+            target: other.to_string(),
+            binding: binding.name.clone(),
+        }),
+    }
+}
+
+/// Validate that an arena allocation has a non-null base pointer.
+fn validate_arena(binding: &Binding) -> Result<(), LlvmValidationError> {
+    if binding.has_metadata("arena_base") {
+        Ok(())
+    } else {
+        Err(LlvmValidationError::MissingArenaPointer {
+            binding: binding.name.clone(),
+        })
+    }
+}
+
+/// Validate a physical address is in the target memory map.
+fn validate_alloc_address(binding: &Binding, addr: i64) -> Result<(), LlvmValidationError> {
+    if ctx.target_memory_map().contains(addr) {
+        Ok(())
+    } else {
+        Err(LlvmValidationError::AddressNotInMemoryMap {
+            address: addr,
+            target: ctx.target_triple().to_string(),
+        })
+    }
+}
+
+/// Validate a list-format alloc: ["Arena", ptr] needs a pointer.
+fn validate_alloc_list(binding: &Binding, items: &[PropertyValue]) -> Result<(), LlvmValidationError> {
+    let first = items.first();
+    let Some(PropertyValue::String(s)) = first else { return Ok(()); };
+    if s != "Arena" {
+        return Ok(());
+    }
+    if items.len() < 2 {
+        return Err(LlvmValidationError::MissingArenaPointer {
+            binding: binding.name.clone(),
+        });
+    }
+    Ok(())
 }
 ```
 
@@ -330,18 +353,19 @@ device's memory map (same pattern as LLVM). Unknown `alloc` string values
 produce CIRCT-specific errors.
 
 ```rust
-// CIRCT-specific validation
+/// CIRCT-specific validation for a single binding.
+/// 2026-07-12: Phase A.4
 fn validate_alloc_circt(binding: &Binding, target: &CirctTarget) -> Result<(), CirctError> {
-    if let Some(addr) = binding.get_metadata_int("fixed_addr") {
-        if !target.memory_map().contains(addr) {
-            return Err(CirctError::AddressNotMapped {
-                address: addr,
-                device: target.device_name(),
-                available_range: target.memory_map_range(),
-            });
-        }
+    let Some(addr) = binding.get_metadata_int("fixed_addr") else { return Ok(()); };
+    if target.memory_map().contains(addr) {
+        Ok(())
+    } else {
+        Err(CirctError::AddressNotMapped {
+            address: addr,
+            device: target.device_name(),
+            available_range: target.memory_map_range(),
+        })
     }
-    Ok(())
 }
 ```
 
