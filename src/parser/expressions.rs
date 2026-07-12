@@ -1,0 +1,369 @@
+// ── Expression Parser ──────────────────────────────────────────────────
+// 2026-07-12: Phase 1.1 — Parse all expression forms.
+// Flat code: each function is max 2 levels, nested logic extracted to helpers.
+// No IntrinsicCall — Sqrt#(x) is Call("Sqrt#", [x]).
+// @ prefix forces any token to Quoted(bytes).
+
+use super::helpers::Parser;
+use crate::ast_new::{BinaryOpKind, Expr, UnaryOpKind};
+use crate::errors::{Span, SyntaxError};
+use crate::lexer::Token;
+
+impl<'a> Parser<'a> {
+    /// Entry point: parse an expression at any precedence level.
+    pub fn parse_expression(&mut self) -> Result<Expr, SyntaxError> {
+        self.parse_assignment()
+    }
+
+    /// Assignment: a = b  (lowest precedence)
+    fn parse_assignment(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_or()?;
+        if self.eat(&Token::Eq) {
+            let value = self.parse_assignment()?;
+            // For now, treat assignment as a binary op; the typechecker
+            // will validate lvalue-ness.
+            expr = Expr::BinaryOp(BinaryOpKind::Eq, Box::new(expr), Box::new(value));
+        }
+        Ok(expr)
+    }
+
+    /// Logical OR: a || b
+    fn parse_or(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_and()?;
+        while self.eat(&Token::OrOr) {
+            let rhs = self.parse_and()?;
+            expr = Expr::BinaryOp(BinaryOpKind::Or, Box::new(expr), Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    /// Logical AND: a && b
+    fn parse_and(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_equality()?;
+        while self.eat(&Token::AndAnd) {
+            let rhs = self.parse_equality()?;
+            expr = Expr::BinaryOp(BinaryOpKind::And, Box::new(expr), Box::new(rhs));
+        }
+        Ok(expr)
+    }
+
+    /// Equality: a == b, a != b
+    fn parse_equality(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_comparison()?;
+        loop {
+            if self.eat(&Token::EqEq) {
+                let rhs = self.parse_comparison()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Eq, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::Ne) {
+                let rhs = self.parse_comparison()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Neq, Box::new(expr), Box::new(rhs));
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    /// Comparison: a < b, a > b, a <= b, a >= b
+    fn parse_comparison(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_term()?;
+        loop {
+            if self.eat(&Token::Lt) {
+                let rhs = self.parse_term()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Lt, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::Gt) {
+                let rhs = self.parse_term()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Gt, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::Le) {
+                let rhs = self.parse_term()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Le, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::Ge) {
+                let rhs = self.parse_term()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Ge, Box::new(expr), Box::new(rhs));
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    /// Term: a + b, a - b
+    fn parse_term(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_factor()?;
+        loop {
+            if self.eat(&Token::Plus) {
+                let rhs = self.parse_factor()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Add, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::Minus) {
+                let rhs = self.parse_factor()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Sub, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::PlusPlus) {
+                let rhs = self.parse_factor()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Concat, Box::new(expr), Box::new(rhs));
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    /// Factor: a * b, a / b, a % b
+    fn parse_factor(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_unary()?;
+        loop {
+            if self.eat(&Token::Star) {
+                let rhs = self.parse_unary()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Mul, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::Slash) {
+                let rhs = self.parse_unary()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Div, Box::new(expr), Box::new(rhs));
+            } else if self.eat(&Token::Percent) {
+                let rhs = self.parse_unary()?;
+                expr = Expr::BinaryOp(BinaryOpKind::Mod, Box::new(expr), Box::new(rhs));
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    /// Unary: !a, -a, ~a, &a
+    fn parse_unary(&mut self) -> Result<Expr, SyntaxError> {
+        if self.eat(&Token::Not) {
+            let expr = self.parse_unary()?;
+            return Ok(Expr::UnaryOp(UnaryOpKind::Not, Box::new(expr)));
+        }
+        if self.eat(&Token::Minus) {
+            let expr = self.parse_unary()?;
+            return Ok(Expr::UnaryOp(UnaryOpKind::Neg, Box::new(expr)));
+        }
+        if self.eat(&Token::Tilde) {
+            let expr = self.parse_unary()?;
+            return Ok(Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(expr)));
+        }
+        self.parse_postfix()
+    }
+
+    /// Postfix: a[b], a.f, a(args), a within { }
+    fn parse_postfix(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_primary()?;
+        loop {
+            if self.eat(&Token::LParen) {
+                // Call: f(args)
+                let mut args = Vec::new();
+                if !self.check(&Token::RParen) {
+                    loop {
+                        args.push(self.parse_expression()?);
+                        if !self.eat(&Token::Comma) {
+                            break;
+                        }
+                    }
+                }
+                self.expect(Token::RParen)?;
+                // Extract function name if primary is an identifier
+                match expr {
+                    Expr::Identifier(name) => {
+                        expr = Expr::Call(name, args);
+                    }
+                    _ => {
+                        return self.error_at_current("only named functions can be called");
+                    }
+                }
+            } else if self.eat(&Token::Dot) {
+                // Field access: a.f
+                let name = self.expect_identifier()?;
+                expr = Expr::Field(Box::new(expr), name);
+            } else if self.eat(&Token::LBracket) {
+                // Index: a[b]
+                let index = self.parse_expression()?;
+                self.expect(Token::RBracket)?;
+                expr = Expr::Index(Box::new(expr), Box::new(index));
+            } else {
+                break;
+            }
+        }
+        Ok(expr)
+    }
+
+    /// Primary: literals, identifiers, parenthesized, blocks, if/match/lambda
+    fn parse_primary(&mut self) -> Result<Expr, SyntaxError> {
+        match self.advance() {
+            // ── Literals ────────────────────────────────────────────
+            Some((Token::Integer(n), _)) => Ok(Expr::Decimal(n)),
+            Some((Token::Float(f), _)) => Ok(Expr::Float(f)),
+            Some((Token::String(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
+            Some((Token::Char(c), _)) => Ok(Expr::Decimal(c as i64)),
+            Some((Token::BoolTrue, _)) => Ok(Expr::Bool(true)),
+            Some((Token::BoolFalse, _)) => Ok(Expr::Bool(false)),
+
+            // ── @ prefix: force literal to Quoted raw bytes ─────────
+            Some((Token::At, span)) => {
+                // Capture the raw source bytes of the next token
+                let start = span.start;
+                let end = match self.advance() {
+                    Some((_, next_span)) => next_span.end,
+                    None => return self.error_at_current("expected expression after @"),
+                };
+                let raw = self.source[start + 1..end].as_bytes().to_vec();
+                Ok(Expr::Quoted(raw))
+            }
+
+            // ── Identifiers (including # names like Sqrt#) ──────────
+            Some((Token::Identifier(name), _)) => self.parse_identifier_or_special(name),
+
+            // ── Grouping: (expr) ────────────────────────────────────
+            Some((Token::LParen, _)) => self.parse_grouping(),
+
+            // ── Block: { stmts } ────────────────────────────────────
+            Some((Token::LBrace, _)) => self.parse_block_expr(),
+
+            // ── If expression ───────────────────────────────────────
+            Some((Token::Match, _)) => self.parse_match_expr(),
+
+            // ── List literal: [expr, ...] ───────────────────────────
+            Some((Token::LBracket, _)) => self.parse_list_literal(),
+
+            Some((tok, span)) => {
+                let msg = format!("unexpected token '{}'", tok);
+                Err(SyntaxError::InvalidExpression {
+                    reason: msg,
+                    span: self.make_span(span),
+                })
+            }
+            None => Err(SyntaxError::UnexpectedEOF {
+                expected: "expression".into(),
+                span: Span::dummy(),
+            }),
+        }
+    }
+
+    /// Handle identifiers that might be followed by => (lambda) or are keywords.
+    fn parse_identifier_or_special(&mut self, name: String) -> Result<Expr, SyntaxError> {
+        // Lambda: param => body
+        if self.eat(&Token::Arrow) {
+            let body = self.parse_expression()?;
+            return Ok(Expr::Lambda(vec![name], Box::new(body)));
+        }
+        Ok(Expr::Identifier(name))
+    }
+
+    /// Parse a parenthesized expression or tuple.
+    fn parse_grouping(&mut self) -> Result<Expr, SyntaxError> {
+        let mut exprs = Vec::new();
+        if !self.check(&Token::RParen) {
+            loop {
+                exprs.push(self.parse_expression()?);
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RParen)?;
+        if exprs.len() == 1 {
+            Ok(exprs.into_iter().next().unwrap())
+        } else {
+            Ok(Expr::Tuple(exprs))
+        }
+    }
+
+    /// Parse a block expression: { stmt; stmt; ... }
+    fn parse_block_expr(&mut self) -> Result<Expr, SyntaxError> {
+        let stmts = self.parse_block()?;
+        Ok(Expr::Block(stmts))
+    }
+
+    /// Parse a match expression.
+    fn parse_match_expr(&mut self) -> Result<Expr, SyntaxError> {
+        let expr = self.parse_expression()?;
+        self.expect(Token::LBrace)?;
+        let mut arms = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            let pattern = self.parse_pattern()?;
+            let guard = if self.eat_identifier("if") {
+                Some(self.parse_expression()?)
+            } else {
+                None
+            };
+            self.expect(Token::Arrow)?;
+            let body = self.parse_expression()?;
+            self.eat(&Token::Comma); // optional comma
+            arms.push(crate::ast_new::MatchArm {
+                pattern,
+                guard,
+                body: Box::new(body),
+            });
+        }
+        self.expect(Token::RBrace)?;
+        Ok(Expr::Match(Box::new(expr), arms))
+    }
+
+    /// Parse a list literal: [a, b, c]
+    fn parse_list_literal(&mut self) -> Result<Expr, SyntaxError> {
+        let mut elems = Vec::new();
+        if !self.check(&Token::RBracket) {
+            loop {
+                elems.push(self.parse_expression()?);
+                if !self.eat(&Token::Comma) {
+                    break;
+                }
+            }
+        }
+        self.expect(Token::RBracket)?;
+        Ok(Expr::List(elems))
+    }
+
+    /// Parse a pattern for match arms.
+    fn parse_pattern(&mut self) -> Result<crate::ast_new::Pattern, SyntaxError> {
+        match self.peek() {
+            Some(Token::Underscore) => {
+                self.pos += 1;
+                Ok(crate::ast_new::Pattern::Wildcard)
+            }
+            Some(Token::Identifier(name)) => {
+                let name = name.clone();
+                self.pos += 1;
+                // Enum variant with fields: Foo(a, b)
+                if self.eat(&Token::LParen) {
+                    let mut fields = Vec::new();
+                    if !self.check(&Token::RParen) {
+                        loop {
+                            fields.push(self.parse_pattern()?);
+                            if !self.eat(&Token::Comma) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect(Token::RParen)?;
+                    Ok(crate::ast_new::Pattern::EnumVariant(name, fields))
+                } else {
+                    Ok(crate::ast_new::Pattern::Binding(name))
+                }
+            }
+            Some(Token::Integer(_))
+            | Some(Token::String(_))
+            | Some(Token::BoolTrue)
+            | Some(Token::BoolFalse) => {
+                let lit = self.parse_primary()?;
+                // Range pattern: 1..5
+                if self.eat(&Token::DotDot) {
+                    let end = self.parse_primary()?;
+                    Ok(crate::ast_new::Pattern::Range(lit, end))
+                } else {
+                    Ok(crate::ast_new::Pattern::Literal(lit))
+                }
+            }
+            _ => self.error_at_current("expected pattern"),
+        }
+    }
+
+    /// Parse a block of statements (used by both Block and function bodies).
+    pub fn parse_block(&mut self) -> Result<Vec<crate::ast_new::Statement>, SyntaxError> {
+        self.expect(Token::LBrace)?;
+        let mut stmts = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            stmts.push(self.parse_statement()?);
+        }
+        self.expect(Token::RBrace)?;
+        Ok(stmts)
+    }
+}
