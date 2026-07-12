@@ -7,7 +7,7 @@ pub fn eval_keys_projection(source_val: &Value) -> Result<Value, RuntimeError> {
     let Value::HashMap(m) = source_val else {
         return Err(RuntimeError::TypeMismatch("Keys requires HashMap".into()));
     };
-    let keys: Vec<Value> = m.keys().map(|k| Value::Bits(k.as_bytes().to_vec())).collect();
+    let keys: Vec<Value> = m.keys().map(|k| Value::Bits(k.to_string().into())).collect();
     Ok(Value::List(keys))
 }
 

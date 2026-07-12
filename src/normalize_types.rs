@@ -157,7 +157,7 @@ fn desugar_toplevel_strings(item: &mut TopLevel, universe: &TypeUniverse) {
         TopLevel::StateDecl(decl) => {
             if decl.ty == Type::string() {
                 if let Some(expr) = &mut decl.expr {
-                    if let Expr::String(s) = expr {
+                    if let Expr::Quoted(s) = expr {
                         *expr = make_string_struct(s.clone());
                     }
                 }
@@ -165,7 +165,7 @@ fn desugar_toplevel_strings(item: &mut TopLevel, universe: &TypeUniverse) {
         }
         TopLevel::Constant(constant) => {
             if constant.ty == Type::string() {
-                if let Expr::String(s) = &constant.expr {
+                if let Expr::Quoted(s) = &constant.expr {
                     constant.expr = make_string_struct(s.clone());
                 }
             }
@@ -174,11 +174,11 @@ fn desugar_toplevel_strings(item: &mut TopLevel, universe: &TypeUniverse) {
     }
 }
 
-fn make_string_struct(s: String) -> Expr {
+fn make_string_struct(s: Vec<u8>) -> Expr {
     let len = s.len() as i64;
     Expr::StructInstance("String".to_string(), vec![
-        ("ptr".to_string(), Expr::String(s)),
-        ("len".to_string(), Expr::Integer(len)),
-        ("codec".to_string(), Expr::Integer(0)),
+        ("ptr".to_string(), Expr::Quoted(s)),
+        ("len".to_string(), Expr::Decimal(len)),
+        ("codec".to_string(), Expr::Decimal(0)),
     ])
 }

@@ -215,7 +215,7 @@ pub fn metro_shm_open_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("ShmError".to_string(), "ShmOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::Bits(err.to_string().as_bytes().to_vec()));
+                m.insert("message".to_string(), Value::Bits(err.to_string().into_bytes()));
                 m
             }))
         } else {
@@ -232,7 +232,7 @@ pub fn metro_shm_unlink_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("ShmError".to_string(), "ShmOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::Bits(err.to_string().as_bytes().to_vec()));
+                m.insert("message".to_string(), Value::Bits(err.to_string().into_bytes()));
                 m
             }))
         }
@@ -248,7 +248,7 @@ pub fn metro_ftruncate_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("ShmError".to_string(), "ShmOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::Bits(err.to_string().as_bytes().to_vec()));
+                m.insert("message".to_string(), Value::Bits(err.to_string().into_bytes()));
                 m
             }))
         }
@@ -260,7 +260,7 @@ pub fn metro_shm_list_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Ok(entries) = std::fs::read_dir("/dev/shm") {
         for entry in entries.flatten() {
             if let Ok(name) = entry.file_name().into_string() {
-                names.push(Value::Bits(name.as_bytes().to_vec()));
+                names.push(Value::Bits(name.into_bytes()));
             }
         }
     }
@@ -314,7 +314,7 @@ pub fn metro_mmap_anonymous_impl(args: Vec<Value>) -> Result<Value, RuntimeError
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("MmapError".to_string(), "MmapOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::Bits(err.to_string().as_bytes().to_vec()));
+                m.insert("message".to_string(), Value::Bits(err.to_string().into_bytes()));
                 m
             }))
         } else {
@@ -332,7 +332,7 @@ pub fn metro_munmap_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("MmapError".to_string(), "MmapOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::Bits(err.to_string().as_bytes().to_vec()));
+                m.insert("message".to_string(), Value::Bits(err.to_string().into_bytes()));
                 m
             }))
         }
@@ -349,7 +349,7 @@ pub fn metro_msync_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("MmapError".to_string(), "MmapOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::Bits(err.to_string().as_bytes().to_vec()));
+                m.insert("message".to_string(), Value::Bits(err.to_string().into_bytes()));
                 m
             }))
         }
@@ -523,7 +523,7 @@ pub fn metro_channel_get_layout_impl(args: Vec<Value>) -> Result<Value, RuntimeE
 pub fn metro_channel_gen_c_header_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let channel_id = value_to_string(&args, 0)?;
     match GLOBAL_METRO_HUB.generate_c_header(&channel_id) {
-        Ok(header) => Ok(Value::Bits(header.as_bytes().to_vec())),
+        Ok(header) => Ok(Value::Bits(header.into_bytes())),
         Err(e) => Err(RuntimeError::UndefinedForeignFunction(e)),
     }
 }

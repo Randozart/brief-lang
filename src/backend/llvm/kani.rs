@@ -66,7 +66,7 @@ fn verify_llvm_emit_guard_check_trap() {
     // Guard: _ > 0 (where _ is bound to x's value %xval)
     let guard = Expr::Gt(
         Box::new(Expr::Identifier("_".to_string())),
-        Box::new(Expr::Integer(0)),
+        Box::new(Expr::Decimal(0)),
     );
     backend.emit_guard_check(&mut out, "", "x", &guard);
     assert!(out.contains("@llvm.trap"),
@@ -88,7 +88,7 @@ fn verify_llvm_emit_guard_check_saves_prior_underscore() {
     backend.fun.let_binding_types.insert("x".to_string(), Type::int());
     let guard = Expr::Gt(
         Box::new(Expr::Identifier("_".to_string())),
-        Box::new(Expr::Integer(0)),
+        Box::new(Expr::Decimal(0)),
     );
     backend.emit_guard_check(&mut out, "", "x", &guard);
     // After emit_guard_check, _ should be restored to %prior

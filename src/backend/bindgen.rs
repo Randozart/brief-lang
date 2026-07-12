@@ -109,7 +109,7 @@ fn emit_c_struct(out: &mut String, name: &str, rt: &ResolvedType) {
 fn emit_c_projection_field(out: &mut String, _name: &str, binding: &crate::ast::TypeBinding, _rt: &ResolvedType) {
     // If the binding value is a Cast expression indicating a type, emit it
     match binding.value.as_ref() {
-        crate::ast::Expr::Integer(_) => {
+        crate::ast::Expr::Decimal(_) => {
             // For simple integer defaults, skip (they're metadata, not fields)
         }
         _ => {
@@ -241,7 +241,7 @@ fn emit_rust_struct(out: &mut String, name: &str, rt: &ResolvedType) {
     } else {
         for (proj_name, binding) in &rt.projections {
             match binding.value.as_ref() {
-                crate::ast::Expr::Integer(_) => {} // metadata skip
+                crate::ast::Expr::Decimal(_) => {} // metadata skip
                 _ => {
                     out.push_str(&format!("    // field: {}", proj_name));
                     if !binding.params.is_empty() {

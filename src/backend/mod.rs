@@ -230,7 +230,7 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
         Expr::Identifier(n) | Expr::PriorState(n) => {
             ids.insert(n.clone());
         }
-        Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) => {}
+        Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::Char(_) => {}
         Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b)
         | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b)
         | Expr::Ge(a, b) | Expr::And(a, b) | Expr::Or(a, b) | Expr::BitAnd(a, b)
@@ -454,7 +454,7 @@ fn peephole_optimize_stmt(stmt: &Statement) -> Option<Statement> {
         }
         Statement::Expression(expr) => {
             match peephole_optimize_expr(expr) {
-                Expr::Integer(_) | Expr::Bool(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_) => None,
+                Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::Char(_) => None,
                 opt => Some(Statement::Expression(opt)),
             }
         }
@@ -489,7 +489,7 @@ fn peephole_optimize_expr(expr: &Expr) -> Expr {
         Expr::Neg(a) => {
             let a = peephole_optimize_expr(a);
             match &a {
-                Expr::Integer(n) => Expr::Integer(-n),
+                Expr::Decimal(n) => Expr::Decimal(-n),
                 Expr::Float(f) => Expr::Float(-f),
                 _ => Expr::Neg(Box::new(a)),
             }
@@ -505,13 +505,13 @@ fn peephole_optimize_expr(expr: &Expr) -> Expr {
 
 fn peephole_fold_binop(expr: &Expr, a: &Expr, b: &Expr) -> Expr {
     match (a, b) {
-        (Expr::Integer(la), Expr::Integer(rb)) => {
+        (Expr::Decimal(la), Expr::Decimal(rb)) => {
             match expr {
-                Expr::Add(_, _) => Expr::Integer(la + rb),
-                Expr::Sub(_, _) => Expr::Integer(la - rb),
-                Expr::Mul(_, _) => Expr::Integer(la * rb),
-                Expr::Div(_, _) => if *rb != 0 { Expr::Integer(la / rb) } else { expr.clone() },
-                Expr::Mod(_, _) => if *rb != 0 { Expr::Integer(la % rb) } else { expr.clone() },
+                Expr::Add(_, _) => Expr::Decimal(la + rb),
+                Expr::Sub(_, _) => Expr::Decimal(la - rb),
+                Expr::Mul(_, _) => Expr::Decimal(la * rb),
+                Expr::Div(_, _) => if *rb != 0 { Expr::Decimal(la / rb) } else { expr.clone() },
+                Expr::Mod(_, _) => if *rb != 0 { Expr::Decimal(la % rb) } else { expr.clone() },
                 _ => expr.clone(),
             }
         }
@@ -524,10 +524,10 @@ fn peephole_fold_binop(expr: &Expr, a: &Expr, b: &Expr) -> Expr {
                 _ => expr.clone(),
             }
         }
-        (_, Expr::Integer(1)) if matches!(expr, Expr::Mul(_, _)) => a.clone(),
-        (_, Expr::Integer(0)) if matches!(expr, Expr::Add(_, _) | Expr::Sub(_, _)) => a.clone(),
-        (Expr::Integer(0), _) if matches!(expr, Expr::Add(_, _)) => b.clone(),
-        (Expr::Integer(1), _) if matches!(expr, Expr::Mul(_, _)) => b.clone(),
+        (_, Expr::Decimal(1)) if matches!(expr, Expr::Mul(_, _)) => a.clone(),
+        (_, Expr::Decimal(0)) if matches!(expr, Expr::Add(_, _) | Expr::Sub(_, _)) => a.clone(),
+        (Expr::Decimal(0), _) if matches!(expr, Expr::Add(_, _)) => b.clone(),
+        (Expr::Decimal(1), _) if matches!(expr, Expr::Mul(_, _)) => b.clone(),
         _ => {
             match expr {
                 Expr::Add(_, _) => Expr::Add(Box::new(a.clone()), Box::new(b.clone())),
@@ -563,7 +563,7 @@ fn peephole_fold_boolop(expr: &Expr, a: &Expr, b: &Expr) -> Expr {
 
 fn peephole_fold_cmp(expr: &Expr, a: &Expr, b: &Expr) -> Expr {
     match (a, b) {
-        (Expr::Integer(la), Expr::Integer(rb)) => {
+        (Expr::Decimal(la), Expr::Decimal(rb)) => {
             match expr {
                 Expr::Eq(_, _) => Expr::Bool(la == rb),
                 Expr::Ne(_, _) => Expr::Bool(la != rb),
@@ -981,13 +981,13 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                expr: Expr::Integer(1),
+                expr: Expr::Decimal(1),
                 timeout: None,
                 modifiers: vec![],
             },
             Statement::Assignment {
                 lhs: Expr::Identifier("y".to_string()),
-                expr: Expr::Integer(2),
+                expr: Expr::Decimal(2),
                 timeout: None,
                 modifiers: vec![],
             },

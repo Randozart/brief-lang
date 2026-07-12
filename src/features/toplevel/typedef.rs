@@ -107,21 +107,21 @@ mod tests {
 
     #[test]
     fn test_type_binding_bytes() {
-        let binding = make_binding("Bytes", Expr::Integer(8));
+        let binding = make_binding("Bytes", Expr::Decimal(8));
         assert_eq!(binding.name, "Bytes");
         assert_eq!(binding.value.as_integer(), Some(8));
     }
 
     #[test]
     fn test_type_binding_alignment() {
-        let binding = make_binding("Alignment", Expr::Integer(4));
+        let binding = make_binding("Alignment", Expr::Decimal(4));
         assert_eq!(binding.name, "Alignment");
         assert_eq!(binding.value.as_integer(), Some(4));
     }
 
     #[test]
     fn test_type_binding_codec() {
-        let binding = make_binding("Codec", Expr::String("Utf8".into()));
+        let binding = make_binding("Codec", Expr::Quoted("Utf8".into()));
         assert_eq!(binding.name, "Codec");
         assert_eq!(binding.value.as_string(), Some("Utf8"));
     }
@@ -139,8 +139,8 @@ mod tests {
             metadata: HashMap::new(),
             projections: vec![],
             bindings: vec![
-                make_binding("Bytes", Expr::Integer(8)),
-                make_binding("Alignment", Expr::Integer(8)),
+                make_binding("Bytes", Expr::Decimal(8)),
+                make_binding("Alignment", Expr::Decimal(8)),
             ],
             operators: vec![], constraints: vec![],
             span: None,
@@ -161,8 +161,8 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    make_binding("Bytes", Expr::Integer(8)),
-                    make_binding("Alignment", Expr::Integer(8)),
+                    make_binding("Bytes", Expr::Decimal(8)),
+                    make_binding("Alignment", Expr::Decimal(8)),
                 ],
                 operators: vec![], constraints: vec![],
                 span: None,
@@ -194,11 +194,11 @@ mod kani_full_tests {
         let binding = TypeBinding {
             name: "Bytes".into(),
             params: vec![],
-            value: Box::new(Expr::Integer(8)),
+            value: Box::new(Expr::Decimal(8)),
             span: None,
         };
         match binding.value.as_ref() {
-            Expr::Integer(n) => assert_eq!(*n, 8),
+            Expr::Decimal(n) => assert_eq!(*n, 8),
             _ => panic!("wrong expr variant"),
         }
     }
@@ -208,11 +208,11 @@ mod kani_full_tests {
         let binding = TypeBinding {
             name: "Alignment".into(),
             params: vec![],
-            value: Box::new(Expr::Integer(4)),
+            value: Box::new(Expr::Decimal(4)),
             span: None,
         };
         match binding.value.as_ref() {
-            Expr::Integer(n) => assert_eq!(*n, 4),
+            Expr::Decimal(n) => assert_eq!(*n, 4),
             _ => panic!("wrong expr variant"),
         }
     }
@@ -222,11 +222,11 @@ mod kani_full_tests {
         let binding = TypeBinding {
             name: "Codec".into(),
             params: vec![],
-            value: Box::new(Expr::String("Utf8".into())),
+            value: Box::new(Expr::Quoted("Utf8".into())),
             span: None,
         };
         match binding.value.as_ref() {
-            Expr::String(s) => assert_eq!(s, "Utf8"),
+            Expr::Quoted(s) => assert_eq!(s, "Utf8"),
             _ => panic!("wrong expr variant"),
         }
     }
@@ -240,7 +240,7 @@ mod kani_full_tests {
             bindings: vec![TypeBinding {
                 name: "Bytes".into(),
                 params: vec![],
-                value: Box::new(Expr::Integer(8)),
+                value: Box::new(Expr::Decimal(8)),
                 span: None,
             }],
             operators: vec![], constraints: vec![],

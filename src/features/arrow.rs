@@ -155,11 +155,11 @@ impl ExprTypecheck for ArrowTransferExpr { fn typecheck(&self, _: &mut TypeCheck
                             let elem = set.iter().next().cloned().ok_or_else(|| RuntimeError::TypeMismatch("Cannot pop from empty HashSet".into()))?;
                             set.remove(&elem);
                             ctx.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
-                            Ok(Value::Bits(elem.as_bytes().to_vec()))
+                            Ok(Value::Bits(elem.to_string().into()))
                         } else {
                             let key_val = ctx.eval_expr(&self.index)?;
                             let elem = ctx.value_to_string(&key_val)?;
-                            if set.remove(&elem) { ctx.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone())); Ok(Value::Bits(elem.as_bytes().to_vec())) }
+                            if set.remove(&elem) { ctx.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone())); Ok(Value::Bits(elem.to_string().into())) }
                             else { Err(RuntimeError::TypeMismatch(format!("Element '{}' not found", elem))) }
                         }
                     }

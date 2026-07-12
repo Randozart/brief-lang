@@ -255,7 +255,7 @@ pub fn emit_identifier(
         // Inline literal integer/bool constants as immediates
         // instead of loading from global RAM.
         match (ty, expr) {
-            (Type::Custom(__t), Expr::Integer(n)) if __t == "Int" || __t == "UInt" => {
+            (Type::Custom(__t), Expr::Decimal(n)) if __t == "Int" || __t == "UInt" => {
                 writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
                 return TypedRegister { name: v.to_string(), ty: Type::int() };
             }

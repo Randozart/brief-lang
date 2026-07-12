@@ -44,7 +44,7 @@ impl LlvmBackend {
         let p = |name: &str| -> String { format!("cell${}${}", cell_name, name) };
         match expr {
             // Leaf nodes — no identifiers
-            Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::String(_) | Expr::RegexLiteral(_)
+            Expr::Decimal(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Quoted(_) | Expr::RegexLiteral(_)
                 | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Ellipsis
                 | Expr::SharedMem(_) => expr.clone(),
             Expr::Literal(lit) => Expr::Literal(lit.clone()),
@@ -933,7 +933,7 @@ impl LlvmBackend {
         // 2026-07-05: Strip "nsw " prefix for matching (added by expr/math.rs)
         // 2026-07-06: nsw now comes after opcode (LLVM 18 syntax: "add nsw")
         let int_op_clean = int_op.strip_suffix(" nsw").unwrap_or(int_op);
-        if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
+        if let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) {
             let result = match int_op_clean {
                 "add" => Some(li.wrapping_add(*ri)),
                 "sub" => Some(li.wrapping_sub(*ri)),
@@ -1101,9 +1101,10 @@ impl LlvmBackend {
             }
             // 2026-07-08: String literal → LLVM opcode, e.g. "add nsw" → add nsw i64 %a, %b
             // For Native storage: "fadd fast" + ensure_float_reg operands → fadd fast float %fa, %fb
-            Expr::String(llvm_op) => {
+            Expr::Quoted(llvm_op) => {
+                let llvm_op_str = String::from_utf8_lossy(llvm_op);
                 writeln!(out, "{}{} = {} {} {}, {}",
-                         indent, v, llvm_op, llvm_ty, op_a, op_b).ok();
+                         indent, v, llvm_op_str, llvm_ty, op_a, op_b).ok();
                 if is_native {
                     self.fun.reg_float_cache.insert(v.clone(), v.clone());
                 }
@@ -1150,7 +1151,7 @@ impl LlvmBackend {
 
     pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, cond: &str) -> TypedRegister {
         // Peephole: constant-fold integer comparisons at compile time
-        if let (Expr::Integer(li), Expr::Integer(ri)) = (l, r) {
+        if let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) {
             let result = match cond {
                 "oeq" => li == ri,
                 "one" => li != ri,
@@ -1169,7 +1170,7 @@ impl LlvmBackend {
             return TypedRegister { name: v, ty: Type::bool_() };
         }
         // String trigger vs string literal: dereference pointer and compare first byte
-        if let Expr::String(s) = r {
+        if let Expr::Quoted(s) = r {
             if self.is_linked_string_trigger(l) {
                 let a = self.emit_expr(out, l, indent);
                 let icmp_cond = match cond {
@@ -1183,13 +1184,13 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, b, p).ok();
                 let z = format!("%fz{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = zext i8 {} to i64", indent, z, b).ok();
-                let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
+                let byte_val = s.first().copied().unwrap_or(0u8) as i64;
                 let c = format!("%fc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
                 return TypedRegister { name: c, ty: Type::bool_() };
             }
         }
-        if let Expr::String(s) = l {
+        if let Expr::Quoted(s) = l {
             if self.is_linked_string_trigger(r) {
                 let b = self.emit_expr(out, r, indent);
                 let icmp_cond = match cond {
@@ -1199,11 +1200,11 @@ impl LlvmBackend {
                 };
                 let p = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 self.emit_inttoptr(out, indent, &p, &b.name);
-                let bv = format!("%fb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, bv, p).ok();
+                let b = format!("%fb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, b, p).ok();
                 let z = format!("%fz{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, bv).ok();
-                let byte_val = s.as_bytes().first().copied().unwrap_or(0u8) as i64;
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, b).ok();
+                let byte_val = s.first().copied().unwrap_or(0u8) as i64;
                 let c = format!("%fc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
                 return TypedRegister { name: c, ty: Type::bool_() };
@@ -1243,7 +1244,7 @@ impl LlvmBackend {
     /// bindings, defn return types, and cast targets.
     pub(crate) fn is_string_chain(&self, e: &Expr) -> bool {
         match e {
-            Expr::String(_) => true,
+            Expr::Quoted(_) => true,
             Expr::Literal(lit) => matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)),
             Expr::Identifier(name) => {
                 matches!(self.fun.let_binding_types.get(name), Some(t) if type_is(&self.ctx.type_universe, t, "String") || type_is(&self.ctx.type_universe, t, "Data"))

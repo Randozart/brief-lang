@@ -154,7 +154,7 @@ mod kani_full_tests {
 
     #[kani::proof]
     fn verify_call_expr_construct() {
-        let call = CallExpr::new("foo".into(), vec![Expr::Integer(42)]);
+        let call = CallExpr::new("foo".into(), vec![Expr::Decimal(42)]);
         assert_eq!(call.name, "foo");
     }
 }

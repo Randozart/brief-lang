@@ -386,7 +386,7 @@ fn check_restores_in_body(body: &[Statement], contract: &Contract, var: &str) ->
 fn evaluate_literal(expr: &Expr) -> Option<bool> {
     match expr {
         Expr::Bool(b) => Some(*b),
-        Expr::Integer(n) => Some(*n != 0),
+        Expr::Decimal(n) => Some(*n != 0),
         Expr::Not(inner) => evaluate_literal(inner).map(|v| !v),
         _ => None,
     }
@@ -509,7 +509,7 @@ mod tests {
         let program = make_program(vec![
             make_trigger("btn"),
             make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
-                None, vec![assign("unrelated", Expr::Integer(42))]),
+                None, vec![assign("unrelated", Expr::Decimal(42))]),
             make_txn("main", Expr::Identifier("ready".to_string()), Expr::Bool(true),
                 Some(watchdog_spec("btn", true)), vec![]),
         ]);
@@ -567,13 +567,13 @@ mod tests {
         let program = make_program(vec![
             make_trigger("btn"),
             make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
-                None, vec![assign("unrelated", Expr::Integer(1))]),
+                None, vec![assign("unrelated", Expr::Decimal(1))]),
             make_txn("main", Expr::Lt(
                 Box::new(Expr::Identifier("i".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ), Expr::Eq(
                 Box::new(Expr::Identifier("i".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ), Some(watchdog_spec("btn", false)), vec![]),
         ]);
         let errors = analyze(&program);
@@ -585,13 +585,13 @@ mod tests {
         let program = make_program(vec![
             make_trigger("btn"),
             make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
-                None, vec![assign("unrelated", Expr::Integer(1))]),
+                None, vec![assign("unrelated", Expr::Decimal(1))]),
             make_txn("main", Expr::Lt(
                 Box::new(Expr::Identifier("i".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ), Expr::Eq(
                 Box::new(Expr::Identifier("i".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ), Some(watchdog_spec("btn", true)), vec![]),
         ]);
         let errors = analyze(&program);
@@ -648,8 +648,8 @@ mod tests {
     fn test_evaluate_literal() {
         assert_eq!(evaluate_literal(&Expr::Bool(true)), Some(true));
         assert_eq!(evaluate_literal(&Expr::Bool(false)), Some(false));
-        assert_eq!(evaluate_literal(&Expr::Integer(0)), Some(false));
-        assert_eq!(evaluate_literal(&Expr::Integer(1)), Some(true));
+        assert_eq!(evaluate_literal(&Expr::Decimal(0)), Some(false));
+        assert_eq!(evaluate_literal(&Expr::Decimal(1)), Some(true));
         assert_eq!(evaluate_literal(&Expr::Not(Box::new(Expr::Bool(true)))), Some(false));
         assert_eq!(evaluate_literal(&Expr::Identifier("x".to_string())), None);
     }
@@ -659,11 +659,11 @@ mod tests {
         let contract = Contract {
             pre_condition: Expr::Lt(
                 Box::new(Expr::Identifier("i".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ),
             post_condition: Expr::Eq(
                 Box::new(Expr::Identifier("i".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ),
             watchdog: None,
             span: None,
@@ -685,7 +685,7 @@ mod tests {
             Box::new(Expr::Identifier("a".to_string())),
             Box::new(Expr::Gt(
                 Box::new(Expr::Identifier("b".to_string())),
-                Box::new(Expr::Integer(0)),
+                Box::new(Expr::Decimal(0)),
             )),
         );
         let vars = extract_variables(&pre);
@@ -718,10 +718,10 @@ mod tests {
         let program = make_program(vec![
             make_trigger("btn"),
             make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
-                None, vec![assign("counter", Expr::Integer(0))]),
+                None, vec![assign("counter", Expr::Decimal(0))]),
             make_txn("main", Expr::Eq(
                 Box::new(Expr::Identifier("counter".to_string())),
-                Box::new(Expr::Integer(0)),
+                Box::new(Expr::Decimal(0)),
             ), Expr::Bool(true),
                 Some(watchdog_spec("btn", true)), vec![]),
         ]);
@@ -752,10 +752,10 @@ mod tests {
         let program = make_program(vec![
             make_txn("main", Expr::Lt(
                 Box::new(Expr::Identifier("i".to_string())),
-                Box::new(Expr::Integer(5)),
+                Box::new(Expr::Decimal(5)),
             ), Expr::Eq(
                 Box::new(Expr::Identifier("i".to_string())),
-                Box::new(Expr::Integer(5)),
+                Box::new(Expr::Decimal(5)),
             ), None, vec![]),
         ]);
         let errors = analyze(&program);

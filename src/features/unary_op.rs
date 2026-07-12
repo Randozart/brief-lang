@@ -121,7 +121,7 @@ impl ExprCodegenWebstack for UnaryOpExpr {
         // Webstack handles Expr::UnaryOp directly in expr_to_ts — this trait
         // path is a fallback for dispatch chains that route through feature structs.
         let op = match self.operand.as_ref() {
-            Expr::Integer(n) => n.to_string(),
+            Expr::Decimal(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Bool(b) => b.to_string(),
             Expr::Identifier(name) => name.clone(),
@@ -142,7 +142,7 @@ mod kani_full_tests {
 
     #[kani::proof]
     fn verify_unary_op_kind_dispatch_neg() {
-        let e = UnaryOpExpr::new(UnaryOpKind::Neg, Expr::Integer(42));
+        let e = UnaryOpExpr::new(UnaryOpKind::Neg, Expr::Decimal(42));
         assert_eq!(e.kind as usize, UnaryOpKind::Neg as usize);
     }
 

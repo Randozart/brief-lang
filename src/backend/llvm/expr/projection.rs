@@ -45,7 +45,7 @@ pub fn emit_projection(
     match target {
         ProjectionTarget::Size => {
             if matches!(source,
-                Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_))
+                Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_))
             {
                 writeln!(out, "{}{} = add i64 0, 1", indent, v).ok();
             } else {

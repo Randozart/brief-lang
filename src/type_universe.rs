@@ -1192,7 +1192,7 @@ impl TypeUniverse {
 /// DEFERRED (D-3, D-5): Full expression normalization.
 fn type_universe_expr_to_string(e: &Expr) -> Option<String> {
     match e {
-        Expr::Integer(n) => Some(n.to_string()),
+        Expr::Decimal(n) => Some(n.to_string()),
         Expr::Identifier(name) => Some(name.clone()),
         Expr::Projection { source, target } => {
             let src = type_universe_expr_to_string(source).unwrap_or_default();
@@ -1272,8 +1272,8 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
-                    TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(1)), span: None },
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(1)), span: None },
+                    TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Decimal(1)), span: None },
                 ],
                 operators: vec![], constraints: vec![],
                 span: None,
@@ -1293,8 +1293,8 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
-                    TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(4)), span: None },
+                    TypeBinding { name: "Alignment".into(), params: vec![], value: Box::new(Expr::Decimal(4)), span: None },
                 ],
                 operators: vec![], constraints: vec![],
                 span: None,
@@ -1346,7 +1346,7 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(8)), span: None },
                     TypeBinding { name: "ElementType".into(), params: vec![], value: Box::new(Expr::TypeRef("T".into())), span: None },
                     TypeBinding { name: "AllowIndex".into(), params: vec![], value: Box::new(Expr::Bool(true)), span: None },
                 ],
@@ -1450,7 +1450,7 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
+                    TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::Quoted("Utf8".into())), span: None },
                 ],
                 operators: vec![], constraints: vec![],
                 span: None,
@@ -1475,7 +1475,7 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(4)), span: None },
                     TypeBinding { name: "Endian".into(), params: vec![], value: Box::new(Expr::Identifier("Big".into())), span: None },
                 ],
                 operators: vec![], constraints: vec![],
@@ -1500,7 +1500,7 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::String("Utf8".into())), span: None },
+                    TypeBinding { name: "Codec".into(), params: vec![], value: Box::new(Expr::Quoted("Utf8".into())), span: None },
                 ],
                 operators: vec![], constraints: vec![],
                 span: None,
@@ -1520,7 +1520,7 @@ mod tests {
             parse_handler: None,
             format_handler: None,
             constraints: vec![
-                Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, Expr::Identifier("value".into()), Expr::Integer(0)))),
+                Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, Expr::Identifier("value".into()), Expr::Decimal(0)))),
             ],
             span: None,
         });
@@ -1538,7 +1538,7 @@ mod tests {
             parse_handler: None,
             format_handler: None,
             constraints: vec![
-                Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, Expr::Identifier("value".into()), Expr::Integer(0)))),
+                Expr::BinaryOp(Box::new(BinaryOpExpr::new(BinaryOpKind::Gt, Expr::Identifier("value".into()), Expr::Decimal(0)))),
             ],
             span: None,
         });
@@ -1639,7 +1639,7 @@ mod tests {
                 operators: vec![],
             constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".into())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 )],
                 span: None,
             },
@@ -1732,7 +1732,7 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(4)), span: None },
                 ],
                 operators: vec![
                     OpDeclaration {
@@ -1767,7 +1767,7 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(8)), span: None },
                 ],
                 operators: vec![],
                 constraints: vec![],
@@ -1793,7 +1793,7 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(4)), span: None },
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(4)), span: None },
                 ],
                 operators: vec![],
                 constraints: vec![],
@@ -1827,7 +1827,7 @@ mod tests {
             base: Box::new(Expr::TypeRef("Bits".into())),
             body: TypeDefBody::from_bindings(
                 vec![],
-                vec![TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None }],
+                vec![TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(8)), span: None }],
                 vec![OpDeclaration {
                     rune: OpRune::Add,
                     param_type: Some(Box::new(Expr::TypeRef("TestType".into()))),
@@ -1914,7 +1914,7 @@ mod tests {
 
     #[test]
     fn test_is_mutable_location_literal_returns_false() {
-        assert!(!is_mutable_location(&Expr::Integer(42)));
+        assert!(!is_mutable_location(&Expr::Decimal(42)));
         assert!(!is_mutable_location(&Expr::Bool(true)));
     }
 
@@ -1997,7 +1997,7 @@ mod tests {
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![
-                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Integer(8)), span: None },
+                    TypeBinding { name: "Bytes".into(), params: vec![], value: Box::new(Expr::Decimal(8)), span: None },
                 ],
                 operators: vec![], constraints: vec![],
                 span: None,

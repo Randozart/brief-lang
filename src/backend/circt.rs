@@ -303,7 +303,7 @@ impl CirctBackend {
     fn initial_value(&self, var_name: &str) -> String {
         if let Some(Some(expr)) = self.var_exprs.get(var_name) {
             match expr {
-                Expr::Integer(n) => format!("{}", n),
+                Expr::Decimal(n) => format!("{}", n),
                 Expr::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
                 Expr::Float(f) => format!("{}", f),
                 _ => "0".to_string(),
@@ -315,7 +315,7 @@ impl CirctBackend {
 
     fn emit_expr(&self, ng: &mut NameGen, out: &mut String, expr: &Expr, reg_names: &HashMap<String, String>, result_ty: &str) -> Option<String> {
         match expr {
-            Expr::Integer(n) => {
+            Expr::Decimal(n) => {
                 let c = ng.fresh_const("int");
                 writeln!(out, "  {} = hw.constant {} : {}", c, n, result_ty).ok();
                 Some(c)
@@ -675,7 +675,7 @@ impl CirctBackend {
         for field in &cell.fields {
             let mlir_ty = self.mlir_type(&field.ty);
             let init_val = match &field.default {
-                Some(Expr::Integer(n)) => format!("{}", n),
+                Some(Expr::Decimal(n)) => format!("{}", n),
                 Some(Expr::Bool(b)) => format!("{}", if *b { 1 } else { 0 }),
                 _ => "0".to_string(),
             };
@@ -919,7 +919,7 @@ mod tests {
     fn test_circt_state_var_has_seq_register() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("counter", Type::int(), Some(Expr::Integer(0))),
+            make_state_decl("counter", Type::int(), Some(Expr::Decimal(0))),
         ]));
         assert!(output.contains("seq.firreg"), "State vars should use seq.firreg. Got:\n{}", output);
     }
@@ -929,8 +929,8 @@ mod tests {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
             make_state_decl("x", Type::int(), Some(Expr::Add(
-                Box::new(Expr::Integer(1)),
-                Box::new(Expr::Integer(2)),
+                Box::new(Expr::Decimal(1)),
+                Box::new(Expr::Decimal(2)),
             ))),
         ]));
         assert!(output.contains("comb.add"), "Add expr should emit comb.add. Got:\n{}", output);
@@ -941,8 +941,8 @@ mod tests {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
             make_state_decl("y", Type::int(), Some(Expr::Mul(
-                Box::new(Expr::Integer(3)),
-                Box::new(Expr::Integer(4)),
+                Box::new(Expr::Decimal(3)),
+                Box::new(Expr::Decimal(4)),
             ))),
         ]));
         assert!(output.contains("comb.mul"), "Mul expr should emit comb.mul. Got:\n{}", output);
@@ -953,8 +953,8 @@ mod tests {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
             make_state_decl("cond", Type::bool_(), Some(Expr::Lt(
-                Box::new(Expr::Integer(5)),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(5)),
+                Box::new(Expr::Decimal(10)),
             ))),
         ]));
         assert!(output.contains("comb.icmp ult"), "Lt expr should emit comb.icmp ult. Got:\n{}", output);
@@ -964,7 +964,7 @@ mod tests {
     fn test_circt_modern_output_ports() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("counter", Type::int(), Some(Expr::Integer(0))),
+            make_state_decl("counter", Type::int(), Some(Expr::Decimal(0))),
         ]));
         // Modern form: hw.module @top(in %clock: i1, in %reset: i1) -> (counter: i64)
         assert!(output.contains("in %clock: i1"), "Should use 'in %' prefix for inputs. Got:\n{}", output);
@@ -980,7 +980,7 @@ mod tests {
         // UInt constrained to 8 bits
         let ty = Type::Constrained(Box::new(Type::uint()), BitRange::Single(8));
         let output = backend.generate(&make_program(vec![
-            make_state_decl("byte", ty, Some(Expr::Integer(0))),
+            make_state_decl("byte", ty, Some(Expr::Decimal(0))),
         ]));
         assert!(output.contains(": i8)"), "Sized UInt[8] should map to i8. Got:\n{}", output);
     }
@@ -990,7 +990,7 @@ mod tests {
         let mut backend = CirctBackend::new();
         let ty = Type::Constrained(Box::new(Type::uint()), BitRange::Single(32));
         let output = backend.generate(&make_program(vec![
-            make_state_decl("word", ty, Some(Expr::Integer(0))),
+            make_state_decl("word", ty, Some(Expr::Decimal(0))),
         ]));
         assert!(output.contains(": i32)"), "Sized UInt[32] should map to i32. Got:\n{}", output);
     }
@@ -1052,13 +1052,13 @@ mod tests {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
             make_trigger("tick", Type::bool_()),
-            make_state_decl("counter", Type::int(), Some(Expr::Integer(0))),
+            make_state_decl("counter", Type::int(), Some(Expr::Decimal(0))),
             make_txn("count", vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("counter".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("counter".to_string())),
-                        Box::new(Expr::Integer(1)),
+                        Box::new(Expr::Decimal(1)),
                     ),
                     timeout: None, modifiers: vec![],
                 },
@@ -1073,10 +1073,10 @@ mod tests {
     fn test_circt_fsm_precondition_check() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("done", Type::int(), Some(Expr::Integer(0))),
+            make_state_decl("done", Type::int(), Some(Expr::Decimal(0))),
             make_txn("loop", vec![], Expr::Lt(
                 Box::new(Expr::Identifier("done".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ), Expr::Bool(true)),
         ]));
         assert!(output.contains("comb.icmp ult"), "Precondition should emit comb.icmp. Got:\n{}", output);
@@ -1086,10 +1086,10 @@ mod tests {
     fn test_circt_fsm_postcondition_check() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("done", Type::int(), Some(Expr::Integer(0))),
+            make_state_decl("done", Type::int(), Some(Expr::Decimal(0))),
             make_txn("loop", vec![], Expr::Bool(true), Expr::Eq(
                 Box::new(Expr::Identifier("done".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             )),
         ]));
         assert!(output.contains("comb.icmp eq"), "Postcondition should emit comb.icmp eq. Got:\n{}", output);
@@ -1099,10 +1099,10 @@ mod tests {
     fn test_circt_await_handshake() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("x", Type::int(), Some(Expr::Integer(0))),
+            make_state_decl("x", Type::int(), Some(Expr::Decimal(0))),
             make_txn("test", vec![
                 Statement::Await {
-                    expr: Expr::Call("compute".to_string(), vec![Expr::Integer(42)]),
+                    expr: Expr::Call("compute".to_string(), vec![Expr::Decimal(42)]),
                     modifiers: vec![],
                 },
             ], Expr::Bool(true), Expr::Bool(true)),
@@ -1115,19 +1115,19 @@ mod tests {
     fn test_circt_sync_block() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("a", Type::int(), Some(Expr::Integer(0))),
-            make_state_decl("b", Type::int(), Some(Expr::Integer(0))),
+            make_state_decl("a", Type::int(), Some(Expr::Decimal(0))),
+            make_state_decl("b", Type::int(), Some(Expr::Decimal(0))),
             make_txn("test", vec![
                 Statement::SyncBlock {
                     body: vec![
                         Statement::Assignment {
                             lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".to_string()))),
-                            expr: Expr::Integer(10),
+                            expr: Expr::Decimal(10),
                             timeout: None, modifiers: vec![],
                         },
                         Statement::Assignment {
                             lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".to_string()))),
-                            expr: Expr::Integer(20),
+                            expr: Expr::Decimal(20),
                             timeout: None, modifiers: vec![],
                         },
                     ],
@@ -1141,13 +1141,13 @@ mod tests {
     fn test_circt_call_submodule() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("x", Type::int(), Some(Expr::Integer(0))),
+            make_state_decl("x", Type::int(), Some(Expr::Decimal(0))),
             make_txn("compute", vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Call("add".to_string(), vec![
-                        Expr::Integer(1),
-                        Expr::Integer(2),
+                        Expr::Decimal(1),
+                        Expr::Decimal(2),
                     ]),
                     timeout: None, modifiers: vec![],
                 },
@@ -1162,7 +1162,7 @@ mod tests {
         let output = backend.generate(&make_program(vec![
             make_state_decl("x", Type::int(), Some(Expr::IntrinsicCall {
                 intrinsic: Intrinsic::Abs,
-                args: vec![Expr::Integer(-5)],
+                args: vec![Expr::Decimal(-5)],
             })),
         ]));
         assert!(output.contains("comb.neg"), "Abs intrinsic should emit comb.neg. Got:\n{}", output);
@@ -1175,7 +1175,7 @@ mod tests {
         let output = backend.generate(&make_program(vec![
             make_state_decl("x", Type::int(), Some(Expr::IntrinsicCall {
                 intrinsic: Intrinsic::Ctpop,
-                args: vec![Expr::Integer(255)],
+                args: vec![Expr::Decimal(255)],
             })),
         ]));
         assert!(output.contains("comb.ctpop"), "Ctpop intrinsic should emit comb.ctpop. Got:\n{}", output);
@@ -1187,7 +1187,7 @@ mod tests {
         let output = backend.generate(&make_program(vec![
             make_state_decl("x", Type::int(), Some(Expr::IntrinsicCall {
                 intrinsic: Intrinsic::Bitreverse,
-                args: vec![Expr::Integer(1)],
+                args: vec![Expr::Decimal(1)],
             })),
         ]));
         assert!(output.contains("comb.rev"), "Bitreverse should emit comb.rev. Got:\n{}", output);

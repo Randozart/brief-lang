@@ -45,7 +45,7 @@ impl LlvmBackend {
         let v = format!("%t{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
         match expr {
-            Expr::Integer(n) => { return self.emit_expr(out, expr, indent).name; }
+            Expr::Decimal(n) => { return self.emit_expr(out, expr, indent).name; }
             // Expr::Float is handled separately: emit the bit pattern as i64
             // so comparison operators (icmp) see i64 on both sides. This avoids
             // the invalid `bitcast float to i64` and type mismatch with icmp.
@@ -54,7 +54,7 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = add i64 0, {}", indent, v, bits).ok();
                 return v;
             }
-            Expr::Bool(_) | Expr::Neg(_) | Expr::String(_) => {
+            Expr::Bool(_) | Expr::Neg(_) | Expr::Quoted(_) => {
                 return self.emit_expr(out, expr, indent).name;
             }
             Expr::Char(c) => {
@@ -624,7 +624,7 @@ impl LlvmBackend {
                         writeln!(out, "  {} = insertvalue %State {}, float {}, {}", iv, cur_init, bc, idx).ok();
                         cur_init = iv;
                     }
-                    Some(Expr::Integer(n)) => {
+                    Some(Expr::Decimal(n)) => {
                         let iv = format!("%iiv{}_{}", label_prefix, self.fun.txn_counter); self.fun.txn_counter += 1;
                         writeln!(out, "  {} = insertvalue %State {}, i64 {}, {}", iv, cur_init, n, idx).ok();
                         cur_init = iv;
@@ -638,7 +638,7 @@ impl LlvmBackend {
                     Some(Expr::Neg(inner)) => {
                         let s = match inner.as_ref() {
                             Expr::Float(f) => float_to_llvm_hex(-*f),
-                            Expr::Integer(n) => format!("-{}", n),
+                            Expr::Decimal(n) => format!("-{}", n),
                             _ => "0".to_string(),
                         };
                         if ty == "float" {
@@ -653,10 +653,10 @@ impl LlvmBackend {
                             cur_init = iv;
                         }
                     }
-                    Some(Expr::String(s)) => {
+                    Some(Expr::Quoted(s)) => {
                         // 2026-06-29: Store actual string constant pointer, not i8* null.
                         // Previously this arm always wrote null regardless of the string value.
-                        let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                        let si = self.ctx.string_constants.iter().position(|x| x.as_bytes() == s.as_slice()).unwrap_or(0);
                         let g = format!("@str.{}", si);
                         let iv = format!("%siv{}_{}", label_prefix, self.fun.txn_counter); self.fun.txn_counter += 1;
                         writeln!(out, "  {} = insertvalue %State {}, ptr bitcast (<{{ i64, i64, [{} x i8] }}>* {} to ptr), {}", iv, cur_init, s.len() + 1, g, idx).ok();
@@ -2131,7 +2131,7 @@ impl LlvmBackend {
         let Some(rhs) = rhs else { return; };
         let bound_reg = format!("%bound_mt{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         match rhs {
-            Expr::Integer(n) => {
+            Expr::Decimal(n) => {
                 writeln!(out, "  {} = add i64 0, {}", bound_reg, n).ok();
                 self.emit_prealloc_for_targets(out, "  ", &all_push_targets, &bound_reg);
             }
@@ -2191,11 +2191,11 @@ impl LlvmBackend {
             match pre {
                 Expr::Lt(lhs, rhs) => {
                     matches!(lhs.as_ref(), Expr::Identifier(_))
-                        && (matches!(rhs.as_ref(), Expr::Identifier(_)) || matches!(rhs.as_ref(), Expr::Integer(_)))
+                        && (matches!(rhs.as_ref(), Expr::Identifier(_)) || matches!(rhs.as_ref(), Expr::Decimal(_)))
                 }
                 Expr::BinaryOp(bop) if bop.kind == crate::features::binary_op::BinaryOpKind::Lt => {
                     matches!(bop.left.as_ref(), Expr::Identifier(_))
-                        && (matches!(bop.right.as_ref(), Expr::Identifier(_)) || matches!(bop.right.as_ref(), Expr::Integer(_)))
+                        && (matches!(bop.right.as_ref(), Expr::Identifier(_)) || matches!(bop.right.as_ref(), Expr::Decimal(_)))
                 }
                 _ => false
             }
@@ -2216,7 +2216,7 @@ impl LlvmBackend {
             };
             let bound_name = match rhs {
                 Expr::Identifier(name) => name.clone(),
-                Expr::Integer(n) => n.to_string(),
+                Expr::Decimal(n) => n.to_string(),
                 _ => return,
             };
             let Some(&b_idx) = self.ctx.field_index_map.get(&bound_name) else { return; };

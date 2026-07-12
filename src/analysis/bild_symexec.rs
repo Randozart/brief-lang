@@ -347,7 +347,7 @@ fn resolve_reg(name: &str, regs: &HashMap<String, SymExpr>) -> SymExpr {
 /// Symbolically evaluate a Brief expression.
 pub fn symexec_expr(expr: &Expr) -> Option<SymExpr> {
     match expr {
-        Expr::Integer(n) => Some(SymExpr::Int(*n)),
+        Expr::Decimal(n) => Some(SymExpr::Int(*n)),
         Expr::Float(f) => Some(SymExpr::Float(*f)),
         Expr::Bool(b) => Some(SymExpr::Bool(*b)),
         Expr::Identifier(name) => Some(SymExpr::Var(name.clone())),
@@ -442,7 +442,7 @@ mod tests {
         let inop = make_inop("bad", vec![("a", Type::int())], vec![
             "%res = add i64 %a, %a;",
             "term %res;",
-        ], Some(Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Integer(1)))));
+        ], Some(Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Decimal(1)))));
         let result = verify_inop(&inop);
         let msg = compare_bild_with_fallback(&result.bild_expr, &result.fallback_expr, "bad");
         assert!(msg.is_some(), "mismatch should be detected");

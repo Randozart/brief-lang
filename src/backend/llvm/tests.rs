@@ -34,7 +34,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "counter".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -69,7 +69,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -92,7 +92,7 @@ fn empty_program() -> Program {
                             lhs: Expr::Identifier("count".to_string()),
                             expr: Expr::Add(
                                 Box::new(Expr::Identifier("count".to_string())),
-                                Box::new(Expr::Integer(1)),
+                                Box::new(Expr::Decimal(1)),
                             ),
                             timeout: None,
                             modifiers: vec![],
@@ -138,7 +138,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -213,7 +213,7 @@ fn empty_program() -> Program {
             body: vec![
                 Statement::Assignment {
                     lhs: Expr::Identifier("count".to_string()),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 },
@@ -240,7 +240,7 @@ fn empty_program() -> Program {
         TopLevel::StateDecl(StateDecl {
             name: "count".to_string(),
             ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None,
             bit_range: None,
             is_override: false,
@@ -340,7 +340,7 @@ fn empty_program() -> Program {
                     lhs: Expr::Identifier("count".to_string()),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("count".to_string())),
-                        Box::new(Expr::Integer(1)),
+                        Box::new(Expr::Decimal(1)),
                     ),
                     timeout: None,
                     modifiers: vec![],
@@ -455,7 +455,7 @@ fn empty_program() -> Program {
                             lhs: Expr::Identifier("count".to_string()),
                             expr: Expr::IntrinsicCall {
                                 intrinsic: Intrinsic::GetGlobalId,
-                                args: vec![Expr::Integer(0)],
+                                args: vec![Expr::Decimal(0)],
                             },
                             timeout: None,
                             modifiers: vec![],
@@ -626,7 +626,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "event_count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -746,7 +746,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -769,7 +769,7 @@ fn empty_program() -> Program {
                             name: "s".to_string(),
                             variant: "None".to_string(),
                             fields: vec![],
-                            expr: Expr::Integer(1),
+                            expr: Expr::Decimal(1),
                         },
                         Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
@@ -814,7 +814,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -829,7 +829,7 @@ fn empty_program() -> Program {
                     contract: Contract {
                         pre_condition: Expr::Lt(
                             Box::new(Expr::Identifier("x".to_string())),
-                            Box::new(Expr::Integer(100)),
+                            Box::new(Expr::Decimal(100)),
                         ),
                         post_condition: Expr::Bool(true),
                         span: None,
@@ -879,7 +879,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -891,7 +891,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "y".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -908,16 +908,16 @@ fn empty_program() -> Program {
                             Box::new(Expr::And(
                                 Box::new(                Expr::Ge(
                                     Box::new(Expr::Identifier("x".to_string())),
-                                    Box::new(Expr::Integer(0)),
+                                    Box::new(Expr::Decimal(0)),
                                 )),
                                 Box::new(Expr::Lt(
                                     Box::new(Expr::Identifier("x".to_string())),
-                                    Box::new(Expr::Integer(10)),
+                                    Box::new(Expr::Decimal(10)),
                                 )),
                             )),
                             Box::new(Expr::Lt(
                                 Box::new(Expr::Identifier("y".to_string())),
-                                Box::new(Expr::Integer(10)),
+                                Box::new(Expr::Decimal(10)),
                             )),
                         ),
                         post_condition: Expr::Bool(true),
@@ -1243,7 +1243,7 @@ fn empty_program() -> Program {
     fn test_string_state_init_not_null() {
         // 2026-06-17: Verify string state variables initialized with literals
         // store the actual string constant pointer, not null. Previously
-        // emit_inline_init_stores stored i8* null for all Expr::String(...),
+        // emit_inline_init_stores stored i8* null for all Expr::Quoted(...),
         // causing SIGSEGV on first read of any string field.
         let mut backend = LlvmBackend::new();
         let program = Program {
@@ -1251,7 +1251,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(),
                     ty: Type::string(),
-                    expr: Some(Expr::String("hello".to_string())),
+                    expr: Some(Expr::Quoted("hello".into())),
                     address: None, bit_range: None,
                     is_override: false, os_mode: false,
                     span: None, attrs: vec![],
@@ -1384,7 +1384,7 @@ fn empty_program() -> Program {
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None,
                     is_override: false, os_mode: false,
                     span: None, attrs: vec![],
@@ -1507,14 +1507,14 @@ fn empty_program() -> Program {
             items.push(TopLevel::Constant(Constant {
                 name: name.to_string(),
                 ty: Type::int(),
-                expr: Expr::Integer(*val),
+                expr: Expr::Decimal(*val),
             }));
         }
         for (name, val) in states {
             items.push(TopLevel::StateDecl(StateDecl {
                 name: name.to_string(),
                 ty: Type::int(),
-                expr: Some(Expr::Integer(*val)),
+                expr: Some(Expr::Decimal(*val)),
                 address: None, bit_range: None, is_override: false,
                 os_mode: false, span: None, attrs: vec![],
                 constraint: None,
@@ -1562,7 +1562,7 @@ fn empty_program() -> Program {
     }
 
     fn ident_s(s: &str) -> Expr { Expr::Identifier(s.to_string()) }
-    fn int_s(v: i64) -> Expr { Expr::Integer(v) }
+    fn int_s(v: i64) -> Expr { Expr::Decimal(v) }
 
     #[test]
     fn test_report_shows_ranking() {
@@ -2099,7 +2099,7 @@ fn empty_program() -> Program {
         // Known identifiers (state field + constant) should produce no errors
         let mut backend = LlvmBackend::new();
         backend.ctx.field_index_map.insert("ops".to_string(), 0);
-        backend.ctx.constants.insert("N".to_string(), (Type::int(), Expr::Integer(100)));
+        backend.ctx.constants.insert("N".to_string(), (Type::int(), Expr::Decimal(100)));
 
         let expr = Expr::Eq(
             Box::new(Expr::Identifier("ops".to_string())),
@@ -2115,7 +2115,7 @@ fn empty_program() -> Program {
         // Unknown identifier should produce an error
         let mut backend = LlvmBackend::new();
         backend.ctx.field_index_map.insert("ops".to_string(), 0);
-        backend.ctx.constants.insert("N".to_string(), (Type::int(), Expr::Integer(100)));
+        backend.ctx.constants.insert("N".to_string(), (Type::int(), Expr::Decimal(100)));
 
         let expr = Expr::Eq(
             Box::new(Expr::Identifier("ops".to_string())),
@@ -2280,7 +2280,7 @@ fn empty_program() -> Program {
         items.push(TopLevel::StateDecl(StateDecl {
             name: "count".to_string(),
             ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None,
             bit_range: None,
             is_override: false,
@@ -2292,7 +2292,7 @@ fn empty_program() -> Program {
         items.push(TopLevel::StateDecl(StateDecl {
             name: "total".to_string(),
             ty: Type::int(),
-            expr: Some(Expr::Integer(100)),
+            expr: Some(Expr::Decimal(100)),
             address: None,
             bit_range: None,
             is_override: false,
@@ -2363,7 +2363,7 @@ fn empty_program() -> Program {
             lhs: Expr::Identifier("count".to_string()),
             expr: Expr::Add(
                 Box::new(Expr::Identifier("count".to_string())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             ),
             timeout: None,
             modifiers: vec![],
@@ -2423,7 +2423,7 @@ fn empty_program() -> Program {
             lhs: Expr::Identifier("count".to_string()),
             expr: Expr::Add(
                 Box::new(Expr::Identifier("count".to_string())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             ),
             timeout: None,
             modifiers: vec![],
@@ -2507,7 +2507,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -2537,7 +2537,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "buf".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -2564,7 +2564,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -2606,7 +2606,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "led_0".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -2640,7 +2640,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "led_0".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     is_override: false,
@@ -2802,7 +2802,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "pt".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -2840,8 +2840,8 @@ let spec = crate::target_spec::TargetSpec {
                 name: "p".to_string(),
                 ty: Some(Type::Custom("Point".to_string())),
                 expr: Some(Expr::StructInstance("Point".to_string(), vec![
-                    ("x".to_string(), Expr::Integer(10)),
-                    ("y".to_string(), Expr::Integer(20)),
+                    ("x".to_string(), Expr::Decimal(10)),
+                    ("y".to_string(), Expr::Decimal(20)),
                 ])),
                 address: None, address_expr: None, bit_range: None,
                 is_override: false, modifiers: vec![],
@@ -2867,8 +2867,8 @@ let spec = crate::target_spec::TargetSpec {
                 name: "p".to_string(),
                 ty: Some(Type::Custom("Point".to_string())),
                 expr: Some(Expr::StructInstance("Point".to_string(), vec![
-                    ("x".to_string(), Expr::Integer(10)),
-                    ("y".to_string(), Expr::Integer(20)),
+                    ("x".to_string(), Expr::Decimal(10)),
+                    ("y".to_string(), Expr::Decimal(20)),
                 ])),
                 address: None, address_expr: None, bit_range: None,
                 is_override: false, modifiers: vec![],
@@ -2900,7 +2900,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "raw".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3094,7 +3094,7 @@ let spec = crate::target_spec::TargetSpec {
                         ))], modifiers: vec![], swan_song: None },
                     ],
                     is_lambda: false,
-                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::String("get_x".to_string()), mode: AnnotationMode::Mandatory , diagnostic: false }],
+                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Quoted("get_x".into()), mode: AnnotationMode::Mandatory , diagnostic: false }],
                     annotations: vec![],
                     metadata: HashMap::new(),
                     variant_bodies: vec![],
@@ -3173,7 +3173,7 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "obj".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3187,8 +3187,8 @@ let spec = crate::target_spec::TargetSpec {
                             name: "o".to_string(),
                             ty: None,
                             expr: Some(Expr::ObjectLiteral(vec![
-                                ("name".to_string(), Expr::String("test".to_string())),
-                                ("value".to_string(), Expr::Integer(42)),
+                                ("name".to_string(), Expr::Quoted("test".into())),
+                                ("value".to_string(), Expr::Decimal(42)),
                             ])),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
@@ -3259,7 +3259,7 @@ let spec = crate::target_spec::TargetSpec {
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "r".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3275,7 +3275,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "x".to_string(), ty: None,
-                            expr: Some(Expr::Call("Ok".to_string(), vec![Expr::Integer(42)])),
+                            expr: Some(Expr::Call("Ok".to_string(), vec![Expr::Decimal(42)])),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
                             constraint: None,
@@ -3316,7 +3316,7 @@ let spec = crate::target_spec::TargetSpec {
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "check".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3382,7 +3382,7 @@ let spec = crate::target_spec::TargetSpec {
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "inner".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3399,7 +3399,7 @@ let spec = crate::target_spec::TargetSpec {
                         Statement::Assignment {
                             lhs: Expr::Identifier("inner".to_string()),
                             expr: Expr::Match {
-                                value: Box::new(Expr::Call("Some".to_string(), vec![Expr::Integer(7)])),
+                                value: Box::new(Expr::Call("Some".to_string(), vec![Expr::Decimal(7)])),
                                 arms: vec![
                                         MatchArm {
                                             pattern: MatchPattern::Variant {
@@ -3412,7 +3412,7 @@ let spec = crate::target_spec::TargetSpec {
                                     MatchArm {
                                         pattern: MatchPattern::Wildcard,
                                         guard: None,
-                                        body: Box::new(Expr::Integer(-1)),
+                                        body: Box::new(Expr::Decimal(-1)),
                                     },
                                 ],
                             },
@@ -3468,7 +3468,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "lst".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "lst".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3479,7 +3479,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Assignment {
                             lhs: Expr::Identifier("lst".to_string()),
-                            expr: Expr::ListLiteral(vec![Expr::Integer(10), Expr::Integer(20)]),
+                            expr: Expr::ListLiteral(vec![Expr::Decimal(10), Expr::Decimal(20)]),
                             timeout: None, modifiers: vec![],
                         },
                     ],
@@ -3512,7 +3512,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "e".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "e".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3554,7 +3554,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "v".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3565,7 +3565,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Assignment {
                             lhs: Expr::Identifier("v".to_string()),
-                            expr: Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)]),
+                            expr: Expr::ListLiteral(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]),
                             timeout: None, modifiers: vec![],
                         },
                     ],
@@ -3598,7 +3598,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "elem".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "elem".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3610,8 +3610,8 @@ let spec = crate::target_spec::TargetSpec {
                         Statement::Assignment {
                             lhs: Expr::Identifier("elem".to_string()),
                             expr: Expr::ListIndex(
-                                Box::new(Expr::ListLiteral(vec![Expr::Integer(99)])),
-                                Box::new(Expr::Integer(0)),
+                                Box::new(Expr::ListLiteral(vec![Expr::Decimal(99)])),
+                                Box::new(Expr::Decimal(0)),
                             ),
                             timeout: None, modifiers: vec![],
                         },
@@ -3640,7 +3640,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "len".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "len".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3651,7 +3651,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Assignment {
                             lhs: Expr::Identifier("len".to_string()),
-                            expr: Expr::Projection { source: Box::new(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)])), target: ProjectionTarget::Size },
+                            expr: Expr::Projection { source: Box::new(Expr::ListLiteral(vec![Expr::Decimal(1), Expr::Decimal(2)])), target: ProjectionTarget::Size },
                             timeout: None, modifiers: vec![],
                         },
                     ],
@@ -3678,7 +3678,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "sliced".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "sliced".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3690,9 +3690,9 @@ let spec = crate::target_spec::TargetSpec {
                         Statement::Assignment {
                             lhs: Expr::Identifier("sliced".to_string()),
                             expr: Expr::Slice {
-                                value: Box::new(Expr::ListLiteral(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
-                                start: Some(Box::new(Expr::Integer(1))),
-                                end: Some(Box::new(Expr::Integer(3))),
+                                value: Box::new(Expr::ListLiteral(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)])),
+                                start: Some(Box::new(Expr::Decimal(1))),
+                                end: Some(Box::new(Expr::Decimal(3))),
                                 stride: None,
                                 mask: None,
                             },
@@ -3720,11 +3720,11 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_multislice_index_delegates() {
         let mut backend = LlvmBackend::new();
-        let mkv: Vec<Expr> = (0..5).map(|i| Expr::Integer(i)).collect();
+        let mkv: Vec<Expr> = (0..5).map(|i| Expr::Decimal(i)).collect();
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "v".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3737,7 +3737,7 @@ let spec = crate::target_spec::TargetSpec {
                             lhs: Expr::Identifier("v".to_string()),
                             expr: Expr::MultiSlice {
                                 value: Box::new(Expr::ListLiteral(mkv)),
-                                ops: vec![BracketOp::Coord(SliceCoordinate::Index(Box::new(Expr::Integer(2))))],
+                                ops: vec![BracketOp::Coord(SliceCoordinate::Index(Box::new(Expr::Decimal(2))))],
                             },
                             timeout: None, modifiers: vec![],
                         },
@@ -3767,7 +3767,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "t".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "t".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3778,7 +3778,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Assignment {
                             lhs: Expr::Identifier("t".to_string()),
-                            expr: Expr::Tuple(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)]),
+                            expr: Expr::Tuple(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]),
                             timeout: None, modifiers: vec![],
                         },
                     ],
@@ -3806,7 +3806,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "val".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "val".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3819,7 +3819,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "$a_b".to_string(), ty: None,
                             expr: Some(Expr::TupleDestructure(
                                 vec!["a".to_string(), "b".to_string()],
-                                Box::new(Expr::Tuple(vec![Expr::Integer(5), Expr::Integer(6)])),
+                                Box::new(Expr::Tuple(vec![Expr::Decimal(5), Expr::Decimal(6)])),
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
@@ -3854,7 +3854,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "xs".to_string(), ty: Type::int(),
-                    expr: Some(Expr::ListLiteral(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
+                    expr: Some(Expr::ListLiteral(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)])),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -3864,8 +3864,8 @@ let spec = crate::target_spec::TargetSpec {
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
                         Statement::Assignment {
-                            lhs: Expr::ListIndex(Box::new(Expr::Identifier("xs".to_string())), Box::new(Expr::Integer(1))),
-                            expr: Expr::Integer(99),
+                            lhs: Expr::ListIndex(Box::new(Expr::Identifier("xs".to_string())), Box::new(Expr::Decimal(1))),
+                            expr: Expr::Decimal(99),
                             timeout: None, modifiers: vec![],
                         },
                     ],
@@ -3894,7 +3894,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "xs".into(), ty: Type::int(),
-                    expr: Some(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3), Expr::Integer(4), Expr::Integer(5)])),
+                    expr: Some(Expr::ListLiteral(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3), Expr::Decimal(4), Expr::Decimal(5)])),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
                     constraint: None,
                 }),
@@ -3904,7 +3904,7 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Assignment {
                             lhs: Expr::Identifier("xs".into()),
-                            expr: Expr::Slice { value: Box::new(Expr::Identifier("xs".into())), start: Some(Box::new(Expr::Integer(1))), end: Some(Box::new(Expr::Integer(3))), stride: None, mask: None },
+                            expr: Expr::Slice { value: Box::new(Expr::Identifier("xs".into())), start: Some(Box::new(Expr::Decimal(1))), end: Some(Box::new(Expr::Decimal(3))), stride: None, mask: None },
                             timeout: None, modifiers: vec![],
                         },
                     ],
@@ -3929,8 +3929,8 @@ let spec = crate::target_spec::TargetSpec {
                 TopLevel::StateDecl(StateDecl {
                     name: "xs".into(), ty: Type::int(),
                     expr: Some(Expr::ListLiteral(vec![
-                        Expr::Integer(10), Expr::Integer(20), Expr::Integer(30),
-                        Expr::Integer(40), Expr::Integer(50),
+                        Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30),
+                        Expr::Decimal(40), Expr::Decimal(50),
                     ])),
                     address: None, bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
@@ -3943,9 +3943,9 @@ let spec = crate::target_spec::TargetSpec {
                             lhs: Expr::Identifier("xs".into()),
                             expr: Expr::Slice {
                                 value: Box::new(Expr::Identifier("xs".into())),
-                                start: Some(Box::new(Expr::Integer(0))),
-                                end: Some(Box::new(Expr::Integer(5))),
-                                stride: Some(Box::new(Expr::Integer(2))),
+                                start: Some(Box::new(Expr::Decimal(0))),
+                                end: Some(Box::new(Expr::Decimal(5))),
+                                stride: Some(Box::new(Expr::Decimal(2))),
                                 mask: None,
                             },
                             timeout: None, modifiers: vec![],
@@ -3973,7 +3973,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "x".into(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "x".into(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
@@ -3985,14 +3985,14 @@ let spec = crate::target_spec::TargetSpec {
                             lhs: Expr::Identifier("x".into()),
                             expr: Expr::Slice {
                                 value: Box::new(Expr::ListLiteral(vec![
-                                    Expr::Integer(1), Expr::Integer(2), Expr::Integer(3),
+                                    Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3),
                                 ])),
-                                start: Some(Box::new(Expr::Integer(0))),
-                                end: Some(Box::new(Expr::Integer(3))),
+                                start: Some(Box::new(Expr::Decimal(0))),
+                                end: Some(Box::new(Expr::Decimal(3))),
                                 stride: None,
                                 mask: Some(Box::new(Expr::Gt(
                                     Box::new(Expr::Identifier("_".into())),
-                                    Box::new(Expr::Integer(1)),
+                                    Box::new(Expr::Decimal(1)),
                                 ))),
                             },
                             timeout: None, modifiers: vec![],
@@ -4017,11 +4017,11 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_multislice_range_emits_copy_loop() {
         let mut backend = LlvmBackend::new();
-        let mkv: Vec<Expr> = (0..5).map(|i| Expr::Integer(i)).collect();
+        let mkv: Vec<Expr> = (0..5).map(|i| Expr::Decimal(i)).collect();
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
@@ -4034,8 +4034,8 @@ let spec = crate::target_spec::TargetSpec {
                             expr: Expr::MultiSlice {
                                 value: Box::new(Expr::ListLiteral(mkv)),
                                 ops: vec![BracketOp::Coord(SliceCoordinate::Range {
-                                    start: Some(Box::new(Expr::Integer(1))),
-                                    end: Some(Box::new(Expr::Integer(4))),
+                                    start: Some(Box::new(Expr::Decimal(1))),
+                                    end: Some(Box::new(Expr::Decimal(4))),
                                 })],
                             },
                             timeout: None, modifiers: vec![],
@@ -4060,11 +4060,11 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_multislice_stride_emits_step_loop() {
         let mut backend = LlvmBackend::new();
-        let mkv: Vec<Expr> = (0..6).map(|i| Expr::Integer(i)).collect();
+        let mkv: Vec<Expr> = (0..6).map(|i| Expr::Decimal(i)).collect();
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
@@ -4076,7 +4076,7 @@ let spec = crate::target_spec::TargetSpec {
                             lhs: Expr::Identifier("v".into()),
                             expr: Expr::MultiSlice {
                                 value: Box::new(Expr::ListLiteral(mkv)),
-                                ops: vec![BracketOp::Stride(Box::new(Expr::Integer(2)))],
+                                ops: vec![BracketOp::Stride(Box::new(Expr::Decimal(2)))],
                             },
                             timeout: None, modifiers: vec![],
                         },
@@ -4100,11 +4100,11 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_multislice_mask_emits_filter_loop() {
         let mut backend = LlvmBackend::new();
-        let mkv: Vec<Expr> = (0..4).map(|i| Expr::Integer(i)).collect();
+        let mkv: Vec<Expr> = (0..4).map(|i| Expr::Decimal(i)).collect();
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
@@ -4118,7 +4118,7 @@ let spec = crate::target_spec::TargetSpec {
                                 value: Box::new(Expr::ListLiteral(mkv)),
                                 ops: vec![BracketOp::Mask(Box::new(Expr::Gt(
                                     Box::new(Expr::Identifier("_".into())),
-                                    Box::new(Expr::Integer(1)),
+                                    Box::new(Expr::Decimal(1)),
                                 )))],
                             },
                             timeout: None, modifiers: vec![],
@@ -4147,7 +4147,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "m".into(), ty: Type::Custom("Map".into()),
-                    expr: Some(Expr::MapLiteral(vec![(Expr::String("a".into()), Expr::Integer(1))])),
+                    expr: Some(Expr::MapLiteral(vec![(Expr::Quoted("a".into()), Expr::Decimal(1))])),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
                     constraint: None,
                 }),
@@ -4166,7 +4166,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "s".into(), ty: Type::Custom("Set".into()),
-                    expr: Some(Expr::SetLiteral(vec![Expr::Integer(1), Expr::Integer(2)])),
+                    expr: Some(Expr::SetLiteral(vec![Expr::Decimal(1), Expr::Decimal(2)])),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
                     constraint: None,
                 }),
@@ -4202,7 +4202,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "c".into(), ty: Type::bool_(),
-                    expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into())), target: ProjectionTarget::Contains(Box::new(Expr::String("k".into()))) }),
+                    expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into())), target: ProjectionTarget::Contains(Box::new(Expr::Quoted("k".into()))) }),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
                     constraint: None,
                 }),
@@ -4303,7 +4303,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = make_intrinsic_program(
             Expr::IntrinsicCall {
                 intrinsic: Intrinsic::Abs,
-                args: vec![Expr::Integer(-42)],
+                args: vec![Expr::Decimal(-42)],
             }
         );
         let output = backend.generate(&program);
@@ -4317,7 +4317,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = make_intrinsic_program(
             Expr::IntrinsicCall {
                 intrinsic: Intrinsic::Ctpop,
-                args: vec![Expr::Integer(255)],
+                args: vec![Expr::Decimal(255)],
             }
         );
         let output = backend.generate(&program);
@@ -4331,7 +4331,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = make_intrinsic_program(
             Expr::IntrinsicCall {
                 intrinsic: Intrinsic::Ctlz,
-                args: vec![Expr::Integer(1)],
+                args: vec![Expr::Decimal(1)],
             }
         );
         let output = backend.generate(&program);
@@ -4345,7 +4345,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = make_intrinsic_program(
             Expr::IntrinsicCall {
                 intrinsic: Intrinsic::Cttz,
-                args: vec![Expr::Integer(8)],
+                args: vec![Expr::Decimal(8)],
             }
         );
         let output = backend.generate(&program);
@@ -4359,7 +4359,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = make_intrinsic_program(
             Expr::IntrinsicCall {
                 intrinsic: Intrinsic::Bitreverse,
-                args: vec![Expr::Integer(1)],
+                args: vec![Expr::Decimal(1)],
             }
         );
         let output = backend.generate(&program);
@@ -4522,7 +4522,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "r".into(),
                             ty: Some(Type::bool_()),
                             expr: Some(Expr::IsType(
-                                Box::new(Expr::Integer(42)),
+                                Box::new(Expr::Decimal(42)),
                                 crate::ast::IsTarget::Type(Type::int()),
                             )),
                             address: None, address_expr: None, bit_range: None,
@@ -4568,7 +4568,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "r".into(),
                             ty: Some(Type::bool_()),
                             expr: Some(Expr::FromCheck(
-                                Box::new(Expr::Integer(42)),
+                                Box::new(Expr::Decimal(42)),
                                 Type::int(),
                             )),
                             address: None, address_expr: None, bit_range: None,
@@ -4611,8 +4611,8 @@ let spec = crate::target_spec::TargetSpec {
                         Statement::Let {
                             name: "r".into(), ty: Some(Type::bool_()),
                             expr: Some(Expr::Like(
-                                Box::new(Expr::Integer(42)),
-                                Box::new(Expr::Integer(1)),
+                                Box::new(Expr::Decimal(42)),
+                                Box::new(Expr::Decimal(1)),
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![], constraint: None,
@@ -4641,7 +4641,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Integer(0)), address: None,
+                    expr: Some(Expr::Decimal(0)), address: None,
                     bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
@@ -4657,7 +4657,7 @@ let spec = crate::target_spec::TargetSpec {
                             ty: Some(Type::bool_()),
                             expr: Some(Expr::Like(
                                 Box::new(Expr::Identifier("x".to_string())),
-                                Box::new(Expr::Integer(42)),
+                                Box::new(Expr::Decimal(42)),
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
@@ -4703,7 +4703,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "r".into(),
                             ty: Some(Type::string()),
                             expr: Some(Expr::Cast(
-                                Box::new(Expr::Integer(42)),
+                                Box::new(Expr::Decimal(42)),
                                 Type::string(),
                             )),
                             address: None, address_expr: None, bit_range: None,
@@ -4741,7 +4741,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "r".into(),
                             ty: Some(Type::int()),
                             expr: Some(Expr::Cast(
-                                Box::new(Expr::String("42".to_string())),
+                                Box::new(Expr::Quoted("42".into())),
                                 Type::int(),
                             )),
                             address: None, address_expr: None, bit_range: None,
@@ -4819,7 +4819,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "r".into(),
                             ty: Some(Type::float()),
                             expr: Some(Expr::Cast(
-                                Box::new(Expr::Integer(42)),
+                                Box::new(Expr::Decimal(42)),
                                 Type::float(),
                             )),
                             address: None, address_expr: None, bit_range: None,
@@ -4902,11 +4902,11 @@ let spec = crate::target_spec::TargetSpec {
                         Statement::Guarded {
                             condition: Expr::Identifier("p".to_string()),
                             statements: vec![
-                                Statement::Term { values: vec![Some(Expr::Integer(1))], modifiers: vec![], swan_song: None },
+                                Statement::Term { values: vec![Some(Expr::Decimal(1))], modifiers: vec![], swan_song: None },
                             ],
                             metadata: HashMap::new(),
                         },
-                        Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None },
+                        Statement::Term { values: vec![Some(Expr::Decimal(0))], modifiers: vec![], swan_song: None },
                     ],
                     reactor_speed: None, span: None, is_lambda: false,
                     dependencies: vec![], modifiers: vec![],
@@ -4943,7 +4943,7 @@ let spec = crate::target_spec::TargetSpec {
                             name: "t".into(), ty: None,
                             expr: Some(Expr::Tuple(vec![
                                 Expr::Bool(true),
-                                Expr::Integer(42),
+                                Expr::Decimal(42),
                             ])),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![], constraint: None,
@@ -4972,7 +4972,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(), ty: Type::string(),
-                    expr: Some(Expr::String("hello".to_string())), address: None,
+                    expr: Some(Expr::Quoted("hello".into())), address: None,
                     bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
@@ -5058,7 +5058,7 @@ let spec = crate::target_spec::TargetSpec {
                         Statement::Term {
                             values: vec![Some(Expr::Lt(
                                 Box::new(Expr::Identifier("x".to_string())),
-                                Box::new(Expr::Integer(10)),
+                                Box::new(Expr::Decimal(10)),
                             ))],
                             modifiers: vec![],
                             swan_song: None,
@@ -5104,7 +5104,7 @@ let spec = crate::target_spec::TargetSpec {
                                 Box::new(Expr::Bool(true)),
                             ),
                             statements: vec![
-                                Statement::Term { values: vec![Some(Expr::Integer(1))], modifiers: vec![], swan_song: None },
+                                Statement::Term { values: vec![Some(Expr::Decimal(1))], modifiers: vec![], swan_song: None },
                             ],
                             metadata: HashMap::new(),
                         },
@@ -5148,7 +5148,7 @@ let spec = crate::target_spec::TargetSpec {
                             dir: ArrowDir::Push,
                              consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                             index: Box::new(Expr::Term),
-                            value: Some(Box::new(Expr::Integer(42))),
+                            value: Some(Box::new(Expr::Decimal(42))),
                         }),
                         Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
@@ -5326,7 +5326,7 @@ let spec = crate::target_spec::TargetSpec {
                         precondition: None, postcondition: None,
                         buffer_mode: None, ffi_kind: None, is_out: false,
                         is_pipe: true,
-                        fallback: Some(Expr::String("default".to_string())),
+                        fallback: Some(Expr::Quoted("default".into())),
                         default_watchdog: None,
                         span: None,
                     },
@@ -5386,7 +5386,7 @@ let spec = crate::target_spec::TargetSpec {
                         precondition: None, postcondition: None,
                         buffer_mode: None, ffi_kind: None, is_out: false,
                         is_pipe: true,
-                        fallback: Some(Expr::String("fallback".to_string())),
+                        fallback: Some(Expr::Quoted("fallback".into())),
                         default_watchdog: None,
                         span: None,
                     },
@@ -5509,7 +5509,7 @@ let spec = crate::target_spec::TargetSpec {
                         precondition: None, postcondition: None,
                         buffer_mode: None, ffi_kind: None, is_out: false,
                         is_pipe: true,
-                        fallback: Some(Expr::Integer(0)),
+                        fallback: Some(Expr::Decimal(0)),
                         default_watchdog: None,
                         span: None,
                     },
@@ -5575,7 +5575,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "buf".to_string(), ty: Type::string(),
-                    expr: Some(Expr::String("".to_string())),
+                    expr: Some(Expr::Quoted("".into())),
                     address: None, bit_range: None, constraint: None,
                     is_override: false, os_mode: false, span: None, attrs: vec![],
                 }),
@@ -5602,7 +5602,7 @@ let spec = crate::target_spec::TargetSpec {
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
                         Statement::Expression(
-                            Expr::IntrinsicCall { intrinsic: Intrinsic::ThreadCreate, args: vec![Expr::Integer(0)] },
+                            Expr::IntrinsicCall { intrinsic: Intrinsic::ThreadCreate, args: vec![Expr::Decimal(0)] },
                         ),
                         Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
                     ],
@@ -5628,7 +5628,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "counter".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, constraint: None,
                     is_override: false, os_mode: false, span: None, attrs: vec![],
                 }),
@@ -5655,7 +5655,7 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let mut out = String::new();
         let stmt = Statement::Await {
-            expr: Expr::Call("compute".to_string(), vec![Expr::Integer(42)]),
+            expr: Expr::Call("compute".to_string(), vec![Expr::Decimal(42)]),
             modifiers: vec![],
         };
         // emit_stmt will try to emit the call — in a minimal context it produces LLVM IR
@@ -5712,7 +5712,7 @@ let spec = crate::target_spec::TargetSpec {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(), ty: Type::string(),
-                    expr: Some(Expr::String("x".to_string())),
+                    expr: Some(Expr::Quoted("x".into())),
                     address: None, bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
@@ -5729,7 +5729,7 @@ let spec = crate::target_spec::TargetSpec {
                             expr: Some(Expr::Concat(
                                 // State field read = runtime-determined, cannot fold
                                 Box::new(Expr::Identifier("s".to_string())),
-                                Box::new(Expr::String("world".to_string())),
+                                Box::new(Expr::Quoted("world".into())),
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![], constraint: None,
@@ -5775,12 +5775,12 @@ let spec = crate::target_spec::TargetSpec {
             Statement::Let {
                 name: "x".to_string(),
                 ty: Some(Type::int()),
-                expr: Some(Expr::Integer(-5)),
+                expr: Some(Expr::Decimal(-5)),
                 address: None, address_expr: None, bit_range: None,
                 is_override: false, modifiers: vec![],
                 constraint: Some(Box::new(Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 ))),
             },
             Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
@@ -5810,7 +5810,7 @@ let spec = crate::target_spec::TargetSpec {
                 operators: vec![],
             constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 )],
                 span: None,
             },
@@ -5827,7 +5827,7 @@ let spec = crate::target_spec::TargetSpec {
             Statement::Let {
                 name: "x".to_string(),
                 ty: Some(Type::Custom("Positive".to_string())),
-                expr: Some(Expr::Integer(-5)),
+                expr: Some(Expr::Decimal(-5)),
                 address: None, address_expr: None, bit_range: None,
                 is_override: false, modifiers: vec![],
                 constraint: None,
@@ -5848,12 +5848,12 @@ let spec = crate::target_spec::TargetSpec {
             Statement::Let {
                 name: "x".to_string(),
                 ty: Some(Type::int()),
-                expr: Some(Expr::Integer(5)),
+                expr: Some(Expr::Decimal(5)),
                 address: None, address_expr: None, bit_range: None,
                 is_override: false, modifiers: vec![],
                 constraint: Some(Box::new(Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 ))),
             },
             Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
@@ -5873,9 +5873,9 @@ let spec = crate::target_spec::TargetSpec {
         let mut body = Vec::new();
         body.push(Statement::Expression(Expr::IntrinsicCall {
             intrinsic: Intrinsic::Fence,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         }));
-        body.push(Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None });
+        body.push(Statement::Term { values: vec![Some(Expr::Decimal(0))], modifiers: vec![], swan_song: None });
         let defn = TopLevel::Definition(Definition {
             name: "main".to_string(),
             type_params: vec![],
@@ -5920,7 +5920,7 @@ let spec = crate::target_spec::TargetSpec {
             intrinsic: Intrinsic::Halt,
             args: vec![],
         }));
-        body.push(Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None });
+        body.push(Statement::Term { values: vec![Some(Expr::Decimal(0))], modifiers: vec![], swan_song: None });
         let defn = TopLevel::Definition(Definition {
             name: "main".to_string(),
             type_params: vec![],
@@ -6278,7 +6278,7 @@ let spec = crate::target_spec::TargetSpec {
             parameters: vec![("x".to_string(), Type::int())],
             output_type: Some(OutputType::Named("result".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "result".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "result".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "compute".to_string(), is_async: false, is_reactive: true,
@@ -6298,7 +6298,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "dummy".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "dummy".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None,
                     attrs: vec![], constraint: None,
                 }),
@@ -6334,7 +6334,7 @@ let spec = crate::target_spec::TargetSpec {
             parameters: vec![("x".to_string(), Type::int())],
             output_type: Some(OutputType::Named("result".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "result".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "result".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "compute".to_string(), is_async: false, is_reactive: true,
@@ -6354,7 +6354,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "result".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "result".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None,
                     attrs: vec![], constraint: None,
                 }),
@@ -6363,7 +6363,7 @@ let spec = crate::target_spec::TargetSpec {
                     name: "main".to_string(), is_async: false, is_reactive: true,
                     parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                     body: vec![
-                        Statement::Let { name: "r".to_string(), ty: Some(Type::int()), expr: Some(Expr::CellCall(Box::new(Expr::Identifier("add_one".to_string())), vec![Expr::Integer(41)])), address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+                        Statement::Let { name: "r".to_string(), ty: Some(Type::int()), expr: Some(Expr::CellCall(Box::new(Expr::Identifier("add_one".to_string())), vec![Expr::Decimal(41)])), address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
                         Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                     ],
                     reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
@@ -6398,14 +6398,14 @@ let spec = crate::target_spec::TargetSpec {
             parameters: vec![],
             output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "tick".to_string(), is_async: false, is_reactive: true,
                 parameters: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![
-                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
@@ -6419,7 +6419,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "dummy".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "dummy".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None,
                     attrs: vec![], constraint: None,
                 }),
@@ -6459,8 +6459,8 @@ let spec = crate::target_spec::TargetSpec {
                 OutputType::Named("b".to_string(), Box::new(OutputType::Single(Type::int()))),
             ])),
             fields: vec![
-                StructField { name: "a".to_string(), ty: Type::int(), default: Some(Expr::Integer(1)), visibility: Visibility::Private },
-                StructField { name: "b".to_string(), ty: Type::int(), default: Some(Expr::Integer(2)), visibility: Visibility::Private },
+                StructField { name: "a".to_string(), ty: Type::int(), default: Some(Expr::Decimal(1)), visibility: Visibility::Private },
+                StructField { name: "b".to_string(), ty: Type::int(), default: Some(Expr::Decimal(2)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "compute".to_string(), is_async: false, is_reactive: true,
@@ -6478,7 +6478,7 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "result".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "result".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false, span: None,
                     attrs: vec![], constraint: None,
                 }),
@@ -6601,7 +6601,7 @@ let spec = crate::target_spec::TargetSpec {
                 dir: ArrowDir::Push,
                  consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
                 index: Box::new(Expr::Term),
-                value: Some(Box::new(Expr::Integer(val))),
+                value: Some(Box::new(Expr::Decimal(val))),
             }).unwrap();
         };
         push(&mut i, 42);
@@ -6690,18 +6690,18 @@ let spec = crate::target_spec::TargetSpec {
             let mut items: Vec<TopLevel> = vec![
                 TopLevel::Constant(Constant {
                     name: "total".to_string(), ty: Type::int(),
-                    expr: Expr::Integer(100),
+                    expr: Expr::Decimal(100),
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false,
                     os_mode: false, span: None, attrs: vec![],
                     constraint: None,
@@ -6722,7 +6722,7 @@ let spec = crate::target_spec::TargetSpec {
                             lhs: Expr::Identifier("count".to_string()),
                             expr: Expr::Add(
                                 Box::new(Expr::Identifier("count".to_string())),
-                                Box::new(Expr::Integer(1)),
+                                Box::new(Expr::Decimal(1)),
                             ),
                             timeout: None, modifiers: vec![],
                         },
@@ -6731,7 +6731,7 @@ let spec = crate::target_spec::TargetSpec {
                             lhs: Expr::Identifier("x".to_string()),
                             expr: Expr::Add(
                                 Box::new(Expr::Identifier("x".to_string())),
-                                Box::new(Expr::Integer(1)),
+                                Box::new(Expr::Decimal(1)),
                             ),
                             timeout: None, modifiers: vec![],
                         },
@@ -6759,7 +6759,7 @@ let spec = crate::target_spec::TargetSpec {
                 dispatch_mode: Default::default(),
                 exit_condition: Some(Box::new(Expr::Eq(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(100)),
+                    Box::new(Expr::Decimal(100)),
                 ))),
                 out_pragmas: vec!["x".to_string()],
                 default_sig_modifier: None,
@@ -6845,12 +6845,12 @@ let spec = crate::target_spec::TargetSpec {
         let program = Program {
             items: vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "count".to_string(), ty: Type::int(), expr: Some(Expr::Integer(0)),
+                    name: "count".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
                     address: None, bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
-                    name: "ro".to_string(), ty: Type::int(), expr: Some(Expr::Integer(100)),
+                    name: "ro".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(100)),
                     address: None, bit_range: None, is_override: false, os_mode: false,
                     span: None, attrs: vec![], constraint: None,
                 }),
@@ -6889,14 +6889,14 @@ let spec = crate::target_spec::TargetSpec {
         }
         items.push(TopLevel::StateDecl(StateDecl {
             name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(100)),
+            expr: Some(Expr::Decimal(100)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
@@ -6907,7 +6907,7 @@ let spec = crate::target_spec::TargetSpec {
                 lhs: Expr::Identifier("count".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None, modifiers: vec![],
             },
@@ -6970,21 +6970,21 @@ let spec = crate::target_spec::TargetSpec {
         let mut items: Vec<TopLevel> = Vec::new();
         items.push(TopLevel::StateDecl(StateDecl {
             name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "x".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(100)),
+            expr: Some(Expr::Decimal(100)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
@@ -6994,7 +6994,7 @@ let spec = crate::target_spec::TargetSpec {
                 lhs: Expr::Identifier("count".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None, modifiers: vec![],
             },
@@ -7002,7 +7002,7 @@ let spec = crate::target_spec::TargetSpec {
                 lhs: Expr::Identifier("x".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None, modifiers: vec![],
             },
@@ -7057,14 +7057,14 @@ let spec = crate::target_spec::TargetSpec {
         }
         items.push(TopLevel::StateDecl(StateDecl {
             name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(100)),
+            expr: Some(Expr::Decimal(100)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
@@ -7074,7 +7074,7 @@ let spec = crate::target_spec::TargetSpec {
                 lhs: Expr::Identifier("count".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None, modifiers: vec![],
             },
@@ -7135,7 +7135,7 @@ let spec = crate::target_spec::TargetSpec {
         for i in 0..12 {
             items.push(TopLevel::StateDecl(StateDecl {
                 name: format!("p{}", i), ty: Type::int(),
-                expr: Some(Expr::Integer(0)),
+                expr: Some(Expr::Decimal(0)),
                 address: None, bit_range: None, is_override: false,
                 os_mode: false, span: None, attrs: vec![],
                 constraint: None,
@@ -7143,14 +7143,14 @@ let spec = crate::target_spec::TargetSpec {
         }
         items.push(TopLevel::StateDecl(StateDecl {
             name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(100)),
+            expr: Some(Expr::Decimal(100)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
@@ -7168,7 +7168,7 @@ let spec = crate::target_spec::TargetSpec {
                 lhs: Expr::Identifier("count".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None, modifiers: vec![],
             },
@@ -7234,21 +7234,21 @@ let spec = crate::target_spec::TargetSpec {
         let mut items: Vec<TopLevel> = Vec::new();
         items.push(TopLevel::StateDecl(StateDecl {
             name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "x".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Integer(10)),
+            expr: Some(Expr::Decimal(10)),
             address: None, bit_range: None, is_override: false,
             os_mode: false, span: None, attrs: vec![],
             constraint: None,
@@ -7259,7 +7259,7 @@ let spec = crate::target_spec::TargetSpec {
                 lhs: Expr::Identifier("count".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None, modifiers: vec![],
             },
@@ -7270,16 +7270,16 @@ let spec = crate::target_spec::TargetSpec {
                 condition: Expr::Eq(
                     Box::new(Expr::Mod(
                         Box::new(Expr::Identifier("count".to_string())),
-                        Box::new(Expr::Integer(2)),
+                        Box::new(Expr::Decimal(2)),
                     )),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 ),
                 statements: vec![
                     Statement::Assignment {
                         lhs: Expr::Identifier("x".to_string()),
                         expr: Expr::Add(
                             Box::new(Expr::Identifier("x".to_string())),
-                            Box::new(Expr::Integer(1)),
+                            Box::new(Expr::Decimal(1)),
                         ),
                         timeout: None, modifiers: vec![],
                     },

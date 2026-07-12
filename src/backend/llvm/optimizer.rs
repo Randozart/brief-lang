@@ -248,9 +248,9 @@ impl LlvmBackend {
                         if let Some(ref bp) = node.bounded_pre {
                             let is_const = self.ctx.field_initializers.get(&bp.bound_var)
                                 .and_then(|e| e.as_ref())
-                                .map_or(false, |e| matches!(e, Expr::Integer(_)))
+                                .map_or(false, |e| matches!(e, Expr::Decimal(_)))
                                 || self.ctx.constants.get(&bp.bound_var)
-                                    .map_or(false, |(_, e)| matches!(e, Expr::Integer(_)));
+                                    .map_or(false, |(_, e)| matches!(e, Expr::Decimal(_)));
                             !is_const
                         } else { false }
                     })
@@ -306,9 +306,9 @@ fn extract_trigger_keys(
     let mut keys = Vec::new();
     match pre {
         Expr::Eq(l, r) => {
-            let (ident, val) = if let (Expr::Identifier(name), Expr::Integer(n)) = (l.as_ref(), r.as_ref()) {
+            let (ident, val) = if let (Expr::Identifier(name), Expr::Decimal(n)) = (l.as_ref(), r.as_ref()) {
                 (name.clone(), *n)
-            } else if let (Expr::Integer(n), Expr::Identifier(name)) = (l.as_ref(), r.as_ref()) {
+            } else if let (Expr::Decimal(n), Expr::Identifier(name)) = (l.as_ref(), r.as_ref()) {
                 (name.clone(), *n)
             } else {
                 return None;

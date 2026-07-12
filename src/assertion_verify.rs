@@ -338,8 +338,8 @@ mod tests {
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::String(
-                "not bool".to_string(),
+            body: vec![Statement::Term { values: vec![Some(Expr::Quoted(
+                "not bool".into(),
             ))], modifiers: vec![], swan_song: None }],
             is_lambda: false,
             annotations: vec![],

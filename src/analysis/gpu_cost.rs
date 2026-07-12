@@ -225,7 +225,7 @@ mod tests {
         // data = data + 1 → 1 add op, 1 field read + 1 write = 16 bytes
         let body = vec![assign("x", Expr::Add(
             Box::new(Expr::Identifier("x".to_string())),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(1)),
         ))];
         let est = estimate(&body, 100);
         assert!(est.arithmetic_intensity < 1.0, "1 op / 16 bytes should be < 1");
@@ -256,7 +256,7 @@ mod tests {
     fn test_large_n_recommends_gpu() {
         let body = vec![assign("x", Expr::Add(
             Box::new(Expr::Identifier("x".to_string())),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(1)),
         ))];
         // N = 10^8 — large enough to justify PCIe even for simple math
         let est = estimate(&body, 100_000_000);
@@ -268,7 +268,7 @@ mod tests {
 
     #[test]
     fn test_runtime_n_returns_runtime_decision() {
-        let body = vec![assign("x", Expr::Integer(42))];
+        let body = vec![assign("x", Expr::Decimal(42))];
         let est = estimate(&body, 0); // N=0 means runtime-determined
         assert_eq!(est.recommended, OffloadDecision::Runtime);
     }
@@ -277,7 +277,7 @@ mod tests {
     fn test_crossover_point_monotonic() {
         let body = vec![assign("x", Expr::Add(
             Box::new(Expr::Identifier("x".to_string())),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(1)),
         ))];
         let est = estimate(&body, 1_000_000_000);
         assert!(est.crossover_point > 0, "crossover should be positive");

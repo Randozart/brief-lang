@@ -142,14 +142,14 @@ pub(crate) fn expr_from_value(value: &crate::interpreter::Value) -> Expr {
         crate::interpreter::Value::Bits(b) if b.len() == 8 => {
             let mut arr = [0u8; 8];
             arr.copy_from_slice(&b[..8]);
-            Expr::Integer(i64::from_le_bytes(arr))
+            Expr::Decimal(i64::from_le_bytes(arr))
         }
         crate::interpreter::Value::Bits(b) if b.len() == 1 => {
             Expr::Bool(b[0] != 0)
         }
         crate::interpreter::Value::Bits(b) => {
             let s = String::from_utf8_lossy(b);
-            Expr::String(s.to_string())
+            Expr::Quoted(s.as_bytes().to_vec())
         }
         _ => Expr::Term,
     }
@@ -275,11 +275,11 @@ mod tests {
             Statement::Expression(Expr::Interpolate("x".to_string())),
         ];
         let bindings = vec![
-            ("x".to_string(), Expr::Integer(42)),
+            ("x".to_string(), Expr::Decimal(42)),
         ];
         let result: Vec<Statement> = body.iter().map(|s| substitute_in_stmt(s, &bindings)).collect();
         assert_eq!(result.len(), 1);
-        if let Statement::Expression(Expr::Integer(42)) = &result[0] {
+        if let Statement::Expression(Expr::Decimal(42)) = &result[0] {
             // OK
         } else {
             panic!("Expected Integer(42), got {:?}", result[0]);

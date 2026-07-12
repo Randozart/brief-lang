@@ -711,9 +711,9 @@ impl TypeDefBody {
 /// 2026-07-11: Phase 1A.2 migration helper.
 pub fn binding_to_property_value(binding: &TypeBinding) -> Option<PropertyValue> {
     match &*binding.value {
-        Expr::Integer(n) => Some(PropertyValue::Int(*n)),
+        Expr::Decimal(n) => Some(PropertyValue::Int(*n)),
         Expr::Float(f) => Some(PropertyValue::Float(*f)),
-        Expr::String(s) => Some(PropertyValue::String(s.clone())),
+        Expr::Quoted(s) => Some(PropertyValue::String(String::from_utf8_lossy(s).to_string())),
         Expr::Bool(b) => Some(PropertyValue::Bool(*b)),
         Expr::Identifier(name) => Some(PropertyValue::Identifier(name.clone())),
         _ => None,
@@ -1773,11 +1773,11 @@ pub enum IsTarget {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Integer(i64),
+    Decimal(i64),
     IntegerSuffixed(i64, Type),
     Float(f64),
     Float64(f64),
-    String(String),
+    Quoted(Vec<u8>),
     RegexLiteral(String), // @"..." — regex pattern literal
     Char(char),  // NEW: Char literal
     Bool(bool),
@@ -2079,7 +2079,7 @@ impl Expr {
     /// Extract integer value, handling both old variant and new Literal wrapper.
     pub fn as_integer(&self) -> Option<i64> {
         match self {
-            Expr::Integer(n) => Some(*n),
+            Expr::Decimal(n) => Some(*n),
             Expr::Literal(lit) => match lit.as_ref() {
                 LiteralExpr::Integer(n) => Some(*n),
                 _ => None,
@@ -2103,7 +2103,7 @@ impl Expr {
     /// Extract string value, handling both old variant and new Literal wrapper.
     pub fn as_string(&self) -> Option<&str> {
         match self {
-            Expr::String(s) => Some(s.as_str()),
+            Expr::Quoted(s) => Some(std::str::from_utf8(s).unwrap_or("")),
             Expr::Literal(lit) => match lit.as_ref() {
                 LiteralExpr::String(s) => Some(s.as_str()),
                 _ => None,
@@ -3126,8 +3126,8 @@ impl Annotation {
     /// Convenience: extract string value for common patterns (was `Option<String>` on old Hashtag)
     pub fn string_value(&self) -> Option<String> {
         match &self.value {
-            Expr::String(s) => Some(s.clone()),
-            Expr::Integer(n) => Some(n.to_string()),
+            Expr::Quoted(s) => Some(String::from_utf8_lossy(s).to_string()),
+            Expr::Decimal(n) => Some(n.to_string()),
             _ => None,
         }
     }
@@ -3241,7 +3241,7 @@ impl Program {
         let state_decl = TopLevel::StateDecl(StateDecl {
             name: booted_name.clone(),
             ty: Type::int(),
-            expr: Some(Expr::Integer(0)),
+            expr: Some(Expr::Decimal(0)),
             address: None,
             bit_range: None,
             constraint: None,
@@ -3254,7 +3254,7 @@ impl Program {
         // Add &__booted_N = true; before term
         body.push(Statement::Assignment {
             lhs: Expr::AddrOf(Box::new(Expr::Identifier(booted_name.clone()))),
-            expr: Expr::Integer(1),
+            expr: Expr::Decimal(1),
             timeout: None,
             modifiers: vec![],
         });
@@ -3421,7 +3421,7 @@ mod kani_tests {
 
     #[kani::proof]
     fn verify_as_integer_old_variant() {
-        let e = Expr::Integer(42);
+        let e = Expr::Decimal(42);
         assert_eq!(e.as_integer(), Some(42));
     }
 
@@ -3485,7 +3485,7 @@ mod kani_full_tests {
     fn verify_as_bool_none_for_non_bool() {
         let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
         assert_eq!(e.as_bool(), None);
-        let f = Expr::Integer(0);
+        let f = Expr::Decimal(0);
         assert_eq!(f.as_bool(), None);
     }
 
@@ -3493,7 +3493,7 @@ mod kani_full_tests {
     fn verify_is_term_false_for_non_term() {
         let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
         assert!(!e.is_term());
-        let f = Expr::Integer(0);
+        let f = Expr::Decimal(0);
         assert!(!f.is_term());
     }
 
@@ -3521,7 +3521,7 @@ mod kani_full_tests {
 
     #[kani::proof]
     fn verify_as_string_old_variant() {
-        let e = Expr::String("hello".to_string());
+        let e = Expr::Quoted("hello".into());
         assert_eq!(e.as_string(), Some(&"hello".to_string()));
     }
 
@@ -3529,7 +3529,7 @@ mod kani_full_tests {
     fn verify_as_string_none_for_non_string() {
         let e = Expr::Literal(Box::new(LiteralExpr::Integer(0)));
         assert_eq!(e.as_string(), None);
-        let f = Expr::Integer(0);
+        let f = Expr::Decimal(0);
         assert_eq!(f.as_string(), None);
     }
 }
@@ -4408,7 +4408,7 @@ mod tests {
 
     #[test]
     fn test_as_var_name_integer_returns_none() {
-        let expr = Expr::Integer(42);
+        let expr = Expr::Decimal(42);
         assert_eq!(expr.as_var_name(), None);
     }
 
@@ -4416,7 +4416,7 @@ mod tests {
     fn test_as_var_name_binary_op_returns_none() {
         let expr = Expr::Add(
             Box::new(Expr::Identifier("x".to_string())),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(1)),
         );
         assert_eq!(expr.as_var_name(), None);
     }
@@ -4426,7 +4426,7 @@ mod tests {
         // &(x + 1) is not a simple variable reference
         let inner = Expr::Add(
             Box::new(Expr::Identifier("x".to_string())),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(1)),
         );
         let expr = Expr::AddrOf(Box::new(inner));
         assert_eq!(expr.as_var_name(), None);

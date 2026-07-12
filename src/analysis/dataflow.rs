@@ -94,7 +94,7 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::Identifier(name) => { ids.insert(name.clone()); }
             expr @ Expr::AddrOf(_) => { ids.insert(expr.as_var_name().unwrap().to_string()); }
             Expr::PriorState(name) => { ids.insert(name.clone()); }
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_) | Expr::Char(_)
+            Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::Char(_)
             | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
             | Expr::BinaryOp(_) | Expr::UnaryOp(_) => {}
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
@@ -327,7 +327,7 @@ impl<'a> DataflowAnalyzer<'a> {
             if let TopLevel::StateDecl(decl) = item {
                 if decl.name == name {
                     if let Some(expr) = &decl.expr {
-                        if let Expr::Integer(n) = expr {
+                        if let Expr::Decimal(n) = expr {
                             return Some(*n);
                         }
                     }
@@ -353,7 +353,7 @@ impl<'a> DataflowAnalyzer<'a> {
 
     fn eval_to_int(&self, expr: &Expr) -> Option<i64> {
         match expr {
-            Expr::Integer(n) => Some(*n),
+            Expr::Decimal(n) => Some(*n),
             _ => None,
         }
     }
@@ -405,7 +405,7 @@ impl TransactionProtocolVerifier {
                 let mut required = Vec::new();
                 if let Expr::Eq(lhs, rhs) = &txn.contract.pre_condition {
                     if let Expr::Identifier(name) = lhs.as_ref() {
-                        if let Expr::Integer(val) = rhs.as_ref() {
+                        if let Expr::Decimal(val) = rhs.as_ref() {
                             required.push(format!("{}={}", name, val));
                         }
                     }

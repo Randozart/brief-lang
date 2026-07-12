@@ -15,7 +15,7 @@ use crate::backend::llvm::{float64_to_llvm_hex, float_to_llvm_hex, LlvmBackend, 
 use std::fmt::Write;
 
 pub fn emit_integer(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Expr, indent: &str) -> TypedRegister {
-    if let Expr::Integer(n) = expr {
+    if let Expr::Decimal(n) = expr {
         writeln!(out, "{}{} = add i64 0, {}", indent, v, n).ok();
     } else {
         writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
@@ -73,10 +73,11 @@ pub fn emit_float(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &E
 
 pub fn emit_string(backend: &mut LlvmBackend, out: &mut String, v: &str, expr: &Expr, indent: &str) -> TypedRegister {
     let s = match expr {
-        Expr::String(s) | Expr::RegexLiteral(s) => s,
+        Expr::Quoted(s) => String::from_utf8_lossy(s).into_owned(),
+        Expr::RegexLiteral(s) => s.clone(),
         _ => return emit_integer(backend, out, v, expr, indent),
     };
-    let si = backend.ctx.string_constants.iter().position(|x| x == s).unwrap_or(0);
+    let si = backend.ctx.string_constants.iter().position(|x| *x == s).unwrap_or(0);
     let g = format!("@str.{}", si);
     let bp = format!("%t{}", backend.fun.txn_counter); backend.fun.txn_counter += 1;
     writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", indent, bp, s.len() + 1, g).ok();

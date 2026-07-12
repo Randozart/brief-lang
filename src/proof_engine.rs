@@ -133,7 +133,7 @@ impl SymbolicValue {
                 LiteralExpr::String(_) => SymbolicValue::Unknown,
                 LiteralExpr::Term => SymbolicValue::Unknown,
             },
-            Expr::Integer(n) => SymbolicValue::Concrete(*n),
+            Expr::Decimal(n) => SymbolicValue::Concrete(*n),
             Expr::Float(f) | Expr::Float64(f) => SymbolicValue::ConcreteFloat(*f),
             Expr::Bool(b) => SymbolicValue::Concrete(if *b { 1 } else { 0 }),
             Expr::Identifier(name) => vars
@@ -1168,7 +1168,7 @@ impl SymbolicExecutor {
                 LiteralExpr::Integer(n) => Some(*n),
                 _ => None,
             },
-            Expr::Integer(n) => Some(*n),
+            Expr::Decimal(n) => Some(*n),
             Expr::Identifier(name) => {
                 // Volatile (trigger) variables are never concretely evaluable
                 if state.is_volatile(name) {
@@ -1221,9 +1221,9 @@ fn format_expr(expr: &Expr) -> String {
     }
     match expr {
         Expr::Literal(lit) => lit.format(),
-        Expr::Integer(n) => n.to_string(),
+        Expr::Decimal(n) => n.to_string(),
         Expr::Float(f) | Expr::Float64(f) => f.to_string(),
-        Expr::String(s) => format!("\"{}\"", s),
+        Expr::Quoted(s) => format!("\"{}\"", String::from_utf8_lossy(s)),
         Expr::Bool(b) => b.to_string(),
         Expr::Identifier(name) => name.clone(),
         Expr::PriorState(name) => format!("@{}", name),
@@ -1349,7 +1349,7 @@ fn eval_const_expr(expr: &Expr, initial_values: &HashMap<String, Expr>) -> Optio
         return eval_const_expr(&normalized, initial_values);
     }
     match expr {
-        Expr::Integer(n) => Some(*n),
+        Expr::Decimal(n) => Some(*n),
         Expr::Literal(lit) => match lit.as_ref() {
             crate::features::literal::LiteralExpr::Integer(n) => Some(*n),
             _ => None,
@@ -1366,10 +1366,10 @@ fn eval_const_expr(expr: &Expr, initial_values: &HashMap<String, Expr>) -> Optio
 }
 
 /// Check for `var & (var - 1)` popcount decay pattern.
-/// Handles both `Expr::Integer(1)` and `Expr::Literal(Boolean(1))` variants.
+/// Handles both `Expr::Decimal(1)` and `Expr::Literal(Boolean(1))` variants.
 fn is_self_minus_one(a: &Expr, b: &Expr, var: &str) -> bool {
     let is_one = |e: &Expr| -> bool {
-        matches!(e, Expr::Integer(1))
+        matches!(e, Expr::Decimal(1))
             || matches!(e, Expr::Literal(lit) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Integer(1)))
     };
     matches!(a, Expr::Identifier(v) if v == var)
@@ -2673,7 +2673,7 @@ impl ProofEngine {
             Expr::UnaryOp(uop) => {
                 self.collect_identifiers(&uop.operand, vars);
             }
-            Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::String(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
+            Expr::Decimal(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Quoted(_) | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
             | Expr::ProjectionExpr(_) | Expr::CallExpr(_) | Expr::ListLiteralExpr(_)
             | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_) | Expr::SliceExpr(_)
             | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_) | Expr::StructInstanceExpr(_)
@@ -3675,8 +3675,8 @@ fn estimate_stmt_cost(stmt: &Statement) -> u64 {
 
 fn expr_cost(expr: &Expr) -> u64 {
     match expr {
-        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
-        | Expr::String(_) | Expr::Term => 1,
+        Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
+        | Expr::Quoted(_) | Expr::Term => 1,
         Expr::Identifier(_) | Expr::PriorState(_) => 1,
         Expr::Add(_, _) | Expr::Sub(_, _) | Expr::Mul(_, _)
         | Expr::Div(_, _) | Expr::Mod(_, _) => 3,
@@ -3755,8 +3755,8 @@ fn count_calls(expr: &Expr, intrinsics: &mut u64, includes_io: &mut bool) {
 pub fn is_proven_terminable(expr: &Expr) -> bool {
     match expr {
         // Literals — trivially 0 cycles
-        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
-        | Expr::String(_) | Expr::Term | Expr::Ellipsis => true,
+        Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
+        | Expr::Quoted(_) | Expr::Term | Expr::Ellipsis => true,
         Expr::Literal(_) => true,
         // Identifiers — check via known definitions (handled at call site)
         Expr::Identifier(_) => false, // cannot prove externally
@@ -3865,17 +3865,17 @@ pub fn estimate_body_cost(
 fn extract_bound_from_postcondition(post: &Expr) -> Option<u64> {
     // x == N
     if let Expr::Eq(left, right) = post {
-        if let (Expr::Identifier(_), Expr::Integer(n)) = (left.as_ref(), right.as_ref()) {
+        if let (Expr::Identifier(_), Expr::Decimal(n)) = (left.as_ref(), right.as_ref()) {
             if *n >= 0 { return Some(*n as u64); }
         }
-        if let (Expr::Integer(n), Expr::Identifier(_)) = (left.as_ref(), right.as_ref()) {
+        if let (Expr::Decimal(n), Expr::Identifier(_)) = (left.as_ref(), right.as_ref()) {
             if *n >= 0 { return Some(*n as u64); }
         }
     }
     // x >= N && x <= N (a range constraint)
     if let Expr::And(left, right) = post {
         if let (Expr::Ge(a, n1), Expr::Le(b, n2)) = (left.as_ref(), right.as_ref()) {
-            if let (Expr::Integer(v1), Expr::Integer(v2)) = (n1.as_ref(), n2.as_ref()) {
+            if let (Expr::Decimal(v1), Expr::Decimal(v2)) = (n1.as_ref(), n2.as_ref()) {
                 if *v1 >= 0 && *v2 >= 0 && v1 == v2 {
                     return Some(*v1 as u64);
                 }
@@ -4199,10 +4199,10 @@ fn is_decreasing_expr(expr: &Expr, param_name: &str) -> bool {
     match expr {
         // n - 1
         Expr::Sub(l, r) if matches!(l.as_ref(), Expr::Identifier(n) if n == param_name)
-            && matches!(r.as_ref(), Expr::Integer(i) if *i == 1) => true,
+            && matches!(r.as_ref(), Expr::Decimal(i) if *i == 1) => true,
         // n - literal > 0
         Expr::Sub(l, r) if matches!(l.as_ref(), Expr::Identifier(n) if n == param_name)
-            && matches!(r.as_ref(), Expr::Integer(i) if *i > 0) => true,
+            && matches!(r.as_ref(), Expr::Decimal(i) if *i > 0) => true,
         // direct identifier (n) — not decreasing, but allowed as fallback
         Expr::Identifier(n) if n == param_name => true,
         _ => false,
@@ -4215,8 +4215,8 @@ mod tests {
 
     #[test]
     fn test_is_proven_terminable_literal() {
-        assert!(is_proven_terminable(&Expr::Integer(42)));
-        assert!(is_proven_terminable(&Expr::String("hello".to_string())));
+        assert!(is_proven_terminable(&Expr::Decimal(42)));
+        assert!(is_proven_terminable(&Expr::Quoted("hello".into())));
         assert!(is_proven_terminable(&Expr::Bool(true)));
         assert!(!is_proven_terminable(&Expr::Identifier("foo".to_string())));
     }
@@ -4224,10 +4224,10 @@ mod tests {
     #[test]
     fn test_is_proven_terminable_within_rejected() {
         let within = Expr::Within {
-            body: Box::new(Expr::Integer(1)),
+            body: Box::new(Expr::Decimal(1)),
             bound: 10, unit: TimeUnit::Cycles,
             retries: 0,
-            fallback: Box::new(Expr::Integer(0)),
+            fallback: Box::new(Expr::Decimal(0)),
         };
         assert!(!is_proven_terminable(&within));
     }
@@ -4243,8 +4243,8 @@ mod tests {
     #[test]
     fn test_estimate_cost_simple_body() {
         let body = vec![
-            Statement::Let { name: "x".to_string(), expr: Some(Expr::Integer(10)), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
-            Statement::Let { name: "y".to_string(), expr: Some(Expr::Add(Box::new(Expr::Integer(5)), Box::new(Expr::Integer(3)))), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+            Statement::Let { name: "x".to_string(), expr: Some(Expr::Decimal(10)), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+            Statement::Let { name: "y".to_string(), expr: Some(Expr::Add(Box::new(Expr::Decimal(5)), Box::new(Expr::Decimal(3)))), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
             Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
         ];
         let contract = Contract {
@@ -4263,17 +4263,17 @@ mod tests {
     #[test]
     fn test_estimate_cost_with_convergence() {
         let body = vec![
-            Statement::Let { name: "x".to_string(), expr: Some(Expr::Integer(0)), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+            Statement::Let { name: "x".to_string(), expr: Some(Expr::Decimal(0)), ty: None, address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
             Statement::Assignment {
                 lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Add(Box::new(Expr::Integer(1)), Box::new(Expr::Identifier("x".to_string()))),
+                expr: Expr::Add(Box::new(Expr::Decimal(1)), Box::new(Expr::Identifier("x".to_string()))),
                 timeout: None, modifiers: vec![],
             },
             Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
         ];
         let contract = Contract {
             pre_condition: Expr::Bool(true),
-            post_condition: Expr::Eq(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Integer(100))),
+            post_condition: Expr::Eq(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100))),
             watchdog: None, span: None,
         };
         let cost = estimate_body_cost(&body, &contract);
@@ -4991,7 +4991,7 @@ mod kani_tests_fast {
     fn verify_eval_numeric_old_integer() {
         let exec = make_executor();
         let state = SymbolicState::new();
-        let expr = Expr::Integer(99);
+        let expr = Expr::Decimal(99);
         let result = exec.eval_numeric(&expr, &state);
         assert_eq!(result, Some(99));
     }
@@ -5078,7 +5078,7 @@ mod kani_full_tests {
         let engine = make_engine();
         let expr = Expr::Gt(
             Box::new(Expr::Identifier("x".to_string())),
-            Box::new(Expr::Integer(5)),
+            Box::new(Expr::Decimal(5)),
         );
         let result = engine.extract_bound(&expr);
         assert_eq!(result, Some(("x".to_string(), "gt", 5)));
@@ -5088,7 +5088,7 @@ mod kani_full_tests {
     fn verify_extract_eq_pair_old_style() {
         let engine = make_engine();
         let a = Expr::Identifier("x".to_string());
-        let b = Expr::Integer(42);
+        let b = Expr::Decimal(42);
         let result = engine.extract_eq_pair(&a, &b);
         assert_eq!(result, Some(("x".to_string(), 42)));
     }

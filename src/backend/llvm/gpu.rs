@@ -237,8 +237,8 @@ fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
             collect_unsafe_ffi(obj, reasons);
         }
         // Terminals — no sub-expressions
-        Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
-        | Expr::String(_) | Expr::Term | Expr::Identifier(_)
+        Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
+        | Expr::Quoted(_) | Expr::Term | Expr::Identifier(_)
         | Expr::AddrOf(_) | Expr::PriorState(_)
         | Expr::Ellipsis | Expr::TypeRef(_) => {}
         // Shared memory — always allowed in GPU kernels
@@ -741,7 +741,7 @@ fn emit_spirv_expr(
             ir.push_str(&format!("{}{} = bitcast i32 {} to float\n", indent, reg, hex));
             reg
         }
-        Expr::Integer(n) => format!("{}", n),
+        Expr::Decimal(n) => format!("{}", n),
         Expr::Bool(b) => {
             if *b { "1".to_string() } else { "0".to_string() }
         }
@@ -1153,7 +1153,7 @@ mod tests {
                 lhs: Expr::Identifier("data".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("data".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None,
                 modifiers: vec![],
@@ -1194,7 +1194,7 @@ mod tests {
     #[test]
     fn test_extract_kernel_creates_name() {
         let body = vec![];
-        let kernel = extract_kernel("test_loop", &body, Expr::Integer(100), &[], HashMap::new());
+        let kernel = extract_kernel("test_loop", &body, Expr::Decimal(100), &[], HashMap::new());
         assert_eq!(kernel.name, "kernel_test_loop");
     }
 
@@ -1203,19 +1203,19 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("out".to_string()),
-                expr: Expr::Integer(42),
+                expr: Expr::Decimal(42),
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("write_test", &body, Expr::Integer(10), &[], HashMap::new());
+        let kernel = extract_kernel("write_test", &body, Expr::Decimal(10), &[], HashMap::new());
         assert!(kernel.write_fields.contains(&"out".to_string()));
     }
 
     #[test]
     fn test_emit_spirv_module_has_correct_triple() {
         let body = vec![];
-        let kernel = extract_kernel("empty", &body, Expr::Integer(1), &[], HashMap::new());
+        let kernel = extract_kernel("empty", &body, Expr::Decimal(1), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("spirv64-unknown-unknown"));
         assert!(ir.contains("kernel_empty"));
@@ -1227,12 +1227,12 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Integer(42),
+                expr: Expr::Decimal(42),
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("assign_test", &body, Expr::Integer(10), &[], HashMap::new());
+        let kernel = extract_kernel("assign_test", &body, Expr::Decimal(10), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("getelementptr"), "should emit GEP for field access");
         assert!(!ir.contains("TODO"), "should not contain placeholder comments");
@@ -1245,13 +1245,13 @@ mod tests {
                 lhs: Expr::Identifier("x".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("arith_test", &body, Expr::Integer(10), &[], HashMap::new());
+        let kernel = extract_kernel("arith_test", &body, Expr::Decimal(10), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("add i64"), "should emit integer add");
         assert!(!ir.contains("TODO"), "should not contain placeholder comments");
@@ -1265,13 +1265,13 @@ mod tests {
                 lhs: Expr::Identifier("x".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("y".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("cross_field", &body, Expr::Integer(10), &[], HashMap::new());
+        let kernel = extract_kernel("cross_field", &body, Expr::Decimal(10), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         // Should have two separate load instructions (x and y are different fields)
         assert!(ir.contains("%lv_0"), "should load first field (y) into register lv_0");
@@ -1314,7 +1314,7 @@ mod tests {
         let body = vec![
             Statement::Expression(Expr::IntrinsicCall {
                 intrinsic: Intrinsic::UserDefined("read_file".to_string()),
-                args: vec![Expr::String("test".to_string())],
+                args: vec![Expr::Quoted("test".into())],
             }),
         ];
         let result = check_eligibility(&body);
@@ -1329,7 +1329,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Call("read_file".to_string(), vec![Expr::String("foo.txt".to_string())]),
+                expr: Expr::Call("read_file".to_string(), vec![Expr::Quoted("foo.txt".into())]),
                 timeout: None,
                 modifiers: vec![],
             },
@@ -1349,7 +1349,7 @@ mod tests {
                 statements: vec![
                     Statement::Expression(Expr::IntrinsicCall {
                         intrinsic: Intrinsic::UserDefined("read_file".to_string()),
-                        args: vec![Expr::String("test".to_string())],
+                        args: vec![Expr::Quoted("test".into())],
                     }),
                 ],
                 metadata: HashMap::new(),
@@ -1368,13 +1368,13 @@ mod tests {
                 lhs: Expr::Identifier("r".to_string()),
                 expr: Expr::IntrinsicCall {
                     intrinsic: Intrinsic::GetGlobalId,
-                    args: vec![Expr::Integer(0)],
+                    args: vec![Expr::Decimal(0)],
                 },
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("gtid_test", &body, Expr::Integer(100), &[], HashMap::new());
+        let kernel = extract_kernel("gtid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("call i64 @_Z13get_global_idj(i32 0)"),
             "SPIR-V IR should contain get_global_id call");
@@ -1387,13 +1387,13 @@ mod tests {
                 lhs: Expr::Identifier("r".to_string()),
                 expr: Expr::IntrinsicCall {
                     intrinsic: Intrinsic::GetLocalId,
-                    args: vec![Expr::Integer(1)],
+                    args: vec![Expr::Decimal(1)],
                 },
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("ltid_test", &body, Expr::Integer(100), &[], HashMap::new());
+        let kernel = extract_kernel("ltid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("call i64 @_Z12get_local_idj(i32 1)"),
             "SPIR-V IR should contain get_local_id call");
@@ -1406,13 +1406,13 @@ mod tests {
                 lhs: Expr::Identifier("r".to_string()),
                 expr: Expr::IntrinsicCall {
                     intrinsic: Intrinsic::GetGroupId,
-                    args: vec![Expr::Integer(0)],
+                    args: vec![Expr::Decimal(0)],
                 },
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("grid_test", &body, Expr::Integer(100), &[], HashMap::new());
+        let kernel = extract_kernel("grid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("call i64 @_Z12get_group_idj(i32 0)"),
             "SPIR-V IR should contain get_group_id call");
@@ -1426,7 +1426,7 @@ mod tests {
                 args: vec![],
             }),
         ];
-        let kernel = extract_kernel("bar_test", &body, Expr::Integer(100), &[], HashMap::new());
+        let kernel = extract_kernel("bar_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("call void @_Z8barrierj(i32 0)"),
             "SPIR-V IR should contain barrier call");
@@ -1435,7 +1435,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_all_declares_present() {
         let body = vec![];
-        let kernel = extract_kernel("decl_test", &body, Expr::Integer(1), &[], HashMap::new());
+        let kernel = extract_kernel("decl_test", &body, Expr::Decimal(1), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("@_Z13get_global_idj"), "should declare get_global_id");
         assert!(ir.contains("@_Z12get_local_idj"), "should declare get_local_id");
@@ -1454,7 +1454,7 @@ mod tests {
         let body = vec![
             Statement::Expression(Expr::IntrinsicCall {
                 intrinsic: Intrinsic::GetGlobalId,
-                args: vec![Expr::Integer(0)],
+                args: vec![Expr::Decimal(0)],
             }),
         ];
         let result = check_eligibility(&body);
@@ -1502,7 +1502,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("float_add", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("float_add", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("load float"), "should load float field");
         assert!(ir.contains("fadd float"), "should emit fadd float");
@@ -1533,7 +1533,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("float_ops", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("float_ops", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("fmul float"), "should emit fmul");
         assert!(ir.contains("fsub float"), "should emit fsub");
@@ -1553,7 +1553,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("fneg", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("fneg", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("fneg float"), "should emit fneg for float negation");
         assert!(!ir.contains("sub i64"), "should not use sub i64 for float");
@@ -1576,7 +1576,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("float_cmp", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("float_cmp", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("fcmp olt float"), "should emit fcmp olt");
         assert!(ir.contains("zext i1"), "should zext comparison result");
@@ -1598,7 +1598,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("sin_test", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("sin_test", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("call float @llvm.sin.f32"), "should emit sin intrinsic");
     }
@@ -1615,7 +1615,7 @@ mod tests {
                 lhs: Expr::Identifier("x".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None,
                 modifiers: vec![],
@@ -1630,7 +1630,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("mixed_int_float", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("mixed_int_float", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("add i64"), "should have integer add");
         assert!(ir.contains("fmul float"), "should have float mul");
@@ -1668,13 +1668,13 @@ mod tests {
                 lhs: Expr::Identifier("t".to_string()),
                 expr: Expr::Eq(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(42)),
+                    Box::new(Expr::Decimal(42)),
                 ),
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("int_cmp", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("int_cmp", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("icmp slt"), "should have signed less-than");
         assert!(ir.contains("icmp sgt"), "should have signed greater-than");
@@ -1691,7 +1691,7 @@ mod tests {
                 lhs: Expr::Identifier("q".to_string()),
                 expr: Expr::Div(
                     Box::new(Expr::Identifier("q".to_string())),
-                    Box::new(Expr::Integer(3)),
+                    Box::new(Expr::Decimal(3)),
                 ),
                 timeout: None,
                 modifiers: vec![],
@@ -1700,13 +1700,13 @@ mod tests {
                 lhs: Expr::Identifier("r".to_string()),
                 expr: Expr::Mod(
                     Box::new(Expr::Identifier("r".to_string())),
-                    Box::new(Expr::Integer(7)),
+                    Box::new(Expr::Decimal(7)),
                 ),
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("div_mod", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("div_mod", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("sdiv i64"), "should have signed div");
         assert!(ir.contains("srem i64"), "should have signed remainder");
@@ -1724,7 +1724,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("float_lit", &body, Expr::Integer(10), &[], ft);
+        let kernel = extract_kernel("float_lit", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("bitcast i32"), "float literal should use bitcast");
         assert!(!ir.contains("bitcast i32 i32"), "bitcast should not have double i32 type");
@@ -1743,13 +1743,13 @@ mod tests {
                 lhs: Expr::Identifier("y".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("multi_buf", &body, Expr::Integer(100), &[], ft);
+        let kernel = extract_kernel("multi_buf", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("%in_buf"), "kernel should have in_buf param");
         assert!(ir.contains("%out_buf"), "kernel should have out_buf param");
@@ -1769,13 +1769,13 @@ mod tests {
                 lhs: Expr::Identifier("y".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("rw_test", &body, Expr::Integer(100), &[], ft);
+        let kernel = extract_kernel("rw_test", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
         // x is read-only → load from in_buf
         assert!(ir.contains("getelementptr i8, ptr %base_in"),
@@ -1802,7 +1802,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("shmem_test", &body, Expr::Integer(10), &[], HashMap::new());
+        let kernel = extract_kernel("shmem_test", &body, Expr::Decimal(10), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("addrspace(3)"), "should declare addrspace(3) global");
         assert!(ir.contains("[256 x i64]"), "should declare [256 x i64] array");
@@ -1824,7 +1824,7 @@ mod tests {
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("shmem_cast", &body, Expr::Integer(10), &[], HashMap::new());
+        let kernel = extract_kernel("shmem_cast", &body, Expr::Decimal(10), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("addrspacecast"), "should emit addrspacecast");
         assert!(ir.contains("ptrtoint"), "should convert to i64 pointer");
@@ -1861,7 +1861,7 @@ mod tests {
                 lhs: Expr::Identifier("x".to_string()),
                 expr: Expr::IntrinsicCall {
                     intrinsic: Intrinsic::GetGlobalId,
-                    args: vec![Expr::Integer(0)],
+                    args: vec![Expr::Decimal(0)],
                 },
                 timeout: None,
                 modifiers: vec![],
@@ -1870,13 +1870,13 @@ mod tests {
                 lhs: Expr::Identifier("y".to_string()),
                 expr: Expr::IntrinsicCall {
                     intrinsic: Intrinsic::GetGlobalId,
-                    args: vec![Expr::Integer(1)],
+                    args: vec![Expr::Decimal(1)],
                 },
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("grid2d", &body, Expr::Integer(100), &[], ft);
+        let kernel = extract_kernel("grid2d", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("call i64 @_Z13get_global_idj(i32 1)"),
             "2D kernel should call get_global_id(1)");
@@ -1894,13 +1894,13 @@ mod tests {
                 lhs: Expr::Identifier("x".to_string()),
                 expr: Expr::IntrinsicCall {
                     intrinsic: Intrinsic::GetGlobalId,
-                    args: vec![Expr::Integer(0)],
+                    args: vec![Expr::Decimal(0)],
                 },
                 timeout: None,
                 modifiers: vec![],
             },
         ];
-        let kernel = extract_kernel("grid1d", &body, Expr::Integer(100), &[], ft);
+        let kernel = extract_kernel("grid1d", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
         assert!(ir.contains("call i64 @_Z13get_global_idj(i32 0)"),
             "1D kernel should have get_global_id(0)");

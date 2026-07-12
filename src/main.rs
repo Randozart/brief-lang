@@ -628,8 +628,8 @@ fn run_selfhost(
     let call_expr = ast::Expr::Call(
         "compile_file".to_string(),
         vec![
-            ast::Expr::String(file_path.to_string()),
-            ast::Expr::String(backend.to_string()),
+            ast::Expr::Quoted(file_path.to_string().into()),
+            ast::Expr::Quoted(backend.to_string().into()),
             ast::Expr::Bool(verbose),
         ],
     );
@@ -2391,18 +2391,18 @@ fn resolve_single_deferred_literal(
         None => {
             eprintln!("warning: deferred literal '{}' for type '{}' has no parse handler, using 0",
                       text, type_name);
-            return ast::Expr::Integer(0);
+            return ast::Expr::Decimal(0);
         }
     };
     let mut interp = interpreter::Interpreter::new();
     interp.load_program(program);
     interp.current_expected_type = Some(ast::Type::Custom(type_name.to_string()));
-    let call_expr = ast::Expr::Call(fn_name, vec![ast::Expr::String(text.to_string())]);
+    let call_expr = ast::Expr::Call(fn_name, vec![ast::Expr::Quoted(text.to_string().into())]);
     match interp.eval_expr(&call_expr) {
         Ok(value) => value_to_expr(&value, text, type_name),
         Err(e) => {
             eprintln!("warning: deferred literal '{}': handler failed: {:?}, using 0", text, e);
-            ast::Expr::Integer(0)
+            ast::Expr::Decimal(0)
         }
     }
 }
@@ -2421,14 +2421,14 @@ fn lookup_parse_handler(type_name: &str, tu: &type_universe::TypeUniverse) -> Op
 fn value_to_expr(value: &interpreter::Value, text: &str, type_name: &str) -> ast::Expr {
     let interpreter::Value::Bits(b) = value else {
         eprintln!("warning: deferred literal '{}': handler returned non-Bits, using 0", text);
-        return ast::Expr::Integer(0);
+        return ast::Expr::Decimal(0);
     };
     match type_name {
         "Int" | "U32" | "U64" | "I32" | "I64" | "Size" => {
             let mut arr = [0u8; 8];
             let copy_len = b.len().min(8);
             arr[..copy_len].copy_from_slice(&b[..copy_len]);
-            ast::Expr::Integer(i64::from_le_bytes(arr))
+            ast::Expr::Decimal(i64::from_le_bytes(arr))
         }
         "Float" | "Double" | "F32" | "F64" => {
             if b.len() >= 8 {
@@ -2452,7 +2452,7 @@ fn value_to_expr(value: &interpreter::Value, text: &str, type_name: &str) -> ast
         }
         _ => {
             // Default: treat as string bytes
-            ast::Expr::String(String::from_utf8_lossy(b).to_string())
+            ast::Expr::Quoted(b.clone())
         }
     }
 }

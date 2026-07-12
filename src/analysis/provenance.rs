@@ -292,7 +292,7 @@ mod tests {
     fn test_extract_ptr_assign_non_ptr_returns_none() {
         let stmt = Statement::Assignment {
             lhs: Expr::Identifier("x".to_string()),
-            expr: Expr::Integer(42),
+            expr: Expr::Decimal(42),
             timeout: None,
             modifiers: vec![],
         };
@@ -314,7 +314,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Integer(42),
+                expr: Expr::Decimal(42),
                 timeout: None,
                 modifiers: vec![],
             },

@@ -108,7 +108,7 @@ impl ParameterRanges {
     ) {
         match (left, right) {
             // var <op> lit
-            (Expr::Identifier(name), Expr::Integer(val)) => {
+            (Expr::Identifier(name), Expr::Decimal(val)) => {
                 if let Some(range) = ranges.get_mut(name) {
                     if op_is_gt {
                         // var > lit or var >= lit → LOWER bound
@@ -126,7 +126,7 @@ impl ParameterRanges {
                 }
             }
             // lit <op> var
-            (Expr::Integer(val), Expr::Identifier(name)) => {
+            (Expr::Decimal(val), Expr::Identifier(name)) => {
                 if let Some(range) = ranges.get_mut(name) {
                     if op_is_gt {
                         // lit > var → var < lit → UPPER bound
@@ -290,7 +290,7 @@ mod tests {
             items: vec![make_txn_with_precondition(
                 "f",
                 &["x"],
-                Expr::Gt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Integer(0))),
+                Expr::Gt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0))),
             )],
             comments: vec![],
             reactor_speed: None,
@@ -316,7 +316,7 @@ mod tests {
             items: vec![make_txn_with_precondition(
                 "f",
                 &["x"],
-                Expr::Le(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Integer(10))),
+                Expr::Le(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(10))),
             )],
             comments: vec![],
             reactor_speed: None,
@@ -343,8 +343,8 @@ mod tests {
                 "f",
                 &["x"],
                 Expr::And(
-                    Box::new(Expr::Gt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Integer(0)))),
-                    Box::new(Expr::Lt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Integer(100)))),
+                    Box::new(Expr::Gt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0)))),
+                    Box::new(Expr::Lt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100)))),
                 ),
             )],
             comments: vec![],

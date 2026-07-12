@@ -224,7 +224,7 @@ pub(crate) fn json_value_to_value(v: JsonValue) -> Value {
                 Value::Bits(crate::interpreter::i64_to_bits(0))
             }
         }
-        JsonValue::String(s) => Value::Bits(s.as_bytes().to_vec()),
+        JsonValue::String(s) => Value::Bits(s.to_string().into()),
         JsonValue::Bool(b) => Value::Bits(vec![if b { 1u8 } else { 0u8 }]),
         JsonValue::Array(arr) => Value::List(arr.into_iter().map(json_value_to_value).collect()),
         JsonValue::Object(map) => {
@@ -2041,7 +2041,7 @@ impl Interpreter {
     fn rewrite_identifiers(&self, expr: &Expr, uid: usize, cell_name: &str) -> Expr {
         let prefix = |name: &str| -> String { format!("{}${}.{}", cell_name, uid, name) };
         match expr {
-            Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::String(_) | Expr::RegexLiteral(_)
+            Expr::Decimal(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Quoted(_) | Expr::RegexLiteral(_)
                 | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Ellipsis
                 | Expr::SharedMem(_) => expr.clone(),
             Expr::Literal(lit) => Expr::Literal(lit.clone()),
@@ -3073,11 +3073,11 @@ impl Interpreter {
             // Pattern B: delegate to feature struct
             Expr::Literal(lit) => lit.evaluate(self, &ExprDispatch),
             // Legacy scalar variants — keep inline until Phase 14 (variant removal)
-            Expr::Integer(v) => Ok(Value::Bits(i64_to_bits(*v))),
+            Expr::Decimal(v) => Ok(Value::Bits(i64_to_bits(*v))),
             Expr::IntegerSuffixed(v, _) => Ok(Value::Bits(i64_to_bits(*v))),
             Expr::Float(v) => Ok(Value::Bits(f64_to_bits(*v))),
             Expr::Float64(v) => Ok(Value::Bits(f64_to_bits(*v))),
-            Expr::String(v) => Ok(Value::Bits(v.as_bytes().to_vec())),
+            Expr::Quoted(v) => Ok(Value::Bits(v.clone())),
             Expr::RegexLiteral(v) => {
                 match crate::analysis::dfa::compile_to_dfa(v) {
                     Ok(dfa) => Ok(Value::Regex(dfa)),
@@ -3147,7 +3147,7 @@ impl Interpreter {
             Expr::Call(name, args) => {
                 // Check if this function has a default watchdog from frgn import
                 if let Some((bound, unit, retries, fallback_opt)) = self.frgn_watchdogs.get(name) {
-                    let fallback = fallback_opt.as_ref().cloned().unwrap_or(Expr::Integer(0));
+                    let fallback = fallback_opt.as_ref().cloned().unwrap_or(Expr::Decimal(0));
                     let within = Expr::Within {
                         body: Box::new(Expr::Call(name.clone(), args.clone())),
                         bound: *bound,
@@ -5263,7 +5263,7 @@ impl Interpreter {
                         let parts: Vec<Value> = if delim.is_empty() {
                             s.chars().map(|c| Value::Bits(c.to_string().into_bytes())).collect()
                         } else {
-                            s.split(&delim).map(|p| Value::Bits(p.as_bytes().to_vec())).collect()
+                            s.split(&delim).map(|p| Value::Bits(p.to_string().into())).collect()
                         };
                         Ok(Value::List(parts))
                     }
@@ -6660,7 +6660,7 @@ impl Interpreter {
                     }
                 }
             }
-            return Ok(Value::Bits(s.as_bytes().to_vec()));
+            return Ok(Value::Bits(s.to_string().into()));
         }
 
         // Check for DbvlTable conversion to collection
@@ -6982,8 +6982,8 @@ fn try_extract_key_eq(expr: &crate::ast::Expr, key_index: usize) -> Option<Strin
         if is_key_field {
             // Extract literal from right side
             match right.as_ref() {
-                crate::ast::Expr::String(s) => return Some(s.clone()),
-                crate::ast::Expr::Integer(n) => return Some(n.to_string()),
+                crate::ast::Expr::Quoted(s) => return Some(String::from_utf8_lossy(s).to_string()),
+                crate::ast::Expr::Decimal(n) => return Some(n.to_string()),
                 _ => {}
             }
         }
@@ -7237,7 +7237,7 @@ pub(crate) fn string_split_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
     if let Value::Bits(s) = &args[0] {
         let s_str = String::from_utf8_lossy(&s).to_string(); let parts: Vec<Value> = s_str.split(char::is_whitespace)
             .filter(|p| !p.is_empty())
-            .map(|p| Value::Bits(p.as_bytes().to_vec()))
+            .map(|p| Value::Bits(p.to_string().into()))
             .collect();
         Ok(Value::List(parts))
     } else {
@@ -7740,7 +7740,7 @@ mod tests {
         let expr = Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
-            value: Some(Box::new(Expr::Integer(42))),
+            value: Some(Box::new(Expr::Decimal(42))),
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::List(vec![Value::Bits(i64_to_bits(42))]));
@@ -7753,7 +7753,7 @@ mod tests {
         let push = |v: i64| Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
-            value: Some(Box::new(Expr::Integer(v))),
+            value: Some(Box::new(Expr::Decimal(v))),
         };
         i.eval_expr(&push(1)).unwrap();
         i.eval_expr(&push(2)).unwrap();
@@ -7770,7 +7770,7 @@ mod tests {
         i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
-            value: Some(Box::new(Expr::Integer(99))),
+            value: Some(Box::new(Expr::Decimal(99))),
         }).unwrap();
         // Then pop it
         let popped = i.eval_expr(&Expr::ArrowMut {
@@ -7789,12 +7789,12 @@ mod tests {
         i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
-            value: Some(Box::new(Expr::Integer(10))),
+            value: Some(Box::new(Expr::Decimal(10))),
         }).unwrap();
         i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
             index: Box::new(Expr::Term),
-            value: Some(Box::new(Expr::Integer(20))),
+            value: Some(Box::new(Expr::Decimal(20))),
         }).unwrap();
         // Discard last
         let discard = Expr::ArrowDiscard {
@@ -7813,14 +7813,14 @@ mod tests {
             i.eval_expr(&Expr::ArrowMut {
                 dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                 index: Box::new(Expr::Term),
-                value: Some(Box::new(Expr::Integer(*v))),
+                value: Some(Box::new(Expr::Decimal(*v))),
             }).unwrap();
         }
         // Insert 15 at index 1: [10, 15, 20, 30]
         i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
-            index: Box::new(Expr::Integer(1)),
-            value: Some(Box::new(Expr::Integer(15))),
+            index: Box::new(Expr::Decimal(1)),
+            value: Some(Box::new(Expr::Decimal(15))),
         }).unwrap();
         assert_eq!(i.state.get("list"), Some(&Value::List(vec![
             Value::Bits(i64_to_bits(10)), Value::Bits(i64_to_bits(15)), Value::Bits(i64_to_bits(20)), Value::Bits(i64_to_bits(30))
@@ -7834,13 +7834,13 @@ mod tests {
             i.eval_expr(&Expr::ArrowMut {
                 dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
                 index: Box::new(Expr::Term),
-                value: Some(Box::new(Expr::Integer(*v))),
+                value: Some(Box::new(Expr::Decimal(*v))),
             }).unwrap();
         }
         // Pop at index 1 → removes 20
         let popped = i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Pop, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
-            index: Box::new(Expr::Integer(1)),
+            index: Box::new(Expr::Decimal(1)),
             value: None,
         }).unwrap();
         assert_eq!(popped, Value::Bits(i64_to_bits(20)));
@@ -7864,7 +7864,7 @@ mod tests {
                 Box::new(Expr::AddrOf(Box::new(Expr::Identifier("queue".to_string())))),
                 "items".to_string(),
             )),
-            index: Box::new(Expr::Integer(0)),
+            index: Box::new(Expr::Decimal(0)),
         };
         i.eval_expr(&discard).unwrap();
         let queue = i.state.get("queue").unwrap();
@@ -7896,7 +7896,7 @@ mod tests {
 
     #[test]
     fn test_expand_coordinates() {
-        let coords = vec![SliceCoordinate::Ellipsis, SliceCoordinate::Index(Box::new(Expr::Integer(0)))];
+        let coords = vec![SliceCoordinate::Ellipsis, SliceCoordinate::Index(Box::new(Expr::Decimal(0)))];
         let expanded = Interpreter::expand_coordinates(&coords, 2).unwrap();
         assert_eq!(expanded.len(), 2);
         assert!(matches!(expanded[0], SliceCoordinate::Range { start: None, end: None }));
@@ -7905,7 +7905,7 @@ mod tests {
         assert_eq!(expanded.len(), 3);
         assert!(matches!(expanded[2], SliceCoordinate::Index(_)));
         // [0, ...] on 3D → [0, :, :]
-        let coords2 = vec![SliceCoordinate::Index(Box::new(Expr::Integer(0))), SliceCoordinate::Ellipsis];
+        let coords2 = vec![SliceCoordinate::Index(Box::new(Expr::Decimal(0))), SliceCoordinate::Ellipsis];
         let expanded = Interpreter::expand_coordinates(&coords2, 3).unwrap();
         assert_eq!(expanded.len(), 3);
         assert!(matches!(expanded[0], SliceCoordinate::Index(_)));
@@ -7914,7 +7914,7 @@ mod tests {
             &vec![SliceCoordinate::Ellipsis, SliceCoordinate::Ellipsis], 3
         ).is_err());
         // Too many explicit coords — error
-        let coords3 = vec![SliceCoordinate::Index(Box::new(Expr::Integer(0))), SliceCoordinate::Index(Box::new(Expr::Integer(1)))];
+        let coords3 = vec![SliceCoordinate::Index(Box::new(Expr::Decimal(0))), SliceCoordinate::Index(Box::new(Expr::Decimal(1)))];
         assert!(Interpreter::expand_coordinates(&coords3, 1).is_err());
     }
 
@@ -7925,8 +7925,8 @@ mod tests {
         let inner2 = Value::List(vec![Value::Bits(i64_to_bits(3)), Value::Bits(i64_to_bits(4))]);
         let matrix = Value::List(vec![inner1, inner2]);
         let coords = vec![
-            SliceCoordinate::Index(Box::new(Expr::Integer(0))),
-            SliceCoordinate::Index(Box::new(Expr::Integer(1))),
+            SliceCoordinate::Index(Box::new(Expr::Decimal(0))),
+            SliceCoordinate::Index(Box::new(Expr::Decimal(1))),
         ];
         assert_eq!(i.apply_multi_slice_coords(&matrix, &coords).unwrap(), Value::Bits(i64_to_bits(2)));
     }
@@ -7939,7 +7939,7 @@ mod tests {
         let matrix = Value::List(vec![inner1, inner2]);
         let coords = vec![
             SliceCoordinate::Range { start: None, end: None },
-            SliceCoordinate::Index(Box::new(Expr::Integer(0))),
+            SliceCoordinate::Index(Box::new(Expr::Decimal(0))),
         ];
         let result = i.apply_multi_slice_coords(&matrix, &coords).unwrap();
         match result {
@@ -7955,7 +7955,7 @@ mod tests {
         let inner2 = Value::List(vec![Value::Bits(i64_to_bits(3)), Value::Bits(i64_to_bits(4))]);
         let matrix = Value::List(vec![inner1, inner2]);
         let coords = vec![
-            SliceCoordinate::Index(Box::new(Expr::Integer(0))),
+            SliceCoordinate::Index(Box::new(Expr::Decimal(0))),
             SliceCoordinate::Range { start: None, end: None },
         ];
         let result = i.apply_multi_slice_coords(&matrix, &coords).unwrap();
@@ -7973,8 +7973,8 @@ mod tests {
         let inner3 = Value::List(vec![Value::Bits(i64_to_bits(7)), Value::Bits(i64_to_bits(8)), Value::Bits(i64_to_bits(9))]);
         let matrix = Value::List(vec![inner1, inner2, inner3]);
         let coords = vec![
-            SliceCoordinate::Range { start: Some(Box::new(Expr::Integer(0))), end: Some(Box::new(Expr::Integer(2))) },
-            SliceCoordinate::Range { start: Some(Box::new(Expr::Integer(1))), end: Some(Box::new(Expr::Integer(3))) },
+            SliceCoordinate::Range { start: Some(Box::new(Expr::Decimal(0))), end: Some(Box::new(Expr::Decimal(2))) },
+            SliceCoordinate::Range { start: Some(Box::new(Expr::Decimal(1))), end: Some(Box::new(Expr::Decimal(3))) },
         ];
         let result = i.apply_multi_slice_coords(&matrix, &coords).unwrap();
         match result {
@@ -8197,7 +8197,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8220,7 +8220,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8257,7 +8257,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8322,7 +8322,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8345,7 +8345,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8368,7 +8368,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8418,7 +8418,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8457,7 +8457,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8481,7 +8481,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8505,7 +8505,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8531,7 +8531,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8556,7 +8556,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8579,7 +8579,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8602,7 +8602,7 @@ mod tests {
             expr: Expr::Block(
                 vec![Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("flag".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 }],
@@ -8733,7 +8733,7 @@ mod tests {
                 MatchArm {
                     pattern: MatchPattern::Wildcard,
                     guard: None,
-                    body: Box::new(Expr::Integer(0)),
+                    body: Box::new(Expr::Decimal(0)),
                 },
             ],
         };
@@ -8759,7 +8759,7 @@ mod tests {
                 MatchArm {
                     pattern: MatchPattern::Wildcard,
                     guard: None,
-                    body: Box::new(Expr::Integer(0)),
+                    body: Box::new(Expr::Decimal(0)),
                 },
             ],
         };
@@ -8780,12 +8780,12 @@ mod tests {
                         fields: vec![Pattern::LitInt(42)],
                     },
                     guard: None,
-                    body: Box::new(Expr::Integer(1)),
+                    body: Box::new(Expr::Decimal(1)),
                 },
                 MatchArm {
                     pattern: MatchPattern::Wildcard,
                     guard: None,
-                    body: Box::new(Expr::Integer(0)),
+                    body: Box::new(Expr::Decimal(0)),
                 },
             ],
         };
@@ -8806,12 +8806,12 @@ mod tests {
                         fields: vec![Pattern::LitInt(42)],
                     },
                     guard: None,
-                    body: Box::new(Expr::Integer(1)),
+                    body: Box::new(Expr::Decimal(1)),
                 },
                 MatchArm {
                     pattern: MatchPattern::Wildcard,
                     guard: None,
-                    body: Box::new(Expr::Integer(0)),
+                    body: Box::new(Expr::Decimal(0)),
                 },
             ],
         };
@@ -8843,7 +8843,7 @@ mod tests {
                 MatchArm {
                     pattern: MatchPattern::Wildcard,
                     guard: None,
-                    body: Box::new(Expr::Integer(0)),
+                    body: Box::new(Expr::Decimal(0)),
                 },
             ],
         };
@@ -8861,7 +8861,7 @@ mod tests {
                 MatchArm {
                     pattern: MatchPattern::Wildcard,
                     guard: None,
-                    body: Box::new(Expr::Integer(99)),
+                    body: Box::new(Expr::Decimal(99)),
                 },
             ],
         };
@@ -8899,7 +8899,7 @@ mod tests {
                 MatchArm {
                     pattern: MatchPattern::Wildcard,
                     guard: None,
-                    body: Box::new(Expr::Integer(0)),
+                    body: Box::new(Expr::Decimal(0)),
                 },
             ],
         };
@@ -8937,7 +8937,7 @@ mod tests {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("result".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("result".to_string())),
-                        Box::new(Expr::Integer(1)),
+                        Box::new(Expr::Decimal(1)),
                     ),
                     timeout: None,
                     modifiers: vec![],
@@ -8946,7 +8946,7 @@ mod tests {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("i".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("i".to_string())),
-                        Box::new(Expr::Integer(1)),
+                        Box::new(Expr::Decimal(1)),
                     ),
                     timeout: None,
                     modifiers: vec![],
@@ -8972,9 +8972,9 @@ mod tests {
         };
         i.callable_txns.insert("count_up".to_string(), txn);
         let result = i.eval_expr(&Expr::Call("count_up".to_string(), vec![
-            Expr::Integer(5),
-            Expr::Integer(0),
-            Expr::Integer(0),
+            Expr::Decimal(5),
+            Expr::Decimal(0),
+            Expr::Decimal(0),
         ])).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(5)));
     }
@@ -9003,7 +9003,7 @@ mod tests {
             body: vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("result".to_string()))),
-                    expr: Expr::Integer(99),
+                    expr: Expr::Decimal(99),
                     timeout: None,
                     modifiers: vec![],
                 },
@@ -9029,9 +9029,9 @@ mod tests {
         i.callable_txns.insert("noop".to_string(), txn);
         // pre is i < n, but i=5, n=3 → false, so body never runs
         let result = i.eval_expr(&Expr::Call("noop".to_string(), vec![
-            Expr::Integer(3),
-            Expr::Integer(0),
-            Expr::Integer(5),
+            Expr::Decimal(3),
+            Expr::Decimal(0),
+            Expr::Decimal(5),
         ])).unwrap();
         assert_eq!(result, Value::Void);
     }
@@ -9047,11 +9047,11 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Lt(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(10)),
+                    Box::new(Expr::Decimal(10)),
                 ),
                 post_condition: Expr::Eq(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(10)),
+                    Box::new(Expr::Decimal(10)),
                 ),
                 watchdog: None,
                 span: None,
@@ -9061,7 +9061,7 @@ mod tests {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("x".to_string())),
-                        Box::new(Expr::Integer(1)),
+                        Box::new(Expr::Decimal(1)),
                     ),
                     timeout: None,
                     modifiers: vec![],
@@ -9088,7 +9088,7 @@ mod tests {
         i.callable_txns.insert("mutate".to_string(), txn);
         i.state.insert("outer".to_string(), Value::Bits(i64_to_bits(42)));
         let result = i.eval_expr(&Expr::Call("mutate".to_string(), vec![
-            Expr::Integer(0),
+            Expr::Decimal(0),
         ])).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(10)));
         // outer variable should still be intact
@@ -9106,8 +9106,8 @@ mod tests {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
             index: Box::new(Expr::Term),
             value: Some(Box::new(Expr::Tuple(vec![
-                Expr::String("a".to_string()),
-                Expr::Integer(1),
+                Expr::Quoted("a".into()),
+                Expr::Decimal(1),
             ]))),
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9124,8 +9124,8 @@ mod tests {
         // &m[key] <- value
         let expr = Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
-            index: Box::new(Expr::String("b".to_string())),
-            value: Some(Box::new(Expr::Integer(2))),
+            index: Box::new(Expr::Quoted("b".into())),
+            value: Some(Box::new(Expr::Decimal(2))),
         };
         i.eval_expr(&expr).unwrap();
         match i.state.get("m").unwrap() {
@@ -9143,7 +9143,7 @@ mod tests {
         // value <- &m[key]
         let popped = i.eval_expr(&Expr::ArrowMut {
             dir: ArrowDir::Pop, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("m".to_string())))),
-            index: Box::new(Expr::String("x".to_string())),
+            index: Box::new(Expr::Quoted("x".into())),
             value: None,
         }).unwrap();
         assert_eq!(popped, Value::Bits(i64_to_bits(42)));
@@ -9160,7 +9160,7 @@ mod tests {
         let expr = Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             index: Box::new(Expr::Term),
-            value: Some(Box::new(Expr::String("hello".to_string()))),
+            value: Some(Box::new(Expr::Quoted("hello".into()))),
         };
         i.eval_expr(&expr).unwrap();
         match i.state.get("s").unwrap() {
@@ -9207,8 +9207,8 @@ mod tests {
     fn test_map_literal_eval() {
         let mut i = Interpreter::new();
         let expr = Expr::MapLiteral(vec![
-            (Expr::String("a".to_string()), Expr::Integer(1)),
-            (Expr::String("b".to_string()), Expr::Integer(2)),
+            (Expr::Quoted("a".into()), Expr::Decimal(1)),
+            (Expr::Quoted("b".into()), Expr::Decimal(2)),
         ]);
         let result = i.eval_expr(&expr).unwrap();
         match result {
@@ -9225,8 +9225,8 @@ mod tests {
     fn test_set_literal_eval() {
         let mut i = Interpreter::new();
         let expr = Expr::SetLiteral(vec![
-            Expr::String("x".to_string()),
-            Expr::String("y".to_string()),
+            Expr::Quoted("x".into()),
+            Expr::Quoted("y".into()),
         ]);
         let result = i.eval_expr(&expr).unwrap();
         match result {
@@ -9268,12 +9268,12 @@ mod tests {
         i.state.insert("s".to_string(), Value::HashSet(set));
         let result = i.eval_expr(&Expr::Projection {
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
-            target: ProjectionTarget::Contains(Box::new(Expr::String("hello".to_string()))),
+            target: ProjectionTarget::Contains(Box::new(Expr::Quoted("hello".into()))),
         }).unwrap();
         assert_eq!(result, Value::Bits(vec![1u8]));
         let result = i.eval_expr(&Expr::Projection {
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
-            target: ProjectionTarget::Contains(Box::new(Expr::String("nope".to_string()))),
+            target: ProjectionTarget::Contains(Box::new(Expr::Quoted("nope".into()))),
         }).unwrap();
         assert_eq!(result, Value::Bits(vec![0u8]));
     }
@@ -9325,7 +9325,7 @@ mod tests {
         // xs[::2] — take every 2nd element
         let expr = Expr::MultiSlice {
             value: Box::new(Expr::Identifier("xs".to_string())),
-            ops: vec![BracketOp::Stride(Box::new(Expr::Integer(2)))],
+            ops: vec![BracketOp::Stride(Box::new(Expr::Decimal(2)))],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::List(vec![
@@ -9344,8 +9344,8 @@ mod tests {
         let expr = Expr::MultiSlice {
             value: Box::new(Expr::Identifier("matrix".to_string())),
             ops: vec![
-                BracketOp::Coord(SliceCoordinate::Index(Box::new(Expr::Integer(0)))),
-                BracketOp::Stride(Box::new(Expr::Integer(2))),
+                BracketOp::Coord(SliceCoordinate::Index(Box::new(Expr::Decimal(0)))),
+                BracketOp::Stride(Box::new(Expr::Decimal(2))),
             ],
         };
         i.state.insert("matrix".to_string(), matrix);
@@ -9371,7 +9371,7 @@ mod tests {
             value: Box::new(Expr::Identifier("xs".to_string())),
             ops: vec![BracketOp::Mask(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(15)))
+                    Box::new(Expr::Decimal(15)))
             ))],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9390,10 +9390,10 @@ mod tests {
         let expr = Expr::MultiSlice {
             value: Box::new(Expr::Identifier("xs".to_string())),
             ops: vec![
-                BracketOp::Stride(Box::new(Expr::Integer(2))),
+                BracketOp::Stride(Box::new(Expr::Decimal(2))),
                 BracketOp::Mask(Box::new(
                     Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
-                        Box::new(Expr::Integer(12)))
+                        Box::new(Expr::Decimal(12)))
                 )),
             ],
         };
@@ -9414,9 +9414,9 @@ mod tests {
             ops: vec![
                 BracketOp::Mask(Box::new(
                     Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
-                        Box::new(Expr::Integer(12)))
+                        Box::new(Expr::Decimal(12)))
                 )),
-                BracketOp::Stride(Box::new(Expr::Integer(2))),
+                BracketOp::Stride(Box::new(Expr::Decimal(2))),
             ],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9438,7 +9438,7 @@ mod tests {
             stride: None,
             mask: Some(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(10)))
+                    Box::new(Expr::Decimal(10)))
             )),
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9458,7 +9458,7 @@ mod tests {
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: Some(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(5)))
+                    Box::new(Expr::Decimal(5)))
             )),
         }).unwrap();
         assert_eq!(i.state.get("src"), Some(&Value::List(vec![
@@ -9482,7 +9482,7 @@ mod tests {
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
             filter: Some(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(15)))
+                    Box::new(Expr::Decimal(15)))
             )),
         }).unwrap();
         match (i.state.get("src").unwrap(), i.state.get("dest").unwrap()) {
@@ -9502,7 +9502,7 @@ mod tests {
         i.state.insert("xs".to_string(), list);
         let expr = Expr::MultiSlice {
             value: Box::new(Expr::Identifier("xs".to_string())),
-            ops: vec![BracketOp::Stride(Box::new(Expr::Integer(0)))],
+            ops: vec![BracketOp::Stride(Box::new(Expr::Decimal(0)))],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -9515,7 +9515,7 @@ mod tests {
             value: Box::new(Expr::Identifier("xs".to_string())),
             ops: vec![BracketOp::Mask(Box::new(
                 Expr::Gt(Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(10)))
+                    Box::new(Expr::Decimal(10)))
             ))],
         };
         // Int is atomic — decomposes to chars, applies mask, reconstructs.
@@ -9530,7 +9530,7 @@ mod tests {
         i.state.insert("xs".to_string(), Value::Bits(i64_to_bits(42)));
         let expr = Expr::MultiSlice {
             value: Box::new(Expr::Identifier("xs".to_string())),
-            ops: vec![BracketOp::Stride(Box::new(Expr::Integer(2)))],
+            ops: vec![BracketOp::Stride(Box::new(Expr::Decimal(2)))],
         };
         // Bits(42) with b.len()==8 is detected as i64: 42→"42"→['4','2']→stride 2→['4']→"4"→4
         let result = i.eval_expr(&expr).unwrap();
@@ -9582,7 +9582,7 @@ mod tests {
         let expr = Expr::MultiSlice {
             value: Box::new(Expr::Identifier("xs".to_string())),
             ops: vec![BracketOp::Coord(SliceCoordinate::Index(Box::new(
-                Expr::String("[15]".to_string())
+                Expr::Quoted("[15]".into())
             )))],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -9598,13 +9598,13 @@ mod tests {
             body: vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                    expr: Expr::Integer(1),
+                    expr: Expr::Decimal(1),
                     timeout: None,
                     modifiers: vec![],
                 },
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".to_string()))),
-                    expr: Expr::Integer(2),
+                    expr: Expr::Decimal(2),
                     timeout: None,
                     modifiers: vec![],
                 },
@@ -9634,7 +9634,7 @@ mod tests {
                 },
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".to_string()))),
-                    expr: Expr::Integer(42),
+                    expr: Expr::Decimal(42),
                     timeout: None,
                     modifiers: vec![],
                 },
@@ -9664,7 +9664,7 @@ mod tests {
             source: Box::new(Expr::Identifier("list".to_string())),
             ops: vec![SubtypeOp::Filter(Box::new(Expr::Gt(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(3)),
+                Box::new(Expr::Decimal(3)),
             )))],
         }).unwrap();
         assert_eq!(result, Value::List(vec![Value::Bits(i64_to_bits(4)), Value::Bits(i64_to_bits(5))]));
@@ -9680,7 +9680,7 @@ mod tests {
             source: Box::new(Expr::Identifier("list".to_string())),
             ops: vec![SubtypeOp::Map(Box::new(Expr::Mul(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(2)),
+                Box::new(Expr::Decimal(2)),
             )))],
         }).unwrap();
         assert_eq!(result, Value::List(vec![Value::Bits(i64_to_bits(2)), Value::Bits(i64_to_bits(4)), Value::Bits(i64_to_bits(6))]));
@@ -9697,7 +9697,7 @@ mod tests {
             ops: vec![
                 SubtypeOp::Filter(Box::new(Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ))),
                 SubtypeOp::Limit(2),
             ],
@@ -9745,7 +9745,7 @@ mod tests {
             ops: vec![
                 SubtypeOp::Group(Box::new(Expr::ListIndex(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 ))),
             ],
         }).unwrap();
@@ -9761,8 +9761,8 @@ mod tests {
     fn test_projection_string_match() {
         let mut i = Interpreter::new();
         let result = i.eval_expr(&Expr::SubtypeProjection {
-            source: Box::new(Expr::String("user@example.com".into())),
-            ops: vec![SubtypeOp::Match(Box::new(Expr::String("^([a-z]+)@(.+)$".into())))],
+            source: Box::new(Expr::Quoted("user@example.com".into())),
+            ops: vec![SubtypeOp::Match(Box::new(Expr::Quoted("^([a-z]+)@(.+)$".into())))],
         }).unwrap();
         match result {
             Value::Tuple(groups) => {
@@ -9778,8 +9778,8 @@ mod tests {
     fn test_projection_string_no_match() {
         let mut i = Interpreter::new();
         let result = i.eval_expr(&Expr::SubtypeProjection {
-            source: Box::new(Expr::String("hello world".into())),
-            ops: vec![SubtypeOp::Match(Box::new(Expr::String("^[0-9]+$".into())))],
+            source: Box::new(Expr::Quoted("hello world".into())),
+            ops: vec![SubtypeOp::Match(Box::new(Expr::Quoted("^[0-9]+$".into())))],
         }).unwrap();
         assert_eq!(result, Value::Bits(vec![0u8]));
     }
@@ -9823,7 +9823,7 @@ mod tests {
             source: Box::new(Expr::Identifier("items".to_string())),
             ops: vec![SubtypeOp::Sort(Box::new(Expr::ListIndex(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(0)),
+                Box::new(Expr::Decimal(0)),
             )))],
         }).unwrap();
         if let Value::List(sorted) = result {
@@ -9891,7 +9891,7 @@ mod tests {
                 Box::new(Expr::Identifier("right".to_string())),
                 Box::new(Expr::ListIndex(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 )),
             )],
         }).unwrap();
@@ -9915,7 +9915,7 @@ mod tests {
             Value::Bits(i64_to_bits(42)),
         ];
         let args = vec![
-            Value::Bits(path.as_bytes().to_vec()),
+            Value::Bits(path.into()),
             Value::List(values),
         ];
 
@@ -9941,7 +9941,7 @@ mod tests {
             Value::Bits("normal".to_string().into_bytes()),
         ];
         let args = vec![
-            Value::Bits(path.as_bytes().to_vec()),
+            Value::Bits(path.into()),
             Value::List(values),
         ];
 
@@ -9963,7 +9963,7 @@ mod tests {
                 Value::Bits(i64_to_bits(i)),
             ];
             let args = vec![
-                Value::Bits(path.as_bytes().to_vec()),
+                Value::Bits(path.into()),
                 Value::List(values),
             ];
             crate::ffi::registry::dbvl_append_impl(args).unwrap();
@@ -10010,7 +10010,7 @@ mod tests {
         );
         let eq = Expr::Eq(
             Box::new(field_access),
-            Box::new(Expr::String("rusty_key".into())),
+            Box::new(Expr::Quoted("rusty_key".into())),
         );
         assert_eq!(
             try_extract_key_eq(&eq, 0),
@@ -10027,7 +10027,7 @@ mod tests {
                 Box::new(Expr::Identifier("_".into())),
                 "name".into(),
             )),
-            Box::new(Expr::String("rusty_key".into())),
+            Box::new(Expr::Quoted("rusty_key".into())),
         );
         assert_eq!(try_extract_key_eq(&gt, 0), None);
     }
@@ -10095,7 +10095,7 @@ mod tests {
         let mut i = Interpreter::new();
         let result = i.eval_expr(&Expr::ListIndex(
             Box::new(Expr::Identifier("table".into())),
-            Box::new(Expr::String("candle".into())),
+            Box::new(Expr::Quoted("candle".into())),
         )).unwrap_err(); // This will fail because table isn't in state
 
         // Actually let's test by calling resolve_dbvl_key directly on the table
@@ -10127,7 +10127,7 @@ mod tests {
                 vec!["a".to_string(), "b".to_string()],
                 Box::new(Expr::Term),
             ),
-            expr: Expr::Tuple(vec![Expr::Integer(42), Expr::Integer(99)]),
+            expr: Expr::Tuple(vec![Expr::Decimal(42), Expr::Decimal(99)]),
             timeout: None,
             modifiers: vec![],
         };
@@ -10146,7 +10146,7 @@ mod tests {
                 vec!["x".to_string(), "y".to_string()],
                 Box::new(Expr::Term),
             ),
-            expr: Expr::ListLiteral(vec![Expr::Integer(7), Expr::Integer(13)]),
+            expr: Expr::ListLiteral(vec![Expr::Decimal(7), Expr::Decimal(13)]),
             timeout: None,
             modifiers: vec![],
         };
@@ -10164,7 +10164,7 @@ mod tests {
                 vec!["a".to_string()],
                 Box::new(Expr::Term),
             ),
-            expr: Expr::Integer(42),
+            expr: Expr::Decimal(42),
             timeout: None,
             modifiers: vec![],
         };
@@ -10184,8 +10184,8 @@ mod tests {
         let stmt = Statement::Assignment {
             lhs: Expr::AddrOf(Box::new(Expr::Identifier("result".to_string()))),
             expr: Expr::ListIndex(
-                Box::new(Expr::Tuple(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Tuple(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)])),
+                Box::new(Expr::Decimal(1)),
             ),
             timeout: None,
             modifiers: vec![],
@@ -10208,7 +10208,7 @@ mod tests {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Eq(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 ),
                 watchdog: None,
                 span: None,
@@ -10216,7 +10216,7 @@ mod tests {
             body: vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                    expr: Expr::Integer(99),
+                    expr: Expr::Decimal(99),
                     timeout: None,
                     modifiers: vec![],
                 },
@@ -10241,7 +10241,7 @@ mod tests {
         };
         i.callable_txns.insert("bad_post".to_string(), txn);
         let result = i.eval_expr(&Expr::Call("bad_post".to_string(), vec![
-            Expr::Integer(0),
+            Expr::Decimal(0),
         ]));
         assert!(result.is_err(), "postcondition violation should return error");
         match result {
@@ -10290,7 +10290,7 @@ mod tests {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("i".to_string()))),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("i".to_string())),
-                        Box::new(Expr::Integer(1)),
+                        Box::new(Expr::Decimal(1)),
                     ),
                     timeout: None,
                     modifiers: vec![],
@@ -10316,9 +10316,9 @@ mod tests {
         };
         i.callable_txns.insert("count_to_n".to_string(), txn);
         let result = i.eval_expr(&Expr::Call("count_to_n".to_string(), vec![
-            Expr::Integer(5),
-            Expr::Integer(0),
-            Expr::Integer(0),
+            Expr::Decimal(5),
+            Expr::Decimal(0),
+            Expr::Decimal(0),
         ])).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(10)));  // 0+1+2+3+4 = 10
     }
@@ -10328,7 +10328,7 @@ mod tests {
         let mut i = Interpreter::new();
         let stmt = Statement::Foreach {
             item: "x".to_string(),
-            list: Box::new(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)])),
+            list: Box::new(Expr::ListLiteral(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)])),
             body: vec![],
             modifiers: vec![],
         };
@@ -10342,7 +10342,7 @@ mod tests {
         i.state.insert("sum".to_string(), Value::Bits(i64_to_bits(0)));
         let stmt = Statement::Foreach {
             item: "x".to_string(),
-            list: Box::new(Expr::ListLiteral(vec![Expr::Integer(10), Expr::Integer(20), Expr::Integer(30)])),
+            list: Box::new(Expr::ListLiteral(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)])),
             modifiers: vec![],
             body: vec![
                 Statement::Assignment {
@@ -10364,17 +10364,17 @@ mod tests {
     fn test_match_string_literal() {
         let mut i = Interpreter::new();
         let expr = Expr::Match {
-            value: Box::new(Expr::String("foo".to_string())),
+            value: Box::new(Expr::Quoted("foo".into())),
             arms: vec![
                 crate::ast::MatchArm {
                     pattern: crate::ast::MatchPattern::Literal(crate::ast::Pattern::LitString("foo".to_string())),
                     guard: None,
-                    body: Box::new(Expr::Integer(1)),
+                    body: Box::new(Expr::Decimal(1)),
                 },
                 crate::ast::MatchArm {
                     pattern: crate::ast::MatchPattern::Wildcard,
                     guard: None,
-                    body: Box::new(Expr::Integer(0)),
+                    body: Box::new(Expr::Decimal(0)),
                 },
             ],
         };
@@ -10386,7 +10386,7 @@ mod tests {
     fn test_match_int_literal() {
         let mut i = Interpreter::new();
         let expr = Expr::Match {
-            value: Box::new(Expr::Integer(42)),
+            value: Box::new(Expr::Decimal(42)),
             arms: vec![
                 crate::ast::MatchArm {
                     pattern: crate::ast::MatchPattern::Literal(crate::ast::Pattern::LitInt(42)),
@@ -10412,14 +10412,14 @@ mod tests {
             handler: vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                    expr: Expr::Integer(99),
+                    expr: Expr::Decimal(99),
                     timeout: None, modifiers: vec![],
                 },
             ],
             body: vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                    expr: Expr::Integer(42),
+                    expr: Expr::Decimal(42),
                     timeout: None, modifiers: vec![],
                 },
             ],
@@ -10439,7 +10439,7 @@ mod tests {
         for _ in 0..200 {
             body.push(Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                expr: Expr::Integer(42),
+                expr: Expr::Decimal(42),
                 timeout: None, modifiers: vec![],
             });
         }
@@ -10447,7 +10447,7 @@ mod tests {
             handler: vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                    expr: Expr::Integer(999),
+                    expr: Expr::Decimal(999),
                     timeout: None, modifiers: vec![],
                 },
             ],
@@ -10468,7 +10468,7 @@ mod tests {
         for _ in 0..10 {
             let stmt = Statement::Assignment {
                 lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Integer(1),
+                expr: Expr::Decimal(1),
                 timeout: None, modifiers: vec![],
             };
             i.exec_stmt(&stmt).unwrap();
@@ -10487,7 +10487,7 @@ mod tests {
         for _ in 0..5 {
             let stmt = Statement::Assignment {
                 lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Integer(1),
+                expr: Expr::Decimal(1),
                 timeout: None, modifiers: vec![],
             };
             i.exec_stmt(&stmt).unwrap();
@@ -10496,7 +10496,7 @@ mod tests {
         // 6th statement should timeout
         let stmt = Statement::Assignment {
             lhs: Expr::Identifier("x".to_string()),
-            expr: Expr::Integer(1),
+            expr: Expr::Decimal(1),
             timeout: None, modifiers: vec![],
         };
         let err = i.exec_stmt(&stmt).unwrap_err();
@@ -10516,23 +10516,23 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                expr: Expr::Integer(1),
+                expr: Expr::Decimal(1),
                 timeout: None, modifiers: vec![],
             },
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                expr: Expr::Integer(2),
+                expr: Expr::Decimal(2),
                 timeout: None, modifiers: vec![],
             },
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                expr: Expr::Integer(3),
+                expr: Expr::Decimal(3),
                 timeout: None, modifiers: vec![],
             },
             // 4th assignment — exceeds budget of 3
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                expr: Expr::Integer(4),
+                expr: Expr::Decimal(4),
                 timeout: None, modifiers: vec![],
             },
         ];
@@ -10540,7 +10540,7 @@ mod tests {
             handler: vec![
                 Statement::Assignment {
                     lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                    expr: Expr::Integer(999),
+                    expr: Expr::Decimal(999),
                     timeout: None, modifiers: vec![],
                 },
             ],
@@ -10575,7 +10575,7 @@ mod tests {
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
-            is_pipe: true, fallback: Some(Expr::Integer(-1)),
+            is_pipe: true, fallback: Some(Expr::Decimal(-1)),
             default_watchdog: None,
             span: None,
         };
@@ -10667,7 +10667,7 @@ mod tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true,
-            fallback: Some(Expr::Integer(-1)),
+            fallback: Some(Expr::Decimal(-1)),
             default_watchdog: None,
             span: None,
         };
@@ -10722,7 +10722,7 @@ mod tests {
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
             is_pipe: true,
-            fallback: Some(Expr::Integer(-1)),
+            fallback: Some(Expr::Decimal(-1)),
             default_watchdog: None,
             span: None,
         };
@@ -10744,13 +10744,13 @@ mod tests {
         let stmt = Statement::Let {
             name: "x".to_string(),
             ty: Some(Type::int()),
-            expr: Some(Expr::Integer(-5)),
+            expr: Some(Expr::Decimal(-5)),
             address: None,
             address_expr: None,
             bit_range: None,
             constraint: Some(Box::new(Expr::Gt(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(0)),
+                Box::new(Expr::Decimal(0)),
             ))),
             is_override: false,
             modifiers: vec![],
@@ -10776,7 +10776,7 @@ mod tests {
                 operators: vec![],
             constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 )],
                 span: None,
             },
@@ -10800,7 +10800,7 @@ mod tests {
         let stmt = Statement::Let {
             name: "x".to_string(),
             ty: Some(Type::Custom("Positive".to_string())),
-            expr: Some(Expr::Integer(-5)),
+            expr: Some(Expr::Decimal(-5)),
             address: None,
             address_expr: None,
             bit_range: None,
@@ -10828,7 +10828,7 @@ mod tests {
                 operators: vec![],
             constraints: vec![Expr::Gt(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 )],
                 span: None,
             },
@@ -10852,7 +10852,7 @@ mod tests {
         let stmt = Statement::Let {
             name: "x".to_string(),
             ty: Some(Type::Custom("Positive".to_string())),
-            expr: Some(Expr::Integer(42)),
+            expr: Some(Expr::Decimal(42)),
             address: None,
             address_expr: None,
             bit_range: None,
@@ -10884,7 +10884,7 @@ mod tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetGlobalId,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)));
@@ -10895,7 +10895,7 @@ mod tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetLocalId,
-            args: vec![Expr::Integer(1)],
+            args: vec![Expr::Decimal(1)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)));
@@ -10906,7 +10906,7 @@ mod tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetGroupId,
-            args: vec![Expr::Integer(2)],
+            args: vec![Expr::Decimal(2)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)));
@@ -10917,7 +10917,7 @@ mod tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetNumGroups,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(1)));
@@ -10939,7 +10939,7 @@ mod tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetGlobalId,
-            args: vec![Expr::Integer(5)],
+            args: vec![Expr::Decimal(5)],
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err());
@@ -10952,7 +10952,7 @@ mod tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetGlobalId,
-            args: vec![Expr::String("x".to_string())],
+            args: vec![Expr::Quoted("x".into())],
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err());
@@ -10981,7 +10981,7 @@ mod tests {
         i.inop_decls.insert("sadd".to_string(), inop);
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::UserDefined("sadd".to_string()),
-            args: vec![Expr::Integer(3), Expr::Integer(7)],
+            args: vec![Expr::Decimal(3), Expr::Decimal(7)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(10)), "inop# fallback should compute 3 + 7 = 10");
@@ -11075,7 +11075,7 @@ mod tests {
             outputs: vec![Type::int()],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: vec![],
-            fallback: Some(Expr::Integer(999)),
+            fallback: Some(Expr::Decimal(999)),
             has_side_effects: false,
             has_state_access: false,
             section: None,
@@ -11086,7 +11086,7 @@ mod tests {
         let let_stmt = Statement::Let {
             name: "x".into(),
             ty: Some(Type::Custom("MyList".into())),
-            expr: Some(Expr::ListLiteral(vec![Expr::Integer(10)])),
+            expr: Some(Expr::ListLiteral(vec![Expr::Decimal(10)])),
             address: None,
             address_expr: None,
             bit_range: None,
@@ -11100,7 +11100,7 @@ mod tests {
         let push_stmt = Statement::Expression(Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("x".into())))),
             index: Box::new(Expr::Term),
-            value: Some(Box::new(Expr::Integer(42))),
+            value: Some(Box::new(Expr::Decimal(42))),
         });
         let result = i.exec_stmt(&push_stmt);
         assert!(result.is_ok(), "ArrowMut Push should succeed: {:?}", result);
@@ -11158,7 +11158,7 @@ mod tests {
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: vec![],
             fallback: Some(Expr::ListLiteral(vec![
-                Expr::Integer(777),
+                Expr::Decimal(777),
                 Expr::ListLiteral(vec![]),
             ])),
             has_side_effects: false,
@@ -11171,7 +11171,7 @@ mod tests {
         let let_stmt = Statement::Let {
             name: "q".into(),
             ty: Some(Type::Custom("MyQueue".into())),
-            expr: Some(Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)])),
+            expr: Some(Expr::ListLiteral(vec![Expr::Decimal(1), Expr::Decimal(2)])),
             address: None,
             address_expr: None,
             bit_range: None,
@@ -11266,7 +11266,7 @@ mod tests {
         let let_stmt = Statement::Let {
             name: "s".into(),
             ty: Some(Type::Custom("SList".into())),
-            expr: Some(Expr::ListLiteral(vec![Expr::Integer(1)])),
+            expr: Some(Expr::ListLiteral(vec![Expr::Decimal(1)])),
             address: None,
             address_expr: None,
             bit_range: None,
@@ -11279,7 +11279,7 @@ mod tests {
         let push_stmt = Statement::Expression(Expr::ArrowMut {
             dir: ArrowDir::Push, consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
             index: Box::new(Expr::Term),
-            value: Some(Box::new(Expr::Integer(42))),
+            value: Some(Box::new(Expr::Decimal(42))),
         });
         let result = i.exec_stmt(&push_stmt);
         assert!(result.is_ok(), "ArrowMut Push via defn should succeed: {:?}", result);
@@ -11292,7 +11292,7 @@ mod tests {
     fn test_eval_meld_cast_identity() {
         let mut i = Interpreter::new();
         let expr = Expr::Cast(
-            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Decimal(42)),
             Type::Custom("CString".to_string()),
         );
         let result = i.eval_expr(&expr).unwrap();
@@ -11304,7 +11304,7 @@ mod tests {
     fn test_eval_meld_cast_string_identity() {
         let mut i = Interpreter::new();
         let expr = Expr::Cast(
-            Box::new(Expr::String("hello".to_string())),
+            Box::new(Expr::Quoted("hello".into())),
             Type::Custom("CString".to_string()),
         );
         let result = i.eval_expr(&expr).unwrap();
@@ -11323,13 +11323,13 @@ mod tests {
             parameters: vec![("x".to_string(), Type::int())],
             output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "compute".to_string(), is_async: false, is_reactive: true,
                 parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![
-                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
@@ -11342,7 +11342,7 @@ mod tests {
             span: None, modifiers: vec![],
         };
         interp.cell_defs.insert("add_one".to_string(), cell_def.clone());
-        let call = Expr::CellCall(Box::new(Expr::Identifier("add_one".to_string())), vec![Expr::Integer(41)]);
+        let call = Expr::CellCall(Box::new(Expr::Identifier("add_one".to_string())), vec![Expr::Decimal(41)]);
         let result = interp.eval_expr(&call).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(42)));
     }
@@ -11361,9 +11361,9 @@ mod tests {
             transactions: vec![Transaction {
                 name: "dec".to_string(), is_async: false, is_reactive: true,
                 parameters: vec![],
-                contract: Contract::new(Expr::Gt(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Integer(0))), Expr::Bool(true)),
+                contract: Contract::new(Expr::Gt(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Decimal(0))), Expr::Bool(true)),
                 body: vec![
-                    Statement::Assignment { lhs: Expr::Identifier("counter".to_string()), expr: Expr::Sub(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: Expr::Identifier("counter".to_string()), expr: Expr::Sub(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
@@ -11376,7 +11376,7 @@ mod tests {
             span: None, modifiers: vec![],
         };
         interp.cell_defs.insert("countdown".to_string(), cell_def.clone());
-        let call = Expr::CellCall(Box::new(Expr::Identifier("countdown".to_string())), vec![Expr::Integer(3)]);
+        let call = Expr::CellCall(Box::new(Expr::Identifier("countdown".to_string())), vec![Expr::Decimal(3)]);
         let result = interp.eval_expr(&call).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)));
     }
@@ -11429,9 +11429,9 @@ mod tests {
             transactions: vec![Transaction {
                 name: "stop_early".to_string(), is_async: false, is_reactive: true,
                 parameters: vec![],
-                contract: Contract::new(Expr::Eq(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Integer(0))), Expr::Bool(true)),
+                contract: Contract::new(Expr::Eq(Box::new(Expr::Identifier("counter".to_string())), Box::new(Expr::Decimal(0))), Expr::Bool(true)),
                 body: vec![
-                    Statement::TermBang { values: vec![Some(Expr::Integer(99))], swan_song: None, modifiers: vec![] },
+                    Statement::TermBang { values: vec![Some(Expr::Decimal(99))], swan_song: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
  modifiers: vec![], variant_bodies: vec![],
@@ -11457,7 +11457,7 @@ mod tests {
             parameters: vec![],
             output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
                 StructField { name: "fired".to_string(), ty: Type::bool_(), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
@@ -11465,7 +11465,7 @@ mod tests {
                 parameters: vec![],
                 contract: Contract::new(Expr::Not(Box::new(Expr::Identifier("fired".to_string()))), Expr::Bool(true)),
                 body: vec![
-                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
                     Statement::Assignment { lhs: Expr::Identifier("fired".to_string()), expr: Expr::Bool(true), timeout: None, modifiers: vec![] },
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
@@ -11521,7 +11521,7 @@ mod tests {
             parameters: vec![],
             output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
                 StructField { name: "fired".to_string(), ty: Type::bool_(), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
@@ -11529,7 +11529,7 @@ mod tests {
                 parameters: vec![],
                 contract: Contract::new(Expr::Not(Box::new(Expr::Identifier("fired".to_string()))), Expr::Bool(true)),
                 body: vec![
-                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
                     Statement::Assignment { lhs: Expr::Identifier("fired".to_string()), expr: Expr::Bool(true), timeout: None, modifiers: vec![] },
                 ],
                 reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
@@ -11548,7 +11548,7 @@ mod tests {
             parameters: vec![("input".to_string(), Type::int())],
             output_type: Some(OutputType::Named("out".to_string(), Box::new(OutputType::Single(Type::int())))),
             fields: vec![
-                StructField { name: "out".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "out".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
                 StructField { name: "input".to_string(), ty: Type::int(), default: None, visibility: Visibility::Private },
                 StructField { name: "fired".to_string(), ty: Type::bool_(), default: Some(Expr::Bool(false)), visibility: Visibility::Private },
             ],
@@ -11684,12 +11684,12 @@ mod tests {
                 OutputType::Named("line_id".to_string(), Box::new(OutputType::Single(Type::int()))),
             ])),
             fields: vec![
-                StructField { name: "buffer".to_string(), ty: Type::string(), default: Some(Expr::String(String::new())), visibility: Visibility::Private },
+                StructField { name: "buffer".to_string(), ty: Type::string(), default: Some(Expr::Quoted(Vec::new())), visibility: Visibility::Private },
                 StructField { name: "prev_key".to_string(), ty: Type::char_(), default: Some(Expr::Char('\0')), visibility: Visibility::Private },
-                StructField { name: "seq".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "seq".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
                 // line and line_id are output ports — registered as fields with defaults
-                StructField { name: "line".to_string(), ty: Type::string(), default: Some(Expr::String(String::new())), visibility: Visibility::Private },
-                StructField { name: "line_id".to_string(), ty: Type::int(), default: Some(Expr::Integer(0)), visibility: Visibility::Private },
+                StructField { name: "line".to_string(), ty: Type::string(), default: Some(Expr::Quoted(Vec::new())), visibility: Visibility::Private },
+                StructField { name: "line_id".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
                 // raw is the trigger input — managed manually in this test
                 StructField { name: "raw".to_string(), ty: Type::char_(), default: Some(Expr::Char('\0')), visibility: Visibility::Private },
             ],
@@ -11706,26 +11706,26 @@ mod tests {
                         condition: Expr::Eq(Box::new(Expr::Identifier("raw".to_string())), Box::new(Expr::Char('\n'))),
                         statements: vec![
                             Statement::Assignment { lhs: Expr::Identifier("line".to_string()), expr: Expr::Identifier("buffer".to_string()), timeout: None, modifiers: vec![] },
-                            Statement::Assignment { lhs: Expr::Identifier("seq".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("seq".to_string())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+                            Statement::Assignment { lhs: Expr::Identifier("seq".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("seq".to_string())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
                             Statement::Assignment { lhs: Expr::Identifier("line_id".to_string()), expr: Expr::Identifier("seq".to_string()), timeout: None, modifiers: vec![] },
-                            Statement::Assignment { lhs: Expr::Identifier("buffer".to_string()), expr: Expr::String(String::new()), timeout: None, modifiers: vec![] },
+                            Statement::Assignment { lhs: Expr::Identifier("buffer".to_string()), expr: Expr::Quoted(Vec::new()), timeout: None, modifiers: vec![] },
                         ],
                         metadata: HashMap::new(),
                     },
                     Statement::Guarded {
                         condition: Expr::And(
                             Box::new(Expr::Eq(Box::new(Expr::Identifier("raw".to_string())), Box::new(Expr::Char('\x7f')))),
-                            Box::new(Expr::Gt(Box::new(Expr::Projection { source: Box::new(Expr::Identifier("buffer".to_string())), target: ProjectionTarget::Size }), Box::new(Expr::Integer(0)))),
+                            Box::new(Expr::Gt(Box::new(Expr::Projection { source: Box::new(Expr::Identifier("buffer".to_string())), target: ProjectionTarget::Size }), Box::new(Expr::Decimal(0)))),
                         ),
                         statements: vec![
                             Statement::Assignment {
                                 lhs: Expr::Identifier("buffer".to_string()),
                                 expr: Expr::Slice {
                                     value: Box::new(Expr::Identifier("buffer".to_string())),
-                                    start: Some(Box::new(Expr::Integer(0))),
+                                    start: Some(Box::new(Expr::Decimal(0))),
                                     end: Some(Box::new(Expr::Sub(
                                         Box::new(Expr::Projection { source: Box::new(Expr::Identifier("buffer".to_string())), target: ProjectionTarget::Size }),
-                                        Box::new(Expr::Integer(1)),
+                                        Box::new(Expr::Decimal(1)),
                                     ))),
                                     stride: None, mask: None,
                                 },
@@ -11911,7 +11911,7 @@ mod tests {
     fn test_eval_cast_int_to_ptr() {
         let mut i = Interpreter::new();
         let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
-        let expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
+        let expr = Expr::Cast(Box::new(Expr::Decimal(0x40011000)), ptr_ty);
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0x40011000)), "Int -> Ptr should wrap address");
     }
@@ -11920,7 +11920,7 @@ mod tests {
     fn test_eval_cast_ptr_to_int() {
         let mut i = Interpreter::new();
         let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
-        let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011004)), ptr_ty);
+        let ptr_expr = Expr::Cast(Box::new(Expr::Decimal(0x40011004)), ptr_ty);
         let cast_back = Expr::Cast(ptr_expr.into(), Type::int());
         let result = i.eval_expr(&cast_back).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0x40011004)), "Ptr -> Int should extract address");
@@ -11946,7 +11946,7 @@ mod tests {
     fn test_volatile_load_returns_zero() {
         let mut i = Interpreter::new();
         let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
-        let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
+        let ptr_expr = Expr::Cast(Box::new(Expr::Decimal(0x40011000)), ptr_ty);
         let vl = Expr::IntrinsicCall {
             intrinsic: Intrinsic::VolatileLoad,
             args: vec![ptr_expr],
@@ -11962,7 +11962,7 @@ mod tests {
         // Type-level checking catches non-Ptr arguments at compile time.
         // At runtime, any Bits value is a valid "address" for the interpreter.
         let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
-        let ptr_expr = Expr::Cast(Box::new(Expr::Integer(42)), ptr_ty);
+        let ptr_expr = Expr::Cast(Box::new(Expr::Decimal(42)), ptr_ty);
         let vl = Expr::IntrinsicCall {
             intrinsic: Intrinsic::VolatileLoad,
             args: vec![ptr_expr],
@@ -11975,10 +11975,10 @@ mod tests {
     fn test_volatile_store_returns_true() {
         let mut i = Interpreter::new();
         let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
-        let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0x40011000)), ptr_ty);
+        let ptr_expr = Expr::Cast(Box::new(Expr::Decimal(0x40011000)), ptr_ty);
         let vs = Expr::IntrinsicCall {
             intrinsic: Intrinsic::VolatileStore,
-            args: vec![ptr_expr, Expr::Integer(42)],
+            args: vec![ptr_expr, Expr::Decimal(42)],
         };
         let result = i.eval_expr(&vs).unwrap();
         assert_eq!(result, Value::Bits(vec![1u8]), "volatile_store returns true");
@@ -11990,10 +11990,10 @@ mod tests {
         // With Bits-only: volatile_store accepts any Bits as Ptr.
         // Type-level checking catches non-Ptr arguments at compile time.
         let ptr_ty = Type::Applied("Ptr".to_string(), vec![Type::int()]);
-        let ptr_expr = Expr::Cast(Box::new(Expr::Integer(0)), ptr_ty);
+        let ptr_expr = Expr::Cast(Box::new(Expr::Decimal(0)), ptr_ty);
         let vs = Expr::IntrinsicCall {
             intrinsic: Intrinsic::VolatileStore,
-            args: vec![ptr_expr, Expr::Integer(1)],
+            args: vec![ptr_expr, Expr::Decimal(1)],
         };
         let result = i.eval_expr(&vs).unwrap();
         assert_eq!(result, Value::Bits(vec![1u8]), "volatile_store with Ptr should succeed");
@@ -12024,7 +12024,7 @@ mod tests {
         i.state.insert("x".to_string(), Value::Bits(i64_to_bits(0)));
         let stmt = Statement::Assignment {
             lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-            expr: Expr::Integer(99),
+            expr: Expr::Decimal(99),
             timeout: None,
             modifiers: vec![],
         };
@@ -12076,7 +12076,7 @@ mod tests {
     fn test_deref_non_pointer_errors() {
         let mut i = Interpreter::new();
         // Dereferencing a plain Int (not a Ref) should error
-        let expr = Expr::Deref(Box::new(Expr::Integer(42)));
+        let expr = Expr::Deref(Box::new(Expr::Decimal(42)));
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "Deref of non-pointer should error");
     }
@@ -12087,7 +12087,7 @@ mod tests {
         i.state.insert("x".to_string(), Value::Bits(i64_to_bits(0)));
         let stmt = Statement::Assignment {
             lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-            expr: Expr::Integer(77),
+            expr: Expr::Decimal(77),
             timeout: None,
             modifiers: vec![],
         };
@@ -12196,7 +12196,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Ctpop,
-            args: vec![Expr::Integer(255)],
+            args: vec![Expr::Decimal(255)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(8)));
@@ -12207,7 +12207,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Ctlz,
-            args: vec![Expr::Integer(1)],
+            args: vec![Expr::Decimal(1)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(63)));
@@ -12218,7 +12218,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Cttz,
-            args: vec![Expr::Integer(8)],
+            args: vec![Expr::Decimal(8)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(3)));
@@ -12229,7 +12229,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Abs,
-            args: vec![Expr::Integer(-42)],
+            args: vec![Expr::Decimal(-42)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(42)));
@@ -12240,7 +12240,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Bitreverse,
-            args: vec![Expr::Integer(1)],
+            args: vec![Expr::Decimal(1)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(1i64.reverse_bits())));
@@ -12251,7 +12251,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ByteCount,
-            args: vec![Expr::Integer(42)],
+            args: vec![Expr::Decimal(42)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(8)));
@@ -12296,7 +12296,7 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Size,
             args: vec![Expr::ListLiteral(vec![
-                Expr::Integer(1), Expr::Integer(2), Expr::Integer(3),
+                Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3),
             ])],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -12308,7 +12308,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Size,
-            args: vec![Expr::String("hello".to_string())],
+            args: vec![Expr::Quoted("hello".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(5)));
@@ -12319,7 +12319,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Pop,
-            args: vec![Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)])],
+            args: vec![Expr::ListLiteral(vec![Expr::Decimal(1), Expr::Decimal(2)])],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(2)));
@@ -12331,8 +12331,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Contains,
             args: vec![
-                Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2), Expr::Integer(3)]),
-                Expr::Integer(1),
+                Expr::ListLiteral(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]),
+                Expr::Decimal(1),
             ],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -12345,8 +12345,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Contains,
             args: vec![
-                Expr::ListLiteral(vec![Expr::Integer(1), Expr::Integer(2)]),
-                Expr::Integer(99),
+                Expr::ListLiteral(vec![Expr::Decimal(1), Expr::Decimal(2)]),
+                Expr::Decimal(99),
             ],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -12359,7 +12359,7 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Contains,
             args: vec![
-                Expr::String("hello".to_string()),
+                Expr::Quoted("hello".into()),
                 Expr::Char('e'),
             ],
         };
@@ -12416,7 +12416,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Sqrt,
-            args: vec![Expr::String("hello".to_string())],
+            args: vec![Expr::Quoted("hello".into())],
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "sqrt#(\"hello\") should produce a type error");
@@ -12450,7 +12450,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::TtyRawMode,
-            args: vec![Expr::Integer(42)],
+            args: vec![Expr::Decimal(42)],
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "tty_raw_mode#(42) should produce type error");
@@ -12490,7 +12490,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::IoCtl,
-            args: vec![Expr::Integer(-1), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(-1), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         // ioctl with invalid fd returns -1, wrapped in Int
@@ -12502,7 +12502,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::IoCtl,
-            args: vec![Expr::String("stdin".into()), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Quoted("stdin".into()), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "ioctl#(\"stdin\",...) should type error");
@@ -12513,7 +12513,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::IsTty,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         // In test runner, stdin is usually piped, not a tty
@@ -12536,7 +12536,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SpawnWithOutput,
-            args: vec![Expr::String("echo hello".to_string())],
+            args: vec![Expr::Quoted("echo hello".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         if let Value::Bits(s_bytes) = result {
@@ -12551,7 +12551,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SpawnWithOutput,
-            args: vec![Expr::String("".to_string())],
+            args: vec![Expr::Quoted("".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         // Empty command may return empty string or error depending on platform
@@ -12563,7 +12563,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Spawn,
-            args: vec![Expr::String("true".to_string())],
+            args: vec![Expr::Quoted("true".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)), "spawn#(\"true\") should return 0");
@@ -12574,7 +12574,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Spawn,
-            args: vec![Expr::String("false".to_string())],
+            args: vec![Expr::Quoted("false".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(1)), "spawn#(\"false\") should return 1");
@@ -12585,7 +12585,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Spawn,
-            args: vec![Expr::Integer(42)],
+            args: vec![Expr::Decimal(42)],
         };
         let result = i.eval_expr(&expr);
         assert!(result.is_err(), "spawn#(42) should type error");
@@ -12603,7 +12603,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Open,
-            args: vec![Expr::Bool(true), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Bool(true), Expr::Decimal(0), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12614,9 +12614,9 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Open,
             args: vec![
-                Expr::String("/nonexistent_file_xyz.bv".into()),
-                Expr::Integer(0),
-                Expr::Integer(0),
+                Expr::Quoted("/nonexistent_file_xyz.bv".into()),
+                Expr::Decimal(0),
+                Expr::Decimal(0),
             ],
         };
         let result = i.eval_expr(&expr).unwrap();
@@ -12628,7 +12628,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Close,
-            args: vec![Expr::String("fd".into())],
+            args: vec![Expr::Quoted("fd".into())],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12638,7 +12638,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Close,
-            args: vec![Expr::Integer(-1)],
+            args: vec![Expr::Decimal(-1)],
         };
         let result = i.eval_expr(&expr).unwrap();
         #[cfg(unix)]
@@ -12652,7 +12652,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Read,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::String("nope".into())],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Quoted("nope".into())],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12662,7 +12662,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Write,
-            args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(5)],
+            args: vec![Expr::Decimal(1), Expr::Decimal(0), Expr::Decimal(5)],
         };
         // write# with opaque pointer returns -1 in interpreter
         let result = i.eval_expr(&expr).unwrap();
@@ -12674,7 +12674,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::LSeek,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(true)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(true)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12684,7 +12684,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::LSeek,
-            args: vec![Expr::Integer(-1), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(-1), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(-1)), "lseek#(-1,0,0) should return -1");
@@ -12695,7 +12695,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::PRead,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(5), Expr::String("off".into())],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(5), Expr::Quoted("off".into())],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12705,7 +12705,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::PWrite,
-            args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(5), Expr::Integer(0)],
+            args: vec![Expr::Decimal(1), Expr::Decimal(0), Expr::Decimal(5), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(-1)), "pwrite# should return -1 in interpreter");
@@ -12716,7 +12716,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Stat,
-            args: vec![Expr::Integer(42)],
+            args: vec![Expr::Decimal(42)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12726,7 +12726,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Stat,
-            args: vec![Expr::String("/nonexistent_stat_file.xyz".into())],
+            args: vec![Expr::Quoted("/nonexistent_stat_file.xyz".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(-1)), "stat#(bad path) should return -1");
@@ -12737,7 +12737,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FStat,
-            args: vec![Expr::String("fd".into())],
+            args: vec![Expr::Quoted("fd".into())],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12747,7 +12747,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FTruncate,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12757,7 +12757,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FTruncate,
-            args: vec![Expr::Integer(0), Expr::Bool(true)],
+            args: vec![Expr::Decimal(0), Expr::Bool(true)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12767,7 +12767,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FSync,
-            args: vec![Expr::String("fd".into())],
+            args: vec![Expr::Quoted("fd".into())],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12787,7 +12787,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FDup2,
-            args: vec![Expr::Integer(0), Expr::Bool(true)],
+            args: vec![Expr::Decimal(0), Expr::Bool(true)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12797,7 +12797,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FCntl,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12809,7 +12809,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::MkDir,
-            args: vec![Expr::Integer(42), Expr::Integer(0)],
+            args: vec![Expr::Decimal(42), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12839,7 +12839,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Rename,
-            args: vec![Expr::String("a".into()), Expr::Integer(0)],
+            args: vec![Expr::Quoted("a".into()), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12849,7 +12849,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SymLink,
-            args: vec![Expr::String("target".into()), Expr::Integer(0)],
+            args: vec![Expr::Quoted("target".into()), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12859,7 +12859,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ReadLink,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12869,7 +12869,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ReadLink,
-            args: vec![Expr::String("/nonexistent_readlink.xyz".into())],
+            args: vec![Expr::Quoted("/nonexistent_readlink.xyz".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(Vec::new()), "readlink#(bad path) should return empty string");
@@ -12880,7 +12880,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Link,
-            args: vec![Expr::String("old".into()), Expr::Bool(false)],
+            args: vec![Expr::Quoted("old".into()), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12901,7 +12901,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ChDir,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12911,7 +12911,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ReadDir,
-            args: vec![Expr::Integer(42)],
+            args: vec![Expr::Decimal(42)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12921,7 +12921,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ReadDir,
-            args: vec![Expr::String("/nonexistent_dir_xyz".into())],
+            args: vec![Expr::Quoted("/nonexistent_dir_xyz".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::List(vec![]), "readdir#(bad path) should return empty list");
@@ -12932,7 +12932,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ReadDir,
-            args: vec![Expr::String(".".into())],
+            args: vec![Expr::Quoted(".".into())],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert!(matches!(result, Value::List(ref items) if !items.is_empty()), "readdir#(\".\") should return entries");
@@ -12943,7 +12943,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ChMod,
-            args: vec![Expr::String("/tmp".into()), Expr::Bool(true)],
+            args: vec![Expr::Quoted("/tmp".into()), Expr::Bool(true)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12953,7 +12953,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ChOwn,
-            args: vec![Expr::String("/tmp".into()), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Quoted("/tmp".into()), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12973,7 +12973,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::UMask,
-            args: vec![Expr::Integer(0o022)],
+            args: vec![Expr::Decimal(0o022)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert!(matches!(result, Value::Bits(i64_to_bits(_))), "umask# should return Int");
@@ -12984,7 +12984,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Access,
-            args: vec![Expr::Integer(42), Expr::Integer(0)],
+            args: vec![Expr::Decimal(42), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -12996,7 +12996,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Mmap,
-            args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Bool(true), Expr::Integer(0), Expr::Integer(-1), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(4096), Expr::Bool(true), Expr::Decimal(0), Expr::Decimal(-1), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err(), "mmap# with Bool prot should type error");
     }
@@ -13006,7 +13006,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::MUnmap,
-            args: vec![Expr::Bool(false), Expr::Integer(4096)],
+            args: vec![Expr::Bool(false), Expr::Decimal(4096)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13016,7 +13016,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::MProtect,
-            args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Bool(true)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(4096), Expr::Bool(true)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13036,7 +13036,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Brk,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert!(matches!(result, Value::Bits(i64_to_bits(_))), "brk# should return Int");
@@ -13047,7 +13047,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::MLock,
-            args: vec![Expr::Integer(0), Expr::Bool(true)],
+            args: vec![Expr::Decimal(0), Expr::Bool(true)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13057,7 +13057,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicLoad,
-            args: vec![Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13067,7 +13067,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicLoad,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)), "atomic_load# stub should return 0");
@@ -13078,7 +13078,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicStore,
-            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(42), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13088,7 +13088,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicStore,
-            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(42), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(-1)), "atomic_store# stub should return -1");
@@ -13099,7 +13099,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicCas,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(1), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(1), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13109,7 +13109,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicCas,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(1), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)), "atomic_cas# stub should return 0");
@@ -13120,7 +13120,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicXchg,
-            args: vec![Expr::Integer(0), Expr::Bool(true), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Bool(true), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13130,7 +13130,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicXchg,
-            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(42), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)), "atomic_xchg# stub should return 0");
@@ -13141,7 +13141,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicAdd,
-            args: vec![Expr::Integer(0), Expr::Bool(true), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Bool(true), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13151,7 +13151,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicAdd,
-            args: vec![Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(1), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)), "atomic_add# stub should return 0");
@@ -13172,7 +13172,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Fence,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(0)), "fence# stub should return 0");
@@ -13183,7 +13183,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Futex,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13193,7 +13193,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Futex,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(-1)), "futex# stub should return -1");
@@ -13216,7 +13216,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ShmOpen,
-            args: vec![Expr::Integer(42), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(42), Expr::Decimal(0), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13226,7 +13226,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ShmUnlink,
-            args: vec![Expr::Integer(42)],
+            args: vec![Expr::Decimal(42)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13236,7 +13236,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SemOpen,
-            args: vec![Expr::String("/test".into()), Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Quoted("/test".into()), Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13256,7 +13256,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SemPost,
-            args: vec![Expr::String("sem".into())],
+            args: vec![Expr::Quoted("sem".into())],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13268,7 +13268,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SigAction,
-            args: vec![Expr::Bool(false), Expr::Integer(0)],
+            args: vec![Expr::Bool(false), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13278,7 +13278,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SigProcMask,
-            args: vec![Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13288,7 +13288,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Kill,
-            args: vec![Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13320,7 +13320,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Socket,
-            args: vec![Expr::Bool(false), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Bool(false), Expr::Decimal(0), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13330,7 +13330,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Bind,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13340,7 +13340,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Listen,
-            args: vec![Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13350,7 +13350,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Accept,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13360,7 +13360,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Connect,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13370,7 +13370,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Send,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13380,7 +13380,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Recv,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13391,8 +13391,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SendTo,
             args: vec![
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
-                Expr::Bool(false), Expr::Integer(0), Expr::Integer(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
+                Expr::Bool(false), Expr::Decimal(0), Expr::Decimal(0),
             ],
         };
         assert!(i.eval_expr(&expr).is_err());
@@ -13404,8 +13404,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::RecvFrom,
             args: vec![
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
-                Expr::Bool(false), Expr::Integer(0), Expr::Integer(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
+                Expr::Bool(false), Expr::Decimal(0), Expr::Decimal(0),
             ],
         };
         assert!(i.eval_expr(&expr).is_err());
@@ -13417,8 +13417,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SetSockOpt,
             args: vec![
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
-                Expr::Bool(false), Expr::Integer(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
+                Expr::Bool(false), Expr::Decimal(0),
             ],
         };
         assert!(i.eval_expr(&expr).is_err());
@@ -13430,8 +13430,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetSockOpt,
             args: vec![
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
-                Expr::Bool(false), Expr::Integer(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
+                Expr::Bool(false), Expr::Decimal(0),
             ],
         };
         assert!(i.eval_expr(&expr).is_err());
@@ -13442,7 +13442,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Shutdown,
-            args: vec![Expr::Integer(0), Expr::Bool(false)],
+            args: vec![Expr::Decimal(0), Expr::Bool(false)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13452,7 +13452,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetAddrInfo,
-            args: vec![Expr::Integer(0), Expr::String("http".into())],
+            args: vec![Expr::Decimal(0), Expr::Quoted("http".into())],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13464,7 +13464,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetEnv,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13474,7 +13474,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SetEnv,
-            args: vec![Expr::String("PATH".into()), Expr::Integer(0)],
+            args: vec![Expr::Quoted("PATH".into()), Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13484,7 +13484,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::UnsetEnv,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         assert!(i.eval_expr(&expr).is_err());
     }
@@ -13513,7 +13513,7 @@ mod kani_full_tests {
     fn test_eval_is_type_int() {
         let mut i = Interpreter::new();
         let expr = Expr::IsType(
-            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Decimal(42)),
             crate::ast::IsTarget::Type(Type::int()),
         );
         let result = i.eval_expr(&expr).unwrap();
@@ -13524,7 +13524,7 @@ mod kani_full_tests {
     fn test_eval_is_type_string() {
         let mut i = Interpreter::new();
         let expr = Expr::IsType(
-            Box::new(Expr::String("hello".to_string())),
+            Box::new(Expr::Quoted("hello".into())),
             crate::ast::IsTarget::Type(Type::int()),
         );
         let result = i.eval_expr(&expr).unwrap();
@@ -13575,8 +13575,8 @@ mod kani_full_tests {
     fn test_eval_like_int() {
         let mut i = Interpreter::new();
         let expr = Expr::Like(
-            Box::new(Expr::Integer(42)),
-            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Decimal(42)),
+            Box::new(Expr::Decimal(42)),
         );
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(vec![1u8]), "42 like 42 should be true");
@@ -13586,8 +13586,8 @@ mod kani_full_tests {
     fn test_eval_like_int_mismatch() {
         let mut i = Interpreter::new();
         let expr = Expr::Like(
-            Box::new(Expr::Integer(42)),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(42)),
+            Box::new(Expr::Decimal(1)),
         );
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(vec![0u8]), "42 like 1 should be false");
@@ -13608,8 +13608,8 @@ mod kani_full_tests {
     fn test_eval_like_string() {
         let mut i = Interpreter::new();
         let expr = Expr::Like(
-            Box::new(Expr::String("hello".to_string())),
-            Box::new(Expr::String("hello".to_string())),
+            Box::new(Expr::Quoted("hello".into())),
+            Box::new(Expr::Quoted("hello".into())),
         );
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(vec![1u8]), "\"hello\" like \"hello\" should be true");
@@ -13619,8 +13619,8 @@ mod kani_full_tests {
     fn test_eval_like_string_mismatch() {
         let mut i = Interpreter::new();
         let expr = Expr::Like(
-            Box::new(Expr::String("hello".to_string())),
-            Box::new(Expr::String("world".to_string())),
+            Box::new(Expr::Quoted("hello".into())),
+            Box::new(Expr::Quoted("world".into())),
         );
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(vec![0u8]), "\"hello\" like \"world\" should be false");
@@ -13659,7 +13659,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_to_string() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::string());
+        let expr = Expr::Cast(Box::new(Expr::Decimal(42)), Type::string());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits("42".to_string().into_bytes()), "Int -> String should format as decimal");
     }
@@ -13667,7 +13667,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_string_to_int() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::String("42".to_string())), Type::int());
+        let expr = Expr::Cast(Box::new(Expr::Quoted("42".into())), Type::int());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(i64_to_bits(42)), "String -> Int should parse decimal");
     }
@@ -13683,7 +13683,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_string_to_char() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::String("hello".to_string())), Type::char_());
+        let expr = Expr::Cast(Box::new(Expr::Quoted("hello".into())), Type::char_());
         let result = i.eval_expr(&expr).unwrap();
         // Char encoding is u32 (4 bytes), not i64 (8 bytes)
         let expected = Value::Bits(('h' as u32).to_le_bytes().to_vec());
@@ -13693,7 +13693,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_to_float() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::float());
+        let expr = Expr::Cast(Box::new(Expr::Decimal(42)), Type::float());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(f64_to_bits(42.0)), "Int -> Float should be exact");
     }
@@ -13709,7 +13709,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_to_char() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(65)), Type::char_());
+        let expr = Expr::Cast(Box::new(Expr::Decimal(65)), Type::char_());
         let result = i.eval_expr(&expr).unwrap();
         // Char encoding is u32 (4 bytes)
         assert_eq!(result, Value::Bits(('A' as u32).to_le_bytes().to_vec()), "Int 65 -> Char should be 'A'");
@@ -13735,7 +13735,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_to_bool() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::bool_());
+        let expr = Expr::Cast(Box::new(Expr::Decimal(42)), Type::bool_());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(vec![1u8]), "Int 42 -> Bool should be true");
     }
@@ -13743,7 +13743,7 @@ mod kani_full_tests {
     #[test]
     fn test_eval_cast_int_zero_to_bool() {
         let mut i = Interpreter::new();
-        let expr = Expr::Cast(Box::new(Expr::Integer(0)), Type::bool_());
+        let expr = Expr::Cast(Box::new(Expr::Decimal(0)), Type::bool_());
         let result = i.eval_expr(&expr).unwrap();
         assert_eq!(result, Value::Bits(vec![0u8]), "Int 0 -> Bool should be false");
     }
@@ -13811,7 +13811,7 @@ mod kani_full_tests {
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
-            is_pipe: true, fallback: Some(Expr::Integer(0)),
+            is_pipe: true, fallback: Some(Expr::Decimal(0)),
             default_watchdog: None,
             span: None,
         };
@@ -13902,7 +13902,7 @@ mod kani_full_tests {
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
-            is_pipe: true, fallback: Some(Expr::String("default".to_string())),
+            is_pipe: true, fallback: Some(Expr::Quoted("default".into())),
             default_watchdog: None,
             span: None,
         };
@@ -13922,7 +13922,7 @@ mod kani_full_tests {
     fn test_interp_await() {
         let mut i = Interpreter::new();
         let stmt = Statement::Await {
-            expr: Expr::Integer(42),
+            expr: Expr::Decimal(42),
             modifiers: vec![],
         };
         i.exec_stmt(&stmt).unwrap();
@@ -13932,7 +13932,7 @@ mod kani_full_tests {
     #[test]
     fn test_interp_async() {
         let mut i = Interpreter::new();
-        let inner = Statement::Expression(Expr::Integer(42));
+        let inner = Statement::Expression(Expr::Decimal(42));
         let stmt = Statement::Async {
             body: Box::new(inner),
             modifiers: vec![],
@@ -13945,7 +13945,7 @@ mod kani_full_tests {
     #[test]
     fn test_interp_async_await() {
         let mut i = Interpreter::new();
-        let inner = Statement::Expression(Expr::Integer(99));
+        let inner = Statement::Expression(Expr::Decimal(99));
         let stmt = Statement::AsyncAwait {
             body: Box::new(inner),
             lhs: Some("result".to_string()),
@@ -13965,11 +13965,11 @@ mod kani_full_tests {
         let constraint = Expr::And(
             Box::new(Expr::Ge(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(0)),
+                Box::new(Expr::Decimal(0)),
             )),
             Box::new(Expr::Le(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(100)),
+                Box::new(Expr::Decimal(100)),
             )),
         );
         assert!(i.eval_constraint(&val, &constraint).is_ok());
@@ -13982,11 +13982,11 @@ mod kani_full_tests {
         let constraint = Expr::And(
             Box::new(Expr::Ge(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(0)),
+                Box::new(Expr::Decimal(0)),
             )),
             Box::new(Expr::Le(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(100)),
+                Box::new(Expr::Decimal(100)),
             )),
         );
         assert!(i.eval_constraint(&val, &constraint).is_err());
@@ -13999,11 +13999,11 @@ mod kani_full_tests {
         let constraint = Expr::And(
             Box::new(Expr::Ge(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(0)),
+                Box::new(Expr::Decimal(0)),
             )),
             Box::new(Expr::Le(
                 Box::new(Expr::Identifier("_".to_string())),
-                Box::new(Expr::Integer(100)),
+                Box::new(Expr::Decimal(100)),
             )),
         );
         assert!(i.eval_constraint(&val, &constraint).is_err());
@@ -14016,18 +14016,18 @@ mod kani_full_tests {
         let stmt = Statement::Let {
             name: "x".to_string(),
             ty: Some(Type::int()),
-            expr: Some(Expr::Integer(50)),
+            expr: Some(Expr::Decimal(50)),
             address: None,
             address_expr: None,
             bit_range: None,
             constraint: Some(Box::new(Expr::And(
                 Box::new(Expr::Ge(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 )),
                 Box::new(Expr::Le(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(100)),
+                    Box::new(Expr::Decimal(100)),
                 )),
             ))),
             is_override: false,
@@ -14044,18 +14044,18 @@ mod kani_full_tests {
         let stmt = Statement::Let {
             name: "x".to_string(),
             ty: Some(Type::int()),
-            expr: Some(Expr::Integer(200)),
+            expr: Some(Expr::Decimal(200)),
             address: None,
             address_expr: None,
             bit_range: None,
             constraint: Some(Box::new(Expr::And(
                 Box::new(Expr::Ge(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(0)),
+                    Box::new(Expr::Decimal(0)),
                 )),
                 Box::new(Expr::Le(
                     Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Integer(100)),
+                    Box::new(Expr::Decimal(100)),
                 )),
             ))),
             is_override: false,
@@ -14073,7 +14073,7 @@ mod kani_full_tests {
         let val = Value::Bits(i64_to_bits(50));
         let constraint = Expr::Ge(
             Box::new(Expr::Identifier("_".to_string())),
-            Box::new(Expr::Integer(0)),
+            Box::new(Expr::Decimal(0)),
         );
         assert!(i.eval_constraint(&val, &constraint).is_ok());
         // After eval_constraint, _ should be restored
@@ -14087,7 +14087,7 @@ mod kani_full_tests {
         // Test desugared pipe chain through interpreter.
         // Pipeline: 5 |> add_one() |> double()  →  double(add_one(5)) = 12
         let pipe = crate::ast::PipeChain {
-            initial: Box::new(Expr::Integer(5)),
+            initial: Box::new(Expr::Decimal(5)),
             steps: vec![
                 crate::ast::PipeStep {
                     target: Box::new(Expr::Call("add_one".to_string(), vec![])),
@@ -14117,7 +14117,7 @@ mod kani_full_tests {
             body: vec![Statement::Term {
                 values: vec![Some(Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ))],
                 modifiers: vec![],
                 swan_song: None,
@@ -14137,7 +14137,7 @@ mod kani_full_tests {
             body: vec![Statement::Term {
                 values: vec![Some(Expr::Mul(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(2)),
+                    Box::new(Expr::Decimal(2)),
                 ))],
                 modifiers: vec![],
                 swan_song: None,
@@ -14157,7 +14157,7 @@ mod kani_full_tests {
         // add_one(10) = 11 (pos 1)
         // .|> skips pos 1, reads initial 10: double(10) = 20
         let pipe = crate::ast::PipeChain {
-            initial: Box::new(Expr::Integer(10)),
+            initial: Box::new(Expr::Decimal(10)),
             steps: vec![
                 crate::ast::PipeStep {
                     target: Box::new(Expr::Call("add_one".to_string(), vec![])),
@@ -14185,7 +14185,7 @@ mod kani_full_tests {
             body: vec![Statement::Term {
                 values: vec![Some(Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ))],
                 modifiers: vec![],
                 swan_song: None,
@@ -14205,7 +14205,7 @@ mod kani_full_tests {
             body: vec![Statement::Term {
                 values: vec![Some(Expr::Mul(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(2)),
+                    Box::new(Expr::Decimal(2)),
                 ))],
                 modifiers: vec![],
                 swan_song: None,
@@ -14223,10 +14223,10 @@ mod kani_full_tests {
     fn test_pipe_chain_e2e_with_args() {
         // Pipeline: 7 |> sum(3) — sum(7, 3) = 10
         let pipe = crate::ast::PipeChain {
-            initial: Box::new(Expr::Integer(7)),
+            initial: Box::new(Expr::Decimal(7)),
             steps: vec![
                 crate::ast::PipeStep {
-                    target: Box::new(Expr::Call("sum".to_string(), vec![Expr::Integer(3)])),
+                    target: Box::new(Expr::Call("sum".to_string(), vec![Expr::Decimal(3)])),
                     skip: 0,
                 },
             ],
@@ -14268,7 +14268,7 @@ mod kani_full_tests {
         // add_one(4) = 5 (pos 2)
         // .|> reads pos 2-1 = pos 1 = 4: double(4) = 8
         let pipe = crate::ast::PipeChain {
-            initial: Box::new(Expr::Integer(2)),
+            initial: Box::new(Expr::Decimal(2)),
             steps: vec![
                 crate::ast::PipeStep {
                     target: Box::new(Expr::Call("square".to_string(), vec![])), skip: 0,
@@ -14293,11 +14293,11 @@ mod kani_full_tests {
             )),
             ("add_one", vec![("x", Type::int())], Expr::Add(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             )),
             ("double", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(2)),
+                Box::new(Expr::Decimal(2)),
             )),
         ] {
             interp.definitions.insert(name.to_string(), Definition {
@@ -14329,7 +14329,7 @@ mod kani_full_tests {
     fn test_pipe_chain_e2e_auto_wrap() {
         // Pipeline: 5 |> add_one — bare identifier auto-wrapped
         let pipe = crate::ast::PipeChain {
-            initial: Box::new(Expr::Integer(5)),
+            initial: Box::new(Expr::Decimal(5)),
             steps: vec![
                 crate::ast::PipeStep {
                     target: Box::new(Expr::Identifier("add_one".to_string())), skip: 0,
@@ -14352,7 +14352,7 @@ mod kani_full_tests {
             body: vec![Statement::Term {
                 values: vec![Some(Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ))],
                 modifiers: vec![],
                 swan_song: None,
@@ -14391,7 +14391,7 @@ mod kani_full_tests {
             output_names: vec![],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body: vec![Statement::Term {
-                values: vec![Some(Expr::Integer(42))],
+                values: vec![Some(Expr::Decimal(42))],
                 modifiers: vec![],
                 swan_song: None,
             }],
@@ -14410,7 +14410,7 @@ mod kani_full_tests {
             body: vec![Statement::Term {
                 values: vec![Some(Expr::Add(
                     Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ))],
                 modifiers: vec![],
                 swan_song: None,
@@ -14431,7 +14431,7 @@ mod kani_full_tests {
         // 3 |> square() |> add_one() .2|> double()
         //   = double(initial) = double(3) = 6
         let pipe = crate::ast::PipeChain {
-            initial: Box::new(Expr::Integer(3)),
+            initial: Box::new(Expr::Decimal(3)),
             steps: vec![
                 crate::ast::PipeStep {
                     target: Box::new(Expr::Call("square".to_string(), vec![])), skip: 0,
@@ -14456,11 +14456,11 @@ mod kani_full_tests {
             )),
             ("add_one", vec![("x", Type::int())], Expr::Add(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             )),
             ("double", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(2)),
+                Box::new(Expr::Decimal(2)),
             )),
         ] {
             interp.definitions.insert(name.to_string(), Definition {
@@ -14493,7 +14493,7 @@ mod kani_full_tests {
         // 3 |> square() |> add_one() .3|> double() reads __pipe_{4-1-3}=__pipe_0 = 3
         // double(3) = 6
         let pipe = crate::ast::PipeChain {
-            initial: Box::new(Expr::Integer(3)),
+            initial: Box::new(Expr::Decimal(3)),
             steps: vec![
                 crate::ast::PipeStep { target: Box::new(Expr::Call("square".to_string(), vec![])), skip: 0 },
                 crate::ast::PipeStep { target: Box::new(Expr::Call("add_one".to_string(), vec![])), skip: 0 },
@@ -14512,11 +14512,11 @@ mod kani_full_tests {
             )),
             ("add_one", vec![("x", Type::int())], Expr::Add(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             )),
             ("double", vec![("x", Type::int())], Expr::Mul(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(2)),
+                Box::new(Expr::Decimal(2)),
             )),
         ] {
             interp.definitions.insert(name.to_string(), Definition {
@@ -14549,7 +14549,7 @@ mod kani_full_tests {
     fn test_pipe_skip_overflow_panics() {
         // 3 |> square() .2|> double() has skip=2 but only 1 step before it
         let pipe = crate::ast::PipeChain {
-            initial: Box::new(Expr::Integer(3)),
+            initial: Box::new(Expr::Decimal(3)),
             steps: vec![
                 crate::ast::PipeStep { target: Box::new(Expr::Call("square".to_string(), vec![])), skip: 0 },
                 crate::ast::PipeStep { target: Box::new(Expr::Call("double".to_string(), vec![])), skip: 2 },

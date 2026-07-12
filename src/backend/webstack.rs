@@ -840,7 +840,7 @@ impl WebstackGenerator {
 
     fn expr_to_ts(&mut self, expr: &Expr) -> String {
         match expr {
-            Expr::Integer(n) => n.to_string(),
+            Expr::Decimal(n) => n.to_string(),
             Expr::Float(f) => {
                 if f.is_infinite() {
                     if *f > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() }
@@ -851,7 +851,10 @@ impl WebstackGenerator {
                 }
             }
             Expr::Bool(b) => b.to_string(),
-            Expr::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+            Expr::Quoted(s) => {
+                let s_str = String::from_utf8_lossy(s);
+                format!("\"{}\"", s_str.replace('\\', "\\\\").replace('"', "\\\""))
+            }
             Expr::Char(c) => format!("\"{}\"", c.escape_default()),
             Expr::Term => "undefined".to_string(),
             Expr::Identifier(name) => self.ts_ident(name),
@@ -1079,7 +1082,7 @@ impl WebstackGenerator {
     fn is_string_expr(&self, expr: &Expr) -> bool {
         if let Expr::Identifier(name) = expr {
             matches!(self.signal_types.get(name), Some(SignalType::String))
-        } else if let Expr::String(_) = expr {
+        } else if let Expr::Quoted(_) = expr {
             true
         } else {
             false
@@ -1262,10 +1265,13 @@ impl WebstackGenerator {
     /// Emit Rust expression string (ARM bare-metal target).
     fn expr_to_rust(&mut self, expr: &Expr) -> String {
         match expr {
-            Expr::Integer(n) => n.to_string(),
+            Expr::Decimal(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Bool(b) => b.to_string(),
-            Expr::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+            Expr::Quoted(s) => {
+                let s_str = String::from_utf8_lossy(s);
+                format!("\"{}\"", s_str.replace('\\', "\\\\").replace('"', "\\\""))
+            }
             Expr::Char(c) => format!("'{}'", c.escape_default()),
             Expr::Term => "true".to_string(),
             Expr::Identifier(name) => format!("state.{}", name.replace('-', "_")),
@@ -1547,7 +1553,7 @@ mod tests {
                 TopLevel::StateDecl(StateDecl {
                     name: "x".into(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(42)),
+                    expr: Some(Expr::Decimal(42)),
                     address: None,
                     bit_range: None,
                     constraint: None,
@@ -1592,8 +1598,8 @@ mod tests {
         // Math.trunc() — but the current TS emitter uses direct `/`.
         let mut backend = WebstackGenerator::new();
         let out = backend.expr_to_ts(&Expr::Div(
-            Box::new(Expr::Integer(3)),
-            Box::new(Expr::Integer(2)),
+            Box::new(Expr::Decimal(3)),
+            Box::new(Expr::Decimal(2)),
         ));
         assert!(out.contains("3 / 2") || out.contains("Math.trunc"),
             "Int division should emit native JS division (or Math.trunc): got {}", out);
@@ -1608,7 +1614,7 @@ mod tests {
                 TopLevel::StateDecl(StateDecl {
                     name: "count".into(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     constraint: None,
@@ -1623,13 +1629,13 @@ mod tests {
                     contract: Contract {
                         pre_condition: Expr::Lt(
                             Box::new(Expr::Identifier("count".into())),
-                            Box::new(Expr::Integer(10)),
+                            Box::new(Expr::Decimal(10)),
                         ),
                         post_condition: Expr::Eq(
                             Box::new(Expr::Identifier("count".into())),
                             Box::new(Expr::Add(
                                 Box::new(Expr::PriorState("count".into())),
-                                Box::new(Expr::Integer(1)),
+                                Box::new(Expr::Decimal(1)),
                             )),
                         ),
                         watchdog: None,
@@ -1640,7 +1646,7 @@ mod tests {
                             lhs: Expr::Identifier("count".into()),
                             expr: Expr::Add(
                                 Box::new(Expr::Identifier("count".into())),
-                                Box::new(Expr::Integer(1)),
+                                Box::new(Expr::Decimal(1)),
                             ),
                             timeout: None,
                             modifiers: vec![],
@@ -1711,7 +1717,7 @@ mod tests {
             body: vec![
                 Statement::Expression(Expr::Add(
                     Box::new(Expr::Identifier("a".into())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 )),
             ],
         };
@@ -1737,19 +1743,19 @@ mod tests {
         let mut backend = WebstackGenerator::new();
         let r = backend.expr_to_ts(&Expr::IntrinsicCall {
             intrinsic: Intrinsic::Abs,
-            args: vec![Expr::Integer(-5)],
+            args: vec![Expr::Decimal(-5)],
         });
         assert!(r.contains("Math.abs"));
 
         let r2 = backend.expr_to_ts(&Expr::IntrinsicCall {
             intrinsic: Intrinsic::Sqrt,
-            args: vec![Expr::Integer(9)],
+            args: vec![Expr::Decimal(9)],
         });
         assert!(r2.contains("Math.sqrt"));
 
         let r3 = backend.expr_to_ts(&Expr::IntrinsicCall {
             intrinsic: Intrinsic::IntToStr,
-            args: vec![Expr::Integer(42)],
+            args: vec![Expr::Decimal(42)],
         });
         assert!(r3.contains("String"));
     }
@@ -1759,7 +1765,7 @@ mod tests {
         let mut backend = WebstackGenerator::new();
         let r = backend.expr_to_ts(&Expr::IntrinsicCall {
             intrinsic: Intrinsic::ToStr,
-            args: vec![Expr::Integer(100)],
+            args: vec![Expr::Decimal(100)],
         });
         assert!(r.contains("String(100)"), "ToStr should map to String() in TS: {}", r);
     }
@@ -1769,7 +1775,7 @@ mod tests {
         let mut backend = WebstackGenerator::new();
         let expr = Expr::Add(
             Box::new(Expr::Identifier("x".into())),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(1)),
         );
         let r = backend.expr_to_rust(&expr);
         assert_eq!(r, "(state.x + 1)");
@@ -1783,7 +1789,7 @@ mod tests {
             lhs: Expr::Identifier("count".into()),
             expr: Expr::Add(
                 Box::new(Expr::Identifier("count".into())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             ),
             timeout: None,
             modifiers: vec![],
@@ -1798,14 +1804,14 @@ mod tests {
         backend.statement_to_rust(&mut out, &Statement::Guarded {
             condition: Expr::Lt(
                 Box::new(Expr::Identifier("count".into())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ),
             statements: vec![
                 Statement::Assignment {
                     lhs: Expr::Identifier("count".into()),
                     expr: Expr::Add(
                         Box::new(Expr::Identifier("count".into())),
-                        Box::new(Expr::Integer(1)),
+                        Box::new(Expr::Decimal(1)),
                     ),
                     timeout: None,
                     modifiers: vec![],
@@ -1826,7 +1832,7 @@ mod tests {
                 TopLevel::StateDecl(StateDecl {
                     name: "x".into(),
                     ty: Type::int(),
-                    expr: Some(Expr::Integer(0)),
+                    expr: Some(Expr::Decimal(0)),
                     address: None,
                     bit_range: None,
                     constraint: None,
@@ -1849,7 +1855,7 @@ mod tests {
                             lhs: Expr::Identifier("x".into()),
                             expr: Expr::Add(
                                 Box::new(Expr::Identifier("x".into())),
-                                Box::new(Expr::Integer(1)),
+                                Box::new(Expr::Decimal(1)),
                             ),
                             timeout: None,
                             modifiers: vec![],

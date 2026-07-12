@@ -4,11 +4,11 @@ use std::collections::HashMap;
 // ── Helpers ────────────────────────────────────────────────────────
 
 fn is_zero(expr: &Expr) -> bool {
-    matches!(expr, Expr::Integer(0)) || matches!(expr, Expr::Float(f) if *f == 0.0)
+    matches!(expr, Expr::Decimal(0)) || matches!(expr, Expr::Float(f) if *f == 0.0)
 }
 
 fn is_one(expr: &Expr) -> bool {
-    matches!(expr, Expr::Integer(1)) || matches!(expr, Expr::Float(f) if *f == 1.0)
+    matches!(expr, Expr::Decimal(1)) || matches!(expr, Expr::Float(f) if *f == 1.0)
 }
 
 fn is_bool_true(expr: &Expr) -> bool {
@@ -56,11 +56,11 @@ fn structural_hash_into(expr: &Expr, h: &mut u64) {
     }
     match expr {
         // ── Leaf variants ───────────────────────────────────────
-        Expr::Integer(n) => { *h = combine(*h, 1); *h = combine(*h, *n as u64); }
+        Expr::Decimal(n) => { *h = combine(*h, 1); *h = combine(*h, *n as u64); }
         Expr::Float(f) => { *h = combine(*h, 2); *h = combine(*h, f.to_bits()); }
         Expr::Bool(b) => { *h = combine(*h, 3); *h = combine(*h, if *b { 1 } else { 0 }); }
         Expr::Char(c) => { *h = combine(*h, 4); *h = combine(*h, *c as u64); }
-        Expr::String(s) => { *h = combine(*h, 5); *h = hash_str(*h, s); }
+        Expr::Quoted(s) => { *h = combine(*h, 5); *h = hash_str(*h, std::str::from_utf8(s).unwrap_or("")); }
         Expr::Identifier(id) => { *h = combine(*h, 6); *h = hash_str(*h, id); }
         Expr::Term => { *h = combine(*h, 7); }
         expr @ Expr::AddrOf(_) => { let id = expr.as_var_name().unwrap(); *h = combine(*h, 8); *h = hash_str(*h, id); }
@@ -205,7 +205,7 @@ pub fn simplify_cached(expr: &Expr, cache: &mut SimplifyCache) -> Option<Expr> {
             let sl = simplify_cached(l, cache)?;
             let sr = simplify_cached(r, cache)?;
             if is_zero(&sr) { sl }
-            else if exprs_equal(&sl, &sr) { Expr::Integer(0) }
+            else if exprs_equal(&sl, &sr) { Expr::Decimal(0) }
             else if let Expr::Add(a, b) = &sl {
                 if exprs_equal(b, &sr) { *a.clone() }
                 else if exprs_equal(a, &sr) { *b.clone() }
@@ -216,7 +216,7 @@ pub fn simplify_cached(expr: &Expr, cache: &mut SimplifyCache) -> Option<Expr> {
         Expr::Mul(l, r) => {
             let sl = simplify_cached(l, cache)?;
             let sr = simplify_cached(r, cache)?;
-            if is_zero(&sl) || is_zero(&sr) { Expr::Integer(0) }
+            if is_zero(&sl) || is_zero(&sr) { Expr::Decimal(0) }
             else if is_one(&sr) { sl }
             else if is_one(&sl) { sr }
             else { Expr::Mul(Box::new(sl), Box::new(sr)) }
@@ -252,7 +252,7 @@ pub fn simplify_cached(expr: &Expr, cache: &mut SimplifyCache) -> Option<Expr> {
         Expr::BitAnd(l, r) => {
             let sl = simplify_cached(l, cache)?;
             let sr = simplify_cached(r, cache)?;
-            if is_zero(&sl) || is_zero(&sr) { Expr::Integer(0) }
+            if is_zero(&sl) || is_zero(&sr) { Expr::Decimal(0) }
             else { Expr::BitAnd(Box::new(sl), Box::new(sr)) }
         }
 
@@ -494,8 +494,8 @@ mod tests {
     #[test]
     fn test_cancel_add_sub() {
         let expr = Expr::Sub(
-            Box::new(Expr::Add(Box::new(id("a")), Box::new(Expr::Integer(5)))),
-            Box::new(Expr::Integer(5)),
+            Box::new(Expr::Add(Box::new(id("a")), Box::new(Expr::Decimal(5)))),
+            Box::new(Expr::Decimal(5)),
         );
         let result = simplify(&expr);
         assert_eq!(result, id("a"), "expected a, got {:?}", result);
@@ -503,23 +503,23 @@ mod tests {
 
     #[test]
     fn test_identity_add_zero() {
-        let expr = Expr::Add(Box::new(id("x")), Box::new(Expr::Integer(0)));
+        let expr = Expr::Add(Box::new(id("x")), Box::new(Expr::Decimal(0)));
         let result = simplify(&expr);
         assert_eq!(result, id("x"));
     }
 
     #[test]
     fn test_identity_mul_one() {
-        let expr = Expr::Mul(Box::new(id("x")), Box::new(Expr::Integer(1)));
+        let expr = Expr::Mul(Box::new(id("x")), Box::new(Expr::Decimal(1)));
         let result = simplify(&expr);
         assert_eq!(result, id("x"));
     }
 
     #[test]
     fn test_mul_zero() {
-        let expr = Expr::Mul(Box::new(id("x")), Box::new(Expr::Integer(0)));
+        let expr = Expr::Mul(Box::new(id("x")), Box::new(Expr::Decimal(0)));
         let result = simplify(&expr);
-        assert_eq!(result, Expr::Integer(0));
+        assert_eq!(result, Expr::Decimal(0));
     }
 
     #[test]
@@ -553,7 +553,7 @@ mod tests {
 
     #[test]
     fn test_cache_hit() {
-        let inner = Expr::Add(Box::new(id("a")), Box::new(Expr::Integer(0)));
+        let inner = Expr::Add(Box::new(id("a")), Box::new(Expr::Decimal(0)));
         let outer = Expr::Add(
             Box::new(Expr::Add(Box::new(inner.clone()), Box::new(id("b")))),
             Box::new(inner),

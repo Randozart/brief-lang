@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn test_gpu_directive_with_value() {
-        let t = Annotation { name: "gpu".into(), value: Expr::String("threshold=1000".into()), mode: AnnotationMode::Advisory, diagnostic: false };
+        let t = Annotation { name: "gpu".into(), value: Expr::Quoted("threshold=1000".into()), mode: AnnotationMode::Advisory, diagnostic: false };
         let effects = resolve_directives(&[t], DirectiveCtx::Transaction);
         assert_eq!(effects.len(), 1);
         match &effects[0] {

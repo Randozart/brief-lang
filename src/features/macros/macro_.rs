@@ -42,7 +42,7 @@ mod tests {
                 modifiers: vec![],
             }],
         });
-        let result = expand_macro_call(&mut ctx, "identity", &[Expr::Integer(42)]);
+        let result = expand_macro_call(&mut ctx, "identity", &[Expr::Decimal(42)]);
         assert!(result.is_ok(), "Expected Ok, got {:?}", result.err());
         let value = result.unwrap();
         assert_eq!(value, crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)));

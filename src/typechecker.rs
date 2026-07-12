@@ -1791,7 +1791,7 @@ impl TypeChecker {
     fn is_compile_time_expr(expr: &Expr) -> bool {
         match expr {
             // Literals: always compile-time
-            Expr::Integer(_) | Expr::Float(_) | Expr::String(_)
+            Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_)
             | Expr::Bool(_) | Expr::Char(_) | Expr::Term
             | Expr::RegexLiteral(_) => true,
             // Constructor calls: allowed if all args are compile-time
@@ -2039,7 +2039,7 @@ impl TypeChecker {
 
     pub(crate) fn infer_expression(&self, expr: &Expr) -> Type {
         match expr {
-            Expr::Integer(_) => Type::int(),
+            Expr::Decimal(_) => Type::int(),
             // 2026-06-29: IntegerSuffixed carries its type from the parser (e.g. 42i8 → Type::int8())
             Expr::IntegerSuffixed(_, ty) => ty.clone(),
             Expr::Float(_) => {
@@ -2071,7 +2071,7 @@ impl TypeChecker {
             }
             // 2026-06-29: Float64 is a separate AST variant for explicit f64 literals (e.g. 3.14f64)
             Expr::Float64(_) => Type::float64(),
-            Expr::String(_) => Type::string(),
+            Expr::Quoted(_) => Type::string(),
             Expr::RegexLiteral(_) => Type::string(),
             Expr::Char(_) => Type::char_(),
             Expr::Bool(_) => Type::bool_(),
@@ -3858,7 +3858,7 @@ mod tests {
                 name: "foo".into(), type_params: vec![], parameters: vec![],
                 outputs: vec![Type::int()], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
+                body: vec![Statement::Term { values: vec![Some(Expr::Decimal(42))], modifiers: vec![], swan_song: None }],
                 annotations: vec![],
                 metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
@@ -3875,7 +3875,7 @@ mod tests {
                 name: "foo".into(), type_params: vec![], parameters: vec![],
                 outputs: vec![Type::bool_()], output_type: None, output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], modifiers: vec![], swan_song: None }],
+                body: vec![Statement::Term { values: vec![Some(Expr::Decimal(42))], modifiers: vec![], swan_song: None }],
                 annotations: vec![],
                 metadata: HashMap::new(),
                 is_lambda: false, modifiers: vec![], variant_bodies: vec![], derivation: None,
@@ -3894,7 +3894,7 @@ mod tests {
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![
                     Statement::Let { name: "x".into(), ty: Some(Type::int()), expr: Some(Expr::Identifier("y".into())), address: None, address_expr: None, bit_range: None, is_override: false, modifiers: vec![], constraint: None },
-                    Statement::Term { values: vec![Some(Expr::Integer(0))], modifiers: vec![], swan_song: None },
+                    Statement::Term { values: vec![Some(Expr::Decimal(0))], modifiers: vec![], swan_song: None },
                 ],
                 annotations: vec![],
                 metadata: HashMap::new(),
@@ -3909,7 +3909,7 @@ mod tests {
     fn test_check_assignment_type_mismatch() {
         let mut prog = make_program(vec![
             TopLevel::StateDecl(StateDecl {
-                name: "x".into(), ty: Type::int(), expr: Some(Expr::String("hello".into())),
+                name: "x".into(), ty: Type::int(), expr: Some(Expr::Quoted("hello".into())),
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
             constraint: None,
             }),
@@ -3922,7 +3922,7 @@ mod tests {
     fn test_check_state_decl_initial_value() {
         let mut prog = make_program(vec![
             TopLevel::StateDecl(StateDecl {
-                name: "x".into(), ty: Type::int(), expr: Some(Expr::Integer(5)),
+                name: "x".into(), ty: Type::int(), expr: Some(Expr::Decimal(5)),
                 address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
             constraint: None,
             }),
@@ -3963,7 +3963,7 @@ mod tests {
         let mut prog = make_program(vec![
             TopLevel::Transaction(Transaction {
                 name: "tx".into(), is_reactive: false, is_async: false, parameters: vec![],
-                contract: Contract { pre_condition: Expr::Gt(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(0))), post_condition: Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(0))), watchdog: None, span: None },
+                contract: Contract { pre_condition: Expr::Gt(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Decimal(0))), post_condition: Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Decimal(0))), watchdog: None, span: None },
                 body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
                 reactor_speed: None, span: None, is_lambda: false,
                 dependencies: vec![], modifiers: vec![],
@@ -3996,7 +3996,7 @@ mod tests {
     fn test_check_constant_declaration() {
         let mut prog = make_program(vec![
             TopLevel::Constant(Constant {
-                name: "MAX".into(), ty: Type::int(), expr: Expr::Integer(100),
+                name: "MAX".into(), ty: Type::int(), expr: Expr::Decimal(100),
             }),
         ]);
         let errors = check(&mut prog);
@@ -4104,7 +4104,7 @@ mod tests {
                 output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![
-                    Statement::Term { values: vec![Some(Expr::Call("needs_int".into(), vec![Expr::String("hello".into())]))], modifiers: vec![], swan_song: None },
+                    Statement::Term { values: vec![Some(Expr::Call("needs_int".into(), vec![Expr::Quoted("hello".into())]))], modifiers: vec![], swan_song: None },
                 ],
                 annotations: vec![],
                 metadata: HashMap::new(),
@@ -4130,7 +4130,7 @@ mod tests {
                 output_names: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 body: vec![
-                    Statement::Expression(Expr::Call("undefined_fn".into(), vec![Expr::Integer(42)])),
+                    Statement::Expression(Expr::Call("undefined_fn".into(), vec![Expr::Decimal(42)])),
                 ],
                 annotations: vec![],
                 metadata: HashMap::new(),
@@ -4156,7 +4156,7 @@ mod tests {
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
-            is_pipe: true, fallback: Some(Expr::String("".to_string())),
+            is_pipe: true, fallback: Some(Expr::Quoted("".into())),
             default_watchdog: None,
             span: None,
         };
@@ -4181,7 +4181,7 @@ mod tests {
             input_layout: None, output_layout: None,
             precondition: None, postcondition: None,
             buffer_mode: None, ffi_kind: None, is_out: false,
-            is_pipe: true, fallback: Some(Expr::Integer(0)),
+            is_pipe: true, fallback: Some(Expr::Decimal(0)),
             default_watchdog: None,
             span: None,
         };
@@ -4192,9 +4192,9 @@ mod tests {
 
     #[test]
     fn test_is_compile_time_expr_literals() {
-        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Integer(42)));
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Decimal(42)));
         assert!(super::TypeChecker::is_compile_time_expr(&Expr::Float(3.14)));
-        assert!(super::TypeChecker::is_compile_time_expr(&Expr::String("hello".into())));
+        assert!(super::TypeChecker::is_compile_time_expr(&Expr::Quoted("hello".into())));
         assert!(super::TypeChecker::is_compile_time_expr(&Expr::Bool(true)));
         assert!(super::TypeChecker::is_compile_time_expr(&Expr::Char('x')));
         assert!(super::TypeChecker::is_compile_time_expr(&Expr::Term));
@@ -4205,7 +4205,7 @@ mod tests {
     fn test_is_compile_time_expr_constructor_call() {
         assert!(super::TypeChecker::is_compile_time_expr(&Expr::Call(
             "Error".into(),
-            vec![Expr::String("msg".into())],
+            vec![Expr::Quoted("msg".into())],
         )));
     }
 
@@ -4214,8 +4214,8 @@ mod tests {
         assert!(super::TypeChecker::is_compile_time_expr(&Expr::Call(
             "CustomError".into(),
             vec![
-                Expr::String("code".into()),
-                Expr::Integer(42),
+                Expr::Quoted("code".into()),
+                Expr::Decimal(42),
             ],
         )));
     }
@@ -4223,17 +4223,17 @@ mod tests {
     #[test]
     fn test_is_compile_time_expr_tuple() {
         assert!(super::TypeChecker::is_compile_time_expr(&Expr::Tuple(vec![
-            Expr::Integer(1),
-            Expr::String("a".into()),
+            Expr::Decimal(1),
+            Expr::Quoted("a".into()),
         ])));
     }
 
     #[test]
     fn test_is_compile_time_expr_list_literal() {
         assert!(super::TypeChecker::is_compile_time_expr(&Expr::ListLiteral(vec![
-            Expr::Integer(1),
-            Expr::Integer(2),
-            Expr::Integer(3),
+            Expr::Decimal(1),
+            Expr::Decimal(2),
+            Expr::Decimal(3),
         ])));
     }
 
@@ -4255,8 +4255,8 @@ mod tests {
     #[test]
     fn test_is_compile_time_expr_rejects_addition() {
         assert!(!super::TypeChecker::is_compile_time_expr(&Expr::Add(
-            Box::new(Expr::Integer(1)),
-            Box::new(Expr::Integer(2)),
+            Box::new(Expr::Decimal(1)),
+            Box::new(Expr::Decimal(2)),
         )));
     }
 
@@ -4291,7 +4291,7 @@ mod tests {
         ctx.inop_decls.insert("sadd".to_string(), inop);
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::UserDefined("sadd".to_string()),
-            args: vec![Expr::Integer(1), Expr::Integer(2)],
+            args: vec![Expr::Decimal(1), Expr::Decimal(2)],
         };
         let ty = ctx.infer_expression(&expr);
         assert_eq!(ty, Type::int(), "UserDefined inop should return output type Int");
@@ -4536,8 +4536,8 @@ mod tests {
         let ctx = super::TypeChecker::new();
         let expr = Expr::Cast(
             Box::new(Expr::Add(
-                Box::new(Expr::Cast(Box::new(Expr::Integer(5)), Type::int())),
-                Box::new(Expr::Cast(Box::new(Expr::Integer(3)), Type::int())),
+                Box::new(Expr::Cast(Box::new(Expr::Decimal(5)), Type::int())),
+                Box::new(Expr::Cast(Box::new(Expr::Decimal(3)), Type::int())),
             )),
             Type::int(),
         );
@@ -4593,7 +4593,7 @@ mod tests {
         ctx.inop_decls.insert("atomic_load".to_string(), inop);
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::UserDefined("atomic_load".to_string()),
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ret = ctx.infer_expression(&expr);
         assert_eq!(ret, Type::int());
@@ -4682,7 +4682,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_abs_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Abs,
-            args: vec![Expr::Integer(-42)],
+            args: vec![Expr::Decimal(-42)],
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
@@ -4693,7 +4693,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_ctpop_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Ctpop,
-            args: vec![Expr::Integer(255)],
+            args: vec![Expr::Decimal(255)],
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
@@ -4705,8 +4705,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Contains,
             args: vec![
-                Expr::ListLiteral(vec![Expr::Integer(1)]),
-                Expr::Integer(1),
+                Expr::ListLiteral(vec![Expr::Decimal(1)]),
+                Expr::Decimal(1),
             ],
         };
         let ctx = TypeChecker::new();
@@ -4718,7 +4718,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_size_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Size,
-            args: vec![Expr::ListLiteral(vec![Expr::Integer(1)])],
+            args: vec![Expr::ListLiteral(vec![Expr::Decimal(1)])],
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
@@ -4740,7 +4740,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_pop_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Pop,
-            args: vec![Expr::ListLiteral(vec![Expr::Integer(1)])],
+            args: vec![Expr::ListLiteral(vec![Expr::Decimal(1)])],
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
@@ -4764,7 +4764,7 @@ mod kani_full_tests {
         let mut tc = super::TypeChecker::new();
         let ty = tc.infer_expression(&Expr::IntrinsicCall {
             intrinsic: Intrinsic::ByteCount,
-            args: vec![Expr::String("hello".into())],
+            args: vec![Expr::Quoted("hello".into())],
         });
         assert_eq!(ty, Type::int(), "bytes# should infer as Int");
     }
@@ -4808,7 +4808,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_ioctl_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::IoCtl,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
@@ -4819,7 +4819,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_isatty_returns_bool() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::IsTty,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
@@ -4830,7 +4830,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_spawn_with_output_returns_string() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SpawnWithOutput,
-            args: vec![Expr::String("echo hi".into())],
+            args: vec![Expr::Quoted("echo hi".into())],
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
@@ -4841,7 +4841,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_spawn_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Spawn,
-            args: vec![Expr::String("true".into())],
+            args: vec![Expr::Quoted("true".into())],
         };
         let ctx = TypeChecker::new();
         let ty = ctx.infer_expression(&expr);
@@ -4854,7 +4854,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_open_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Open,
-            args: vec![Expr::String("/tmp/t".into()), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Quoted("/tmp/t".into()), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "open# should infer as Int");
@@ -4864,7 +4864,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_close_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Close,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "close# should infer as Int");
@@ -4874,7 +4874,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_read_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Read,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(4096)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(4096)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "read# should infer as Int");
@@ -4884,7 +4884,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_write_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Write,
-            args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(8)],
+            args: vec![Expr::Decimal(1), Expr::Decimal(0), Expr::Decimal(8)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "write# should infer as Int");
@@ -4894,7 +4894,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_lseek_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::LSeek,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "lseek# should infer as Int");
@@ -4904,7 +4904,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_pread_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::PRead,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(16), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(16), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "pread# should infer as Int");
@@ -4914,7 +4914,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_pwrite_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::PWrite,
-            args: vec![Expr::Integer(1), Expr::Integer(0), Expr::Integer(8), Expr::Integer(0)],
+            args: vec![Expr::Decimal(1), Expr::Decimal(0), Expr::Decimal(8), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "pwrite# should infer as Int");
@@ -4924,7 +4924,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_stat_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Stat,
-            args: vec![Expr::String("/tmp/t".into())],
+            args: vec![Expr::Quoted("/tmp/t".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "stat# should infer as Int");
@@ -4934,7 +4934,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_fstat_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FStat,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "fstat# should infer as Int");
@@ -4944,7 +4944,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_truncate_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FTruncate,
-            args: vec![Expr::String("/tmp/t".into()), Expr::Integer(0)],
+            args: vec![Expr::Quoted("/tmp/t".into()), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "truncate# should infer as Int");
@@ -4954,7 +4954,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_ftruncate_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FTruncate,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "ftruncate# should infer as Int");
@@ -4964,7 +4964,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_fsync_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FSync,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "fsync# should infer as Int");
@@ -4974,7 +4974,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_dup_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FDup,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "dup# should infer as Int");
@@ -4984,7 +4984,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_dup2_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FDup2,
-            args: vec![Expr::Integer(0), Expr::Integer(3)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(3)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "dup2# should infer as Int");
@@ -4994,7 +4994,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_fcntl_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::FCntl,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "fcntl# should infer as Int");
@@ -5006,7 +5006,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_mkdir_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::MkDir,
-            args: vec![Expr::String("/tmp/d".into()), Expr::Integer(0o755)],
+            args: vec![Expr::Quoted("/tmp/d".into()), Expr::Decimal(0o755)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "mkdir# should infer as Int");
@@ -5016,7 +5016,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_rmdir_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::RmDir,
-            args: vec![Expr::String("/tmp/d".into())],
+            args: vec![Expr::Quoted("/tmp/d".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "rmdir# should infer as Int");
@@ -5026,7 +5026,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_unlink_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Unlink,
-            args: vec![Expr::String("/tmp/f".into())],
+            args: vec![Expr::Quoted("/tmp/f".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "unlink# should infer as Int");
@@ -5036,7 +5036,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_rename_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Rename,
-            args: vec![Expr::String("a".into()), Expr::String("b".into())],
+            args: vec![Expr::Quoted("a".into()), Expr::Quoted("b".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "rename# should infer as Int");
@@ -5046,7 +5046,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_symlink_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SymLink,
-            args: vec![Expr::String("target".into()), Expr::String("link".into())],
+            args: vec![Expr::Quoted("target".into()), Expr::Quoted("link".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "symlink# should infer as Int");
@@ -5056,7 +5056,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_readlink_returns_string() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ReadLink,
-            args: vec![Expr::String("/tmp/l".into())],
+            args: vec![Expr::Quoted("/tmp/l".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::string(), "readlink# should infer as String");
@@ -5066,7 +5066,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_link_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Link,
-            args: vec![Expr::String("old".into()), Expr::String("new".into())],
+            args: vec![Expr::Quoted("old".into()), Expr::Quoted("new".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "link# should infer as Int");
@@ -5086,7 +5086,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_chdir_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ChDir,
-            args: vec![Expr::String("/tmp".into())],
+            args: vec![Expr::Quoted("/tmp".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "chdir# should infer as Int");
@@ -5096,7 +5096,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_readdir_returns_list() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ReadDir,
-            args: vec![Expr::String(".".into())],
+            args: vec![Expr::Quoted(".".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::Custom("List".to_string()), "readdir# should infer as List");
@@ -5106,7 +5106,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_chmod_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ChMod,
-            args: vec![Expr::String("/tmp/f".into()), Expr::Integer(0o644)],
+            args: vec![Expr::Quoted("/tmp/f".into()), Expr::Decimal(0o644)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "chmod# should infer as Int");
@@ -5116,7 +5116,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_chown_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ChOwn,
-            args: vec![Expr::String("/tmp/f".into()), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Quoted("/tmp/f".into()), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "chown# should infer as Int");
@@ -5126,7 +5126,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_umask_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::UMask,
-            args: vec![Expr::Integer(0o022)],
+            args: vec![Expr::Decimal(0o022)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "umask# should infer as Int");
@@ -5136,7 +5136,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_access_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Access,
-            args: vec![Expr::String("/tmp".into()), Expr::Integer(0)],
+            args: vec![Expr::Quoted("/tmp".into()), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "access# should infer as Int");
@@ -5148,7 +5148,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_mmap_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Mmap,
-            args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Integer(3), Expr::Integer(-1), Expr::Integer(-1), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(4096), Expr::Decimal(3), Expr::Decimal(-1), Expr::Decimal(-1), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int(), "mmap# should infer as Int");
@@ -5158,7 +5158,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_munmap_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::MUnmap,
-            args: vec![Expr::Integer(0), Expr::Integer(4096)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(4096)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5168,7 +5168,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_mprotect_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::MProtect,
-            args: vec![Expr::Integer(0), Expr::Integer(4096), Expr::Integer(3)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(4096), Expr::Decimal(3)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5178,7 +5178,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_brk_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Brk,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5188,7 +5188,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_mlock_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::MLock,
-            args: vec![Expr::Integer(0), Expr::Integer(4096)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(4096)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5198,7 +5198,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_atomic_load_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicLoad,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5208,7 +5208,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_atomic_store_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicStore,
-            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(42), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5218,7 +5218,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_atomic_cas_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicCas,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(1), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5228,7 +5228,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_atomic_xchg_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicXchg,
-            args: vec![Expr::Integer(0), Expr::Integer(42), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(42), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5238,7 +5238,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_atomic_add_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::AtomicAdd,
-            args: vec![Expr::Integer(0), Expr::Integer(1), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(1), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5268,7 +5268,7 @@ mod kani_full_tests {
         });
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::UserDefined("atomic_load".to_string()),
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ret = ctx.infer_expression(&expr);
         assert_eq!(ret, Type::int());
@@ -5278,7 +5278,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_fence_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Fence,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5288,7 +5288,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_futex_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Futex,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5300,7 +5300,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_pipe_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Pipe,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5310,7 +5310,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_shm_open_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ShmOpen,
-            args: vec![Expr::String("/s".into()), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Quoted("/s".into()), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5320,7 +5320,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_shm_unlink_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ShmUnlink,
-            args: vec![Expr::String("/s".into())],
+            args: vec![Expr::Quoted("/s".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5330,7 +5330,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_sem_open_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SemOpen,
-            args: vec![Expr::String("/s".into()), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Quoted("/s".into()), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5340,7 +5340,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_sem_wait_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SemWait,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5350,7 +5350,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_sem_post_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SemPost,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5362,7 +5362,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_sigaction_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SigAction,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5372,7 +5372,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_sigprocmask_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SigProcMask,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5382,7 +5382,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_kill_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Kill,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5392,7 +5392,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_signalfd_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SignalFd,
-            args: vec![Expr::Integer(0)],
+            args: vec![Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5402,7 +5402,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_timerfd_create_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::TimerFdCreate,
-            args: vec![Expr::Integer(100)],
+            args: vec![Expr::Decimal(100)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5414,7 +5414,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_socket_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Socket,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5424,7 +5424,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_bind_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Bind,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5434,7 +5434,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_listen_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Listen,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5444,7 +5444,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_accept_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Accept,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5454,7 +5454,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_connect_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Connect,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5464,7 +5464,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_send_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Send,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5474,7 +5474,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_recv_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Recv,
-            args: vec![Expr::Integer(0), Expr::Integer(0), Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5485,8 +5485,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SendTo,
             args: vec![
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
             ],
         };
         let ctx = TypeChecker::new();
@@ -5498,8 +5498,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::RecvFrom,
             args: vec![
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
             ],
         };
         let ctx = TypeChecker::new();
@@ -5511,8 +5511,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SetSockOpt,
             args: vec![
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
-                Expr::Integer(0), Expr::Integer(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
+                Expr::Decimal(0), Expr::Decimal(0),
             ],
         };
         let ctx = TypeChecker::new();
@@ -5524,8 +5524,8 @@ mod kani_full_tests {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetSockOpt,
             args: vec![
-                Expr::Integer(0), Expr::Integer(0), Expr::Integer(0),
-                Expr::Integer(0), Expr::Integer(0),
+                Expr::Decimal(0), Expr::Decimal(0), Expr::Decimal(0),
+                Expr::Decimal(0), Expr::Decimal(0),
             ],
         };
         let ctx = TypeChecker::new();
@@ -5536,7 +5536,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_shutdown_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::Shutdown,
-            args: vec![Expr::Integer(0), Expr::Integer(0)],
+            args: vec![Expr::Decimal(0), Expr::Decimal(0)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5546,7 +5546,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_getaddrinfo_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetAddrInfo,
-            args: vec![Expr::String("localhost".into()), Expr::String("80".into())],
+            args: vec![Expr::Quoted("localhost".into()), Expr::Quoted("80".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5558,7 +5558,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_getenv_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::GetEnv,
-            args: vec![Expr::String("PATH".into())],
+            args: vec![Expr::Quoted("PATH".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5568,7 +5568,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_setenv_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::SetEnv,
-            args: vec![Expr::String("VAR".into()), Expr::String("val".into())],
+            args: vec![Expr::Quoted("VAR".into()), Expr::Quoted("val".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5578,7 +5578,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_unsetenv_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::UnsetEnv,
-            args: vec![Expr::String("VAR".into())],
+            args: vec![Expr::Quoted("VAR".into())],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5608,7 +5608,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_clock_gettime_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::ClockGetTime,
-            args: vec![Expr::Integer(1)],
+            args: vec![Expr::Decimal(1)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5618,7 +5618,7 @@ mod kani_full_tests {
     fn test_check_intrinsic_nanosleep_returns_int() {
         let expr = Expr::IntrinsicCall {
             intrinsic: Intrinsic::NanoSleep,
-            args: vec![Expr::Integer(1000)],
+            args: vec![Expr::Decimal(1000)],
         };
         let ctx = TypeChecker::new();
         assert_eq!(ctx.infer_expression(&expr), Type::int());
@@ -5689,7 +5689,7 @@ mod kani_full_tests {
     fn test_infer_is_type_returns_bool() {
         let ctx = TypeChecker::new();
         let expr = Expr::IsType(
-            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Decimal(42)),
             crate::ast::IsTarget::Type(Type::int()),
         );
         let ty = ctx.infer_expression(&expr);
@@ -5722,8 +5722,8 @@ mod kani_full_tests {
     fn test_infer_like_returns_bool() {
         let ctx = TypeChecker::new();
         let expr = Expr::Like(
-            Box::new(Expr::Integer(42)),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(42)),
+            Box::new(Expr::Decimal(1)),
         );
         let ty = ctx.infer_expression(&expr);
         assert_eq!(ty, Type::bool_(), "Like should infer as Bool");
@@ -5733,7 +5733,7 @@ mod kani_full_tests {
     fn test_infer_cast_int_to_string_valid() {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
-            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Decimal(42)),
             Type::string(),
         );
         let ty = ctx.infer_expression(&expr);
@@ -5745,7 +5745,7 @@ mod kani_full_tests {
     fn test_infer_cast_string_to_int_valid() {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
-            Box::new(Expr::String("42".to_string())),
+            Box::new(Expr::Quoted("42".into())),
             Type::int(),
         );
         let ty = ctx.infer_expression(&expr);
@@ -5769,7 +5769,7 @@ mod kani_full_tests {
     fn test_infer_cast_string_to_char_valid() {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
-            Box::new(Expr::String("hello".to_string())),
+            Box::new(Expr::Quoted("hello".into())),
             Type::char_(),
         );
         let ty = ctx.infer_expression(&expr);
@@ -5781,7 +5781,7 @@ mod kani_full_tests {
     fn test_infer_cast_int_to_float_valid() {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
-            Box::new(Expr::Integer(42)),
+            Box::new(Expr::Decimal(42)),
             Type::float(),
         );
         let ty = ctx.infer_expression(&expr);
@@ -5793,7 +5793,7 @@ mod kani_full_tests {
     fn test_infer_cast_int_to_char_valid() {
         let ctx = TypeChecker::new();
         let expr = Expr::Cast(
-            Box::new(Expr::Integer(65)),
+            Box::new(Expr::Decimal(65)),
             Type::char_(),
         );
         let ty = ctx.infer_expression(&expr);

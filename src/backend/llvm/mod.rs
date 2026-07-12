@@ -370,7 +370,14 @@ fn collect_strings_from_bracket_ops(ops: &[crate::ast::BracketOp], seen: &mut st
 
 fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match expr {
-        Expr::String(s) | Expr::RegexLiteral(s) => {
+        Expr::Quoted(s) => {
+            let s_str = String::from_utf8_lossy(s).into_owned();
+            if !seen.contains(&s_str) {
+                seen.insert(s_str.clone());
+                out.push(s_str);
+            }
+        }
+        Expr::RegexLiteral(s) => {
             if !seen.contains(s) {
                 seen.insert(s.clone());
                 out.push(s.clone());
@@ -494,7 +501,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::FromCheck(e, _) => { collect_strings_expr(e, seen, out); }
         Expr::Like(l, r) => { collect_strings_expr(l, seen, out); collect_strings_expr(r, seen, out); }
         // Terminals
-        Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
+        Expr::Decimal(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
         | Expr::Ellipsis | Expr::TypeRef(_) | Expr::AddrOf(_) | Expr::PriorState(_)
         | Expr::SharedMem(_) => {}
         // Macro/template nodes — should be expanded before reaching backends
@@ -672,9 +679,9 @@ fn extract_trigger_keys(pre: &Expr, trigger_names: &std::collections::HashSet<&s
     let mut keys = Vec::new();
     match pre {
         Expr::Eq(l, r) | Expr::Eq(r, l) => {
-            let (ident, val) = if let (Expr::Identifier(name), Expr::Integer(n)) = (l.as_ref(), r.as_ref()) {
+            let (ident, val) = if let (Expr::Identifier(name), Expr::Decimal(n)) = (l.as_ref(), r.as_ref()) {
                 (name.clone(), *n)
-            } else if let (Expr::Integer(n), Expr::Identifier(name)) = (l.as_ref(), r.as_ref()) {
+            } else if let (Expr::Decimal(n), Expr::Identifier(name)) = (l.as_ref(), r.as_ref()) {
                 (name.clone(), *n)
             } else {
                 return None;
@@ -1081,7 +1088,7 @@ impl LlvmBackend {
         let field_types_map: std::collections::HashMap<String, String> = self.ctx.field_index_map.iter()
             .map(|(name, idx)| (name.clone(), self.ctx.field_types[*idx].clone()))
             .collect();
-        let kernel = gpu::extract_kernel(txn_name, body, crate::ast::Expr::Integer(0), &[], field_types_map);
+        let kernel = gpu::extract_kernel(txn_name, body, crate::ast::Expr::Decimal(0), &[], field_types_map);
         let spirv_ir = gpu::emit_spirv_module(&kernel);
         self.spirv_kernels.push(spirv_ir.clone());
 
@@ -1563,7 +1570,7 @@ impl LlvmBackend {
             self.ctx.field_index_map.insert("cycle_count".to_string(), idx);
             self.ctx.field_types.push("i64".to_string());
             self.ctx.field_brief_types.push(Type::int());
-            self.ctx.field_initializers.insert("cycle_count".to_string(), Some(Expr::Integer(0)));
+            self.ctx.field_initializers.insert("cycle_count".to_string(), Some(Expr::Decimal(0)));
         }
         self.validate_schema_types();
         self.ctx.triggers.clear();
@@ -2040,7 +2047,7 @@ impl LlvmBackend {
                     crate::features::literal::LiteralExpr::String(_) => format!("{}:null", llvm_ty),
                     crate::features::literal::LiteralExpr::Char(_) | crate::features::literal::LiteralExpr::Term => format!("{}:{}", llvm_ty, name),
                 },
-                Expr::Integer(n) => format!("{}:{}", llvm_ty, n),
+                Expr::Decimal(n) => format!("{}:{}", llvm_ty, n),
                 Expr::IntegerSuffixed(n, _) => format!("{}:{}", llvm_ty, n),
                 Expr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
                 Expr::Neg(inner) => match inner.as_ref() {
@@ -2053,10 +2060,10 @@ impl LlvmBackend {
                             format!("{}:neg:{}", llvm_ty, name)
                         }
                     }
-                    Expr::Integer(n) => format!("{}:-{}", llvm_ty, n),
+                    Expr::Decimal(n) => format!("{}:-{}", llvm_ty, n),
                     _ => format!("{}:neg:{}", llvm_ty, name),
                 },
-                Expr::String(_) => format!("{}:null", llvm_ty),
+                Expr::Quoted(_) => format!("{}:null", llvm_ty),
                 _ => format!("{}:unresolved:{}", llvm_ty, name),
             };
             if let Some(canonical) = dedup_map.get(&key) {
@@ -2104,7 +2111,7 @@ impl LlvmBackend {
                     crate::features::literal::LiteralExpr::Char(c) => format!("{}", *c as i64),
                     crate::features::literal::LiteralExpr::Term => "0".to_string(),
                 },
-                Expr::Integer(n) => n.to_string(),
+                Expr::Decimal(n) => n.to_string(),
                 Expr::IntegerSuffixed(n, _) => n.to_string(),
                 Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
                 Expr::Neg(inner) => match inner.as_ref() {
@@ -2117,10 +2124,10 @@ impl LlvmBackend {
                             if *ty == Type::float() { "0.0".to_string() } else { "0".to_string() }
                         }
                     }
-                    Expr::Integer(n) => format!("-{}", n),
+                    Expr::Decimal(n) => format!("-{}", n),
                     _ => if *ty == Type::float() { "0.0".to_string() } else { "0".to_string() },
                 },
-                Expr::String(_) => "null".to_string(),
+                Expr::Quoted(_) => "null".to_string(),
                 _ => {
                     if *ty == Type::float() {
                         "0.0".to_string()
@@ -2445,11 +2452,11 @@ impl LlvmBackend {
                                 .get(&bp.bound_var)
                                 .and_then(|e| e.as_ref())
                                 .and_then(|e| {
-                                    if let Expr::Integer(n) = e { Some(*n) } else { None }
+                                    if let Expr::Decimal(n) = e { Some(*n) } else { None }
                                 })
                                 .or_else(|| {
                                     self.ctx.constants.get(&bp.bound_var).and_then(|(_, e)| {
-                                        if let Expr::Integer(n) = e { Some(*n) } else { None }
+                                        if let Expr::Decimal(n) = e { Some(*n) } else { None }
                                     })
                                 });
                             if let Some(tv) = total_val {
@@ -2694,10 +2701,10 @@ impl LlvmBackend {
                             let total_val = node.bounded_pre.as_ref().and_then(|bp| {
                                 self.ctx.field_initializers.get(&bp.bound_var)
                                     .and_then(|e| e.as_ref())
-                                    .and_then(|e| if let Expr::Integer(n) = e { Some(*n) } else { None })
+                                    .and_then(|e| if let Expr::Decimal(n) = e { Some(*n) } else { None })
                                     .or_else(|| {
                                         self.ctx.constants.get(&bp.bound_var).and_then(|(_, e)| {
-                                            if let Expr::Integer(n) = e { Some(*n) } else { None }
+                                            if let Expr::Decimal(n) = e { Some(*n) } else { None }
                                         })
                                     })
                             });
@@ -2868,10 +2875,10 @@ impl LlvmBackend {
                     let inc = node.increments.as_ref().unwrap();
                     let bp = node.bounded_pre.as_ref().unwrap();
                     let total_str = self.ctx.constants.get(&bp.bound_var)
-                        .and_then(|(_, e)| if let Expr::Integer(n) = e { Some(n.to_string()) } else { None })
+                        .and_then(|(_, e)| if let Expr::Decimal(n) = e { Some(n.to_string()) } else { None })
                         .or_else(|| self.ctx.field_initializers.get(&bp.bound_var)
                             .and_then(|e| e.as_ref())
-                            .and_then(|e| if let Expr::Integer(n) = e { Some(n.to_string()) } else { None }));
+                            .and_then(|e| if let Expr::Decimal(n) = e { Some(n.to_string()) } else { None }));
                     let iterations_msg = match &total_str {
                         Some(s) => format!(" — {} iterations replaced by single store", s),
                         None => String::new(),

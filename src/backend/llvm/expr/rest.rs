@@ -34,12 +34,12 @@ pub fn emit_rest_expr(
         match &expr {
             // 2026-06-29: Literal expressions dispatched to expr::literal submodule.
             // Keeps emit_expr focused on dispatching rather than implementation.
-            Expr::Integer(_) => return crate::backend::llvm::expr::literal::emit_integer(backend, out, &v, &expr, indent),
+            Expr::Decimal(_) => return crate::backend::llvm::expr::literal::emit_integer(backend, out, &v, &expr, indent),
             Expr::IntegerSuffixed(_, _) => return crate::backend::llvm::expr::literal::emit_integer_suffixed(backend, out, &v, &expr, indent),
             Expr::Bool(_) => return crate::backend::llvm::expr::literal::emit_bool(backend, out, &v, &expr, indent),
             Expr::Float64(_) => return crate::backend::llvm::expr::literal::emit_float64(backend, out, &v, &expr, indent),
             Expr::Float(_) => return crate::backend::llvm::expr::literal::emit_float(backend, out, &v, &expr, indent),
-            Expr::String(_) | Expr::RegexLiteral(_) => return crate::backend::llvm::expr::literal::emit_string(backend, out, &v, &expr, indent),
+            Expr::Quoted(_) | Expr::RegexLiteral(_) => return crate::backend::llvm::expr::literal::emit_string(backend, out, &v, &expr, indent),
             Expr::Char(_) => return crate::backend::llvm::expr::literal::emit_char(backend, out, &v, &expr, indent),
             Expr::Term => return crate::backend::llvm::expr::literal::emit_term(backend, out, &v, indent),
             // 2026-06-29: Arithmetic and bitwise expressions dispatched to expr::math
@@ -297,7 +297,7 @@ pub fn emit_rest_expr(
             Expr::MultiSlice { value, ops } => {
                 let src_val = backend.emit_expr(out, value, indent);
                 // Atomic value literals: coord returns backend, stride/mask return 0
-                let is_atomic_literal = matches!(value.as_ref(), Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_));
+                let is_atomic_literal = matches!(value.as_ref(), Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_));
                 if is_atomic_literal {
                     let has_coord = ops.iter().any(|op| matches!(op, BracketOp::Coord(_)));
                     let has_other = ops.iter().any(|op| matches!(op, BracketOp::Stride(_) | BracketOp::Mask(_)));
@@ -632,7 +632,7 @@ pub fn emit_rest_expr(
                 writeln!(out, "{}{}:", indent, merge_label).ok();
                 backend.fun.let_bindings = saved_bindings;
                 backend.fun.let_binding_types = saved_types;
-                let match_ty = if arms.iter().all(|a| matches!(a.body.as_ref(), Expr::String(_))) {
+                let match_ty = if arms.iter().all(|a| matches!(a.body.as_ref(), Expr::Quoted(_))) {
                     Type::string()
                 } else {
                     Type::int()
@@ -643,7 +643,7 @@ pub fn emit_rest_expr(
             Expr::Slice { value, start, end, stride, mask } => {
                 let src_val = backend.emit_expr(out, value, indent);
                 // Atomic value literals: pass through (single element is itself)
-                let is_atomic_literal = matches!(value.as_ref(), Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_));
+                let is_atomic_literal = matches!(value.as_ref(), Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_));
                 if is_atomic_literal {
                     writeln!(out, "{}{} = add i64 0, {} ; atomic slice passthrough", indent, v, src_val.name).ok();
                     return crate::backend::llvm::TypedRegister { name: v.to_string(), ty: src_val.ty };

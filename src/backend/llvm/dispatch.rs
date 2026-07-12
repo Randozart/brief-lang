@@ -154,7 +154,7 @@ impl LlvmBackend {
             Expr::And(l, rgt) => { Self::extract_ranges_inner(l, r); Self::extract_ranges_inner(rgt, r); }
             Expr::Lt(l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
-                    if let Expr::Integer(v) = rgt.as_ref() {
+                    if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
                         if *v < e.1 { e.1 = *v; }
                     }
@@ -162,7 +162,7 @@ impl LlvmBackend {
             }
             Expr::Ge(l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
-                    if let Expr::Integer(v) = rgt.as_ref() {
+                    if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
                         if *v > e.0 { e.0 = *v; }
                     }
@@ -170,7 +170,7 @@ impl LlvmBackend {
             }
             Expr::Gt(l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
-                    if let Expr::Integer(v) = rgt.as_ref() {
+                    if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
                         if v + 1 > e.0 { e.0 = v + 1; }
                     }

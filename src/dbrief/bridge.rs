@@ -47,7 +47,7 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
                     .unwrap_or_else(|| field_names.clone());
 
                 data_map.push((
-                    ast::Expr::String(group_name),
+                    ast::Expr::Quoted(group_name.into()),
                     ast::Expr::DbvlTable {
                         path: String::new(),               // filled in by the import resolver
                         field_names: schema_field_names,
@@ -60,14 +60,14 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
                 let mut entry_map: Vec<(ast::Expr, ast::Expr)> = Vec::new();
                 for entry in &group.entries {
                     let key_expr = match &entry.key {
-                        Some(k) => ast::Expr::String(k.clone()),
-                        None => ast::Expr::Integer(entry_map.len() as i64),
+                        Some(k) => ast::Expr::Quoted(k.clone().into()),
+                        None => ast::Expr::Decimal(entry_map.len() as i64),
                     };
                     let val_expr = data_entry_to_expr(entry, group.schema_name.as_deref(), &doc.schemas);
                     entry_map.push((key_expr, val_expr));
                 }
                 data_map.push((
-                    ast::Expr::String(group_name),
+                    ast::Expr::Quoted(group_name.into()),
                     ast::Expr::MapLiteral(entry_map),
                 ));
             }
@@ -151,7 +151,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
             result.push(ast::TopLevel::Constant(ast::Constant {
                 name: format!("{}_base", key),
                 ty: ast::Type::int(),
-                expr: ast::Expr::Integer(base),
+                expr: ast::Expr::Decimal(base),
             }));
 
             // Emit end constant (base + size) if size is known
@@ -163,7 +163,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
                 result.push(ast::TopLevel::Constant(ast::Constant {
                     name: format!("{}_end", key),
                     ty: ast::Type::int(),
-                    expr: ast::Expr::Integer(base + sz),
+                    expr: ast::Expr::Decimal(base + sz),
                 }));
             }
 
@@ -197,7 +197,7 @@ fn flatten_peripheral_constants(doc: &DbriefDocument) -> Vec<ast::TopLevel> {
                     result.push(ast::TopLevel::Constant(ast::Constant {
                         name: const_name,
                         ty: ast::Type::int(),
-                        expr: ast::Expr::Integer(base + off),
+                        expr: ast::Expr::Decimal(base + off),
                     }));
                 }
             }
@@ -325,8 +325,8 @@ fn data_field_to_expr(field: &DataField) -> ast::Expr {
 /// Convert a DataValue to an Expr
 fn data_value_to_expr(dv: &DataValue) -> ast::Expr {
     match dv {
-        DataValue::String(s) => ast::Expr::String(s.clone()),
-        DataValue::Int(n) => ast::Expr::Integer(*n),
+        DataValue::String(s) => ast::Expr::Quoted(s.clone().into()),
+        DataValue::Int(n) => ast::Expr::Decimal(*n),
         DataValue::Float(f) => ast::Expr::Float(*f),
         DataValue::Bool(b) => ast::Expr::Bool(*b),
         DataValue::List(items) => {
@@ -337,7 +337,7 @@ fn data_value_to_expr(dv: &DataValue) -> ast::Expr {
             let pairs: Vec<(ast::Expr, ast::Expr)> = entries
                 .iter()
                 .map(|(k, v)| {
-                    (ast::Expr::String(k.clone()), data_value_to_expr(v))
+                    (ast::Expr::Quoted(k.clone().into()), data_value_to_expr(v))
                 })
                 .collect();
             ast::Expr::MapLiteral(pairs)
@@ -391,7 +391,7 @@ mod tests {
                         assert_eq!(pairs.len(), 1);
                         let (key, val) = &pairs[0];
                         match key {
-                            ast::Expr::String(s) => assert_eq!(s, "Item"),
+                            ast::Expr::Quoted(s) => assert_eq!(s.as_slice(), b"Item"),
                             _ => panic!("Expected string key"),
                         }
                         match val {
@@ -399,7 +399,7 @@ mod tests {
                                 assert_eq!(entries.len(), 1);
                                 let (ek, ev) = &entries[0];
                                 match ek {
-                                    ast::Expr::String(s) => assert_eq!(s, "rusty_key"),
+                                    ast::Expr::Quoted(s) => assert_eq!(s.as_slice(), b"rusty_key"),
                                     _ => panic!("Expected string entry key"),
                                 }
                                 match ev {
@@ -423,13 +423,13 @@ mod tests {
     fn test_data_value_conversion() {
         let dv = DataValue::String("hello".into());
         match data_value_to_expr(&dv) {
-            ast::Expr::String(s) => assert_eq!(s, "hello"),
+            ast::Expr::Quoted(s) => assert_eq!(s.as_slice(), b"hello"),
             _ => panic!("expected string"),
         }
 
         let dv = DataValue::Int(42);
         match data_value_to_expr(&dv) {
-            ast::Expr::Integer(n) => assert_eq!(n, 42),
+            ast::Expr::Decimal(n) => assert_eq!(n, 42),
             _ => panic!("expected int"),
         }
 

@@ -525,7 +525,7 @@ impl RegionAnalyzer {
     /// a narrow range of constants.
     fn expr_to_interval(expr: &Expr) -> Option<Interval> {
         match expr {
-            Expr::Integer(n) => Some(Interval { lo: *n, hi: *n }),
+            Expr::Decimal(n) => Some(Interval { lo: *n, hi: *n }),
             Expr::Bool(b) => Some(Interval {
                 lo: if *b { 1 } else { 0 },
                 hi: if *b { 1 } else { 0 },
@@ -689,10 +689,10 @@ impl RegionAnalyzer {
         for item in &program.items {
             match item {
                 TopLevel::Constant(c) if c.name == bound_var => {
-                    if let Expr::Integer(n) = &c.expr { return Some(*n as u64); }
+                    if let Expr::Decimal(n) = &c.expr { return Some(*n as u64); }
                 }
                 TopLevel::StateDecl(d) if d.name == bound_var => {
-                    if let Some(Expr::Integer(n)) = &d.expr { return Some(*n as u64); }
+                    if let Some(Expr::Decimal(n)) = &d.expr { return Some(*n as u64); }
                 }
                 _ => {}
             }
@@ -1066,7 +1066,7 @@ impl RegionAnalyzer {
         while let Some(mut f) = stack.pop() {
             match f.state {
                 0 => match f.expr {
-                    Expr::Integer(n) => results.push(*n),
+                    Expr::Decimal(n) => results.push(*n),
                     Expr::Bool(b) => results.push(if *b { 1 } else { 0 }),
                     Expr::Identifier(n) => {
                         if let Some(&v) = bindings.get(n) { results.push(v); }
@@ -1299,7 +1299,7 @@ impl RegionAnalyzer {
             if i == 0 {
                 if let Some(tv) = trigger_values {
                     for (trg_name, trg_val) in tv {
-                        stmts = substitute_var(&stmts, trg_name, &Expr::Integer(*trg_val));
+                        stmts = substitute_var(&stmts, trg_name, &Expr::Decimal(*trg_val));
                     }
                 }
             }
@@ -1318,7 +1318,7 @@ impl RegionAnalyzer {
                                 if let Some(ref we) = write_expr {
                                     let mut subs = we.clone();
                                     for (trg_name, trg_val) in tv {
-                                        subs = substitute_expr(&subs, trg_name, &Expr::Integer(*trg_val));
+                                        subs = substitute_expr(&subs, trg_name, &Expr::Decimal(*trg_val));
                                     }
                                     write_expr = Some(subs);
                                 }
@@ -1589,7 +1589,7 @@ fn is_counter_bump_stmt(stmt: &Statement, counter_var: &str) -> bool {
     if let Statement::Assignment { expr: Expr::Add(a, b), .. } = stmt {
         let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(n) if n == counter_var);
         let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(n) if n == counter_var);
-        let pos_int = |e: &Expr| matches!(e, Expr::Integer(d) if *d > 0);
+        let pos_int = |e: &Expr| matches!(e, Expr::Decimal(d) if *d > 0);
         return (lhs_in_a && pos_int(b)) || (lhs_in_b && pos_int(a));
     }
     false
@@ -1609,7 +1609,7 @@ fn find_counter_var(body: &[Statement]) -> Option<String> {
         if let Expr::Add(a, b) = expr {
             let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(an) if *an == name);
             let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(bn) if *bn == name);
-            let pos_int = |e: &Expr| matches!(e, Expr::Integer(d) if *d > 0);
+            let pos_int = |e: &Expr| matches!(e, Expr::Decimal(d) if *d > 0);
             if (lhs_in_a && pos_int(b)) || (lhs_in_b && pos_int(a)) {
                 return Some(name);
             }
@@ -1784,7 +1784,7 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
                 }
                 Expr::Identifier(n) => { results.push(Expr::Identifier(n)); }
                 expr @ Expr::AddrOf(_) => { results.push(expr.clone()); }
-                Expr::Integer(_) | Expr::Float(_) | Expr::String(_)
+                Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_)
                 | Expr::Char(_) | Expr::Bool(_) | Expr::Term
                 | Expr::Ellipsis | Expr::RegexLiteral(_) | Expr::TypeRef(_)
                 | Expr::SharedMem(_) | Expr::Literal(_) => {
@@ -2069,7 +2069,7 @@ mod tests {
     }
 
     fn int(n: i64) -> Expr {
-        Expr::Integer(n)
+        Expr::Decimal(n)
     }
 
     fn ident(name: &str) -> Expr {

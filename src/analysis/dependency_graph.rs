@@ -355,7 +355,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             collect_expr_ids_inner(value, ids);
         }
         // Literal leaves — no identifiers
-        Expr::Integer(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::String(_) | Expr::Char(_)
+        Expr::Decimal(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Quoted(_) | Expr::Char(_)
         | Expr::Bool(_) | Expr::Term | Expr::Ellipsis | Expr::TypeRef(_)
         | Expr::RegexLiteral(_) | Expr::SharedMem(_) => {}
         // Pattern B wrappers — literal leaves, no identifiers
@@ -644,7 +644,7 @@ mod tests {
                 Type::int(),
                 Some(Expr::Add(
                     Box::new(Expr::Identifier("sensor".to_string())),
-                    Box::new(Expr::Integer(5)),
+                    Box::new(Expr::Decimal(5)),
                 )),
             ),
         ])).unwrap();

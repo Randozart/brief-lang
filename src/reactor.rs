@@ -571,12 +571,12 @@ mod tests {
     #[test]
     fn test_run_executes_txn() {
         let body = vec![
-            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(42), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Decimal(42), timeout: None, modifiers: vec![] },
             Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
         ];
         let txn = make_rct_txn("set_x",
             Expr::Bool(true),
-            Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(42))),
+            Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Decimal(42))),
             body);
         let mut interp = Interpreter::new();
         interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
@@ -588,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_run_skips_txn_pre_false() {
-        let body = vec![Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(99), timeout: None, modifiers: vec![] }];
+        let body = vec![Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Decimal(99), timeout: None, modifiers: vec![] }];
         let txn = make_rct_txn("skip", Expr::Bool(false), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
         interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
@@ -616,7 +616,7 @@ mod tests {
     #[test]
     fn test_run_escape_triggers_rollback() {
         let body = vec![
-            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(10), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Decimal(10), timeout: None, modifiers: vec![] },
             Statement::Guarded { condition: Expr::Bool(true), statements: vec![Statement::Escape(None)], metadata: HashMap::new() },
         ];
         let txn = make_rct_txn("rollback", Expr::Bool(true), Expr::Bool(true), body);
@@ -683,7 +683,7 @@ mod tests {
     #[test]
     fn test_fire_due_async_txns_fires_on_first_call() {
         let body = vec![
-            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(99), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Decimal(99), timeout: None, modifiers: vec![] },
             Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
         ];
         let txn = Transaction {

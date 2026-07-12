@@ -18,7 +18,7 @@ pub fn json_stringify_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(val) => {
             let json = crate::interpreter::value_to_json_value(val);
-            Ok(Value::Bits(json.to_string().as_bytes().to_vec()))
+            Ok(Value::Bits(json.to_string().into_bytes()))
         }
         None => Err(RuntimeError::TypeMismatch("json::stringify expects 1 argument".to_string())),
     }

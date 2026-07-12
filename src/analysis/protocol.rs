@@ -87,7 +87,7 @@ impl ProtocolVerifier {
         match expr {
             Expr::Eq(lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
-                    if let Expr::Integer(val) = rhs.as_ref() {
+                    if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
                             register: name.clone(),
                             value: *val,
@@ -98,7 +98,7 @@ impl ProtocolVerifier {
             }
             Expr::Ne(lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
-                    if let Expr::Integer(val) = rhs.as_ref() {
+                    if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
                             register: name.clone(),
                             value: *val,
@@ -109,7 +109,7 @@ impl ProtocolVerifier {
             }
             Expr::Ge(lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
-                    if let Expr::Integer(val) = rhs.as_ref() {
+                    if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
                             register: name.clone(),
                             value: *val,
@@ -120,7 +120,7 @@ impl ProtocolVerifier {
             }
             Expr::Gt(lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
-                    if let Expr::Integer(val) = rhs.as_ref() {
+                    if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
                             register: name.clone(),
                             value: *val,
@@ -131,7 +131,7 @@ impl ProtocolVerifier {
             }
             Expr::Le(lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
-                    if let Expr::Integer(val) = rhs.as_ref() {
+                    if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
                             register: name.clone(),
                             value: *val,
@@ -142,7 +142,7 @@ impl ProtocolVerifier {
             }
             Expr::Lt(lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
-                    if let Expr::Integer(val) = rhs.as_ref() {
+                    if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
                             register: name.clone(),
                             value: *val,
@@ -225,7 +225,7 @@ mod tests {
     fn test_prerequisite_extraction() {
         let expr = Expr::Eq(
             Box::new(Expr::Identifier("control".to_string())),
-            Box::new(Expr::Integer(1)),
+            Box::new(Expr::Decimal(1)),
         );
         
         let prereqs = ProtocolVerifier::extract_prerequisites(&expr);

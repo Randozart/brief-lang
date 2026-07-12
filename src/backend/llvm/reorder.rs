@@ -337,7 +337,7 @@ mod tests {
             },
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
-                expr: Expr::Add(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(1))),
+                expr: Expr::Add(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Decimal(1))),
                 timeout: None, modifiers: vec![],
             },
         ];
@@ -353,9 +353,9 @@ mod tests {
     fn test_reorder_chain() {
         // a = 1; b = a + 1; c = b + 1; — chain, must preserve order
         let body = vec![
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".into()))), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".into()))), expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("c".into()))), expr: Expr::Add(Box::new(Expr::Identifier("b".into())), Box::new(Expr::Integer(1))), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".into()))), expr: Expr::Decimal(1), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".into()))), expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("c".into()))), expr: Expr::Add(Box::new(Expr::Identifier("b".into())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 3);
@@ -372,8 +372,8 @@ mod tests {
         // reorder_body_statements cannot produce cycles (edges are always forward),
         // so test topological_sort directly with a manually constructed cycle graph.
         let body = vec![
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))), expr: Expr::Integer(2), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))), expr: Expr::Decimal(1), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))), expr: Expr::Decimal(2), timeout: None, modifiers: vec![] },
         ];
         let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
         deps.insert(0, HashSet::from([1]));
@@ -388,7 +388,7 @@ mod tests {
     fn test_reorder_short_body_no_reordering() {
         // 2026-06-19: Bodies with < 3 statements are returned as-is.
         let body = vec![
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))), expr: Expr::Integer(1), timeout: None, modifiers: vec![] },
+            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))), expr: Expr::Decimal(1), timeout: None, modifiers: vec![] },
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 1);

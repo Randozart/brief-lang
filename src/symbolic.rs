@@ -138,12 +138,12 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             LiteralExpr::String(_) => SymbolicValue::Unknown,
             LiteralExpr::Term => SymbolicValue::Unknown,
         },
-        Expr::Integer(n) => SymbolicValue::Literal(*n, "int".to_string()),
+        Expr::Decimal(n) => SymbolicValue::Literal(*n, "int".to_string()),
         Expr::IntegerSuffixed(n, _) => SymbolicValue::Literal(*n, "int".to_string()),
         Expr::Float(_) | Expr::Float64(_) => SymbolicValue::Unknown, // Float support via Unknown
         Expr::Bool(b) => SymbolicValue::bool_literal(*b),
         Expr::Char(c) => SymbolicValue::Literal(*c as i64, "char".to_string()),  // NEW: Char as int
-        Expr::String(_) => SymbolicValue::Unknown, // Strings not trackable at this level
+        Expr::Quoted(_) => SymbolicValue::Unknown, // Strings not trackable at this level
 
         // Variable references
         Expr::Identifier(name) => {
@@ -559,7 +559,7 @@ mod tests {
     #[test]
     fn test_state_assign_literal() {
         let mut state = SymbolicState::empty();
-        state.assign("x", &Expr::Integer(5));
+        state.assign("x", &Expr::Decimal(5));
 
         let val = state.get_value("x");
         assert_eq!(val, Some(SymbolicValue::int_literal(5)));
@@ -568,11 +568,11 @@ mod tests {
     #[test]
     fn test_satisfies_postcondition_literal_equality() {
         let mut state = SymbolicState::empty();
-        state.assign("x", &Expr::Integer(5));
+        state.assign("x", &Expr::Decimal(5));
 
         let postcond = Expr::Eq(
             Box::new(Expr::Identifier("x".to_string())),
-            Box::new(Expr::Integer(5)),
+            Box::new(Expr::Decimal(5)),
         );
 
         assert!(satisfies_postcondition(&postcond, &state));
@@ -581,11 +581,11 @@ mod tests {
     #[test]
     fn test_satisfies_postcondition_literal_inequality() {
         let mut state = SymbolicState::empty();
-        state.assign("x", &Expr::Integer(5));
+        state.assign("x", &Expr::Decimal(5));
 
         let postcond = Expr::Eq(
             Box::new(Expr::Identifier("x".to_string())),
-            Box::new(Expr::Integer(3)),
+            Box::new(Expr::Decimal(3)),
         );
 
         assert!(!satisfies_postcondition(&postcond, &state));
@@ -594,17 +594,17 @@ mod tests {
     #[test]
     fn test_satisfies_postcondition_conjunction() {
         let mut state = SymbolicState::empty();
-        state.assign("x", &Expr::Integer(5));
-        state.assign("y", &Expr::Integer(10));
+        state.assign("x", &Expr::Decimal(5));
+        state.assign("y", &Expr::Decimal(10));
 
         let postcond = Expr::And(
             Box::new(Expr::Eq(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(5)),
+                Box::new(Expr::Decimal(5)),
             )),
             Box::new(Expr::Eq(
                 Box::new(Expr::Identifier("y".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             )),
         );
 
@@ -614,16 +614,16 @@ mod tests {
     #[test]
     fn test_satisfies_postcondition_disjunction() {
         let mut state = SymbolicState::empty();
-        state.assign("x", &Expr::Integer(5));
+        state.assign("x", &Expr::Decimal(5));
 
         let postcond = Expr::Or(
             Box::new(Expr::Eq(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(5)),
+                Box::new(Expr::Decimal(5)),
             )),
             Box::new(Expr::Eq(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(3)),
+                Box::new(Expr::Decimal(3)),
             )),
         );
 

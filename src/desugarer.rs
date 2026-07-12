@@ -56,7 +56,7 @@ impl Desugarer {
                     self.collect_vars(arg, vars);
                 }
             }
-            Expr::Bool(_) | Expr::Term | Expr::Integer(_) | Expr::Float(_) | Expr::String(_) => {}
+            Expr::Bool(_) | Expr::Term | Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_) => {}
             _ => {}
         }
     }
@@ -90,9 +90,9 @@ impl Desugarer {
             }
             Expr::And(_, _) | Expr::Or(_, _) => Type::bool_(),
             Expr::Not(_) => Type::bool_(),
-            Expr::Integer(_) => Type::int(),
+            Expr::Decimal(_) => Type::int(),
             Expr::Float(_) => Type::float(),
-            Expr::String(_) => Type::string(),
+            Expr::Quoted(_) => Type::string(),
             Expr::Bool(_) => Type::bool_(),
             Expr::Call(_, args) => {
                 for arg in args {
@@ -206,10 +206,10 @@ impl Desugarer {
                             let ty =
                                 self.infer_type_from_expr(&txn.contract.post_condition, &var_name);
                             let default_val = match &ty {
-                                Type::Custom(__t) if __t == "Int" => Expr::Integer(0),
+                                Type::Custom(__t) if __t == "Int" => Expr::Decimal(0),
                                 Type::Custom(__t) if __t == "Float" => Expr::Float(0.0),
                                 Type::Custom(__t) if __t == "Bool" => Expr::Bool(false),
-                                Type::Custom(__t) if __t == "String" => Expr::String(String::new()),
+                                Type::Custom(__t) if __t == "String" => Expr::Quoted(Vec::new()),
                                 _ => Expr::Bool(false),
                             };
                             self.generated_state.push(StateDecl {
@@ -258,10 +258,10 @@ impl Desugarer {
                                 other => other.clone(),
                             };
                             let initial_expr = match &ty {
-                                Type::Custom(__t) if __t == "Int" => Some(Expr::Integer(0)),
-                                Type::Custom(__t) if __t == "Float" => Some(Expr::Integer(0)),
+                                Type::Custom(__t) if __t == "Int" => Some(Expr::Decimal(0)),
+                                Type::Custom(__t) if __t == "Float" => Some(Expr::Decimal(0)),
                                 Type::Custom(__t) if __t == "Bool" => Some(Expr::Bool(false)),
-                                Type::Custom(__t) if __t == "String" => Some(Expr::String("".to_string())),
+                                Type::Custom(__t) if __t == "String" => Some(Expr::Quoted(Vec::new())),
                                 Type::Applied(name, _) if name == "List" => {
                                     Some(Expr::ListLiteral(vec![]))
                                 }
@@ -306,10 +306,10 @@ impl Desugarer {
                                 other => other.clone(),
                             };
                             let initial_expr = match &ty {
-                                Type::Custom(__t) if __t == "Int" => Some(Expr::Integer(0)),
-                                Type::Custom(__t) if __t == "Float" => Some(Expr::Integer(0)),
+                                Type::Custom(__t) if __t == "Int" => Some(Expr::Decimal(0)),
+                                Type::Custom(__t) if __t == "Float" => Some(Expr::Decimal(0)),
                                 Type::Custom(__t) if __t == "Bool" => Some(Expr::Bool(false)),
-                                Type::Custom(__t) if __t == "String" => Some(Expr::String("".to_string())),
+                                Type::Custom(__t) if __t == "String" => Some(Expr::Quoted(Vec::new())),
                                 Type::Applied(name, _) if name == "List" => {
                                     Some(Expr::ListLiteral(vec![]))
                                 }
@@ -696,7 +696,7 @@ impl Desugarer {
                                 .find(|(name, _)| name == &struct_field.name)
                                 .map(|(_, v)| v.clone())
                                 .unwrap_or_else(|| {
-                                    struct_field.default.clone().unwrap_or(Expr::Integer(0))
+                                    struct_field.default.clone().unwrap_or(Expr::Decimal(0))
                                 });
                             all_fields.push((struct_field.name.clone(), value));
                         }
@@ -1322,11 +1322,11 @@ mod tests {
             output_names: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
-                post_condition: Expr::Integer(42),
+                post_condition: Expr::Decimal(42),
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Integer(1))], modifiers: vec![], swan_song: None }],
+            body: vec![Statement::Term { values: vec![Some(Expr::Decimal(1))], modifiers: vec![], swan_song: None }],
             is_lambda: true,
             annotations: vec![],
             metadata: HashMap::new(),

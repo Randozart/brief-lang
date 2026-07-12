@@ -214,7 +214,7 @@ impl ExprEval for SliceExpr {
             let start_idx = eval_idx(&self.start, len).unwrap_or(0);
             let end_idx = eval_idx(&self.end, len).unwrap_or(len);
             let result = if start_idx < end_idx && start_idx < len { s[start_idx..end_idx.min(len)].to_string() } else { String::new() };
-            return Ok(Value::Bits(result.as_bytes().to_vec()));
+            return Ok(Value::Bits(result.into_bytes()));
         }
 
         // Handle atomic types (Int, Float, Bool, Char) via visual char decomposition

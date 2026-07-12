@@ -170,14 +170,14 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                     direction: ConvergeDirection::Increasing,
                     bound_literal: None,
                 }),
-                (Expr::Identifier(var), Expr::Integer(n)) => Some(BoundedPre {
+                (Expr::Identifier(var), Expr::Decimal(n)) => Some(BoundedPre {
                     var: var.clone(),
                     bound_var: format!("__lit__{}", var),
                     direction: ConvergeDirection::Increasing,
                     bound_literal: Some(*n),
                 }),
-                (Expr::Identifier(var), Expr::Neg(bn)) if matches!(bn.as_ref(), Expr::Integer(_)) => {
-                    let n = match bn.as_ref() { Expr::Integer(n) => -n, _ => 0 };
+                (Expr::Identifier(var), Expr::Neg(bn)) if matches!(bn.as_ref(), Expr::Decimal(_)) => {
+                    let n = match bn.as_ref() { Expr::Decimal(n) => -n, _ => 0 };
                     Some(BoundedPre {
                         var: var.clone(),
                         bound_var: format!("__lit__{}", var),
@@ -207,14 +207,14 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                     direction: ConvergeDirection::Decreasing,
                     bound_literal: None,
                 }),
-                (Expr::Identifier(var), Expr::Integer(n)) => Some(BoundedPre {
+                (Expr::Identifier(var), Expr::Decimal(n)) => Some(BoundedPre {
                     var: var.clone(),
                     bound_var: format!("__lit__{}", var),
                     direction: ConvergeDirection::Decreasing,
                     bound_literal: Some(*n),
                 }),
-                (Expr::Identifier(var), Expr::Neg(bn)) if matches!(bn.as_ref(), Expr::Integer(_)) => {
-                    let n = match bn.as_ref() { Expr::Integer(n) => -n, _ => 0 };
+                (Expr::Identifier(var), Expr::Neg(bn)) if matches!(bn.as_ref(), Expr::Decimal(_)) => {
+                    let n = match bn.as_ref() { Expr::Decimal(n) => -n, _ => 0 };
                     Some(BoundedPre {
                         var: var.clone(),
                         bound_var: format!("__lit__{}", var),
@@ -223,7 +223,7 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                     })
                 }
                 // len(list) > 0 — list drains to empty (bound=0)
-                (Expr::Projection { source: list, target: ProjectionTarget::Size }, Expr::Integer(0)) => {
+                (Expr::Projection { source: list, target: ProjectionTarget::Size }, Expr::Decimal(0)) => {
                     if let Some(name) = expr_name(list) {
                         Some(BoundedPre {
                             var: name.clone(),
@@ -234,7 +234,7 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
                     } else { None }
                 }
                 // len(list) > N — list drains to N
-                (Expr::Projection { source: list, target: ProjectionTarget::Size }, Expr::Integer(n)) if *n > 0 => {
+                (Expr::Projection { source: list, target: ProjectionTarget::Size }, Expr::Decimal(n)) if *n > 0 => {
                     if let Some(name) = expr_name(list) {
                         Some(BoundedPre {
                             var: name.clone(),
@@ -253,7 +253,7 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
         // extract_valid_bounded_pre against IncrementInfo.
         Expr::Ne(l, r) => {
             match (l.as_ref(), r.as_ref()) {
-                (Expr::Identifier(var), Expr::Integer(n)) => Some(BoundedPre {
+                (Expr::Identifier(var), Expr::Decimal(n)) => Some(BoundedPre {
                     var: var.clone(),
                     bound_var: format!("__lit__{}", var),
                     direction: ConvergeDirection::Decreasing,
@@ -443,7 +443,7 @@ fn simplify_expr(expr: &Expr) -> Expr {
                 }
             }
             // R7: a - 0 → a
-            if let Expr::Integer(0) = sub_rhs.as_ref() {
+            if let Expr::Decimal(0) = sub_rhs.as_ref() {
                 return sub_lhs.as_ref().clone();
             }
             expr
@@ -457,11 +457,11 @@ fn simplify_expr(expr: &Expr) -> Expr {
                 }
             }
             // R6: a + 0 → a
-            if let Expr::Integer(0) = add_rhs.as_ref() {
+            if let Expr::Decimal(0) = add_rhs.as_ref() {
                 return add_lhs.as_ref().clone();
             }
             // R6b: 0 + a → a
-            if let Expr::Integer(0) = add_lhs.as_ref() {
+            if let Expr::Decimal(0) = add_lhs.as_ref() {
                 return add_rhs.as_ref().clone();
             }
             expr
@@ -469,27 +469,27 @@ fn simplify_expr(expr: &Expr) -> Expr {
 
         Expr::Mul(mul_lhs, mul_rhs) => {
             // R8: a * 1 → a
-            if let Expr::Integer(1) = mul_rhs.as_ref() {
+            if let Expr::Decimal(1) = mul_rhs.as_ref() {
                 return mul_lhs.as_ref().clone();
             }
             // R8b: 1 * a → a
-            if let Expr::Integer(1) = mul_lhs.as_ref() {
+            if let Expr::Decimal(1) = mul_lhs.as_ref() {
                 return mul_rhs.as_ref().clone();
             }
             // R10: a * 0 → 0
-            if let Expr::Integer(0) = mul_rhs.as_ref() {
-                return Expr::Integer(0);
+            if let Expr::Decimal(0) = mul_rhs.as_ref() {
+                return Expr::Decimal(0);
             }
             // R10b: 0 * a → 0
-            if let Expr::Integer(0) = mul_lhs.as_ref() {
-                return Expr::Integer(0);
+            if let Expr::Decimal(0) = mul_lhs.as_ref() {
+                return Expr::Decimal(0);
             }
             expr
         }
 
         Expr::Div(div_lhs, div_rhs) => {
             // R9: a / 1 → a
-            if let Expr::Integer(1) = div_rhs.as_ref() {
+            if let Expr::Decimal(1) = div_rhs.as_ref() {
                 return div_lhs.as_ref().clone();
             }
             expr
@@ -539,7 +539,7 @@ pub fn simplify_body(body: &[Statement]) -> Vec<Statement> {
     // Pre-convert Literal(Integer(n)) → Integer(n) so legacy pattern matchers work
     fn lit_to_int(e: &Expr) -> Expr {
         match e {
-            Expr::Literal(boxed) => match boxed.as_ref() { LiteralExpr::Integer(n) => Expr::Integer(*n), _ => e.clone() },
+            Expr::Literal(boxed) => match boxed.as_ref() { LiteralExpr::Integer(n) => Expr::Decimal(*n), _ => e.clone() },
             _ => e.clone(),
         }
     }
@@ -572,7 +572,7 @@ pub fn simplify_body(body: &[Statement]) -> Vec<Statement> {
 
 fn get_int(e: &Expr) -> Option<i64> {
     match e {
-        Expr::Integer(n) => Some(*n),
+        Expr::Decimal(n) => Some(*n),
         Expr::Literal(boxed) => match boxed.as_ref() { LiteralExpr::Integer(n) => Some(*n), _ => None },
         _ => None,
     }
@@ -651,7 +651,7 @@ fn detect_popcount_decay(body: &[Statement]) -> Option<IncrementInfo> {
                 let a_is_self = matches!(a.as_ref(), Expr::Identifier(v) if *v == name);
                 let b_is_self_minus = if let Expr::Sub(inner, val) = b.as_ref() {
                     matches!(inner.as_ref(), Expr::Identifier(v) if *v == name)
-                        && matches!(val.as_ref(), Expr::Integer(1))
+                        && matches!(val.as_ref(), Expr::Decimal(1))
                 } else {
                     false
                 };
@@ -662,7 +662,7 @@ fn detect_popcount_decay(body: &[Statement]) -> Option<IncrementInfo> {
                 let b_is_self = matches!(b.as_ref(), Expr::Identifier(v) if *v == name);
                 let a_is_self_minus = if let Expr::Sub(inner, val) = a.as_ref() {
                     matches!(inner.as_ref(), Expr::Identifier(v) if *v == name)
-                        && matches!(val.as_ref(), Expr::Integer(1))
+                        && matches!(val.as_ref(), Expr::Decimal(1))
                 } else {
                     false
                 };
@@ -723,7 +723,7 @@ fn detect_lexicographic_ranking(pre: &Expr, body: &[Statement]) -> Vec<String> {
             _ => {
                 // Check for Gt(var, N) where N >= 0
                 if let Expr::Gt(inner, val) = expr {
-                    if let (Expr::Identifier(var), Expr::Integer(n)) = (inner.as_ref(), val.as_ref()) {
+                    if let (Expr::Identifier(var), Expr::Decimal(n)) = (inner.as_ref(), val.as_ref()) {
                         if *n >= 0 && !out.contains(var) {
                             out.push(var.clone());
                         }
@@ -731,7 +731,7 @@ fn detect_lexicographic_ranking(pre: &Expr, body: &[Statement]) -> Vec<String> {
                 }
                 // Check for Ge(var, N) where N > 0
                 if let Expr::Ge(inner, val) = expr {
-                    if let (Expr::Identifier(var), Expr::Integer(n)) = (inner.as_ref(), val.as_ref()) {
+                    if let (Expr::Identifier(var), Expr::Decimal(n)) = (inner.as_ref(), val.as_ref()) {
                         if *n > 0 && !out.contains(var) {
                             out.push(var.clone());
                         }
@@ -756,7 +756,7 @@ fn detect_lexicographic_ranking(pre: &Expr, body: &[Statement]) -> Vec<String> {
             }?;
             let is_decrement = if let Expr::Sub(a, d) = expr {
                             matches!(a.as_ref(), Expr::Identifier(v) if *v == name)
-                                && matches!(d.as_ref(), Expr::Integer(val) if *val >= 1)
+                                && matches!(d.as_ref(), Expr::Decimal(val) if *val >= 1)
                         } else { false };
             if is_decrement { Some(name) } else { None }
         } else { None }
@@ -847,7 +847,7 @@ fn references_triggers_or_ffi_with_decls(expr: &Expr, inop_decls: &HashMap<Strin
     match expr {
         Expr::Call(_, _) => true,
         Expr::IntrinsicCall { intrinsic, .. } => intrinsic_has_side_effects(intrinsic, inop_decls),
-        Expr::Identifier(_) | Expr::Integer(_) | Expr::Float(_) | Expr::Bool(_) | Expr::String(_) | Expr::Char(_) => false,
+        Expr::Identifier(_) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Quoted(_) | Expr::Char(_) => false,
         Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b)
         | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b)
         | Expr::Ge(a, b) | Expr::And(a, b) | Expr::Or(a, b) | Expr::BitAnd(a, b)
@@ -1638,7 +1638,7 @@ mod tests {
             lhs: Expr::Identifier("count".to_string()),
             expr: Expr::Add(
                 Box::new(Expr::Identifier("count".to_string())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             ),
             timeout: None,
             modifiers: vec![],
@@ -1655,7 +1655,7 @@ mod tests {
             lhs: Expr::Identifier("count".to_string()),
             expr: Expr::Add(
                 Box::new(Expr::Identifier("count".to_string())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             ),
             timeout: None,
             modifiers: vec![],
@@ -1678,7 +1678,7 @@ mod tests {
                 lhs: Expr::Identifier("count".to_string()),
                 expr: Expr::Add(
                     Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Integer(1)),
+                    Box::new(Expr::Decimal(1)),
                 ),
                 timeout: None,
                 modifiers: vec![],
@@ -1694,7 +1694,7 @@ mod tests {
             lhs: Expr::Identifier("count".to_string()),
             expr: Expr::Add(
                 Box::new(Expr::Identifier("count".to_string())),
-                Box::new(Expr::Integer(1)),
+                Box::new(Expr::Decimal(1)),
             ),
             timeout: None,
             modifiers: vec![],
@@ -1739,13 +1739,13 @@ mod tests {
     fn test_is_uniform_body_group_different() {
         let body_a = vec![Statement::Assignment {
             lhs: Expr::Identifier("a".to_string()),
-            expr: Expr::Integer(1),
+            expr: Expr::Decimal(1),
             timeout: None,
             modifiers: vec![],
         }];
         let body_b = vec![Statement::Assignment {
             lhs: Expr::Identifier("b".to_string()),
-            expr: Expr::Integer(2),
+            expr: Expr::Decimal(2),
             timeout: None,
             modifiers: vec![],
         }];
@@ -1842,7 +1842,7 @@ mod tests {
                         lhs: Expr::Identifier("count".to_string()),
                         expr: Expr::Add(
                             Box::new(Expr::Identifier("count".to_string())),
-                            Box::new(Expr::Integer(1)),
+                            Box::new(Expr::Decimal(1)),
                         ),
                         timeout: None,
                         modifiers: vec![],

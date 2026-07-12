@@ -101,7 +101,7 @@ impl EntryPointAnalyzer {
             if let TopLevel::StateDecl(decl) = item {
                 if decl.name == name {
                     return match &decl.expr {
-                        Some(Expr::Integer(n)) => Some(*n),
+                        Some(Expr::Decimal(n)) => Some(*n),
                         Some(Expr::Bool(b)) => Some(if *b { 1 } else { 0 }),
                         _ => None,
                     };
@@ -113,7 +113,7 @@ impl EntryPointAnalyzer {
 
     fn evaluate_to_constant(expr: &Expr, program: &Program) -> i64 {
         match expr {
-            Expr::Integer(n) => *n,
+            Expr::Decimal(n) => *n,
             Expr::Identifier(name) => {
                 if let Some(val) = Self::get_initial_value_numeric(name, program) {
                     val

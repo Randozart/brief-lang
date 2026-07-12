@@ -85,7 +85,7 @@ mod tests {
         let mut body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("x".into()),
-                expr: Expr::Integer(42),
+                expr: Expr::Decimal(42),
                 timeout: None, modifiers: vec![],
             },
         ];

@@ -102,19 +102,19 @@ mod tests {
     fn test_assignment_stmt_construct() {
         let stmt = AssignmentStmt {
             lhs: Expr::Identifier("x".into()),
-            expr: Expr::Integer(42),
+            expr: Expr::Decimal(42),
             timeout: None,
             modifiers: vec![],
         };
         assert!(matches!(stmt.lhs, Expr::Identifier(_)));
-        assert_eq!(stmt.expr, Expr::Integer(42));
+        assert_eq!(stmt.expr, Expr::Decimal(42));
     }
 
     #[test]
     fn test_assignment_stmt_eval_simple() {
         let stmt = AssignmentStmt {
             lhs: Expr::Identifier("x".into()),
-            expr: Expr::Integer(42),
+            expr: Expr::Decimal(42),
             timeout: None,
             modifiers: vec![],
         };
@@ -129,9 +129,9 @@ mod tests {
         let stmt = AssignmentStmt {
             lhs: Expr::ListIndex(
                 Box::new(Expr::Identifier("items".into())),
-                Box::new(Expr::Integer(0)),
+                Box::new(Expr::Decimal(0)),
             ),
-            expr: Expr::Integer(99),
+            expr: Expr::Decimal(99),
             timeout: None,
             modifiers: vec![],
         };
@@ -149,8 +149,8 @@ mod tests {
     #[test]
     fn test_assignment_stmt_eval_tuple_destructure() {
         let stmt = AssignmentStmt {
-            lhs: Expr::TupleDestructure(vec!["a".into(), "b".into()], Box::new(Expr::Integer(0))),
-            expr: Expr::Tuple(vec![Expr::Integer(10), Expr::Integer(20)]),
+            lhs: Expr::TupleDestructure(vec!["a".into(), "b".into()], Box::new(Expr::Decimal(0))),
+            expr: Expr::Tuple(vec![Expr::Decimal(10), Expr::Decimal(20)]),
             timeout: None,
             modifiers: vec![],
         };
@@ -169,7 +169,7 @@ mod kani_full_tests {
     fn verify_assignment_construct() {
         let stmt = AssignmentStmt {
             lhs: Expr::Identifier("x".into()),
-            expr: Expr::Integer(42),
+            expr: Expr::Decimal(42),
             timeout: None,
             modifiers: vec![],
         };

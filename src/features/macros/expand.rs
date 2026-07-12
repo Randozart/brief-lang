@@ -536,7 +536,7 @@ mod tests {
             }],
         });
         let mut stmt = Statement::Expression(Expr::TemplateCall {
-            name: "double".to_string(), args: vec![Expr::Integer(5)], block: None, span: None,
+            name: "double".to_string(), args: vec![Expr::Decimal(5)], block: None, span: None,
         });
         let result = expand_template_in_stmt(&stmt, &mut ctx);
         assert!(result.is_ok(), "Expected Ok, got {:?}", result.err());
@@ -551,7 +551,7 @@ mod tests {
         let span = crate::errors::Span::new(10, 20, 5, 3);
         ctx.macros.insert("foo".to_string(), MacroDef {
             name: "foo".to_string(), params: vec![], return_type: None,
-            body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], swan_song: None, modifiers: vec![] }],
+            body: vec![Statement::Term { values: vec![Some(Expr::Decimal(42))], swan_song: None, modifiers: vec![] }],
         });
         let stmt = Statement::Expression(Expr::MacroCall { name: "foo".to_string(), args: vec![], block: None, span: Some(span) });
         let result = expand_macro_in_stmt(&stmt, &mut ctx);
@@ -561,7 +561,7 @@ mod tests {
     #[test]
     fn test_validate_no_compile_time_intrinsics_ok() {
         let program = Program {
-            items: vec![TopLevel::Statement(Box::new(Statement::Expression(Expr::Integer(42))))],
+            items: vec![TopLevel::Statement(Box::new(Statement::Expression(Expr::Decimal(42))))],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
@@ -586,7 +586,7 @@ mod tests {
         });
         let mut stmt = Statement::Expression(Expr::TemplateCall {
             name: "double".to_string(),
-            args: vec![Expr::Integer(5)],
+            args: vec![Expr::Decimal(5)],
             block: None,
             span: None,
         });
@@ -607,7 +607,7 @@ mod tests {
             params: vec![],
             return_type: None,
             body: vec![Statement::Term {
-                values: vec![Some(Expr::Integer(42))],
+                values: vec![Some(Expr::Decimal(42))],
                 swan_song: None,
                 modifiers: vec![],
             }],
@@ -635,7 +635,7 @@ mod tests {
                     params: vec![],
                     return_type: None,
                     body: vec![Statement::Term {
-                        values: vec![Some(Expr::Integer(7))],
+                        values: vec![Some(Expr::Decimal(7))],
                         swan_song: None, modifiers: vec![],
                     }],
                 },
@@ -676,7 +676,7 @@ mod tests {
     fn test_collect_macro_defs() {
         let mut program = Program {
             items: vec![TopLevel::MacroDef { name: "m".to_string(), params: vec![], return_type: None,
-                body: vec![Statement::Term { values: vec![Some(Expr::Integer(42))], swan_song: None, modifiers: vec![] }],
+                body: vec![Statement::Term { values: vec![Some(Expr::Decimal(42))], swan_song: None, modifiers: vec![] }],
             }],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential,

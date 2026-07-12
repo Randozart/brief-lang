@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn test_hygiene_renames_let_binding() {
         let mut stmts = vec![Statement::Let {
-            name: "temp".to_string(), ty: None, expr: Some(Expr::Integer(42)),
+            name: "temp".to_string(), ty: None, expr: Some(Expr::Decimal(42)),
             address: None, address_expr: None, bit_range: None,
             constraint: None, is_override: false, modifiers: Vec::new(),
         }];
@@ -165,7 +165,7 @@ mod tests {
     fn test_hygiene_renames_references_in_following_stmt() {
         let mut stmts = vec![
             Statement::Let {
-                name: "temp".to_string(), ty: None, expr: Some(Expr::Integer(42)),
+                name: "temp".to_string(), ty: None, expr: Some(Expr::Decimal(42)),
                 address: None, address_expr: None, bit_range: None,
                 constraint: None, is_override: false, modifiers: Vec::new(),
             },
@@ -195,7 +195,7 @@ mod tests {
     fn test_hygiene_preserves_state_names() {
         let mut stmts = vec![
             Statement::Let {
-                name: "temp".to_string(), ty: None, expr: Some(Expr::Integer(1)),
+                name: "temp".to_string(), ty: None, expr: Some(Expr::Decimal(1)),
                 address: None, address_expr: None, bit_range: None,
                 constraint: None, is_override: false, modifiers: Vec::new(),
             },

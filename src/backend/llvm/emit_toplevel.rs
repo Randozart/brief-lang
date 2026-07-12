@@ -715,7 +715,7 @@ impl LlvmBackend {
                 // back, producing dead IR. LLVM DCE would clean them, but they may cause
                 // verifier errors if they cross adapt_to_i64 before DCE runs.
         match init_clone {
-            Some(Expr::Integer(n)) => {
+            Some(Expr::Decimal(n)) => {
                 writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, n, gep, self.align_of("i64")).ok();
             }
             Some(Expr::Float(f)) => {
@@ -756,7 +756,7 @@ impl LlvmBackend {
                             writeln!(out, "{}store i64 0, ptr {}, align {}", indent, gep, self.align_of("i64")).ok();
                         }
                     }
-                    Expr::Integer(n) => {
+                    Expr::Decimal(n) => {
                         writeln!(out, "{}store i64 -{}, ptr {}, align {}", indent, n, gep, self.align_of("i64")).ok();
                     }
                     _ => {
@@ -793,10 +793,10 @@ impl LlvmBackend {
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
                 }
             }
-            Some(Expr::String(s)) => {
+            Some(Expr::Quoted(s)) => {
                 // 2026-06-17: Store actual string constant pointer, not null.
                 // The string is stored as a bitcast of @str.N to ptr.
-                let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
+                let si = self.ctx.string_constants.iter().position(|x| x.as_bytes() == s.as_slice()).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
                 writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
@@ -1597,7 +1597,7 @@ impl LlvmBackend {
         // We emit a re-load of x with !range { 0, N } — the extra load is
         // GVN-eliminated if the bound is already provable by LLVM.
         match pre {
-            Expr::Lt(lhs, rhs) if matches!(rhs.as_ref(), Expr::Integer(_)) => {
+            Expr::Lt(lhs, rhs) if matches!(rhs.as_ref(), Expr::Decimal(_)) => {
                 // 2026-07-04: Unwrap Cast(Identifier, Int) for Ptr<T> fields.
                 // Ptr<T> fields use "ptr_field as Int" in precondition contracts
                 // (e.g., [ptr as Int >= BASE && ptr as Int < END]). The Cast
@@ -1612,7 +1612,7 @@ impl LlvmBackend {
                 };
                 if let Some(ref name) = field_name {
                     if let Some(&idx) = self.ctx.field_index_map.get(name.as_str()) {
-                        let bound = if let Expr::Integer(b) = rhs.as_ref() { *b } else { 0 };
+                        let bound = if let Expr::Decimal(b) = rhs.as_ref() { *b } else { 0 };
                         let gep = format!("%prg{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                         let ty = self.ctx.field_types[idx].clone();
                         let idx_val = idx;

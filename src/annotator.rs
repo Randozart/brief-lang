@@ -400,9 +400,9 @@ impl Annotator {
                 LiteralExpr::Bool(b) => b.to_string(),
                 LiteralExpr::Term => "term".to_string(),
             },
-            Expr::Integer(n) => n.to_string(),
+            Expr::Decimal(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
-            Expr::String(s) => format!("\"{}\"", s),
+            Expr::Quoted(s) => format!("\"{}\"", String::from_utf8_lossy(s)),
             Expr::Char(c) => format!("'{}'", c),  // NEW
             Expr::Bool(true) => "true".to_string(),
             Expr::Bool(false) => "false".to_string(),
@@ -667,7 +667,7 @@ use crate::ast::*;
     #[test]
     fn test_analyze_definition_no_calls() {
         let mut ann = Annotator::new();
-        let stmts = vec![Statement::Term { values: vec![Some(Expr::Integer(42))], swan_song: None, modifiers: vec![] }];
+        let stmts = vec![Statement::Term { values: vec![Some(Expr::Decimal(42))], swan_song: None, modifiers: vec![] }];
         let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
         ann.analyze(&prog);
         assert_eq!(ann.call_paths.get("foo").map(|v| v.len()).unwrap_or(0), 0);

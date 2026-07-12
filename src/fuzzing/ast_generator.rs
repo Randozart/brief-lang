@@ -397,10 +397,10 @@ pub fn arb_expr(max_depth: usize) -> impl Strategy<Value = Expr> {
 /// Generate a random leaf expression (no recursion)
 fn arb_leaf_expr() -> impl Strategy<Value = Expr> {
     prop_oneof![
-        any::<i64>().prop_map(Expr::Integer),
+        any::<i64>().prop_map(Expr::Decimal),
         any::<f64>().prop_map(Expr::Float),
         any::<bool>().prop_map(Expr::Bool),
-        arb_string_literal().prop_map(Expr::String),
+        arb_string_literal().prop_map(|s| Expr::Quoted(s.into())),
         arb_identifier().prop_map(Expr::Identifier),
     ]
 }
@@ -408,7 +408,7 @@ fn arb_leaf_expr() -> impl Strategy<Value = Expr> {
 /// Generate a random simple expression (for escape, etc.)
 fn arb_simple_expr() -> impl Strategy<Value = Expr> {
     prop_oneof![
-        any::<i64>().prop_map(Expr::Integer),
+        any::<i64>().prop_map(Expr::Decimal),
         any::<bool>().prop_map(Expr::Bool),
         arb_identifier().prop_map(Expr::Identifier),
     ]

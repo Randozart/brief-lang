@@ -224,14 +224,14 @@ impl ExprCodegenWebstack for BinaryOpExpr {
         // Webstack handles Expr::BinaryOp directly in expr_to_ts — this trait
         // path is a fallback for dispatch chains that route through feature structs.
         let l = match self.left.as_ref() {
-            Expr::Integer(n) => n.to_string(),
+            Expr::Decimal(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Bool(b) => b.to_string(),
             Expr::Identifier(name) => name.clone(),
             _ => "value".to_string(),
         };
         let r = match self.right.as_ref() {
-            Expr::Integer(n) => n.to_string(),
+            Expr::Decimal(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Bool(b) => b.to_string(),
             Expr::Identifier(name) => name.clone(),
@@ -267,13 +267,13 @@ mod kani_full_tests {
 
     #[kani::proof]
     fn verify_binary_op_kind_dispatch_add() {
-        let e = BinaryOpExpr::new(BinaryOpKind::Add, Expr::Integer(1), Expr::Integer(2));
+        let e = BinaryOpExpr::new(BinaryOpKind::Add, Expr::Decimal(1), Expr::Decimal(2));
         assert_eq!(e.kind as usize, BinaryOpKind::Add as usize);
     }
 
     #[kani::proof]
     fn verify_binary_op_kind_dispatch_eq() {
-        let e = BinaryOpExpr::new(BinaryOpKind::Eq, Expr::Integer(0), Expr::Integer(0));
+        let e = BinaryOpExpr::new(BinaryOpKind::Eq, Expr::Decimal(0), Expr::Decimal(0));
         assert_eq!(e.kind as usize, BinaryOpKind::Eq as usize);
     }
 }

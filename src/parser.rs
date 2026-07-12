@@ -460,10 +460,10 @@ impl<'a> Parser<'a> {
                             None
                         };
                         let value_expr = match &value {
-                            Some(val) => Expr::String(val.clone()),
-                            None => Expr::Bool(true),
-                        };
-                        mods.push(Annotation { name, value: value_expr, mode, diagnostic: true });
+                        Some(val) => Expr::Quoted(val.clone().into()),
+                        None => Expr::Bool(true),
+                    };
+                    mods.push(Annotation { name, value: value_expr, mode, diagnostic: true });
                     } else {
                         // Bare #? — diagnose all passes for this item
                         mods.push(Annotation {
@@ -512,7 +512,7 @@ impl<'a> Parser<'a> {
                         None
                     };
                     let value_expr = match &value {
-                        Some(val) => Expr::String(val.clone()),
+                        Some(val) => Expr::Quoted(val.clone().into()),
                         None => Expr::Bool(true),
                     };
                     mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Advisory, diagnostic: false });
@@ -569,7 +569,7 @@ impl<'a> Parser<'a> {
                         None
                     };
                     let value_expr = match &value {
-                        Some(val) => Expr::String(val.clone()),
+                        Some(val) => Expr::Quoted(val.clone().into()),
                         None => Expr::Bool(true),
                     };
                     mods.push(Annotation { name, value: value_expr, mode: AnnotationMode::Mandatory, diagnostic });
@@ -1320,7 +1320,7 @@ impl<'a> Parser<'a> {
                     value: if export_name.is_empty() {
                         Expr::Bool(true)
                     } else {
-                        Expr::String(export_name)
+                        Expr::Quoted(export_name.into())
                     },
                     mode: AnnotationMode::Mandatory,
                     diagnostic: false,
@@ -5651,7 +5651,7 @@ let span = self.current_span();
     fn extract_timing_bound(expr: &Expr) -> (Option<u64>, Option<u64>) {
         match expr {
             Expr::Lt(left, right) => {
-                if let (Expr::Identifier(name), Expr::Integer(n)) = (left.as_ref(), right.as_ref()) {
+                if let (Expr::Identifier(name), Expr::Decimal(n)) = (left.as_ref(), right.as_ref()) {
                     if *n >= 0 {
                         if name == "cycles" {
                             return (Some(*n as u64), None);
@@ -7034,7 +7034,7 @@ let span = self.current_span();
                         _ => Type::Custom(name),
                     },
                     // 2026-07-08: Phase 2b — use Width(n) instead of Custom("Literal(n)")
-                    Expr::Integer(n) => Type::Width(n as u64),
+                    Expr::Decimal(n) => Type::Width(n as u64),
                     Expr::Literal(lit) => match lit.as_ref() {
                         crate::features::literal::LiteralExpr::Integer(n) => {
                             Type::Width(*n as u64)
@@ -8506,7 +8506,7 @@ let span = self.current_span();
                 self.advance();
                 let identifier = self.expect_identifier()?;
                 let path = format!("~/{}", identifier);
-                Ok(Expr::String(path))
+                Ok(Expr::Quoted(path.into()))
             }
             _ => {
                 // Fallback: try expect_identifier (handles keywords + identifiers)
@@ -9029,7 +9029,7 @@ let span = self.current_span();
 
     fn bracket_contents_to_expr(&self, base: Expr, contents: BracketContents) -> Expr {
         match contents {
-            BracketContents::Empty => Expr::ListIndex(Box::new(base), Box::new(Expr::Integer(0))),
+            BracketContents::Empty => Expr::ListIndex(Box::new(base), Box::new(Expr::Decimal(0))),
             BracketContents::SimpleIndex(idx) => Expr::ListIndex(Box::new(base), idx),
             BracketContents::Slice { start, end, stride, mask } => Expr::Slice {
                 value: Box::new(base),
@@ -9407,9 +9407,9 @@ struct MultiSliceResult {
 /// 2026-07-11: Phase 1A.1c.
 fn expr_to_property_value(expr: &Expr) -> Result<PropertyValue, SyntaxError> {
     match expr {
-        Expr::Integer(n) => Ok(PropertyValue::Int(*n)),
+        Expr::Decimal(n) => Ok(PropertyValue::Int(*n)),
         Expr::Float(f) => Ok(PropertyValue::Float(*f)),
-        Expr::String(s) => Ok(PropertyValue::String(s.clone())),
+        Expr::Quoted(s) => Ok(PropertyValue::String(String::from_utf8_lossy(s).to_string())),
         Expr::Bool(b) => Ok(PropertyValue::Bool(*b)),
         Expr::IntegerSuffixed(n, _) => Ok(PropertyValue::Int(*n)),
         Expr::Identifier(name) => Ok(PropertyValue::Identifier(name.clone())),
@@ -11781,7 +11781,7 @@ defn fallback() -> Int { term 0; };
                 assert_eq!(d.name, "add");
                 assert_eq!(d.modifiers.len(), 1);
                 assert_eq!(d.modifiers[0].name, "export");
-                assert_eq!(d.modifiers[0].value, Expr::String("my_add_api".to_string()));
+                assert_eq!(d.modifiers[0].value, Expr::Quoted("my_add_api".into()));
             }
             other => panic!("Expected Definition, got {:?}", other),
         }

@@ -138,32 +138,32 @@ pub fn generate_concrete_values(
     
     match &constraint.condition {
         Expr::Eq(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
         Expr::Gt(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val + 1));
             }
         }
         Expr::Lt(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val.saturating_sub(1)));
             }
         }
         Expr::Ge(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
         Expr::Le(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
         Expr::Ne(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val + 1));
             }
         }
@@ -192,32 +192,32 @@ fn generate_concrete_for_expr(expr: &Expr, _state: &SymbolicState) -> Vec<(Strin
 fn extract_integer_comparisons(expr: &Expr, assignments: &mut Vec<(String, i64)>) {
     match expr {
         Expr::Eq(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
         Expr::Gt(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val + 1));
             }
         }
         Expr::Lt(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val.saturating_sub(1)));
             }
         }
         Expr::Ge(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
         Expr::Le(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
         Expr::Ne(l, r) => {
-            if let (Expr::Identifier(var), Expr::Integer(val)) = (&**l, &**r) {
+            if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val + 1));
             }
         }
@@ -403,7 +403,7 @@ mod tests {
         let constraint = PathConstraintInfo {
             condition: Expr::Gt(
                 Box::new(Expr::Identifier("x".to_string())),
-                Box::new(Expr::Integer(5)),
+                Box::new(Expr::Decimal(5)),
             ),
             depth: 0,
             kind: ConstraintKind::Guard,
@@ -418,7 +418,7 @@ mod tests {
         let constraint = PathConstraintInfo {
             condition: Expr::Eq(
                 Box::new(Expr::Identifier("y".to_string())),
-                Box::new(Expr::Integer(10)),
+                Box::new(Expr::Decimal(10)),
             ),
             depth: 0,
             kind: ConstraintKind::Guard,

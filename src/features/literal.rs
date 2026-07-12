@@ -157,7 +157,7 @@ mod kani_tests {
 
     #[kani::proof]
     fn verify_expr_as_integer_dual_path() {
-        let old = Expr::Integer(42);
+        let old = Expr::Decimal(42);
         let new = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
         assert_eq!(old.as_integer(), new.as_integer());
     }
@@ -213,7 +213,7 @@ mod kani_full_tests {
 
     #[kani::proof]
     fn verify_expr_as_string_dual_path() {
-        let old = Expr::String("hello".to_string());
+        let old = Expr::Quoted("hello".into());
         let new = Expr::Literal(Box::new(LiteralExpr::String("hello".to_string())));
         assert_eq!(old.as_string(), new.as_string());
         assert_eq!(new.as_string(), Some(&"hello".to_string()));
