@@ -25,6 +25,7 @@
 pub mod annotator;
 pub mod assertion_verify;
 pub mod ast;
+pub mod ast_new;
 pub mod analysis;
 pub mod backend;
 pub mod features;
