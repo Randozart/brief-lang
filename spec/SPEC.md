@@ -1,9 +1,9 @@
 # Brief Language Specification
 
 **Version:** v0.18.0  
-**Date:** 2026-07-11  
-**Status:** Development (Phases 4-7 complete: codec declarations, custom literal parsers, WASM target, plugin system.)  
-**Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Data (.dbv, .dbvs, .dbvl), **Strict** (.sbv, .srbv, .sebv)
+**Date:** 2026-07-12  
+**Status:** Development (Phases 0-7 complete: extensible types, property system, codec declarations, custom literal parsers, WASM target, plugin system. Phases 8.0-8.2 complete: derivation block lexer/parser/AST. Phases 8A-8F in progress: Pure Bits refactor.)  
+**Language Variants:** Core (.bv), Rendered (.rbv), Embedded (.ebv), Accelerated (.abv), Circuit (.cbv), Data (.dbv, .dbvs, .dbvl), plus extension modifiers (.s, .f, .c)
 
 ## 1. Introduction and Philosophy
 
@@ -19,8 +19,36 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 4. **Zero-Nesting Logic**: Branching is handled via guards, not nested blocks. This improves clarity and LLM comprehension.
 5. **FFI for External Capabilities**: Brief cannot do everything (file I/O, networking, hardware math). Foreign Function Interface handles these cases with explicit contracts.
 
-### 1.2 Language Variants
+### 1.2 Language Variants and Extension Modifiers
 
+Brief uses a **base variant** extension (`.bv`, `.ebv`, etc.) with optional
+**modifier flags** in the filename as a middle segment. The format is
+`[name].[modifiers].[variant]` where modifiers are single-character flags
+in any order.
+
+| Flags | Meaning | Effect |
+|-------|---------|--------|
+| `s` | Strict | Extra compiler verification passes |
+| `f` | Formatted | Indentation-based layout (no braces/semicolons) |
+| `c` | Cell | File becomes `cell <stem> { ... }` with `input`/`output` keywords |
+
+**Examples:**
+
+| Filename | Variant | Modifiers | Meaning |
+|----------|---------|-----------|---------|
+| `main.bv` | `bv` | — | Standard Brief |
+| `main.s.bv` | `bv` | `s` | Strict |
+| `main.f.bv` | `bv` | `f` | Formatted (indentation) |
+| `main.sf.bv` | `bv` | `s`, `f` | Strict + Formatted |
+| `server.c.bv` | `bv` | `c` | Cell-wrapped |
+| `server.sfc.bv` | `bv` | `s`, `f`, `c` | Strict + Formatted + Cell |
+| `sensor.c.ebv` | `ebv` | `c` | Cell-wrapped Embedded |
+
+**Deprecation:** The old single-segment `.sbv`, `.srbv`, `.sebv` extensions
+are superseded by `.s.bv`, `.s.rbv`, `.s.ebv`. The old forms continue to
+compile during a deprecation window but emit a warning.
+
+**Base Variants:**
 * **Core Brief** (`.bv`): Transactional state machines with FFI support. Compiles to native binary via LLVM backend.
 * **Rendered Brief** (`.rbv`): Adds `rstruct`, view components (HTML/CSS/SVG), and UI binding directives (b-text, b-show, b-trigger). Compiles to TypeScript + WASM via Webstack backend.
 * **Embedded Brief** (`.ebv`): Adds native `Float` types, vector types, bit-range addressing, and hardware triggers (`trg`). Compiles to microcontroller binary via LLVM backend.
@@ -28,9 +56,8 @@ Brief is designed for **Formal Verification without the Boilerplate**. It elimin
 * **Circuit Brief** (`.cbv`): Pure hardware logic. Compiles to Verilog/VHDL via CIRCT backend (no FFI, no external deps).
 * **Data Brief Schema** (`.dbvs`): Schema definitions for Data Brief, including aliases and validation rules.
 * **Data Brief Lines** (`.dbvl`): Line-based mutable database for large datasets with verification.
-* **Strict Brief** (`.sbv`): Enforces full pre/postcondition verification. Both conditions are mandatory and must be non-trivial. Same compilation targets as `.bv`.
-* **Strict Rendered Brief** (`.srbv`): Combines Strict Brief enforcement with verified view-state isomorphism. Every view binding maps to a state variable with a non-trivial contract. Same targets as `.rbv`.
-* **Strict Embedded Brief** (`.sebv`): Strict Brief for hardware targets. Same targets as `.ebv` with additional strictness.
+* **Rendered Brief** (`.rbv`): Combines Strict Brief enforcement with verified view-state isomorphism. Same targets as `.rbv`.
+* **Strict Embedded Brief** (`.s.ebv`): Strict Brief for hardware targets. Same targets as `.ebv` with additional strictness.
 
 ### 1.3 Versioning
 
@@ -143,6 +170,9 @@ top_level ::= definition
             | resource_decl
             | render_block
             | exit_condition
+            | export_def
+            | cell_input       (* Valid only in .c.bv files *)
+            | cell_output      (* Valid only in .c.bv files *)
 
 type_def ::= "type" identifier type_params? "<:" type_expr "{" (slot_decl | type_property | op_decl | constraint)* "}" ";"
 slot_decl ::= identifier ":" type_expr ";"
@@ -152,11 +182,25 @@ op_decl ::= "op" rune_name "(" param_type? ")" "->" return_type "=" intrinsic ";
 
 exit_condition ::= "#!exit" expression
 
-definition ::= ("defn" | "def" | "definition") identifier type_params? parameters? "->" output_types contract body
+definition ::= ("defn" | "def" | "definition") identifier type_params? parameters? "->" output_types contract body derivation?
 
-transaction ::= ("async")? "rct"? "txn" identifier type_params? parameters? contract body
+transaction ::= ("async")? "rct"? "txn" identifier type_params? parameters? contract body derivation?
 
 body ::= "{" statement* "}" ";" | ";"
+
+derivation ::= ":=" "{" derivation_example ((";" | ",") derivation_example)* "}" ";"
+
+derivation_example ::= expression ("," expression)* "->" expression
+                     (* Inputs -> output mapping, e.g. 2, 2 -> 4 *)
+
+export_def ::= "export" definition
+             (* Export a function for C/foreign linking *)
+
+cell_input ::= "input" identifier ":" type ";"
+             (* Only valid in .c.bv (cell-wrapped) files — declares a cell parameter *)
+
+cell_output ::= "output" identifier ":" type ";"
+              (* Only valid in .c.bv (cell-wrapped) files — declares the cell return type *)
 
 signature ::= "sig" ("#out" | "#inline")? identifier "(" parameters? ")" "->" output_type ("from" path | "=" identifier)? ";"
 
@@ -249,6 +293,7 @@ output_types ::= type ("," type)*  // Multi-output: (A, B, C)
 statement ::= assignment
             | unification
             | guarded
+            | when_guard
             | term
             | termbang
             | escape
@@ -263,6 +308,13 @@ lhs ::= identifier | field_access | index_access
 unification ::= identifier "(" pattern ")" "=" expression ";"
 
 guarded ::= "[" condition "]" ("{" statement* "}" | statement)
+          (* Same-line enforcement: if braces omitted, condition and
+             statement must be on the same line *)
+
+when_guard ::= "when" condition ("->" statement | "{" statement* "}")
+             (* -> arrow form: condition and statement must be same line.
+                Block form: no ->, braces required, no same-line restriction.
+                when is forbidden on signatures and type definitions. *)
 
 term ::= "term" (expression ("," expression)*)? ("->" statement)? ";"
 
@@ -276,6 +328,23 @@ let_binding ::= "let" identifier (":" type)? ("=" expression)? ";"
 
 inline_asm ::= "asm" string_literal ("{" string_literal ("," string_literal)* "}")? ";"
 ```
+
+**Guard same-line rule:** Both `[condition]` and `when condition -> statement;`
+require that the condition and its effect reside on the same physical line when
+braces are omitted. If the effect spills to a new line, braces `{ }` are
+required. This prevents dangling statements and maintains flat vertical
+structure.
+
+| Form | Same-line required? | Braces? | Arrow? |
+|------|-------------------|---------|--------|
+| `when x > 0 -> term 0;` | ✅ | ❌ | ✅ Required |
+| `when x > 0 { term 0; };` | ❌ | ✅ | ❌ |
+| `[x > 0] term 0;` | ✅ | ❌ | ❌ |
+| `[x > 0] { term 0; };` | ❌ | ✅ | ❌ |
+
+**AST equivalence:** Both `when condition` and `[condition]` forms parse to
+the identical `Statement::Guarded { condition, statements, metadata }` node.
+The SMT verifier, interpreter, and backends treat them identically.
 
 ### 2.4 Expressions
 
@@ -367,13 +436,24 @@ match_pattern ::= "_" | identifier ("(" identifier ("," identifier)* ")")?
 ### 2.5 Contracts
 
 ```bnf
-contract ::= "[" expression "]" "[" expression "]" watchdog?
+contract ::= entry_contract? "[" expression? "]" "[" expression? "]" watchdog?
+           | entry_contract
+
+entry_contract ::= "[#]" ("[" expression "]")?
+                 (* [#] marks a function as an environment entry point.
+                    Optional postcondition after: [#] [result == 0]. *)
 
 watchdog ::= ("?" | "!") "[" expression "]"
 ```
 
-* **Precondition**: First bracket `[pre]` - must be true for transaction to fire
-* **Watchdog**: Optional timeout/condition `?[timeout]` (optional) or `![timeout]` (required)
+* **`[#]` Entry precondition**: Marks a function as an environment entry
+  point (CLI-addressable). The function cannot be called from internal Brief
+  code — call graph is enforced at compile time. Multiple `[#]` functions
+  in the same file become subcommands (e.g., `myapp build`, `myapp test`).
+* **Postcondition**: Second bracket `[post]` - what the function guarantees
+  will be true after execution.
+* **Watchdog**: Optional timeout/condition `?[timeout]` (optional) or
+  `![timeout]` (required).
 
 ### 2.6 FFI Grammar
 
@@ -592,39 +672,6 @@ rct async txn fetch_data [needs_update][data != @data] {
 **Contract semantics:**
 - `[pre]` - Precondition: when the transaction is allowed to fire
 - `[post]` - Postcondition: what must be true after completion
-- `@var` - Prior state: value of `var` at transaction start
-- `term` - Completes transaction; verifies postcondition
-
-### 3.2 Guard-Based Control Flow
-
-Brief eliminates imperative branching (`if`/`else`) in favor of guards:
-
-```brief
-txn process(value: Int) [true][result != 0] {
-    let result: Int = 0;
-    
-    // Guard: only executes if condition is true
-    [value > 0] {
-        result = value * 2;
-    };
-    
-    [value < 0] {
-        result = value * -1;
-    };
-    
-    [value == 0] {
-        escape;  // Rollback transaction
-    };
-    
-    term;
-};
-```
-
-**Guard behavior:**
-- Multiple guards can execute (unlike `if`/`else if`)
-- Guards are evaluated in order
-- Empty guard body is valid: `[x > 0] &positive = true;`
-- `escape` inside a guard rolls back the entire transaction
 
 ### 3.3 Definitions (Functions)
 
@@ -1776,6 +1823,232 @@ pub trait Plugin: Debug {
 
 ---
 
+### 3.23 Derivation Blocks (`:=`) \[2026-07-11: Phase 8\]
+
+A derivation block attaches input-output examples to a definition or
+transaction. When a body is present, the examples act as compile-time
+assertions. When the body is omitted (drafting state), the compiler
+synthesizes the minimal formula that satisfies all examples.
+
+```brief
+// Resolved state: body + derivation (compile-time assertions)
+defn add(a: Int, b: Int) -> Int {
+    term a + b;
+} := {
+    2, 2 -> 4;
+    3, 5 -> 8;
+};
+
+// Drafting state: derivation only (compiler synthesizes body)
+defn swap(x: UInt16) -> UInt16 := {
+    0x1234 -> 0x3412;
+    0x00FF -> 0xFF00;
+};
+
+// Derivation with contracts (hybrid: examples + formal constraints)
+defn clamp(val: Int) -> Int
+    [result >= 0]
+    [result <= 100]
+:= {
+    -5 -> 0;
+    200 -> 100;
+};
+```
+
+**Behavior:**
+- When body is present: compiler interprets the body with each example's
+  inputs and asserts the output matches. Compile error on mismatch.
+- When body is absent: `brief derive` runs SMT synthesis to infer the body.
+- The derivation block is never consumed — it stays in source as the
+  permanent specification.
+- `#no_derive` pragma blocks synthesis during drafting.
+
+### 3.24 `[#]` Entry Precondition \[2026-07-12: Phase 16B\]
+
+The `[#]` contract marks a function as a CLI-addressable entry point.
+The compiler generates a lightweight `argc`/`argv` parser from the
+function's parameter names, types, and preconditions.
+
+```brief
+// Single entry point: `myapp --project ./src --clean`
+defn build(project: String, clean: Bool) -> Int
+    [#]
+    [project != ""]
+    [result == 0]
+{ ... };
+
+// Multiple entry points become subcommands: `myapp init`, `myapp build`
+defn init(name: String) -> Int [#] [name != ""] [result == 0] { ... };
+defn build(target: String) -> Int [#] [target != ""] [result == 0] { ... };
+```
+
+**Rules:**
+- `[#]` functions cannot be called from internal Brief code (call graph
+  isolation enforced at compile time).
+- `[#]` on a transaction is also valid for stateful entry points.
+- Top-level scripting (bare statements outside any `defn`/`txn`) gets an
+  implicit `[#]` wrapper — no `[#]` annotation needed.
+- Scripting mode and explicit `[#]` are mutually exclusive in the same file.
+
+### 3.25 `export` Keyword \[2026-07-12: Phase 15\]
+
+The `export` keyword marks a definition for C/foreign linking. The
+compiler generates a C-ABI compatible wrapper with state handle.
+
+```brief
+export defn add(a: Int, b: Int) -> Int { term a + b; };
+```
+
+Compiled with `brief build --library`, this produces:
+- `.ll` LLVM IR with a `dso_local` wrapper function
+- `.o` object file
+- `.a` static library
+- `brief_types.h` C header with `__brief_init_state` and `__glue_release`
+
+**Replaces:** The old `#export` pragma. Both forms work during a
+deprecation window.
+
+### 3.26 `alloc` Metadata \[2026-07-12: Planned\]
+
+The `alloc` annotation on variable bindings controls where and how memory
+is allocated. It follows the `<~` metadata pattern.
+
+```brief
+// Stack allocation (verified no-escape at compile time)
+let buffer: List<Int>;
+buffer <~ alloc("Stack");
+
+// Physical memory-mapped I/O (MMIO)
+let uart_status: UInt32 <~ alloc(0x4000_2000);
+
+// Arena allocation (opaque — backend handles it)
+let node: TreeNode;
+node <~ alloc("Arena", scratchpad);
+
+// Placement new (bind to existing pointer)
+let header: PacketHeader;
+header <~ alloc(raw_ptr);
+```
+
+**Frontend validation:**
+- `alloc("Stack")` — verifies the variable does not escape its scope.
+  Expands to `alloca: true` metadata.
+- `alloc(0x...)` — verifies the address is a compile-time constant.
+  Implicitly expands to `volatile: true`, `observable: true`,
+  `fixed_addr: <addr>`.
+- `alloc("Arena", ptr)` and `alloc(ptr)` — passed through to backend
+  as opaque metadata.
+
+**Backend validation:**
+- Known key (`alloc`) + unparseable value → error.
+- Unknown key → silently ignored (forward compatibility).
+- Physical addresses validated against the target memory map.
+
+### 3.27 `observable` and `volatile` Metadata \[2026-07-12: Phase 8G\]
+
+`observable` marks a function or variable access as having side effects
+visible outside the Brief program. DCE must preserve calls to observable
+functions. `volatile` prevents LLVM from reordering or redundantly loading.
+
+```brief
+defn print_int(n: Int) -> Bool {
+    observable <~ true;
+    llvm_asm <~ "call @printf";
+    interpreter_impl <~ "rust_print_int";
+};
+```
+
+Both are implicitly set by `alloc(0x...)` — physical MMIO accesses are
+always observable and volatile. Default for all other bindings is `false`.
+
+### 3.28 Top-Level Scripting \[2026-07-12: Phase 16E\]
+
+When a `.bv` file contains bare statements outside any `defn` or `txn`,
+the compiler wraps them in an implicit entry transaction with `[#]`.
+
+```brief
+// No defn, no txn — this is a script
+let name = __get_env("USER")?;
+frgn printf("Hello, %s!\n", name);
+```
+
+The implicit transaction is named after the file stem and has `[#]`
+as the entry precondition. The generated wrapper has no subcommand
+dispatch — execution is direct.
+
+**Rules:**
+- Scripting mode only activates when the file has zero explicit `defn`
+  or `txn` declarations.
+- Scripting and explicit `[#]` functions are mutually exclusive (compile
+  error if both present).
+
+### 3.29 `.f` Layout Parsing (Formatted Brief) \[2026-07-12: Phase 16C\]
+
+Files with the `.f` modifier (e.g., `main.f.bv`, `server.f.c.bv`) use
+indentation instead of braces and semicolons. The layout pre-processor
+injects virtual `{`, `}`, and `;` tokens based on indentation changes.
+
+```brief
+// main.f.bv — same semantics as standard Brief
+defn add(a: Int, b: Int) -> Int
+    a + b         // indented body — virtual { } inserted
+                  // virtual ; at end of line
+```
+
+**Rules:**
+- Tabs and spaces cannot be mixed in the same file (clear error if mixed).
+- The pre-processor runs before the lexer — the rest of the pipeline
+  sees standard braces and semicolons.
+- Valid with any variant: `.f.bv`, `.f.ebv`, `.s.f.bv`, etc.
+
+### 3.30 `.c` Cell Files and `input`/`output` Keywords \[2026-07-12: Phase 16D\]
+
+Files with the `.c` modifier (e.g., `server.c.bv`, `sensor.c.ebv`) are
+automatically wrapped in `cell <stem> { ... }`. The `input` and `output`
+keywords declare the cell's parameters and return type.
+
+```brief
+// server.c.bv — becomes: cell server(port: UInt16, verbose: Bool) -> status: Int { ... }
+input port: UInt16;
+input verbose: Bool;
+output status: Int;
+
+state running: Bool = false;
+txn start { running = true; };
+```
+
+**Rules:**
+- `input` and `output` are only valid in `.c.bv` files.
+- Multiple `input` declarations are allowed (one per parameter).
+- Only one `output` declaration. If omitted, the cell has no return type.
+- `input` parameters are ephemeral — passed per invocation, not persisted.
+
+### 3.31 Metadata Dispatch and Distributed Validation
+
+Metadata follows a key-value pattern with a prefix convention:
+
+| Prefix | Consumed by |
+|--------|-------------|
+| `alloc` | Frontend + all backends |
+| `llvm_*` | `brief-llvm` backend |
+| `circt_*` | `brief-circt` hardware backend |
+| `hls_*` | `brief-circt` HLS pass |
+| `wasm_*` | `brief-webstack` backend |
+| `gpu_*` | GPU backends |
+| `interpreter_*` | Compile-time interpreter |
+| No prefix | All backends (standard Brief) |
+
+**Validation rules:**
+1. **Unknown key** → silently ignored. Forward compatibility.
+2. **Known key + supported value** → emit code.
+3. **Known key + unparseable value** → **error**. The backend recognizes
+   the key but cannot fulfill the value.
+
+See `docs/architecture/features/metadata-dispatch.md` for the full
+architecture.
+
+---
+
 ## 4. Type System
 
 ### 4.1 Primitive Types
@@ -2858,7 +3131,7 @@ let size = hardware.memory.regions[0].size;
 ### 9.1 Compilation Pipeline
 
 ```
-Source (.bv/.rbv/.ebv/.sbv/.srbv/.sebv)
+Source (.bv/.rbv/.ebv/.sbv/.s.rbv/.s.ebv)
     ↓
 Lexer (tokenization)
     ↓
@@ -2877,12 +3150,9 @@ Target (Rust/C/WASM/Verilog/VHDL/COBOL)
 
 ### 9.2 Strict Brief Verification
 
-**Strict Brief** (`.sbv`, `.sebv`, `.srbv`) extends the standard Brief compiler pipeline with:
+**Strict Brief** (`.s.bv`, `.s.ebv`, `.s.rbv`) extends the standard Brief compiler pipeline with:
 
-1. **Mandatory Contracts**: Both `[precondition]` and `[postcondition]` are required. Omitting one or using `[true]` is a hard error.
-2. **Warning Escalation**: All contract warnings (P009, P010) become hard errors in strict mode.
-3. **View-State Isomorphism** (`.srbv` only): Every `b-text`, `b-show`, `b-trigger`, or other view binding is verified against the program's state declarations and contracts. References to undefined state or transactions with trivial contracts cause errors.
-4. **Capability Requirements** (`.sebv`/`.srbv`): Strict embedded files require `hardware_triggers` capability; strict rendered files require `reactive_ui` capability.
+4. **Capability Requirements** (`.s.ebv`/`.s.rbv`): Strict embedded files require `hardware_triggers` capability; strict rendered files require `reactive_ui` capability.
 
 Use `--strict` flag to apply strict mode to any file: `brief check --strict file.bv`
 
@@ -3034,6 +3304,21 @@ reset = "RESETn"
 | Formatter | ❌ Planned | |
 | Debugger | ❌ Planned | |
 | Profiler | ❌ Planned | |
+| `brief derive` CLI | ❌ Planned | Synthesizes bodies from `:=` blocks (Phase 9) |
+| **Phase 8+ Features** | | |
+| `:=` derivation blocks | ✅ Complete | Lexer, parser, AST committed (8.0-8.2) |
+| `when` keyword guards | ❌ Planned | Parser addition, same `Statement::Guarded` as brackets (Phase 8.6) |
+| Guard same-line enforcement | ❌ Planned | Brace-less guards on single line only (Phase 8.6) |
+| `[#]` entry precondition | ❌ Planned | CLI dispatch, call graph isolation (Phase 16B) |
+| `export` keyword | ❌ Planned | C/foreign linking (Phase 15) |
+| `.f` layout parsing | ❌ Planned | Indentation-based syntax (Phase 16C) |
+| `.c` cell wrapper + input/output | ❌ Planned | Cell-wrapped files (Phase 16D) |
+| Top-level scripting | ❌ Planned | Implicit `[#]` entry (Phase 16E) |
+| `alloc` metadata | ❌ Planned | Stack/MMIO/arena/placement (Planned) |
+| `observable`/`volatile` metadata | ❌ Planned | Liveness/dispatch (Phase 8G) |
+| Metadata dispatch architecture | ❌ Planned | Backend dispatch on `llvm_*` keys (Phase 8G) |
+| Extension modifiers (`.s.bv`, etc.) | ❌ Planned | Aggregated flags in filename (Phase 16A) |
+| Pure Bits refactor (`Value::Bits`) | 🔄 In progress | Phase 8A-8F |
 
 **Legend:**
 - ✅ Complete - Fully implemented and tested
