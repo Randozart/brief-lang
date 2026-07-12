@@ -459,3 +459,62 @@ declares `formatting <~ Quoted`, not because the type is named `String`.
 
 The old hardcoded rules are REMOVED, not supplemented. The type checker
 must use the `formatting` property exclusively for token assignments.
+
+---
+
+### Compiler Primitives
+
+These are the capitalized, PascalCase identifiers that the compiler
+recognizes in specific metadata contexts. They are NEVER user-definable
+and NEVER appear in string quotes.
+
+**Token form primitives** (used in `formatting <~`):
+
+| Primitive | Meaning |
+|---|---|
+| `Quoted` | Accepts `"..."` token form |
+| `Bare` | Accepts bare identifier token form (`FF00FF`) |
+| `Decimal` | Accepts numeric token form (`42`, `3.14`) |
+
+**Operator primitives** (used in `intrinsic_op <~`):
+
+| Primitive | Operation | Backend LLVM instruction |
+|---|---|---|
+| `AddI64` | Wrapping i64 addition | `add i64 %0, %1` |
+| `SubI64` | Wrapping i64 subtraction | `sub i64 %0, %1` |
+| `MulI64` | Wrapping i64 multiplication | `mul i64 %0, %1` |
+| `FAddF64` | f64 addition | `fadd double %0, %1` |
+| `ShlI64` | i64 shift left | `shl i64 %0, %1` |
+| `Malloc` | Heap memory allocation | `call @malloc` |
+| `Free` | Heap memory deallocation | `call @free` |
+| `PrintInt` | Print i64 to stdout | `call @printf` |
+| `GetEnvInt` | Read integer from environment | `call @getenv` |
+
+**Lifecycle primitive** (used in `op Drop <~`):
+
+| Primitive | Meaning |
+|---|---|
+| `Drop` | Destructor contract — compiler calls this at scope exit |
+
+**Naming rules:**
+1. PascalCase (`AddI64`, `FAddF64`, `Malloc`)
+2. UpperCamelCase type names suffixed to operation names (`I64`, `F64`, `Str`)
+3. No underscores, no hyphens
+4. Never in string quotes — `intrinsic_op <~ AddI64`, not `intrinsic_op <~ "AddI64"`
+5. Never user-definable — these are the compiler's vocabulary
+6. Functions carrying `intrinsic_op <~` CANNOT be called directly:
+   `let x = add_i64(a, b)` → compile error
+
+**Example `defn` carrying compiler primitives:**
+
+```brief
+defn add_i64(a: Int, b: Int) -> Int {
+    intrinsic_op <~ AddI64;             // interpreter fast path
+    llvm_instr   <~ "add i64 %0, %1";   // LLVM backend
+    term a + b;                          // any backend fallback
+};
+```
+
+A backend that doesn't understand either metadata key evaluates
+`term a + b;` using the Axiom 2 bitwise primitives on `Value::Bits`.
+No backend is ever stranded.
