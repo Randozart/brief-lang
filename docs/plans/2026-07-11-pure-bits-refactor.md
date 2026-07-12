@@ -660,7 +660,7 @@ must produce SOMETHING. Every other literal concept (string, integer, float,
 hex color, Roman numeral) is a semantic interpretation of one of these three
 forms, driven by the type's codec.
 
-### The `@` Prefix Modifier
+### ### The `@` Prefix Modifier
 
 The `@` prefix converts ANY token form to a `QuotedValue` containing the
 raw source bytes, bypassing any lexer-level interpretation:
@@ -674,29 +674,30 @@ raw source bytes, bypassing any lexer-level interpretation:
 This disambiguates the variable-vs-literal problem: `let x: Color = @FF00FF`
 is unambiguously a custom literal even if `FF00FF` is in scope as a variable.
 
-### The `accepts` Codec Property
+### The `formatting` Codec Property
 
-A codec declares which token forms it accepts. The frontend type checker
-reads this property during assignment validation:
+A codec declares which token forms it accepts via the `formatting <~`
+property. The value is a frontend-intrinsic identifier (not a string):
 
 ```brief
 codec HexColor {
-    accepts <~ "bare";                   // ← accepts FF00FF as a bareword
-    parse   <~ parse_hex;                // converts "FF00FF" → Value::Bits
+    formatting <~ Bare;                // ← accepts FF00FF as a bareword
+    parse      <~ parse_hex;           // converts "FF00FF" → Value::Bits
 };
 
 codec StringCodec {
-    accepts <~ "quoted";                 // ← accepts "hello" as a quoted value
-    parse   <~ identity_utf8;            // stores quoted bytes as-is
+    formatting <~ Quoted;              // ← accepts "hello" as a quoted value
+    parse      <~ identity_utf8;       // stores quoted bytes as-is
 };
 
 codec DefaultDecimal {
-    accepts <~ "decimal";                // ← accepts 42, 3.14
-    parse   <~ parse_decimal;            // converts decimal text → Value::Bits
+    formatting <~ Numeric;             // ← accepts 42, 3.14
+    parse      <~ parse_decimal;       // converts decimal text → Value::Bits
 };
 ```
 
-A type can accept multiple forms:
+The three recognized identifiers are `Quoted`, `Bare`, and `Numeric` — one
+for each compiler-intrinsic token form. A type can accept multiple forms:
 
 ```brief
 type FlexibleInt <: Int {
@@ -704,8 +705,8 @@ type FlexibleInt <: Int {
 };
 
 codec FlexibleCodec {
-    accepts <~ ["decimal", "bare", "quoted"];
-    parse   <~ my_flexible_parse;
+    formatting <~ [Numeric, Bare, Quoted];
+    parse      <~ my_flexible_parse;
 };
 ```
 
@@ -715,18 +716,18 @@ The prelude defines three default codecs, one for each token form:
 
 ```brief
 codec DefaultQuoted {
-    accepts <~ "quoted";
-    parse   <~ identity_utf8;
+    formatting <~ Quoted;
+    parse      <~ identity_utf8;
 };
 
 codec DefaultDecimal {
-    accepts <~ "decimal";
-    parse   <~ parse_decimal;
+    formatting <~ Numeric;
+    parse      <~ parse_decimal;
 };
 
 codec DefaultBare {
-    accepts <~ "bare";
-    parse   <~ parse_bare;    // default: variable lookup or error
+    formatting <~ Bare;
+    parse      <~ parse_bare;    // default: variable lookup or error
 };
 ```
 
@@ -739,7 +740,7 @@ type String <: Bits { codec <~ DefaultQuoted; bytes <~ 24; llvm <~ "%String"; };
 ```
 
 No name-based magic. `String` accepts `"..."` because `DefaultQuoted` says
-`accepts <~ "quoted"`, not because of its name.
+`formatting <~ Quoted`, not because of its name.
 
 ### Custom Token Handler Example
 
@@ -749,8 +750,8 @@ type HexColor <: Int {
 };
 
 codec HexCodec {
-    accepts <~ "bare";
-    parse   <~ parse_hex;
+    formatting <~ Bare;
+    parse      <~ parse_hex;
 };
 
 type CustomFloat <: Float {
@@ -758,8 +759,8 @@ type CustomFloat <: Float {
 };
 
 codec CFPrefixCodec {
-    accepts <~ "bare";
-    parse   <~ parse_cf;              // strips "cf" prefix, parses float
+    formatting <~ Bare;
+    parse      <~ parse_cf;              // strips "cf" prefix, parses float
 };
 
 let bg: HexColor    = FF00FF;         // bareword → HexCodec.parse

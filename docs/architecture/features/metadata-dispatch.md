@@ -86,6 +86,28 @@ at the layer that possesses the relevant domain knowledge, not earlier.
 
 ```
 
+### The Identifier-vs-String Rule
+
+A metadata value is either a **frontend-intrinsic identifier** or a
+**backend-intrinsic opaque string**:
+
+| Form | Meaning | Example |
+|---|---|---|
+| `key <~ Identifier` | Frontend interprets this value | `formatting <~ Quoted` |
+| `key <~ "string"` | Backend interprets this value; frontend carries it | `llvm <~ "%String"` |
+
+**Rule:** If the frontend must understand the value to compile the program,
+it is an identifier. If the value only matters to a backend (or the
+compile-time interpreter), it is a string.
+
+Frontend-intrinsic values use capitalized identifiers: `Quoted`, `Bare`,
+`Numeric`, `Add`, `Sub`, `Drop`. These are matched by the type checker
+and compile-time evaluator.
+
+Backend-intrinsic values use quoted strings: `"%String"`, `"add nsw i64"`,
+`"rdtsc"`, `"i64.const 0"`. The frontend never inspects their contents;
+it carries them through to the `.dbvl` archive where backends consume them.
+
 ### Stage 1: Parsing and Frontend Validation
 
 The frontend parser reads metadata declarations (`<~ expr;`) in function

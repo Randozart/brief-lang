@@ -274,20 +274,20 @@ Any property the frontend does not recognize is stored, serialized to the
 The parser produces exactly three primitive token forms, each representing
 raw bytes from source text with no semantic interpretation:
 
-| Form | AST node | Source | `accepts` value |
-|------|----------|--------|-----------------|
-| QuotedValue | `Expr::Quoted(Vec<u8>)` | `"..."` | `"quoted"` |
-| DecimalValue | `Expr::Decimal(i64)` | `[0-9]+`, `[0-9]+\.[0-9]+` | `"decimal"` |
-| Bareword | `Expr::Identifier(String)` | `[a-zA-Z][a-zA-Z0-9_]*` | `"bare"` |
+| Form | AST node | Source | `formatting <~` value |
+|------|----------|--------|----------------------|
+| QuotedValue | `Expr::Quoted(Vec<u8>)` | `"..."` | `Quoted` |
+| DecimalValue | `Expr::Decimal(i64)` | `[0-9]+`, `[0-9]+\.[0-9]+` | `Numeric` |
+| Bareword | `Expr::Identifier(String)` | `[a-zA-Z][a-zA-Z0-9_]*` | `Bare` |
 
 These are compiler axioms — they must exist because the lexer must produce
 something. All semantic meaning is attached by the type's codec via the
-`accepts` property:
+`formatting <~` property:
 
 ```brief
 codec HexColor {
-    accepts <~ "bare";     // ← FF00FF is accepted
-    parse   <~ parse_hex;  // converts text to Value::Bits
+    formatting <~ Bare;     // ← FF00FF is accepted
+    parse      <~ parse_hex;  // converts text to Value::Bits
 };
 ```
 
@@ -296,7 +296,7 @@ bypassing lexer interpretation. `@FF00FF`, `@42`, `@"..."` all produce
 `Expr::Quoted(bytes)`.
 
 No name-based magic. `String` accepts `"..."` because `DefaultQuoted`
-declares `accepts <~ "quoted"`, not because the type is named `String`.
+declares `formatting <~ Quoted`, not because the type is named `String`.
 
 ### 7. The Complete Type Hierarchy from First Principles
 
