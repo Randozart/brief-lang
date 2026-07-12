@@ -475,52 +475,84 @@ each example through the compile-time interpreter. This provides
 **Compile-Time Assertions** — zero-runtime-cost verification that the
 function body produces the expected outputs for the provided inputs.
 
+**Approach**: Rather than inventing an external environment API, reuse the
+interpreter's existing function call mechanism. For each example, evaluate
+the input expressions to produce `Value` arguments, then call the function
+with those arguments via `Interpreter::call_function`. The interpreter
+already handles parameter binding internally via `InterpreterFrame`.
+
 **Changes**:
 
-Add a function `execute_derivation_tests()`:
-
 ```rust
+use crate::derive::DeriveError;
+
 /// Execute all derivation examples through the compile-time interpreter.
-/// Each example's inputs are injected as constants, the function body is
-/// interpreted, and the result is compared to the expected output.
+/// Each example's inputs are evaluated as expressions, then the function
+/// is called with those values. The result is compared to the expected
+/// output expression (also evaluated at compile time).
 /// 2026-07-11: Phase 8.5
 fn execute_derivation_tests(
     defn: &Definition,
-    universe: &TypeUniverse,
     interpreter: &mut Interpreter,
-) -> Result<(), Vec<CompileError>> {
+) -> Result<(), Vec<DeriveError>> {
     let Some(derivation) = &defn.derivation else {
         return Ok(());
     };
-    let Some(body) = &defn.body else {
+    let Some(_body) = &defn.body else {
         return Ok(()); // No body yet — synthesis phase handles this
     };
 
     let mut errors = Vec::new();
 
     for (i, example) in derivation.examples.iter().enumerate() {
-        // Bind parameter names to input values in the interpreter
-        let mut env = InterpreterEnv::new();
-        for (param, input) in defn.parameters.iter().zip(example.inputs.iter()) {
-            let value = interpreter.eval_expr(input, &env)?;
-            env.bind(&param.name, value);
-        }
+        // Step 1: Evaluate input expressions to produce argument values
+        let args: Result<Vec<Value>, _> = example.inputs.iter()
+            .map(|input| interpreter.eval_expr(input, &None))
+            .collect();
+        let args = match args {
+            Ok(a) => a,
+            Err(e) => {
+                errors.push(DeriveError::EvalFailed {
+                    example_index: i,
+                    message: e.to_string(),
+                });
+                continue;
+            }
+        };
 
-        // Interpret the function body
-        let result = interpreter.eval_body(body, &env)?;
+        // Step 2: Call the function with these arguments.
+        // The interpreter bounds params via InterpreterFrame internally.
+        let result = match interpreter.call_function(&defn.name, &args) {
+            Ok(r) => r,
+            Err(e) => {
+                errors.push(DeriveError::EvalFailed {
+                    example_index: i,
+                    message: e.to_string(),
+                });
+                continue;
+            }
+        };
 
-        // Evaluate the expected output expression
-        let expected = interpreter.eval_expr(&example.output, &env)?;
+        // Step 3: Evaluate the expected output expression
+        let expected = match interpreter.eval_expr(&example.output, &None) {
+            Ok(v) => v,
+            Err(e) => {
+                errors.push(DeriveError::EvalFailed {
+                    example_index: i,
+                    message: format!("expected output: {}", e),
+                });
+                continue;
+            }
+        };
 
-        // Compare
+        // Step 4: Compare
         if result != expected {
-            errors.push(CompileError::new(
-                &example.span,
-                format!(
-                    "derivation test {} failed: expected {:?}, got {:?}",
-                    i + 1, expected, result
-                ),
-            ));
+            errors.push(DeriveError::AssertionFailed {
+                example_index: i,
+                expected,
+                got: result,
+                span: example.span,
+            });
         }
     }
 
@@ -528,19 +560,33 @@ fn execute_derivation_tests(
 }
 ```
 
-This reuses the existing compile-time interpreter infrastructure (already
-used for custom literal codec evaluation in Phase 5). The interpreter must
-support:
-- Injecting constant values for function parameters
-- Evaluating the body statements and returning the final value
-- Comparing values (the interpreter already handles this)
+**Prerequisites:** The interpreter's `call_function` method must accept
+a function name and a slice of argument values, push a frame with
+parameter bindings, execute the body, and return the `Term` value's
+result. If `call_function` does not yet exist (because it currently
+requires an `Expr::Call` node rather than raw `Value` arguments), a
+thin wrapper must be added to the interpreter:
 
-**Nesting check**: The function has a loop (level 1) with an inner env setup
-(level 2) — flat enough. Each error path is a guard clause.
+```rust
+// Thin addition to the interpreter (if not already present)
+impl Interpreter {
+    /// Call a function by name with pre-evaluated argument values.
+    /// 2026-07-11: Phase 8.5
+    pub fn call_function(&mut self, name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+        // Bind parameter names → values via InterpreterFrame
+        // Execute body statements sequentially
+        // Return the term value
+    }
+}
+```
+
+This reuse of the existing interpreter's call mechanism means no new
+environment API (`InterpreterEnv`) is needed — the interpreter already
+manages parameter binding internally through its frame stack.
 
 **Tests**:
 - `test_compile_time_assertion_passes`: `add { 2, 2 -> 4; }` → compiles
-- `test_compile_time_assertion_fails`: `add { 2, 2 -> 5; }` → compile error
+- `test_compile_time_assertion_fails`: `add { 2, 2 -> 5; }` → assertion error
 - `test_compile_time_assertion_multi_example`: Both pass → compiles
 - `test_compile_time_assertion_one_fails`: Second example fails → error
   with correct example number
@@ -879,7 +925,8 @@ formula satisfying all examples.
 
 **File**: `src/derive.rs` (new)
 
-**What**: Create the top-level derivation module with three sub-modules:
+**What**: Create the top-level derivation module with three sub-modules and
+the shared error type used across all derivation phases:
 
 ```rust
 //! Derivation & synthesis engine.
@@ -888,6 +935,31 @@ formula satisfying all examples.
 pub mod engine;   // Synthesis orchestration, cost model, enumerative search
 pub mod smt;      // SMT solver interface (via WASM plugin)
 pub mod cli;      // CLI command handlers for `brief derive`
+```
+
+**Shared error type** (used by all derivation phases):
+
+```rust
+/// Errors from derivation example execution, synthesis, and CLI operations.
+/// 2026-07-11: Phase 8.5, 9.5, 9.6, 11.3, 13.1 — shared across all derive phases.
+pub enum DeriveError {
+    /// An expression could not be evaluated at compile time.
+    EvalFailed { example_index: usize, message: String },
+    /// The function body produced a different result than expected.
+    AssertionFailed { example_index: usize, expected: Value, got: Value, span: Span },
+    /// A fallback value violates the function's postcondition.
+    FallbackViolatesContract { example_index: usize, variant: String, value: Value },
+    /// IO error reading/writing a file.
+    Io { path: PathBuf, error: io::Error },
+    /// File is not valid UTF-8.
+    InvalidUtf8 { path: PathBuf, error: FromUtf8Error },
+    /// Parse failed on a file.
+    ParseFailed { path: PathBuf, error: SyntaxError },
+    /// Synthesis produced no valid program.
+    SynthesisFailed(String),
+    /// Multiple errors during directory-level derive.
+    Multiple(Vec<DeriveError>),
+}
 ```
 
 Also create `src/derive/` directory with `mod.rs`, `engine.rs`, `smt.rs`,
@@ -1287,6 +1359,41 @@ at the correct byte offset, preserving all existing formatting and comments.
 
 **The core challenge**: AST pretty-printing destroys formatting. Instead,
 record byte offsets during parsing and use surgical byte-level insertion.
+
+**Prerequisite: `parse_file_with_offsets`**:
+
+Before write-back can happen, the derivation CLI needs the raw source bytes
+alongside the parsed AST. The derivation block's `span` field (recorded
+during parsing) provides the exact byte offset for insertion. The source
+bytes are passed through unchanged alongside the AST.
+
+```rust
+/// Parse a Brief source file and return both the AST and the raw source bytes.
+/// The source bytes are used for byte-offset surgical write-back.
+/// 2026-07-11: Phase 9.6
+fn parse_file_with_offsets(path: &Path) -> Result<(Program, Vec<u8>), DeriveError> {
+    let source = std::fs::read(path).map_err(|e| DeriveError::Io {
+        path: path.to_path_buf(),
+        error: e,
+    })?;
+    let source_str = String::from_utf8(source.clone())
+        .map_err(|e| DeriveError::InvalidUtf8 {
+            path: path.to_path_buf(),
+            error: e,
+        })?;
+    let mut parser = Parser::new(&source_str);
+    let program = parser.parse()
+        .map_err(|e| DeriveError::ParseFailed {
+            path: path.to_path_buf(),
+            error: e,
+        })?;
+    Ok((program, source))
+}
+```
+
+The byte offsets are stored in `DerivationBlock.span.end`, which points to
+the byte AFTER the closing `}` of the derivation block. This is the correct
+insertion point for the synthesized body.
 
 **How it works**:
 
@@ -1713,7 +1820,7 @@ synthesis), emit them as LLVM metadata for optimizer leverage. This is the
 
 | Contract Pattern | LLVM Metadata | Effect |
 |-----------------|---------------|--------|
-| `[result >= min && result <= max]` | `!range !{min, max}` | GVN, jump threading, loop optimization |
+| `[result >= min && result <= max]` | `!range !{min, max+1}` (max is **exclusive**) | GVN, jump threading, loop optimization |
 | `[ptr != null]` | `nonnull` attribute | Null check elimination, register promotion |
 | `[val % 2 == 0]` | `@llvm.assume` | Division → shift optimization |
 | `[index < len]` | `!range` on index | Bounds check elimination, vectorization |
@@ -1722,7 +1829,8 @@ synthesis), emit them as LLVM metadata for optimizer leverage. This is the
 
 ```rust
 /// Emit LLVM metadata for contract-proven invariants.
-/// 2026-07-11: Phase 10.2
+/// LLVM !range metadata uses exclusive upper bound (max+1).
+/// 2026-07-11: Phase 10.2 — inclusive→exclusive conversion.
 fn emit_contract_metadata(
     contract: &Contract,
     builder: &mut LlvmBuilder,
@@ -1730,8 +1838,10 @@ fn emit_contract_metadata(
     out: &mut String,
 ) {
     // Extract range constraints from postcondition
+    // extract_range_constraint returns INCLUSIVE bounds;
+    // LLVM !range expects EXCLUSIVE upper bound.
     if let Some((min, max)) = extract_range_constraint(&contract.post) {
-        writeln!(out, "  !range !{{ {} , {} }}", min, max).ok();
+        writeln!(out, "  !range !{{ {} , {} }}", min, max.saturating_add(1)).ok();
     }
 
     // Extract non-null constraints
@@ -1741,11 +1851,12 @@ fn emit_contract_metadata(
 }
 ```
 
-**Helper to extract range constraints**:
+**Helper to extract range constraints** (returns **inclusive** bounds):
 
 ```rust
 /// Extract a `[result >= min && result <= max]` pattern from a postcondition.
-/// Returns `Some((min, max))` if the pattern matches.
+/// Returns `Some((min, max))` where BOTH min and max are INCLUSIVE.
+/// The caller must convert to LLVM's exclusive upper bound via saturating_add(1).
 /// 2026-07-11: Phase 10.2
 fn extract_range_constraint(expr: &Expr) -> Option<(i64, i64)> {
     // Normalize to handle old-style vs new-style BinaryOp
@@ -1783,7 +1894,7 @@ clauses and match patterns — depth 1.
 
 **Tests**:
 - `test_contract_range_metadata`: `[result >= 0 && result <= 100]` →
-  `!range !{ 0, 101 }`
+  `!range !{ 0, 101 }` (exclusive upper bound)
 - `test_contract_nonnull_metadata`: `[ptr != null]` → `nonnull` attribute
   on parameter
 - `test_contract_metadata_emitted_in_ir`: Compile a function with contract,
@@ -1931,85 +2042,127 @@ fn extract_error_variant(expr: &Expr) -> Option<String> {
 - `test_exhaustiveness_no_error_type`: Not an enum type → Ok (no variants)
 - `test_extract_error_variant`: `FileError::NotFound` → `"NotFound"`
 
-### Step 11.2 — Synthesize match statement from sad-path derivation
+### Step 11.2 — Synthesize sad-path branching from derivation
 
 **File**: `src/derive/sad_path.rs`
 
-**What**: Generate the `match` statement that replaces the raw `frgn` call
-result with the happy-path/sad-path branching.
+**What**: Generate the conditional branching that wraps a `frgn` call result
+with happy-path/sad-path handling. Uses the existing `Statement::Guarded`
+AST node (one-shot conditional with a guard expression) and sequential
+fallthrough — each guard is tried in order; the first match wins.
 
 ```rust
-/// Generate a match statement that wraps a frgn call result.
+/// Generate a guarded if-else chain that wraps a frgn call result.
 /// 2026-07-11: Phase 11.2
-fn synthesize_match_statement(
-    frgn_call: &FrgnCall,
+fn synthesize_sad_path(
+    frgn_call: &ForeignSignature,
     ok_type: &Type,
     examples: &[DerivationExample],
 ) -> Vec<Statement> {
-    let result_var = format!("%__result_{}", frgn_call.id);
-    let ok_var = format!("%__ok_{}", frgn_call.id);
+    let result_var = format!("%__result_{}", frgn_call.name);
+    let ok_var = format!("%__ok_{}", frgn_call.name);
 
-    // match <result_var> {
-    //     Ok(<ok_var>) => <ok_var>,
-    //     Err(FileError::NotFound) => Config::Default(),
-    //     Err(FileError::PermissionDenied) => Config::SecureDefault(),
-    // }
-    let mut cases = Vec::new();
-    cases.push(MatchCase {
-        pattern: MatchPattern::Constructor {
-            name: "Ok".to_string(),
-            bindings: vec![ok_var.clone()],
-        },
-        body: vec![Statement::Term(Box::new(Expr::Identifier(ok_var)))],
+    let mut statements = Vec::new();
+
+    // 1. Bind the frgn call result to a variable
+    statements.push(Statement::Let {
+        name: result_var.clone(),
+        value: Box::new(Expr::Call {
+            // The frgn call — left as an Expr::Call to the foreign function
+            name: frgn_call.name.clone(),
+            type_args: vec![],
+            args: /* from the body context */ vec![],
+        }),
+        ty: Type::Applied("Result".to_string(), vec![ok_type.clone(), /* error type */]),
     });
 
+    // 2. For each error variant, emit a Guarded check:
+    // [result is Err(NotFound)] { term Config::Default(); }
     for example in examples {
-        let error_pattern = example.inputs[0].clone();
-        cases.push(MatchCase {
-            pattern: MatchPattern::Constructor {
-                name: "Err".to_string(),
-                bindings: vec![],
-            },
-            guard: Some(error_pattern), // Err(FileError::NotFound)
-            body: vec![Statement::Term(Box::new(example.output.clone()))],
+        let error_variant = extract_error_variant(&example.inputs[0])
+            .unwrap_or_default();
+        let guard = build_is_err_check(&result_var, &error_variant);
+        statements.push(Statement::Guarded {
+            condition: guard,
+            statements: vec![Statement::Term {
+                values: vec![Some(example.output.clone())],
+                swan_song: None,
+                modifiers: vec![],
+            }],
+            metadata: HashMap::new(),
         });
     }
 
-    vec![
-        Statement::Let {
-            name: result_var.clone(),
-            value: Box::new(frgn_call.clone().into_expr()),
-        },
-        Statement::Match {
-            expr: Box::new(Expr::Identifier(result_var)),
-            cases,
-        },
-    ]
+    // 3. Fallthrough to the happy path (no guard):
+    // [true] { term ok_value; }
+    let fallback_guard = Expr::Bool(true);
+    statements.push(Statement::Guarded {
+        condition: fallback_guard,
+        statements: vec![Statement::Term {
+            values: vec![Some(Expr::Identifier(ok_var))],
+            swan_song: None,
+            modifiers: vec![],
+        }],
+        metadata: HashMap::new(),
+    });
+
+    statements
+}
+
+/// Build a guard expression checking if result is Err(VariantName).
+/// 2026-07-11: Phase 11.2
+fn build_is_err_check(result_var: &str, variant: &str) -> Expr {
+    // result is Err(VariantName) — simplified guard using Expr::Match
+    // on the Result's discriminant.
+    Expr::Match {
+        expr: Box::new(Expr::Identifier(result_var.to_string())),
+        arms: vec![
+            MatchArm {
+                pattern: MatchPattern::Variant {
+                    name: "Err".to_string(),
+                    fields: vec![Pattern::Wildcard],
+                },
+                guard: Some(Box::new(Expr::BinaryOp {
+                    left: Box::new(Expr::Identifier("__discriminant".to_string())),
+                    op: BinaryOp::Eq,
+                    right: Box::new(Expr::Identifier(variant.to_string())),
+                })),
+                body: Box::new(Expr::Bool(true)),
+            },
+        ],
+    }
 }
 ```
 
-**Note**: This requires the `Statement::Match` and `MatchCase` /
-`MatchPattern` AST nodes to already exist (from Pattern Matching feature,
-which should be in the existing feature set). If pattern matching is not
-yet implemented, this step is deferred.
-
-**Alternative without pattern matching**: Emit an `if-else` chain:
+**Note:** If `Expr::Match` is unavailable (pattern matching not yet
+implemented), the fallback is to use the `is_err` intrinsic via metadata:
 
 ```rust
-fn synthesize_if_else_chain(...) -> Vec<Statement> {
-    // if (result is Err(NotFound)) { term Config::Default(); }
-    // else if (result is Err(PermissionDenied)) { term Config::SecureDefault(); }
-    // else { term ok_value; }
+fn build_is_err_check(result_var: &str, variant: &str) -> Expr {
+    // frgn __is_err_and_variant(result, variant)
+    Expr::Call {
+        name: "__is_err_and_variant".to_string(),
+        type_args: vec![],
+        args: vec![
+            Expr::Identifier(result_var.to_string()),
+            Expr::String(variant.to_string()),
+        ],
+    }
 }
 ```
 
+This call dispatches through the metadata-driven `interpreter_impl` /
+`llvm_instr` mechanism established in Phase 8G. The function
+`__is_err_and_variant` is defined in the prelude as a standard `defn`
+with `interpreter_impl <~ "check_err_variant"`.
+
 **Tests**:
-- `test_sad_path_synthesize_match`: Generate match statement, verify all
-  error variants present
-- `test_sad_path_synthesize_if_else`: Without pattern matching, generate
-  if-else chain
+- `test_sad_path_synthesize_if_else`: Generate guarded chain, verify all
+  error variants present in order
 - `test_sad_path_integration`: Full pipeline: frgn + derivation →
   synthesized body passes compile-time tests
+- `test_sad_path_fallback_happy_path`: When result is Ok, fallthrough to
+  happy path executed
 
 ### Step 11.3 — SMT verify fallback values satisfy downstream contracts
 
@@ -2031,16 +2184,17 @@ fn verify_fallbacks_satisfy_contract(
 
     for (i, example) in examples.iter().enumerate() {
         // Evaluate the fallback value
-        let fallback_value = interpreter.eval_expr(&example.output, &InterpreterEnv::new())?;
+        let fallback_value = interpreter.eval_expr(&example.output, &None)?;
 
-        // Check it against the postcondition
-        let env = InterpreterEnv::with_result(fallback_value);
-        let satisfied = interpreter.eval_expr(postcondition, &env)?;
+        // Evaluate the postcondition with `result` bound to the fallback.
+        // Uses the interpreter's eval_with_result helper (thin addition),
+        // which temporarily binds `result` via the frame stack.
+        let satisfied = interpreter.eval_with_result(postcondition, fallback_value.clone())?;
 
         if satisfied != Value::Bool(true) {
             violations.push(DeriveError::FallbackViolatesContract {
                 example_index: i,
-                variant: /* extract variant name */,
+                variant: extract_error_variant(&example.inputs[0]).unwrap_or_default(),
                 value: fallback_value,
             });
         }
@@ -2049,6 +2203,35 @@ fn verify_fallbacks_satisfy_contract(
     if violations.is_empty() { Ok(()) } else { Err(violations) }
 }
 ```
+
+**Interpreter addition** (thin helper, added to `src/interpreter.rs`):
+
+```rust
+impl Interpreter {
+    /// Evaluate an expression in a context where `result` is bound to a value.
+    /// Used for postcondition verification of derivation fallbacks.
+    /// 2026-07-11: Phase 11.3
+    pub fn eval_with_result(&mut self, expr: &Expr, result: Value) -> Result<Value, RuntimeError> {
+        // Save existing result binding (if any), push new one
+        let prev = self.current_result.take();
+        self.current_result = Some(result);
+
+        // Evaluate the postcondition expression
+        let out = self.eval_expr(expr, &None);
+
+        // Restore previous binding
+        self.current_result = prev;
+
+        out
+    }
+}
+```
+
+This requires adding a `current_result: Option<Value>` field to the
+`Interpreter` struct, which is initialized to `None` and set during
+postcondition evaluation. The field is distinct from the frame stack —
+it's a single-value convenience for quickly evaluating expressions
+that reference `result`.
 
 **Tests**:
 - `test_fallback_satisfies_contract`: `Config::Default()` has non-empty URL
@@ -2502,7 +2685,7 @@ pub fn derive_file(path: &Path, depth: u8) -> Result<(), DeriveError> {
         let synthesized = engine::synthesize_body(
             defn,
             &program.type_universe,
-            &plugin_host,
+            plugin_host.as_ref(),  // Option<&PluginHost>
             depth,
         )?;
 
@@ -2524,25 +2707,36 @@ pub fn derive_file(path: &Path, depth: u8) -> Result<(), DeriveError> {
         source = new_source;
     }
 
-    // 4. Write the modified source back
+    // 4. Verify: re-parse the modified program in memory and run compile-time tests.
+    //    This must happen BEFORE writing to disk to prevent corrupting the file
+    //    if verification fails.
+    let temp_source = String::from_utf8(source.clone())
+        .map_err(|e| DeriveError::InvalidUtf8 {
+            path: path.to_path_buf(),
+            error: e,
+        })?;
+    let mut temp_parser = Parser::new(&temp_source);
+    let reparsed = temp_parser.parse().map_err(|e| DeriveError::ParseFailed {
+        path: path.to_path_buf(),
+        error: e,
+    })?;
+    for defn in &reparsed.definitions {
+        execute_derivation_tests(defn, &mut interpreter)?;
+    }
+
+    // 5. Write the modified source back (only after verification passes)
     fs::write(path, &source).map_err(|e| DeriveError::Io {
         path: path.to_path_buf(),
         error: e,
     })?;
-
-    // 5. Verify: re-parse and run compile-time tests
-    let (reparsed, _) = parse_file_with_offsets(path)?;
-    for defn in &reparsed.definitions {
-        execute_derivation_tests(defn, &reparsed.type_universe, &mut interpreter)?;
-    }
 
     Ok(())
 }
 ```
 
 **Nesting check**: The function has sequential phases: parse → collect →
-sort → write → verify. Each phase is a loop with guard clauses — depth 2
-max.
+sort → verify (in memory) → write. Each phase is a loop with guard clauses —
+depth 2 max. Verification before write ensures no file corruption on failure.
 
 **Tests**:
 - `test_derive_file_single_definition`: One definition with derivation →
