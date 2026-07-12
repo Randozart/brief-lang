@@ -4214,7 +4214,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[test]
     fn test_is_proven_terminable_literal() {
         assert!(is_proven_terminable(&Expr::Integer(42)));
         assert!(is_proven_terminable(&Expr::String("hello".to_string())));

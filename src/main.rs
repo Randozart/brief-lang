@@ -651,7 +651,7 @@ fn run_selfhost(
                         let val = fields.get("value").or_else(|| fields.get("result"));
                         if let Some(val) = val {
                             match val {
-                                interpreter::Value::String(s) => println!("{}", s),
+                                interpreter::Value::Bits(b) => println!("{}", String::from_utf8_lossy(b)),
                                 _ => return Err(format!("Unexpected Ok value type: {:?}", val)),
                             }
                         }
@@ -660,8 +660,8 @@ fn run_selfhost(
                         let val = fields.get("value").or_else(|| fields.get("error"));
                         if let Some(val) = val {
                             match val {
-                                interpreter::Value::String(s) => {
-                                    return Err(format!("Self-host compilation failed: {}", s));
+                                interpreter::Value::Bits(b) => {
+                                    return Err(format!("Self-host compilation failed: {}", String::from_utf8_lossy(b)));
                                 }
                                 _ => return Err(format!("Error: {:?}", val)),
                             }
@@ -2399,7 +2399,7 @@ fn resolve_single_deferred_literal(
     interp.current_expected_type = Some(ast::Type::Custom(type_name.to_string()));
     let call_expr = ast::Expr::Call(fn_name, vec![ast::Expr::String(text.to_string())]);
     match interp.eval_expr(&call_expr) {
-        Ok(value) => value_to_expr(&value, text),
+        Ok(value) => value_to_expr(&value, text, type_name),
         Err(e) => {
             eprintln!("warning: deferred literal '{}': handler failed: {:?}, using 0", text, e);
             ast::Expr::Integer(0)
@@ -2417,17 +2417,42 @@ fn lookup_parse_handler(type_name: &str, tu: &type_universe::TypeUniverse) -> Op
 }
 
 /// Convert an interpreter Value to an AST Expr. Warnings on mismatch.
-/// 2026-07-11: Phase 8B — extracted for flat control flow.
-fn value_to_expr(value: &interpreter::Value, text: &str) -> ast::Expr {
-    match value {
-        interpreter::Value::Int(i) => ast::Expr::Integer(*i),
-        interpreter::Value::Float(f) => ast::Expr::Float64(*f),
-        interpreter::Value::Bool(b) => ast::Expr::Bool(*b),
-        interpreter::Value::String(s) => ast::Expr::String(s.clone()),
-        interpreter::Value::Char(c) => ast::Expr::Char(*c),
+/// 2026-07-11: Phase 8B — Bits-only dispatch via type_name.
+fn value_to_expr(value: &interpreter::Value, text: &str, type_name: &str) -> ast::Expr {
+    let interpreter::Value::Bits(b) = value else {
+        eprintln!("warning: deferred literal '{}': handler returned non-Bits, using 0", text);
+        return ast::Expr::Integer(0);
+    };
+    match type_name {
+        "Int" | "U32" | "U64" | "I32" | "I64" | "Size" => {
+            let mut arr = [0u8; 8];
+            let copy_len = b.len().min(8);
+            arr[..copy_len].copy_from_slice(&b[..copy_len]);
+            ast::Expr::Integer(i64::from_le_bytes(arr))
+        }
+        "Float" | "Double" | "F32" | "F64" => {
+            if b.len() >= 8 {
+                let mut arr = [0u8; 8];
+                arr.copy_from_slice(&b[..8]);
+                ast::Expr::Float64(f64::from_le_bytes(arr))
+            } else {
+                eprintln!("warning: deferred literal '{}': expected 8 bytes for float, got {}", text, b.len());
+                ast::Expr::Float64(0.0)
+            }
+        }
+        "Bool" => {
+            ast::Expr::Bool(b.first().copied().unwrap_or(0) != 0)
+        }
+        "Char" => {
+            let mut arr = [0u8; 8];
+            let copy_len = b.len().min(8);
+            arr[..copy_len].copy_from_slice(&b[..copy_len]);
+            let code = i64::from_le_bytes(arr) as u32;
+            ast::Expr::Char(char::from_u32(code).unwrap_or('\0'))
+        }
         _ => {
-            eprintln!("warning: deferred literal '{}': handler returned unsupported type, using 0", text);
-            ast::Expr::Integer(0)
+            // Default: treat as string bytes
+            ast::Expr::String(String::from_utf8_lossy(b).to_string())
         }
     }
 }

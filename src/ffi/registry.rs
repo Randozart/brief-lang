@@ -463,8 +463,16 @@ pub(crate) fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
     };
 
     // Convert values to CSV-safe strings
-    let csv_parts: Vec<String> = values.iter().map(|v| match v {
-        Value::Bits(b) => {
+    let csv_parts: Vec<String> = values.iter().map(|v| {
+        let Value::Bits(b) = v else { return format!("{:?}", v); };
+        // 2026-07-11: Bits-only — detect integer vs text by null byte presence.
+        // Integers (via i64_to_bits) produce trailing nulls; text never has them.
+        if b.contains(&0u8) || !b.iter().all(|&x| x.is_ascii_graphic() || x.is_ascii_whitespace()) {
+            let mut arr = [0u8; 8];
+            let copy_len = b.len().min(8);
+            arr[..copy_len].copy_from_slice(&b[..copy_len]);
+            i64::from_le_bytes(arr).to_string()
+        } else {
             let s = String::from_utf8_lossy(b);
             if s.contains(',') || s.contains('"') || s.contains('\n') {
                 format!("\"{}\"", s.replace('"', "\"\""))
@@ -472,7 +480,6 @@ pub(crate) fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
                 s.to_string()
             }
         }
-        other => format!("{:?}", other),
     }).collect();
 
     let line = csv_parts.join(",") + "\n";
@@ -854,7 +861,7 @@ fn metro_mmap_read_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let source = unsafe { addr.add(offset) };
     let mut result = Vec::with_capacity(length);
     for i in 0..length {
-        unsafe { result.push(Value::Bits(crate::interpreter::i64_to_bits(*source.add(i)) as i64)); }
+        unsafe { result.push(Value::Bits(crate::interpreter::i64_to_bits(*source.add(i) as i64))); }
     }
     Ok(Value::List(result))
 }
@@ -916,7 +923,7 @@ fn metro_atomic_cas_u32_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             Ordering::SeqCst,
             Ordering::SeqCst,
         );
-        Ok(Value::Bits(crate::interpreter::i64_to_bits(prev.unwrap_or(expected)) as i64))
+        Ok(Value::Bits(crate::interpreter::i64_to_bits(prev.unwrap_or(expected) as i64)))
     }
 }
 
@@ -1143,11 +1150,16 @@ fn encoding_sha1_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 }
 
 fn encoding_sha256_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
-    match args.first() {
-        Some(Value::Bits(data)) => Ok(Value::Bits(hash_bytes_sha256(data).as_bytes().to_vec())),
-        Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::sha256 expects 1 argument (string)".to_string())),
+    let data = match args.first() {
+        Some(Value::Bits(data)) => data,
+        Some(other) => return Ok(other.clone()),
+        None => return Err(RuntimeError::TypeMismatch("encoding::sha256 expects 1 argument (string)".to_string())),
+    };
+    // 2026-07-11: Bits-only — null bytes indicate numeric data, pass through
+    if data.contains(&0u8) {
+        return Ok(Value::Bits(data.clone()));
     }
+    Ok(Value::Bits(hash_bytes_sha256(data).as_bytes().to_vec()))
 }
 
 fn encoding_sha512_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
@@ -1252,11 +1264,11 @@ fn json_set_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 fn json_keys_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Instance { fields, .. }) => {
-            let keys: Vec<Value> = fields.keys().cloned().map(Value::String).collect();
+            let keys: Vec<Value> = fields.keys().cloned().map(|s| Value::Bits(s.into_bytes())).collect();
             Ok(Value::List(keys))
         }
         Some(Value::HashMap(map)) => {
-            let keys: Vec<Value> = map.keys().cloned().map(Value::String).collect();
+            let keys: Vec<Value> = map.keys().cloned().map(|s| Value::Bits(s.into_bytes())).collect();
             Ok(Value::List(keys))
         }
         Some(_) => Ok(Value::List(Vec::new())),

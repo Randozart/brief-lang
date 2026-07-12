@@ -121,7 +121,7 @@ mod tests {
         let mut ctx = Interpreter::new();
         stmt.evaluate(&mut ctx, &StmtDispatch).unwrap();
         let value = ctx.state.get("x").unwrap();
-        assert_eq!(*value, Value::Int(42));
+        assert_eq!(*value, Value::Bits(crate::interpreter::i64_to_bits(42)));
     }
 
     #[test]
@@ -136,11 +136,11 @@ mod tests {
             modifiers: vec![],
         };
         let mut ctx = Interpreter::new();
-        ctx.state.insert("items".into(), Value::List(vec![Value::Int(1), Value::Int(2)]));
+        ctx.state.insert("items".into(), Value::List(vec![Value::Bits(crate::interpreter::i64_to_bits(1)), Value::Bits(crate::interpreter::i64_to_bits(2))]));
         stmt.evaluate(&mut ctx, &StmtDispatch).unwrap();
         let items = ctx.state.get("items").unwrap();
         if let Value::List(list) = items {
-            assert_eq!(list[0], Value::Int(99));
+            assert_eq!(list[0], Value::Bits(crate::interpreter::i64_to_bits(99)));
         } else {
             panic!("Expected List");
         }
@@ -156,8 +156,8 @@ mod tests {
         };
         let mut ctx = Interpreter::new();
         stmt.evaluate(&mut ctx, &StmtDispatch).unwrap();
-        assert_eq!(*ctx.state.get("a").unwrap(), Value::Int(10));
-        assert_eq!(*ctx.state.get("b").unwrap(), Value::Int(20));
+        assert_eq!(*ctx.state.get("a").unwrap(), Value::Bits(crate::interpreter::i64_to_bits(10)));
+        assert_eq!(*ctx.state.get("b").unwrap(), Value::Bits(crate::interpreter::i64_to_bits(20)));
     }
 }
 

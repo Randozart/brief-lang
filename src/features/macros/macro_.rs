@@ -45,7 +45,7 @@ mod tests {
         let result = expand_macro_call(&mut ctx, "identity", &[Expr::Integer(42)]);
         assert!(result.is_ok(), "Expected Ok, got {:?}", result.err());
         let value = result.unwrap();
-        assert_eq!(value, crate::interpreter::Value::Int(42));
+        assert_eq!(value, crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)));
     }
 
     #[test]
@@ -82,7 +82,7 @@ mod tests {
             for stmt in stmts {
                 interp.exec_stmt(stmt).expect("Statement execution should succeed");
                 if let Some(ret) = interp.return_value.take() {
-                    assert_eq!(ret, crate::interpreter::Value::Int(42));
+                    assert_eq!(ret, crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)));
                     return;
                 }
             }
@@ -116,7 +116,7 @@ mod tests {
         for stmt in &defn.body {
             interp.exec_stmt(stmt).expect("Statement execution should succeed");
             if let Some(ret) = interp.return_value.take() {
-                assert_eq!(ret, crate::interpreter::Value::Int(42),
+                assert_eq!(ret, crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)),
                     "Expected 42 from expanded macro program");
                 return;
             }

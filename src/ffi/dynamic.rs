@@ -259,11 +259,11 @@ mod tests {
 
     #[test]
     fn test_wrap_ok_creates_result_enum() {
-        let result = wrap_ok(&FrgnType::Int, Value::Int(42));
+        let result = wrap_ok(&FrgnType::Int, Value::Bits(crate::interpreter::i64_to_bits(42)));
         match result {
             Value::Enum(_, variant, fields) => {
                 assert_eq!(variant, "Ok");
-                assert_eq!(fields.get("value"), Some(&Value::Int(42)));
+                assert_eq!(fields.get("value"), Some(&Value::Bits(crate::interpreter::i64_to_bits(42))));
             }
             _ => panic!("Expected Enum(Result, Ok, ...)"),
         }
@@ -275,7 +275,7 @@ mod tests {
         match result {
             Value::Enum(_, variant, fields) => {
                 assert_eq!(variant, "Err");
-                assert_eq!(fields.get("error"), Some(&Value::String("something failed".into())));
+                assert_eq!(fields.get("error"), Some(&Value::Bits("something failed".to_string().into_bytes())));
             }
             _ => panic!("Expected Enum(Result, Err, ...)"),
         }

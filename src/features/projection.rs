@@ -15,6 +15,23 @@ impl ProjectionExpr {
     }
 }
 
+/// Evaluate the Bytes projection: total byte size of the value.
+/// 2026-07-11: Flat helper, max 2 levels.
+fn eval_bytes_projection(source_val: &Value) -> Result<Value, RuntimeError> {
+    let n = byte_size_of(source_val);
+    Ok(Value::Bits(i64_to_bits(n)))
+}
+
+/// Evaluate the Keys projection: return HashMap keys as a List of Bits strings.
+/// 2026-07-11: Flat helper, max 2 levels.
+fn eval_keys_projection(source_val: &Value) -> Result<Value, RuntimeError> {
+    let Value::HashMap(m) = source_val else {
+        return Err(RuntimeError::TypeMismatch("Keys requires HashMap".into()));
+    };
+    let keys: Vec<Value> = m.keys().map(|k| Value::Bits(k.as_bytes().to_vec())).collect();
+    Ok(Value::List(keys))
+}
+
 impl ExprTypecheck for ProjectionExpr {
     fn typecheck(&self, _ctx: &mut TypeChecker, _dispatch: &ExprDispatch) -> Result<Type, crate::errors::TypeError> {
         Ok(Type::int())
@@ -115,8 +132,10 @@ impl ExprEval for ProjectionExpr {
                 };
                 Ok(Value::Bits(i64_to_bits(w)))
             }
-            ProjectionTarget::Keys | ProjectionTarget::Values
-            | ProjectionTarget::Bytes | ProjectionTarget::Alignment
+            ProjectionTarget::Bytes => eval_bytes_projection(&source_val),
+            ProjectionTarget::Keys => eval_keys_projection(&source_val),
+            ProjectionTarget::Values
+            | ProjectionTarget::Alignment
             | ProjectionTarget::Range | ProjectionTarget::Popcount
             | ProjectionTarget::LeadingZeros | ProjectionTarget::TrailingZeros
             | ProjectionTarget::Absolute | ProjectionTarget::BitReverse
@@ -135,6 +154,21 @@ impl ExprEval for ProjectionExpr {
                 Err(RuntimeError::UnsupportedProjection("projection not yet implemented with Bits".into()))
             }
         }
+    }
+}
+
+/// Compute the byte size of any Value recursively.
+/// 2026-07-11: Bits-only — Bytes projection.
+fn byte_size_of(v: &Value) -> i64 {
+    match v {
+        Value::Bits(b) => b.len() as i64,
+        Value::List(items) => items.iter().map(byte_size_of).sum(),
+        Value::Tuple(items) => items.iter().map(byte_size_of).sum(),
+        Value::Instance { fields, .. } => fields.values().map(byte_size_of).sum(),
+        Value::HashMap(m) => m.values().map(byte_size_of).sum(),
+        Value::HashSet(s) => s.iter().map(|k| k.len() as i64).sum(),
+        Value::Enum(_, _, fields) => fields.values().map(byte_size_of).sum(),
+        _ => 0,
     }
 }
 

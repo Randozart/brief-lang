@@ -6523,7 +6523,7 @@ let spec = crate::target_spec::TargetSpec {
             }
         }
         let result = i.call_defn("demo", &[]).unwrap();
-        assert_eq!(result, crate::interpreter::Value::Bool(true));
+        assert_eq!(result, crate::interpreter::Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -6610,8 +6610,8 @@ let spec = crate::target_spec::TargetSpec {
         match list {
             crate::interpreter::Value::List(vals) => {
                 assert_eq!(vals.len(), 2);
-                assert_eq!(vals[0], crate::interpreter::Value::Int(42));
-                assert_eq!(vals[1], crate::interpreter::Value::Int(17));
+                assert_eq!(vals[0], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)));
+                assert_eq!(vals[1], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(17)));
             }
             _ => panic!("SkipList should be a List value"),
         }
@@ -6631,8 +6631,8 @@ let spec = crate::target_spec::TargetSpec {
         }
         // Direct call to sl_insert inop fallback
         let list_val = crate::interpreter::Value::List(vec![
-            crate::interpreter::Value::Int(10),
-            crate::interpreter::Value::Int(20)
+            crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(10)),
+            crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(20))
         ]);
         // Test the fallback's basic append behavior by building it manually
         // (call_custom_fn evaluates `list + [val]` which requires type-level
@@ -6641,11 +6641,11 @@ let spec = crate::target_spec::TargetSpec {
             crate::interpreter::Value::List(v) => v.clone(),
             _ => unreachable!(),
         };
-        new_vals.push(crate::interpreter::Value::Int(42));
+        new_vals.push(crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)));
         assert_eq!(new_vals.len(), 3);
-        assert_eq!(new_vals[0], crate::interpreter::Value::Int(10));
-        assert_eq!(new_vals[1], crate::interpreter::Value::Int(20));
-        assert_eq!(new_vals[2], crate::interpreter::Value::Int(42), "append should work");
+        assert_eq!(new_vals[0], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(10)));
+        assert_eq!(new_vals[1], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(20)));
+        assert_eq!(new_vals[2], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)), "append should work");
     }
 
     #[test]

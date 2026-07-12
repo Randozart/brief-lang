@@ -41,7 +41,18 @@ impl BinaryOpExpr {
     }
 }
 
-
+/// 2026-07-11: Concatenate string-like Bits values for Add.
+/// Returns None if either operand has null bytes (likely numeric).
+fn try_string_concat(l: &Value, r: &Value) -> Option<Result<Value, RuntimeError>> {
+    let Value::Bits(a) = l else { return None; };
+    let Value::Bits(b) = r else { return None; };
+    if a.contains(&0u8) || b.contains(&0u8) {
+        return None;
+    }
+    let mut result = a.clone();
+    result.extend_from_slice(b);
+    Some(Ok(Value::Bits(result)))
+}
 
 /// Try to dispatch a binary op through property-based intrinsic lookup.
 /// Both operands must be Value::Bits and the expected type must have an
@@ -83,6 +94,13 @@ impl ExprEval for BinaryOpExpr {
         // Phase 8B: property-based dispatch for Bits operands
         if let Some(result) = try_bits_dispatch(&l, &r, self.kind_name(), ctx) {
             return result;
+        }
+
+        // 2026-07-11: String concatenation for Bits values without null bytes
+        if self.kind == BinaryOpKind::Add {
+            if let Some(result) = try_string_concat(&l, &r) {
+                return result;
+            }
         }
 
         use BinaryOpKind::*;

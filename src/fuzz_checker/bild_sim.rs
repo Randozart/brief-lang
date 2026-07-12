@@ -429,7 +429,7 @@ mod tests {
     }
 
     fn i(n: i64) -> Value { Value::Bits(crate::interpreter::i64_to_bits(n)) }
-    fn b(v: bool) -> Value { Value::Bool(v) }
+    fn b(v: bool) -> Value { Value::Bits(vec![v as u8]) }
     fn f(v: f64) -> Value { Value::Bits(crate::interpreter::f64_to_bits(v)) }
     fn check(body: &[&str], params: &[(&str, &str)], bindings: &[(&str, Value)], expected: &[Value]) {
         let result = run(body, params, bindings).unwrap();

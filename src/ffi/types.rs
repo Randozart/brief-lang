@@ -131,7 +131,7 @@ impl FfiValue {
             crate::interpreter::Value::Void => FfiValue::Void,
             crate::interpreter::Value::DbvlTable(t) => {
                 let mut meta = std::collections::HashMap::new();
-                meta.insert("__lazy".to_string(), FfiValue::Bits(t.path.as_bytes().to_vec()));
+                meta.insert("__lazy".to_string(), FfiValue::Data(t.path.as_bytes().to_vec()));
                 meta.insert("entries".to_string(), FfiValue::Int(t.key_offsets.len() as i64));
                 FfiValue::Struct("DbvlTable".to_string(), meta)
             }
@@ -164,6 +164,8 @@ impl FfiValue {
                 }
                 crate::interpreter::Value::Enum(name.clone(), variant.clone(), int_fields)
             }
+            FfiValue::Float(f) => crate::interpreter::Value::Bits(crate::interpreter::f64_to_bits(*f)),
+            FfiValue::String(s) => crate::interpreter::Value::Bits(s.as_bytes().to_vec()),
             FfiValue::Void => crate::interpreter::Value::Void,
         }
     }
