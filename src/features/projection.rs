@@ -1,6 +1,6 @@
 use crate::ast::{Expr, ProjectionTarget, Type};
 use crate::features::traits::*;
-use crate::interpreter::{f64_to_bits, i64_to_bits, value_as_i64, Interpreter, RuntimeError, Value};
+use crate::interpreter::{f64_to_bits, i64_to_bits, value_as_bool, value_as_f64, value_as_i64, Interpreter, RuntimeError, Value};
 use crate::typechecker::TypeChecker;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -175,54 +175,70 @@ fn eval_user_projection_fast_path(
     let rhs = ctx.eval_expr(arg_expr)?;
     // Extract i64 from lhs and rhs, returning None if either is non-integer
     let (l_int, r_int) = (value_as_i64(source_val), value_as_i64(&rhs));
-    match (source_val, &rhs, name) {
+    let l_f = value_as_f64(source_val);
+    let r_f = value_as_f64(&rhs);
+    let l_b = value_as_bool(source_val);
+    let r_b = value_as_bool(&rhs);
+    match name {
         // ── Int arithmetic ──
         _ if l_int.is_some() && r_int.is_some() => {
             let (l, r) = (l_int.unwrap(), r_int.unwrap());
             match name {
-                "Add" => Ok(Value::Int(l + r)),
-                "Sub" => Ok(Value::Int(l - r)),
-                "Mul" => Ok(Value::Int(l * r)),
-                "Div" => { if r == 0 { Err(RuntimeError::DivisionByZero) } else { Ok(Value::Int(l / r)) } }
-                "Mod" => { if r == 0 { Err(RuntimeError::DivisionByZero) } else { Ok(Value::Int(l % r)) } }
-                // ── Int comparisons ──
-                "Eq" => Ok(Value::Bool(l == r)),
-                "Ne" => Ok(Value::Bool(l != r)),
-                "Lt" => Ok(Value::Bool(l < r)),
-                "Le" => Ok(Value::Bool(l <= r)),
-                "Gt" => Ok(Value::Bool(l > r)),
-                "Ge" => Ok(Value::Bool(l >= r)),
-                // ── Int bitwise ──
-                "BitAnd" => Ok(Value::Int(l & r)),
-                "BitOr" => Ok(Value::Int(l | r)),
-                "BitXor" => Ok(Value::Int(l ^ r)),
-                "Shl" => Ok(Value::Int(l << r)),
-                "Shr" => Ok(Value::Int(l >> r)),
-                // ── Int logical (treated as boolean in Brief) ──
-                "And" => Ok(Value::Bool(l != 0 && r != 0)),
-                "Or" => Ok(Value::Bool(l != 0 || r != 0)),
+                "Add" => Ok(Value::Bits(i64_to_bits(l + r))),
+                "Sub" => Ok(Value::Bits(i64_to_bits(l - r))),
+                "Mul" => Ok(Value::Bits(i64_to_bits(l * r))),
+                "Div" => { if r == 0 { Err(RuntimeError::DivisionByZero) } else { Ok(Value::Bits(i64_to_bits(l / r))) } }
+                "Mod" => { if r == 0 { Err(RuntimeError::DivisionByZero) } else { Ok(Value::Bits(i64_to_bits(l % r))) } }
+                "Eq" => Ok(Value::Bits(vec![if l == r { 1u8 } else { 0u8 }])),
+                "Ne" => Ok(Value::Bits(vec![if l != r { 1u8 } else { 0u8 }])),
+                "Lt" => Ok(Value::Bits(vec![if l < r { 1u8 } else { 0u8 }])),
+                "Le" => Ok(Value::Bits(vec![if l <= r { 1u8 } else { 0u8 }])),
+                "Gt" => Ok(Value::Bits(vec![if l > r { 1u8 } else { 0u8 }])),
+                "Ge" => Ok(Value::Bits(vec![if l >= r { 1u8 } else { 0u8 }])),
+                "BitAnd" => Ok(Value::Bits(i64_to_bits(l & r))),
+                "BitOr" => Ok(Value::Bits(i64_to_bits(l | r))),
+                "BitXor" => Ok(Value::Bits(i64_to_bits(l ^ r))),
+                "Shl" => Ok(Value::Bits(i64_to_bits(l << r))),
+                "Shr" => Ok(Value::Bits(i64_to_bits(l >> r))),
+                "And" => Ok(Value::Bits(vec![if l != 0 && r != 0 { 1u8 } else { 0u8 }])),
+                "Or" => Ok(Value::Bits(vec![if l != 0 || r != 0 { 1u8 } else { 0u8 }])),
                 _ => Err(RuntimeError::UnsupportedProjection(format!(
                     "projection '{}' not applicable to Int source type", name
                 ))),
             }
         }
-        // ── Float arithmetic ──
-        (Value::Float(l), Value::Float(r), "Add") => Ok(Value::Float(l + r)),
-        (Value::Float(l), Value::Float(r), "Sub") => Ok(Value::Float(l - r)),
-        (Value::Float(l), Value::Float(r), "Mul") => Ok(Value::Float(l * r)),
-        (Value::Float(l), Value::Float(r), "Div") => Ok(Value::Float(l / r)),
-        // ── Float comparisons ──
-        (Value::Float(l), Value::Float(r), "Eq") => Ok(Value::Bool((l - r).abs() < f64::EPSILON)),
-        (Value::Float(l), Value::Float(r), "Ne") => Ok(Value::Bool((l - r).abs() >= f64::EPSILON)),
-        (Value::Float(l), Value::Float(r), "Lt") => Ok(Value::Bool(l < r)),
-        (Value::Float(l), Value::Float(r), "Le") => Ok(Value::Bool(l <= r)),
-        (Value::Float(l), Value::Float(r), "Gt") => Ok(Value::Bool(l > r)),
-        (Value::Float(l), Value::Float(r), "Ge") => Ok(Value::Bool(l >= r)),
+        // ── Float arithmetic/comparisons ──
+        _ if l_f.is_some() && r_f.is_some() => {
+            let (l, r) = (l_f.unwrap(), r_f.unwrap());
+            match name {
+                "Add" => Ok(Value::Bits(f64_to_bits(l + r))),
+                "Sub" => Ok(Value::Bits(f64_to_bits(l - r))),
+                "Mul" => Ok(Value::Bits(f64_to_bits(l * r))),
+                "Div" => Ok(Value::Bits(f64_to_bits(l / r))),
+                "Eq" => Ok(Value::Bits(vec![if (l - r).abs() < f64::EPSILON { 1u8 } else { 0u8 }])),
+                "Ne" => Ok(Value::Bits(vec![if (l - r).abs() >= f64::EPSILON { 1u8 } else { 0u8 }])),
+                "Lt" => Ok(Value::Bits(vec![if l < r { 1u8 } else { 0u8 }])),
+                "Le" => Ok(Value::Bits(vec![if l <= r { 1u8 } else { 0u8 }])),
+                "Gt" => Ok(Value::Bits(vec![if l > r { 1u8 } else { 0u8 }])),
+                "Ge" => Ok(Value::Bits(vec![if l >= r { 1u8 } else { 0u8 }])),
+                _ => Err(RuntimeError::UnsupportedProjection(format!(
+                    "projection '{}' not applicable to Float source type", name
+                ))),
+            }
+        }
         // ── Bool logical ──
-        (Value::Bool(l), Value::Bool(r), "And") => Ok(Value::Bool(*l && *r)),
-        (Value::Bool(l), Value::Bool(r), "Or") => Ok(Value::Bool(*l || *r)),
-        (Value::Bool(l), Value::Bool(r), "Eq") => Ok(Value::Bool(l == r)),
-        (Value::Bool(l), Value::Bool(r), "Ne") => Ok(Value::Bool(l != r)),
+        _ if l_b.is_some() && r_b.is_some() => {
+            let (l, r) = (l_b.unwrap(), r_b.unwrap());
+            match name {
+                "And" => Ok(Value::Bits(vec![if l && r { 1u8 } else { 0u8 }])),
+                "Or" => Ok(Value::Bits(vec![if l || r { 1u8 } else { 0u8 }])),
+                "Eq" => Ok(Value::Bits(vec![if l == r { 1u8 } else { 0u8 }])),
+                "Ne" => Ok(Value::Bits(vec![if l != r { 1u8 } else { 0u8 }])),
+                _ => Err(RuntimeError::UnsupportedProjection(format!(
+                    "projection '{}' not applicable to Bool source type", name
+                ))),
+            }
+        }
         // ── Unknown combination ──
         _ => Err(RuntimeError::UnsupportedProjection(format!(
             "projection '{}' not applicable to source type", name

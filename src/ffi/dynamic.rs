@@ -50,7 +50,7 @@ fn wrap_ok(ret: &FrgnType, value: Value) -> Value {
 
 fn wrap_err(msg: String) -> Value {
     let mut fields = std::collections::HashMap::new();
-    fields.insert("error".to_string(), Value::String(msg));
+    fields.insert("error".to_string(), Value::Bits(msg.into_bytes()));
     Value::Enum("Result".to_string(), "Err".to_string(), fields)
 }
 
@@ -72,19 +72,23 @@ pub fn call_foreign_by_name(
         let val = if i < args.len() { &args[i] } else { &Value::Void };
         match param_type {
             FrgnType::Int => {
-                c_ints.push(match val { Value::Int(n) => *n, _ => 0 });
+                let n = match val { Value::Bits(b) => crate::interpreter::bits_to_i64(val).unwrap_or(0), _ => 0 };
+                c_ints.push(n);
             }
             FrgnType::Float => {
-                c_doubles.push(match val { Value::Float(f) => *f, _ => 0.0 });
+                let f = match val { Value::Bits(b) if b.len() >= 8 => crate::interpreter::bits_to_f64(val).unwrap_or(0.0), _ => 0.0 };
+                c_doubles.push(f);
             }
             FrgnType::Bool => {
-                c_ints.push(match val { Value::Bool(b) => *b, _ => false } as i64);
+                let b = match val { Value::Bits(b) => b.first().copied().unwrap_or(0) != 0, _ => false };
+                c_ints.push(b as i64);
             }
             FrgnType::Char => {
-                c_ints.push(match val { Value::Char(c) => *c, _ => '\0' } as i64);
+                let c = match val { Value::Bits(b) => char::from_u32(u32::from_le_bytes([b.first().copied().unwrap_or(0), 0, 0, 0])).unwrap_or('\0'), _ => '\0' };
+                c_ints.push(c as i64);
             }
             FrgnType::String => {
-                let s = match val { Value::String(s) => s.clone(), _ => String::new() };
+                let s = match val { Value::Bits(b) => String::from_utf8_lossy(b).to_string(), _ => String::new() };
                 c_strings.push(CString::new(s).unwrap_or_else(|_| CString::new("").unwrap()));
             }
             FrgnType::Void => {}
@@ -109,9 +113,9 @@ pub fn call_foreign_by_name(
                 .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
             let raw = unsafe { f() };
             Ok(match ret {
-                FrgnType::Int => Value::Int(raw),
-                FrgnType::Bool => Value::Bool(raw != 0),
-                FrgnType::Char => Value::Char(char::from_u32(raw as u32).unwrap_or('\0')),
+                FrgnType::Int => Value::Bits(crate::interpreter::i64_to_bits(raw)),
+                FrgnType::Bool => Value::Bits(vec![if raw != 0 { 1u8 } else { 0u8 }]),
+                FrgnType::Char => Value::Bits((raw as u32).to_le_bytes().to_vec()),
                 _ => unreachable!(),
             })
         }
@@ -120,7 +124,7 @@ pub fn call_foreign_by_name(
         (0, FrgnType::Float) => {
             let f: Symbol<unsafe extern "C" fn() -> f64> = unsafe { lib.get(name_bytes) }
                 .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
-            Ok(Value::Float(unsafe { f() }))
+            Ok(Value::Bits(crate::interpreter::f64_to_bits(unsafe { f() })))
         }
 
         // 0 args, String return
@@ -129,9 +133,9 @@ pub fn call_foreign_by_name(
                 .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
             let ptr = unsafe { f() };
             if ptr.is_null() {
-                Ok(Value::String(String::new()))
+                Ok(Value::Bits(Vec::new()))
             } else {
-                Ok(Value::String(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned()))
+                Ok(Value::Bits(unsafe { CStr::from_ptr(ptr) }.to_bytes().to_vec()))
             }
         }
 
@@ -141,9 +145,9 @@ pub fn call_foreign_by_name(
                 .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
             let raw = unsafe { f(c_ints[0]) };
             Ok(match ret {
-                FrgnType::Int => Value::Int(raw),
-                FrgnType::Bool => Value::Bool(raw != 0),
-                FrgnType::Char => Value::Char(char::from_u32(raw as u32).unwrap_or('\0')),
+                FrgnType::Int => Value::Bits(crate::interpreter::i64_to_bits(raw)),
+                FrgnType::Bool => Value::Bits(vec![if raw != 0 { 1u8 } else { 0u8 }]),
+                FrgnType::Char => Value::Bits((raw as u32).to_le_bytes().to_vec()),
                 _ => unreachable!(),
             })
         }
@@ -152,7 +156,7 @@ pub fn call_foreign_by_name(
         (1, FrgnType::Float) if c_doubles.len() == 1 => {
             let f: Symbol<unsafe extern "C" fn(f64) -> f64> = unsafe { lib.get(name_bytes) }
                 .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
-            Ok(Value::Float(unsafe { f(c_doubles[0]) }))
+            Ok(Value::Bits(crate::interpreter::f64_to_bits(unsafe { f(c_doubles[0]) })))
         }
 
         // 1 arg String → Int (strlen etc)
@@ -160,7 +164,7 @@ pub fn call_foreign_by_name(
             let f: Symbol<unsafe extern "C" fn(*const libc::c_char) -> i64> = unsafe { lib.get(name_bytes) }
                 .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
             let ptr = c_strings[0].as_ptr();
-            Ok(Value::Int(unsafe { f(ptr) }))
+            Ok(Value::Bits(crate::interpreter::i64_to_bits(unsafe { f(ptr) })))
         }
 
         // 1 arg Void
@@ -177,8 +181,8 @@ pub fn call_foreign_by_name(
                 .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
             let raw = unsafe { f(c_ints[0], c_ints[1]) };
             Ok(match ret {
-                FrgnType::Int => Value::Int(raw),
-                FrgnType::Bool => Value::Bool(raw != 0),
+                FrgnType::Int => Value::Bits(crate::interpreter::i64_to_bits(raw)),
+                FrgnType::Bool => Value::Bits(vec![if raw != 0 { 1u8 } else { 0u8 }]),
                 _ => unreachable!(),
             })
         }

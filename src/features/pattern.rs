@@ -37,7 +37,7 @@ impl ExprEval for PatternMatchExpr {
                 let all_matched = self.fields.iter().zip(vals.iter()).all(|(pat, val)| {
                     Interpreter::pattern_match(pat, val, &mut ctx.state)
                 });
-                Ok(Value::Bool(all_matched))
+                Ok(Value::Bits(vec![if all_matched { 1u8 } else { 0u8 }]))
             }
             _ => Ok(Value::Bits(vec![0u8])),
         }

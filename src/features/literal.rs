@@ -57,11 +57,11 @@ impl ExprTypecheck for LiteralExpr {
 impl ExprEval for LiteralExpr {
     fn evaluate(&self, ctx: &mut Interpreter, _dispatch: &ExprDispatch) -> Result<Value, RuntimeError> {
         match self {
-            LiteralExpr::Integer(v) => Ok(Value::Int(*v)),
-            LiteralExpr::Float(v) => Ok(Value::Float(*v)),
-            LiteralExpr::String(v) => Ok(Value::String(v.clone())),
-            LiteralExpr::Char(v) => Ok(Value::Char(*v)),
-            LiteralExpr::Bool(v) => Ok(Value::Bool(*v)),
+            LiteralExpr::Integer(v) => Ok(Value::Bits(crate::interpreter::i64_to_bits(*v))),
+            LiteralExpr::Float(v) => Ok(Value::Bits(crate::interpreter::f64_to_bits(*v))),
+            LiteralExpr::String(v) => Ok(Value::Bits(v.clone().into_bytes())),
+            LiteralExpr::Char(v) => Ok(Value::Bits((*v as u32).to_le_bytes().to_vec())),
+            LiteralExpr::Bool(v) => Ok(Value::Bits(vec![if *v { 1u8 } else { 0u8 }])),
             LiteralExpr::Term => ctx
                 .state
                 .get("term")

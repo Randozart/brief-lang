@@ -197,16 +197,8 @@ fn resolve_binop(
     // Float operations — check type before int destructure to avoid
     // returning Int(0) for float operands.
     if ty == "float" || ty.starts_with("float") {
-        let fa = match &a {
-            Value::Bits(crate::interpreter::f64_to_bits(f)) => *f,
-            Value::Bits(crate::interpreter::i64_to_bits(n)) => *n as f64,
-            _ => 0.0,
-        };
-        let fb = match &b {
-            Value::Bits(crate::interpreter::f64_to_bits(f)) => *f,
-            Value::Bits(crate::interpreter::i64_to_bits(n)) => *n as f64,
-            _ => 0.0,
-        };
+        let fa = crate::interpreter::value_as_f64(&a).unwrap_or_else(|| crate::interpreter::value_as_i64(&a).unwrap_or(0) as f64);
+        let fb = crate::interpreter::value_as_f64(&b).unwrap_or_else(|| crate::interpreter::value_as_i64(&b).unwrap_or(0) as f64);
         return Ok(match opcode {
             "fadd" | "add" => Value::Bits(crate::interpreter::f64_to_bits(fa + fb)),
             "fsub" | "sub" => Value::Bits(crate::interpreter::f64_to_bits(fa - fb)),
@@ -218,13 +210,10 @@ fn resolve_binop(
         });
     }
 
-    let (va, vb) = match (&a, &b) {
-        (Value::Bits(crate::interpreter::i64_to_bits(va)), Value::Bits(crate::interpreter::i64_to_bits(vb))) => (*va, *vb),
-        (Value::Bool(va), Value::Bool(vb)) => (*va as i64, *vb as i64),
-        _ => return Ok(Value::Bits(crate::interpreter::i64_to_bits(0))),
-    };
+    let va = crate::interpreter::value_as_i64(&a).unwrap_or(0);
+    let vb = crate::interpreter::value_as_i64(&b).unwrap_or(0);
 
-    Ok(Value::Int(match opcode {
+    Ok(Value::Bits(crate::interpreter::i64_to_bits(match opcode {
         "add" => va.wrapping_add(vb),
         "sub" => va.wrapping_sub(vb),
         "mul" => va.wrapping_mul(vb),
@@ -235,7 +224,7 @@ fn resolve_binop(
             if vb == 0 { 0 } else { va % vb }
         }
         _ => 0,
-    }))
+    })))
 }
 
 fn resolve_bitwise(
@@ -247,10 +236,10 @@ fn resolve_bitwise(
     // Format: opcode type op1, op2 — skip type at operands[0]
     let a = resolve_reg(operands.get(1).unwrap_or(&"0"), regs)?;
     let b = resolve_reg(operands.get(2).unwrap_or(&"0"), regs)?;
-    let va = match a { Value::Bits(crate::interpreter::i64_to_bits(n)) => n, Value::Bool(b) => b as i64, _ => 0 };
-    let vb = match b { Value::Bits(crate::interpreter::i64_to_bits(n)) => n, Value::Bool(b) => b as i64, _ => 0 };
+    let va = crate::interpreter::value_as_i64(&a).unwrap_or(0);
+    let vb = crate::interpreter::value_as_i64(&b).unwrap_or(0);
 
-    Ok(Value::Int(match opcode {
+    Ok(Value::Bits(crate::interpreter::i64_to_bits(match opcode {
         "and" => va & vb,
         "or" => va | vb,
         "xor" => va ^ vb,
@@ -258,7 +247,7 @@ fn resolve_bitwise(
         "lshr" => (va as u64).wrapping_shr(vb as u32) as i64,
         "ashr" => va.wrapping_shr(vb as u32),
         _ => 0,
-    }))
+    })))
 }
 
 fn resolve_icmp(
@@ -273,8 +262,8 @@ fn resolve_icmp(
     let a = resolve_reg(operands.get(2).unwrap_or(&"0"), regs)?;
     let b = resolve_reg(operands.get(3).unwrap_or(&"0"), regs)?;
 
-    let va = match &a { Value::Bits(crate::interpreter::i64_to_bits(n)) => *n, Value::Bool(b) => *b as i64, _ => 0 };
-    let vb = match &b { Value::Bits(crate::interpreter::i64_to_bits(n)) => *n, Value::Bool(b) => *b as i64, _ => 0 };
+    let va = crate::interpreter::value_as_i64(&a).unwrap_or(0);
+    let vb = crate::interpreter::value_as_i64(&b).unwrap_or(0);
 
     let result = match cond {
         "eq" => va == vb,
@@ -286,7 +275,7 @@ fn resolve_icmp(
         _ => false,
     };
 
-    Ok(Value::Bool(result))
+    Ok(Value::Bits(vec![if result { 1u8 } else { 0u8 }]))
 }
 
 fn resolve_select(
@@ -300,11 +289,8 @@ fn resolve_select(
     let val1 = resolve_reg(operands.get(3).unwrap_or(&"0"), regs)?;
     let val2 = resolve_reg(operands.get(5).unwrap_or(&"0"), regs)?;
 
-    match cond {
-        Value::Bits(vec![1u8]) => Ok(val1),
-        Value::Bits(vec![0u8]) => Ok(val2),
-        _ => Ok(val2),
-    }
+    let is_true = matches!(cond, Value::Bits(ref b) if b.first() == Some(&1u8));
+    Ok(if is_true { val1 } else { val2 })
 }
 
 fn resolve_conversion(
@@ -317,18 +303,18 @@ fn resolve_conversion(
     // For simulation: pass through the operand value (identity) or convert.
     let val = resolve_reg(operands.get(1).unwrap_or(&"0"), regs)?;
     match opcode {
-        "zext" | "sext" => match val {
-            Value::Bool(b) => Ok(Value::Int(b as i64)),
-            other => Ok(other),
-        },
-        "sitofp" | "uitofp" => match val {
-            Value::Bits(crate::interpreter::i64_to_bits(n)) => Ok(Value::Bits(crate::interpreter::f64_to_bits(n as f64))),
-            other => Ok(other),
-        },
-        "fptosi" => match val {
-            Value::Bits(crate::interpreter::f64_to_bits(f)) => Ok(Value::Int(f as i64)),
-            other => Ok(other),
-        },
+        "zext" | "sext" => {
+            let n = crate::interpreter::value_as_i64(&val).unwrap_or(0);
+            Ok(Value::Bits(crate::interpreter::i64_to_bits(n)))
+        }
+        "sitofp" | "uitofp" => {
+            let n = crate::interpreter::value_as_i64(&val).unwrap_or(0);
+            Ok(Value::Bits(crate::interpreter::f64_to_bits(n as f64)))
+        }
+        "fptosi" => {
+            let f = crate::interpreter::value_as_f64(&val).unwrap_or(0.0);
+            Ok(Value::Bits(crate::interpreter::i64_to_bits(f as i64)))
+        }
         _ => Ok(val),
     }
 }
@@ -356,18 +342,10 @@ fn resolve_load(
     let ptr_val = if let Some(val) = regs.get(trimmed) {
         val.clone()
     } else {
-        Value::Bits(crate::interpreter::i64_to_bits(0 as i64))
+        Value::Bits(crate::interpreter::i64_to_bits(0))
     };
-
-    match ptr_val {
-        Value::Bits(crate::interpreter::i64_to_bits(idx as i64)) => {
-            Ok(state_view.get(&(idx as usize)).cloned().unwrap_or(Value::Bits(crate::interpreter::i64_to_bits(0))))
-        }
-        Value::Bits(crate::interpreter::i64_to_bits(idx)) => {
-            Ok(state_view.get(&(idx as usize)).cloned().unwrap_or(Value::Bits(crate::interpreter::i64_to_bits(0))))
-        }
-        _ => Ok(Value::Bits(crate::interpreter::i64_to_bits(0))),
-    }
+    let idx = crate::interpreter::value_as_i64(&ptr_val).unwrap_or(0) as usize;
+    Ok(state_view.get(&idx).cloned().unwrap_or(Value::Bits(crate::interpreter::i64_to_bits(0))))
 }
 
 fn resolve_store(
@@ -387,11 +365,7 @@ fn resolve_store(
         Value::Bits(crate::interpreter::i64_to_bits(0 as i64))
     };
 
-    let idx = match ptr_val {
-        Value::Bits(crate::interpreter::i64_to_bits(n as i64)) => n as usize,
-        Value::Bits(crate::interpreter::i64_to_bits(n)) => n as usize,
-        _ => 0,
-    };
+    let idx = crate::interpreter::value_as_i64(&ptr_val).unwrap_or(0) as usize;
     state_view.insert(idx, val);
     Ok(())
 }
@@ -416,8 +390,8 @@ fn resolve_gep(
             break;
         }
         if let Some(val) = regs.get(t) {
-            if let Value::Bits(crate::interpreter::i64_to_bits(n)) = val {
-                last_idx = *n;
+            if let Some(n) = crate::interpreter::value_as_i64(val) {
+                last_idx = n;
                 break;
             }
         }

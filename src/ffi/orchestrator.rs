@@ -210,14 +210,15 @@ impl Orchestrator {
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Bits(crate::interpreter::i64_to_bits(0)) => true,
-        Value::Bits(crate::interpreter::f64_to_bits(0.0)) => true,
-        Value::Bits(s.as_bytes().to_vec()) => s.is_empty(),
-        Value::Bits(vec![0u8]) => true,
+        Value::Bits(d) if d.len() == 8 => {
+            let mut arr = [0u8; 8];
+            arr[..8].copy_from_slice(&d[..8]);
+            i64::from_le_bytes(arr) == 0
+        }
+        Value::Bits(d) => d.is_empty() || (d.len() == 1 && d[0] == 0),
         Value::List(l) => l.is_empty(),
         Value::Instance { fields, .. } => fields.is_empty(),
         Value::Void => true,
-        Value::Bits(d) => d.is_empty(),
         _ => false,
     }
 }

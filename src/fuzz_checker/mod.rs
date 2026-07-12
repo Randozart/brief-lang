@@ -364,16 +364,21 @@ fn format_bindings(fuzz_case: &FuzzCase) -> String {
 
 fn format_value(val: &Value) -> String {
     match val {
-        Value::Bits(crate::interpreter::i64_to_bits(n)) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Bits(s.as_bytes().to_vec()) => format!("\"{}\"", s),
-        Value::Bits(crate::interpreter::f64_to_bits(f)) => format!("{}", f),
+        Value::Bits(d) if d.len() == 8 => {
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(&d[..8]);
+            let n = i64::from_le_bytes(arr);
+            n.to_string()
+        }
+        Value::Bits(d) => {
+            let s = String::from_utf8_lossy(d);
+            format!("\"{}\"", s)
+        }
         Value::Void => "void".to_string(),
         Value::List(items) => {
             let inner: Vec<String> = items.iter().map(format_value).collect();
             format!("({})", inner.join(", "))
         }
-        Value::Bits(crate::interpreter::i64_to_bits(n as i64)) => format!("ptr({})", n),
         _ => format!("{:?}", val),
     }
 }

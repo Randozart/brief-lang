@@ -51,23 +51,21 @@ impl ExprEval for UnaryOpExpr {
         }
 
         use UnaryOpKind::*;
-        Ok(match (self.kind, v) {
-            (Neg,    Value::Bits(crate::interpreter::i64_to_bits(a))) => Value::Int(-a),
-            (Neg,    Value::Bits(b)) => {
-                let mut arr = [0u8; 8];
-                let copy_len = b.len().min(8);
-                arr[..copy_len].copy_from_slice(&b[..copy_len]);
-                let val = i64::from_le_bytes(arr);
-                Value::Bits((-val).to_le_bytes().to_vec())
+        return match (self.kind, &v) {
+            (Neg, Value::Bits(_)) => {
+                let bits = crate::interpreter::bits_to_i64(&v)?;
+                Ok(Value::Bits((-bits).to_le_bytes().to_vec()))
             }
-            (Not,    Value::Bool(a)) => Value::Bool(!a),
-            (Not,    Value::Bits(b)) => Value::Bool(b.first().map_or(true, |x| *x == 0)),
-            (BitNot, Value::Bits(crate::interpreter::i64_to_bits(a))) => Value::Int(!a),
+            (Not, Value::Bits(b)) => Ok(Value::Bits(vec![if b.first().map_or(true, |x| *x == 0) { 1u8 } else { 0u8 }])),
+            (BitNot, Value::Bits(_)) => {
+                let bits = crate::interpreter::bits_to_i64(&v)?;
+                Ok(Value::Bits((!bits).to_le_bytes().to_vec()))
+            }
             (_, Value::Regex(_)) => {
-                return Err(RuntimeError::TypeMismatch(format!("unary op {:?} on Regex", self.kind)))
+                Err(RuntimeError::TypeMismatch(format!("unary op {:?} on Regex", self.kind)))
             }
-            _ => return Err(RuntimeError::TypeMismatch(format!("unary op {:?}", self.kind))),
-        })
+            _ => Err(RuntimeError::TypeMismatch(format!("unary op {:?}", self.kind))),
+        };
     }
 }
 
