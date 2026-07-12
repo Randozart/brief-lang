@@ -296,6 +296,114 @@ with a different encoding — and the compiler would handle them identically
 because it only sees `Bits` + properties. There is no "stdlib" path and
 "user" path in the compiler. There is only one path.
 
+### 7. SMT Solver Alignment
+
+#### 7.1 Eliminating the Translation Gap
+
+In traditional solver-aided compilers, the compiler must bridge between
+its high-level type representation and the SMT solver's logic. Translating
+an algebraic enum, a struct with padding, or a string into SMT-LIB requires
+complex lowering rules that are brittle and hard to verify.
+
+Under the Bits thesis, a type's physical representation in the compiler is
+identical to its representation in the SMT solver:
+
+| Brief type | Compiler value | SMT-LIB sort |
+|-----------|---------------|--------------|
+| `Int` | `Value::Bits(8 bytes)` | `(_ BitVec 64)` |
+| `Bool` | `Value::Bits(1 byte)` | `(_ BitVec 8)` |
+| `String` | `Value::Bits(24 bytes)` | `(_ BitVec 192)` |
+| Custom struct | `Value::Bits(N bytes)` | `(_ BitVec N*8)` |
+
+The translation function is a single match arm:
+
+```rust
+fn value_to_smt(value: &Value) -> SmtExpr {
+    match value {
+        Value::Bits(bytes) => SmtExpr::Bitvector(bytes.len() * 8, bytes),
+        _ => unreachable!(), // meta-objects never reach the solver
+    }
+}
+```
+
+No type dispatch. No enum-variant branching. The frontend and the solver
+speak the same bit-level language. The mathematical model can never diverge
+from the runtime behavior because they are the same representation.
+
+#### 7.2 Bit-Blasting Performance
+
+SMT solvers are exceptionally fast at solving bit-vector constraints because
+of **bit-blasting**: every bit of a `(_ BitVec N)` variable becomes a boolean
+variable, and operations become networks of primitive logic gates. These gate
+networks are fed to the solver's CDCL (Conflict-Driven Clause Learning) SAT
+engine, which can solve millions of boolean variables in microseconds.
+
+Because Brief values are already raw bytes, the compiler can emit SMT-LIB
+bit-vector constraints directly — no type-to-logic lowering step. The solver
+receives the same bit-level problem the hardware would execute.
+
+#### 7.3 Elimination of the Modulo Arithmetic Tax
+
+If a solver models machine integers using Linear Integer Arithmetic (LIA),
+it must enforce wrapping on every operation:
+
+```
+; LIA model of 64-bit addition — expensive for the solver
+(assert (= result (mod (+ a b) 18446744073709551616)))
+```
+
+In QF_BV, wrapping is native to the representation:
+
+```
+; QF_BV — wrapping is free, the bit-vector is finite
+(assert (= result (bvadd a b)))
+```
+
+The solver's bit-blasting circuit for `bvadd` naturally wraps at 64 bits,
+just like physical CPU silicon. Overflow checks, saturating arithmetic, and
+bounds verification are all derived from the same native bit-vector
+operations — no modulo constraints needed.
+
+#### 7.4 Elimination of Pointer Aliasing Complexity
+
+In SMT solvers, modeling a heap with arbitrary pointer aliasing requires
+expensive array theory axioms (select/store with frame conditions). Because
+Brief's value semantics and linear ownership guarantee that variables are
+unaliased, independent bit-vectors, the solver never needs to reason about
+aliasing. Every variable maps to a fresh `(_ BitVec N)` constant. The
+solver's state space is flat and localized — no interconnected pointer web.
+
+#### 7.5 Impact on Synthesis and Verification
+
+The synthesis engine (Phase 9) and contract verifier (Phase 10) both
+translate function bodies and contracts into SMT-LIB queries. Because the
+input is already `Value::Bits`:
+
+- The solver interface is a single function, not a type-directed translator
+- Example values from `:=` derivation blocks map directly to solver constants
+- Contract pre/post-conditions become bit-vector constraints without lowering
+- The solver's counterexample models are trivially convertible back to
+  `Value::Bits` — no reification step needed
+
+This alignment is not an accident of implementation. It follows directly from
+the Bits thesis: if everything is bits at the compiler level, everything is
+bits at the solver level, because the solver is just another consumer of the
+same representation.
+
+The frontend recognizes a fixed set of metadata properties for its own use:
+
+| Property | Purpose | Hardcoded? |
+|----------|---------|------------|
+| `bytes` | Byte width of the type | Yes (Axiom 1) |
+| `alignment` | Memory alignment | Yes (layout engine) |
+| `op X` | Operator binding | Yes (Axiom 3 — rune→op, not op→intrinsic) |
+| `llvm` | LLVM type representation | **No** — opaque to frontend |
+| `hw_storage` | Hardware storage type | **No** — opaque to frontend |
+
+Any property the frontend does not recognize is stored, serialized to the
+`.bvsa` archive, and ignored. Only backend-specific tooling (e.g.,
+`brief-llvm`, `brief-circt`) interprets it.
+
 ---
 
 ## How This Enables Decoupled Backends
