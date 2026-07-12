@@ -778,7 +778,71 @@ dispatches on those strings. No shared `Intrinsic` enum between them.
 - `test_archive_no_intrinsic_entries`: No `IntrinsicCall` or `Inop`
   references in archive output
 
-### Arrow Elimination Summary
+### Step 8G.5 — Add `observable` metadata for liveness tracking
+
+**What:** The `Intrinsic` enum currently carries implicit knowledge about
+which operations have observable side effects (I/O, hardware access, etc.).
+This knowledge is embedded in match arms across the dead-code elimination
+pass and the LLVM backend. Removing the enum means this knowledge must be
+explicit — declared as metadata on the function itself.
+
+**The `observable` property:**
+
+A boolean metadata key that marks a function as having side effects visible
+outside the Brief program. The compiler's DCE pass must preserve calls to
+`observable` functions even when the result is unused.
+
+```brief
+defn print_int(n: Int) -> Bool {
+    observable <~ true;
+    llvm_asm <~ "call @printf";
+    interpreter_impl <~ "rust_print_int";
+}
+
+defn read_cycle_counter() -> UInt64 {
+    observable <~ true;
+    llvm_asm <~ "rdtsc";
+}
+
+defn add_i64(a: Int, b: Int) -> Int {
+    llvm_instr <~ "add nsw i64";
+    // No observable — this is a pure computation.
+    // DCE may eliminate this call if result is unused.
+}
+```
+
+**Impact by layer:**
+
+| Layer | Without `observable` | With `observable` |
+|-------|---------------------|-------------------|
+| **DCE pass** (frontend) | Eliminates call if result is unused | Preserves call unconditionally |
+| **LLVM backend** | Emits `readnone` — LLVM may reorder/eliminate | Emits `sideeffect` on asm, omits `readnone` on calls |
+| **Interpreter** | May skip evaluation during compile-time folding | Executes call; side effects are observable |
+| **SMT verifier** | Assumes deterministic (same inputs → same output) | Treats result as nondeterministic |
+
+**Default:** `observable <~ false;` — functions are assumed pure unless
+explicitly declared otherwise. This is the safe default for the synthesis
+engine (Phase 9), which reasons about mathematical purity.
+
+**Files affected:**
+- `src/lifetime.rs` or DCE pass — check `observable` metadata before
+  eliminating calls
+- `src/backend/llvm/emit_stmt.rs` — check `observable` to decide
+  `readnone`/`sideeffect` attributes
+- `src/interpreter.rs` — check `observable` to decide fold eligibility
+- `src/proof_engine.rs` — check `observable` to decide determinism
+- `lib/std/os/*.bv`, `lib/std/types/bootstrap.bv` — mark I/O functions
+  with `observable <~ true;`
+
+**Tests:**
+- `test_observable_dce_preserves`: Call to `observable` function with
+  unused result → call preserved in IR
+- `test_observable_dce_eliminates`: Call to pure function with unused
+  result → call eliminated
+- `test_observable_llvm_readnone`: Pure function gets `readnone`
+  attribute in LLVM IR
+- `test_observable_llvm_sideeffect`: Observable function gets
+  `sideeffect` on asm call
 
 | File | Before 8G | After 8G | Arms removed |
 |------|-----------|----------|--------------|
