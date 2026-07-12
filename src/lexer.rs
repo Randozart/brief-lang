@@ -20,32 +20,37 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
+// 2026-07-12: Phase 0.1 — Full rewrite for new architecture.
+// Changes from old lexer:
+// - # is now a valid identifier character (Sqrt# -> single token)
+// - Standalone # token removed — [ # ] uses Identifier("#")
+// - inop/inop! removed (intrinsic architecture: all ops are # intrinsics)
+// - Added When, Input, Output tokens
+// - Export, ColonEq already existed (kept as-is)
+
 use logos::Logos;
 
 #[derive(Logos, Debug, PartialEq, Clone)]
 #[logos(skip r"[ \t\n\r]+")]
-#[logos(skip r"//[^\n]*")] // Skip // comments entirely
+#[logos(skip r"//[^\n]*")]
 pub enum Token {
-    // Sig aliases: sig, sign, signature (lowercase and UPPERCASE)
+    // ── Keywords ──────────────────────────────────────────────
     #[token("sig")]
     Sig,
 
-    // Export keyword (Phase 4 — replaces #export annotation)
+    /// Phase 15: export defn — replaces #export pragma
     #[token("export")]
     Export,
 
-    // Defn aliases: defn, def, definition (lowercase and UPPERCASE)
     #[token("defn")]
     Defn,
 
     #[token("let")]
     Let,
 
-    // Const aliases: const, constant (lowercase and UPPERCASE)
     #[token("const")]
     Const,
 
-    // Txn aliases: txn, transact, transaction (lowercase and UPPERCASE)
     #[token("txn")]
     Txn,
 
@@ -60,94 +65,122 @@ pub enum Token {
 
     #[token("term")]
     Term,
+
     #[token("term!")]
     TermBang,
+
     #[token("escape")]
     Escape,
+
     #[token("uni")]
     Uni,
+
     #[token("is")]
     Is,
+
     #[token("like")]
     Like,
+
     #[token("import")]
     Import,
+
     #[token("from")]
     From,
+
     #[token("as")]
     As,
+
     #[token("frgn")]
     Frgn,
+
     #[token("frgn!")]
     FrgnBang,
-    #[token("inop")]
-    #[token("inop#")]
-    Inop,
-    #[token("inop!")]
-    #[token("inop#!")]
-    InopBang,
+
+    // 2026-07-12: inop/inop! removed — all ops are # intrinsics
     #[token("meld")]
     Meld,
+
     #[token("syscall")]
     Syscall,
+
     #[token("syscall!")]
     SyscallBang,
+
     #[token("reg")]
     Reg,
+
     #[token("op")]
     Op,
+
     #[token("type")]
     Type,
 
     #[token("cell")]
     Cell,
+
     #[token("struct")]
     Struct,
+
     #[token("rstruct")]
     Rstruct,
+
     #[token("render")]
     Render,
+
     #[token("enum")]
     Enum,
+
     #[token("trg")]
     Trg,
+
     #[token("link")]
     Link,
+
     #[token("asm")]
     Asm,
+
     #[token("stage")]
     Stage,
+
     #[token("on")]
     On,
+
     #[token("within")]
     Within,
+
     #[token("bank")]
     Bank,
+
     #[token("Ptr!")]
     PtrBang,
+
     #[token("Ok")]
     Ok,
+
     #[token("Err")]
     Err,
+
     #[token("match")]
     Match,
 
     #[token("template")]
     Template,
+
     #[token("macro")]
     Macro,
+
     #[token("quote")]
     Quote,
 
     #[token("$")]
     Dollar,
+
     #[token("$!")]
     DollarBang,
 
     #[token("foreach")]
     Foreach,
 
-    // Visibility: pvt / private (struct boundary), sed / sedentary (file boundary)
     #[token("pvt")]
     Pvt,
 
@@ -158,117 +191,173 @@ pub enum Token {
     Sync,
 
     #[token("some")]
-    #[token("Some")]
     Some,
+
     #[token("none")]
-    #[token("None")]
     None,
 
     #[token("true")]
     BoolTrue,
+
     #[token("false")]
     BoolFalse,
 
-    // Time units (lowercase and UPPERCASE)
     #[token("cycles")]
     Cycles,
+
     #[token("cyc")]
     Cyc,
+
     #[token("ms")]
     Ms,
+
     #[token("sec")]
     #[token("seconds")]
     Seconds,
+
     #[token("minute")]
     Minute,
+
     #[token("minutes")]
     Minutes,
+
     #[token("nanoseconds")]
     Nanoseconds,
 
-    // Operators
+    // ── Phase 16A/16D: Cell file keywords ─────────────────────
+    /// 2026-07-12: .c.bv cell parameter declaration
+    #[token("input")]
+    Input,
+
+    /// 2026-07-12: .c.bv cell output declaration
+    #[token("output")]
+    Output,
+
+    // ── Phase 8.6: Guard/derivation keywords ─────────────────
+    /// 2026-07-12: Guard statement keyword
+    #[token("when")]
+    When,
+
+    // ── Operators ─────────────────────────────────────────────
     #[token("=")]
     Eq,
+
     #[token("&")]
     Ampersand,
+
     #[token("@")]
     At,
+
     #[token("==")]
     EqEq,
+
     #[token("!=")]
     Ne,
+
     #[token("<")]
     Lt,
+
     #[token("</")]
     LtSlash,
+
     #[token("<=")]
     Le,
+
     #[token(">")]
     Gt,
+
     #[token(">=")]
     Ge,
+
     #[token("<<")]
     Shl,
+
     #[token(">>")]
     Shr,
+
     #[token("|>")]
     PipeGreater,
+
     #[token("|")]
     Pipe,
+
     #[token("||")]
     OrOr,
+
     #[token("&&")]
     AndAnd,
+
     #[token("!")]
     Not,
+
     #[token("?")]
     Question,
+
     #[token("-")]
     Minus,
+
     #[token("~?")]
     TildeQuestion,
+
     #[token("~/")]
     TildeSlash,
+
     #[token("~")]
     Tilde,
+
     #[token("++")]
     PlusPlus,
+
     #[token("+")]
     Plus,
+
     #[token("*")]
     Star,
+
     #[token("/")]
     Slash,
+
     #[token("^")]
     BitXor,
+
     #[token("->")]
     Arrow,
+
     #[token("<-")]
     ArrowLeft,
-    /// `<~` — Annotation Arrow: compile-time metadata on declarations
+
+    /// <~ — metadata assignment operator
     #[token("<~")]
     TildeArrow,
-    // 2026-07-11: Phase 0.0 — TildeArrowRight removed (~> no longer used)
+
     #[token("_")]
     Underscore,
 
-    // Punctuation
+    // ── Pragma tokens (kept for backward compat, to migrate) ──
     #[token("#[")]
     HashBracket,
+
     #[token("#![")]
     HashBangBracket,
+
     #[token("#pragma")]
     Pragma,
+
     #[token("#!pragma")]
     PragmaBang,
+
     #[token("#?")]
     HashQuestion,
-    #[token("#")]
-    Hash,
+
+    /// 2026-07-12: #! kept for backward compat. # alone is now
+    /// an identifier character (e.g. Sqrt# -> single ident).
     #[token("#!")]
     HashBang,
+
+    // ── Punctuation ───────────────────────────────────────────
     #[token(";")]
     Semicolon,
+
     #[token("<:>")]
     LtColonGt,
 
@@ -277,63 +366,88 @@ pub enum Token {
 
     #[token(":>")]
     ColonGreaterThan,
+
+    /// := — derivation / compile-time assertion block
     #[token(":=")]
-    /// `:=` — derivation / compile-time assertion block.
-    /// 2026-07-11: Phase 8.0.
     ColonEq,
+
     #[token(":")]
     Colon,
+
     #[token("::")]
     ColonColon,
+
     #[token("{")]
     LBrace,
+
     #[token("}")]
     RBrace,
+
     #[token("(")]
     LParen,
+
     #[token(")")]
     RParen,
+
     #[token("[")]
     LBracket,
+
     #[token("]")]
     RBracket,
+
     #[token(",")]
     Comma,
+
     #[token("%")]
     Percent,
+
     #[token("...")]
     Ellipsis,
+
     #[token("..")]
     DotDot,
+
     #[token(".")]
     Dot,
 
-    // Literals
+    // ── Literals ──────────────────────────────────────────────
     #[regex(r"0x[0-9a-fA-F]+", |lex| i64::from_str_radix(&lex.slice()[2..], 16).ok())]
     #[regex(r"[0-9]+", |lex| lex.slice().parse().ok())]
     Integer(i64),
+
     #[regex(r"[0-9]+i8", |lex| lex.slice().trim_end_matches("i8").parse().ok())]
     IntegerI8(i64),
+
     #[regex(r"[0-9]+i16", |lex| lex.slice().trim_end_matches("i16").parse().ok())]
     IntegerI16(i64),
+
     #[regex(r"[0-9]+i32", |lex| lex.slice().trim_end_matches("i32").parse().ok())]
     IntegerI32(i64),
+
     #[regex(r"[0-9]+i64", |lex| lex.slice().trim_end_matches("i64").parse().ok())]
     IntegerI64(i64),
+
     #[regex(r"[0-9]+u8", |lex| lex.slice().trim_end_matches("u8").parse().ok())]
     IntegerU8(i64),
+
     #[regex(r"[0-9]+u16", |lex| lex.slice().trim_end_matches("u16").parse().ok())]
     IntegerU16(i64),
+
     #[regex(r"[0-9]+u32", |lex| lex.slice().trim_end_matches("u32").parse().ok())]
     IntegerU32(i64),
+
     #[regex(r"[0-9]+u64", |lex| lex.slice().trim_end_matches("u64").parse().ok())]
     IntegerU64(i64),
+
     #[regex(r"[0-9]+\.[0-9]+", |lex| lex.slice().parse().ok())]
     Float(f64),
+
     #[regex(r"[0-9]+\.[0-9]+f32", |lex| lex.slice().trim_end_matches("f32").parse().ok())]
     Float32(f64),
+
     #[regex(r"[0-9]+\.[0-9]+f64", |lex| lex.slice().trim_end_matches("f64").parse().ok())]
     Float64(f64),
+
     #[regex(r#""([^"\\]|\\.)*""#, |lex| {
         let s = lex.slice();
         let inner = &s[1..s.len()-1];
@@ -348,14 +462,12 @@ pub enum Token {
                     Some('"') => out.push('"'),
                     Some('0') => out.push('\0'),
                     Some('x') => {
-                        // Hex escape: \x03 → char 3
                         let hex_str: String = chars.by_ref().take(2).collect();
                         if let Ok(h) = u8::from_str_radix(&hex_str, 16) {
                             out.push(h as char);
                         }
                     }
                     Some('u') => {
-                        // Unicode escape: \u{1F600}
                         if chars.next() == Some('{') {
                             let mut hex = String::new();
                             while let Some(h) = chars.next() {
@@ -377,124 +489,143 @@ pub enum Token {
         Some(out)
     })]
     String(String),
+
     #[regex(r"'([^'\\]|\\.)*'", |lex| {
         let s = lex.slice();
         let inner = &s[1..s.len()-1];
-        // Handle escape sequences
         if inner.is_empty() {
-            return Some(' ');  // Default for empty char literal
+            return Some(' ');
         }
         if inner.len() == 1 {
             return Some(inner.chars().next().unwrap());
         }
-        if inner == "\\0" {
-            return Some('\0');
-        }
-        if inner == "\\n" {
-            return Some('\n');
-        }
-        if inner == "\\t" {
-            return Some('\t');
-        }
-        if inner == "\\\\" {
-            return Some('\\');
-        }
-        if inner == "\\'" {
-            return Some('\'');
-        }
+        if inner == "\\0" { return Some('\0'); }
+        if inner == "\\n" { return Some('\n'); }
+        if inner == "\\t" { return Some('\t'); }
+        if inner == "\\\\" { return Some('\\'); }
+        if inner == "\\'" { return Some('\''); }
         if inner.len() == 4 && inner.starts_with("\\x") {
-            // Hex escape: \x03 → char 3
             if let Ok(h) = u8::from_str_radix(&inner[2..], 16) {
                 return Some(h as char);
             }
         }
         if inner.starts_with("\\u{") && inner.ends_with('}') {
-            // Unicode escape: \u{1F600}
             if let Ok(cp) = u32::from_str_radix(&inner[3..inner.len()-1], 16) {
                 return Some(char::from_u32(cp).unwrap_or('?'));
             }
         }
-        // Multi-character char literal or invalid - just take first char
         Some(inner.chars().next().unwrap_or(' '))
     })]
     Char(char),
 
-    // Keywords
+    // ── Type keywords ─────────────────────────────────────────
     #[token("Int")]
     TypeInt,
+
     #[token("UInt")]
     TypeUInt,
+
     #[token("Unsigned")]
     TypeUnsigned,
+
     #[token("USgn")]
     TypeUSgn,
+
     #[token("Signed")]
     TypeSigned,
+
     #[token("Sgn")]
     TypeSgn,
+
     #[token("Float")]
     TypeFloat,
+
     #[token("String")]
     TypeString,
+
     #[token("Bool")]
     TypeBool,
+
     #[token("void")]
     TypeVoid,
+
     #[token("Data")]
     TypeData,
-    #[token("Char")]  // NEW: Char type keyword
-    TypeChar,
-    // Note: HashMap, HashSet, StringBuilder, Stack, Queue are regular identifiers
-    // defined in stdlib, not special type keywords. This keeps the language pure.
 
-    // Shorthand sized integer types (syntactic sugar for Int/UInt @/xN)
+    #[token("Char")]
+    TypeChar,
+
+    // Shorthand sized integer types
     #[token("i8")]
     TypeI8,
+
     #[token("u8")]
     TypeU8,
+
     #[token("i16")]
     TypeI16,
+
     #[token("u16")]
     TypeU16,
+
     #[token("i32")]
     TypeI32,
+
     #[token("u32")]
     TypeU32,
+
     #[token("i64")]
     TypeI64,
+
     #[token("u64")]
     TypeU64,
 
     // Long-form type keyword aliases
     #[token("Int8")]
     TypeInt8,
+
     #[token("Int16")]
     TypeInt16,
+
     #[token("Int32")]
     TypeInt32,
+
     #[token("Int64")]
     TypeInt64,
+
     #[token("UInt8")]
     TypeUInt8,
+
     #[token("UInt16")]
     TypeUInt16,
+
     #[token("UInt32")]
     TypeUInt32,
+
     #[token("UInt64")]
     TypeUInt64,
+
     #[token("Float32")]
     TypeFloat32,
+
     #[token("F32")]
     TypeF32,
+
     #[token("Float64")]
     TypeFloat64,
+
     #[token("F64")]
     TypeF64,
+
     #[token("Double")]
     TypeDouble,
 
-    // Identifiers
-    #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
+    // ── Identifiers (including PascalCase# intrinsics) ────────
+    // 2026-07-12: # is a valid identifier character.
+    // This allows Sqrt#, AddI64#, PrintInt# as single tokens.
+    // Specific multi-char hash tokens (#[, #![, #pragma, etc.)
+    // are matched BEFORE this regex due to logos priority rules.
+    #[regex(r"[a-zA-Z_#][a-zA-Z0-9_#]*", |lex| lex.slice().to_string())]
     Identifier(String),
 }
 
@@ -521,8 +652,6 @@ impl std::fmt::Display for Token {
             Token::As => write!(f, "as"),
             Token::Frgn => write!(f, "frgn"),
             Token::FrgnBang => write!(f, "frgn!"),
-            Token::Inop => write!(f, "inop"),
-            Token::InopBang => write!(f, "inop!"),
             Token::Meld => write!(f, "meld"),
             Token::Syscall => write!(f, "syscall"),
             Token::SyscallBang => write!(f, "syscall!"),
@@ -534,7 +663,6 @@ impl std::fmt::Display for Token {
             Token::Rstruct => write!(f, "rstruct"),
             Token::Render => write!(f, "render"),
             Token::Enum => write!(f, "enum"),
-            Token::Trg => write!(f, "trg!"),
             Token::Trg => write!(f, "trg"),
             Token::Link => write!(f, "link"),
             Token::Asm => write!(f, "asm"),
@@ -564,6 +692,11 @@ impl std::fmt::Display for Token {
             Token::Ms => write!(f, "ms"),
             Token::Seconds => write!(f, "seconds"),
             Token::Minute => write!(f, "minute"),
+            Token::Minutes => write!(f, "minutes"),
+            Token::Nanoseconds => write!(f, "nanoseconds"),
+            Token::Input => write!(f, "input"),
+            Token::Output => write!(f, "output"),
+            Token::When => write!(f, "when"),
             Token::Eq => write!(f, "="),
             Token::EqEq => write!(f, "=="),
             Token::Ne => write!(f, "!="),
@@ -581,6 +714,7 @@ impl std::fmt::Display for Token {
             Token::Not => write!(f, "!"),
             Token::Question => write!(f, "?"),
             Token::Minus => write!(f, "-"),
+            Token::TildeQuestion => write!(f, "~?"),
             Token::TildeSlash => write!(f, "~/"),
             Token::Tilde => write!(f, "~"),
             Token::PlusPlus => write!(f, "++"),
@@ -597,7 +731,6 @@ impl std::fmt::Display for Token {
             Token::Pragma => write!(f, "#pragma"),
             Token::PragmaBang => write!(f, "#!pragma"),
             Token::HashQuestion => write!(f, "#?"),
-            Token::Hash => write!(f, "#"),
             Token::HashBang => write!(f, "#!"),
             Token::Semicolon => write!(f, ";"),
             Token::LtColonGt => write!(f, "<:>"),
@@ -666,9 +799,6 @@ impl std::fmt::Display for Token {
             Token::TypeFloat64 => write!(f, "Float64"),
             Token::TypeF64 => write!(f, "F64"),
             Token::TypeDouble => write!(f, "Double"),
-            Token::Minutes => write!(f, "minutes"),
-            Token::Nanoseconds => write!(f, "nanoseconds"),
-            Token::TildeQuestion => write!(f, "~?"),
             Token::Identifier(s) => write!(f, "{}", s),
         }
     }
@@ -696,31 +826,24 @@ mod tests {
 
     #[test]
     fn test_char_literals() {
-        // Basic char
         let mut lexer = Token::lexer("'a'");
         assert_eq!(lexer.next(), Some(Ok(Token::Char('a'))));
-        
-        // Newline escape
+
         let mut lexer = Token::lexer("'\\n'");
         assert_eq!(lexer.next(), Some(Ok(Token::Char('\n'))));
-        
-        // Tab escape
+
         let mut lexer = Token::lexer("'\\t'");
         assert_eq!(lexer.next(), Some(Ok(Token::Char('\t'))));
-        
-        // Backslash escape
+
         let mut lexer = Token::lexer("'\\\\'");
         assert_eq!(lexer.next(), Some(Ok(Token::Char('\\'))));
-        
-        // Single quote escape
+
         let mut lexer = Token::lexer("'\\''");
         assert_eq!(lexer.next(), Some(Ok(Token::Char('\''))));
-        
-        // Unicode escape
+
         let mut lexer = Token::lexer("'\\u{1F600}'");
         assert_eq!(lexer.next(), Some(Ok(Token::Char('😀'))));
-        
-        // Char type keyword
+
         let mut lexer = Token::lexer("let c: Char = 'x';");
         assert_eq!(lexer.next(), Some(Ok(Token::Let)));
         assert_eq!(lexer.next(), Some(Ok(Token::Identifier("c".to_string()))));
@@ -733,14 +856,19 @@ mod tests {
 
     #[test]
     fn test_nested_generic_tokens() {
-        // Test that >> is lexed as Shr, not two Gt tokens
         let mut lexer = Token::lexer("List<List<Int>>");
-        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("List".to_string()))));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("List".to_string())))
+        );
         assert_eq!(lexer.next(), Some(Ok(Token::Lt)));
-        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("List".to_string()))));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("List".to_string())))
+        );
         assert_eq!(lexer.next(), Some(Ok(Token::Lt)));
         assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
-        assert_eq!(lexer.next(), Some(Ok(Token::Shr)));  // >> is Shr
+        assert_eq!(lexer.next(), Some(Ok(Token::Shr)));
         assert_eq!(lexer.next(), None);
     }
 
@@ -757,15 +885,20 @@ mod tests {
     fn test_dollar_tokens() {
         let mut lexer = Token::lexer("$unless $!circular_buffer");
         assert_eq!(lexer.next(), Some(Ok(Token::Dollar)));
-        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("unless".to_string()))));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("unless".to_string())))
+        );
         assert_eq!(lexer.next(), Some(Ok(Token::DollarBang)));
-        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("circular_buffer".to_string()))));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("circular_buffer".to_string())))
+        );
         assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn test_dollar_bang_as_single_token() {
-        // $! must be lexed as a single DollarBang token, not Dollar + Not
         let mut lexer = Token::lexer("$!x");
         assert_eq!(lexer.next(), Some(Ok(Token::DollarBang)));
         assert_eq!(lexer.next(), Some(Ok(Token::Identifier("x".to_string()))));
@@ -774,33 +907,177 @@ mod tests {
 
     #[test]
     fn test_hash_question_as_single_token() {
-        // #? must be lexed as a single HashQuestion token, not Hash + Question
         let mut lexer = Token::lexer("#?inline");
         assert_eq!(lexer.next(), Some(Ok(Token::HashQuestion)));
-        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("inline".to_string()))));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("inline".to_string())))
+        );
         assert_eq!(lexer.next(), None);
+    }
 
-        // Verify # is still lexed correctly for normal hashtags
-        let mut lexer2 = Token::lexer("#volatile");
-        assert_eq!(lexer2.next(), Some(Ok(Token::Hash)));
-        assert_eq!(lexer2.next(), Some(Ok(Token::Identifier("volatile".to_string()))));
-        assert_eq!(lexer2.next(), None);
+    // 2026-07-12: Updated for new #-as-ident-char behavior.
+    // #volatile is now a single identifier, not Hash + volatile.
+    #[test]
+    fn test_hash_as_identifier_char() {
+        let mut lexer = Token::lexer("#volatile");
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("#volatile".to_string())))
+        );
+        assert_eq!(lexer.next(), None);
     }
 
     #[test]
     fn test_tilde_arrow_as_single_token() {
-        // Verify <~ is lexed as a single TildeArrow token, not Lt + Tilde
         let mut lexer = Token::lexer("x <~ 5");
         assert_eq!(lexer.next(), Some(Ok(Token::Identifier("x".to_string()))));
         assert_eq!(lexer.next(), Some(Ok(Token::TildeArrow)));
         assert_eq!(lexer.next(), Some(Ok(Token::Integer(5))));
         assert_eq!(lexer.next(), None);
 
-        // Verify < (Lt) still works independently
         let mut lexer2 = Token::lexer("x < 5");
         assert_eq!(lexer2.next(), Some(Ok(Token::Identifier("x".to_string()))));
         assert_eq!(lexer2.next(), Some(Ok(Token::Lt)));
         assert_eq!(lexer2.next(), Some(Ok(Token::Integer(5))));
         assert_eq!(lexer2.next(), None);
+    }
+
+    // ── New tests for Phase 0.1 features ──────────────────────
+
+    #[test]
+    fn test_intrinsic_identifier() {
+        let mut lexer = Token::lexer("Sqrt#(x)");
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("Sqrt#".to_string())))
+        );
+        assert_eq!(lexer.next(), Some(Ok(Token::LParen)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("x".to_string()))));
+        assert_eq!(lexer.next(), Some(Ok(Token::RParen)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_entry_hash_bracket() {
+        let mut lexer = Token::lexer("[#]");
+        assert_eq!(lexer.next(), Some(Ok(Token::LBracket)));
+        // # is now an identifier character, so [#] -> LBracket, Identifier("#"), RBracket
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("#".to_string()))));
+        assert_eq!(lexer.next(), Some(Ok(Token::RBracket)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_hash_in_identifier_middle() {
+        let mut lexer = Token::lexer("foo#bar");
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("foo#bar".to_string())))
+        );
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_keyword_when() {
+        let mut lexer = Token::lexer("when");
+        assert_eq!(lexer.next(), Some(Ok(Token::When)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_keyword_input() {
+        let mut lexer = Token::lexer("input port: Int;");
+        assert_eq!(lexer.next(), Some(Ok(Token::Input)));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("port".to_string())))
+        );
+        assert_eq!(lexer.next(), Some(Ok(Token::Colon)));
+        assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_keyword_output() {
+        let mut lexer = Token::lexer("output status: Int;");
+        assert_eq!(lexer.next(), Some(Ok(Token::Output)));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("status".to_string())))
+        );
+        assert_eq!(lexer.next(), Some(Ok(Token::Colon)));
+        assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_inop_removed() {
+        // inop should now lex as a regular identifier, not a keyword
+        let mut lexer = Token::lexer("inop");
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("inop".to_string())))
+        );
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_export_keyword() {
+        let mut lexer = Token::lexer("export defn add(a: Int) -> Int;");
+        assert_eq!(lexer.next(), Some(Ok(Token::Export)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Defn)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("add".to_string()))));
+    }
+
+    #[test]
+    fn test_hash_bracket_still_works() {
+        // #[...] attribute syntax should still lex as HashBracket
+        let mut lexer = Token::lexer("#[inline]");
+        assert_eq!(lexer.next(), Some(Ok(Token::HashBracket)));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("inline".to_string())))
+        );
+        assert_eq!(lexer.next(), Some(Ok(Token::RBracket)));
+        assert_eq!(lexer.next(), None);
+    }
+
+    #[test]
+    fn test_colon_eq_derivation() {
+        let mut lexer = Token::lexer("defn add(a: Int, b: Int) -> Int := { 1, 2 -> 3 };");
+        assert_eq!(lexer.next(), Some(Ok(Token::Defn)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("add".to_string()))));
+    }
+
+    #[test]
+    fn test_display_roundtrip() {
+        let source = "defn main() -> Int { term 0; };";
+        let mut lexer = Token::lexer(source);
+        let mut found = Vec::new();
+        while let Some(Ok(tok)) = lexer.next() {
+            found.push(tok);
+        }
+        // Just verify that all tokens have Display impls that don't panic
+        for tok in &found {
+            let _ = format!("{}", tok);
+        }
+    }
+
+    #[test]
+    fn test_underscore_identifier() {
+        let mut lexer = Token::lexer("_ _foo __bar");
+        assert_eq!(lexer.next(), Some(Ok(Token::Underscore)));
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("_foo".to_string())))
+        );
+        assert_eq!(
+            lexer.next(),
+            Some(Ok(Token::Identifier("__bar".to_string())))
+        );
+        assert_eq!(lexer.next(), None);
     }
 }
