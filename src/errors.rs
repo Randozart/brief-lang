@@ -1061,6 +1061,46 @@ impl fmt::Display for WebstackError {
     }
 }
 
+/// Runtime error during compile-time evaluation (interpreter).
+#[derive(Debug, Clone)]
+pub enum RuntimeError {
+    UndefinedVariable { name: String },
+    DivisionByZero,
+    HeapError(String),
+    UnsupportedIntrinsic(String),
+    TypeError { expected: String, found: String },
+    UndefinedForeignFunction { name: String, source: String },
+    ContractViolation(String),
+}
+
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RuntimeError::UndefinedVariable { name } => {
+                write!(f, "undefined variable '{}'", name)
+            }
+            RuntimeError::DivisionByZero => write!(f, "division by zero"),
+            RuntimeError::HeapError(msg) => write!(f, "heap error: {}", msg),
+            RuntimeError::UnsupportedIntrinsic(name) => {
+                write!(f, "unsupported intrinsic '{}'", name)
+            }
+            RuntimeError::TypeError { expected, found } => {
+                write!(f, "type error: expected {}, got {}", expected, found)
+            }
+            RuntimeError::UndefinedForeignFunction { name, source } => {
+                write!(f, "undefined foreign function '{}' from {}", name, source)
+            }
+            RuntimeError::ContractViolation(msg) => write!(f, "contract violation: {}", msg),
+        }
+    }
+}
+
+impl From<RuntimeError> for CompilerError {
+    fn from(err: RuntimeError) -> Self {
+        CompilerError::Runtime(err)
+    }
+}
+
 // ── Into impls: convert specific error types into CompilerError ──
 
 /// Top-level compiler error, wrapping all specific error types.
@@ -1093,6 +1133,8 @@ pub enum CompilerError {
     Proof(ProofError),
     /// I/O error.
     Io(String),
+    /// Runtime/interpreter error.
+    Runtime(RuntimeError),
 }
 
 impl fmt::Display for CompilerError {
@@ -1110,6 +1152,7 @@ impl fmt::Display for CompilerError {
             CompilerError::Fuzz(err) => fmt::Display::fmt(err, f),
             CompilerError::Proof(err) => fmt::Display::fmt(err, f),
             CompilerError::Io(msg) => write!(f, "I/O error: {}", msg),
+            CompilerError::Runtime(err) => fmt::Display::fmt(err, f),
         }
     }
 }
