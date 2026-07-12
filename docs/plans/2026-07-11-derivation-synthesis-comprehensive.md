@@ -593,6 +593,246 @@ manages parameter binding internally through its frame stack.
 - `test_compile_time_no_body_skips`: No body → tests skipped (handled in
   synthesis phase)
 
+### Step 8.6 — Add `when` keyword and guard statement syntax
+
+**Goal:** Introduce `when` as a body-only keyword for compile-time verified
+guards, alongside the existing `[condition]` bracket form. Both map to the
+same `Statement::Guarded` AST node. New same-line enforcement: if a guard
+and its effect are on the same line, braces are optional. If they span
+multiple lines, braces are required.
+
+#### Syntax rules
+
+| Form | Arrow? | Same-line? | Scope |
+|------|--------|-----------|-------|
+| `when x > 0 -> term 0;` | ✅ Required | ✅ Required | Bodies only |
+| `when x > 0 { term 0; };` | ❌ Not used | ❌ Not required | Bodies only |
+| `[x > 0] term 0;` | ❌ Not used | ✅ Required (NEW) | Universal |
+| `[x > 0] { term 0; };` | ❌ Not used | ❌ Not required | Universal |
+| `when x > 0` on signature | — | — | ❌ Rejected (bodies only) |
+| `when x > 0 -> { ... };` | ❌ Rejected | — | `->` never pairs with `{}` |
+
+**Key principle:** `when` is syntactically forbidden on signatures and type
+definitions — it only appears inside function and transaction bodies.
+Contract brackets `[ ]` remain universal (signatures, type defs, and bodies).
+
+**Breaking change:** `[x > 0]` across lines without braces (`[x > 0]\nstmt;`)
+is now rejected. The effect must be on the same line when braces are omitted.
+
+#### Step 8.6.0 — Add `when` keyword token
+
+**File:** `src/lexer.rs`
+
+Add a new keyword token:
+
+```rust
+/// `when` — compile-time verified guard (body-only).
+/// 2026-07-12: Phase 8.6
+#[token("when")]
+When,
+```
+
+Also mark `when` as a reserved keyword in the identifier parser so it
+cannot be used as a variable or function name.
+
+**Tests:**
+- `test_lexer_when_keyword`: `when` → `Token::When`
+- `test_lexer_when_not_identifier`: `let when = 5;` → parse error (reserved)
+
+#### Step 8.6.1 — Implement `parse_guard_statement()`
+
+**File:** `src/parser.rs`
+
+Add a unified parser method that handles both `[condition]` and
+`when condition` guard forms, with `->` for the compact single-line
+`when` form and same-line enforcement:
+
+```rust
+/// Parse a compile-time verified guard statement.
+/// Handles both `when condition` and `[condition]` forms.
+/// 2026-07-12: Phase 8.6
+fn parse_guard_statement(&mut self) -> Result<Statement, SyntaxError> {
+    // `when` is only valid inside bodies — enforced by parse_statement dispatch
+    // Capture start line for same-line enforcement
+    let start_line = self.current_span().unwrap_or_else(Span::dummy).line;
+    let condition = self.parse_expression()?;
+
+    // Form A: Multi-line block — braces required
+    if matches!(self.current_token(), Some(Ok(Token::LBrace))) {
+        let statements = self.parse_block()?;
+        return Ok(Statement::Guarded {
+            condition,
+            statements,
+            metadata: HashMap::new(),
+        });
+    }
+
+    // Form B: Compact single-line — no braces
+    // For `when` only: optional `->` separator before the effect statement
+    if matches!(self.current_token(), Some(Ok(Token::Arrow))) {
+        // `when x > 0 -> { ... };` is rejected — `->` never pairs with `{}`
+        if self.peek_token_is(Token::LBrace) {
+            return self.spanned_err(
+                "Do not use '->' with braces. Write 'when x > 0 { ... };' directly."
+            );
+        }
+        self.advance(); // consume ->
+    } else if !matches!(self.current_token(), Some(Ok(Token::LBrace))) {
+        // Bracket form without `->` — check it's actually a bracket guard,
+        // not a bare expression misparsed. If the token after the expression
+        // is a statement start, proceed.
+    }
+
+    let effect = self.parse_statement()?;
+    let end_line = effect.span().unwrap_or_else(Span::dummy).line;
+
+    // Enforce same-line rule: guard and effect must be on the same line
+    if start_line != end_line {
+        return self.spanned_err(
+            "Braces '{}' are required for guards that spill to a new line."
+        );
+    }
+
+    Ok(Statement::Guarded {
+        condition,
+        statements: vec![effect],
+        metadata: HashMap::new(),
+    })
+}
+```
+
+**Dispatch integration:** In `parse_statement()`, add a check for
+`Token::When` that routes to `parse_guard_statement()`. The existing
+`[condition]` handling already routes through the same method (or is
+replaced by it).
+
+```rust
+fn parse_statement(&mut self) -> Result<Statement, SyntaxError> {
+    match self.current_token() {
+        Some(Ok(Token::When)) => {
+            self.advance();
+            self.parse_guard_statement()
+        }
+        Some(Ok(Token::LBracket)) => {
+            // Existing bracket guard parsing — replace with
+            // parse_guard_statement() or keep inline
+            self.parse_guard_statement()
+        }
+        // ... other statement types ...
+    }
+}
+```
+
+**Rejection on signatures:** In `parse_definition()` and
+`parse_transaction()`, add a check in the signature section that
+rejects `when`:
+
+```rust
+// After parsing parameter list, before contract brackets:
+if matches!(self.current_token(), Some(Ok(Token::When))) {
+    return self.spanned_err(
+        "'when' is not valid on signatures. Use '[condition]' for contracts."
+    );
+}
+```
+
+**Nesting check:** `parse_guard_statement()` uses guard clauses (early
+return for `{}` block form, then `if` for arrow, then same-line check)
+— max depth 2.
+
+**Tests:**
+- `test_parse_when_compact`: `when x > 0 -> term 0;` → Guarded with
+  condition `x > 0`, body `[term 0]`
+- `test_parse_when_block`: `when x > 0 { term 0; };` → same AST node
+- `test_parse_bracket_compact`: `[x > 0] term 0;` → same AST node
+- `test_parse_bracket_block`: `[x > 0] { term 0; };` → same AST node
+- `test_parse_when_rejected_on_signature`: `defn f() when x > 0;` → error
+- `test_parse_when_arrow_with_braces`: `when x > 0 -> { term 0; };` → error
+- `test_parse_guard_same_line_violation`: `when x > 0 ->\nterm 0;` → error
+- `test_parse_bracket_same_line_violation`: `[x > 0]\nterm 0;` → error
+- `test_parse_when_not_reserved_as_keyword`: `when` used as identifier → error
+
+#### Step 8.6.2 — Verify `Statement::Guarded` handles both forms
+
+**File:** `src/ast.rs`
+
+**What:** Verify that the existing `Statement::Guarded { condition, statements,
+metadata }` node (Phase 1A) already serves both `when` and `[condition]`
+forms. No changes to the AST struct itself — the parser simply populates it
+from either syntactic form.
+
+If `Statement::Guarded` does not yet exist (Phase 1A may not have been
+committed when this is implemented), add it:
+
+```rust
+/// A compile-time verified guard condition.
+/// Parsed from either `[condition] stmt;` or `when condition -> stmt;`.
+/// The SMT verifier proves the condition before the body executes.
+/// 2026-07-12: Phase 8.6
+Guarded {
+    condition: Expr,
+    statements: Vec<Statement>,
+    metadata: HashMap<String, PropertyValue>,
+},
+```
+
+**Check:** Ensure the interpreter's eval loop, DCE pass, and SMT verifier
+all handle `Statement::Guarded` identically regardless of whether it was
+parsed from brackets or `when`. No changes needed — they operate on the
+AST node, not the source syntax.
+
+**Tests:**
+- Existing `test_interpreter_guard` passes with both `when` and `[ ]` forms
+- No interpreter/backend changes needed — the AST node is consumed identically
+
+#### Step 8.6.3 — Add `when` to the syntax documentation
+
+**File:** `docs/architecture/` (update existing syntax doc)
+
+**What:** Document the complete guard statement model:
+
+```brief
+// Guards are compile-time verified — the SMT solver proves the
+// condition before the body executes.
+
+// Two syntactic forms, identical semantics:
+
+// Form 1: Bracket (universal — signatures, type defs, bodies)
+[x > 0] term 0;                  // compact, same-line
+[x > 0] {                        // multi-line, braces required
+    let adjusted = x + 1;
+    term adjusted;
+};
+
+// Form 2: when (bodies only)
+when x > 0 -> term 0;            // compact, same-line, arrow required
+when x > 0 {                     // multi-line, braces required, no arrow
+    let adjusted = x + 1;
+    term adjusted;
+};
+
+// Error: spilling to a new line without braces
+// [x > 0]          ← error: braces required for multi-line
+//     term 0;
+
+// Error: when on a signature
+// defn f() when x > 0 -> Int { ... };  ← error: use [x > 0] instead
+```
+
+**Tests integration:**
+
+```rust
+#[test]
+fn test_when_and_bracket_produce_same_ast() {
+    let source_when = "defn f(x: Int) -> Int { when x > 0 -> term x; term 0; };";
+    let source_bracket = "defn f(x: Int) -> Int { [x > 0] term x; term 0; };";
+    let ast_when = parse(source_when).unwrap();
+    let ast_bracket = parse(source_bracket).unwrap();
+    // Both produce identical ASTs
+    assert_eq!(ast_when, ast_bracket);
+}
+```
+
 ---
 
 ## Phase 8G — Remove Intrinsic/Inop, Modularize Frontend & Backend
