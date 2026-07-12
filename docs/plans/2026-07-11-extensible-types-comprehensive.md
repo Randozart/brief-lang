@@ -1549,6 +1549,19 @@ through metadata strings.
 - Phase 7 (Plugin System): SMT solver integration via WASM plugin;
   `.dbvl` archive enables decoupled backends
 
+### Parallel: Phases 16A–16F — Extension Modifiers, Entry Points, Scripting
+
+**Plan**: `docs/plans/2026-07-12-modifiers-entry-scripting.md`
+
+Adds `.s`/`.f`/`.c` filename modifiers (`main.sf.bv`), `[#]` entry
+precondition with CLI dispatch, indentation-based layout parsing (`.f`),
+cell-wrapped files (`.c`), `input`/`output` keywords, top-level scripting,
+and the stdlib `cli.c.bv` CLI framework. All frontend-only.
+
+**Prerequisites from this plan**:
+- Phase 1A (metadata infrastructure): `[#]` uses the contract system
+- Phase 7 (plugin system): `cli.c.bv` can discover entry points via plugin hooks
+
 ### After That: Phase 15 — Library Mode Completion
 
 **Plan**: `docs/plans/2026-07-11-library-mode-completion.md`

@@ -2665,8 +2665,21 @@ pub enum DeriveHook {
 
 After Phases 8–8G–14 are complete, the compiler has compile-time assertions,
 program synthesis, sad-path derivation, intrinsic-free metadata dispatch,
-and the `.dbvl` semantic archive. The next major effort builds the
-**consumable C-callable library** path:
+and the `.dbvl` semantic archive. The next major efforts build the
+**consumable C-callable library** path and the **frontend extension system**:
+
+### Parallel: Phases 16A–16F — Extension Modifiers, Entry Points, Scripting
+
+**Plan**: `docs/plans/2026-07-12-modifiers-entry-scripting.md`
+
+Adds `.s`/`.f`/`.c` filename modifiers (`main.sf.bv` → strict + formatted),
+`[#]` entry precondition with automatic CLI dispatch from function
+signatures, `.f` layout pre-processor (indentation instead of braces),
+`.c` cell wrapper (`server.c.bv` → `cell server { ... }`), `input`/`output`
+keywords for cell files, top-level scripting with implicit `[#]` entry, and
+the stdlib `cli.c.bv` extensible CLI framework.
+
+All frontend-only — no backend, archive, or SMT changes.
 
 ### Next: Phase 15 — Library Mode Completion
 
