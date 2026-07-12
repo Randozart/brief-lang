@@ -352,12 +352,15 @@ calls the function, and returns its result.
 
 **For a binary with no `[#]` functions:** emit the existing `_start` wrapper.
 
-**For a binary with one `[#]` function:** emit a `main` that parses its
-arguments directly (no subcommand dispatch needed).
+**For a binary with one explicit `[#]` function:** emit a `main` that
+parses `--key value` arguments for that function's parameters directly
+(no name subcommand — the function name is irrelevant to the CLI).
+This case arises from explicit `defn f() -> Int [#] { ... };` or from
+the implicit scripting wrapper (Phase 16E), which are mutually exclusive.
 
 **For a binary with multiple `[#]` functions:** emit a `main` that matches
 `argv[1]` to the function name, then parses the remaining args per that
-function's signature.
+function's signature. This only applies to explicit `[#]` functions.
 
 **Example LLVM IR for single `[#]` function (`build(project: String, clean: Bool)`):**
 
@@ -680,6 +683,18 @@ it in a `txn { ... }` block. The compiler automatically:
 2. Adds `[#]` as the implicit precondition
 3. This means every `.bv` file is a valid, runnable entry point by default
 
+### Codegen rule: scripting vs. explicit `[#]` are mutually exclusive
+
+| Case | Source shape | Generated `main` behavior | CLI usage |
+|------|-------------|---------------------------|-----------|
+| **Explicit `[#]`** (16B) | One or more `defn`/`txn` with `[#]` | Subcommand dispatch via `argv[1]` | `myapp build --x 5` |
+| **Implicit `[#]` (scripting)** (16E) | Top-level statements, no named `[#]` | Direct dispatch — no name matching | `./myapp` |
+
+**Rule:** A file can have scripting statements OR explicit `[#]` functions,
+never both. The implicit wrapper has no name to register in the subcommand
+table because the statements are not attached to any specific function name.
+Attempting to combine them is a compile error (enforced in Step 16E.0).
+
 ### Step 16E.0 — Detect script mode
 
 **File:** `src/parser.rs`
@@ -852,4 +867,4 @@ next step alongside the derivation plan:
 | Layout pre-processor mis-handles edge cases (tab-aligned comments, inline braces in strings) | 16C | Comprehensive edge-case test suite; round-trip comparison with equivalent `.bv` |
 | `[#]` CLI dispatch wrapper conflicts with existing `_start` codegen | 16B | The entry wrapper replaces `_start` when `[#]` is present; no `[#]` → existing behavior unchanged |
 | `.c` cell wrapper does not handle all AST node types | 16D | Reject unsupported top-level nodes (imports, melds) with clear error |
-| Implicit scripting causes surprises for users writing libraries | 16E | Only trigger when file has zero explicit declarations; explicit declarations → no implicit behavior |
+| Implicit scripting causes surprises for users writing libraries | 16E | Only trigger when file has zero explicit declarations. Files with explicit `defn`/`txn` → no implicit behavior. Scripting and explicit `[#]` are mutually exclusive by construction (compile error if both present). |
