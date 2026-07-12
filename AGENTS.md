@@ -23,11 +23,11 @@ proven at compile time, not `unsafe` blocks.
    `is_digit` → `import char from "std/char.bv"`. `None` → `import option from "std/option.bv"`.
 
 3. **INTRINSICS BEFORE FRGN**: Before writing `frgn`, check if an intrinsic
-   exists. Print? `print_int#`. Input? `get_env_int#`. GPU? `get_global_id#`.
+   exists. Print? `PrintInt#`. Input? `GetEnvInt#`. GPU? `GetGlobalId#`.
    The `#` suffix is part of the identifier — `Sqrt#(x)` parses as a regular
-   `Expr::Call("Sqrt#", [x])`. Add new intrinsics to `execute_intrinsic()` in
-   `src/interpreter/intrinsics.rs` and to `get_intrinsic_signature()` — never
-   add `frgn`.
+   `Expr::Call("Sqrt#", [x])`. All intrinsic names are PascalCase + `#` suffix.
+   Add new intrinsics to `execute_intrinsic()` in `src/interpreter/intrinsics.rs`
+   and to `get_intrinsic_signature()` — never add `frgn`.
 
 4. **INTERPRETER IS REFERENCE**: If the interpreter runs it correctly, the
    backend must compile it. Fix codegen, never the interpreter.
@@ -334,14 +334,11 @@ term! -> __print_int(result);   // swan song runs before ret — structurally li
 
 **The correct pattern:**
 ```brief
-frgn __get_env_int(name: Ptr<Byte>) -> Int ;
-frgn __print_int(n: Int) -> Bool ;
-
-let N: Int = __get_env_int("BOUND");   // runtime-determined
+let N: Int = GetEnvInt#("BOUND");   // runtime-determined
 
 rct txn compute [done < N][done == N] {
     [done == N - 1] {
-        term! -> __print_int(result);
+        term! -> PrintInt#(result);
     };
     &done = done + 1;
     term;
@@ -353,8 +350,8 @@ rct txn compute [done < N][done == N] {
 If the compiler folds your entire hot loop — it had all information at compile
 time. Do NOT fight it with hacks. Make the bound runtime-determined:
 ```
-let N: Int = __get_env_int("BOUND");  // ✓ not precomputable
-const N: Int = 50000000;              // ✗ precomputable
+let N: Int = GetEnvInt#("BOUND");  // ✓ not precomputable
+const N: Int = 50000000;           // ✗ precomputable
 ```
 
 The `--optimize-budget` flag (default 256) controls simulation depth. Increase
@@ -508,27 +505,40 @@ it. The more LLVM knows, the more aggressively it can optimize.
 
 ### Intrinsic Conventions
 
-8. **Intrinsics follow PascalCase with `#` suffix** — `Sqrt#`, `Malloc#`.
-   The `#` is part of the identifier lexically. The `_` prefix convention
-   does not exist in Brief.
+8. **Intrinsics follow PascalCase with `#` suffix** — `Sqrt#`, `Malloc#`,
+   `PrintInt#`, `GetEnvInt#`. The `#` is part of the identifier lexically.
+   The `_` prefix convention does not exist in Brief.
+
+9. **No `inop` keyword** — `inop` is removed. All compiler-known operations
+   are `#` intrinsics with entries in `get_intrinsic_signature()` and
+   `execute_intrinsic()`. Use `defn` with `interpreter_impl` metadata for
+   backend-specific implementations.
+
+10. **Side-effecting intrinsics must declare `observable <~ true`** —
+    `PrintInt#`, `Malloc#`, `Memcpy#`, and any intrinsic with external side
+    effects MUST have `observable <~ true` in their metadata. This prevents
+    DCE from eliminating the call. The `observable` property is a
+    frontend-intrinsic PascalCase identifier.
 
 ### Common Syntax Traps
 
-10. **`<-` is statement-level** — it breaks the expression parser.
-    You cannot write `let x = &list <- val`. Use standalone
-    `&list <- val;` or `let x = &list <- ;` (pop only).
+11. **`<-` is statement-level** — it breaks the expression parser.
+    You cannot write `let x = &list <- val`. Use standalone statements:
+    - `&list <- val;` — push val onto list (destructive insert)
+    - `x <- &list;` — pop from list into x (destructive extract)
+    - `x <- list;` — read from list without removing (non-destructive copy)
 
-11. **`Byte` is defined in `lib/std/types.bv`** — do not assume it
+12. **`Byte` is defined in `lib/std/types.bv`** — do not assume it
     exists without importing. If the type isn't needed, use `Int`.
 
 ### Type System
 
-12. **`type Foo <: List { ... }` creates a TypeDef** — but `Foo<Int>`
+13. **`type Foo <: List { ... }` creates a TypeDef** — but `Foo<Int>`
     is NOT automatically assignable to `List<Int>` in the type checker.
     Projections like `:> Size` and index `foo[i]` may fail on `Foo<Int>`
     even though the runtime representation is identical.
 
-13. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
+14. **No implicit `Copy` on enums with `String`** — `InsertStrategy::Custom(String)`
     requires removing `Copy` and adjusting comparison code.
 
 ## Commenting Mandate (Backend Updates)

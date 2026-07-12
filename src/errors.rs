@@ -566,32 +566,76 @@ pub enum FuzzError {
 impl fmt::Display for FuzzError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FuzzError::Mismatch { function, case_index, inputs, expected, actual, .. } => {
-                write!(f, "fuzz case {} of '{}' failed: expected {}, got {}",
-                    case_index, function, expected, actual)?;
+            FuzzError::Mismatch {
+                function,
+                case_index,
+                inputs,
+                expected,
+                actual,
+                ..
+            } => {
+                write!(
+                    f,
+                    "fuzz case {} of '{}' failed: expected {}, got {}",
+                    case_index, function, expected, actual
+                )?;
                 if !inputs.is_empty() {
                     write!(f, " (inputs: {})", inputs)?;
                 }
                 Ok(())
             }
-            FuzzError::InvalidInput { function, case_index, detail, .. } => {
-                write!(f, "fuzz case {} of '{}': precondition not satisfied: {}",
-                    case_index, function, detail)
+            FuzzError::InvalidInput {
+                function,
+                case_index,
+                detail,
+                ..
+            } => {
+                write!(
+                    f,
+                    "fuzz case {} of '{}': precondition not satisfied: {}",
+                    case_index, function, detail
+                )
             }
-            FuzzError::Unverifiable { function, case_index, detail, .. } => {
-                write!(f, "fuzz case {} of '{}': cannot verify — {}",
-                    case_index, function, detail)
+            FuzzError::Unverifiable {
+                function,
+                case_index,
+                detail,
+                ..
+            } => {
+                write!(
+                    f,
+                    "fuzz case {} of '{}': cannot verify — {}",
+                    case_index, function, detail
+                )
             }
-            FuzzError::MissingBinding { function, case_index, param, .. } => {
-                write!(f, "fuzz case {} of '{}': missing binding for parameter '{}'",
-                    case_index, function, param)
+            FuzzError::MissingBinding {
+                function,
+                case_index,
+                param,
+                ..
+            } => {
+                write!(
+                    f,
+                    "fuzz case {} of '{}': missing binding for parameter '{}'",
+                    case_index, function, param
+                )
             }
-            FuzzError::Skipped { function, reason, .. } => {
+            FuzzError::Skipped {
+                function, reason, ..
+            } => {
                 write!(f, "fuzz check skipped for '{}': {}", function, reason)
             }
-            FuzzError::EvaluationError { function, case_index, message, .. } => {
-                write!(f, "fuzz case {} of '{}' raised error: {}",
-                    case_index, function, message)
+            FuzzError::EvaluationError {
+                function,
+                case_index,
+                message,
+                ..
+            } => {
+                write!(
+                    f,
+                    "fuzz case {} of '{}' raised error: {}",
+                    case_index, function, message
+                )
             }
         }
     }
@@ -734,6 +778,416 @@ impl fmt::Display for ContractError {
     }
 }
 
+// ── New Architecture Error Types (2026-07-12 rewrite) ────────────────────
+//
+// These error types are for the new compiler architecture. They are additive —
+// existing error types are untouched. As phases progress, older error types
+// will be consolidated into CompilerError variants.
+//
+// 2026-07-12: Phase 0.0 — AllocError, DeriveError, BackendError, CompilerError
+
+/// Errors from alloc annotation validation (Phase A/A.1 of the rewrite).
+///
+/// Validated at type-check time: alloc("Stack") must pass escape analysis,
+/// alloc(0x...) must be a compile-time constant, etc.
+#[derive(Debug, Clone)]
+pub enum AllocError {
+    /// Variable with alloc("Stack") escapes the current scope.
+    Escape { name: String, span: Option<Span> },
+    /// alloc(0x...) requires a compile-time constant address.
+    AddressNotConstant { name: String, span: Option<Span> },
+    /// Physical address is outside the target's memory map (backend-validated,
+    /// but caught at type-check time if the constant is clearly out of range).
+    AddressOutOfRange {
+        name: String,
+        address: i64,
+        span: Option<Span>,
+    },
+}
+
+impl fmt::Display for AllocError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AllocError::Escape { name, .. } => {
+                write!(
+                    f,
+                    "variable '{}' is annotated alloc(\"Stack\") but escapes the current scope",
+                    name
+                )
+            }
+            AllocError::AddressNotConstant { name, .. } => {
+                write!(
+                    f,
+                    "alloc annotation on '{}' requires a compile-time constant address",
+                    name
+                )
+            }
+            AllocError::AddressOutOfRange { name, address, .. } => {
+                write!(
+                    f,
+                    "alloc address 0x{:x} on '{}' is out of range",
+                    address, name
+                )
+            }
+        }
+    }
+}
+
+/// Errors from the derivation/synthesis engine (Phase 6 of the rewrite).
+#[derive(Debug, Clone)]
+pub enum DeriveError {
+    /// Derivation block has no examples.
+    NoExamples { function: String },
+    /// Example input types don't match the function signature.
+    ExampleTypeMismatch {
+        function: String,
+        example_index: usize,
+        expected: String,
+        found: String,
+    },
+    /// Synthesis found no valid expression within the depth bound.
+    SynthesisFailed {
+        function: String,
+        max_depth: usize,
+        reason: String,
+    },
+    /// SMT solver returned an error.
+    SolverError { function: String, message: String },
+    /// Derivation requires SMT but --no-smt or solver unavailable.
+    SolverUnavailable { function: String },
+}
+
+impl fmt::Display for DeriveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DeriveError::NoExamples { function } => {
+                write!(f, "derivation block for '{}' has no examples", function)
+            }
+            DeriveError::ExampleTypeMismatch {
+                function,
+                example_index,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "derivation example {} for '{}': expected type {}, got {}",
+                    example_index, function, expected, found
+                )
+            }
+            DeriveError::SynthesisFailed {
+                function,
+                max_depth,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "synthesis of '{}' failed at depth {}: {}",
+                    function, max_depth, reason
+                )
+            }
+            DeriveError::SolverError { function, message } => {
+                write!(f, "SMT solver error for '{}': {}", function, message)
+            }
+            DeriveError::SolverUnavailable { function } => {
+                write!(
+                    f,
+                    "SMT solver is not available; derivation of '{}' requires it",
+                    function
+                )
+            }
+        }
+    }
+}
+
+/// Errors from backend code generation (Phase 4 of the rewrite).
+///
+/// Contains backend-specific variants for LLVM, CIRCT, and Webstack.
+/// Each variant carries enough context for a backend-specific diagnostic.
+#[derive(Debug, Clone)]
+pub enum BackendError {
+    /// Generic codegen failure with message.
+    CodegenFailed { message: String, span: Option<Span> },
+    /// LLVM-specific error.
+    Llvm(LlvmError),
+    /// CIRCT-specific error.
+    Circt(CirctError),
+    /// Webstack-specific error.
+    Webstack(WebstackError),
+    /// Unknown or unhandled target.
+    UnsupportedTarget { target: String, span: Option<Span> },
+}
+
+impl fmt::Display for BackendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BackendError::CodegenFailed { message, .. } => {
+                write!(f, "codegen failed: {}", message)
+            }
+            BackendError::Llvm(err) => fmt::Display::fmt(err, f),
+            BackendError::Circt(err) => fmt::Display::fmt(err, f),
+            BackendError::Webstack(err) => fmt::Display::fmt(err, f),
+            BackendError::UnsupportedTarget { target, .. } => {
+                write!(f, "unsupported target: {}", target)
+            }
+        }
+    }
+}
+
+/// LLVM-specific codegen error.
+#[derive(Debug, Clone)]
+pub enum LlvmError {
+    /// LLVM instruction emission failed.
+    InstructionFailed {
+        instruction: String,
+        reason: String,
+        span: Option<Span>,
+    },
+    /// Unknown or unsupported alloc strategy for LLVM target.
+    UnknownAllocTarget {
+        target: String,
+        binding: String,
+        span: Option<Span>,
+    },
+    /// Arena allocation missing base pointer.
+    MissingArenaPointer { binding: String, span: Option<Span> },
+    /// Physical address not in target memory map.
+    AddressNotInMemoryMap {
+        address: i64,
+        target: String,
+        span: Option<Span>,
+    },
+}
+
+impl fmt::Display for LlvmError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LlvmError::InstructionFailed {
+                instruction,
+                reason,
+                ..
+            } => {
+                write!(f, "LLVM instruction '{}' failed: {}", instruction, reason)
+            }
+            LlvmError::UnknownAllocTarget {
+                target, binding, ..
+            } => {
+                write!(
+                    f,
+                    "unknown alloc target '{}' for binding '{}'",
+                    target, binding
+                )
+            }
+            LlvmError::MissingArenaPointer { binding, .. } => {
+                write!(
+                    f,
+                    "alloc(\"Arena\") on '{}' requires a pointer argument",
+                    binding
+                )
+            }
+            LlvmError::AddressNotInMemoryMap {
+                address, target, ..
+            } => {
+                write!(
+                    f,
+                    "address 0x{:x} is not in the memory map for target '{}'",
+                    address, target
+                )
+            }
+        }
+    }
+}
+
+/// CIRCT-specific codegen error.
+#[derive(Debug, Clone)]
+pub enum CirctError {
+    /// Physical address not mapped on the target device.
+    AddressNotMapped {
+        address: i64,
+        device: String,
+        available_range: String,
+        span: Option<Span>,
+    },
+    /// Unknown alloc strategy for hardware target.
+    UnknownAlloc {
+        strategy: String,
+        binding: String,
+        span: Option<Span>,
+    },
+}
+
+impl fmt::Display for CirctError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CirctError::AddressNotMapped {
+                address,
+                device,
+                available_range,
+                ..
+            } => {
+                write!(
+                    f,
+                    "address 0x{:x} not mapped on device '{}' (available: {})",
+                    address, device, available_range
+                )
+            }
+            CirctError::UnknownAlloc {
+                strategy, binding, ..
+            } => {
+                write!(
+                    f,
+                    "unknown alloc strategy '{}' for binding '{}'",
+                    strategy, binding
+                )
+            }
+        }
+    }
+}
+
+/// Webstack-specific codegen error.
+#[derive(Debug, Clone)]
+pub enum WebstackError {
+    /// WASM emission failed.
+    WasmEmitFailed { reason: String, span: Option<Span> },
+}
+
+impl fmt::Display for WebstackError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            WebstackError::WasmEmitFailed { reason, .. } => {
+                write!(f, "WASM emission failed: {}", reason)
+            }
+        }
+    }
+}
+
+// ── Into impls: convert specific error types into CompilerError ──
+
+/// Top-level compiler error, wrapping all specific error types.
+///
+/// This provides a common error type for the compilation pipeline.
+/// Each specific error type can be converted into CompilerError via From.
+#[derive(Debug, Clone)]
+pub enum CompilerError {
+    /// Invalid file path or filename format.
+    InvalidPath,
+    /// Malformed filename (expected [name].[bv] or [name].[flags].[bv]).
+    MalformedFilename(String),
+    /// Syntax/parse error.
+    Syntax(SyntaxError),
+    /// Type-checking error.
+    Type(TypeError),
+    /// Import resolution error.
+    Import(ImportError),
+    /// Contract verification error.
+    Contract(ContractError),
+    /// Alloc annotation validation error.
+    Alloc(AllocError),
+    /// Derivation/synthesis error.
+    Derive(DeriveError),
+    /// Backend codegen error.
+    Backend(BackendError),
+    /// Fuzz verification error.
+    Fuzz(FuzzError),
+    /// Proof engine error.
+    Proof(ProofError),
+    /// I/O error.
+    Io(String),
+}
+
+impl fmt::Display for CompilerError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CompilerError::InvalidPath => write!(f, "invalid file path"),
+            CompilerError::MalformedFilename(msg) => write!(f, "malformed filename: {}", msg),
+            CompilerError::Syntax(err) => fmt::Display::fmt(err, f),
+            CompilerError::Type(err) => fmt::Display::fmt(err, f),
+            CompilerError::Import(err) => fmt::Display::fmt(err, f),
+            CompilerError::Contract(err) => fmt::Display::fmt(err, f),
+            CompilerError::Alloc(err) => fmt::Display::fmt(err, f),
+            CompilerError::Derive(err) => fmt::Display::fmt(err, f),
+            CompilerError::Backend(err) => fmt::Display::fmt(err, f),
+            CompilerError::Fuzz(err) => fmt::Display::fmt(err, f),
+            CompilerError::Proof(err) => fmt::Display::fmt(err, f),
+            CompilerError::Io(msg) => write!(f, "I/O error: {}", msg),
+        }
+    }
+}
+
+impl From<SyntaxError> for CompilerError {
+    fn from(err: SyntaxError) -> Self {
+        CompilerError::Syntax(err)
+    }
+}
+
+impl From<TypeError> for CompilerError {
+    fn from(err: TypeError) -> Self {
+        CompilerError::Type(err)
+    }
+}
+
+impl From<ImportError> for CompilerError {
+    fn from(err: ImportError) -> Self {
+        CompilerError::Import(err)
+    }
+}
+
+impl From<ContractError> for CompilerError {
+    fn from(err: ContractError) -> Self {
+        CompilerError::Contract(err)
+    }
+}
+
+impl From<AllocError> for CompilerError {
+    fn from(err: AllocError) -> Self {
+        CompilerError::Alloc(err)
+    }
+}
+
+impl From<DeriveError> for CompilerError {
+    fn from(err: DeriveError) -> Self {
+        CompilerError::Derive(err)
+    }
+}
+
+impl From<BackendError> for CompilerError {
+    fn from(err: BackendError) -> Self {
+        CompilerError::Backend(err)
+    }
+}
+
+impl From<FuzzError> for CompilerError {
+    fn from(err: FuzzError) -> Self {
+        CompilerError::Fuzz(err)
+    }
+}
+
+impl From<ProofError> for CompilerError {
+    fn from(err: ProofError) -> Self {
+        CompilerError::Proof(err)
+    }
+}
+
+impl From<LlvmError> for CompilerError {
+    fn from(err: LlvmError) -> Self {
+        CompilerError::Backend(BackendError::Llvm(err))
+    }
+}
+
+impl From<CirctError> for CompilerError {
+    fn from(err: CirctError) -> Self {
+        CompilerError::Backend(BackendError::Circt(err))
+    }
+}
+
+impl From<WebstackError> for CompilerError {
+    fn from(err: WebstackError) -> Self {
+        CompilerError::Backend(BackendError::Webstack(err))
+    }
+}
+
+impl std::error::Error for CompilerError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,5 +1270,186 @@ mod tests {
     fn test_error_mode_enum() {
         assert_ne!(ErrorMode::Verbose, ErrorMode::Whisper);
         assert_eq!(ErrorMode::Verbose, ErrorMode::Verbose);
+    }
+
+    // ── New Architecture Error Type Tests ──
+
+    #[test]
+    fn test_alloc_error_escape() {
+        let err = AllocError::Escape {
+            name: "buffer".into(),
+            span: None,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("buffer"));
+        assert!(msg.contains("Stack"));
+        assert!(msg.contains("escape"));
+    }
+
+    #[test]
+    fn test_alloc_error_address_not_constant() {
+        let err = AllocError::AddressNotConstant {
+            name: "reg".into(),
+            span: None,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("reg"));
+        assert!(msg.contains("constant"));
+    }
+
+    #[test]
+    fn test_alloc_error_out_of_range() {
+        let err = AllocError::AddressOutOfRange {
+            name: "mmio".into(),
+            address: 0xFFFF_FFFF,
+            span: None,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("mmio"));
+        assert!(msg.contains("ffffffff"));
+    }
+
+    #[test]
+    fn test_derive_error_no_examples() {
+        let err = DeriveError::NoExamples {
+            function: "add".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("add"));
+        assert!(msg.contains("no examples"));
+    }
+
+    #[test]
+    fn test_derive_error_type_mismatch() {
+        let err = DeriveError::ExampleTypeMismatch {
+            function: "add".into(),
+            example_index: 0,
+            expected: "Int".into(),
+            found: "String".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("add"));
+        assert!(msg.contains("Int"));
+        assert!(msg.contains("String"));
+    }
+
+    #[test]
+    fn test_derive_error_synthesis_failed() {
+        let err = DeriveError::SynthesisFailed {
+            function: "fib".into(),
+            max_depth: 5,
+            reason: "no valid expression found".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("fib"));
+        assert!(msg.contains("5"));
+    }
+
+    #[test]
+    fn test_llvm_error_instruction_failed() {
+        let err = LlvmError::InstructionFailed {
+            instruction: "add nsw i64".into(),
+            reason: "operand type mismatch".into(),
+            span: None,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("add nsw i64"));
+        assert!(msg.contains("operand"));
+    }
+
+    #[test]
+    fn test_llvm_error_unknown_alloc() {
+        let err = LlvmError::UnknownAllocTarget {
+            target: "QuantumGravityZone".into(),
+            binding: "x".into(),
+            span: None,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("QuantumGravityZone"));
+    }
+
+    #[test]
+    fn test_circt_error_address_not_mapped() {
+        let err = CirctError::AddressNotMapped {
+            address: 0x4000_0000,
+            device: "xc7z020".into(),
+            available_range: "0x0000-0x3FFF".into(),
+            span: None,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("40000000"));
+        assert!(msg.contains("xc7z020"));
+    }
+
+    #[test]
+    fn test_webstack_error_emit_failed() {
+        let err = WebstackError::WasmEmitFailed {
+            reason: "unsupported opcode".into(),
+            span: None,
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("WASM"));
+        assert!(msg.contains("unsupported"));
+    }
+
+    #[test]
+    fn test_backend_error_variants() {
+        let llvm = BackendError::Llvm(LlvmError::MissingArenaPointer {
+            binding: "buf".into(),
+            span: None,
+        });
+        assert!(format!("{}", llvm).contains("buf"));
+
+        let circt = BackendError::Circt(CirctError::UnknownAlloc {
+            strategy: "BRAM".into(),
+            binding: "x".into(),
+            span: None,
+        });
+        assert!(format!("{}", circt).contains("BRAM"));
+
+        let web = BackendError::Webstack(WebstackError::WasmEmitFailed {
+            reason: "timeout".into(),
+            span: None,
+        });
+        assert!(format!("{}", web).contains("timeout"));
+    }
+
+    #[test]
+    fn test_compiler_error_wraps_errors() {
+        let alloc = AllocError::Escape {
+            name: "x".into(),
+            span: None,
+        };
+        let ce: CompilerError = alloc.into();
+        assert!(matches!(ce, CompilerError::Alloc(..)));
+        assert!(format!("{}", ce).contains("x"));
+
+        let derive = DeriveError::NoExamples {
+            function: "f".into(),
+        };
+        let ce: CompilerError = derive.into();
+        assert!(matches!(ce, CompilerError::Derive(..)));
+
+        let llvm = LlvmError::MissingArenaPointer {
+            binding: "b".into(),
+            span: None,
+        };
+        let ce: CompilerError = llvm.into();
+        assert!(matches!(ce, CompilerError::Backend(BackendError::Llvm(..))));
+    }
+
+    #[test]
+    fn test_compiler_error_display() {
+        let cases: Vec<(CompilerError, &str)> = vec![
+            (CompilerError::InvalidPath, "invalid file path"),
+            (
+                CompilerError::MalformedFilename("bad".into()),
+                "malformed filename",
+            ),
+            (CompilerError::Io("disk full".into()), "I/O error"),
+        ];
+        for (err, substr) in cases {
+            assert!(format!("{}", err).contains(substr), "failed for variant");
+        }
     }
 }
