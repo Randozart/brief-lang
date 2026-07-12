@@ -2939,6 +2939,20 @@ the stdlib `cli.c.bv` extensible CLI framework.
 
 All frontend-only — no backend, archive, or SMT changes.
 
+### Parallel: Alloc Metadata System
+
+**Plan**: `docs/plans/2026-07-12-alloc-metadata.md`
+
+Adds `alloc` as a `<~` metadata annotation on variable bindings. Frontend
+validates `"Stack"` (via escape analysis) and physical address literals
+(`0x4000_2000`), expanding them to `alloca`, `volatile`, `observable`, and
+`fixed_addr` metadata. Unknown values pass through to backends, which
+validate what they can execute — known key + unparseable value is an error,
+unknown keys are silently ignored.
+
+Builds on the metadata dispatch infrastructure from Phase 8G and the
+property system from Phase 1B.
+
 ### Next: Phase 15 — Library Mode Completion
 
 **Plan**: `docs/plans/2026-07-11-library-mode-completion.md`

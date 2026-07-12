@@ -891,9 +891,11 @@ fn initialize_entry_state(state: &mut State, universe: &TypeUniverse) {
 Extensible Types (0-7)
   └─ Derivation (8.0-8.2)
   └─ Pure Bits (7.5, 8A-8G)
-      └─ Modifiers + Entry + Scripting (16A-16F)    ← THIS PLAN
-          └─ Derivation remaining (8.4-8.5, 9-14)
-              └─ Phase 15: Library mode
+      ├─ Modifiers + Entry + Scripting (16A-16F)    ← THIS PLAN
+      ├─ Alloc Metadata (A.0-A.6)                   ← parallel plan
+      └─ Derivation remaining (8.4-8.5, 9-14)
+          └─ Phase 15: Library mode
+              └─ Zero-copy meld
 ```
 
 ### What changes in the existing derivation plan

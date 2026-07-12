@@ -1562,6 +1562,20 @@ and the stdlib `cli.c.bv` CLI framework. All frontend-only.
 - Phase 1A (metadata infrastructure): `[#]` uses the contract system
 - Phase 7 (plugin system): `cli.c.bv` can discover entry points via plugin hooks
 
+### Parallel: Alloc Metadata System
+
+**Plan**: `docs/plans/2026-07-12-alloc-metadata.md`
+
+Adds `alloc` as a `<~` metadata annotation on variable bindings for
+stack, physical MMIO, arena, and placement allocation. Frontend validates
+`"Stack"` and physical address constants; backends validate and emit the
+correct IR. Known key + unparseable value → error; unknown key → silently
+ignored.
+
+**Prerequisites from this plan**:
+- Phase 1B (property system): `<~` metadata infrastructure
+- Phase 2 (codegen migration): backends query the universe for type sizes
+
 ### After That: Phase 15 — Library Mode Completion
 
 **Plan**: `docs/plans/2026-07-11-library-mode-completion.md`

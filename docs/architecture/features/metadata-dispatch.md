@@ -22,11 +22,32 @@ Instead, the frontend guarantees only language-level properties:
 - Metadata keys are valid identifiers
 - Metadata values are valid property types (string, int, bool, list)
 
+The frontend also validates metadata it has domain knowledge to verify.
+For example, `alloc("Stack")` triggers escape analysis, and
+`alloc(0x4000_2000)` verifies the address is a compile-time constant.
+Metadata the frontend cannot validate is passed through opaquely.
+
 Everything target-specific is delegated to the backends through
 **opaque metadata strings**. A metadata value is a payload that the
 frontend carries but never interprets. Each backend reads only the keys
 it understands, validates them against its target, and either emits code
 or reports an error.
+
+### Validation Rules
+
+1. **Unknown key** → silently ignored. The backend has no opinion about
+   the key. Forward compatibility: new backends add keys without breaking
+   existing backends.
+
+2. **Known key + supported value** → emit code. The backend understands
+   the key and the value, and can fulfill the request.
+
+3. **Known key + unparseable/unsupported value** → **error**. The backend
+   recognizes the key but cannot fulfill the value. The error message MUST
+   include the key name, the value, and the reason for rejection. Example:
+   `alloc("QuantumGravityZone")` produces an error because the LLVM backend
+   knows the `alloc` key but doesn't recognize `"QuantumGravityZone"`.
+   A future backend that does recognize it simply handles it.
 
 This is **Distributed Metadata Validation**: verification is performed
 at the layer that possesses the relevant domain knowledge, not earlier.
@@ -142,6 +163,7 @@ To prevent collisions between backends, metadata keys follow a
 
 | Prefix | Consumed by | Example |
 |--------|-------------|---------|
+| `alloc` | Frontend + all backends | Allocation annotation | `"Stack"`, `0x4000_2000`, `"Arena", ptr` |
 | `llvm_*` | `brief-llvm` backend | `llvm_instr`, `llvm_asm`, `llvm_asm_constraints`, `llvm_entry_arg` |
 | `circt_*` | `brief-circt` hardware backend | `circt_op`, `circt_module` |
 | `hls_*` | `brief-circt` HLS pass | `hls_storage`, `hls_capacity` |
@@ -178,6 +200,7 @@ forward compatibility when new backends add new keys.
 | `llvm_asm_constraints` | Parse register constraints (`"={ax}"`, `"{dx}"`). Validate registers exist on target. Validate constraint syntax matches LLVM expected format. |
 | `llvm_instr` | Parse as LLVM IR instruction. Validate operands and types match surrounding IR. Reject malformed IR with source location. |
 | `llvm_entry_arg` | Validate value is `"argc"` or `"argv"`. Verify the state field type matches the entry parameter (`i32` for `argc`, `ptr` for `argv`). On `main` emission, wire the entry parameter into this state field. |
+| `alloc` | If value is a string, validate it's a known allocation strategy (`"Stack"`, `"Heap"`, `"Arena"`, etc.) or error. If value is an integer (physical address), validate address is in the target memory map or error. If value is a list `[strategy, ptr]`, validate the pointer is non-null. Unknown string values produce an error (known key, unparseable value). |
 | Unknown keys | Silently ignored. |
 
 ### 4.3 CIRCT Backend Responsibilities (`brief-circt`)
