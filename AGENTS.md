@@ -35,9 +35,19 @@ proven at compile time, not `unsafe` blocks.
 6. **ALWAYS FINISH**: No `todo!()`, `unreachable!()`, `// TODO:`, or stubs in
    committed code. Every feature must be wired parser → AST → analysis → codegen → tests.
 
-7. **NEVER DISCARD STAGED WORK**: The git index holds critical work-in-progress.
-   Before `git checkout --` or `git restore`, inspect everything that will be
-   destroyed. Stash instead of discard. Never `git stash drop` — resolve conflicts.
+7. **NEVER DISCARD UNCOMMITTED WORK**: The working tree may hold critical
+   work-in-progress from multiple agents. `git checkout -- <file>`, `git restore`,
+   and `git checkout .` DESTROY uncommitted changes permanently. They are never
+   acceptable. If you need to change focus:
+   - **Commit your own changes** with `git add <your files> && git commit`.
+     Targeted add+commit never touches other agents' files.
+   - **Never stash** work from other agents — stashing creates a single bundle
+     that risks loss when popped over conflicts. Commit is safer.
+   - **Never use `git checkout --`** or `git restore` on any file, for any reason.
+     If a file needs reverting, discuss with the team first.
+   - `git reset HEAD <file>` is safe for unstaging (does not modify file contents).
+   The git index holds critical work-in-progress. Treat every uncommitted change
+   as irreplaceable.
 
 8. **TESTS OR IT DOESN'T EXIST**: Every new feature, every code path, every
    match arm must have tests. `cargo test --lib` before every commit.
