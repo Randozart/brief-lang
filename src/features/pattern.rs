@@ -39,7 +39,7 @@ impl ExprEval for PatternMatchExpr {
                 });
                 Ok(Value::Bool(all_matched))
             }
-            _ => Ok(Value::Bool(false)),
+            _ => Ok(Value::Bits(vec![0u8])),
         }
     }
 }
@@ -70,7 +70,7 @@ impl ExprEval for MatchExpr {
             if matched {
                 if let Some(guard) = &arm.guard {
                     let guard_val = ctx.eval_expr(guard)?;
-                    if guard_val != Value::Bool(true) { continue; }
+                    if guard_val != Value::Bits(vec![1u8]) { continue; }
                 }
                 return ctx.eval_expr(&arm.body);
             }

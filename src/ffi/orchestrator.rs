@@ -210,10 +210,10 @@ impl Orchestrator {
 
 fn is_empty_value(value: &Value) -> bool {
     match value {
-        Value::Int(0) => true,
-        Value::Float(0.0) => true,
-        Value::String(s) => s.is_empty(),
-        Value::Bool(false) => true,
+        Value::Bits(crate::interpreter::i64_to_bits(0)) => true,
+        Value::Bits(crate::interpreter::f64_to_bits(0.0)) => true,
+        Value::Bits(s.as_bytes().to_vec()) => s.is_empty(),
+        Value::Bits(vec![0u8]) => true,
         Value::List(l) => l.is_empty(),
         Value::Instance { fields, .. } => fields.is_empty(),
         Value::Void => true,

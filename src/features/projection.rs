@@ -1,7 +1,6 @@
 use crate::ast::{Expr, ProjectionTarget, Type};
 use crate::features::traits::*;
-use crate::interpreter::{Interpreter, RuntimeError, Value};
-use crate::interpreter::value_as_i64;
+use crate::interpreter::{f64_to_bits, i64_to_bits, value_as_i64, Interpreter, RuntimeError, Value};
 use crate::typechecker::TypeChecker;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -29,146 +28,38 @@ impl ExprEval for ProjectionExpr {
             v => v,
         };
         match &self.target {
-            ProjectionTarget::Size => match &source_val {
-                Value::Int(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_) => Ok(Value::Int(1)),
-                // 2026-07-11: Bits from Expr::String carry UTF-8 bytes; return byte length.
-                Value::Bits(d) => Ok(Value::Int(d.len() as i64)),
-                Value::List(items) => Ok(Value::Int(items.len() as i64)),
-                Value::Tuple(items) => Ok(Value::Int(items.len() as i64)),
-                Value::String(s) => Ok(Value::Int(s.len() as i64)),
-                Value::HashMap(m) => Ok(Value::Int(m.len() as i64)),
-                Value::HashSet(s) => Ok(Value::Int(s.len() as i64)),
-                _ => Err(RuntimeError::TypeMismatch("Size projection requires List, String, or collection type".into())),
-            },
-            ProjectionTarget::Bytes => {
-                let size = match &source_val {
-                    Value::Int(_) | Value::Float(_) => 8,
-                    Value::Bool(_) => 1, Value::Char(_) => 4,
-                    Value::String(s) => s.len() as i64,
-                    Value::List(items) => items.len() as i64 * 8,
+            ProjectionTarget::Size => {
+                let n = match &source_val {
                     Value::Bits(d) => d.len() as i64,
-                    Value::Instance { fields, .. } => fields.len() as i64 * 8,
-                    Value::Tuple(items) => items.len() as i64 * 8,
-                    _ => 0,
+                    Value::List(v) => v.len() as i64,
+                    Value::Tuple(v) => v.len() as i64,
+                    Value::HashMap(m) => m.len() as i64,
+                    Value::HashSet(s) => s.len() as i64,
+                    _ => return Err(RuntimeError::TypeMismatch("Size projection requires collection".into())),
                 };
-                Ok(Value::Int(size))
+                Ok(Value::Bits(i64_to_bits(n)))
             }
-            ProjectionTarget::Ptr => Ok(Value::Int(0)),
-            ProjectionTarget::Alignment => {
-                let align = match &source_val {
-                    Value::Int(_) | Value::Float(_) => 8,
-                    Value::Bool(_) => 1,
-                    Value::Char(_) => 4,
-                    Value::Bits(_) | Value::String(_) | Value::List(_) | Value::Tuple(_)
-                        | Value::HashMap(_) | Value::HashSet(_)
-                        | Value::Enum(..)
-                        | Value::Instance { .. }
-                        | Value::Defn(_) | Value::DbvlTable(_) | Value::Regex(_)
-                        | Value::Ptr(_) | Value::Ref(_) => 8,
-                    Value::Void => 0,
-                    Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
-                        return Err(RuntimeError::TypeMismatch("Alignment on compile-time value".into()));
-                    }
+            ProjectionTarget::Ptr => Ok(Value::Bits(i64_to_bits(0))),
+            ProjectionTarget::IsEmpty => {
+                let empty = match &source_val {
+                    Value::List(items) => items.is_empty(),
+                    Value::Tuple(items) => items.is_empty(),
+                    Value::HashMap(m) => m.is_empty(),
+                    Value::HashSet(s) => s.is_empty(),
+                    Value::Bits(d) => d.is_empty(),
+                    _ => return Err(RuntimeError::TypeMismatch("IsEmpty requires collection".into())),
                 };
-                Ok(Value::Int(align))
+                Ok(Value::Bits(vec![if empty { 1u8 } else { 0u8 }]))
             }
-            ProjectionTarget::Range => {
-                let range = match &source_val {
-                    Value::Int(_) | Value::Bits(_) => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
-                    Value::Bool(_) => vec![Value::Int(0), Value::Int(1)],
-                    Value::Char(_) => vec![Value::Int(0), Value::Int(0x10FFFF)],
-                    Value::Float(_) => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
-                    _ => vec![Value::Int(i64::MIN), Value::Int(i64::MAX)],
-                };
-                Ok(Value::List(range))
-            }
-            ProjectionTarget::Popcount => match source_val {
-                Value::Int(n) => Ok(Value::Int(n.count_ones() as i64)),
-                Value::Bits(_) => {
-                    let n = value_as_i64(&source_val).unwrap();
-                    Ok(Value::Int(n.count_ones() as i64))
-                }
-                _ => Err(RuntimeError::TypeMismatch("Popcount requires Int".into())),
-            },
-            ProjectionTarget::LeadingZeros => match source_val {
-                Value::Int(n) => Ok(Value::Int(n.leading_zeros() as i64)),
-                Value::Bits(_) => {
-                    let n = value_as_i64(&source_val).unwrap();
-                    Ok(Value::Int(n.leading_zeros() as i64))
-                }
-                _ => Err(RuntimeError::TypeMismatch("LeadingZeros requires Int".into())),
-            },
-            ProjectionTarget::TrailingZeros => match source_val {
-                Value::Int(n) => Ok(Value::Int(n.trailing_zeros() as i64)),
-                Value::Bits(_) => {
-                    let n = value_as_i64(&source_val).unwrap();
-                    Ok(Value::Int(n.trailing_zeros() as i64))
-                }
-                _ => Err(RuntimeError::TypeMismatch("TrailingZeros requires Int".into())),
-            },
-            ProjectionTarget::Absolute => match source_val {
-                Value::Int(n) => Ok(Value::Int(n.abs())),
-                Value::Bits(_) => {
-                    let n = value_as_i64(&source_val).unwrap();
-                    Ok(Value::Int(n.abs()))
-                }
-                Value::Float(f) => Ok(Value::Float(f.abs())),
-                _ => Err(RuntimeError::TypeMismatch("Absolute requires Int or Float".into())),
-            },
-            ProjectionTarget::BitReverse => match source_val {
-                Value::Int(n) => Ok(Value::Int(n.reverse_bits())),
-                Value::Bits(_) => {
-                    let n = value_as_i64(&source_val).unwrap();
-                    Ok(Value::Int(n.reverse_bits()))
-                }
-                _ => Err(RuntimeError::TypeMismatch("BitReverse requires Int".into())),
-            },
-            ProjectionTarget::Type => {
-                let discriminant = match &source_val {
-                    Value::Int(_) => 1, Value::Bits(_) => 8, Value::Float(_) => 2, Value::Bool(_) => 3,
-                    Value::Char(_) => 4, Value::String(_) => 5, Value::List(_) => 6,
-                    Value::Tuple(_) => 7, Value::HashMap(_) => 9,
-                    Value::HashSet(_) => 10,
-                    Value::Instance { .. } => 11, Value::Enum(..) => 12,
-                    Value::Defn(_) => 16, Value::DbvlTable(_) => 17, Value::Regex(_) => 18,
-                    Value::Ptr(_) | Value::Ref(_) => 19, Value::Void => 0,
-                    Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
-                        unreachable!("compile-time only value")
-                    }
-                };
-                Ok(Value::Int(discriminant))
-            }
-            ProjectionTarget::PtrBang => Ok(Value::Int(0)),
-            ProjectionTarget::Keys => match &source_val {
-                Value::HashMap(m) => {
-                    let mut keys: Vec<Value> = m.keys().cloned().map(Value::String).collect();
-                    keys.sort_by(|a, b| { if let (Value::String(a), Value::String(b)) = (a, b) { a.cmp(b) } else { std::cmp::Ordering::Equal } });
-                    Ok(Value::List(keys))
-                }
-                _ => Err(RuntimeError::TypeMismatch("Keys requires HashMap".into())),
-            },
-            ProjectionTarget::Values => match &source_val {
-                Value::HashMap(m) => Ok(Value::List(m.values().cloned().collect())),
-                _ => Err(RuntimeError::TypeMismatch("Values requires HashMap".into())),
-            },
             ProjectionTarget::Contains(key_expr) => {
                 let key_val = ctx.eval_expr(key_expr)?;
                 let key_str = ctx.value_to_string(&key_val)?;
                 match &source_val {
-                    Value::HashMap(m) => Ok(Value::Bool(m.contains_key(&key_str))),
-                    Value::HashSet(s) => Ok(Value::Bool(s.contains(&key_str))),
+                    Value::HashMap(m) => Ok(Value::Bits(vec![if m.contains_key(&key_str) { 1u8 } else { 0u8 }])),
+                    Value::HashSet(s) => Ok(Value::Bits(vec![if s.contains(&key_str) { 1u8 } else { 0u8 }])),
                     _ => Err(RuntimeError::TypeMismatch("Contains requires HashMap or HashSet".into())),
                 }
             }
-            ProjectionTarget::IsEmpty => Ok(Value::Bool(match &source_val {
-                Value::List(items) => items.is_empty(),
-                Value::Tuple(items) => items.is_empty(),
-                Value::HashMap(m) => m.is_empty(),
-                Value::HashSet(s) => s.is_empty(),
-                Value::String(s) => s.is_empty(),
-                Value::Bits(d) => d.is_empty(),
-                _ => return Err(RuntimeError::TypeMismatch("IsEmpty requires List, Tuple, HashMap, HashSet, String, or Bits".into())),
-            })),
             ProjectionTarget::Get(key_expr) => {
                 let key_val = ctx.eval_expr(key_expr)?;
                 let key_str = ctx.value_to_string(&key_val)?;
@@ -203,109 +94,46 @@ impl ExprEval for ProjectionExpr {
                 }
                 _ => Err(RuntimeError::TypeMismatch("Front requires List".into())),
             },
-            ProjectionTarget::Elements => match &source_val {
-                Value::HashSet(s) => {
-                    let mut elems: Vec<Value> = s.iter().cloned().map(Value::String).collect();
-                    elems.sort_by(|a, b| { if let (Value::String(a), Value::String(b)) = (a, b) { a.cmp(b) } else { std::cmp::Ordering::Equal } });
-                    Ok(Value::List(elems))
-                }
-                _ => Err(RuntimeError::TypeMismatch("Elements requires HashSet".into())),
-            },
-            ProjectionTarget::AsStack => match &source_val {
-                Value::List(items) => Ok(Value::List(items.clone())),
-                _ => Err(RuntimeError::TypeMismatch("AsStack requires List".into())),
-            },
-            ProjectionTarget::AsQueue => match &source_val {
-                Value::List(items) => Ok(Value::List(items.clone())),
-                _ => Err(RuntimeError::TypeMismatch("AsQueue requires List".into())),
-            },
-            // Function metadata projections — handled by Interpreter::try_eval_fn_projection
-            // before dispatch reaches ProjectionExpr. These are unreachable fallbacks.
-            ProjectionTarget::Address
-            | ProjectionTarget::Name
-            | ProjectionTarget::Params
-            | ProjectionTarget::Returns
-            | ProjectionTarget::Arity
-            | ProjectionTarget::Loc
-            | ProjectionTarget::Doc
-            | ProjectionTarget::Hash
-            | ProjectionTarget::Contracts
-            | ProjectionTarget::Module
-            | ProjectionTarget::IsPure
-            | ProjectionTarget::FnSpan => Err(RuntimeError::TypeMismatch(
-                "Fn projection requires a function/transaction/inop name, not a runtime value".into()
-            )),
             ProjectionTarget::BitRange(br) => {
-                let n = match &source_val {
-                    Value::Int(n) => *n,
-                    Value::Bits(_) => value_as_i64(&source_val).unwrap(),
-                    _ => return Err(RuntimeError::TypeMismatch("BitRange requires Int".into())),
-                };
+                let n = value_as_i64(&source_val).ok_or_else(|| RuntimeError::TypeMismatch("BitRange requires Int".into()))?;
                 let (lo, hi) = match br {
                     crate::ast::BitRange::Single(i) => (*i, *i),
                     crate::ast::BitRange::Range(l, h) => (*l, *h),
                     crate::ast::BitRange::Any(w) => (0, *w - 1),
                 };
-                if hi > 63 {
-                    return Err(RuntimeError::TypeMismatch(
-                        "BitRange exceeds 64-bit integer width".into()
-                    ));
-                }
+                if hi > 63 { return Err(RuntimeError::TypeMismatch("BitRange exceeds 64-bit integer width".into())); }
                 let width = hi - lo + 1;
                 let shifted = (n as u64) >> lo;
-                let result = if width >= 64 {
-                    shifted as i64
-                } else {
-                    let mask = (1u64 << width) - 1;
-                    (shifted & mask) as i64
-                };
-                Ok(Value::Int(result))
-            },
-            ProjectionTarget::UserDefined(name) => {
-                let val = source_val.clone();
-                match name.as_str() {
-                    "Neg" => match &val {
-                        Value::Int(n) => Ok(Value::Int(-n)),
-                        Value::Bits(_) => Ok(Value::Int(-value_as_i64(&val).unwrap())),
-                        Value::Float(f) => Ok(Value::Float(-f)),
-                        _ => Err(RuntimeError::TypeMismatch("Neg requires Int or Float".into())),
-                    },
-                    "Not" => match &val {
-                        Value::Bool(b) => Ok(Value::Bool(!b)),
-                        _ => Err(RuntimeError::TypeMismatch("Not requires Bool".into())),
-                    },
-                    "BitNot" => match &val {
-                        Value::Int(n) => Ok(Value::Int(!n)),
-                        Value::Bits(_) => Ok(Value::Int(!value_as_i64(&val).unwrap())),
-                        _ => Err(RuntimeError::TypeMismatch("BitNot requires Int".into())),
-                    },
-                    _ => Err(RuntimeError::UnsupportedProjection(format!(
-                        "user-defined projection '{}' is not supported at runtime", name
-                    ))),
-                }
+                let result = if width >= 64 { shifted as i64 }
+                else { let mask = (1u64 << width) - 1; (shifted & mask) as i64 };
+                Ok(Value::Bits(i64_to_bits(result)))
             }
-            ProjectionTarget::UserDefinedWithArg(name, arg_expr) => {
-                // Phase 3.5: Fast-path for well-known operator projections
-                if let Ok(val) = eval_user_projection_fast_path(ctx, &source_val, name, arg_expr) {
-                    return Ok(val);
-                }
-                Err(RuntimeError::UnsupportedProjection(format!(
-                    "user-defined projection '{}' is not supported at runtime", name
-                )))
-            }
-            // ── Phase 2F: Metadata projections ──────────────────
             ProjectionTarget::Width => {
                 let w = match &source_val {
-                    Value::Int(_) | Value::Bits(_) | Value::Float(_) => 64i64,
-                    Value::Bool(_) => 1,
-                    Value::Char(_) => 32,
+                    Value::Bits(b) if b.len() == 1 => 1,
                     _ => 64,
                 };
-                Ok(Value::Int(w))
+                Ok(Value::Bits(i64_to_bits(w)))
             }
-            ProjectionTarget::Endian => Ok(Value::String("little".to_string())),
-            ProjectionTarget::Codec => Ok(Value::String("none".to_string())),
-            ProjectionTarget::Ops => Ok(Value::Int(0)),
+            ProjectionTarget::Keys | ProjectionTarget::Values
+            | ProjectionTarget::Bytes | ProjectionTarget::Alignment
+            | ProjectionTarget::Range | ProjectionTarget::Popcount
+            | ProjectionTarget::LeadingZeros | ProjectionTarget::TrailingZeros
+            | ProjectionTarget::Absolute | ProjectionTarget::BitReverse
+            | ProjectionTarget::Type | ProjectionTarget::PtrBang
+            | ProjectionTarget::Endian | ProjectionTarget::Codec
+            | ProjectionTarget::Ops | ProjectionTarget::Elements
+            | ProjectionTarget::AsStack | ProjectionTarget::AsQueue
+            | ProjectionTarget::Address | ProjectionTarget::Name
+            | ProjectionTarget::Params | ProjectionTarget::Returns
+            | ProjectionTarget::Arity | ProjectionTarget::Loc
+            | ProjectionTarget::Doc | ProjectionTarget::Hash
+            | ProjectionTarget::Contracts | ProjectionTarget::Module
+            | ProjectionTarget::IsPure | ProjectionTarget::FnSpan
+            | ProjectionTarget::UserDefined(_)
+            | ProjectionTarget::UserDefinedWithArg(_, _) => {
+                Err(RuntimeError::UnsupportedProjection("projection not yet implemented with Bits".into()))
+            }
         }
     }
 }

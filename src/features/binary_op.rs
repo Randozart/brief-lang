@@ -41,38 +41,7 @@ impl BinaryOpExpr {
     }
 }
 
-/// Normalize numeric-like values to Value::Int for the legacy typed dispatch.
-/// Both Value::Bits and Value::Char are converted to i64 so the 50-arm match
-/// (Value::Int × Value::Int) can handle them. Temporary shim — deleted once
-/// all ops dispatch through properties.
-/// 2026-07-11: Phase 8C.
-fn legacy_normalize(v: Value) -> Value {
-    match v {
-        // 2026-07-11: Only normalize 8-byte Bits (integer-sized) to Int.
-        // Variable-length Bits (strings, bools, chars) must not be converted.
-        Value::Bits(b) if b.len() == 8 => {
-            let mut arr = [0u8; 8];
-            arr.copy_from_slice(&b);
-            Value::Int(i64::from_le_bytes(arr))
-        }
-        other => other,
-    }
-}
 
-/// Normalize 4-byte char-originated Bits and 1-byte bool-originated Bits to their
-/// Value variants so existing comparison arms (Char+Char, Bool+Bool) match correctly.
-/// 2026-07-11: Expr::Char produces 4-byte Bits, Expr::Bool produces 1-byte Bits.
-fn normalize_bits_to_char_bool(v: Value) -> Value {
-    match v {
-        Value::Bits(b) if b.len() == 4 && (b[1] | b[2] | b[3]) == 0 => {
-            let mut arr = [0u8; 4];
-            arr.copy_from_slice(&b);
-            Value::Char(char::from_u32(u32::from_le_bytes(arr)).unwrap_or('\0'))
-        }
-        Value::Bits(b) if b.len() == 1 => Value::Bool(b[0] != 0),
-        other => other,
-    }
-}
 
 /// Try to dispatch a binary op through property-based intrinsic lookup.
 /// Both operands must be Value::Bits and the expected type must have an
@@ -116,135 +85,54 @@ impl ExprEval for BinaryOpExpr {
             return result;
         }
 
-        // Fallback: normalize numeric-like values to Int for legacy dispatch.
-        let l = legacy_normalize(l);
-        let r = legacy_normalize(r);
-        // Also normalize char-like Bits (4 bytes, trailing NULs → Char) and
-        // bool-like Bits (1 byte → Bool) so comparison arms match correctly.
-        let l = normalize_bits_to_char_bool(l);
-        let r = normalize_bits_to_char_bool(r);
-
         use BinaryOpKind::*;
-        Ok(match (self.kind, &l, &r) {
-            (Add,  Value::Int(a), Value::Int(b)) => Value::Int(a + b),
-            (Add,  Value::String(a), Value::String(b)) => Value::String({
-                let mut s = String::with_capacity(a.len() + b.len());
-                s.push_str(a);
-                s.push_str(b);
-                s
-            }),
-            (Add,  Value::String(a), Value::Int(b)) => Value::String({
-                let mut s = String::with_capacity(a.len() + 20);
-                s.push_str(a);
-                s.push_str(&b.to_string());
-                s
-            }),
-            (Add,  Value::Int(a), Value::String(b)) => Value::String({
-                let mut s = String::with_capacity(20 + b.len());
-                s.push_str(&a.to_string());
-                s.push_str(b);
-                s
-            }),
-            (Add,  Value::String(a), Value::Float(b)) => Value::String({
-                let mut s = String::with_capacity(a.len() + 30);
-                s.push_str(a);
-                s.push_str(&b.to_string());
-                s
-            }),
-            (Add,  Value::Float(a), Value::String(b)) => Value::String({
-                let mut s = String::with_capacity(30 + b.len());
-                s.push_str(&a.to_string());
-                s.push_str(b);
-                s
-            }),
-            // 2026-07-11: String concatenation arms for Value::Bits (from Expr::String).
-            // Bits operands carry UTF-8 bytes; decode, concat, return String for downstream
-            // compatibility with Size/IsEmpty projections that need Value::String.
-            (Add,  Value::Bits(a), Value::String(b)) => Value::String({
-                let sa = String::from_utf8(a.clone()).unwrap_or_default();
-                let mut s = String::with_capacity(sa.len() + b.len());
-                s.push_str(&sa);
-                s.push_str(b);
-                s
-            }),
-            (Add,  Value::String(a), Value::Bits(b)) => Value::String({
-                let sb = String::from_utf8(b.clone()).unwrap_or_default();
-                let mut s = String::with_capacity(a.len() + sb.len());
-                s.push_str(a);
-                s.push_str(&sb);
-                s
-            }),
-            (Add,  Value::Bits(a), Value::Bits(b)) => Value::String({
-                let sa = String::from_utf8(a.clone()).unwrap_or_default();
-                let sb = String::from_utf8(b.clone()).unwrap_or_default();
-                let mut s = String::with_capacity(sa.len() + sb.len());
-                s.push_str(&sa);
-                s.push_str(&sb);
-                s
-            }),
-            (Add,  Value::Float(a), Value::Float(b)) => Value::Float(a + b),
-            (Sub,  Value::Int(a), Value::Int(b)) => Value::Int(a - b),
-            (Mul,  Value::Int(a), Value::Int(b)) => Value::Int(a * b),
-            (Div,  Value::Int(a), Value::Int(b)) => Value::Int(a / b),
-            (Mod,  Value::Int(a), Value::Int(b)) => Value::Int(a % b),
-            (Eq,   Value::Int(a), Value::Int(b)) => Value::Bool(a == b),
-            (Eq,   Value::Char(a), Value::Char(b)) => Value::Bool(a == b),
-            (Eq,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) == *b),
-            (Eq,   Value::Int(a), Value::Char(b)) => Value::Bool(*a == (*b as i64)),
-            (Ne,   Value::Int(a), Value::Int(b)) => Value::Bool(a != b),
-            (Ne,   Value::Char(a), Value::Char(b)) => Value::Bool(a != b),
-            (Ne,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) != *b),
-            (Ne,   Value::Int(a), Value::Char(b)) => Value::Bool(*a != (*b as i64)),
-            (Lt,   Value::Int(a), Value::Int(b)) => Value::Bool(a < b),
-            (Lt,   Value::Char(a), Value::Char(b)) => Value::Bool(a < b),
-            (Lt,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) < *b),
-            (Lt,   Value::Int(a), Value::Char(b)) => Value::Bool(*a < (*b as i64)),
-            (Le,   Value::Int(a), Value::Int(b)) => Value::Bool(a <= b),
-            (Le,   Value::Char(a), Value::Char(b)) => Value::Bool(a <= b),
-            (Le,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) <= *b),
-            (Le,   Value::Int(a), Value::Char(b)) => Value::Bool(*a <= (*b as i64)),
-            (Gt,   Value::Int(a), Value::Int(b)) => Value::Bool(a > b),
-            (Gt,   Value::Char(a), Value::Char(b)) => Value::Bool(a > b),
-            (Gt,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) > *b),
-            (Gt,   Value::Int(a), Value::Char(b)) => Value::Bool(*a > (*b as i64)),
-            (Ge,   Value::Int(a), Value::Int(b)) => Value::Bool(a >= b),
-            (Ge,   Value::Char(a), Value::Char(b)) => Value::Bool(a >= b),
-            (Ge,   Value::Char(a), Value::Int(b)) => Value::Bool((*a as i64) >= *b),
-            (Ge,   Value::Int(a), Value::Char(b)) => Value::Bool(*a >= (*b as i64)),
-            (And,  Value::Bool(a), Value::Bool(b)) => Value::Bool(*a && *b),
-            (Or,   Value::Bool(a), Value::Bool(b)) => Value::Bool(*a || *b),
-            (BitAnd, Value::Int(a), Value::Int(b)) => Value::Int(a & b),
-            (BitOr,  Value::Int(a), Value::Int(b)) => Value::Int(a | b),
-            (BitXor, Value::Int(a), Value::Int(b)) => Value::Int(a ^ b),
-            (Shl,  Value::Int(a), Value::Int(b)) => Value::Int(a << b),
-            (Shr,  Value::Int(a), Value::Int(b)) => Value::Int(a >> b),
-            // Ptr<T> arithmetic — all ops preserve T, produce Ptr<T>
-            (Add,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a.wrapping_add(*b as u64)),
-            (Add,  Value::Int(a), Value::Ptr(b)) => Value::Ptr(b.wrapping_add(*a as u64)),
-            (Sub,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a.wrapping_sub(*b as u64)),
-            (BitAnd, Value::Ptr(a), Value::Int(b)) => Value::Ptr(a & *b as u64),
-            (BitAnd, Value::Int(a), Value::Ptr(b)) => Value::Ptr(b & *a as u64),
-            (BitOr,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a | *b as u64),
-            (BitOr,  Value::Int(a), Value::Ptr(b)) => Value::Ptr(b | *a as u64),
-            (BitXor, Value::Ptr(a), Value::Int(b)) => Value::Ptr(a ^ *b as u64),
-            (BitXor, Value::Int(a), Value::Ptr(b)) => Value::Ptr(b ^ *a as u64),
-            (Shl,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a << *b),
-            (Shr,  Value::Ptr(a), Value::Int(b)) => Value::Ptr(a >> *b),
-            // Ptr<T> comparison
-            (Eq,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a == b),
-            (Ne,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a != b),
-            (Lt,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a < b),
-            (Le,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a <= b),
-            (Gt,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a > b),
-            (Ge,  Value::Ptr(a), Value::Ptr(b)) => Value::Bool(a >= b),
-            (_, Value::Regex(_), _) | (_, _, Value::Regex(_)) => {
-                return Err(RuntimeError::TypeMismatch(format!("binary op {:?} on Regex", self.kind)))
+
+        let result = match self.kind {
+            Add | Sub | Mul | Div | Mod | BitAnd | BitOr | BitXor | Shl | Shr => {
+                let lb = crate::interpreter::value_as_i64(&l).ok_or_else(|| RuntimeError::TypeMismatch(
+                    format!("binary op {:?} requires integer operands", self.kind)))?;
+                let rb = crate::interpreter::value_as_i64(&r).ok_or_else(|| RuntimeError::TypeMismatch(
+                    format!("binary op {:?} requires integer operands", self.kind)))?;
+                match self.kind {
+                    Add => crate::interpreter::i64_to_bits(lb.wrapping_add(rb)),
+                    Sub => crate::interpreter::i64_to_bits(lb.wrapping_sub(rb)),
+                    Mul => crate::interpreter::i64_to_bits(lb.wrapping_mul(rb)),
+                    Div => crate::interpreter::i64_to_bits(lb.wrapping_div(rb)),
+                    Mod => crate::interpreter::i64_to_bits(lb.wrapping_rem(rb)),
+                    BitAnd => crate::interpreter::i64_to_bits(lb & rb),
+                    BitOr => crate::interpreter::i64_to_bits(lb | rb),
+                    BitXor => crate::interpreter::i64_to_bits(lb ^ rb),
+                    Shl => crate::interpreter::i64_to_bits(lb.wrapping_shl(rb as u32)),
+                    Shr => crate::interpreter::i64_to_bits(lb.wrapping_shr(rb as u32)),
+                    _ => unreachable!(),
+                }
             }
-            // 2026-07-11: Fall back to PartialEq for Eq/Ne — handles Bits↔Char, Bits↔Bool etc.
-            (Eq, _, _) => Value::Bool(l == r),
-            (Ne, _, _) => Value::Bool(l != r),
-            _ => return Err(RuntimeError::TypeMismatch(format!("binary op {:?} on ({:?}, {:?})", self.kind, self.left, self.right))),
-        })
+            Lt | Le | Gt | Ge => {
+                let lb = crate::interpreter::value_as_i64(&l).ok_or_else(|| RuntimeError::TypeMismatch(
+                    format!("binary op {:?} requires integer operands", self.kind)))?;
+                let rb = crate::interpreter::value_as_i64(&r).ok_or_else(|| RuntimeError::TypeMismatch(
+                    format!("binary op {:?} requires integer operands", self.kind)))?;
+                vec![match self.kind {
+                    Lt => lb < rb,
+                    Le => lb <= rb,
+                    Gt => lb > rb,
+                    Ge => lb >= rb,
+                    _ => unreachable!(),
+                } as u8]
+            }
+            Eq => vec![(l == r) as u8],
+            Ne => vec![(l != r) as u8],
+            And | Or => {
+                let lb = match &l { Value::Bits(b) => b.first().copied().unwrap_or(0) != 0, _ => false };
+                let rb = match &r { Value::Bits(b) => b.first().copied().unwrap_or(0) != 0, _ => false };
+                vec![match self.kind {
+                    And => lb && rb,
+                    Or => lb || rb,
+                    _ => unreachable!(),
+                } as u8]
+            }
+        };
+        Ok(Value::Bits(result))
     }
 }
 

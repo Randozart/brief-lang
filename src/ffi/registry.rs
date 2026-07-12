@@ -169,11 +169,11 @@ impl FunctionRegistry {
             for entry in &group.entries {
                 // Extract name and impl from positional fields
                 let name = match entry.fields.first() {
-                    Some(crate::dbrief::v2::DataField::Positional(crate::dbrief::v2::DataValue::String(n))) => n.clone(),
+                    Some(crate::dbrief::v2::DataField::Positional(crate::dbrief::v2::DataValue::Bits(n.as_bytes().to_vec()))) => n.clone(),
                     _ => continue,
                 };
                 let impl_location = match entry.fields.get(1) {
-                    Some(crate::dbrief::v2::DataField::Positional(crate::dbrief::v2::DataValue::String(l))) => l.clone(),
+                    Some(crate::dbrief::v2::DataField::Positional(crate::dbrief::v2::DataValue::Bits(l.as_bytes().to_vec()))) => l.clone(),
                     _ => continue,
                 };
 
@@ -446,7 +446,7 @@ pub(crate) fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
         ));
     }
     let path = match &args[0] {
-        Value::String(s) => s.clone(),
+        Value::Bits(s.as_bytes().to_vec()) => s.clone(),
         other => {
             return Err(RuntimeError::TypeMismatch(
                 format!("First argument to dbvl_append must be a String path, got {:?}", other)
@@ -464,18 +464,18 @@ pub(crate) fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
 
     // Convert values to CSV-safe strings
     let csv_parts: Vec<String> = values.iter().map(|v| match v {
-        Value::String(s) => {
+        Value::Bits(s.as_bytes().to_vec()) => {
             if s.contains(',') || s.contains('"') || s.contains('\n') {
                 format!("\"{}\"", s.replace('"', "\"\""))
             } else {
                 s.clone()
             }
         }
-        Value::Int(n) => n.to_string(),
-        Value::Float(f) => f.to_string(),
-        Value::Bool(true) => "true".into(),
-        Value::Bool(false) => "false".into(),
-        Value::Char(c) => c.to_string(),
+        Value::Bits(crate::interpreter::i64_to_bits(n)) => n.to_string(),
+        Value::Bits(crate::interpreter::f64_to_bits(f)) => f.to_string(),
+        Value::Bits(vec![1u8]) => "true".into(),
+        Value::Bits(vec![0u8]) => "false".into(),
+        Value::Bits((c as u32).to_le_bytes().to_vec()) => c.to_string(),
         other => format!("{:?}", other),
     }).collect();
 
@@ -489,7 +489,7 @@ pub(crate) fn dbvl_append_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
                     format!("Failed to append to '{}': {}", path, e)
                 ))
             } else {
-                Ok(Value::Bool(true))
+                Ok(Value::Bits(vec![1u8]))
             }
         }
         Err(e) => Err(RuntimeError::TypeMismatch(
@@ -626,28 +626,28 @@ fn delete_dir_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 /// Concrete address from a Value (Int or ptr-cast)
 fn value_to_ptr_offset(args: &[Value], idx: usize) -> Result<*mut u8, RuntimeError> {
     match &args[idx] {
-        Value::Int(addr) => Ok(*addr as *mut u8),
+        Value::Bits(crate::interpreter::i64_to_bits(addr)) => Ok(*addr as *mut u8),
         _ => Err(RuntimeError::TypeMismatch(format!("arg {} expected Int (address)", idx))),
     }
 }
 
 fn value_to_i32(args: &[Value], idx: usize) -> Result<i32, RuntimeError> {
     match &args[idx] {
-        Value::Int(n) => Ok(*n as i32),
+        Value::Bits(crate::interpreter::i64_to_bits(n)) => Ok(*n as i32),
         _ => Err(RuntimeError::TypeMismatch(format!("arg {} expected Int", idx))),
     }
 }
 
 fn value_to_usize(args: &[Value], idx: usize) -> Result<usize, RuntimeError> {
     match &args[idx] {
-        Value::Int(n) => Ok(*n as usize),
+        Value::Bits(crate::interpreter::i64_to_bits(n)) => Ok(*n as usize),
         _ => Err(RuntimeError::TypeMismatch(format!("arg {} expected Int", idx))),
     }
 }
 
 fn value_to_string(args: &[Value], idx: usize) -> Result<String, RuntimeError> {
     match &args[idx] {
-        Value::String(s) => Ok(s.clone()),
+        Value::Bits(s.as_bytes().to_vec()) => Ok(s.clone()),
         _ => Err(RuntimeError::TypeMismatch(format!("arg {} expected String", idx))),
     }
 }
@@ -666,7 +666,7 @@ fn metro_shm_open_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("ShmError".to_string(), "ShmOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::String(err.to_string()));
+                m.insert("message".to_string(), Value::Bits(err.to_string(.as_bytes().to_vec())));
                 m
             }))
         } else {
@@ -685,7 +685,7 @@ fn metro_shm_unlink_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("ShmError".to_string(), "ShmOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::String(err.to_string()));
+                m.insert("message".to_string(), Value::Bits(err.to_string(.as_bytes().to_vec())));
                 m
             }))
         }
@@ -703,7 +703,7 @@ fn metro_ftruncate_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("ShmError".to_string(), "ShmOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::String(err.to_string()));
+                m.insert("message".to_string(), Value::Bits(err.to_string(.as_bytes().to_vec())));
                 m
             }))
         }
@@ -716,7 +716,7 @@ fn metro_shm_list_impl(_args: Vec<Value>) -> Result<Value, RuntimeError> {
     if let Ok(entries) = std::fs::read_dir("/dev/shm") {
         for entry in entries.flatten() {
             if let Ok(name) = entry.file_name().into_string() {
-                names.push(Value::String(name));
+                names.push(Value::Bits(name.as_bytes().to_vec()));
             }
         }
     }
@@ -739,7 +739,7 @@ fn metro_shm_size_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
         if fd < 0 {
             return Ok(Value::Enum("ShmError".to_string(), "ShmNotFound".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::String("Not found".to_string()));
+                m.insert("message".to_string(), Value::Bits("Not found".to_string(.as_bytes().to_vec())));
                 m
             }));
         }
@@ -751,7 +751,7 @@ fn metro_shm_size_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
         } else {
             Ok(Value::Enum("ShmError".to_string(), "ShmOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::String("fstat failed".to_string()));
+                m.insert("message".to_string(), Value::Bits("fstat failed".to_string(.as_bytes().to_vec())));
                 m
             }))
         }
@@ -775,7 +775,7 @@ fn metro_mmap_anonymous_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("MmapError".to_string(), "MmapOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::String(err.to_string()));
+                m.insert("message".to_string(), Value::Bits(err.to_string(.as_bytes().to_vec())));
                 m
             }))
         } else {
@@ -795,7 +795,7 @@ fn metro_munmap_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("MmapError".to_string(), "MmapOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::String(err.to_string()));
+                m.insert("message".to_string(), Value::Bits(err.to_string(.as_bytes().to_vec())));
                 m
             }))
         }
@@ -814,7 +814,7 @@ fn metro_msync_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             let err = std::io::Error::last_os_error();
             Ok(Value::Enum("MmapError".to_string(), "MmapOther".to_string(), {
                 let mut m = std::collections::HashMap::new();
-                m.insert("message".to_string(), Value::String(err.to_string()));
+                m.insert("message".to_string(), Value::Bits(err.to_string(.as_bytes().to_vec())));
                 m
             }))
         }
@@ -832,7 +832,7 @@ fn metro_mmap_write_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let target = unsafe { addr.add(offset) };
     for (i, item) in data.iter().enumerate() {
         let byte = match item {
-            Value::Int(n) => *n as u8,
+            Value::Bits(crate::interpreter::i64_to_bits(n)) => *n as u8,
             _ => return Err(RuntimeError::TypeMismatch("list items must be Int".to_string())),
         };
         unsafe { *target.add(i) = byte; }
@@ -960,7 +960,7 @@ fn metro_channel_create_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
             fields.insert("request_addr".to_string(), Value::Int(req_addr as i64));
             fields.insert("response_addr".to_string(), Value::Int(resp_addr as i64));
             fields.insert("sync_addr".to_string(), Value::Int(sync_addr as i64));
-            fields.insert("handle".to_string(), Value::Int(0));
+            fields.insert("handle".to_string(), Value::Bits(crate::interpreter::i64_to_bits(0)));
             Ok(Value::Instance { typename: "MetroChannel".to_string(), fields })
         }
         Err(e) => Err(RuntimeError::UndefinedForeignFunction(e)),
@@ -993,21 +993,21 @@ fn metro_channel_get_layout_impl(args: Vec<Value>) -> Result<Value, RuntimeError
 fn metro_channel_gen_c_header_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let channel_id = value_to_string(&args, 0)?;
     match GLOBAL_METRO_HUB.generate_c_header(&channel_id) {
-        Ok(header) => Ok(Value::String(header)),
+        Ok(header) => Ok(Value::Bits(header.as_bytes().to_vec())),
         Err(e) => Err(RuntimeError::UndefinedForeignFunction(e)),
     }
 }
 
 fn value_to_i64(args: &[Value], idx: usize) -> Result<i64, RuntimeError> {
     match &args[idx] {
-        Value::Int(n) => Ok(*n),
+        Value::Bits(crate::interpreter::i64_to_bits(n)) => Ok(*n),
         _ => Err(RuntimeError::TypeMismatch(format!("arg {} expected Int", idx))),
     }
 }
 
 fn value_to_u32(args: &[Value], idx: usize) -> Result<u32, RuntimeError> {
     match &args[idx] {
-        Value::Int(n) => Ok(*n as u32),
+        Value::Bits(crate::interpreter::i64_to_bits(n)) => Ok(*n as u32),
         _ => Err(RuntimeError::TypeMismatch(format!("arg {} expected Int", idx))),
     }
 }
@@ -1017,7 +1017,7 @@ fn value_to_u32(args: &[Value], idx: usize) -> Result<u32, RuntimeError> {
 fn encoding_base64_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => Ok(Value::Bits(data.clone())),
-        Some(Value::String(s)) => Ok(Value::String(s.clone())),
+        Some(Value::Bits(s.as_bytes().to_vec())) => Ok(Value::Bits(s.as_bytes().to_vec())),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::base64_encode expects 1 argument".to_string())),
     }
@@ -1026,7 +1026,7 @@ fn encoding_base64_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> 
 fn encoding_base64_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => Ok(Value::Bits(data.clone())),
-        Some(Value::String(s)) => Ok(Value::String(s.clone())),
+        Some(Value::Bits(s.as_bytes().to_vec())) => Ok(Value::Bits(s.as_bytes().to_vec())),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::base64_decode expects 1 argument".to_string())),
     }
@@ -1036,11 +1036,11 @@ fn encoding_hex_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => {
             let hex: String = data.iter().map(|b| format!("{:02x}", b)).collect();
-            Ok(Value::String(hex))
+            Ok(Value::Bits(hex.as_bytes().to_vec()))
         }
-        Some(Value::String(s)) => {
+        Some(Value::Bits(s.as_bytes().to_vec())) => {
             let hex: String = s.bytes().map(|b| format!("{:02x}", b)).collect();
-            Ok(Value::String(hex))
+            Ok(Value::Bits(hex.as_bytes().to_vec()))
         }
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::hex_encode expects 1 argument".to_string())),
@@ -1049,7 +1049,7 @@ fn encoding_hex_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn encoding_hex_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => {
+        Some(Value::Bits(s.as_bytes().to_vec())) => {
             let hex = s.trim();
             let data: Vec<u8> = (0..hex.len())
                 .step_by(2)
@@ -1067,9 +1067,9 @@ fn encoding_hex_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn encoding_url_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => {
+        Some(Value::Bits(s.as_bytes().to_vec())) => {
             let encoded = s.replace(' ', "%20");
-            Ok(Value::String(encoded))
+            Ok(Value::Bits(encoded.as_bytes().to_vec()))
         }
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::url_encode expects 1 argument (string)".to_string())),
@@ -1078,9 +1078,9 @@ fn encoding_url_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn encoding_url_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => {
+        Some(Value::Bits(s.as_bytes().to_vec())) => {
             let decoded = s.replace("%20", " ");
-            Ok(Value::String(decoded))
+            Ok(Value::Bits(decoded.as_bytes().to_vec()))
         }
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::url_decode expects 1 argument (string)".to_string())),
@@ -1089,12 +1089,12 @@ fn encoding_url_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn encoding_html_escape_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => {
+        Some(Value::Bits(s.as_bytes().to_vec())) => {
             let escaped = s
                 .replace('&', "&amp;")
                 .replace('<', "&lt;")
                 .replace('>', "&gt;");
-            Ok(Value::String(escaped))
+            Ok(Value::Bits(escaped.as_bytes().to_vec()))
         }
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::html_escape expects 1 argument (string)".to_string())),
@@ -1103,12 +1103,12 @@ fn encoding_html_escape_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn encoding_html_unescape_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => {
+        Some(Value::Bits(s.as_bytes().to_vec())) => {
             let unescaped = s
                 .replace("&amp;", "&")
                 .replace("&lt;", "<")
                 .replace("&gt;", ">");
-            Ok(Value::String(unescaped))
+            Ok(Value::Bits(unescaped.as_bytes().to_vec()))
         }
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::html_unescape expects 1 argument (string)".to_string())),
@@ -1137,8 +1137,8 @@ fn hash_bytes_sha512(data: &[u8]) -> String {
 
 fn encoding_md5_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => Ok(Value::String(hash_bytes_md5(s.as_bytes()))),
-        Some(Value::Bits(d)) => Ok(Value::String(hash_bytes_md5(d))),
+        Some(Value::Bits(s.as_bytes().to_vec())) => Ok(Value::Bits(hash_bytes_md5(s.as_bytes(.as_bytes().to_vec())))),
+        Some(Value::Bits(d)) => Ok(Value::Bits(hash_bytes_md5(d.as_bytes().to_vec()))),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::md5 expects 1 argument (string)".to_string())),
     }
@@ -1146,8 +1146,8 @@ fn encoding_md5_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn encoding_sha1_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha1(s.as_bytes()))),
-        Some(Value::Bits(d)) => Ok(Value::String(hash_bytes_sha1(d))),
+        Some(Value::Bits(s.as_bytes().to_vec())) => Ok(Value::Bits(hash_bytes_sha1(s.as_bytes(.as_bytes().to_vec())))),
+        Some(Value::Bits(d)) => Ok(Value::Bits(hash_bytes_sha1(d.as_bytes().to_vec()))),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::sha1 expects 1 argument (string)".to_string())),
     }
@@ -1155,8 +1155,8 @@ fn encoding_sha1_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn encoding_sha256_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha256(s.as_bytes()))),
-        Some(Value::Bits(d)) => Ok(Value::String(hash_bytes_sha256(d))),
+        Some(Value::Bits(s.as_bytes().to_vec())) => Ok(Value::Bits(hash_bytes_sha256(s.as_bytes(.as_bytes().to_vec())))),
+        Some(Value::Bits(d)) => Ok(Value::Bits(hash_bytes_sha256(d.as_bytes().to_vec()))),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::sha256 expects 1 argument (string)".to_string())),
     }
@@ -1164,8 +1164,8 @@ fn encoding_sha256_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn encoding_sha512_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => Ok(Value::String(hash_bytes_sha512(s.as_bytes()))),
-        Some(Value::Bits(d)) => Ok(Value::String(hash_bytes_sha512(d))),
+        Some(Value::Bits(s.as_bytes().to_vec())) => Ok(Value::Bits(hash_bytes_sha512(s.as_bytes(.as_bytes().to_vec())))),
+        Some(Value::Bits(d)) => Ok(Value::Bits(hash_bytes_sha512(d.as_bytes().to_vec()))),
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("encoding::sha512 expects 1 argument (string)".to_string())),
     }
@@ -1174,7 +1174,7 @@ fn encoding_sha512_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 fn encoding_uuid_v4_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     if args.is_empty() {
         let uuid = uuid::Uuid::new_v4();
-        Ok(Value::String(uuid.to_string()))
+        Ok(Value::Bits(uuid.to_string(.as_bytes().to_vec())))
     } else {
         Err(RuntimeError::TypeMismatch("encoding::uuid_v4 expects 0 arguments".to_string()))
     }
@@ -1184,7 +1184,7 @@ fn encoding_uuid_v4_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn json_parse_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(s)) => {
+        Some(Value::Bits(s.as_bytes().to_vec())) => {
             match serde_json::from_str::<serde_json::Value>(s) {
                 Ok(json) => Ok(crate::interpreter::json_value_to_value(json)),
                 Err(e) => Err(RuntimeError::TypeMismatch(format!("json::parse failed: {}", e))),
@@ -1199,7 +1199,7 @@ fn json_stringify_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(val) => {
             let json = crate::interpreter::value_to_json_value(val);
-            Ok(Value::String(json.to_string()))
+            Ok(Value::Bits(json.to_string(.as_bytes().to_vec())))
         }
         None => Err(RuntimeError::TypeMismatch("json::stringify expects 1 argument".to_string())),
     }
@@ -1207,43 +1207,43 @@ fn json_stringify_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn json_is_object_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::Instance { .. }) | Some(Value::HashMap(_)) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
+        Some(Value::Instance { .. }) | Some(Value::HashMap(_)) => Ok(Value::Bits(vec![1u8])),
+        _ => Ok(Value::Bits(vec![0u8])),
     }
 }
 
 fn json_is_array_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::List(_)) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
+        Some(Value::List(_)) => Ok(Value::Bits(vec![1u8])),
+        _ => Ok(Value::Bits(vec![0u8])),
     }
 }
 
 fn json_is_string_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(_)) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
+        Some(Value::Bits(_.as_bytes().to_vec())) => Ok(Value::Bits(vec![1u8])),
+        _ => Ok(Value::Bits(vec![0u8])),
     }
 }
 
 fn json_is_number_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::Int(_)) | Some(Value::Float(_)) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
+        Some(Value::Bits(crate::interpreter::i64_to_bits(_))) | Some(Value::Bits(crate::interpreter::f64_to_bits(_))) => Ok(Value::Bits(vec![1u8])),
+        _ => Ok(Value::Bits(vec![0u8])),
     }
 }
 
 fn json_is_bool_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::Bool(_)) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
+        Some(Value::Bool(_)) => Ok(Value::Bits(vec![1u8])),
+        _ => Ok(Value::Bits(vec![0u8])),
     }
 }
 
 fn json_is_null_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::Void) => Ok(Value::Bool(true)),
-        _ => Ok(Value::Bool(false)),
+        Some(Value::Void) => Ok(Value::Bits(vec![1u8])),
+        _ => Ok(Value::Bits(vec![0u8])),
     }
 }
 
@@ -1281,8 +1281,8 @@ fn json_length_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
         Some(Value::List(items)) => Ok(Value::Int(items.len() as i64)),
         Some(Value::Instance { fields, .. }) => Ok(Value::Int(fields.len() as i64)),
         Some(Value::HashMap(map)) => Ok(Value::Int(map.len() as i64)),
-        Some(Value::String(s)) => Ok(Value::Int(s.len() as i64)),
-        Some(_) => Ok(Value::Int(0)),
+        Some(Value::Bits(s.as_bytes().to_vec())) => Ok(Value::Int(s.len() as i64)),
+        Some(_) => Ok(Value::Bits(crate::interpreter::i64_to_bits(0))),
         None => Err(RuntimeError::TypeMismatch("json::length expects 1 argument".to_string())),
     }
 }
@@ -1291,14 +1291,14 @@ fn json_length_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn http_get_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
-        Some(Value::String(url)) => {
+        Some(Value::Bits(url.as_bytes().to_vec())) => {
             let response = ureq::get(url)
                 .call()
                 .map_err(|e| RuntimeError::TypeMismatch(format!("http::get failed: {}", e)))?;
             let body = response
                 .into_string()
                 .map_err(|e| RuntimeError::TypeMismatch(format!("http::get response read failed: {}", e)))?;
-            Ok(Value::String(body))
+            Ok(Value::Bits(body.as_bytes().to_vec()))
         }
         Some(other) => Ok(other.clone()),
         None => Err(RuntimeError::TypeMismatch("http::get expects 1 argument (URL string)".to_string())),
@@ -1307,14 +1307,14 @@ fn http_get_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
 
 fn http_post_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match (args.first(), args.get(1)) {
-        (Some(Value::String(url)), Some(Value::String(body))) => {
+        (Some(Value::Bits(url.as_bytes().to_vec())), Some(Value::Bits(body.as_bytes().to_vec()))) => {
             let response = ureq::post(url)
                 .send_string(body)
                 .map_err(|e| RuntimeError::TypeMismatch(format!("http::post failed: {}", e)))?;
             let body = response
                 .into_string()
                 .map_err(|e| RuntimeError::TypeMismatch(format!("http::post response read failed: {}", e)))?;
-            Ok(Value::String(body))
+            Ok(Value::Bits(body.as_bytes().to_vec()))
         }
         (Some(other), _) => Ok(other.clone()),
         (None, _) => Err(RuntimeError::TypeMismatch("http::post expects 2 arguments (URL string, body string)".to_string())),
@@ -1446,44 +1446,44 @@ mod tests {
 
     #[test]
     fn test_encoding_md5() {
-        let result = encoding_md5_impl(vec![Value::String("hello".to_string())]);
+        let result = encoding_md5_impl(vec![Value::Bits("hello".to_string(.as_bytes().to_vec()))]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::String("5d41402abc4b2a76b9719d911017c592".to_string()));
+        assert_eq!(result.unwrap(), Value::Bits("5d41402abc4b2a76b9719d911017c592".to_string(.as_bytes().to_vec())));
     }
 
     #[test]
     fn test_encoding_sha1() {
-        let result = encoding_sha1_impl(vec![Value::String("hello".to_string())]);
+        let result = encoding_sha1_impl(vec![Value::Bits("hello".to_string(.as_bytes().to_vec()))]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::String("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d".to_string()));
+        assert_eq!(result.unwrap(), Value::Bits("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d".to_string(.as_bytes().to_vec())));
     }
 
     #[test]
     fn test_encoding_sha256() {
-        let result = encoding_sha256_impl(vec![Value::String("hello".to_string())]);
+        let result = encoding_sha256_impl(vec![Value::Bits("hello".to_string(.as_bytes().to_vec()))]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::String("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string()));
+        assert_eq!(result.unwrap(), Value::Bits("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".to_string(.as_bytes().to_vec())));
     }
 
     #[test]
     fn test_encoding_sha512() {
-        let result = encoding_sha512_impl(vec![Value::String("hello".to_string())]);
+        let result = encoding_sha512_impl(vec![Value::Bits("hello".to_string(.as_bytes().to_vec()))]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::String("9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043".to_string()));
+        assert_eq!(result.unwrap(), Value::Bits("9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043".to_string(.as_bytes().to_vec())));
     }
 
     #[test]
     fn test_encoding_md5_data() {
         let result = encoding_md5_impl(vec![Value::Bits(vec![104, 101, 108, 108, 111])]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::String("5d41402abc4b2a76b9719d911017c592".to_string()));
+        assert_eq!(result.unwrap(), Value::Bits("5d41402abc4b2a76b9719d911017c592".to_string(.as_bytes().to_vec())));
     }
 
     #[test]
     fn test_encoding_uuid_v4() {
         let result = encoding_uuid_v4_impl(vec![]);
         assert!(result.is_ok());
-        if let Value::String(uuid) = result.unwrap() {
+        if let Value::Bits(uuid.as_bytes().to_vec()) = result.unwrap() {
             assert_eq!(uuid.len(), 36, "UUID should be 36 chars");
             assert_eq!(uuid.chars().nth(8), Some('-'));
             assert_eq!(uuid.chars().nth(14), Some('4'), "UUID v4 should have version nibble 4");
@@ -1494,7 +1494,7 @@ mod tests {
 
     #[test]
     fn test_encoding_uuid_v4_errors_with_args() {
-        let result = encoding_uuid_v4_impl(vec![Value::String("bad".to_string())]);
+        let result = encoding_uuid_v4_impl(vec![Value::Bits("bad".to_string(.as_bytes().to_vec()))]);
         assert!(result.is_err());
     }
 
@@ -1507,8 +1507,8 @@ mod tests {
     #[test]
     fn test_encoding_sha256_passthrough_non_string() {
         // Non-string, non-data inputs pass through unchanged
-        let result = encoding_sha256_impl(vec![Value::Int(42)]);
+        let result = encoding_sha256_impl(vec![Value::Bits(crate::interpreter::i64_to_bits(42))]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::Int(42));
+        assert_eq!(result.unwrap(), Value::Bits(crate::interpreter::i64_to_bits(42)));
     }
 }

@@ -52,7 +52,7 @@ impl ExprEval for UnaryOpExpr {
 
         use UnaryOpKind::*;
         Ok(match (self.kind, v) {
-            (Neg,    Value::Int(a)) => Value::Int(-a),
+            (Neg,    Value::Bits(crate::interpreter::i64_to_bits(a))) => Value::Int(-a),
             (Neg,    Value::Bits(b)) => {
                 let mut arr = [0u8; 8];
                 let copy_len = b.len().min(8);
@@ -62,7 +62,7 @@ impl ExprEval for UnaryOpExpr {
             }
             (Not,    Value::Bool(a)) => Value::Bool(!a),
             (Not,    Value::Bits(b)) => Value::Bool(b.first().map_or(true, |x| *x == 0)),
-            (BitNot, Value::Int(a)) => Value::Int(!a),
+            (BitNot, Value::Bits(crate::interpreter::i64_to_bits(a))) => Value::Int(!a),
             (_, Value::Regex(_)) => {
                 return Err(RuntimeError::TypeMismatch(format!("unary op {:?} on Regex", self.kind)))
             }

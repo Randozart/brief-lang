@@ -155,11 +155,11 @@ impl ExprTypecheck for ArrowTransferExpr { fn typecheck(&self, _: &mut TypeCheck
                             let elem = set.iter().next().cloned().ok_or_else(|| RuntimeError::TypeMismatch("Cannot pop from empty HashSet".into()))?;
                             set.remove(&elem);
                             ctx.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone()));
-                            Ok(Value::String(elem))
+                            Ok(Value::Bits(elem.as_bytes().to_vec()))
                         } else {
                             let key_val = ctx.eval_expr(&self.index)?;
                             let elem = ctx.value_to_string(&key_val)?;
-                            if set.remove(&elem) { ctx.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone())); Ok(Value::String(elem)) }
+                            if set.remove(&elem) { ctx.store_arrow_value(&root_name, &field_path, Value::HashSet(set.clone())); Ok(Value::Bits(elem.as_bytes().to_vec())) }
                             else { Err(RuntimeError::TypeMismatch(format!("Element '{}' not found", elem))) }
                         }
                     }
@@ -218,7 +218,7 @@ impl ExprEval for ArrowTransferExpr {
                         let prev = ctx.state.insert("_".into(), remaining[i].clone());
                         let cond = ctx.eval_expr(f)?;
                         if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
-                        if cond == Value::Bool(true) { dest.push(remaining.remove(i)); } else { i += 1; }
+                        if cond == Value::Bits(vec![1u8]) { dest.push(remaining.remove(i)); } else { i += 1; }
                     }
                     *src = remaining;
                 } else { dest.extend(src.drain(..)); }
@@ -232,7 +232,7 @@ impl ExprEval for ArrowTransferExpr {
                             let prev = ctx.state.insert("_".into(), val.clone());
                             let cond = ctx.eval_expr(f)?;
                             if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
-                            if cond == Value::Bool(true) { dest.insert(key, val); } else { src.insert(key, val); }
+                            if cond == Value::Bits(vec![1u8]) { dest.insert(key, val); } else { src.insert(key, val); }
                         }
                     }
                 } else { dest.extend(src.drain()); }

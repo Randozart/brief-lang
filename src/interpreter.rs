@@ -62,51 +62,25 @@ pub struct DbvlTableInner {
 
 #[derive(Debug, Clone)]
 pub enum Value {
-    Int(i64),
-    Float(f64),
-    String(String),
-    Char(char),
-    Bool(bool),
-    /// Universal bit-vector storage cell (Bits thesis).
-    /// Data(Vec<u8>) merged into Bits — same type, one variant.
-    /// 2026-07-11: Phase 8A — all representational values are Bits.
     Bits(Vec<u8>),
     List(Vec<Value>),
-    Tuple(Vec<Value>),  // True tuple type (not flattened to List)
-    HashMap(HashMap<String, Value>),  // HashMap (string keys for simplicity)
-    HashSet(HashSet<String>),  // HashSet (string values for simplicity)
-    // StringBuilder, Stack, Queue removed in Phase 8D.2 — defined as
-    // stdlib types with op InsertAt/ExtractFrom, not compiler primitives.
+    Tuple(Vec<Value>),
+    HashMap(HashMap<String, Value>),
+    HashSet(HashSet<String>),
     Instance {
         typename: String,
         fields: HashMap<String, Value>,
     },
-    Enum(String, String, HashMap<String, Value>), // (enum_name, variant_name, fields)
+    Enum(String, String, HashMap<String, Value>),
     Defn(String),
     Void,
-    /// Lazy-loaded DBVL table with key-offset index.
-    /// Users see it as a Map[String, T] — the DbvlTable type is internal.
     DbvlTable(Arc<DbvlTableInner>),
-    /// Compiled regex pattern from `@"..."` literal.
     Regex(crate::analysis::dfa::RegexPattern),
 
-    /// Typed memory address — carries a pointer value but cannot be dereferenced
-    /// without an explicit `volatile_load#` or `volatile_store#` intrinsic.
-    /// The pointee type `T` is tracked at the type level (`Type::Applied("Ptr", vec![T])`),
-    /// not at runtime.
-    Ptr(u64),
-
-    /// Reference (address-of) — wraps a value produced by `&expr`.
-    /// In the interpreter, `&x` evaluates the inner expression and wraps the
-    /// result in `Value::Ref`. This enables `Deref` to unwrap it.
     Ref(Box<Value>),
-
-    /// Compile-time AST node values (for template/macro return values)
     Expr(Box<crate::ast::Expr>),
     Stmt(Box<crate::ast::Statement>),
     Block(Vec<crate::ast::Statement>),
-    /// Full top-level items (for compile#() with non-Statement items like
-    /// StateDecl, Definition, Transaction, TriggerBinding, etc.)
     Items(Vec<crate::ast::TopLevel>),
     Type(crate::ast::Type),
 }
@@ -114,35 +88,7 @@ pub enum Value {
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Value::Int(a), Value::Int(b)) => a == b,
-            // Migration equality: Bits ↔ Int (same numeric value)
-            (Value::Int(a), Value::Bits(b)) | (Value::Bits(b), Value::Int(a)) => {
-                let mut arr = [0u8; 8];
-                let copy_len = b.len().min(8);
-                arr[..copy_len].copy_from_slice(&b[..copy_len]);
-                *a == i64::from_le_bytes(arr)
-            }
-            (Value::Bool(a), Value::Bits(b)) | (Value::Bits(b), Value::Bool(a)) => {
-                b.len() >= 1 && *a == (b[0] != 0)
-            }
-            (Value::Char(a), Value::Bits(b)) | (Value::Bits(b), Value::Char(a)) => {
-                b.len() >= 4 && *a == char::from_u32(u32::from_le_bytes(b[..4].try_into().unwrap_or([0; 4]))).unwrap_or('\0')
-            }
-            (Value::Float(a), Value::Bits(b)) | (Value::Bits(b), Value::Float(a)) => {
-                b.len() >= 8 && {
-                    let mut arr = [0u8; 8];
-                    arr.copy_from_slice(&b[..8]);
-                    *a == f64::from_le_bytes(arr)
-                }
-            }
-            (Value::String(a), Value::Bits(b)) | (Value::Bits(b), Value::String(a)) => {
-                *a == String::from_utf8_lossy(b)
-            }
             (Value::Bits(a), Value::Bits(b)) => a == b,
-            (Value::Float(a), Value::Float(b)) => a == b,
-            (Value::String(a), Value::String(b)) => a == b,
-            (Value::Char(a), Value::Char(b)) => a == b,
-            (Value::Bool(a), Value::Bool(b)) => a == b,
             (Value::List(a), Value::List(b)) => a == b,
             (Value::Tuple(a), Value::Tuple(b)) => a == b,
             (Value::HashMap(a), Value::HashMap(b)) => a == b,
@@ -153,13 +99,11 @@ impl PartialEq for Value {
             (Value::Void, Value::Void) => true,
             (Value::DbvlTable(a), Value::DbvlTable(b)) => a == b,
             (Value::Regex(a), Value::Regex(b)) => a == b,
-            (Value::Ptr(a), Value::Ptr(b)) => a == b,
             (Value::Ref(a), Value::Ref(b)) => a == b,
             (Value::Expr(a), Value::Expr(b)) => a == b,
             (Value::Stmt(a), Value::Stmt(b)) => a == b,
             (Value::Block(a), Value::Block(b)) => a == b,
             (Value::Items(_), Value::Items(_)) => {
-                // Items are compile-time only; identical discriminant is sufficient
                 true
             }
             (Value::Type(a), Value::Type(b)) => a == b,
@@ -171,11 +115,6 @@ impl PartialEq for Value {
 impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Value::Int(v) => write!(f, "{}", v),
-            Value::Float(v) => write!(f, "{}", v),
-            Value::String(v) => write!(f, "\"{}\"", v),
-            Value::Char(v) => write!(f, "'{}'", v),
-            Value::Bool(v) => write!(f, "{}", v),
             Value::Bits(b) => write!(f, "<Bits {}>", b.len()),
             Value::List(items) => write!(f, "[{}]", items.len()),
             Value::Tuple(items) => write!(f, "({})", items.len()),
@@ -194,7 +133,6 @@ impl fmt::Display for Value {
                 write!(f, "<DbvlTable {} '{}' ({} entries, lazy)>", schema, t.path, t.key_offsets.len())
             }
             Value::Regex(r) => write!(f, "<Regex {:?}>", r.pattern),
-            Value::Ptr(addr) => write!(f, "Ptr({})", addr),
             Value::Ref(v) => write!(f, "&{}", v),
             Value::Expr(_) => write!(f, "<Expr>"),
             Value::Stmt(_) => write!(f, "<Stmt>"),
@@ -226,11 +164,6 @@ pub enum RuntimeError {
 // Helper functions for JSON serialization stdlib
 pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
     match v {
-        Value::Int(i) => JsonValue::Number((*i).into()),
-        Value::Float(f) => serde_json::json!(*f),
-        Value::Bool(b) => JsonValue::Bool(*b),
-        Value::String(s) => JsonValue::String(s.clone()),
-        Value::Char(c) => JsonValue::String(c.to_string()),
         Value::List(items) => JsonValue::Array(items.iter().map(value_to_json_value).collect()),
         Value::Tuple(items) => JsonValue::Array(items.iter().map(value_to_json_value).collect()),
         Value::HashMap(map) => {
@@ -246,7 +179,6 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
                 .collect();
             JsonValue::Array(arr)
         }
-        Value::Ptr(p) => JsonValue::Number((*p).into()),
         Value::Ref(v) => value_to_json_value(v),
         Value::Instance { fields, .. } => {
             let map: serde_json::Map<String, JsonValue> = fields
@@ -277,6 +209,7 @@ pub(crate) fn value_to_json_value(v: &Value) -> JsonValue {
         Value::Expr(..) | Value::Stmt(..) | Value::Block(..) | Value::Items(..) | Value::Type(..) => {
             unreachable!("compile-time only value")
         }
+        _ => JsonValue::Null,
     }
 }
 
@@ -284,15 +217,15 @@ pub(crate) fn json_value_to_value(v: JsonValue) -> Value {
     match v {
         JsonValue::Number(n) => {
             if let Some(i) = n.as_i64() {
-                Value::Int(i)
+                Value::Bits(crate::interpreter::i64_to_bits(i))
             } else if let Some(f) = n.as_f64() {
-                Value::Float(f)
+                Value::Bits(crate::interpreter::f64_to_bits(f))
             } else {
-                Value::Int(0)
+                Value::Bits(crate::interpreter::i64_to_bits(0))
             }
         }
-        JsonValue::String(s) => Value::String(s),
-        JsonValue::Bool(b) => Value::Bool(b),
+        JsonValue::String(s) => Value::Bits(s.as_bytes().to_vec()),
+        JsonValue::Bool(b) => Value::Bits(vec![if b { 1u8 } else { 0u8 }]),
         JsonValue::Array(arr) => Value::List(arr.into_iter().map(json_value_to_value).collect()),
         JsonValue::Object(map) => {
             let fields: HashMap<String, Value> = map
@@ -382,7 +315,6 @@ pub(crate) fn i64_to_bits(i: i64) -> Vec<u8> {
 /// 2026-07-11: Phase 8A migration — unified integer extraction.
 pub(crate) fn value_as_i64(v: &Value) -> Option<i64> {
     match v {
-        Value::Int(i) => Some(*i),
         Value::Bits(b) => {
             let mut arr = [0u8; 8];
             let copy_len = b.len().min(8);
@@ -407,7 +339,7 @@ fn bits_to_f64(v: &Value) -> Result<f64, RuntimeError> {
     Ok(f64::from_le_bytes(arr))
 }
 
-fn f64_to_bits(f: f64) -> Vec<u8> {
+pub(crate) fn f64_to_bits(f: f64) -> Vec<u8> {
     f.to_le_bytes().to_vec()
 }
 
@@ -601,7 +533,7 @@ pub fn cell_convergence_pass(
             Ok(v) => v,
             Err(_) => continue,
         };
-        if pre_val == Value::Bool(true) {
+        if pre_val == Value::Bits(vec![1u8]) {
             *prior_state = state.clone();
             let mut return_val: Option<Value> = None;
             let mut terminated = false;
@@ -622,7 +554,7 @@ pub fn cell_convergence_pass(
             }
             let post = interp.rewrite_identifiers(&txn.contract.post_condition, 0, cell_name);
             if let Ok(post_val) = interp.eval_expr_in_state(&post, state) {
-                if post_val == Value::Bool(true) && state != prior_state {
+                if post_val == Value::Bits(vec![1u8]) && state != prior_state {
                     fired = true;
                 }
             }
@@ -1106,7 +1038,7 @@ impl Interpreter {
         // something to accept silently.
         loop {
             let pre_val = self.eval_expr(&txn.contract.pre_condition)?;
-            if pre_val != Value::Bool(true) {
+            if pre_val != Value::Bits(vec![1u8]) {
                 break;
             }
 
@@ -1154,7 +1086,7 @@ impl Interpreter {
         // Verify postcondition on the final (converged) state.
         // If it fails, roll back to entry state.
         let post_val = self.eval_expr(&txn.contract.post_condition)?;
-        if post_val != Value::Bool(true) {
+        if post_val != Value::Bits(vec![1u8]) {
             self.state = old_state.clone();
             self.return_value = old_return;
             return Err(RuntimeError::ContractViolation(format!(
@@ -1511,7 +1443,7 @@ impl Interpreter {
                         Type::Custom(__t) if __t == "Int" => Value::Int(0),
                         Type::Custom(__t) if __t == "Float" => Value::Float(0.0),
                         Type::Custom(__t) if __t == "String" => Value::String(String::new()),
-                        Type::Custom(__t) if __t == "Bool" => Value::Bool(false),
+                        Type::Custom(__t) if __t == "Bool" => Value::Bits(vec![0u8]),
                         _ => Value::Void,
                     }
                 };
@@ -1606,7 +1538,7 @@ impl Interpreter {
                 if let TopLevel::Transaction(txn) = inner_item {
                     if txn.is_reactive {
                         let pre_val = self.eval_expr(&txn.contract.pre_condition)?;
-                        if pre_val == Value::Bool(true) {
+                        if pre_val == Value::Bits(vec![1u8]) {
                             self.prior_state = self.state.clone();
 
                             let mut transaction_escaped = false;
@@ -1633,7 +1565,7 @@ impl Interpreter {
                                 // Commit state if postcondition is met (convergence reached).
                                 // If post is not yet met, state still advances (convergent loop
                                 // makes progress each tick). Only revert on error/escape.
-                                if post_val == Value::Bool(true) {
+                                if post_val == Value::Bits(vec![1u8]) {
                                     if self.state != self.prior_state {
                                         executed = true;
                                     }
@@ -1662,7 +1594,7 @@ impl Interpreter {
                     if let TopLevel::Transaction(txn) = &**inner {
                         if txn.is_reactive {
                             let pre_val = self.eval_expr(&txn.contract.pre_condition)?;
-                            if pre_val == Value::Bool(true) {
+                            if pre_val == Value::Bits(vec![1u8]) {
                                 self.prior_state = self.state.clone();
                                 let mut transaction_escaped = false;
                                 let mut transaction_failed = false;
@@ -1682,7 +1614,7 @@ impl Interpreter {
                                 }
                                 if !transaction_failed && !transaction_escaped {
                                     let post_val = self.eval_expr(&txn.contract.post_condition)?;
-                                    if post_val != Value::Bool(true) {
+                                    if post_val != Value::Bits(vec![1u8]) {
                                         self.state = self.prior_state.clone();
                                     } else if self.state != self.prior_state {
                                         executed = true;
@@ -1723,7 +1655,7 @@ impl Interpreter {
             } else {
                 match &field.ty {
                     Type::Custom(__t) if __t == "Int" => Value::Int(0),
-                    Type::Custom(__t) if __t == "Bool" => Value::Bool(false),
+                    Type::Custom(__t) if __t == "Bool" => Value::Bits(vec![0u8]),
                     Type::Custom(__t) if __t == "Float" => Value::Float(0.0),
                     Type::Custom(__t) if __t == "Char" => Value::Char('\0'),
                     Type::Custom(__t) if __t == "String" => Value::String(String::new()),
@@ -1847,7 +1779,7 @@ impl Interpreter {
                 self.eval_expr(expr)?
             } else {
                 match &field.ty {
-                    Type::Custom(__t) if __t == "Int" => Value::Int(0), Type::Custom(__t) if __t == "Bool" => Value::Bool(false),
+                    Type::Custom(__t) if __t == "Int" => Value::Int(0), Type::Custom(__t) if __t == "Bool" => Value::Bits(vec![0u8]),
                     Type::Custom(__t) if __t == "Float" => Value::Float(0.0), Type::Custom(__t) if __t == "Char" => Value::Char('\0'),
                     Type::Custom(__t) if __t == "String" => Value::String(String::new()), _ => Value::Void,
                 }
@@ -1875,7 +1807,7 @@ impl Interpreter {
             for txn in &cell_def.transactions {
                 let pre = self.rewrite_identifiers(&txn.contract.pre_condition, uid, &cell_def.name);
                 let pre_val = self.eval_expr(&pre)?;
-                if pre_val == Value::Bool(true) {
+                if pre_val == Value::Bits(vec![1u8]) {
                     self.prior_state = self.state.clone();
                     self.return_value = None;
                     for stmt in &txn.body {
@@ -1892,7 +1824,7 @@ impl Interpreter {
                     }
                     let post = self.rewrite_identifiers(&txn.contract.post_condition, uid, &cell_def.name);
                     let post_val = self.eval_expr(&post)?;
-                    if post_val == Value::Bool(true) && self.state != self.prior_state {
+                    if post_val == Value::Bits(vec![1u8]) && self.state != self.prior_state {
                         executed = true;
                     }
                 }
@@ -1918,7 +1850,7 @@ impl Interpreter {
                     if let Some(instance) = self.persistent_cells.get_mut(&wire.to_cell) {
                         instance.state.insert(
                             format!("{}${}.fired", wire.to_cell, 0),
-                            Value::Bool(false),
+                            Value::Bits(vec![0u8]),
                         );
                     }
                 }
@@ -1987,7 +1919,7 @@ impl Interpreter {
                     }
                 };
 
-                if pre_val == Value::Bool(true) {
+                if pre_val == Value::Bits(vec![1u8]) {
                     self.prior_state = self.state.clone();
                     self.return_value = None;
 
@@ -2025,7 +1957,7 @@ impl Interpreter {
                             return Err(e);
                         }
                     };
-                    if post_val == Value::Bool(true) && self.state != self.prior_state {
+                    if post_val == Value::Bits(vec![1u8]) && self.state != self.prior_state {
                         cell_fired = true;
                     }
                 }
@@ -2749,13 +2681,13 @@ impl Interpreter {
                     let guard_id = format!("guard_{}", self.guard_counter);
                     self.guard_counter += 1;
                     let entry = self.branch_counts.entry(guard_id).or_insert((0, 0));
-                    if cond_val == Value::Bool(true) {
+                    if cond_val == Value::Bits(vec![1u8]) {
                         entry.0 += 1;
                     } else {
                         entry.1 += 1;
                     }
                 }
-                if cond_val == Value::Bool(true) {
+                if cond_val == Value::Bits(vec![1u8]) {
                     for stmt in statements {
                         self.exec_stmt(stmt)?;
                     }
@@ -2965,7 +2897,7 @@ impl Interpreter {
             None => { self.state.remove("_"); }
         }
         match result {
-            Value::Bool(true) => Ok(()),
+            Value::Bits(vec![1u8]) => Ok(()),
             _ => Err(RuntimeError::TypeMismatch("constraint violated".into())),
         }
     }
@@ -3120,7 +3052,7 @@ impl Interpreter {
             Value::Int(0) => true,
             Value::Float(0.0) => true,
             Value::String(s) => s.is_empty(),
-            Value::Bool(false) => true,
+            Value::Bits(vec![0u8]) => true,
             Value::List(l) => l.is_empty(),
             Value::Instance {
                 typename: _,
@@ -3400,14 +3332,14 @@ impl Interpreter {
                                 if let Value::String(key) = &elem {
                                     Ok(Value::Bool(m.contains_key(key)))
                                 } else {
-                                    Ok(Value::Bool(false))
+                                    Ok(Value::Bits(vec![0u8]))
                                 }
                             }
                             Value::HashSet(s) => {
                                 if let Value::String(key) = &elem {
                                     Ok(Value::Bool(s.contains(key)))
                                 } else {
-                                    Ok(Value::Bool(false))
+                                    Ok(Value::Bits(vec![0u8]))
                                 }
                             }
                             v => Err(RuntimeError::TypeMismatch(format!("contains requires collection, got {:?}", v))),
@@ -3538,8 +3470,8 @@ impl Interpreter {
                         Ok(Value::Bool(true))
                     }
                     Intrinsic::Socket => Ok(Value::Int(-1)),
-                    Intrinsic::Bind => Ok(Value::Bool(false)),
-                    Intrinsic::Listen => Ok(Value::Bool(false)),
+                    Intrinsic::Bind => Ok(Value::Bits(vec![0u8])),
+                    Intrinsic::Listen => Ok(Value::Bits(vec![0u8])),
                     Intrinsic::Accept => Ok(Value::Int(-1)),
                     // ===== Phase A: Terminal (intrinsics.md D4) =====
                     Intrinsic::TtyRawMode => {
@@ -3599,7 +3531,7 @@ impl Interpreter {
                         #[cfg(not(unix))]
                         {
                             let _ = fd;
-                            Ok(Value::Bool(false))
+                            Ok(Value::Bits(vec![0u8]))
                         }
                     }
                     // ===== Phase A: Process (intrinsics.md D5) =====
@@ -5222,7 +5154,7 @@ impl Interpreter {
                                 format!("contains_at start requires Int, got {:?}", v))),
                         };
                         if start < 0 || (start as usize) >= haystack.len() {
-                            return Ok(Value::Bool(false));
+                            return Ok(Value::Bits(vec![0u8]));
                         }
                         Ok(Value::Bool(haystack[(start as usize)..].contains(&needle)))
                     }
@@ -6539,7 +6471,7 @@ impl Interpreter {
     fn eval_from_check(&self, val: Value, ty: &Type) -> Result<Value, RuntimeError> {
         let type_name = match &val {
             Value::Instance { typename, .. } | Value::Enum(typename, ..) => typename.clone(),
-            _ => return Ok(Value::Bool(false)),
+            _ => return Ok(Value::Bits(vec![0u8])),
         };
         let target_name = format!("{:?}", ty);
         Ok(Value::Bool(type_name == target_name))
@@ -6547,7 +6479,7 @@ impl Interpreter {
 
     fn eval_like(&self, lhs: Value, rhs: Value) -> Result<Value, RuntimeError> {
         fn is_bool_true(v: &Value) -> bool {
-            matches!(v, Value::Bool(true))
+            matches!(v, Value::Bits(vec![1u8]))
         }
         let result = match (&lhs, &rhs) {
             (Value::Int(a), Value::Int(b)) => a == b,
@@ -6728,7 +6660,7 @@ impl Interpreter {
                             _ => return Ok(Value::Tuple(groups)),
                         }
                     } else {
-                        return Ok(Value::Bool(false));
+                        return Ok(Value::Bits(vec![0u8]));
                     }
                 }
             }
@@ -6837,14 +6769,14 @@ impl Interpreter {
                 crate::ast::SubtypeOp::Filter(predicate) => {
                     items = items.into_iter().filter(|item| {
                         self.state.insert("_".to_string(), item.clone());
-                        let result = self.eval_expr(predicate).unwrap_or(Value::Bool(false));
-                        result == Value::Bool(true)
+                        let result = self.eval_expr(predicate).unwrap_or(Value::Bits(vec![0u8]));
+                        result == Value::Bits(vec![1u8])
                     }).collect();
                 }
                 crate::ast::SubtypeOp::Map(transform) => {
                     items = items.into_iter().map(|item| {
                         self.state.insert("_".to_string(), item);
-                        self.eval_expr(transform).unwrap_or(Value::Bool(false))
+                        self.eval_expr(transform).unwrap_or(Value::Bits(vec![0u8]))
                     }).collect();
                 }
                 crate::ast::SubtypeOp::Limit(n) => {
@@ -7105,10 +7037,10 @@ fn parse_csv_value(s: &str) -> Value {
     }
     // Bool
     if s == "true" {
-        return Value::Bool(true);
+        return Value::Bits(vec![1u8]);
     }
     if s == "false" {
-        return Value::Bool(false);
+        return Value::Bits(vec![0u8]);
     }
     // Default: string
     Value::String(s.to_string())
@@ -7366,7 +7298,7 @@ pub(crate) fn json_is_array_impl(args: Vec<Value>) -> Result<Value, RuntimeError
     if let Value::List(_) = &args[0] {
         Ok(Value::Bool(true))
     } else {
-        Ok(Value::Bool(false))
+        Ok(Value::Bits(vec![0u8]))
     }
 }
 
@@ -8076,7 +8008,7 @@ mod tests {
     #[test]
     fn test_projection_size_on_bool() {
         let mut i = Interpreter::new();
-        i.state.insert("x".to_string(), Value::Bool(true));
+        i.state.insert("x".to_string(), Value::Bits(vec![1u8]));
         let expr = Expr::Projection {
             source: Box::new(Expr::Identifier("x".to_string())),
             target: ProjectionTarget::Size,
@@ -8604,7 +8536,7 @@ mod tests {
     #[test]
     fn test_uni_literal_bool_matches() {
         let mut i = Interpreter::new();
-        i.state.insert("val".to_string(), make_enum("Flag", vec![("0", Value::Bool(true))]));
+        i.state.insert("val".to_string(), make_enum("Flag", vec![("0", Value::Bits(vec![1u8]))]));
         i.state.insert("flag".to_string(), Value::Int(0));
         let stmt = Statement::Unification {
             name: "val".to_string(),
@@ -8657,7 +8589,7 @@ mod tests {
             fields: vec![Pattern::Var("v".to_string())],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
         assert_eq!(i.state.get("v"), Some(&Value::Int(42)));
     }
 
@@ -8671,7 +8603,7 @@ mod tests {
             fields: vec![Pattern::Var("v".to_string())],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, Value::Bits(vec![0u8]));
         assert!(!i.state.contains_key("v"));
     }
 
@@ -8685,7 +8617,7 @@ mod tests {
             fields: vec![Pattern::LitInt(42)],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -8698,7 +8630,7 @@ mod tests {
             fields: vec![Pattern::LitInt(42)],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, Value::Bits(vec![0u8]));
     }
 
     #[test]
@@ -8717,7 +8649,7 @@ mod tests {
             ])],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
         assert_eq!(i.state.get("a"), Some(&Value::Int(10)));
         assert_eq!(i.state.get("b"), Some(&Value::Int(20)));
     }
@@ -8732,7 +8664,7 @@ mod tests {
             fields: vec![Pattern::Wildcard],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
         assert!(!i.state.contains_key("_"));
     }
 
@@ -8746,7 +8678,7 @@ mod tests {
             fields: vec![],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -9304,12 +9236,12 @@ mod tests {
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             target: ProjectionTarget::Contains(Box::new(Expr::String("hello".to_string()))),
         }).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
         let result = i.eval_expr(&Expr::Projection {
             source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".to_string())))),
             target: ProjectionTarget::Contains(Box::new(Expr::String("nope".to_string()))),
         }).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, Value::Bits(vec![0u8]));
     }
 
     #[test]
@@ -9667,7 +9599,7 @@ mod tests {
     #[test]
     fn test_sync_block_nested_guarded() {
         let mut i = Interpreter::new();
-        i.state.insert("a".to_string(), Value::Bool(false));
+        i.state.insert("a".to_string(), Value::Bits(vec![0u8]));
         i.state.insert("b".to_string(), Value::Int(0));
         let sync_block = Statement::SyncBlock {
             body: vec![
@@ -9830,7 +9762,7 @@ mod tests {
             source: Box::new(Expr::String("hello world".into())),
             ops: vec![SubtypeOp::Match(Box::new(Expr::String("^[0-9]+$".into())))],
         }).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, Value::Bits(vec![0u8]));
     }
 
     // ---- SubtypeOp gap tests ----
@@ -9969,7 +9901,7 @@ mod tests {
         ];
 
         let result = crate::ffi::registry::dbvl_append_impl(args).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
 
         // Read file back and verify
         let content = std::fs::read_to_string(path).unwrap();
@@ -10037,7 +9969,7 @@ mod tests {
         assert_eq!(vals[0], Value::String("key1".into()));
         assert_eq!(vals[1], Value::String("hello,world".into()));
         assert_eq!(vals[2], Value::Int(42));
-        assert_eq!(vals[3], Value::Bool(true));
+        assert_eq!(vals[3], Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -10450,7 +10382,7 @@ mod tests {
             ],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -10914,7 +10846,7 @@ mod tests {
     fn test_constraint_regex_evaluates_to_non_bool() {
         // Regex literals evaluate to Value::Regex(dfa), not Bool(true).
         // Using @"pattern" alone as a constraint always violates because
-        // eval_constraint requires Value::Bool(true). A future enhancement
+        // eval_constraint requires Value::Bits(vec![1u8]). A future enhancement
         // could auto-apply regex against _ in constraint context.
         let mut i = Interpreter::new();
         let val = Value::String("hello".to_string());
@@ -10977,7 +10909,7 @@ mod tests {
             args: vec![],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -11548,7 +11480,7 @@ mod tests {
 
         // Reset fired in saved state — demonstrate persistence
         let saved = interp.persistent_cells.get_mut("counter").unwrap();
-        saved.state.insert("counter$0.fired".to_string(), Value::Bool(false));
+        saved.state.insert("counter$0.fired".to_string(), Value::Bits(vec![0u8]));
 
         // Tick again: fired=false → !fired=true → fires → val=1+1=2
         interp.tick_persistent_cells().unwrap();
@@ -12020,7 +11952,7 @@ mod tests {
             args: vec![ptr_expr, Expr::Integer(42)],
         };
         let result = i.eval_expr(&vs).unwrap();
-        assert_eq!(result, Value::Bool(true), "volatile_store returns true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "volatile_store returns true");
     }
 
     #[test]
@@ -12151,7 +12083,7 @@ mod kani_full_tests {
         let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
         let result = ctx.eval_expr(&expr);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::Bool(true));
+        assert_eq!(result.unwrap(), Value::Bits(vec![1u8]));
     }
 
     #[kani::proof]
@@ -12371,7 +12303,7 @@ mod kani_full_tests {
             ],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -12385,7 +12317,7 @@ mod kani_full_tests {
             ],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, Value::Bits(vec![0u8]));
     }
 
     #[test]
@@ -12399,7 +12331,7 @@ mod kani_full_tests {
             ],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -12477,7 +12409,7 @@ mod kani_full_tests {
             args: vec![Expr::Bool(false)],
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false), "tty_raw_mode#(false) should return false (not a tty)");
+        assert_eq!(result, Value::Bits(vec![0u8]), "tty_raw_mode#(false) should return false (not a tty)");
     }
 
     #[test]
@@ -12552,7 +12484,7 @@ mod kani_full_tests {
         };
         let result = i.eval_expr(&expr).unwrap();
         // In test runner, stdin is usually piped, not a tty
-        assert_eq!(result, Value::Bool(false), "isatty#(0) should return false in test runner");
+        assert_eq!(result, Value::Bits(vec![0u8]), "isatty#(0) should return false in test runner");
     }
 
     #[test]
@@ -13552,7 +13484,7 @@ mod kani_full_tests {
             crate::ast::IsTarget::Type(Type::int()),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true), "42 is Int should be true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "42 is Int should be true");
     }
 
     #[test]
@@ -13563,7 +13495,7 @@ mod kani_full_tests {
             crate::ast::IsTarget::Type(Type::int()),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false), "string is Int should be false");
+        assert_eq!(result, Value::Bits(vec![0u8]), "string is Int should be false");
     }
 
     #[test]
@@ -13577,7 +13509,7 @@ mod kani_full_tests {
             crate::ast::IsTarget::Variant("Some".to_string()),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true), "Option::Some is Some should be true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "Option::Some is Some should be true");
     }
 
     #[test]
@@ -13589,7 +13521,7 @@ mod kani_full_tests {
             crate::ast::IsTarget::Variant("Some".to_string()),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false), "Option::None is Some should be false");
+        assert_eq!(result, Value::Bits(vec![0u8]), "Option::None is Some should be false");
     }
 
     #[test]
@@ -13603,7 +13535,7 @@ mod kani_full_tests {
             Type::Custom("Foo".to_string()),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true), "obj from Foo should be true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "obj from Foo should be true");
     }
 
     #[test]
@@ -13614,7 +13546,7 @@ mod kani_full_tests {
             Box::new(Expr::Integer(42)),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true), "42 like 42 should be true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "42 like 42 should be true");
     }
 
     #[test]
@@ -13625,7 +13557,7 @@ mod kani_full_tests {
             Box::new(Expr::Integer(1)),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false), "42 like 1 should be false");
+        assert_eq!(result, Value::Bits(vec![0u8]), "42 like 1 should be false");
     }
 
     #[test]
@@ -13636,7 +13568,7 @@ mod kani_full_tests {
             Box::new(Expr::Float(3.14)),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true), "3.14 like 3.14 should be true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "3.14 like 3.14 should be true");
     }
 
     #[test]
@@ -13647,7 +13579,7 @@ mod kani_full_tests {
             Box::new(Expr::String("hello".to_string())),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true), "\"hello\" like \"hello\" should be true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "\"hello\" like \"hello\" should be true");
     }
 
     #[test]
@@ -13658,7 +13590,7 @@ mod kani_full_tests {
             Box::new(Expr::String("world".to_string())),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false), "\"hello\" like \"world\" should be false");
+        assert_eq!(result, Value::Bits(vec![0u8]), "\"hello\" like \"world\" should be false");
     }
 
     #[test]
@@ -13673,7 +13605,7 @@ mod kani_full_tests {
             Box::new(Expr::AddrOf(Box::new(Expr::Identifier("b".to_string())))),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true), "[1,2] like [1,2] should be true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "[1,2] like [1,2] should be true");
     }
 
     #[test]
@@ -13688,7 +13620,7 @@ mod kani_full_tests {
             Box::new(Expr::AddrOf(Box::new(Expr::Identifier("b".to_string())))),
         );
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false), "[1,2] like [1,3] should be false");
+        assert_eq!(result, Value::Bits(vec![0u8]), "[1,2] like [1,3] should be false");
     }
 
     #[test]
@@ -13768,7 +13700,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::Cast(Box::new(Expr::Integer(42)), Type::bool_());
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true), "Int 42 -> Bool should be true");
+        assert_eq!(result, Value::Bits(vec![1u8]), "Int 42 -> Bool should be true");
     }
 
     #[test]
@@ -13776,7 +13708,7 @@ mod kani_full_tests {
         let mut i = Interpreter::new();
         let expr = Expr::Cast(Box::new(Expr::Integer(0)), Type::bool_());
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false), "Int 0 -> Bool should be false");
+        assert_eq!(result, Value::Bits(vec![0u8]), "Int 0 -> Bool should be false");
     }
 
     #[test]
@@ -13818,7 +13750,7 @@ mod kani_full_tests {
     #[test]
     fn test_is_valid_ffi_return_bool_valid() {
         assert!(Interpreter::is_valid_ffi_return(&Value::Bool(true), &Type::bool_()));
-        assert!(Interpreter::is_valid_ffi_return(&Value::Bool(false), &Type::bool_()));
+        assert!(Interpreter::is_valid_ffi_return(&Value::Bits(vec![0u8]), &Type::bool_()));
     }
 
     #[test]
@@ -14661,7 +14593,7 @@ mod kani_full_tests {
             target: ProjectionTarget::IsPure,
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(true));
+        assert_eq!(result, Value::Bits(vec![1u8]));
     }
 
     #[test]
@@ -14686,7 +14618,7 @@ mod kani_full_tests {
             target: ProjectionTarget::IsPure,
         };
         let result = i.eval_expr(&expr).unwrap();
-        assert_eq!(result, Value::Bool(false));
+        assert_eq!(result, Value::Bits(vec![0u8]));
     }
 
     #[test]

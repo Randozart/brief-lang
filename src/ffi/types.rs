@@ -99,10 +99,10 @@ pub enum FfiValue {
 impl FfiValue {
     pub fn from_interpreter_value(v: &crate::interpreter::Value) -> Self {
         match v {
-            crate::interpreter::Value::Int(i) => FfiValue::Int(*i),
-            crate::interpreter::Value::Float(f) => FfiValue::Float(*f),
+            crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(i)) => FfiValue::Int(*i),
+            crate::interpreter::Value::Bits(crate::interpreter::f64_to_bits(f)) => FfiValue::Bits(crate::interpreter::f64_to_bits(*f)),
             crate::interpreter::Value::Bool(b) => FfiValue::Bool(*b),
-            crate::interpreter::Value::String(s) => FfiValue::String(s.clone()),
+            crate::interpreter::Value::Bits(s.as_bytes().to_vec()) => FfiValue::Bits(s.as_bytes().to_vec()),
             crate::interpreter::Value::Bits(d) => FfiValue::Data(d.clone()),
             crate::interpreter::Value::List(l) => {
                 FfiValue::List(l.iter().map(Self::from_interpreter_value).collect())
@@ -122,10 +122,10 @@ impl FfiValue {
                 FfiValue::Variant(name.clone(), variant.clone(), ffi_fields)
             }
             crate::interpreter::Value::Void => FfiValue::Void,
-            crate::interpreter::Value::Ptr(addr) => FfiValue::Int(*addr as i64),
+            crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(addr as i64)) => FfiValue::Int(*addr as i64),
             crate::interpreter::Value::DbvlTable(t) => {
                 let mut meta = std::collections::HashMap::new();
-                meta.insert("__lazy".to_string(), FfiValue::String(t.path.clone()));
+                meta.insert("__lazy".to_string(), FfiValue::Bits(t.path.as_bytes().to_vec()));
                 meta.insert("entries".to_string(), FfiValue::Int(t.key_offsets.len() as i64));
                 FfiValue::Struct("DbvlTable".to_string(), meta)
             }
@@ -135,10 +135,10 @@ impl FfiValue {
 
     pub fn to_interpreter_value(&self) -> crate::interpreter::Value {
         match self {
-            FfiValue::Int(i) => crate::interpreter::Value::Int(*i),
-            FfiValue::Float(f) => crate::interpreter::Value::Float(*f),
+            FfiValue::Bits(crate::interpreter::i64_to_bits(i)) => crate::interpreter::Value::Int(*i),
+            FfiValue::Bits(crate::interpreter::f64_to_bits(f)) => crate::interpreter::Value::Bits(crate::interpreter::f64_to_bits(*f)),
             FfiValue::Bool(b) => crate::interpreter::Value::Bool(*b),
-            FfiValue::String(s) => crate::interpreter::Value::String(s.clone()),
+            FfiValue::Bits(s.as_bytes().to_vec()) => crate::interpreter::Value::Bits(s.as_bytes().to_vec()),
             FfiValue::Data(d) => crate::interpreter::Value::Bits(d.clone()),
             FfiValue::List(l) => crate::interpreter::Value::List(
                 l.iter().map(|v| v.to_interpreter_value()).collect(),

@@ -139,11 +139,18 @@ pub fn value_to_items(value: &crate::interpreter::Value) -> Vec<crate::ast::TopL
 
 pub(crate) fn expr_from_value(value: &crate::interpreter::Value) -> Expr {
     match value {
-        crate::interpreter::Value::Int(n) => Expr::Integer(*n),
-        crate::interpreter::Value::Float(f) => Expr::Float(*f),
-        crate::interpreter::Value::String(s) => Expr::String(s.clone()),
-        crate::interpreter::Value::Bool(b) => Expr::Bool(*b),
-        crate::interpreter::Value::Char(c) => Expr::Char(*c),
+        crate::interpreter::Value::Bits(b) if b.len() == 8 => {
+            let mut arr = [0u8; 8];
+            arr.copy_from_slice(&b[..8]);
+            Expr::Integer(i64::from_le_bytes(arr))
+        }
+        crate::interpreter::Value::Bits(b) if b.len() == 1 => {
+            Expr::Bool(b[0] != 0)
+        }
+        crate::interpreter::Value::Bits(b) => {
+            let s = String::from_utf8_lossy(b);
+            Expr::String(s.to_string())
+        }
         _ => Expr::Term,
     }
 }

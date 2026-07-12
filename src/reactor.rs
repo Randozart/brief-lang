@@ -123,7 +123,7 @@ impl Reactor {
             Statement::Guarded { condition, statements, .. } => {
                 // Check if this guard's condition is currently true
                 if let Ok(cond_val) = interp.eval_expr(condition) {
-                    if cond_val == Value::Bool(true) {
+                    if cond_val == Value::Bits(vec![1u8]) {
                         // Check if any statement in the guard body is an escape
                         for s in statements {
                             if self.contains_escape(s) {
@@ -169,7 +169,7 @@ impl Reactor {
                     // Run this single transaction
                     if let Some(txn) = self.transactions.get(idx) {
                         let pre_val = interp.eval_expr(&txn.contract.pre_condition)?;
-                        if pre_val == Value::Bool(true) {
+                        if pre_val == Value::Bits(vec![1u8]) {
                             interp.prior_state = interp.state.clone();
                             for stmt in &txn.body {
                                 if let Err(e) = interp.exec_stmt(stmt) {
@@ -207,7 +207,7 @@ impl Reactor {
         for &txn_idx in self.get_dirty_transactions().iter() {
             if let Some(txn) = self.transactions.get(txn_idx) {
                 let pre_val = interp.eval_expr(&txn.contract.pre_condition)?;
-                if pre_val == Value::Bool(true) {
+                if pre_val == Value::Bits(vec![1u8]) {
                     // PRE-EVALUATION GUARD: Check if any escape conditions are provably true
                     // before running the transaction. If so, skip entirely to avoid FFI side effects.
                     if self.will_escape(txn, interp) {
@@ -232,7 +232,7 @@ impl Reactor {
                                 Ok(StmtResult::TermSuccess) => {
                                     let post_val =
                                         interp.eval_expr(&txn.contract.post_condition)?;
-                                    if post_val == Value::Bool(true) {
+                                    if post_val == Value::Bits(vec![1u8]) {
                                         term_executed = true;
                                         any_executed = true;
                                         break;
@@ -306,7 +306,7 @@ impl Reactor {
                 if let Some(first) = outputs.first() {
                     if let Some(expr) = first {
                         let value = interp.eval_expr(expr)?;
-                        if value == Value::Bool(true) {
+                        if value == Value::Bits(vec![1u8]) {
                             Ok(StmtResult::TermSuccess)
                         } else {
                             Ok(StmtResult::TermFailed)
@@ -325,7 +325,7 @@ impl Reactor {
                 ..
             } => {
                 let cond_val = interp.eval_expr(condition)?;
-                if cond_val == Value::Bool(true) {
+                if cond_val == Value::Bits(vec![1u8]) {
                     for stmt in statements {
                         let result = self.execute_statement(interp, stmt)?;
                         match result {
@@ -579,11 +579,11 @@ mod tests {
             Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Integer(42))),
             body);
         let mut interp = Interpreter::new();
-        interp.state.insert("x".into(), Value::Int(0));
+        interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
         let reactor = build_reactor(&simple_program(vec![txn]));
         let result = reactor.run(&mut interp).unwrap();
         assert!(result);
-        assert_eq!(interp.state.get("x"), Some(&Value::Int(42)));
+        assert_eq!(interp.state.get("x"), Some(&Value::Bits(crate::interpreter::i64_to_bits(42))));
     }
 
     #[test]
@@ -591,11 +591,11 @@ mod tests {
         let body = vec![Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Integer(99), timeout: None, modifiers: vec![] }];
         let txn = make_rct_txn("skip", Expr::Bool(false), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
-        interp.state.insert("x".into(), Value::Int(0));
+        interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
         let reactor = build_reactor(&simple_program(vec![txn]));
         let result = reactor.run(&mut interp).unwrap();
         assert!(!result);
-        assert_eq!(interp.state.get("x"), Some(&Value::Int(0)));
+        assert_eq!(interp.state.get("x"), Some(&Value::Bits(crate::interpreter::i64_to_bits(0))));
     }
 
     #[test]
@@ -621,14 +621,14 @@ mod tests {
         ];
         let txn = make_rct_txn("rollback", Expr::Bool(true), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
-        interp.state.insert("x".into(), Value::Int(5));
+        interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(5)));
         interp.prior_state = interp.state.clone();
         let reactor = build_reactor(&simple_program(vec![txn]));
         let result = reactor.run(&mut interp).unwrap();
         // Pre-evaluation guard skips the transaction entirely (escape would fire)
         assert!(!result);
         // State unchanged since transaction wasn't executed
-        assert_eq!(interp.state.get("x"), Some(&Value::Int(5)));
+        assert_eq!(interp.state.get("x"), Some(&Value::Bits(crate::interpreter::i64_to_bits(5))));
     }
 
     #[test]
@@ -707,7 +707,7 @@ mod tests {
             derivation: None,
         };
         let mut interp = Interpreter::new();
-        interp.state.insert("x".into(), Value::Int(0));
+        interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
         let mut reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
         // First call should fire immediately (last_fired was set at construction)
         // The last_fired is set to Instant::now() during build, so we need to

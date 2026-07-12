@@ -1,7 +1,7 @@
 use crate::ast::{BracketOp, Expr, SliceCoordinate, Type};
 use crate::features::traits::*;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
-use crate::interpreter::{value_as_i64, i64_to_bits};
+use crate::interpreter::{value_as_i64, i64_to_bits, f64_to_bits};
 
 /// Evaluate a mask condition against an item value.
 /// Supports both Bool predicates and Regex matching.
@@ -10,13 +10,14 @@ fn eval_mask_condition(ctx: &mut Interpreter, mask_expr: &Expr, item_value: &Val
     let cond = ctx.eval_expr(mask_expr)?;
     if prev.is_some() { ctx.state.insert("_".into(), prev.unwrap()); } else { ctx.state.remove("_"); }
     match cond {
-        Value::Bool(b) => Ok(b),
+        Value::Bits(b) if b.len() == 1 => Ok(b[0] != 0),
         Value::Regex(ref dfa) => {
             let s = ctx.value_to_string(item_value)?;
             Ok(crate::analysis::dfa::execute_dfa(dfa, &s).is_some())
         }
-        Value::String(ref pattern) => {
-            match crate::analysis::dfa::compile_to_dfa(pattern) {
+        Value::Bits(ref bytes) => {
+            let pattern = String::from_utf8_lossy(bytes);
+            match crate::analysis::dfa::compile_to_dfa(&pattern) {
                 Ok(dfa) => {
                     let s = ctx.value_to_string(item_value)?;
                     Ok(crate::analysis::dfa::execute_dfa(&dfa, &s).is_some())
@@ -32,19 +33,21 @@ fn eval_mask_condition(ctx: &mut Interpreter, mask_expr: &Expr, item_value: &Val
 /// `Int(15561)` → `['1', '5', '5', '6', '1']`
 fn decompose_atomic_to_chars(val: &Value) -> Option<Vec<char>> {
     match val {
-        Value::Int(n) => Some(n.to_string().chars().collect()),
-        Value::Bits(_) => value_as_i64(val).map(|n| n.to_string().chars().collect()),
-        Value::Float(f) => Some({
-            let s = format!("{:.}", f);
-            // Format without trailing zeros for cleaner reconstruction
-            if s.contains('.') {
-                let trimmed = s.trim_end_matches('0');
-                if trimmed.ends_with('.') { format!("{}0", trimmed) } else { trimmed.to_string() }
-            } else { s }
-            .chars().collect()
-        }),
-        Value::Bool(b) => Some(b.to_string().chars().collect()),
-        Value::Char(c) => Some(vec![*c]),
+        Value::Bits(b) if b.len() == 8 => {
+            value_as_i64(val).map(|n| n.to_string().chars().collect())
+        }
+        Value::Bits(b) if b.len() == 1 => {
+            Some(if b[0] != 0 { "true".to_string() } else { "false".to_string() }.chars().collect())
+        }
+        Value::Bits(b) if b.len() == 4 => {
+            let mut arr = [0u8; 4];
+            arr.copy_from_slice(b);
+            char::from_u32(u32::from_le_bytes(arr)).map(|c| vec![c])
+        }
+        Value::Bits(b) => {
+            let s = String::from_utf8_lossy(b);
+            Some(s.chars().collect())
+        }
         _ => None,
     }
 }
@@ -53,27 +56,25 @@ fn decompose_atomic_to_chars(val: &Value) -> Option<Vec<char>> {
 /// `['1', '6', '1']` from original `Int(15561)` → `Int(161)`
 fn reconstruct_from_chars(chars: &[char], original: &Value) -> Option<Value> {
     match original {
-        Value::Int(_) => {
-            let s: String = chars.iter().collect();
-            s.parse::<i64>().ok().map(Value::Int)
-        }
-        Value::Bits(_) => {
+        Value::Bits(b) if b.len() == 8 => {
             let s: String = chars.iter().collect();
             s.parse::<i64>().ok().map(|n| Value::Bits(i64_to_bits(n)))
         }
-        Value::Float(_) => {
-            let s: String = chars.iter().collect();
-            s.parse::<f64>().ok().map(Value::Float)
-        }
-        Value::Bool(_) => {
+        Value::Bits(b) if b.len() == 1 => {
             let s: String = chars.iter().collect();
             match s.as_str() {
-                "true" => Some(Value::Bool(true)),
-                "false" => Some(Value::Bool(false)),
+                "true" => Some(Value::Bits(vec![1u8])),
+                "false" => Some(Value::Bits(vec![0u8])),
                 _ => None,
             }
         }
-        Value::Char(_) => chars.first().copied().map(Value::Char),
+        Value::Bits(b) if b.len() == 4 => {
+            chars.first().copied().map(|c| Value::Bits((c as u32).to_le_bytes().to_vec()))
+        }
+        Value::Bits(b) => {
+            let s: String = chars.iter().collect();
+            s.parse::<i64>().ok().map(|n| Value::Bits(i64_to_bits(n)))
+        }
         _ => None,
     }
 }
@@ -161,7 +162,6 @@ impl ExprEval for ListIndexExpr {
                 // Non-integer index: try DbvlTable string key
                 // 2026-07-11: Expr::String produces Value::Bits; check both.
                 let dbvl_key = match &index_val {
-                    Value::String(k) => Some(k.clone()),
                     Value::Bits(b) => String::from_utf8(b.clone()).ok(),
                     _ => None,
                 };
@@ -207,12 +207,14 @@ impl ExprEval for SliceExpr {
             }
         };
 
-        // Handle String atomically (existing behavior)
-        if let Value::String(ref s) = list_val {
+        // Handle String atomically via Bits
+        if let Value::Bits(ref s_bytes) = list_val {
+            let s = String::from_utf8_lossy(s_bytes);
             let len = s.len();
             let start_idx = eval_idx(&self.start, len).unwrap_or(0);
             let end_idx = eval_idx(&self.end, len).unwrap_or(len);
-            return Ok(Value::String(if start_idx < end_idx && start_idx < len { s[start_idx..end_idx.min(len)].to_string() } else { String::new() }));
+            let result = if start_idx < end_idx && start_idx < len { s[start_idx..end_idx.min(len)].to_string() } else { String::new() };
+            return Ok(Value::Bits(result.as_bytes().to_vec()));
         }
 
         // Handle atomic types (Int, Float, Bool, Char) via visual char decomposition
@@ -227,7 +229,7 @@ impl ExprEval for SliceExpr {
             if let Some(mask_expr) = &self.mask {
                 let mut filtered = Vec::new();
                 for item in result {
-                    if eval_mask_condition(ctx, mask_expr, &Value::Char(item))? { filtered.push(item); }
+                    if eval_mask_condition(ctx, mask_expr, &Value::Bits((item as u32).to_le_bytes().to_vec()))? { filtered.push(item); }
                 }
                 result = filtered;
             }
@@ -259,7 +261,7 @@ impl ExprEval for MultiSliceExpr {
         let base = ctx.eval_expr(&self.value)?;
 
         // Atomic types (Int, Bits, Float, Bool, Char): decompose, apply ops, reconstruct
-        if matches!(base, Value::Int(_) | Value::Bits(_) | Value::Float(_) | Value::Bool(_) | Value::Char(_)) {
+        if matches!(base, Value::Bits(_)) {
             // Type-directed desugar: single string coord -> treat as regex filter
             // e.g., 15561["[15]"] is equivalent to 15561[;@"[15]"]
             if self.ops.len() == 1 {
@@ -267,7 +269,6 @@ impl ExprEval for MultiSliceExpr {
                     // 2026-07-11: Expr::String produces Value::Bits; check both.
                     let coord_val = ctx.eval_expr(coord_expr)?;
                     let pattern = match &coord_val {
-                        Value::String(s) => Some(s.clone()),
                         Value::Bits(b) => String::from_utf8(b.clone()).ok(),
                         _ => None,
                     };
@@ -279,7 +280,7 @@ impl ExprEval for MultiSliceExpr {
                             let chars = decompose_atomic_to_chars(&base).unwrap_or_default();
                             let mut filtered = Vec::new();
                             for &c in &chars {
-                                let item = Value::Char(c);
+                                let item = Value::Bits((c as u32).to_le_bytes().to_vec());
                                 let s = ctx.value_to_string(&item)?;
                                 if crate::analysis::dfa::execute_dfa(&dfa, &s).is_some() {
                                     filtered.push(c);
@@ -293,7 +294,7 @@ impl ExprEval for MultiSliceExpr {
             }
 
             let chars = decompose_atomic_to_chars(&base).ok_or_else(|| RuntimeError::TypeMismatch("Cannot decompose atomic value".into()))?;
-            let mut current: Vec<Value> = chars.iter().map(|&c| Value::Char(c)).collect();
+            let mut current: Vec<Value> = chars.iter().map(|&c| Value::Bits((c as u32).to_le_bytes().to_vec())).collect();
 
             for op in &self.ops {
                 match op {
@@ -313,7 +314,15 @@ impl ExprEval for MultiSliceExpr {
                 }
             }
 
-            let result_chars: Vec<char> = current.iter().filter_map(|v| if let Value::Char(c) = v { Some(*c) } else { None }).collect();
+            let result_chars: Vec<char> = current.iter().filter_map(|v| {
+                if let Value::Bits(b) = v {
+                    if b.len() == 4 {
+                        let mut arr = [0u8; 4];
+                        arr.copy_from_slice(b);
+                        char::from_u32(u32::from_le_bytes(arr))
+                    } else { None }
+                } else { None }
+            }).collect();
             return reconstruct_from_chars(&result_chars, &base)
                 .ok_or_else(|| RuntimeError::TypeMismatch("Empty bracket result on atomic value".into()));
         }

@@ -49,7 +49,7 @@ pub fn execute_bild(
 
     // Pre-populate %state with a dummy pointer if the inop has state access.
     if has_state {
-        regs.insert("%state".to_string(), Value::Ptr(0));
+        regs.insert("%state".to_string(), Value::Bits(crate::interpreter::i64_to_bits(0 as i64)));
     }
 
     // State view: maps GEP-computed field indices to Values.
@@ -177,9 +177,9 @@ fn resolve_reg(name: &str, regs: &HashMap<String, Value>) -> Result<Value, FuzzE
     } else {
         // Try as literal integer (e.g. "42").
         if let Ok(n) = trimmed.parse::<i64>() {
-            return Ok(Value::Int(n));
+            return Ok(Value::Bits(crate::interpreter::i64_to_bits(n)));
         }
-        Ok(Value::Int(0)) // default zero for undefined
+        Ok(Value::Bits(crate::interpreter::i64_to_bits(0))) // default zero for undefined
     }
 }
 
@@ -198,30 +198,30 @@ fn resolve_binop(
     // returning Int(0) for float operands.
     if ty == "float" || ty.starts_with("float") {
         let fa = match &a {
-            Value::Float(f) => *f,
-            Value::Int(n) => *n as f64,
+            Value::Bits(crate::interpreter::f64_to_bits(f)) => *f,
+            Value::Bits(crate::interpreter::i64_to_bits(n)) => *n as f64,
             _ => 0.0,
         };
         let fb = match &b {
-            Value::Float(f) => *f,
-            Value::Int(n) => *n as f64,
+            Value::Bits(crate::interpreter::f64_to_bits(f)) => *f,
+            Value::Bits(crate::interpreter::i64_to_bits(n)) => *n as f64,
             _ => 0.0,
         };
         return Ok(match opcode {
-            "fadd" | "add" => Value::Float(fa + fb),
-            "fsub" | "sub" => Value::Float(fa - fb),
-            "fmul" | "mul" => Value::Float(fa * fb),
+            "fadd" | "add" => Value::Bits(crate::interpreter::f64_to_bits(fa + fb)),
+            "fsub" | "sub" => Value::Bits(crate::interpreter::f64_to_bits(fa - fb)),
+            "fmul" | "mul" => Value::Bits(crate::interpreter::f64_to_bits(fa * fb)),
             "fdiv" | "div" | "sdiv" | "udiv" => {
-                if fb == 0.0 { Value::Float(0.0) } else { Value::Float(fa / fb) }
+                if fb == 0.0 { Value::Bits(crate::interpreter::f64_to_bits(0.0)) } else { Value::Bits(crate::interpreter::f64_to_bits(fa / fb)) }
             }
-            _ => Value::Float(0.0),
+            _ => Value::Bits(crate::interpreter::f64_to_bits(0.0)),
         });
     }
 
     let (va, vb) = match (&a, &b) {
-        (Value::Int(va), Value::Int(vb)) => (*va, *vb),
+        (Value::Bits(crate::interpreter::i64_to_bits(va)), Value::Bits(crate::interpreter::i64_to_bits(vb))) => (*va, *vb),
         (Value::Bool(va), Value::Bool(vb)) => (*va as i64, *vb as i64),
-        _ => return Ok(Value::Int(0)),
+        _ => return Ok(Value::Bits(crate::interpreter::i64_to_bits(0))),
     };
 
     Ok(Value::Int(match opcode {
@@ -247,8 +247,8 @@ fn resolve_bitwise(
     // Format: opcode type op1, op2 — skip type at operands[0]
     let a = resolve_reg(operands.get(1).unwrap_or(&"0"), regs)?;
     let b = resolve_reg(operands.get(2).unwrap_or(&"0"), regs)?;
-    let va = match a { Value::Int(n) => n, Value::Bool(b) => b as i64, _ => 0 };
-    let vb = match b { Value::Int(n) => n, Value::Bool(b) => b as i64, _ => 0 };
+    let va = match a { Value::Bits(crate::interpreter::i64_to_bits(n)) => n, Value::Bool(b) => b as i64, _ => 0 };
+    let vb = match b { Value::Bits(crate::interpreter::i64_to_bits(n)) => n, Value::Bool(b) => b as i64, _ => 0 };
 
     Ok(Value::Int(match opcode {
         "and" => va & vb,
@@ -273,8 +273,8 @@ fn resolve_icmp(
     let a = resolve_reg(operands.get(2).unwrap_or(&"0"), regs)?;
     let b = resolve_reg(operands.get(3).unwrap_or(&"0"), regs)?;
 
-    let va = match &a { Value::Int(n) => *n, Value::Bool(b) => *b as i64, _ => 0 };
-    let vb = match &b { Value::Int(n) => *n, Value::Bool(b) => *b as i64, _ => 0 };
+    let va = match &a { Value::Bits(crate::interpreter::i64_to_bits(n)) => *n, Value::Bool(b) => *b as i64, _ => 0 };
+    let vb = match &b { Value::Bits(crate::interpreter::i64_to_bits(n)) => *n, Value::Bool(b) => *b as i64, _ => 0 };
 
     let result = match cond {
         "eq" => va == vb,
@@ -301,8 +301,8 @@ fn resolve_select(
     let val2 = resolve_reg(operands.get(5).unwrap_or(&"0"), regs)?;
 
     match cond {
-        Value::Bool(true) => Ok(val1),
-        Value::Bool(false) => Ok(val2),
+        Value::Bits(vec![1u8]) => Ok(val1),
+        Value::Bits(vec![0u8]) => Ok(val2),
         _ => Ok(val2),
     }
 }
@@ -322,11 +322,11 @@ fn resolve_conversion(
             other => Ok(other),
         },
         "sitofp" | "uitofp" => match val {
-            Value::Int(n) => Ok(Value::Float(n as f64)),
+            Value::Bits(crate::interpreter::i64_to_bits(n)) => Ok(Value::Bits(crate::interpreter::f64_to_bits(n as f64))),
             other => Ok(other),
         },
         "fptosi" => match val {
-            Value::Float(f) => Ok(Value::Int(f as i64)),
+            Value::Bits(crate::interpreter::f64_to_bits(f)) => Ok(Value::Int(f as i64)),
             other => Ok(other),
         },
         _ => Ok(val),
@@ -356,17 +356,17 @@ fn resolve_load(
     let ptr_val = if let Some(val) = regs.get(trimmed) {
         val.clone()
     } else {
-        Value::Ptr(0)
+        Value::Bits(crate::interpreter::i64_to_bits(0 as i64))
     };
 
     match ptr_val {
-        Value::Ptr(idx) => {
-            Ok(state_view.get(&(idx as usize)).cloned().unwrap_or(Value::Int(0)))
+        Value::Bits(crate::interpreter::i64_to_bits(idx as i64)) => {
+            Ok(state_view.get(&(idx as usize)).cloned().unwrap_or(Value::Bits(crate::interpreter::i64_to_bits(0))))
         }
-        Value::Int(idx) => {
-            Ok(state_view.get(&(idx as usize)).cloned().unwrap_or(Value::Int(0)))
+        Value::Bits(crate::interpreter::i64_to_bits(idx)) => {
+            Ok(state_view.get(&(idx as usize)).cloned().unwrap_or(Value::Bits(crate::interpreter::i64_to_bits(0))))
         }
-        _ => Ok(Value::Int(0)),
+        _ => Ok(Value::Bits(crate::interpreter::i64_to_bits(0))),
     }
 }
 
@@ -384,12 +384,12 @@ fn resolve_store(
     let ptr_val = if let Some(p) = regs.get(trimmed) {
         p.clone()
     } else {
-        Value::Ptr(0)
+        Value::Bits(crate::interpreter::i64_to_bits(0 as i64))
     };
 
     let idx = match ptr_val {
-        Value::Ptr(n) => n as usize,
-        Value::Int(n) => n as usize,
+        Value::Bits(crate::interpreter::i64_to_bits(n as i64)) => n as usize,
+        Value::Bits(crate::interpreter::i64_to_bits(n)) => n as usize,
         _ => 0,
     };
     state_view.insert(idx, val);
@@ -416,7 +416,7 @@ fn resolve_gep(
             break;
         }
         if let Some(val) = regs.get(t) {
-            if let Value::Int(n) = val {
+            if let Value::Bits(crate::interpreter::i64_to_bits(n)) = val {
                 last_idx = *n;
                 break;
             }
@@ -424,7 +424,7 @@ fn resolve_gep(
     }
 
     // Return the field index as a Ptr value (used by load/store).
-    Ok(Value::Ptr(last_idx as u64))
+    Ok(Value::Bits(crate::interpreter::i64_to_bits(last_idx as u64 as i64)))
 }
 
 fn resolve_extractvalue(
@@ -454,9 +454,9 @@ mod tests {
         execute_bild(&body, &params, &bindings, false, &HashMap::new())
     }
 
-    fn i(n: i64) -> Value { Value::Int(n) }
+    fn i(n: i64) -> Value { Value::Bits(crate::interpreter::i64_to_bits(n)) }
     fn b(v: bool) -> Value { Value::Bool(v) }
-    fn f(v: f64) -> Value { Value::Float(v) }
+    fn f(v: f64) -> Value { Value::Bits(crate::interpreter::f64_to_bits(v)) }
     fn check(body: &[&str], params: &[(&str, &str)], bindings: &[(&str, Value)], expected: &[Value]) {
         let result = run(body, params, bindings).unwrap();
         assert_eq!(result, expected, "body: {:?}, bindings: {:?}", body, bindings);
