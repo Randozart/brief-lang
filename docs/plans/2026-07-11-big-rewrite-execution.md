@@ -305,70 +305,16 @@ grep -rn "Expr::String(" src/interpreter.rs src/features/ src/ffi/ src/typecheck
 
 ---
 
-## Phase 10 (Post-Rewrite): Intrinsic Enum Removal — 8G
+## Phase 8G: `#` Intrinsic Architecture
 
-This phase builds on the completed rewrite (Phase 0–9). It removes the
-old `Intrinsic` enum from `src/ast.rs` and redirects all dispatch through
-the property-driven `execute_intrinsic()` engine. Do NOT attempt before
-Phase 9 is green — the old enum is the fallback if property lookup fails.
-Only after the rewrite ensures every Intrinsic variant has a string-based
-counterpart in `execute_intrinsic()` can the enum be safely deleted.
+**Replaced by `docs/plans/2026-07-12-intrinsic-architecture.md`.**
 
-### Prerequisites from this rewrite
+This phase has been redesigned. The `#` suffix is now a first-class lexical
+character in identifiers — `Sqrt#(x)` parses as `Expr::Call("Sqrt#", [x])`
+with no `Intrinsic` enum, no `Expr::IntrinsicCall` AST node, no `inop`.
 
-| What | Where | Why needed |
-|---|---|---|
-| `execute_intrinsic(name, args)` | `src/interpreter.rs` (or its split modules) | The string-based dispatch that replaces `Intrinsic::AddI64` |
-| `TypeUniverse::get_operator_intrinsic()` | `src/type_universe/operators.rs` | Property lookup that maps `op Add` → `"__add_i64"` |
-| `op Add <~ "__add_i64#"` on types | `lib/std/types/bootstrap.bv` | Every standard type has operator bindings in its properties |
-| `BinaryOpExpr::evaluate()` falling through to property dispatch | `src/features/binary_op.rs` | Operator evaluation no longer needs the typed match |
-| `formatting <~ Quoted` | Codec declarations | Proves property-driven dispatch works for the type checker; same pattern applies to operator dispatch |
-
-### What gets deleted
-
-| Item | File | Lines |
-|---|---|---|
-| `Intrinsic` enum (~50 variants) | `src/ast.rs` | ~60 |
-| All match arms on `Intrinsic::Foo` | `src/interpreter.rs` (eval block) | ~400 |
-| `Intrinsic::name()` method | `src/ast.rs` or `src/interpreter.rs` | ~60 |
-| `inop` keyword in parser | `src/parser.rs`, `src/lexer.rs` | ~20 |
-| `#` suffix parsing (intrinsic marker) | `src/parser.rs` | ~15 |
-| `Expr::IntrinsicCall` | `src/ast.rs` + all match sites | ~30 |
-| Old typed match in `execute_intrinsic` | `src/interpreter.rs` | ~50 |
-
-Total: ~600 lines of dead code removed.
-
-### What stays
-
-| Item | Why |
-|---|---|
-| `execute_intrinsic(name, args)` | The string-based engine — stays as the canonical dispatch table |
-| The string names themselves (`"__add_i64"`) | They ARE the intrinsic — the enum was just an indirection |
-| `Intrinsic::Malloc`, `Free`, `Realloc` | These become plain entries in `execute_intrinsic()`'s match |
-| `#` in source files | Still valid syntax in `op Add <~ "__add_i64#"` — but the `#` is now a convention, not a parser-level distinction |
-
-### Execution
-
-1. **Delete the `Intrinsic` enum** from `src/ast.rs` — build reveals all match sites
-2. **Delete `IntrinsicCall` expr variant** from `src/ast.rs` — more match sites
-3. **Delete `inop` from lexer+parser** — all `inop` declarations become codec-style:
-   ```brief
-   // Old: inop! foo(x: Int) -> Int [true][true] (%state) { BILD }
-   // New: defn foo(x: Int) -> Int { BILD }
-   //      (Operator binding goes on the type, not the function)
-   ```
-4. **Redirect all match arms** on `Intrinsic::Foo` to call `execute_intrinsic("__foo", args)` directly
-5. **Remove `Intrinsic::name()`** — unreachable
-6. **Remove `#` suffix handling** in parser — the suffix is now just part of the string name (cosmetic)
-7. **Rename `execute_intrinsic`** to just `dispatch_intrinsic` or inline into the calling code — the name was designed for the string-based era, may not fit after cleanup
-
-### Verification
-
-```
-cargo build                                          # 0 errors
-cargo test --lib                                     # same count as before
-grep -rn "Intrinsic::" src/ --include="*.rs"         # zero hits
-```
+See the new plan document for the full 12-step execution:
+[`docs/plans/2026-07-12-intrinsic-architecture.md`](./2026-07-12-intrinsic-architecture.md)
 
 ---
 
@@ -476,43 +422,7 @@ and NEVER appear in string quotes.
 | `Bare` | Accepts bare identifier token form (`FF00FF`) |
 | `Decimal` | Accepts numeric token form (`42`, `3.14`) |
 
-**Operator primitives** (used in `intrinsic_op <~`):
-
-| Primitive | Operation | Backend LLVM instruction |
-|---|---|---|
-| `AddI64` | Wrapping i64 addition | `add i64 %0, %1` |
-| `SubI64` | Wrapping i64 subtraction | `sub i64 %0, %1` |
-| `MulI64` | Wrapping i64 multiplication | `mul i64 %0, %1` |
-| `FAddF64` | f64 addition | `fadd double %0, %1` |
-| `ShlI64` | i64 shift left | `shl i64 %0, %1` |
-| `Malloc` | Heap memory allocation | `call @malloc` |
-| `Free` | Heap memory deallocation | `call @free` |
-| `PrintInt` | Print i64 to stdout | `call @printf` |
-| `GetEnvInt` | Read integer from environment | `call @getenv` |
-
-**Lifecycle primitive** (used in `op Drop <~`):
-
-| Primitive | Meaning |
-|---|---|
-| `Drop` | Destructor contract — compiler calls this at scope exit |
-
-**Naming rules:**
-1. PascalCase (`AddI64`, `FAddF64`, `Malloc`)
-2. UpperCamelCase type names suffixed to operation names (`I64`, `F64`, `Str`)
-3. No underscores, no hyphens
-4. Never in string quotes — `intrinsic_op <~ AddI64`, not `intrinsic_op <~ "AddI64"`
-5. Never user-definable — these are the compiler's vocabulary
-
-**Example `defn` carrying compiler primitives:**
-
-```brief
-defn add_i64(a: Int, b: Int) -> Int {
-    intrinsic_op <~ AddI64;             // interpreter fast path
-    llvm_instr   <~ "add i64 %0, %1";   // LLVM backend
-    term a + b;                          // any backend fallback
-};
-```
-
-A backend that doesn't understand either metadata key evaluates
-`term a + b;` using the Axiom 2 bitwise primitives on `Value::Bits`.
-No backend is ever stranded.
+**Operator primitives** are now handled by the `#` intrinsic architecture.
+See `docs/plans/2026-07-12-intrinsic-architecture.md` for the full design.
+The `intrinsic_op <~` convention has been replaced by the `#` suffix on
+function identifiers — `Sqrt#(x)` parses as a standard `Expr::Call`.

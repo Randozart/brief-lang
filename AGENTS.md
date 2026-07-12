@@ -22,9 +22,12 @@ proven at compile time, not `unsafe` blocks.
 2. **NO MAGIC**: Never hardcode Rust string matches as built-in functions.
    `is_digit` → `import char from "std/char.bv"`. `None` → `import option from "std/option.bv"`.
 
-3. **INTRINSICS BEFORE FRGN**: Before writing `frgn`, check if an `Intrinsic`
-   variant exists. Print? `print_int#`. Input? `get_env_int#`. GPU? `get_global_id#`.
-   If no suitable intrinsic exists, add one to `src/ast.rs` — never add `frgn`.
+3. **INTRINSICS BEFORE FRGN**: Before writing `frgn`, check if an intrinsic
+   exists. Print? `print_int#`. Input? `get_env_int#`. GPU? `get_global_id#`.
+   The `#` suffix is part of the identifier — `Sqrt#(x)` parses as a regular
+   `Expr::Call("Sqrt#", [x])`. Add new intrinsics to `execute_intrinsic()` in
+   `src/interpreter/intrinsics.rs` and to `get_intrinsic_signature()` — never
+   add `frgn`.
 
 4. **INTERPRETER IS REFERENCE**: If the interpreter runs it correctly, the
    backend must compile it. Fix codegen, never the interpreter.
@@ -486,8 +489,9 @@ it. The more LLVM knows, the more aggressively it can optimize.
 2. **`txn` must have at least one contract side** — either `[pre][post]`,
    `[pre]]`, or `[[post]`. Convergence must be provable.
 
-3. **`inop` should have meaningful contracts** — BILD body is opaque to
-   the proof engine; the contract IS the specification.
+3. **Intrinsics have no body** — `Sqrt#(x)` is never declared in source.
+   The compiler knows it via the hardcoded signature registry
+   (`get_intrinsic_signature("Sqrt#")`). `inop` is removed.
 
 4. **`[true][true]` is rejected** — parser enforces at least one
    meaningful constraint. Use `[[post]` or `[pre]]` sugar instead.
@@ -502,14 +506,11 @@ it. The more LLVM knows, the more aggressively it can optimize.
 7. **Single-bracket `[expr]` is ambiguous** — parser rejects it.
    Must be `[[expr]` or `[expr]]`.
 
-### Inop Conventions
+### Intrinsic Conventions
 
-8. **Inops follow intrinsic naming**, not private-underscore:
-   `sl_insert#` not `_sl_insert`. The `_` prefix convention does not
-   exist in Brief.
-
-9. **`(%state)` marker comes AFTER the contract**:
-   `inop! foo() -> Int [pre][post] (%state) { BILD }`.
+8. **Intrinsics follow PascalCase with `#` suffix** — `Sqrt#`, `Malloc#`.
+   The `#` is part of the identifier lexically. The `_` prefix convention
+   does not exist in Brief.
 
 ### Common Syntax Traps
 
