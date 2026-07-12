@@ -42,6 +42,7 @@ pub mod fuzzing;
 pub mod hardware;
 pub mod hardware_validator;
 pub mod import_resolver;
+pub mod intrinsic_signatures;
 pub mod interpreter;
 pub mod lexer;
 pub mod lifetime;
