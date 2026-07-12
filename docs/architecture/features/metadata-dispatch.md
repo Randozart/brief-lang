@@ -142,7 +142,7 @@ To prevent collisions between backends, metadata keys follow a
 
 | Prefix | Consumed by | Example |
 |--------|-------------|---------|
-| `llvm_*` | `brief-llvm` backend | `llvm_instr`, `llvm_asm`, `llvm_asm_constraints` |
+| `llvm_*` | `brief-llvm` backend | `llvm_instr`, `llvm_asm`, `llvm_asm_constraints`, `llvm_entry_arg` |
 | `circt_*` | `brief-circt` hardware backend | `circt_op`, `circt_module` |
 | `hls_*` | `brief-circt` HLS pass | `hls_storage`, `hls_capacity` |
 | `wasm_*` | `brief-webstack` backend | `wasm_op`, `wasm_module` |
@@ -177,6 +177,7 @@ forward compatibility when new backends add new keys.
 | `llvm_asm` | Parse as LLVM `call asm` string. Validate instruction is valid for target triple (x86, ARM, RISC-V). Reject with clear error if unsupported. |
 | `llvm_asm_constraints` | Parse register constraints (`"={ax}"`, `"{dx}"`). Validate registers exist on target. Validate constraint syntax matches LLVM expected format. |
 | `llvm_instr` | Parse as LLVM IR instruction. Validate operands and types match surrounding IR. Reject malformed IR with source location. |
+| `llvm_entry_arg` | Validate value is `"argc"` or `"argv"`. Verify the state field type matches the entry parameter (`i32` for `argc`, `ptr` for `argv`). On `main` emission, wire the entry parameter into this state field. |
 | Unknown keys | Silently ignored. |
 
 ### 4.3 CIRCT Backend Responsibilities (`brief-circt`)

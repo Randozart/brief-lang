@@ -775,12 +775,14 @@ trg cli @ self.cli;
 
 txn handle_build {
     [self.cli.command == "build"]
-    frgn printf("Building project: %s\n", self.cli.project);
+    let msg: String = "Building project: %s\n";
+    frgn printf(msg, self.cli.project);
 };
 
 txn handle_test {
     [self.cli.command == "test"]
-    frgn printf("Running test suite: %s\n", self.cli.suite);
+    let msg: String = "Running test suite: %s\n";
+    frgn printf(msg, self.cli.suite);
 };
 ```
 
@@ -789,8 +791,16 @@ txn handle_test {
 ```brief
 // lib/std/cli.c.bv
 // Reactive CLI parser cell.
-// Reads argv internally, emits structured results via output ports.
-// No interaction with [#] — independent compiler feature.
+// Reads environment entry data via metadata, emits structured results
+// via output ports. No frgn calls, no C runtime dependency.
+
+// The backend (LLVM) populates these from main(argc, argv) on startup.
+state argc: Int {
+    llvm_entry_arg <~ "argc";
+};
+state argv: Ptr<Ptr<Byte>> {
+    llvm_entry_arg <~ "argv";
+};
 
 output command: String;       // First positional arg: "build", "test"
 output arg_count: Int;        // Number of flags parsed
@@ -805,16 +815,55 @@ output port: Int;
 // pushes results to output ports. Program reacts via trg.
 ```
 
+### How the backend fulfills the metadata
+
+The `llvm_entry_arg` key tells the LLVM backend that a state field should
+be initialized from the `main(argc, argv)` function parameters. The backend
+generates:
+
+```llvm
+define i32 @main(i32 %argc, ptr %argv) {
+entry:
+  %state = alloca %State, align 8
+  ; Populate cell state from entry args
+  %argc_field = getelementptr %State, %State* %state, i32 0, i32 <argc_offset>
+  store i32 %argc, ptr %argc_field
+  %argv_field = getelementptr %State, %State* %state, i32 0, i32 <argv_offset>
+  store ptr %argv, ptr %argv_field
+  ; ... continue with normal state initialization ...
+}
+```
+
+The interpreter provides mock values during compile-time evaluation:
+
+```rust
+// In the interpreter, when a state field has llvm_entry_arg:
+fn initialize_entry_state(state: &mut State, universe: &TypeUniverse) {
+    for (field_name, metadata) in &state.metadata {
+        if let Some(entry_arg) = metadata.get("llvm_entry_arg") {
+            match entry_arg {
+                "argc" => state.set(field_name, Value::Bits(0u64.to_le_bytes().to_vec())),
+                "argv" => state.set(field_name, Value::Bits(vec![])), // empty mock
+                _ => {}
+            }
+        }
+    }
+}
+```
+
 ### Key constraints
 
-1. **No compiler changes** — the cell uses standard Brief: `frgn __get_argv()`,
-   `frgn __get_arg_count()`, string operations, and output ports.
-2. **No `[#]` interaction** — this is a separate utility from the compiler's
+1. **No `frgn` calls** — the cell uses `llvm_entry_arg` metadata to receive
+   `argc`/`argv` from the backend. No C runtime dependency, no `libc` linking.
+2. **No compiler changes** — `llvm_entry_arg` follows the existing metadata
+   dispatch pattern (`llvm_instr`, `llvm_asm`, `interpreter_impl`). The
+   frontend carries it opaquely; the LLVM backend interprets it.
+3. **No `[#]` interaction** — this is a separate utility from the compiler's
    entry dispatch. They share no code, no state, no design.
-3. **Extensible by inheritance** — projects define `cell MyCli <: cli { ... }`
-   to override flag parsing for custom types.
-4. **Self-hosting irrelevant** — the Rust compiler can compile `.c.bv` files
-   (Phase 16D). The cell ships the moment `.c.bv` support is stable.
+4. **Interpreter mock** — compile-time evaluation provides dummy values
+   (`argc=0`, empty `argv`). Full evaluation happens at runtime.
+5. **Extensible by inheritance** — projects define
+   `cell MyCli <: cli { ... }` to override flag parsing for custom types.
 
 ### When to use which
 
