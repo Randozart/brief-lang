@@ -101,7 +101,7 @@ it is an identifier. If the value only matters to a backend (or the
 compile-time interpreter), it is a string.
 
 Frontend-intrinsic values use capitalized identifiers: `Quoted`, `Bare`,
-`Numeric`, `Add`, `Sub`, `Drop`. These are matched by the type checker
+`Decimal`, `Add`, `Sub`, `Drop`. These are matched by the type checker
 and compile-time evaluator.
 
 Backend-intrinsic values use quoted strings: `"%String"`, `"add nsw i64"`,

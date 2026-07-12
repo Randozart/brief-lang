@@ -277,7 +277,7 @@ raw bytes from source text with no semantic interpretation:
 | Form | AST node | Source | `formatting <~` value |
 |------|----------|--------|----------------------|
 | QuotedValue | `Expr::Quoted(Vec<u8>)` | `"..."` | `Quoted` |
-| DecimalValue | `Expr::Decimal(i64)` | `[0-9]+`, `[0-9]+\.[0-9]+` | `Numeric` |
+| DecimalValue | `Expr::Decimal(i64)` | `[0-9]+`, `[0-9]+\.[0-9]+` | `Decimal` |
 | Bareword | `Expr::Identifier(String)` | `[a-zA-Z][a-zA-Z0-9_]*` | `Bare` |
 
 These are compiler axioms — they must exist because the lexer must produce

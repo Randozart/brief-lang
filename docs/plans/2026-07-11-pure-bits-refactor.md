@@ -691,12 +691,12 @@ codec StringCodec {
 };
 
 codec DefaultDecimal {
-    formatting <~ Numeric;             // ← accepts 42, 3.14
+    formatting <~ Decimal;             // ← accepts 42, 3.14
     parse      <~ parse_decimal;       // converts decimal text → Value::Bits
 };
 ```
 
-The three recognized identifiers are `Quoted`, `Bare`, and `Numeric` — one
+The three recognized identifiers are `Quoted`, `Bare`, and `Decimal` — one
 for each compiler-intrinsic token form. A type can accept multiple forms:
 
 ```brief
@@ -705,7 +705,7 @@ type FlexibleInt <: Int {
 };
 
 codec FlexibleCodec {
-    formatting <~ [Numeric, Bare, Quoted];
+    formatting <~ [Decimal, Bare, Quoted];
     parse      <~ my_flexible_parse;
 };
 ```
@@ -721,7 +721,7 @@ codec DefaultQuoted {
 };
 
 codec DefaultDecimal {
-    formatting <~ Numeric;
+    formatting <~ Decimal;
     parse      <~ parse_decimal;
 };
 
