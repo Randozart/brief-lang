@@ -16,7 +16,7 @@
 //   2. Avoid LLVM having to push independent ops through alias analysis
 //   3. Keep the emitted IR readable for debugging
 
-use crate::ast_new::{Expr, Statement};
+use crate::ast::{Expr, Statement};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Reorder body statements to maximize instruction-level parallelism.
@@ -190,7 +190,7 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
                 collect_reads_from_expr(a, reads);
             }
         }
-        Expr::IntrinsicCall { args, .. } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             for a in args {
                 collect_reads_from_expr(a, reads);
             }
@@ -200,13 +200,13 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
             collect_reads_from_expr(list, reads);
             collect_reads_from_expr(idx, reads);
         }
-        Expr::ListLiteral(items) => {
+        Expr::List(items) => {
             for item in items {
                 collect_reads_from_expr(item, reads);
             }
         }
         Expr::Cast(inner, _) => collect_reads_from_expr(inner, reads),
-        Expr::FieldAccess(obj, _) => collect_reads_from_expr(obj, reads),
+        Expr::Field(obj, _) => collect_reads_from_expr(obj, reads),
         Expr::Block(_, body) => collect_reads_from_expr(body, reads),
         Expr::MapLiteral(entries) => {
             for (k, v) in entries {
@@ -364,7 +364,7 @@ fn topological_sort(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast_new::*;
+    use crate::ast::*;
 
     #[test]
     fn test_reorder_independent_assignments() {

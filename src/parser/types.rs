@@ -3,7 +3,7 @@
 // Flat code: each function is max 2 levels of nesting.
 
 use super::helpers::Parser;
-use crate::ast_new::Type;
+use crate::ast::Type;
 use crate::errors::SyntaxError;
 use crate::lexer::Token;
 

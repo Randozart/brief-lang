@@ -5,7 +5,7 @@
 //! emits it with `spirv64-unknown-unknown` LLVM target triple, and replaces
 //! the loop in the main CPU binary with a Vulkan compute dispatch call.
 
-use crate::ast_new::*;
+use crate::ast::*;
 use std::collections::HashMap;
 
 /// Result of a GPU eligibility check.
@@ -149,12 +149,12 @@ fn collect_touched_fields(expr: &Expr, fields: &mut Vec<String>) {
         Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
             collect_touched_fields(e, fields);
         }
-        Expr::Call(_, args) | Expr::IntrinsicCall { args, .. } => {
+        Expr::Call(_, args) | /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             for arg in args {
                 collect_touched_fields(arg, fields);
             }
         }
-        Expr::ListLiteral(items) | Expr::SetLiteral(items) => {
+        Expr::List(items) | Expr::SetLiteral(items) => {
             for item in items {
                 collect_touched_fields(item, fields);
             }
@@ -172,7 +172,7 @@ fn collect_touched_fields(expr: &Expr, fields: &mut Vec<String>) {
 /// Recursively walk an expression tree and collect reasons for any unsafe FFI
 /// calls or intrinsics that would make the kernel ineligible for GPU offloading.
 ///
-/// `Expr::Call` (user FFI) is always unsafe. `Expr::IntrinsicCall` is only
+/// `Expr::Call` (user FFI) is always unsafe. `/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![])` is only
 /// unsafe if the intrinsic is not in the GPU-safe allowlist. `Expr::SharedMem`
 /// is always allowed (it is GPU-native).
 fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
@@ -180,7 +180,7 @@ fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
         Expr::Call(name, _) => {
             reasons.push(format!("GPU kernel contains FFI call '{}' — unsupported", name));
         }
-        Expr::IntrinsicCall { intrinsic, args } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
             if !is_gpu_safe_intrinsic(intrinsic) {
                 reasons.push(format!("GPU kernel contains unsafe intrinsic '{:?}'", intrinsic));
             }
@@ -202,7 +202,7 @@ fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
             collect_unsafe_ffi(e, reasons);
         }
         // Collection literals — recurse into elements
-        Expr::ListLiteral(items) | Expr::SetLiteral(items) => {
+        Expr::List(items) | Expr::SetLiteral(items) => {
             for item in items {
                 collect_unsafe_ffi(item, reasons);
             }
@@ -233,7 +233,7 @@ fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
         Expr::Cast(e, _) => collect_unsafe_ffi(e, reasons),
         Expr::Projection { source, .. } => collect_unsafe_ffi(source, reasons),
         // Field access — recurse into the struct expression
-        Expr::FieldAccess(obj, _) => {
+        Expr::Field(obj, _) => {
             collect_unsafe_ffi(obj, reasons);
         }
         // Terminals — no sub-expressions
@@ -490,7 +490,7 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
         | Expr::Eq(l, r) | Expr::Ne(l, r) => {
             is_float_context(l, field_types) || is_float_context(r, field_types)
         }
-        Expr::IntrinsicCall { intrinsic, .. } => matches!(intrinsic,
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => matches!(intrinsic,
             Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
             | Intrinsic::Sqrt | Intrinsic::Fabs
             | Intrinsic::Ceil | Intrinsic::Floor
@@ -548,7 +548,7 @@ fn collect_shared_mem_sizes_expr(expr: &Expr, sizes: &mut Vec<usize>) {
         Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
             collect_shared_mem_sizes_expr(e, sizes);
         }
-        Expr::IntrinsicCall { args, .. } | Expr::Call(_, args) => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } | Expr::Call(_, args) => {
             for arg in args {
                 collect_shared_mem_sizes_expr(arg, sizes);
             }
@@ -581,7 +581,7 @@ fn has_print_intrinsics(body: &[Statement]) -> bool {
 
 fn has_print_intrinsics_expr(expr: &Expr) -> bool {
     match expr {
-        Expr::IntrinsicCall { intrinsic, .. } => matches!(intrinsic,
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => matches!(intrinsic,
             Intrinsic::PrintInt | Intrinsic::PrintFloat | Intrinsic::PutChar
         ),
         Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
@@ -696,7 +696,7 @@ fn emit_spirv_stmt(
         }
         Statement::Expression(expr) => {
             match expr {
-                Expr::IntrinsicCall { intrinsic: Intrinsic::SubGroupBarrier, args } => {
+                /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: Intrinsic::SubGroupBarrier, args } => {
                     let dim = if args.is_empty() {
                         "0".to_string()
                     } else {
@@ -919,7 +919,7 @@ fn emit_spirv_expr(
             reg
         }
         // GPU intrinsics
-        Expr::IntrinsicCall { intrinsic, args } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
             emit_spirv_intrinsic(intrinsic, args, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
         }
         _ => {
@@ -1295,7 +1295,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::IntrinsicCall {
+                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                     intrinsic: Intrinsic::Sin,
                     args: vec![Expr::Identifier("x".to_string())],
                 },
@@ -1312,7 +1312,7 @@ mod tests {
     fn test_check_eligibility_unsafe_intrinsic_blocked() {
         // ReadFile# has side effects and no SPIR-V mapping — should be blocked
         let body = vec![
-            Statement::Expression(Expr::IntrinsicCall {
+            Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                 intrinsic: Intrinsic::UserDefined("read_file".to_string()),
                 args: vec![Expr::Quoted("test".into())],
             }),
@@ -1347,7 +1347,7 @@ mod tests {
             Statement::Guarded {
                 condition: Expr::Bool(true),
                 statements: vec![
-                    Statement::Expression(Expr::IntrinsicCall {
+                    Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                         intrinsic: Intrinsic::UserDefined("read_file".to_string()),
                         args: vec![Expr::Quoted("test".into())],
                     }),
@@ -1366,7 +1366,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::IntrinsicCall {
+                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                     intrinsic: Intrinsic::GetGlobalId,
                     args: vec![Expr::Decimal(0)],
                 },
@@ -1385,7 +1385,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::IntrinsicCall {
+                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                     intrinsic: Intrinsic::GetLocalId,
                     args: vec![Expr::Decimal(1)],
                 },
@@ -1404,7 +1404,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::IntrinsicCall {
+                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                     intrinsic: Intrinsic::GetGroupId,
                     args: vec![Expr::Decimal(0)],
                 },
@@ -1421,7 +1421,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_barrier() {
         let body = vec![
-            Statement::Expression(Expr::IntrinsicCall {
+            Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                 intrinsic: Intrinsic::SubGroupBarrier,
                 args: vec![],
             }),
@@ -1452,7 +1452,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_gpu_intrinsic_allowed() {
         let body = vec![
-            Statement::Expression(Expr::IntrinsicCall {
+            Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                 intrinsic: Intrinsic::GetGlobalId,
                 args: vec![Expr::Decimal(0)],
             }),
@@ -1464,7 +1464,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_barrier_allowed() {
         let body = vec![
-            Statement::Expression(Expr::IntrinsicCall {
+            Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                 intrinsic: Intrinsic::SubGroupBarrier,
                 args: vec![],
             }),
@@ -1590,7 +1590,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::IntrinsicCall {
+                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                     intrinsic: Intrinsic::Sin,
                     args: vec![Expr::Identifier("x".to_string())],
                 },
@@ -1859,7 +1859,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::IntrinsicCall {
+                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                     intrinsic: Intrinsic::GetGlobalId,
                     args: vec![Expr::Decimal(0)],
                 },
@@ -1868,7 +1868,7 @@ mod tests {
             },
             Statement::Assignment {
                 lhs: Expr::Identifier("y".to_string()),
-                expr: Expr::IntrinsicCall {
+                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                     intrinsic: Intrinsic::GetGlobalId,
                     args: vec![Expr::Decimal(1)],
                 },
@@ -1892,7 +1892,7 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::IntrinsicCall {
+                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                     intrinsic: Intrinsic::GetGlobalId,
                     args: vec![Expr::Decimal(0)],
                 },

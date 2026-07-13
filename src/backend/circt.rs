@@ -2,7 +2,7 @@
 // Invoked via: brief build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
 use crate::analysis::dependency_graph::DependencyGraph;
-use crate::ast_new::{BitRange, Contract, Expr, Intrinsic, LinkRef, OutputType, Program, Statement, TopLevel, Type};
+use crate::ast::{BitRange, Contract, Expr, Intrinsic, LinkRef, OutputType, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -416,7 +416,7 @@ impl CirctBackend {
                 ).ok();
                 Some(result_wire)
             }
-            Expr::IntrinsicCall { intrinsic, args } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
                 let mut arg = |i: usize| -> String {
                     args.get(i).and_then(|a| {
                         let ty = if matches!(intrinsic, Intrinsic::Fabs | Intrinsic::Sqrt | Intrinsic::Ceil | Intrinsic::Floor | Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow) { "f64" } else { result_ty };
@@ -608,7 +608,7 @@ impl CirctBackend {
                 Statement::Foreach { item, list, body, .. } => {
                     // Hardware can't do dynamic iteration. Try compile-time unroll.
                     let list_items = match list.as_ref() {
-                        Expr::ListLiteral(items) => Some(items),
+                        Expr::List(items) => Some(items),
                         _ => None,
                     };
                     if let Some(items) = list_items {
@@ -829,7 +829,7 @@ impl CirctBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast_new::*;
+    use crate::ast::*;
 
     fn make_program(items: Vec<TopLevel>) -> Program {
         Program {
@@ -1160,7 +1160,7 @@ mod tests {
     fn test_circt_intrinsic_abs() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("x", Type::int(), Some(Expr::IntrinsicCall {
+            make_state_decl("x", Type::int(), Some(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                 intrinsic: Intrinsic::Abs,
                 args: vec![Expr::Decimal(-5)],
             })),
@@ -1173,7 +1173,7 @@ mod tests {
     fn test_circt_intrinsic_ctpop() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("x", Type::int(), Some(Expr::IntrinsicCall {
+            make_state_decl("x", Type::int(), Some(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                 intrinsic: Intrinsic::Ctpop,
                 args: vec![Expr::Decimal(255)],
             })),
@@ -1185,7 +1185,7 @@ mod tests {
     fn test_circt_intrinsic_bitreverse() {
         let mut backend = CirctBackend::new();
         let output = backend.generate(&make_program(vec![
-            make_state_decl("x", Type::int(), Some(Expr::IntrinsicCall {
+            make_state_decl("x", Type::int(), Some(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                 intrinsic: Intrinsic::Bitreverse,
                 args: vec![Expr::Decimal(1)],
             })),

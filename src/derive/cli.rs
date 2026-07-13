@@ -3,7 +3,7 @@
 // Handles the command-line invocation of the synthesis engine.
 // Flat code: max 2 levels of nesting.
 
-use crate::ast_new::{DerivationBlock, DerivationExample, Expr, TopLevel};
+use crate::ast::{DerivationBlock, DerivationExample, Expr, TopLevel};
 use crate::derive::{SynthesizeError, synthesize};
 use std::fs;
 use std::path::Path;

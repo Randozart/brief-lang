@@ -4,7 +4,7 @@
 // Preserves all optimization patterns from old expr/intrinsics.rs.
 // Flat code: each helper function handles one intrinsic group.
 
-use crate::ast_new::{Expr, Type};
+use crate::ast::{Expr, Type};
 use crate::backend::llvm::helpers::LlvmBackend;
 use crate::backend::llvm::types::lower_type;
 use crate::backend::llvm::function::FunctionState;

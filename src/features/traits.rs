@@ -20,97 +20,17 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-// ── Pattern B: Feature Traits ──────────────────────────────────────────
-//
-// One trait per concern, per backend. Separate traits = separate compilation
-// units (changing VHDL emission never recompiles LLVM codegen).
-//
-// Each feature struct implements only the traits relevant to it. Missing
-// backend impls fall through to the router's default stub.
-//
-// All sub-expression recursion goes through the dispatch reference, not
-// directly into the pass files.
-
-use crate::ast_new::{Expr, Type};
-use crate::errors::TypeError;
-use crate::interpreter::{Interpreter, RuntimeError, Value};
-use crate::parser::Parser;
-use crate::typechecker::TypeChecker;
+// 2026-07-13: Stripped to only the webstack traits needed by active backends.
+// Removed ExprTypecheck, ExprEval, ExprParse, StmtTypecheck, StmtEval,
+// ExprCodegenLLVM, StmtCodegenLLVM, and ExprCodegenVHDL — these types
+// (TypeChecker, Interpreter, Parser, LlvmBackend) no longer exist as
+// single concrete structs. Webstack is the only active backend consuming
+// feature trait dispatch.
 
 /// Router handle for sub-expression dispatch.
-/// Feature structs call `dispatch.infer_expr()` / `dispatch.eval_expr()` etc.
 pub struct ExprDispatch;
 
-/// Parse: Parser routes tokens to feature struct constructors.
-pub trait ExprParse {
-    type Output;
-    fn parse(parser: &mut Parser) -> Self::Output;
-}
-
-/// Typecheck: Typechecker routes each Expr variant to its feature.
-pub trait ExprTypecheck {
-    fn typecheck(
-        &self,
-        ctx: &mut TypeChecker,
-        dispatch: &ExprDispatch,
-    ) -> Result<Type, TypeError>;
-}
-
-/// Eval: Interpreter routes each Expr variant to its feature.
-pub trait ExprEval {
-    fn evaluate(
-        &self,
-        ctx: &mut Interpreter,
-        dispatch: &ExprDispatch,
-    ) -> Result<Value, RuntimeError>;
-}
-
-/// LLVM Codegen — feature structs receive the backend + builder.
-///
-/// 2026-06-29: Phase 4 — added `builder` and `emit_expr` parameters.
-/// Features should gradually migrate from `out` to `builder` for IR
-/// emission, and from direct `ctx.emit_expr(...)` calls to the
-/// `emit_expr` closure.
-///
-/// TODO Phase 5: Split `ctx` into CompilerContext + FunctionContext.
-pub trait ExprCodegenLLVM {
-    fn emit_llvm(
-        &self,
-        ctx: &mut crate::backend::llvm::LlvmBackend,
-        out: &mut String,
-        builder: &mut crate::backend::llvm::LLVMBuilder,
-        dispatch: &ExprDispatch,
-        emit_expr: &mut dyn FnMut(
-            &mut crate::backend::llvm::LlvmBackend,
-            &mut String,
-            &mut crate::backend::llvm::LLVMBuilder,
-            &crate::ast::Expr,
-            &str,
-        ) -> crate::backend::llvm::TypedRegister,
-    ) -> crate::backend::llvm::TypedRegister;
-}
-
-/// LLVM Codegen — statement features.
-/// 2026-06-29: Added builder + emit_expr parameters (Phase 4b).
-pub trait StmtCodegenLLVM {
-    fn emit_llvm(
-        &self,
-        ctx: &mut crate::backend::llvm::LlvmBackend,
-        out: &mut String,
-        builder: &mut crate::backend::llvm::LLVMBuilder,
-        dispatch: &StmtDispatch,
-        indent: &str,
-        emit_expr: &mut dyn FnMut(
-            &mut crate::backend::llvm::LlvmBackend,
-            &mut String,
-            &mut crate::backend::llvm::LLVMBuilder,
-            &crate::ast::Expr,
-            &str,
-        ) -> crate::backend::llvm::TypedRegister,
-    );
-}
-
-/// Webstack Codegen. Stateless string builder — takes `&WebstackGenerator`.
+/// Webstack codegen. Stateless string builder — takes `&WebstackGenerator`.
 pub trait ExprCodegenWebstack {
     fn emit_js(
         &self,
@@ -119,31 +39,10 @@ pub trait ExprCodegenWebstack {
     ) -> String;
 }
 
-// ── Statement Feature Traits ───────────────────────────────────────
-
-/// Router handle for sub-statement and sub-expression dispatch.
+/// Router handle for sub-statement dispatch.
 pub struct StmtDispatch;
 
-/// Typecheck: Typechecker routes each Statement variant to its feature.
-pub trait StmtTypecheck {
-    fn typecheck(
-        &self,
-        ctx: &mut crate::typechecker::TypeChecker,
-        dispatch: &StmtDispatch,
-    ) -> Result<(), crate::errors::TypeError>;
-}
-
-/// Eval: Interpreter routes each Statement variant to its feature.
-pub trait StmtEval {
-    fn evaluate(
-        &self,
-        ctx: &mut crate::interpreter::Interpreter,
-        dispatch: &StmtDispatch,
-    ) -> Result<(), crate::interpreter::RuntimeError>;
-}
-
-/// LLVM Codegen — feature structs reference &mut LlvmBackend directly.
-/// Webstack Codegen.
+/// Webstack statement codegen.
 pub trait StmtCodegenWebstack {
     fn emit_js(
         &self,
@@ -164,26 +63,8 @@ mod kani_full_tests {
     }
 
     #[kani::proof]
-    fn verify_expr_codegen_llvm_trait_satisfied() {
-        fn assert_trait<T: ExprCodegenLLVM>() {}
-        assert_trait::<crate::features::literal::LiteralExpr>();
-    }
-
-    #[kani::proof]
     fn verify_expr_codegen_webstack_trait_satisfied() {
         fn assert_trait<T: ExprCodegenWebstack>() {}
-        assert_trait::<crate::features::literal::LiteralExpr>();
-    }
-
-    #[kani::proof]
-    fn verify_expr_eval_trait_satisfied() {
-        fn assert_trait<T: ExprEval>() {}
-        assert_trait::<crate::features::literal::LiteralExpr>();
-    }
-
-    #[kani::proof]
-    fn verify_expr_typecheck_trait_satisfied() {
-        fn assert_trait<T: ExprTypecheck>() {}
         assert_trait::<crate::features::literal::LiteralExpr>();
     }
 }

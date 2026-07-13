@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast_new::{BitRange, BracketOp, Contract, Expr, ForeignTarget, Intrinsic, Program, Statement, TopLevel, Transaction, Type};
+use crate::ast::{BitRange, BracketOp, Contract, Expr, ForeignTarget, Intrinsic, Program, Statement, TopLevel, Transaction, Type};
 use crate::features::traits::{ExprCodegenWebstack, ExprDispatch};
 use crate::view_compiler::{Binding, Directive};
 use std::cell::RefCell;
@@ -583,18 +583,18 @@ impl WebstackGenerator {
                     deps.push(name.clone());
                 }
             }
-            Expr::FieldAccess(e, _) => self.extract_identifiers(e, deps),
+            Expr::Field(e, _) => self.extract_identifiers(e, deps),
             Expr::Call(_, args) => {
                 for arg in args {
                     self.extract_identifiers(arg, deps);
                 }
             }
-            Expr::IntrinsicCall { intrinsic: _, args } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
                 for arg in args {
                     self.extract_identifiers(arg, deps);
                 }
             }
-            Expr::ListLiteral(items) => {
+            Expr::List(items) => {
                 for item in items {
                     self.extract_identifiers(item, deps);
                 }
@@ -893,7 +893,7 @@ impl WebstackGenerator {
                     format!("this.{}({})", ts_name, ts_args.join(", "))
                 }
             }
-            Expr::IntrinsicCall { intrinsic, args } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
                 let ts_args: Vec<String> = args.iter().map(|a| self.expr_to_ts(a)).collect();
                 let joined = ts_args.join(", ");
                 match intrinsic {
@@ -964,7 +964,7 @@ impl WebstackGenerator {
                     }
                 }
             }
-            Expr::ListLiteral(items) => {
+            Expr::List(items) => {
                 let ts_items: Vec<String> = items.iter().map(|i| self.expr_to_ts(i)).collect();
                 format!("[{}]", ts_items.join(", "))
             }
@@ -994,7 +994,7 @@ impl WebstackGenerator {
                 let ts_items: Vec<String> = items.iter().map(|i| self.expr_to_ts(i)).collect();
                 format!("[{}]", ts_items.join(", "))
             }
-            Expr::FieldAccess(obj, field) => {
+            Expr::Field(obj, field) => {
                 format!("{}[\"{}\"]", self.expr_to_ts(obj), field)
             }
             Expr::ArrowMut { target, index, value, .. } => {
@@ -1301,7 +1301,7 @@ impl WebstackGenerator {
                 let rust_args: Vec<String> = args.iter().map(|a| self.expr_to_rust(a)).collect();
                 format!("{}({})", name.replace('-', "_"), rust_args.join(", "))
             }
-            Expr::IntrinsicCall { intrinsic, args } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
                 let rust_args: Vec<String> = args.iter().map(|a| self.expr_to_rust(a)).collect();
                 let joined = rust_args.join(", ");
                 match intrinsic {
@@ -1321,7 +1321,7 @@ impl WebstackGenerator {
                     _ => format!("{}({})", format!("{:?}", intrinsic).to_lowercase(), joined),
                 }
             }
-            Expr::ListLiteral(items) => {
+            Expr::List(items) => {
                 let rust_items: Vec<String> = items.iter().map(|i| self.expr_to_rust(i)).collect();
                 format!("vec![{}]", rust_items.join(", "))
             }
@@ -1348,7 +1348,7 @@ impl WebstackGenerator {
                 let rust_items: Vec<String> = items.iter().map(|i| self.expr_to_rust(i)).collect();
                 format!("({})", rust_items.join(", "))
             }
-            Expr::FieldAccess(obj, field) => {
+            Expr::Field(obj, field) => {
                 format!("{}.{}", self.expr_to_rust(obj), field)
             }
             Expr::BinaryOp(bop) => {
@@ -1427,7 +1427,7 @@ pub struct WebstackOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast_new::*;
+    use crate::ast::*;
 
     #[test]
     fn test_webstack_generates_output() {
@@ -1741,19 +1741,19 @@ mod tests {
     #[test]
     fn test_intrinsic_to_ts_math() {
         let mut backend = WebstackGenerator::new();
-        let r = backend.expr_to_ts(&Expr::IntrinsicCall {
+        let r = backend.expr_to_ts(&/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
             intrinsic: Intrinsic::Abs,
             args: vec![Expr::Decimal(-5)],
         });
         assert!(r.contains("Math.abs"));
 
-        let r2 = backend.expr_to_ts(&Expr::IntrinsicCall {
+        let r2 = backend.expr_to_ts(&/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
             intrinsic: Intrinsic::Sqrt,
             args: vec![Expr::Decimal(9)],
         });
         assert!(r2.contains("Math.sqrt"));
 
-        let r3 = backend.expr_to_ts(&Expr::IntrinsicCall {
+        let r3 = backend.expr_to_ts(&/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
             intrinsic: Intrinsic::IntToStr,
             args: vec![Expr::Decimal(42)],
         });
@@ -1763,7 +1763,7 @@ mod tests {
     #[test]
     fn test_intrinsic_to_str_ts() {
         let mut backend = WebstackGenerator::new();
-        let r = backend.expr_to_ts(&Expr::IntrinsicCall {
+        let r = backend.expr_to_ts(&/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
             intrinsic: Intrinsic::ToStr,
             args: vec![Expr::Decimal(100)],
         });

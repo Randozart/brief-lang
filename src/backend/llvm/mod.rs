@@ -233,7 +233,7 @@ fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
                 remap_expr_into(arg, map);
             }
         }
-        Expr::IntrinsicCall { intrinsic: _, args } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
             for arg in args.iter_mut() {
                 remap_expr_into(arg, map);
             }
@@ -242,7 +242,7 @@ fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
     }
 }
 
-use crate::ast_new::{Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{Expr, Program, Statement, TopLevel, Type};
 
 #[derive(Debug, Clone)]
 pub struct TypedRegister {
@@ -405,7 +405,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
             collect_strings_expr(e, seen, out);
         }
         // Collections
-        Expr::ListLiteral(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
+        Expr::List(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
         Expr::MapLiteral(pairs) => { for (k, v) in pairs { collect_strings_expr(k, seen, out); collect_strings_expr(v, seen, out); } }
         Expr::SetLiteral(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
         Expr::ListIndex(l, i) => { collect_strings_expr(l, seen, out); collect_strings_expr(i, seen, out); }
@@ -437,7 +437,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
             if let Some(f) = filter { collect_strings_expr(f, seen, out); }
         }
         // Field/object
-        Expr::FieldAccess(o, _) => { collect_strings_expr(o, seen, out); }
+        Expr::Field(o, _) => { collect_strings_expr(o, seen, out); }
         Expr::StructInstance(_, fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
         Expr::ObjectLiteral(fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
         // Call, Match, Pattern
@@ -484,7 +484,7 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::BinaryOp(e) => { collect_strings_expr(e.left.as_ref(), seen, out); collect_strings_expr(e.right.as_ref(), seen, out); }
         Expr::UnaryOp(e) => { collect_strings_expr(e.operand.as_ref(), seen, out); }
         Expr::CallExpr(e) => { for a in &e.args { collect_strings_expr(a, seen, out); } }
-        Expr::IntrinsicCall { intrinsic: _, args } => { for a in args { collect_strings_expr(a, seen, out); } }
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => { for a in args { collect_strings_expr(a, seen, out); } }
         Expr::ProjectionExpr(e) => { collect_strings_expr(e.source.as_ref(), seen, out); }
         Expr::BlockExpr(e) => { for s in &e.stmts { collect_strings_stmt(s, seen, out); } collect_strings_expr(e.last.as_ref(), seen, out); }
         Expr::MatchExpr(e) => { collect_strings_expr(e.value.as_ref(), seen, out); for arm in &e.arms { collect_strings_expr(&arm.body, seen, out); } }
@@ -1432,7 +1432,7 @@ impl LlvmBackend {
             return self.check_expr_embedded(&norm, ctx_name, threading_intrinsics);
         }
         match expr {
-            Expr::IntrinsicCall { intrinsic, .. } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => {
                 if threading_intrinsics.contains(intrinsic) {
                     self.warnings.push(format!(
                         "TargetError: threading intrinsic not supported on target 'Embedded' — {:?} in '{}'",
@@ -1440,7 +1440,7 @@ impl LlvmBackend {
                     ));
                 }
             }
-            Expr::Call(_, args) | Expr::ListLiteral(args) => {
+            Expr::Call(_, args) | Expr::List(args) => {
                 for arg in args {
                     self.check_expr_embedded(arg, ctx_name, threading_intrinsics);
                 }
@@ -1457,7 +1457,7 @@ impl LlvmBackend {
                 self.check_expr_embedded(inner, ctx_name, threading_intrinsics);
             }
             Expr::AddrOf(_) | Expr::PriorState(_) => {} // identifiers, no embedded checks
-            Expr::FieldAccess(target, _) | Expr::ListIndex(target, _) => {
+            Expr::Field(target, _) | Expr::ListIndex(target, _) => {
                 self.check_expr_embedded(target, ctx_name, threading_intrinsics);
             }
             Expr::Slice { value, start, end, stride, .. } => {
@@ -3634,7 +3634,7 @@ impl LlvmBackend {
                 if !self.ctx.cell_defs.contains_key(callee) { return; }
                 let cell = &self.ctx.cell_defs[callee];
                 for (i, arg) in args.iter().enumerate() {
-                    if let Expr::FieldAccess(inner, port_name) = arg {
+                    if let Expr::Field(inner, port_name) = arg {
                         if let Expr::Identifier(src_cell) = inner.as_ref() {
                             if self.ctx.cell_defs.contains_key(src_cell) {
                                 if let Some(param_name) = cell.parameters.get(i) {

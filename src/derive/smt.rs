@@ -3,7 +3,7 @@
 // Builds SMT queries that encode the synthesis problem as constraint solving.
 // Falls back gracefully if no solver is available.
 
-use crate::ast_new::{DerivationExample, Expr};
+use crate::ast::{DerivationExample, Expr};
 use crate::derive::SynthesizeError;
 use std::process::Command;
 
@@ -72,7 +72,7 @@ fn parse_smt_model(_stdout: &str, _examples: &[DerivationExample]) -> Result<Exp
         .collect();
     if inputs.len() >= 2 {
         Ok(Expr::BinaryOp(
-            crate::ast_new::BinaryOpKind::Add,
+            crate::ast::BinaryOpKind::Add,
             Box::new(inputs[0].clone()),
             Box::new(inputs[1].clone()),
         ))

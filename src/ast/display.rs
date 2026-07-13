@@ -1,7 +1,7 @@
 // ── Display Impls for AST Types ────────────────────────────────────────
 // 2026-07-12: Phase 0.2 — Format AST types as valid Brief source text.
 
-use crate::ast_new::*;
+use crate::ast::*;
 use std::fmt;
 
 impl fmt::Display for Expr {

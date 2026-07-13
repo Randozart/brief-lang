@@ -11,7 +11,7 @@ pub use operators::*;
 pub use resolve::*;
 pub use validate::*;
 
-use crate::ast_new::Type;
+use crate::ast::Type;
 use std::collections::HashMap;
 
 /// Resolved metadata for a single type in the universe.
@@ -22,7 +22,7 @@ pub struct ResolvedType {
     pub bytes: u64,
     pub alignment: u64,
     pub llvm_type: String,
-    pub properties: HashMap<String, crate::ast_new::PropertyValue>,
+    pub properties: HashMap<String, crate::ast::PropertyValue>,
 }
 
 /// Central type definition registry.
@@ -52,21 +52,21 @@ impl TypeUniverse {
     }
 
     /// Look up the `Formatting` property for a type.
-    pub fn get_formatting(&self, ty: &Type) -> crate::ast_new::Formatting {
+    pub fn get_formatting(&self, ty: &Type) -> crate::ast::Formatting {
         let name = match ty {
             Type::Custom(name) => name,
-            _ => return crate::ast_new::Formatting::None,
+            _ => return crate::ast::Formatting::None,
         };
         self.types
             .get(name)
             .and_then(|rt| rt.properties.get("formatting"))
             .and_then(|pv| {
-                if let crate::ast_new::PropertyValue::Identifier(s) = pv {
-                    crate::ast_new::Formatting::from_name(s)
+                if let crate::ast::PropertyValue::Identifier(s) = pv {
+                    crate::ast::Formatting::from_name(s)
                 } else {
                     None
                 }
             })
-            .unwrap_or(crate::ast_new::Formatting::None)
+            .unwrap_or(crate::ast::Formatting::None)
     }
 }

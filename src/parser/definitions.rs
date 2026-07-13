@@ -5,7 +5,7 @@
 // Also handles [#] entry contracts, derivation blocks :=, implicit entry wrapping.
 
 use super::helpers::Parser;
-use crate::ast_new::*;
+use crate::ast::*;
 use crate::errors::{Span, SyntaxError};
 use crate::lexer::Token;
 

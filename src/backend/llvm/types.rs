@@ -2,7 +2,7 @@
 // 2026-07-12: Phase 2.6/4 — Lower Brief types to LLVM IR type strings.
 // Consults the llvm metadata property, falls back to iN based on byte width.
 
-use crate::ast_new::Type;
+use crate::ast::Type;
 use crate::type_universe::resolve_type;
 
 /// Lower a Brief Type to an LLVM IR type string.

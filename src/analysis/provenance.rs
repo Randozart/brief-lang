@@ -28,7 +28,7 @@ pub fn infer_provenance(expr: &Expr) -> Provenance {
     match expr {
         Expr::Identifier(name) => Provenance::Known(name.clone()),
         Expr::PriorState(name) => Provenance::Known(name.clone()),
-        Expr::FieldAccess(base, field) => Provenance::FieldAccess {
+        Expr::Field(base, field) => Provenance::FieldAccess {
             base: Box::new(infer_provenance(base)),
             field: field.clone(),
         },
@@ -139,7 +139,7 @@ fn collect_var_names(expr: &Expr) -> Vec<String> {
                 work.push(b);
                 work.push(a);
             }
-            Expr::FieldAccess(obj, _) | Expr::ListIndex(obj, _) => { work.push(obj); }
+            Expr::Field(obj, _) | Expr::ListIndex(obj, _) => { work.push(obj); }
             Expr::Call(_, args) => { work.extend(args.iter().rev()); }
             _ => {}
         }
@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_provenance_addr_of_field() {
-        let inner = Expr::FieldAccess(
+        let inner = Expr::Field(
             Box::new(Expr::Identifier("obj".to_string())),
             "field".to_string(),
         );

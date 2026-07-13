@@ -94,7 +94,7 @@ impl Annotator {
                     self.collect_calls_from_expr(arg, calls);
                 }
             }
-            Expr::IntrinsicCall { intrinsic: _, args } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
                 for arg in args {
                     self.collect_calls_from_expr(arg, calls);
                 }
@@ -118,7 +118,7 @@ impl Annotator {
                 self.collect_calls_from_expr(r, calls);
             }
             Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.collect_calls_from_expr(e, calls),
-            Expr::ListLiteral(elems) => {
+            Expr::List(elems) => {
                 for e in elems {
                     self.collect_calls_from_expr(e, calls);
                 }
@@ -128,7 +128,7 @@ impl Annotator {
                 self.collect_calls_from_expr(index, calls);
             }
             Expr::Projection { source: list, .. } => self.collect_calls_from_expr(list, calls),
-            Expr::FieldAccess(obj, _) => self.collect_calls_from_expr(obj, calls),
+            Expr::Field(obj, _) => self.collect_calls_from_expr(obj, calls),
             Expr::StructInstance(_, fields) => {
                 for (_, v) in fields {
                     self.collect_calls_from_expr(v, calls);
@@ -418,7 +418,7 @@ impl Annotator {
                     .join(", ");
                 format!("{}({})", name, args_str)
             }
-            Expr::IntrinsicCall { intrinsic, args } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
                 let args_str = args
                     .iter()
                     .map(|a| self.format_expr(a))
@@ -453,7 +453,7 @@ impl Annotator {
             Expr::Not(e) => format!("!{}", self.format_expr(e)),
             Expr::Neg(e) => format!("-{}", self.format_expr(e)),
             Expr::BitNot(e) => format!("~{}", self.format_expr(e)),
-            Expr::ListLiteral(elements) => {
+            Expr::List(elements) => {
                 let elements_str = elements
                     .iter()
                     .map(|e| self.format_expr(e))
@@ -467,7 +467,7 @@ impl Annotator {
             Expr::Projection { source, target } => {
                 format!("{} :> {:?}", self.format_expr(source), target)
             }
-            Expr::FieldAccess(obj, field) => {
+            Expr::Field(obj, field) => {
                 format!("{}.{}", self.format_expr(obj), field)
             }
             Expr::StructInstance(typename, fields) => {

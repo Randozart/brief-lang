@@ -288,7 +288,7 @@ impl RegionAnalyzer {
                         work.push(arg);
                     }
                 }
-                Expr::ListLiteral(elems) | Expr::Tuple(elems) => {
+                Expr::List(elems) | Expr::Tuple(elems) => {
                     for e in elems.iter().rev() {
                         work.push(e);
                     }
@@ -297,7 +297,7 @@ impl RegionAnalyzer {
                     work.push(idx);
                     work.push(list);
                 }
-                Expr::FieldAccess(obj, _) => {
+                Expr::Field(obj, _) => {
                     work.push(obj);
                 }
                 Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
@@ -1383,9 +1383,9 @@ fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
             | Expr::Projection { source: a, .. }
             | Expr::AddrOf(a) | Expr::Deref(a) => { work.push(a); }
             Expr::Call(_, args) => { work.extend(args.iter().rev()); }
-            Expr::ListLiteral(elems) | Expr::Tuple(elems) => { work.extend(elems.iter().rev()); }
+            Expr::List(elems) | Expr::Tuple(elems) => { work.extend(elems.iter().rev()); }
             Expr::ListIndex(l, i) => { work.push(i); work.push(l); }
-            Expr::FieldAccess(o, _) => { work.push(o); }
+            Expr::Field(o, _) => { work.push(o); }
             Expr::Block(_, last) | Expr::TupleDestructure(_, last) => { work.push(last); }
             _ => {}
         }
@@ -1510,7 +1510,7 @@ fn expr_has_call(expr: &Expr) -> bool {
     let mut work: Vec<&Expr> = vec![expr];
     while let Some(e) = work.pop() {
         match e {
-            Expr::Call(_, _) | Expr::IntrinsicCall { .. } => return true,
+            Expr::Call(_, _) | /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { .. } => return true,
             Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
             | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
             | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
@@ -1523,14 +1523,14 @@ fn expr_has_call(expr: &Expr) -> bool {
             | Expr::Projection { source: a, .. } => {
                 work.push(a);
             }
-            Expr::ListLiteral(elems) | Expr::Tuple(elems) => {
+            Expr::List(elems) | Expr::Tuple(elems) => {
                 work.extend(elems.iter().rev());
             }
             Expr::ListIndex(l, i) => {
                 work.push(i);
                 work.push(l);
             }
-            Expr::FieldAccess(o, _) => {
+            Expr::Field(o, _) => {
                 work.push(o);
             }
             Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
@@ -1825,7 +1825,7 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
                         work.push(W::Proc(a));
                     }
                 }
-                Expr::ListLiteral(elems) => {
+                Expr::List(elems) => {
                     let n = elems.len();
                     work.push(W::Args(n, Box::new(Expr::ListLiteral)));
                     for e in elems.into_iter().rev() {
@@ -1849,9 +1849,9 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
                     work.push(W::Args(1, Box::new(move |v| Expr::Projection { source: Box::new(v[0].clone()), target: t2.clone() })));
                     work.push(W::Proc(*source));
                 }
-                Expr::FieldAccess(obj, f) => {
+                Expr::Field(obj, f) => {
                     let f2 = f;
-                    work.push(W::Args(1, Box::new(move |v| Expr::FieldAccess(Box::new(v[0].clone()), f2.clone()))));
+                    work.push(W::Args(1, Box::new(move |v| Expr::Field(Box::new(v[0].clone()), f2.clone()))));
                     work.push(W::Proc(*obj));
                 }
                 Expr::Block(stmts, last) => {

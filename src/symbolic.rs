@@ -246,14 +246,14 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
 
         // Function calls - can't track
         Expr::Call(_, _) | Expr::CellCall(_, _) => SymbolicValue::Unknown,
-        Expr::IntrinsicCall { .. } => SymbolicValue::Unknown,
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { .. } => SymbolicValue::Unknown,
 
         // Other complex expressions
         Expr::Neg(_) | Expr::Not(_) | Expr::BitNot(_) => SymbolicValue::Unknown,
-        Expr::ListLiteral(_)
+        Expr::List(_)
         | Expr::ListIndex(_, _)
         | Expr::Projection { .. }
-        | Expr::FieldAccess(_, _)
+        | Expr::Field(_, _)
         | Expr::StructInstance(_, _) => SymbolicValue::Unknown,
         Expr::ObjectLiteral(_) => SymbolicValue::Unknown,
 

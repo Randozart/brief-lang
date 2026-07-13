@@ -331,7 +331,7 @@ fn data_value_to_expr(dv: &DataValue) -> ast::Expr {
         DataValue::Bool(b) => ast::Expr::Bool(*b),
         DataValue::List(items) => {
             let exprs: Vec<ast::Expr> = items.iter().map(data_value_to_expr).collect();
-            ast::Expr::ListLiteral(exprs)
+            ast::Expr::List(exprs)
         }
         DataValue::Map(entries) => {
             let pairs: Vec<(ast::Expr, ast::Expr)> = entries
@@ -447,7 +447,7 @@ mod tests {
 
         let dv = DataValue::List(vec![DataValue::Int(1), DataValue::Int(2)]);
         match data_value_to_expr(&dv) {
-            ast::Expr::ListLiteral(items) => assert_eq!(items.len(), 2),
+            ast::Expr::List(items) => assert_eq!(items.len(), 2),
             _ => panic!("expected list"),
         }
 

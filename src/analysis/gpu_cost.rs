@@ -146,7 +146,7 @@ fn count_expr_ops(expr: &Expr) -> u64 {
             1 + count_expr_ops(e)
         }
         // Intrinsic calls — count float math ops as 1 each, recurse into args
-        Expr::IntrinsicCall { intrinsic, args } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
             let intrinsic_op = if matches!(intrinsic,
                 Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
                 | Intrinsic::Sqrt | Intrinsic::Fabs

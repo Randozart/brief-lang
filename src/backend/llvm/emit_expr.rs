@@ -9,7 +9,7 @@
 //
 // 2026-06-28: fix empty-indent emit_expr — default indent prevents %t{N} violations.
 
-use crate::ast_new::{Expr, Statement, Type};
+use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
 use crate::backend::llvm::intrinsics::emit_intrinsic_call;
 use crate::backend::llvm::types::lower_type;
@@ -221,49 +221,49 @@ impl LlvmBackend {
 
     /// Emit a binary operation.
     fn emit_binary_op(&mut self, out: &mut String, v: &str,
-        kind: &crate::ast_new::BinaryOpKind, l: &TypedRegister, r: &TypedRegister, indent: &str) -> TypedRegister {
+        kind: &crate::ast::BinaryOpKind, l: &TypedRegister, r: &TypedRegister, indent: &str) -> TypedRegister {
         match kind {
-            crate::ast_new::BinaryOpKind::Add => {
+            crate::ast::BinaryOpKind::Add => {
                 writeln!(out, "{}{} = add i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
-            crate::ast_new::BinaryOpKind::Sub => {
+            crate::ast::BinaryOpKind::Sub => {
                 writeln!(out, "{}{} = sub i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
-            crate::ast_new::BinaryOpKind::Mul => {
+            crate::ast::BinaryOpKind::Mul => {
                 writeln!(out, "{}{} = mul i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
-            crate::ast_new::BinaryOpKind::Div => {
+            crate::ast::BinaryOpKind::Div => {
                 writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
-            crate::ast_new::BinaryOpKind::Eq => {
+            crate::ast::BinaryOpKind::Eq => {
                 let icmp = self.fun.gen_reg();
                 writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, icmp, l.name, r.name).ok();
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
-            crate::ast_new::BinaryOpKind::Neq => {
+            crate::ast::BinaryOpKind::Neq => {
                 let icmp = self.fun.gen_reg();
                 writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, icmp, l.name, r.name).ok();
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
-            crate::ast_new::BinaryOpKind::Lt => {
+            crate::ast::BinaryOpKind::Lt => {
                 writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
-            crate::ast_new::BinaryOpKind::Gt => {
+            crate::ast::BinaryOpKind::Gt => {
                 writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
-            crate::ast_new::BinaryOpKind::And => {
+            crate::ast::BinaryOpKind::And => {
                 writeln!(out, "{}{} = and i8 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
-            crate::ast_new::BinaryOpKind::Or => {
+            crate::ast::BinaryOpKind::Or => {
                 writeln!(out, "{}{} = or i8 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
@@ -276,17 +276,17 @@ impl LlvmBackend {
 
     /// Emit a unary operation.
     fn emit_unary_op(&mut self, out: &mut String, v: &str,
-        kind: &crate::ast_new::UnaryOpKind, operand: &TypedRegister, indent: &str) -> TypedRegister {
+        kind: &crate::ast::UnaryOpKind, operand: &TypedRegister, indent: &str) -> TypedRegister {
         match kind {
-            crate::ast_new::UnaryOpKind::Neg => {
+            crate::ast::UnaryOpKind::Neg => {
                 writeln!(out, "{}{} = sub i64 0, {}", indent, v, operand.name).ok();
                 TypedRegister { name: v.to_string(), ty: operand.ty.clone() }
             }
-            crate::ast_new::UnaryOpKind::Not => {
+            crate::ast::UnaryOpKind::Not => {
                 writeln!(out, "{}{} = xor i8 {}, 1", indent, v, operand.name).ok();
                 TypedRegister { name: v.to_string(), ty: operand.ty.clone() }
             }
-            crate::ast_new::UnaryOpKind::BitNot => {
+            crate::ast::UnaryOpKind::BitNot => {
                 writeln!(out, "{}{} = xor i64 {}, -1", indent, v, operand.name).ok();
                 TypedRegister { name: v.to_string(), ty: operand.ty.clone() }
             }

@@ -2,7 +2,7 @@
 // 2026-07-12: Phase 2.7/4 — Marshaling between C calling convention
 // and Brief internal types (Bool zext/trunc, String ptr extract, etc.).
 
-use crate::ast_new::Type;
+use crate::ast::Type;
 
 /// Marshal a C parameter value into a Brief internal value.
 /// Bool: trunc i8 to i1

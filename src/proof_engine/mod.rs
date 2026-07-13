@@ -6,7 +6,7 @@
 mod smt;
 pub use smt::*;
 
-use crate::ast_new::{Expr, Statement, TopLevel, Type};
+use crate::ast::{Expr, Statement, TopLevel, Type};
 use crate::errors::ProofError;
 
 /// Check that a contract's pre/post conditions are satisfiable.
@@ -27,7 +27,7 @@ pub fn prove_contract(
 pub fn extract_bound_from_postcondition(post: &Expr) -> Option<u64> {
     match post {
         Expr::BinaryOp(kind, lhs, rhs) => {
-            if *kind != crate::ast_new::BinaryOpKind::Eq {
+            if *kind != crate::ast::BinaryOpKind::Eq {
                 return None;
             }
             match (lhs.as_ref(), rhs.as_ref()) {
@@ -133,7 +133,7 @@ pub fn is_proven_terminable(expr: &Expr) -> bool {
 /// Split a conjunction (&&) into individual conditions.
 pub fn split_and(expr: &Expr) -> Vec<&Expr> {
     match expr {
-        Expr::BinaryOp(kind, lhs, rhs) if *kind == crate::ast_new::BinaryOpKind::And => {
+        Expr::BinaryOp(kind, lhs, rhs) if *kind == crate::ast::BinaryOpKind::And => {
             let mut result = split_and(lhs);
             result.extend(split_and(rhs));
             result
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn test_extract_bound() {
         let post = Expr::BinaryOp(
-            crate::ast_new::BinaryOpKind::Eq,
+            crate::ast::BinaryOpKind::Eq,
             Box::new(Expr::Identifier("done".into())),
             Box::new(Expr::Decimal(100)),
         );
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn test_expr_cost_binary() {
         let expr = Expr::BinaryOp(
-            crate::ast_new::BinaryOpKind::Add,
+            crate::ast::BinaryOpKind::Add,
             Box::new(Expr::Decimal(1)),
             Box::new(Expr::Decimal(2)),
         );
@@ -228,7 +228,7 @@ mod tests {
     #[test]
     fn test_split_and() {
         let conjunct = Expr::BinaryOp(
-            crate::ast_new::BinaryOpKind::And,
+            crate::ast::BinaryOpKind::And,
             Box::new(Expr::Bool(true)),
             Box::new(Expr::Bool(false)),
         );

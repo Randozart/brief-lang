@@ -5,7 +5,7 @@
 // @ prefix forces any token to Quoted(bytes).
 
 use super::helpers::Parser;
-use crate::ast_new::{BinaryOpKind, Expr, UnaryOpKind};
+use crate::ast::{BinaryOpKind, Expr, UnaryOpKind};
 use crate::errors::{Span, SyntaxError};
 use crate::lexer::Token;
 
@@ -287,7 +287,7 @@ impl<'a> Parser<'a> {
             self.expect(Token::Arrow)?;
             let body = self.parse_expression()?;
             self.eat(&Token::Comma); // optional comma
-            arms.push(crate::ast_new::MatchArm {
+            arms.push(crate::ast::MatchArm {
                 pattern,
                 guard,
                 body: Box::new(body),
@@ -313,11 +313,11 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a pattern for match arms.
-    fn parse_pattern(&mut self) -> Result<crate::ast_new::Pattern, SyntaxError> {
+    fn parse_pattern(&mut self) -> Result<crate::ast::Pattern, SyntaxError> {
         match self.peek() {
             Some(Token::Underscore) => {
                 self.pos += 1;
-                Ok(crate::ast_new::Pattern::Wildcard)
+                Ok(crate::ast::Pattern::Wildcard)
             }
             Some(Token::Identifier(name)) => {
                 let name = name.clone();
@@ -334,9 +334,9 @@ impl<'a> Parser<'a> {
                         }
                     }
                     self.expect(Token::RParen)?;
-                    Ok(crate::ast_new::Pattern::EnumVariant(name, fields))
+                    Ok(crate::ast::Pattern::EnumVariant(name, fields))
                 } else {
-                    Ok(crate::ast_new::Pattern::Binding(name))
+                    Ok(crate::ast::Pattern::Binding(name))
                 }
             }
             Some(Token::Integer(_))
@@ -347,9 +347,9 @@ impl<'a> Parser<'a> {
                 // Range pattern: 1..5
                 if self.eat(&Token::DotDot) {
                     let end = self.parse_primary()?;
-                    Ok(crate::ast_new::Pattern::Range(lit, end))
+                    Ok(crate::ast::Pattern::Range(lit, end))
                 } else {
-                    Ok(crate::ast_new::Pattern::Literal(lit))
+                    Ok(crate::ast::Pattern::Literal(lit))
                 }
             }
             _ => self.error_at_current("expected pattern"),
@@ -357,7 +357,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse a block of statements (used by both Block and function bodies).
-    pub fn parse_block(&mut self) -> Result<Vec<crate::ast_new::Statement>, SyntaxError> {
+    pub fn parse_block(&mut self) -> Result<Vec<crate::ast::Statement>, SyntaxError> {
         self.expect(Token::LBrace)?;
         let mut stmts = Vec::new();
         while !self.check(&Token::RBrace) && !self.is_at_end() {

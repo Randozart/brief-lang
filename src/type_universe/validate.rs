@@ -2,7 +2,7 @@
 // 2026-07-12: Phase 2.2 — Validate type definitions for consistency.
 // Checks: referenced types exist, no circular inheritance, operator bindings resolve.
 
-use crate::ast_new::Type;
+use crate::ast::Type;
 use crate::errors::TypeError;
 
 /// Validate a list of type definitions for internal consistency.

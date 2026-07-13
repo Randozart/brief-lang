@@ -11,7 +11,7 @@ pub use engine::*;
 pub use smt::*;
 pub use cli::*;
 
-use crate::ast_new::{DerivationBlock, DerivationExample, Expr};
+use crate::ast::{DerivationBlock, DerivationExample, Expr};
 
 /// Synthesize a function body from a derivation block.
 /// Tries the fast enumerative engine first, falls back to SMT if needed.

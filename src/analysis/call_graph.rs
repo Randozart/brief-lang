@@ -142,10 +142,10 @@ pub fn collect_call_names(expr: &Expr, called: &mut Vec<String>) {
         Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
             collect_call_names(e, called);
         }
-        Expr::FieldAccess(e, _) => {
+        Expr::Field(e, _) => {
             collect_call_names(e, called);
         }
-        Expr::ListLiteral(elems) => {
+        Expr::List(elems) => {
             for elem in elems {
                 collect_call_names(elem, called);
             }

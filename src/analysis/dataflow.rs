@@ -114,12 +114,12 @@ impl<'a> DataflowAnalyzer<'a> {
             Expr::Cast(inner, _) | Expr::Projection { source: inner, .. } => {
                 self.extract_ids_recursive(inner, ids);
             }
-            Expr::Call(_, args) | Expr::ListLiteral(args) | Expr::Tuple(args) => {
+            Expr::Call(_, args) | Expr::List(args) | Expr::Tuple(args) => {
                 for arg in args {
                     self.extract_ids_recursive(arg, ids);
                 }
             }
-            Expr::IntrinsicCall { intrinsic: _, args } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
                 for arg in args {
                     self.extract_ids_recursive(arg, ids);
                 }
@@ -128,7 +128,7 @@ impl<'a> DataflowAnalyzer<'a> {
                 self.extract_ids_recursive(list, ids);
                 self.extract_ids_recursive(idx, ids);
             }
-            Expr::FieldAccess(obj, _) => {
+            Expr::Field(obj, _) => {
                 self.extract_ids_recursive(obj, ids);
             }
             Expr::StructInstance(_, fields) | Expr::ObjectLiteral(fields) => {

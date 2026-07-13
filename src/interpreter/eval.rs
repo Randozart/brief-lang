@@ -3,7 +3,7 @@
 // Call with # suffix dispatches to execute_intrinsic().
 // Each complex arm is extracted into a named helper for flat code.
 
-use crate::ast_new::*;
+use crate::ast::*;
 use crate::errors::RuntimeError;
 use crate::interpreter::{
     bool_to_bits, execute_intrinsic, f64_to_bits, i64_to_bits, zero_bits, Value, VirtualHeap,

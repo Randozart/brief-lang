@@ -1866,7 +1866,7 @@ impl LlvmBackend {
     fn try_modulo_switch_dispatch(
         &mut self,
         out: &mut String,
-        reactive_txns: &[&(String, &crate::ast_new::Transaction)],
+        reactive_txns: &[&(String, &crate::ast::Transaction)],
     ) -> bool {
         if reactive_txns.len() < 2 { return false; }
         let mut counter: Option<String> = None;
@@ -1936,7 +1936,7 @@ impl LlvmBackend {
     fn emit_ssa_canonical_loop_setup(
         &mut self,
         out: &mut String,
-        txn: &crate::ast_new::Transaction,
+        txn: &crate::ast::Transaction,
         bound_name: &str,
         b_idx: usize,
         cname: &str,
@@ -2116,7 +2116,7 @@ impl LlvmBackend {
     /// 2026-07-03: Preallocate collection buffers for multi-txn programs
     /// by scanning reactive txn bodies for push targets and using the
     /// first txn's bound (from its precondition) for allocation size.
-    fn emit_ssa_mt_prealloc(&mut self, out: &mut String, txns: &[(String, &crate::ast_new::Transaction)]) {
+    fn emit_ssa_mt_prealloc(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
         let mut all_push_targets: Vec<String> = Vec::new();
         for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             crate::backend::llvm::collect_push_targets(&txn.body, &mut all_push_targets);
@@ -2151,14 +2151,14 @@ impl LlvmBackend {
     pub(crate) fn emit_ssa_main(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast_new::Transaction)],
+        txns: &[(String, &crate::ast::Transaction)],
         has_wake_triggers: bool,
     ) {
         // 2026-07-02: Check modulo-switch dispatch EARLY, before emitting
         // @main() header. emit_modulo_switch_main emits its OWN @main()
         // function with setup. If we emit @main() here and then delegate,
         // the first @main() is left unterminated (sparse_dispatch bug).
-        let reactive_txns: Vec<&(String, &crate::ast_new::Transaction)> = txns.iter()
+        let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
             .filter(|(_, t)| t.is_reactive).collect();
         if self.try_modulo_switch_dispatch(out, &reactive_txns) {
             return;
@@ -2265,7 +2265,7 @@ impl LlvmBackend {
         // with an indirect jump is still faster than K sequential branches
         // for all practical dispatch sizes.
         if self.fun.phi_induction_reg.is_none() {
-            let reactive_txns: Vec<&(String, &crate::ast_new::Transaction)> = txns.iter()
+            let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
                 .filter(|(_, t)| t.is_reactive).collect();
             if self.try_modulo_switch_dispatch(out, &reactive_txns) {
                 return;
@@ -2433,7 +2433,7 @@ impl LlvmBackend {
     fn emit_modulo_rotated(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast_new::Transaction)],
+        txns: &[(String, &crate::ast::Transaction)],
         counter_name: &str,
         divisor: i64,
         cases: &[(i64, &str)],
@@ -2543,7 +2543,7 @@ impl LlvmBackend {
                             if let Some(m) = m_val {
                                 // Check for print_int# inside guard body
                                 if statements.iter().any(|st| {
-                                    matches!(st, Statement::Expression(Expr::IntrinsicCall {
+                                    matches!(st, Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                                         intrinsic: Intrinsic::PrintInt, ..
                                     }))
                                 }) {
@@ -2660,7 +2660,7 @@ impl LlvmBackend {
     pub(crate) fn emit_modulo_switch_main(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast_new::Transaction)],
+        txns: &[(String, &crate::ast::Transaction)],
         counter_name: &str,
         divisor: i64,
         cases: &[(i64, &str)],
@@ -2918,7 +2918,7 @@ impl LlvmBackend {
     pub(crate) fn emit_folded_multi_main(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast_new::Transaction)],
+        txns: &[(String, &crate::ast::Transaction)],
         enum_sizes: &[(String, Option<u64>)],
         enum_keys: &HashMap<String, Vec<i64>>,
         fold_params: &HashMap<String, FoldParam>,
@@ -2965,7 +2965,7 @@ impl LlvmBackend {
         emit_cycle_count_increment(self, out);
 
         // Sample triggers (clone trigger data to avoid borrow conflict)
-        let trigger_data: Vec<(String, crate::ast_new::LinkRef, crate::ast_new::Type)> = enum_sizes.iter()
+        let trigger_data: Vec<(String, crate::ast::LinkRef, crate::ast::Type)> = enum_sizes.iter()
             .filter_map(|(tn, _)| {
                 self.ctx.triggers.get(tn).map(|t| {
                     let rn = format!("%sz_{}", tn);
@@ -3512,10 +3512,10 @@ fn exempt_side_effect_args(
     field_index_map: &HashMap<String, usize>,
 ) {
     let (args, is_float_call) = match s {
-        Statement::Expression(Expr::IntrinsicCall { intrinsic: crate::ast_new::Intrinsic::PrintFloat, args, .. }) => {
+        Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: crate::ast::Intrinsic::PrintFloat, args, .. }) => {
             (Some(args), true)
         }
-        Statement::Expression(Expr::IntrinsicCall { args, .. }) => {
+        Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. }) => {
             (Some(args), false)
         }
         Statement::Expression(Expr::Call(_, args)) => {
@@ -3570,7 +3570,7 @@ fn collect_field_ids_from_expr(
         Expr::Not(op) | Expr::Neg(op) | Expr::BitNot(op) | Expr::Cast(op, _) => {
             collect_field_ids_from_expr(op, fields, field_index_map);
         }
-        Expr::Call(_, args) | Expr::ListLiteral(args) | Expr::IntrinsicCall { args, .. } => {
+        Expr::Call(_, args) | Expr::List(args) | /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             for arg in args { collect_field_ids_from_expr(arg, fields, field_index_map); }
         }
         _ => {}
@@ -3586,10 +3586,10 @@ fn extract_side_effect_reads(
 ) -> Vec<String> {
     let mut result = Vec::new();
     let (args, is_float_call) = match s {
-        Statement::Expression(Expr::IntrinsicCall { intrinsic: crate::ast_new::Intrinsic::PrintFloat, args, .. }) => {
+        Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: crate::ast::Intrinsic::PrintFloat, args, .. }) => {
             (Some(args), true)
         }
-        Statement::Expression(Expr::IntrinsicCall { args, .. })
+        Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. })
         | Statement::Expression(Expr::Call(_, args)) => {
             (Some(args), false)
         }
@@ -3651,10 +3651,10 @@ fn collect_expr_field_refs_for_set(e: &Expr, refs: &mut HashSet<String>) {
         Expr::Not(op) | Expr::Neg(op) | Expr::BitNot(op) => {
             collect_expr_field_refs_for_set(op, refs);
         }
-        Expr::Call(_, args) | Expr::ListLiteral(args) => {
+        Expr::Call(_, args) | Expr::List(args) => {
             for arg in args { collect_expr_field_refs_for_set(arg, refs); }
         }
-        Expr::IntrinsicCall { args, .. } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             for arg in args { collect_expr_field_refs_for_set(arg, refs); }
         }
         Expr::Cast(op, _) => { collect_expr_field_refs_for_set(op, refs); }
@@ -3726,10 +3726,10 @@ fn collect_expr_field_refs(
             collect_expr_field_refs(op, fields, field_index_map);
         }
         // Calls and intrinsics
-        Expr::Call(_, args) | Expr::ListLiteral(args) => {
+        Expr::Call(_, args) | Expr::List(args) => {
             for arg in args { collect_expr_field_refs(arg, fields, field_index_map); }
         }
-        Expr::IntrinsicCall { args, .. } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             for arg in args { collect_expr_field_refs(arg, fields, field_index_map); }
         }
         Expr::Cast(op, _) => {
@@ -3752,7 +3752,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
             writeln!(out, "  call void @__rt_wait()").ok();
             // Step all MMIO wake triggers to refresh reactor state
             for (name, trg) in &backend.ctx.triggers {
-                if matches!(&trg.address, crate::ast_new::LinkRef::Explicit(_)) {
+                if matches!(&trg.address, crate::ast::LinkRef::Explicit(_)) {
                     if let Some(&bit) = backend.ctx.dep_graph.bit_index.get(name) {
                         let drx = format!("%drx_{}_{}", tc, name);
                         writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
@@ -3792,7 +3792,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
         writeln!(out, "  br i1 {}, label %{}, label %{}", bit_check, t_body, t_skip).ok();
         writeln!(out, "{}:", t_body).ok();
         match &trg.address {
-            crate::ast_new::LinkRef::Stdin => {
+            crate::ast::LinkRef::Stdin => {
                 let ch_slot = format!("%ch_{}_{}", tc, name);
                 writeln!(out, "  {} = alloca i8, i64 1, align 1", ch_slot).ok();
                 let rd_res = format!("%rd_{}_{}", tc, name);
@@ -3829,7 +3829,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            crate::ast_new::LinkRef::Timer(_hz) => {
+            crate::ast::LinkRef::Timer(_hz) => {
                 if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                     let sge = format!("%sge_{}_{}", tc, name);
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, idx).ok();
@@ -3844,7 +3844,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            crate::ast_new::LinkRef::Signal(_sig) => {
+            crate::ast::LinkRef::Signal(_sig) => {
                 if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                     let sge = format!("%sge_{}_{}", tc, name);
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, idx).ok();
@@ -3855,13 +3855,13 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            crate::ast_new::LinkRef::Explicit(_) => {
+            crate::ast::LinkRef::Explicit(_) => {
                 let drx = format!("%drx_{}_{}", tc, name);
                 writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            crate::ast_new::LinkRef::Linked(_) => {
+            crate::ast::LinkRef::Linked(_) => {
                 let drx = format!("%drx_{}_{}", tc, name);
                 writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
@@ -3930,10 +3930,10 @@ fn collect_all_idents(e: &Expr, idents: &mut HashSet<String>) {
         Expr::Not(op) | Expr::Neg(op) | Expr::BitNot(op) | Expr::Cast(op, _) => {
             collect_all_idents(op, idents);
         }
-        Expr::Call(_, args) | Expr::ListLiteral(args) => {
+        Expr::Call(_, args) | Expr::List(args) => {
             for arg in args { collect_all_idents(arg, idents); }
         }
-        Expr::IntrinsicCall { args, .. } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             for arg in args { collect_all_idents(arg, idents); }
         }
         _ => {}
@@ -4001,7 +4001,7 @@ fn build_let_field_refs(body: &[Statement], field_index_map: &HashMap<String, us
 /// Also handles frgn FFI calls that produce output (identified by print_ prefix).
 fn is_output_call(expr: &Expr) -> bool {
     match expr {
-        Expr::IntrinsicCall { intrinsic, .. } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => {
             matches!(intrinsic, Intrinsic::Print | Intrinsic::Println
                 | Intrinsic::PrintInt | Intrinsic::PrintFloat
                 | Intrinsic::PutChar)

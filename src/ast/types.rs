@@ -198,6 +198,6 @@ pub enum Constraint {
     Implies(Box<Constraint>, Box<Constraint>),
     Forall(String, Box<Constraint>),
     Exists(String, Box<Constraint>),
-    Literal(Box<crate::ast_new::Expr>),
+    Literal(Box<crate::ast::Expr>),
     Bool(bool),
 }

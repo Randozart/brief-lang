@@ -5,7 +5,7 @@
 // - derivation example type checking (Phase 8.4)
 // - [#] entry call graph isolation (Phase 16B.2)
 
-use crate::ast_new::*;
+use crate::ast::*;
 use crate::errors::{AllocError, SyntaxError, TypeError};
 use crate::typechecker::TypecheckContext;
 

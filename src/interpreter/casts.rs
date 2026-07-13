@@ -3,7 +3,7 @@
 // Type casts reinterpret Value::Bits bytes between type interpretations.
 // IsType checks the byte width for type compatibility.
 
-use crate::ast_new::{Expr, Type};
+use crate::ast::{Expr, Type};
 use crate::errors::RuntimeError;
 use crate::interpreter::{f64_to_bits, i64_to_bits, Value};
 

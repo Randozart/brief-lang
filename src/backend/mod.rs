@@ -244,8 +244,8 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
                 collect_expr_identifiers(arg, ids);
             }
         }
-        Expr::FieldAccess(obj, _) => collect_expr_identifiers(obj, ids),
-        Expr::ListLiteral(elems) => {
+        Expr::Field(obj, _) => collect_expr_identifiers(obj, ids),
+        Expr::List(elems) => {
             for elem in elems {
                 collect_expr_identifiers(elem, ids);
             }

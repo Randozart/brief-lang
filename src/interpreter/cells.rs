@@ -3,7 +3,7 @@
 // No Intrinsic references — all intrinsic dispatch goes through
 // execute_intrinsic() in intrinsics.rs.
 
-use crate::ast_new::{Expr, Statement, TopLevel, Transaction};
+use crate::ast::{Expr, Statement, TopLevel, Transaction};
 use crate::errors::RuntimeError;
 use crate::interpreter::{eval_expr, eval_statement, Value, VirtualHeap};
 use std::collections::HashMap;

@@ -2,7 +2,7 @@
 // 2026-07-12: Phase 2.1 — Resolve type definitions to Bits(N).
 // Follows the derivation chain until reaching Bits or a known base type.
 
-use crate::ast_new::{PropertyValue, Type};
+use crate::ast::{PropertyValue, Type};
 use crate::type_universe::{ResolvedType, TypeUniverse};
 
 /// Resolve a Type to its ResolvedType metadata.

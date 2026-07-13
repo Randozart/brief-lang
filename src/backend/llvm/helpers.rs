@@ -147,12 +147,12 @@ impl LlvmBackend {
                 block: block.clone(),
                 span: *span,
             },
-            Expr::IntrinsicCall { intrinsic, args } => Expr::IntrinsicCall {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
                 intrinsic: intrinsic.clone(),
                 args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
             },
             // Collections
-            Expr::ListLiteral(items) => Expr::ListLiteral(
+            Expr::List(items) => Expr::List(
                 items.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
             ),
             Expr::ListLiteralExpr(e) => Expr::ListLiteralExpr(ListLiteralExpr {
@@ -198,7 +198,7 @@ impl LlvmBackend {
                 ops: e.ops.clone(),
             }),
             // Field access
-            Expr::FieldAccess(obj, field) => Expr::FieldAccess(
+            Expr::Field(obj, field) => Expr::Field(
                 Box::new(Self::rewrite_cell_identifiers(obj, cell_name)),
                 field.clone(),
             ),
@@ -307,7 +307,7 @@ impl LlvmBackend {
             }),
             Expr::Within { body, fallback, .. } => Expr::Within {
                 body: Box::new(Self::rewrite_cell_identifiers(body, cell_name)),
-                bound: 0, retries: 0, unit: crate::ast_new::TimeUnit::Cycles,
+                bound: 0, retries: 0, unit: crate::ast::TimeUnit::Cycles,
                 fallback: Box::new(Self::rewrite_cell_identifiers(fallback, cell_name)),
             },
             // 2026-07-11: Phase 5 — deferred literal carries no cell identifiers
@@ -471,7 +471,7 @@ impl LlvmBackend {
         let wake_symbols: Vec<&str> = self.ctx.triggers.values()
             .filter(|t| t.is_wake)
             .filter_map(|t| match &t.address {
-                crate::ast_new::LinkRef::Linked(s) => Some(s.as_str()),
+                crate::ast::LinkRef::Linked(s) => Some(s.as_str()),
                 _ => None,
             })
             .collect();
@@ -522,10 +522,10 @@ impl LlvmBackend {
     }
 
     // ── FUSABLE PAIRS ────────────────────────────────────────
-    pub(crate) fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast_new::Transaction)]) -> Vec<(String, String)> {
-        let prg = crate::ast_new::Program {
-            items: txns.iter().map(|(_, t)| crate::ast_new::TopLevel::Transaction((*t).clone())).collect(),
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast_new::StrictMode::Off, dispatch_mode: crate::ast_new::DispatchMode::Sequential, exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None),
+    pub(crate) fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast::Transaction)]) -> Vec<(String, String)> {
+        let prg = crate::ast::Program {
+            items: txns.iter().map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect(),
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential, exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None),
         };
         let mut pairs = crate::backend::detect_fusable_pairs(&prg);
         pairs.retain(|(a, b)| {
@@ -1077,7 +1077,7 @@ impl LlvmBackend {
         let llvm_ty = self.operator_llvm_type(&a.ty);
         match &op.implementation.as_ref() {
             // Intrinsic call: emit via the intrinsic name
-            Expr::IntrinsicCall { intrinsic, .. } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => {
                 writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
                          indent, v, intrinsic.name(), op_a, op_b).ok();
             }
@@ -1275,7 +1275,7 @@ impl LlvmBackend {
     /// Emit LLVM IR for function metadata projections (Address, Name, etc.).
     /// Returns Some(register) if the target is an Fn* variant and the source is a function name.
     pub(super) fn try_emit_fn_projection(&mut self, out: &mut String, source: &Expr, target: &ProjectionTarget, indent: &str) -> Option<TypedRegister> {
-        use crate::ast_new::ProjectionTarget;
+        use crate::ast::ProjectionTarget;
         let name = match source {
             Expr::Identifier(n) => n.clone(),
             _ => return None,
@@ -1613,13 +1613,13 @@ impl LlvmBackend {
     /// When a meld route exists, evaluates the route's destination expression to derive
     /// the projection result from the backing value. Handles:
     /// - `Expr::Identifier(name)` where name is a projection target → emit direct projection
-    /// - `Expr::IntrinsicCall { intrinsic, args }` → emit intrinsic with args as projections
+    /// - `/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args }` → emit intrinsic with args as projections
     /// - `Expr::Projection { source, target }` → emit projection with substituted source
     pub(crate) fn try_meld_projection(&mut self, out: &mut String, src_val: &TypedRegister,
         target_name: &str, indent: &str) -> Option<TypedRegister>
     {
         let custom_name = match &src_val.ty {
-            crate::ast_new::Type::Custom(n) => n.clone(),
+            crate::ast::Type::Custom(n) => n.clone(),
             _ => return None,
         };
         let universe = self.ctx.type_universe.as_ref()?;
@@ -1654,12 +1654,12 @@ impl LlvmBackend {
                 self.emit_direct_projection(out, src_val, name, indent)
             }
             // Pattern 2: intrinsic call — "strlen#(Ptr)" etc.
-            Expr::IntrinsicCall { intrinsic, args } => {
+            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
                 // 2026-06-28: Use txn_counter to prevent %t{N} collision
                 let v = format!("%t{}", self.fun.txn_counter);
                 self.fun.txn_counter += 1;
                 // Handle strlen#(arg) — the common meld route for CString.Size
-                if let crate::ast_new::Intrinsic::Strlen = intrinsic {
+                if let crate::ast::Intrinsic::Strlen = intrinsic {
                     if args.len() == 1 {
                         let arg_name = match &args[0] {
                             Expr::Identifier(n) => Some(n.clone()),
@@ -1677,7 +1677,7 @@ impl LlvmBackend {
                 None
             }
             // Pattern 3: field access on the partner type — "CString.ptr"
-            Expr::FieldAccess(obj, field) => {
+            Expr::Field(obj, field) => {
                 if let Expr::Identifier(n) = obj.as_ref() {
                     if n == partner {
                         // Substitute with the actual source value and emit the field
@@ -1737,7 +1737,7 @@ impl LlvmBackend {
         // Generic materialization: look up the meld between backing and target,
         // derive each field of the target type from the backing value via routes.
         // Clone all data first to avoid borrow conflicts with mutable self.
-        let meld_routes: Vec<crate::ast_new::MeldRouteDef> = {
+        let meld_routes: Vec<crate::ast::MeldRouteDef> = {
             let universe = match self.ctx.type_universe.as_ref() {
                 Some(u) => u,
                 None => return val.clone(),
@@ -1856,11 +1856,11 @@ impl LlvmBackend {
         &mut self,
         out: &mut String,
         v: &str,
-        inner: &crate::ast_new::Expr,
-        target_ty: &crate::ast_new::Type,
+        inner: &crate::ast::Expr,
+        target_ty: &crate::ast::Type,
         indent: &str,
     ) -> Option<TypedRegister> {
-        use crate::ast_new::Expr;
+        use crate::ast::Expr;
         let (lhs, rhs) = match inner {
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
                 (l.as_ref().clone(), r.as_ref().clone())
@@ -1874,8 +1874,8 @@ impl LlvmBackend {
         let has_meld = self.ctx.type_universe.as_ref()
             .and_then(|tu| {
                 let tn = match target_ty {
-                    crate::ast_new::Type::Custom(n) => Some(n.as_str()),
-                    crate::ast_new::Type::Applied(n, _) => Some(n.as_str()),
+                    crate::ast::Type::Custom(n) => Some(n.as_str()),
+                    crate::ast::Type::Applied(n, _) => Some(n.as_str()),
                     _ => None,
                 };
                 tn.and_then(|n| tu.find_meld(n, cast_ty.universe_key()))

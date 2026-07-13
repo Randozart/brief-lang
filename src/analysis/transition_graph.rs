@@ -388,11 +388,11 @@ fn simplify_expr(expr: &Expr) -> Expr {
             Box::new(simplify_expr(list)),
             Box::new(simplify_expr(idx)),
         ),
-        Expr::FieldAccess(obj, f) => Expr::FieldAccess(
+        Expr::Field(obj, f) => Expr::Field(
             Box::new(simplify_expr(obj)),
             f.clone(),
         ),
-        Expr::ListLiteral(elems) => Expr::ListLiteral(
+        Expr::List(elems) => Expr::List(
             elems.iter().map(|e| simplify_expr(e)).collect(),
         ),
         Expr::Tuple(elems) => Expr::Tuple(
@@ -846,7 +846,7 @@ fn references_triggers_or_ffi_with_decls(expr: &Expr, inop_decls: &HashMap<Strin
     }
     match expr {
         Expr::Call(_, _) => true,
-        Expr::IntrinsicCall { intrinsic, .. } => intrinsic_has_side_effects(intrinsic, inop_decls),
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => intrinsic_has_side_effects(intrinsic, inop_decls),
         Expr::Identifier(_) | Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Quoted(_) | Expr::Char(_) => false,
         Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b) | Expr::Mod(a, b)
         | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b)
@@ -857,11 +857,11 @@ fn references_triggers_or_ffi_with_decls(expr: &Expr, inop_decls: &HashMap<Strin
         Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) => references_triggers_or_ffi_with_decls(a, inop_decls),
         Expr::Cast(a, _) => references_triggers_or_ffi_with_decls(a, inop_decls),
         Expr::Block(_, last) | Expr::TupleDestructure(_, last) => references_triggers_or_ffi_with_decls(last, inop_decls),
-        Expr::ListLiteral(elems) => elems.iter().any(|e| references_triggers_or_ffi_with_decls(e, inop_decls)),
+        Expr::List(elems) => elems.iter().any(|e| references_triggers_or_ffi_with_decls(e, inop_decls)),
         Expr::ListIndex(list, idx) => references_triggers_or_ffi_with_decls(list, inop_decls) || references_triggers_or_ffi_with_decls(idx, inop_decls),
         Expr::Projection { source: inner, .. } => references_triggers_or_ffi_with_decls(inner, inop_decls),
         Expr::Tuple(elems) => elems.iter().any(|e| references_triggers_or_ffi_with_decls(e, inop_decls)),
-        Expr::FieldAccess(obj, _) => references_triggers_or_ffi_with_decls(obj, inop_decls),
+        Expr::Field(obj, _) => references_triggers_or_ffi_with_decls(obj, inop_decls),
         _ => false,
     }
 }
@@ -1066,7 +1066,7 @@ fn collect_projection_identifiers(expr: &crate::ast::Expr, state_fields: &HashSe
         crate::ast::Expr::Cast(inner, _) => {
             collect_projection_identifiers(inner, state_fields, usage);
         }
-        crate::ast::Expr::FieldAccess(obj, _field_name) => {
+        crate::ast::Expr::Field(obj, _field_name) => {
             collect_projection_identifiers(obj, state_fields, usage);
         }
         crate::ast::Expr::Block(_, last) => {
@@ -1204,7 +1204,7 @@ fn collect_state_identifiers(expr: &crate::ast::Expr, state_fields: &HashSet<Str
                 collect_state_identifiers(arg, state_fields, out);
             }
         }
-        crate::ast::Expr::FieldAccess(obj, _) => {
+        crate::ast::Expr::Field(obj, _) => {
             collect_state_identifiers(obj, state_fields, out);
         }
         crate::ast::Expr::ListIndex(obj, idx) => {
@@ -1226,7 +1226,7 @@ fn collect_state_identifiers(expr: &crate::ast::Expr, state_fields: &HashSet<Str
         crate::ast::Expr::Block(_, last) => {
             collect_state_identifiers(last, state_fields, out);
         }
-        crate::ast::Expr::Tuple(exprs) | crate::ast::Expr::ListLiteral(exprs) => {
+        crate::ast::Expr::Tuple(exprs) | crate::ast::Expr::List(exprs) => {
             for e in exprs {
                 collect_state_identifiers(e, state_fields, out);
             }
@@ -1258,7 +1258,7 @@ fn collect_state_identifiers(expr: &crate::ast::Expr, state_fields: &HashSet<Str
                 collect_state_identifiers(item, state_fields, out);
             }
         }
-        crate::ast::Expr::IntrinsicCall { args, .. } => {
+        crate::ast::/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             for arg in args {
                 collect_state_identifiers(arg, state_fields, out);
             }
@@ -1335,7 +1335,7 @@ fn collect_ffi_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                 collect_identifiers(arg, out);
             }
         }
-        Expr::IntrinsicCall { intrinsic: _, args } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
             for arg in args {
                 collect_identifiers(arg, out);
             }
@@ -1457,12 +1457,12 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                 collect_identifiers(arg, out);
             }
         }
-        Expr::IntrinsicCall { intrinsic: _, args } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
             for arg in args {
                 collect_identifiers(arg, out);
             }
         }
-        Expr::ListLiteral(elems) => {
+        Expr::List(elems) => {
             for elem in elems {
                 collect_identifiers(elem, out);
             }
@@ -1488,7 +1488,7 @@ fn collect_identifiers(expr: &Expr, out: &mut HashSet<String>) {
                 }
             }
         }
-        Expr::FieldAccess(obj, _) => {
+        Expr::Field(obj, _) => {
             collect_identifiers(obj, out);
         }
         Expr::StructInstance(_, fields) => {

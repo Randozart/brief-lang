@@ -268,7 +268,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
                 collect_expr_ids_inner(arg, ids);
             }
         }
-        Expr::ListLiteral(items) => {
+        Expr::List(items) => {
             for item in items {
                 collect_expr_ids_inner(item, ids);
             }
@@ -277,7 +277,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
             collect_expr_ids_inner(list, ids);
             collect_expr_ids_inner(index, ids);
         }
-        Expr::FieldAccess(obj, _) => {
+        Expr::Field(obj, _) => {
             collect_expr_ids_inner(obj, ids);
         }
         Expr::Projection { source, .. } => {
@@ -346,7 +346,7 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
                 collect_expr_ids_inner(item, ids);
             }
         }
-        Expr::IntrinsicCall { args, .. } => {
+        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             for arg in args {
                 collect_expr_ids_inner(arg, ids);
             }

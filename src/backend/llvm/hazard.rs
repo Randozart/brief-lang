@@ -1,4 +1,4 @@
-use crate::ast_new::{Expr, Statement, Type};
+use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::LlvmBackend;
 use std::collections::HashSet;
 
@@ -24,16 +24,16 @@ fn expr_refs_name(expr: &Expr, name: &str) -> bool {
         | Expr::Shl(l, r)
         | Expr::Shr(l, r) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => expr_refs_name(e, name),
-        Expr::Call(_, args) | Expr::IntrinsicCall { args, .. } => {
+        Expr::Call(_, args) | /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
             args.iter().any(|a| expr_refs_name(a, name))
         }
         Expr::Projection { source, .. } => expr_refs_name(source, name),
         Expr::ListIndex(l, i) => expr_refs_name(l, name) || expr_refs_name(i, name),
-        Expr::FieldAccess(obj, _) => expr_refs_name(obj, name),
+        Expr::Field(obj, _) => expr_refs_name(obj, name),
         Expr::StructInstance(_, fields) => fields.iter().any(|(_, e)| expr_refs_name(e, name)),
         Expr::Concat(l, r) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::Tuple(items) => items.iter().any(|e| expr_refs_name(e, name)),
-        Expr::ListLiteral(items) => items.iter().any(|e| expr_refs_name(e, name)),
+        Expr::List(items) => items.iter().any(|e| expr_refs_name(e, name)),
         Expr::MapLiteral(entries) => entries
             .iter()
             .any(|(k, v)| expr_refs_name(k, name) || expr_refs_name(v, name)),
@@ -614,7 +614,7 @@ mod tests {
 
     fn assign_stmt(name: &str, expr: Expr) -> Statement {
         Assignment {
-            lhs: Expr::FieldAccess(Box::new(ident("state")), name.to_string()),
+            lhs: Expr::Field(Box::new(ident("state")), name.to_string()),
             expr,
             timeout: None,
             modifiers: vec![],

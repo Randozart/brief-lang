@@ -346,7 +346,7 @@ fn emit_py_class(out: &mut String, name: &str, rt: &ResolvedType) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast_new::{Expr, TypeBinding, TypeDef, TypeDefBody, Type};
+    use crate::ast::{Expr, TypeBinding, TypeDef, TypeDefBody, Type};
     use crate::type_universe::{ResolvedType, TypeUniverse};
 
     fn make_test_type(name: &str, bytes: u64) -> ResolvedType {

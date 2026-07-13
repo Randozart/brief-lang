@@ -236,7 +236,7 @@ fn collect_vars(expr: &Expr, vars: &mut HashSet<String>) {
             }
         }
         Expr::Projection { source, .. } => collect_vars(source, vars),
-        Expr::ListLiteral(elems) => {
+        Expr::List(elems) => {
             for elem in elems {
                 collect_vars(elem, vars);
             }

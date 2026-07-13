@@ -3,7 +3,7 @@
 // All values are modeled as (_ BitVec N) — no type-specific theories.
 // This aligns with the Bits-is-primitive architecture.
 
-use crate::ast_new::{Expr, Type};
+use crate::ast::{Expr, Type};
 use std::process::Command;
 
 /// Result of an SMT query.
@@ -77,25 +77,25 @@ fn encode_expr_smt(expr: &Expr) -> String {
             let l = encode_expr_smt(lhs);
             let r = encode_expr_smt(rhs);
             match kind {
-                crate::ast_new::BinaryOpKind::Eq => format!("(= {} {})", l, r),
-                crate::ast_new::BinaryOpKind::Neq => format!("(not (= {} {}))", l, r),
-                crate::ast_new::BinaryOpKind::Lt => format!("(bvslt {} {})", l, r),
-                crate::ast_new::BinaryOpKind::Gt => format!("(bvsgt {} {})", l, r),
-                crate::ast_new::BinaryOpKind::Le => format!("(bvsle {} {})", l, r),
-                crate::ast_new::BinaryOpKind::Ge => format!("(bvsge {} {})", l, r),
-                crate::ast_new::BinaryOpKind::And => format!("(and {} {})", l, r),
-                crate::ast_new::BinaryOpKind::Or => format!("(or {} {})", l, r),
-                crate::ast_new::BinaryOpKind::Add => format!("(bvadd {} {})", l, r),
-                crate::ast_new::BinaryOpKind::Sub => format!("(bvsub {} {})", l, r),
-                crate::ast_new::BinaryOpKind::Mul => format!("(bvmul {} {})", l, r),
+                crate::ast::BinaryOpKind::Eq => format!("(= {} {})", l, r),
+                crate::ast::BinaryOpKind::Neq => format!("(not (= {} {}))", l, r),
+                crate::ast::BinaryOpKind::Lt => format!("(bvslt {} {})", l, r),
+                crate::ast::BinaryOpKind::Gt => format!("(bvsgt {} {})", l, r),
+                crate::ast::BinaryOpKind::Le => format!("(bvsle {} {})", l, r),
+                crate::ast::BinaryOpKind::Ge => format!("(bvsge {} {})", l, r),
+                crate::ast::BinaryOpKind::And => format!("(and {} {})", l, r),
+                crate::ast::BinaryOpKind::Or => format!("(or {} {})", l, r),
+                crate::ast::BinaryOpKind::Add => format!("(bvadd {} {})", l, r),
+                crate::ast::BinaryOpKind::Sub => format!("(bvsub {} {})", l, r),
+                crate::ast::BinaryOpKind::Mul => format!("(bvmul {} {})", l, r),
                 _ => format!("(= {} {})", l, r),
             }
         }
         Expr::UnaryOp(kind, e) => {
             let inner = encode_expr_smt(e);
             match kind {
-                crate::ast_new::UnaryOpKind::Not => format!("(not {})", inner),
-                crate::ast_new::UnaryOpKind::Neg => format!("(bvneg {})", inner),
+                crate::ast::UnaryOpKind::Not => format!("(not {})", inner),
+                crate::ast::UnaryOpKind::Neg => format!("(bvneg {})", inner),
                 _ => inner,
             }
         }
@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn test_encode_eq() {
         let expr = Expr::BinaryOp(
-            crate::ast_new::BinaryOpKind::Eq,
+            crate::ast::BinaryOpKind::Eq,
             Box::new(Expr::Decimal(42)),
             Box::new(Expr::Decimal(42)),
         );
@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn test_encode_and() {
         let expr = Expr::BinaryOp(
-            crate::ast_new::BinaryOpKind::And,
+            crate::ast::BinaryOpKind::And,
             Box::new(Expr::Bool(true)),
             Box::new(Expr::Bool(true)),
         );

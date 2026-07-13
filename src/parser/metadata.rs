@@ -3,7 +3,7 @@
 // Flat code: each function is max 2 levels of nesting.
 
 use super::helpers::Parser;
-use crate::ast_new::PropertyValue;
+use crate::ast::PropertyValue;
 use crate::errors::SyntaxError;
 use crate::lexer::Token;
 use std::collections::HashMap;

@@ -4,7 +4,7 @@
 // Handles: let, assign, term, if, guard, foreach, trg, asm, sync, return, escape, metadata.
 
 use super::helpers::Parser;
-use crate::ast_new::{PropertyValue, Statement};
+use crate::ast::{PropertyValue, Statement};
 use crate::errors::SyntaxError;
 use crate::lexer::Token;
 
@@ -25,7 +25,7 @@ impl<'a> Parser<'a> {
             Some(Token::When) => self.parse_guard_statement_when(),
             Some(Token::Semicolon) => {
                 self.pos += 1;
-                Ok(Statement::Expression(crate::ast_new::Expr::Decimal(0)))
+                Ok(Statement::Expression(crate::ast::Expr::Decimal(0)))
             }
             _ => {
                 // Keywords that lex as identifiers: return, if

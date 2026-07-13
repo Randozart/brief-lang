@@ -3,7 +3,7 @@
 // Adding a new intrinsic: add one arm here + one arm in execute_intrinsic().
 // The _ => None fallthrough must remain unchanged.
 
-use crate::ast_new::Type;
+use crate::ast::Type;
 
 /// The signature of a compiler-known # intrinsic.
 pub struct Signature {

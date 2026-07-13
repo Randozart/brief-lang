@@ -2,7 +2,7 @@
 // 2026-07-12: Phase 6.1 — Depth-bounded enumerative search for expressions.
 // Generates all expressions up to a given depth and checks them against examples.
 
-use crate::ast_new::{BinaryOpKind, DerivationExample, Expr, UnaryOpKind};
+use crate::ast::{BinaryOpKind, DerivationExample, Expr, UnaryOpKind};
 use crate::derive::SynthesizeError;
 
 /// Depth-bounded enumerative search for a function body.

@@ -12,7 +12,7 @@
 mod validate;
 pub use validate::*;
 
-use crate::ast_new::*;
+use crate::ast::*;
 use crate::errors::{SyntaxError, TypeError};
 use crate::intrinsic_signatures::{get_intrinsic_signature, Signature};
 use crate::type_universe::{builtin_operator_binding, TypeUniverse};

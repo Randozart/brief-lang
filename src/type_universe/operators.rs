@@ -3,7 +3,7 @@
 // This is the most critical function in the compiler (Risk #1 from the plan).
 // Flat code: each function is max 2 levels, extracted helpers where needed.
 
-use crate::ast_new::{OpBinding, Type};
+use crate::ast::{OpBinding, Type};
 use crate::type_universe::TypeUniverse;
 use std::collections::HashMap;
 
@@ -49,14 +49,14 @@ pub fn get_operator_intrinsic(universe: &TypeUniverse, rune: &str, ty: &Type) ->
     let key = format!("op {}", op_name);
     let binding = rt.properties.get(&key)?;
     match binding {
-        crate::ast_new::PropertyValue::Identifier(s) => {
+        crate::ast::PropertyValue::Identifier(s) => {
             if s.ends_with('#') {
                 Some(OpBinding::Intrinsic(s.clone()))
             } else {
                 Some(OpBinding::Function(s.clone()))
             }
         }
-        crate::ast_new::PropertyValue::String(s) => {
+        crate::ast::PropertyValue::String(s) => {
             if s.ends_with('#') {
                 Some(OpBinding::Intrinsic(s.clone()))
             } else {
@@ -136,7 +136,7 @@ pub fn builtin_operator_binding(rune: &str, ty: &Type) -> Option<OpBinding> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast_new::Type;
+    use crate::ast::Type;
 
     fn empty_universe() -> TypeUniverse {
         TypeUniverse::new()

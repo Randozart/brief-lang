@@ -3,7 +3,7 @@
 // No InopDeclaration, no TopLevel::Inop.
 // Added Export struct and Contract.is_entry.
 
-use crate::ast_new::{DerivationBlock, Expr, Formatting, PropertyValue, Type};
+use crate::ast::{DerivationBlock, Expr, Formatting, PropertyValue, Type};
 use crate::errors::Span;
 use std::collections::HashMap;
 

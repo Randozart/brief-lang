@@ -3,7 +3,7 @@
 // The .dbvl format stores compiled type metadata, intrinsic bindings,
 // and function signatures for import by other Brief modules.
 
-use crate::ast_new::{Definition, PropertyValue, TopLevel};
+use crate::ast::{Definition, PropertyValue, TopLevel};
 use std::collections::HashMap;
 
 /// Write a .dbvl archive from a compiled program.
@@ -51,7 +51,7 @@ fn write_export_sig(defn: &Definition, out: &mut String) {
 }
 
 /// Write a transaction entry.
-fn write_transaction(txn: &crate::ast_new::Transaction, out: &mut String) {
+fn write_transaction(txn: &crate::ast::Transaction, out: &mut String) {
     use std::fmt::Write;
     writeln!(out, "txn {} ({})", txn.name,
         txn.parameters.iter()

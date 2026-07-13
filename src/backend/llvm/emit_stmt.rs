@@ -4,7 +4,7 @@
 // 2026-07-04: MAX_FIELDS_PER_ALLLOCA=15 ensures LLVM's SROA can decompose
 // %State chunks into scalars for alias analysis and vectorization.
 
-use crate::ast_new::{Expr, Statement, Type};
+use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::TypedRegister;
 use crate::backend::llvm::helpers::LlvmBackend;
 use std::fmt::Write;

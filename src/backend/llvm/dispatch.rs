@@ -31,7 +31,7 @@ impl LlvmBackend {
     pub(crate) fn emit_reactor(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast_new::Transaction)],
+        txns: &[(String, &crate::ast::Transaction)],
         fusable: &[(String, String)],
     ) {
         self.fused_to_first.clear();
@@ -76,7 +76,7 @@ impl LlvmBackend {
         // but inlining shares one arena across all txns, saving memory.
         self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
-        let trigger_snapshot: Vec<(String, crate::ast_new::TriggerDeclaration)> = self
+        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self
             .ctx
             .trigger_names
             .iter()
@@ -221,7 +221,7 @@ impl LlvmBackend {
     }
     pub(crate) fn dispatch_has_pre(
         &self,
-        txns: &[(String, &crate::ast_new::Transaction)],
+        txns: &[(String, &crate::ast::Transaction)],
         name: &str,
     ) -> bool {
         let first = self.resolve_dispatch_first_txn(name);
@@ -272,7 +272,7 @@ impl LlvmBackend {
     pub(crate) fn emit_parallel_reactor(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast_new::Transaction)],
+        txns: &[(String, &crate::ast::Transaction)],
         fusable: &[(String, String)],
     ) {
         self.fused_to_first.clear();
@@ -322,7 +322,7 @@ impl LlvmBackend {
         // Arena init for parallel reactor — shared across all parallel txns.
         self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
-        let trigger_snapshot: Vec<(String, crate::ast_new::TriggerDeclaration)> = self
+        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self
             .ctx
             .trigger_names
             .iter()
@@ -419,7 +419,7 @@ impl LlvmBackend {
         &mut self,
         out: &mut String,
         indent: &str,
-        txns: &[(String, &crate::ast_new::Transaction)],
+        txns: &[(String, &crate::ast::Transaction)],
         txn_name: &str,
     ) {
         let first_name = self.resolve_dispatch_first_txn(txn_name);
@@ -433,7 +433,7 @@ impl LlvmBackend {
 
             // Emit precondition assume (for LLVM opt) — the br instruction
             // already guards execution, so this is just for metadata.
-            if !matches!(txn.contract.pre_condition, crate::ast_new::Expr::Bool(true)) {
+            if !matches!(txn.contract.pre_condition, crate::ast::Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, indent);
             }
             for s in &txn.body {
