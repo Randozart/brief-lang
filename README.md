@@ -1,11 +1,6 @@
-# Brief
-
-<img src="assets/brief-logo.svg" alt="Brief" width="200"/><img src="assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/> 
-
-<img src="assets/e-brief-logo.svg" alt="Embedded Brief" width="200"/><img src="assets/d-brief-logo.svg" alt="Data Brief" width="200"/>
-
-<img src="assets/a-brief-logo.svg" alt="Accelerated Brief" width="200"/><img src="assets/c-brief-logo.svg" alt="Circuit Brief" width="200"/>
-
+# Brief: A Programming Language
+| <img src="assets/breeve_present.png" alt="Breeve showing you the logos" width="250"/><br/><p align="center">*Breeve*, the Cybersphinx<p> | <img src="assets/brief-logo.svg" alt="Brief" width="200"/><img src="assets/r-brief-logo.svg" alt="Rendered Brief" width="200"/><br/><p align="center">**Brief \| Rendered Brief**<p><img src="assets/e-brief-logo.svg" alt="Embedded Brief" width="200"/><img src="assets/d-brief-logo.svg" alt="Data Brief" width="200"/><br/><p align="center">**Embedded Brief \| Data Brief**<p><img src="assets/a-brief-logo.svg" alt="Accelerated Brief" width="200"/><img src="assets/c-brief-logo.svg" alt="Circuit Brief" width="200"/><p align="center">**Accelerated Brief \| Circuit Brief**<p> |
+|-----------|---------|
 
 ## Brief Doesn't Break
 
