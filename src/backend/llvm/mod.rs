@@ -242,10 +242,7 @@ fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
     }
 }
 
-use crate::ast::{
-    ArrowDir, BracketOp, CellDef, DispatchMode, Expr, ForeignSignature, Intrinsic, MatchArm, MatchPattern, Pattern, Program, ProjectionTarget, SliceCoordinate, Statement, TopLevel, Type,
-};
-use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
+use crate::ast_new::{Expr, Program, Statement, TopLevel, Type};
 
 #[derive(Debug, Clone)]
 pub struct TypedRegister {

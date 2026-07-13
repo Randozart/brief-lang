@@ -29,7 +29,8 @@
 // and loop vectorization. The per-field phi loop provides this, while
 // the old A005a path used a %State alloca round-trip and A005b kept
 // the counter in memory — both hiding the loop structure from LLVM.
-use crate::ast_new::{Expr, Intrinsic, Statement, Type};
+
+
 use crate::backend::llvm::emit_stmt::MAX_FIELDS_PER_ALLLOCA;
 use crate::backend::llvm::{float_to_llvm_hex, find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
 use crate::analysis::dependency_graph::DependencyGraph;

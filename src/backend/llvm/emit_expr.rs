@@ -10,15 +10,10 @@
 // 2026-06-28: fix empty-indent emit_expr — default indent prevents %t{N} violations.
 
 use crate::ast_new::{Expr, Statement, Type};
-use crate::backend::llvm::helpers::LlvmBackend;
+use crate::backend::llvm::{LlvmBackend, TypedRegister};
 use crate::backend::llvm::intrinsics::emit_intrinsic_call;
 use crate::backend::llvm::types::lower_type;
 use std::fmt::Write;
-
-pub struct TypedRegister {
-    pub name: String,
-    pub ty: Type,
-}
 
 impl LlvmBackend {
     /// Emit LLVM IR for an expression. Returns the result register and type.
@@ -298,8 +293,8 @@ impl LlvmBackend {
         }
     }
 
-    /// Emit a statement (re-exported from emit_stmt module).
-    pub(crate) fn emit_statement(&mut self, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
+    /// Emit a statement (delegates to emit_stmt module).
+    fn emit_statement(&mut self, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
         crate::backend::llvm::emit_stmt::emit_statement(self, out, stmt, indent)
     }
 

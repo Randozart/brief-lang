@@ -31,7 +31,7 @@
 // All sub-expression recursion goes through the dispatch reference, not
 // directly into the pass files.
 
-use crate::ast::{Expr, Type};
+use crate::ast_new::{Expr, Type};
 use crate::errors::TypeError;
 use crate::interpreter::{Interpreter, RuntimeError, Value};
 use crate::parser::Parser;
