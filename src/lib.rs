@@ -32,6 +32,7 @@ pub mod features;
 pub mod type_universe;
 pub mod cache;
 pub mod dbrief;
+pub mod derive;
 pub mod desugarer;
 pub mod errors;
 pub mod ffi;
