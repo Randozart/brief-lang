@@ -27,6 +27,7 @@ pub mod assertion_verify;
 pub mod ast;
 pub mod ast_new;
 pub mod analysis;
+pub mod archive;
 pub mod backend;
 pub mod features;
 pub mod type_universe;
