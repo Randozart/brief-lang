@@ -5,7 +5,7 @@
 //! emits it with `spirv64-unknown-unknown` LLVM target triple, and replaces
 //! the loop in the main CPU binary with a Vulkan compute dispatch call.
 
-use crate::ast::*;
+use crate::ast_new::*;
 use std::collections::HashMap;
 
 /// Result of a GPU eligibility check.

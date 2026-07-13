@@ -31,9 +31,9 @@
 //
 // Zero behavioral changes — pure code reorganization.
 
-use std::collections::{HashMap, HashSet};
 use crate::ast::{DispatchMode, Expr, Program, Transaction};
 use crate::backend::AnalysisResults;
+use std::collections::{HashMap, HashSet};
 
 use crate::backend::llvm::LlvmBackend;
 
@@ -78,13 +78,13 @@ impl LlvmBackend {
     ///   The cross-read-write check only runs when preconditions share
     ///   identifiers — if A and B read different fields, there is no
     ///   cross-path regardless of writes.
-    fn select_dispatch_mode(
-        program: &Program,
-        txns: &[(String, &Transaction)],
-    ) -> DispatchMode {
+    fn select_dispatch_mode(program: &Program, txns: &[(String, &Transaction)]) -> DispatchMode {
         if program.dispatch_mode == DispatchMode::Sequential {
-            let reactive: Vec<&Transaction> = txns.iter()
-                .filter(|(_, t)| t.is_reactive).map(|(_, t)| *t).collect();
+            let reactive: Vec<&Transaction> = txns
+                .iter()
+                .filter(|(_, t)| t.is_reactive)
+                .map(|(_, t)| *t)
+                .collect();
             let mut cf = true;
             for i in 0..reactive.len() {
                 for j in (i + 1)..reactive.len() {
@@ -92,27 +92,48 @@ impl LlvmBackend {
                     let b = reactive[j];
                     let a_writes: HashSet<String> =
                         crate::backend::collect_assigned_identifiers(&a.body)
-                            .into_iter().collect();
+                            .into_iter()
+                            .collect();
                     let b_writes: HashSet<String> =
                         crate::backend::collect_assigned_identifiers(&b.body)
-                            .into_iter().collect();
+                            .into_iter()
+                            .collect();
                     let a_reads = crate::backend::collect_read_identifiers(&a.body);
                     let b_reads = crate::backend::collect_read_identifiers(&b.body);
-                    if !a_writes.is_disjoint(&b_writes) { cf = false; break; }
+                    if !a_writes.is_disjoint(&b_writes) {
+                        cf = false;
+                        break;
+                    }
                     let mut a_pre_ids = HashSet::new();
                     crate::backend::collect_expr_identifiers(
-                        &a.contract.pre_condition, &mut a_pre_ids);
+                        &a.contract.pre_condition,
+                        &mut a_pre_ids,
+                    );
                     let mut b_pre_ids = HashSet::new();
                     crate::backend::collect_expr_identifiers(
-                        &b.contract.pre_condition, &mut b_pre_ids);
+                        &b.contract.pre_condition,
+                        &mut b_pre_ids,
+                    );
                     if !a_pre_ids.is_disjoint(&b_pre_ids) {
-                        if !a_writes.is_disjoint(&b_reads) { cf = false; break; }
-                        if !b_writes.is_disjoint(&a_reads) { cf = false; break; }
+                        if !a_writes.is_disjoint(&b_reads) {
+                            cf = false;
+                            break;
+                        }
+                        if !b_writes.is_disjoint(&a_reads) {
+                            cf = false;
+                            break;
+                        }
                     }
                 }
-                if !cf { break; }
+                if !cf {
+                    break;
+                }
             }
-            if cf { DispatchMode::Parallel } else { program.dispatch_mode }
+            if cf {
+                DispatchMode::Parallel
+            } else {
+                program.dispatch_mode
+            }
         } else {
             program.dispatch_mode
         }
@@ -132,10 +153,18 @@ impl LlvmBackend {
         &mut self,
         analysis: &AnalysisResults,
         txns: &[(String, &Transaction)],
-    ) -> (bool, Option<Vec<(String, Option<u64>)>>, HashMap<String, Vec<i64>>, HashSet<String>) {
+    ) -> (
+        bool,
+        Option<Vec<(String, Option<u64>)>>,
+        HashMap<String, Vec<i64>>,
+        HashSet<String>,
+    ) {
         let has_wake_triggers = self.ctx.triggers.values().any(|t| t.is_wake);
 
-        let (enumerable, enum_keys): (Option<Vec<(String, Option<u64>)>>, HashMap<String, Vec<i64>>) = {
+        let (enumerable, enum_keys): (
+            Option<Vec<(String, Option<u64>)>>,
+            HashMap<String, Vec<i64>>,
+        ) = {
             let region = &analysis.region_analyzer;
             if !self.ctx.trigger_names.is_empty() {
                 let mut sizes = Vec::new();
@@ -146,7 +175,10 @@ impl LlvmBackend {
                     let sz = region.value_set_size_of(tn);
                     if let Some(s) = sz {
                         total = total.saturating_mul(s);
-                        if total > self.ctx.optimize_budget { ok = false; break; }
+                        if total > self.ctx.optimize_budget {
+                            ok = false;
+                            break;
+                        }
                         sizes.push((tn.clone(), sz));
                     } else {
                         fallback_triggers.push(tn.clone());
@@ -160,10 +192,12 @@ impl LlvmBackend {
                     let mut keys_map = HashMap::new();
                     for tn in &fallback_triggers {
                         for (_, txn) in txns {
-                            if !txn.is_reactive { continue; }
-                            if let Some(keys) = extract_trigger_keys(
-                                &txn.contract.pre_condition, &trigger_set,
-                            ) {
+                            if !txn.is_reactive {
+                                continue;
+                            }
+                            if let Some(keys) =
+                                extract_trigger_keys(&txn.contract.pre_condition, &trigger_set)
+                            {
                                 keys_map.insert(tn.clone(), keys);
                                 break;
                             }
@@ -174,44 +208,65 @@ impl LlvmBackend {
                         let mut combined_total = total;
                         let mut all_ok = true;
                         for tn in &self.ctx.trigger_names {
-                            if combined_sizes.iter().any(|(n, _)| n == tn) { continue; }
+                            if combined_sizes.iter().any(|(n, _)| n == tn) {
+                                continue;
+                            }
                             if let Some(keys) = keys_map.get(tn) {
                                 let s = keys.len() as u64;
                                 combined_total = combined_total.saturating_mul(s);
-                                if combined_total > self.ctx.optimize_budget { all_ok = false; break; }
+                                if combined_total > self.ctx.optimize_budget {
+                                    all_ok = false;
+                                    break;
+                                }
                                 combined_sizes.push((tn.clone(), Some(s)));
                             } else {
-                                all_ok = false; break;
+                                all_ok = false;
+                                break;
                             }
                         }
-                        if all_ok { (Some(combined_sizes), keys_map) } else { (None, HashMap::new()) }
+                        if all_ok {
+                            (Some(combined_sizes), keys_map)
+                        } else {
+                            (None, HashMap::new())
+                        }
                     } else {
                         (None, HashMap::new())
                     }
                 } else {
                     (None, HashMap::new())
                 }
-            } else { (None, HashMap::new()) }
+            } else {
+                (None, HashMap::new())
+            }
         };
 
-        let enum_trigger_names: HashSet<&str> = enumerable.as_ref()
+        let enum_trigger_names: HashSet<&str> = enumerable
+            .as_ref()
             .map(|en| en.iter().map(|(n, _)| n.as_str()).collect())
             .unwrap_or_default();
-        let enum_txn_names: HashSet<String> = txns.iter()
+        let enum_txn_names: HashSet<String> = txns
+            .iter()
             .filter(|(_, t)| {
                 t.is_reactive && is_trigger_gated(&t.contract.pre_condition, &enum_trigger_names)
             })
             .map(|(n, _)| n.clone())
             .collect();
 
-        let async_candidates: Vec<&Transaction> = txns.iter()
+        let async_candidates: Vec<&Transaction> = txns
+            .iter()
             .filter(|(n, t)| t.is_reactive && !enum_txn_names.contains(n.as_str()))
             .map(|(_, t)| *t)
             .collect();
-        let ac_writes: Vec<HashSet<String>> = async_candidates.iter()
-            .map(|t| crate::backend::collect_assigned_identifiers(&t.body).into_iter().collect())
+        let ac_writes: Vec<HashSet<String>> = async_candidates
+            .iter()
+            .map(|t| {
+                crate::backend::collect_assigned_identifiers(&t.body)
+                    .into_iter()
+                    .collect()
+            })
             .collect();
-        let ac_reads: Vec<HashSet<String>> = async_candidates.iter()
+        let ac_reads: Vec<HashSet<String>> = async_candidates
+            .iter()
             .map(|t| crate::backend::collect_read_identifiers(&t.body))
             .collect();
         let mut is_async_eligible: Vec<bool> = vec![true; async_candidates.len()];
@@ -226,8 +281,8 @@ impl LlvmBackend {
                 }
             }
         }
-        let all_async_eligible = async_candidates.len() >= 2
-            && is_async_eligible.iter().all(|&x| x);
+        let all_async_eligible =
+            async_candidates.len() >= 2 && is_async_eligible.iter().all(|&x| x);
         let mut async_txn_names: HashSet<String> = HashSet::new();
         if all_async_eligible {
             for ac in &async_candidates {
@@ -241,18 +296,32 @@ impl LlvmBackend {
 
         if !async_txn_names.is_empty() {
             let all_lightweight = async_txn_names.iter().all(|name| {
-                analysis.transition_graph.nodes.iter().find(|n| n.name == *name)
+                analysis
+                    .transition_graph
+                    .nodes
+                    .iter()
+                    .find(|n| n.name == *name)
                     .map_or(false, |node| {
                         let is_pure = node.is_pure_body || node.is_effectively_pure;
-                        if !is_pure { return false; }
+                        if !is_pure {
+                            return false;
+                        }
                         if let Some(ref bp) = node.bounded_pre {
-                            let is_const = self.ctx.field_initializers.get(&bp.bound_var)
+                            let is_const = self
+                                .ctx
+                                .field_initializers
+                                .get(&bp.bound_var)
                                 .and_then(|e| e.as_ref())
                                 .map_or(false, |e| matches!(e, Expr::Decimal(_)))
-                                || self.ctx.constants.get(&bp.bound_var)
+                                || self
+                                    .ctx
+                                    .constants
+                                    .get(&bp.bound_var)
                                     .map_or(false, |(_, e)| matches!(e, Expr::Decimal(_)));
                             !is_const
-                        } else { false }
+                        } else {
+                            false
+                        }
                     })
             });
             if all_lightweight {
@@ -282,9 +351,7 @@ fn is_trigger_gated(pre: &Expr, trigger_names: &HashSet<&str>) -> bool {
             matches!(l.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
                 || matches!(r.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
         }
-        Expr::And(l, r) => {
-            is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names)
-        }
+        Expr::And(l, r) => is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names),
         _ => false,
     }
 }
@@ -299,14 +366,13 @@ fn is_trigger_gated(pre: &Expr, trigger_names: &HashSet<&str>) -> bool {
 /// tells us the size of a trigger's value set, but not the actual values.
 /// For enum dispatch we need the concrete values to emit switch labels.
 /// extract_trigger_keys digs them out of the precondition's Eq arms.
-fn extract_trigger_keys(
-    pre: &Expr,
-    trigger_names: &HashSet<&str>,
-) -> Option<Vec<i64>> {
+fn extract_trigger_keys(pre: &Expr, trigger_names: &HashSet<&str>) -> Option<Vec<i64>> {
     let mut keys = Vec::new();
     match pre {
         Expr::Eq(l, r) => {
-            let (ident, val) = if let (Expr::Identifier(name), Expr::Decimal(n)) = (l.as_ref(), r.as_ref()) {
+            let (ident, val) = if let (Expr::Identifier(name), Expr::Decimal(n)) =
+                (l.as_ref(), r.as_ref())
+            {
                 (name.clone(), *n)
             } else if let (Expr::Decimal(n), Expr::Identifier(name)) = (l.as_ref(), r.as_ref()) {
                 (name.clone(), *n)

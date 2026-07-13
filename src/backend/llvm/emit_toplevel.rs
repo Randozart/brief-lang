@@ -1,5 +1,5 @@
 use crate::analysis::bild_asm;
-use crate::ast::{Expr, Statement, TopLevel, Type};
+use crate::ast_new::{Expr, Statement, TopLevel, Type};
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
 use crate::type_universe::TypeUniverse;
 use std::fmt::Write;
@@ -7,7 +7,7 @@ use std::fmt::Write;
 impl LlvmBackend {
     /// Check if any modifier has the given name and extract its export name.
     /// Returns Some(export_name) if #export or #export("name") was found.
-    pub fn get_export_name(modifiers: &[crate::ast::Annotation]) -> Option<String> {
+    pub fn get_export_name(modifiers: &[crate::ast_new::Annotation]) -> Option<String> {
         for tag in modifiers {
             if tag.name == "export" {
                 let export_name = tag.string_value().unwrap_or_else(|| tag.name.clone());
@@ -26,8 +26,8 @@ impl LlvmBackend {
         let Some(ref universe) = self.ctx.type_universe else { return };
         for (name, ty) in &self.fun.let_binding_types {
             let type_name = match ty {
-                crate::ast::Type::Custom(n) => n,
-                crate::ast::Type::Applied(n, _) => n,
+                crate::ast_new::Type::Custom(n) => n,
+                crate::ast_new::Type::Applied(n, _) => n,
                 _ => continue,
             };
             let Some(resolved) = universe.types.get(type_name) else { continue };
@@ -55,26 +55,26 @@ impl LlvmBackend {
         // List arena path, causing realloc on non-heap memory.
         if let Some(ty) = self.fun.let_original_types.get(var_name) {
             return match ty {
-                crate::ast::Type::Custom(n) => Some(n.clone()),
-                crate::ast::Type::Applied(n, _) => Some(n.clone()),
+                crate::ast_new::Type::Custom(n) => Some(n.clone()),
+                crate::ast_new::Type::Applied(n, _) => Some(n.clone()),
                 _ => None,
             };
         }
         if let Some(&idx) = self.ctx.field_index_map.get(var_name) {
             let ty = self.ctx.field_brief_types.get(idx)?;
             return match ty {
-                crate::ast::Type::Custom(n) => Some(n.clone()),
-                crate::ast::Type::Applied(n, _) => Some(n.clone()),
+                crate::ast_new::Type::Custom(n) => Some(n.clone()),
+                crate::ast_new::Type::Applied(n, _) => Some(n.clone()),
                 _ => None,
             };
         }
         None
     }
 
-    pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::InsertStrategy> {
+    pub(super) fn check_insert_strategy(&self, target: &crate::ast_new::Expr) -> Option<crate::type_universe::InsertStrategy> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
-            crate::ast::Expr::Identifier(n) => n,
+            crate::ast_new::Expr::Identifier(n) => n,
             _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
@@ -83,10 +83,10 @@ impl LlvmBackend {
 
     /// Check the target expression for an ExtractFrom strategy by looking up
     /// the variable's type in the TypeUniverse.
-    pub(super) fn check_extract_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::ExtractStrategy> {
+    pub(super) fn check_extract_strategy(&self, target: &crate::ast_new::Expr) -> Option<crate::type_universe::ExtractStrategy> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
-            crate::ast::Expr::Identifier(n) => n,
+            crate::ast_new::Expr::Identifier(n) => n,
             _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
@@ -334,7 +334,7 @@ impl LlvmBackend {
         // Need at least one built-in trigger to emit setup
         let has_builtin = self.ctx.triggers.iter().any(|(_, trg)| matches!(
             &trg.address,
-            crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_)
+            crate::ast_new::LinkRef::Stdin | crate::ast_new::LinkRef::Timer(_) | crate::ast_new::LinkRef::Signal(_)
         ));
         if !has_builtin { return; }
 
@@ -364,7 +364,7 @@ impl LlvmBackend {
         for (name, trg) in &self.ctx.triggers {
             let bit = self.ctx.dep_graph.bit_index.get(name).copied().unwrap_or(0);
             match &trg.address {
-                crate::ast::LinkRef::Stdin => {
+                crate::ast_new::LinkRef::Stdin => {
                     // fcntl(0, F_SETFL, O_NONBLOCK)
                     writeln!(out, "  %fcntl_{} = call i32 @fcntl(i32 0, i32 {}, i32 {})", name, f_setfl, o_nonblock).ok();
                     // epoll_event struct on stack: { events: EPOLLIN, data: { u64: bit } }
@@ -384,7 +384,7 @@ impl LlvmBackend {
                     let ctl = format!("%ectl_{}", name);
                     writeln!(out, "  {} = call i32 @epoll_ctl(i32 {}, i32 1, i32 0, ptr {})", ctl, epfd, ev_slot).ok();
                 }
-                crate::ast::LinkRef::Timer(hz) => {
+                crate::ast_new::LinkRef::Timer(hz) => {
                     // timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK)
                     let tfd = format!("%tfd_{}", name);
                     writeln!(out, "  {} = call i32 @timerfd_create(i32 {}, i32 {})", tfd, clo_monotonic, tfd_nonblock).ok();
@@ -432,7 +432,7 @@ impl LlvmBackend {
                     writeln!(out, "  store i64 {}, ptr {}, align 8", bit, ev_data_u64).ok();
                     writeln!(out, "  %ectl_{} = call i32 @epoll_ctl(i32 {}, i32 1, i32 {}, ptr {})", name, epfd, tfd, ev_slot).ok();
                 }
-                crate::ast::LinkRef::Signal(sig) => {
+                crate::ast_new::LinkRef::Signal(sig) => {
                     // sigemptyset(&mask)
                     let mask_slot = format!("%mask_{}", name);
                     writeln!(out, "  {} = alloca i8, i64 128, align 8", mask_slot).ok();
@@ -468,9 +468,9 @@ impl LlvmBackend {
     /// Load an external trigger value (MMIO address or C global).
     /// Built-in triggers (@stdin#, @timer#, @signal#) are stored to state
     /// by the event loop — load from the state field.
-    pub(super) fn emit_trg_load(&mut self, out: &mut String, indent: &str, dst: &str, address: &crate::ast::LinkRef, trg_ty: &Type) {
+    pub(super) fn emit_trg_load(&mut self, out: &mut String, indent: &str, dst: &str, address: &crate::ast_new::LinkRef, trg_ty: &Type) {
         match address {
-            crate::ast::LinkRef::Explicit(addr) => {
+            crate::ast_new::LinkRef::Explicit(addr) => {
                 let store_ty = super::trg_llvm_storage_ty(trg_ty);
                 let tr_counter = self.fun.txn_counter;
                 self.fun.txn_counter += 1;
@@ -478,7 +478,7 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = load volatile {}, {}* inttoptr (i64 {} to {}*), align 1", indent, raw, store_ty, store_ty, addr, store_ty).ok();
                 self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
             }
-            crate::ast::LinkRef::Linked(sym) => {
+            crate::ast_new::LinkRef::Linked(sym) => {
                 let store_ty = super::trg_llvm_storage_ty(trg_ty);
                 let tr_counter = self.fun.txn_counter;
                 self.fun.txn_counter += 1;
@@ -1024,7 +1024,7 @@ impl LlvmBackend {
         }
     }
 
-    pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast::Definition) {
+    pub(super) fn emit_definition(&mut self, out: &mut String, d: &crate::ast_new::Definition) {
         self.fun.pending_cleanup.clear();
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
         self.fun.expr_dedup_cache.clear();
@@ -1197,7 +1197,7 @@ impl LlvmBackend {
         }
     }
 
-    pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str, range_meta: &mut Vec<String>) {
+    pub(super) fn emit_transaction(&mut self, out: &mut String, txn: &crate::ast_new::Transaction, name: &str, range_meta: &mut Vec<String>) {
         let has_output = txn.output_type.is_some() || !txn.outputs.is_empty();
         if !txn.is_reactive && (!txn.parameters.is_empty() || has_output) {
             self.emit_callable_txn(out, txn, name);
@@ -1387,7 +1387,7 @@ impl LlvmBackend {
         }
     }
 
-    pub(super) fn emit_callable_txn(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
+    pub(super) fn emit_callable_txn(&mut self, out: &mut String, txn: &crate::ast_new::Transaction, name: &str) {
         self.fun.pending_cleanup.clear();
         self.fun.let_bindings.clear();
         self.fun.let_binding_types.clear();
@@ -1401,8 +1401,8 @@ impl LlvmBackend {
 
         let has_return = if let Some(ref ot) = txn.output_type {
             match ot {
-                crate::ast::OutputType::Single(ty) => !matches!(ty, Type::Void),
-                crate::ast::OutputType::Tuple(ts) => !ts.is_empty(),
+                crate::ast_new::OutputType::Single(ty) => !matches!(ty, Type::Void),
+                crate::ast_new::OutputType::Tuple(ts) => !ts.is_empty(),
                 _ => false,
             }
         } else {
@@ -1650,7 +1650,7 @@ impl LlvmBackend {
     //   across the call boundary. nocapture means @pre_* does not store %state
     //   in a global or return it, which lets LLVM's -mem2reg promote stack
     //   allocas that would otherwise escape to the @pre_* call.
-    pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
+    pub(super) fn emit_pre_function(&mut self, out: &mut String, txn: &crate::ast_new::Transaction, name: &str) {
         if matches!(txn.contract.pre_condition, Expr::Bool(true)) { return; }
         // 2026-07-04: Use #7 (memory(readonly)) for @pre_* functions.
         // Precondition expressions never write to %State — they only read
@@ -1710,7 +1710,7 @@ impl LlvmBackend {
     //   Mirroring the sequential emit ensures identical semantics under both
     //   dispatch strategies. The only difference is the function boundary, which
     //   enables the async runtime to call each body independently.
-    pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast::Transaction, name: &str) {
+    pub(super) fn emit_async_body(&mut self, out: &mut String, txn: &crate::ast_new::Transaction, name: &str) {
         let async_name = format!("async_body_{}", name);
         let async_attr = self.slp_attr(&async_name, "#0");
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", async_name, async_attr).ok();
@@ -1767,7 +1767,7 @@ impl LlvmBackend {
     //   explicit memcpy — defeating the purpose of fusion by doubling memory
     //   traffic. A single pointer is correct because the fusion pass guaranteed
     //   that A and B do not conflict on any state field.
-    pub(super) fn emit_fused(&mut self, out: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, name: &str) {
+    pub(super) fn emit_fused(&mut self, out: &mut String, a: &crate::ast_new::Transaction, b: &crate::ast_new::Transaction, name: &str) {
         let body_a: Vec<Statement> = a.body.iter()
             .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. } | Statement::Escape(_)))
             .cloned().collect();
@@ -1854,7 +1854,7 @@ impl LlvmBackend {
     ///   resolve_bild_type converts declared types to concrete LLVM types so the
     ///   parameter types in the function signature match what the user's IR
     ///   instructions expect.
-    pub(super) fn emit_inop(&mut self, out: &mut String, inop: &crate::ast::InopDeclaration) {
+    pub(super) fn emit_inop(&mut self, out: &mut String, inop: &crate::ast_new::InopDeclaration) {
         let is_float_fn = inop.outputs.iter().any(|t| {
             let resolved = self.resolve_bild_type(t);
             matches!(resolved, Type::Custom(__t) if __t == "Float")
@@ -1996,7 +1996,7 @@ impl LlvmBackend {
     /// Emit a library shim — no main function, only `__brief_init_state`
     /// and dso_local wrappers for #export functions.
     /// Called when `self.ctx.library_mode` is true.
-    pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
+    pub(super) fn emit_library_shim(&mut self, out: &mut String, txns: &[(String, &crate::ast_new::Transaction)]) {
         // The #export wrappers are already emitted by emit_definition (called
         // earlier in generate()). We only need to add __brief_init_state.
         // __brief_init_state — allocates %State, calls init_state, returns ptr
@@ -2057,9 +2057,9 @@ impl LlvmBackend {
                 if let Some(trg_idx) = trg_idx_opt {
                     let trg_ll_ty = self.ctx.field_types[trg_idx].clone();
                     match &trg.address {
-                        crate::ast::LinkRef::Stdin => {
-                            let read_expr = crate::ast::Expr::IntrinsicCall {
-                                intrinsic: crate::ast::Intrinsic::TtyReadKey,
+                        crate::ast_new::LinkRef::Stdin => {
+                            let read_expr = crate::ast_new::Expr::IntrinsicCall {
+                                intrinsic: crate::ast_new::Intrinsic::TtyReadKey,
                                 args: vec![],
                             };
                             let result = self.emit_expr(out, &read_expr, "  ");
@@ -2204,7 +2204,7 @@ impl LlvmBackend {
     /// Emit a thread function for a persistent cell that loops with nanosleep.
     /// The function takes a ptr to a %CellState struct, runs convergence,
     /// and stores outputs to atomic channel globals.
-    pub(super) fn emit_cell_thread(&mut self, out: &mut String, cell: &crate::ast::CellDef) {
+    pub(super) fn emit_cell_thread(&mut self, out: &mut String, cell: &crate::ast_new::CellDef) {
         let cell_name = &cell.name;
         // Thread function receives a private %CellState.<name>* allocated by the caller
         // in emit_main. We temporarily replace field_index_map and field_types with
@@ -2287,7 +2287,7 @@ impl LlvmBackend {
     }
 
     /// Emit channel globals for a persistent cell's output ports.
-    pub(super) fn emit_cell_channel_globals(&mut self, out: &mut String, cell: &crate::ast::CellDef) {
+    pub(super) fn emit_cell_channel_globals(&mut self, out: &mut String, cell: &crate::ast_new::CellDef) {
         let cell_name = &cell.name;
         let output_names = Self::extract_output_names_llvm(&cell.output_type);
         // For persistent cells, look up field types in cell_state_types

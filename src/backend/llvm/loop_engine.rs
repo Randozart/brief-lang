@@ -29,7 +29,7 @@
 // and loop vectorization. The per-field phi loop provides this, while
 // the old A005a path used a %State alloca round-trip and A005b kept
 // the counter in memory — both hiding the loop structure from LLVM.
-use crate::ast::{Expr, Intrinsic, Statement, Type};
+use crate::ast_new::{Expr, Intrinsic, Statement, Type};
 use crate::backend::llvm::emit_stmt::MAX_FIELDS_PER_ALLLOCA;
 use crate::backend::llvm::{float_to_llvm_hex, find_perfect_hash, sparsity_ratio, FoldParam, LlvmBackend};
 use crate::analysis::dependency_graph::DependencyGraph;
@@ -197,7 +197,6 @@ impl LlvmBackend {
             Expr::BinaryOp(bop) => {
                 let lv = self.emit_exit_expr(out, &bop.left, indent);
                 let rv = self.emit_exit_expr(out, &bop.right, indent);
-                use crate::features::binary_op::BinaryOpKind;
                 let cmp = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
                 match bop.kind {
                     BinaryOpKind::Eq => writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, lv, rv),
@@ -1866,7 +1865,7 @@ impl LlvmBackend {
     fn try_modulo_switch_dispatch(
         &mut self,
         out: &mut String,
-        reactive_txns: &[&(String, &crate::ast::Transaction)],
+        reactive_txns: &[&(String, &crate::ast_new::Transaction)],
     ) -> bool {
         if reactive_txns.len() < 2 { return false; }
         let mut counter: Option<String> = None;
@@ -1936,7 +1935,7 @@ impl LlvmBackend {
     fn emit_ssa_canonical_loop_setup(
         &mut self,
         out: &mut String,
-        txn: &crate::ast::Transaction,
+        txn: &crate::ast_new::Transaction,
         bound_name: &str,
         b_idx: usize,
         cname: &str,
@@ -2116,7 +2115,7 @@ impl LlvmBackend {
     /// 2026-07-03: Preallocate collection buffers for multi-txn programs
     /// by scanning reactive txn bodies for push targets and using the
     /// first txn's bound (from its precondition) for allocation size.
-    fn emit_ssa_mt_prealloc(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)]) {
+    fn emit_ssa_mt_prealloc(&mut self, out: &mut String, txns: &[(String, &crate::ast_new::Transaction)]) {
         let mut all_push_targets: Vec<String> = Vec::new();
         for (_, txn) in txns.iter().filter(|(_, t)| t.is_reactive) {
             crate::backend::llvm::collect_push_targets(&txn.body, &mut all_push_targets);
@@ -2151,14 +2150,14 @@ impl LlvmBackend {
     pub(crate) fn emit_ssa_main(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast::Transaction)],
+        txns: &[(String, &crate::ast_new::Transaction)],
         has_wake_triggers: bool,
     ) {
         // 2026-07-02: Check modulo-switch dispatch EARLY, before emitting
         // @main() header. emit_modulo_switch_main emits its OWN @main()
         // function with setup. If we emit @main() here and then delegate,
         // the first @main() is left unterminated (sparse_dispatch bug).
-        let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
+        let reactive_txns: Vec<&(String, &crate::ast_new::Transaction)> = txns.iter()
             .filter(|(_, t)| t.is_reactive).collect();
         if self.try_modulo_switch_dispatch(out, &reactive_txns) {
             return;
@@ -2265,7 +2264,7 @@ impl LlvmBackend {
         // with an indirect jump is still faster than K sequential branches
         // for all practical dispatch sizes.
         if self.fun.phi_induction_reg.is_none() {
-            let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
+            let reactive_txns: Vec<&(String, &crate::ast_new::Transaction)> = txns.iter()
                 .filter(|(_, t)| t.is_reactive).collect();
             if self.try_modulo_switch_dispatch(out, &reactive_txns) {
                 return;
@@ -2433,7 +2432,7 @@ impl LlvmBackend {
     fn emit_modulo_rotated(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast::Transaction)],
+        txns: &[(String, &crate::ast_new::Transaction)],
         counter_name: &str,
         divisor: i64,
         cases: &[(i64, &str)],
@@ -2660,7 +2659,7 @@ impl LlvmBackend {
     pub(crate) fn emit_modulo_switch_main(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast::Transaction)],
+        txns: &[(String, &crate::ast_new::Transaction)],
         counter_name: &str,
         divisor: i64,
         cases: &[(i64, &str)],
@@ -2918,7 +2917,7 @@ impl LlvmBackend {
     pub(crate) fn emit_folded_multi_main(
         &mut self,
         out: &mut String,
-        txns: &[(String, &crate::ast::Transaction)],
+        txns: &[(String, &crate::ast_new::Transaction)],
         enum_sizes: &[(String, Option<u64>)],
         enum_keys: &HashMap<String, Vec<i64>>,
         fold_params: &HashMap<String, FoldParam>,
@@ -2965,7 +2964,7 @@ impl LlvmBackend {
         emit_cycle_count_increment(self, out);
 
         // Sample triggers (clone trigger data to avoid borrow conflict)
-        let trigger_data: Vec<(String, crate::ast::LinkRef, crate::ast::Type)> = enum_sizes.iter()
+        let trigger_data: Vec<(String, crate::ast_new::LinkRef, crate::ast_new::Type)> = enum_sizes.iter()
             .filter_map(|(tn, _)| {
                 self.ctx.triggers.get(tn).map(|t| {
                     let rn = format!("%sz_{}", tn);
@@ -3512,7 +3511,7 @@ fn exempt_side_effect_args(
     field_index_map: &HashMap<String, usize>,
 ) {
     let (args, is_float_call) = match s {
-        Statement::Expression(Expr::IntrinsicCall { intrinsic: crate::ast::Intrinsic::PrintFloat, args, .. }) => {
+        Statement::Expression(Expr::IntrinsicCall { intrinsic: crate::ast_new::Intrinsic::PrintFloat, args, .. }) => {
             (Some(args), true)
         }
         Statement::Expression(Expr::IntrinsicCall { args, .. }) => {
@@ -3586,7 +3585,7 @@ fn extract_side_effect_reads(
 ) -> Vec<String> {
     let mut result = Vec::new();
     let (args, is_float_call) = match s {
-        Statement::Expression(Expr::IntrinsicCall { intrinsic: crate::ast::Intrinsic::PrintFloat, args, .. }) => {
+        Statement::Expression(Expr::IntrinsicCall { intrinsic: crate::ast_new::Intrinsic::PrintFloat, args, .. }) => {
             (Some(args), true)
         }
         Statement::Expression(Expr::IntrinsicCall { args, .. })
@@ -3752,7 +3751,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
             writeln!(out, "  call void @__rt_wait()").ok();
             // Step all MMIO wake triggers to refresh reactor state
             for (name, trg) in &backend.ctx.triggers {
-                if matches!(&trg.address, crate::ast::LinkRef::Explicit(_)) {
+                if matches!(&trg.address, crate::ast_new::LinkRef::Explicit(_)) {
                     if let Some(&bit) = backend.ctx.dep_graph.bit_index.get(name) {
                         let drx = format!("%drx_{}_{}", tc, name);
                         writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
@@ -3792,7 +3791,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
         writeln!(out, "  br i1 {}, label %{}, label %{}", bit_check, t_body, t_skip).ok();
         writeln!(out, "{}:", t_body).ok();
         match &trg.address {
-            crate::ast::LinkRef::Stdin => {
+            crate::ast_new::LinkRef::Stdin => {
                 let ch_slot = format!("%ch_{}_{}", tc, name);
                 writeln!(out, "  {} = alloca i8, i64 1, align 1", ch_slot).ok();
                 let rd_res = format!("%rd_{}_{}", tc, name);
@@ -3829,7 +3828,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            crate::ast::LinkRef::Timer(_hz) => {
+            crate::ast_new::LinkRef::Timer(_hz) => {
                 if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                     let sge = format!("%sge_{}_{}", tc, name);
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, idx).ok();
@@ -3844,7 +3843,7 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            crate::ast::LinkRef::Signal(_sig) => {
+            crate::ast_new::LinkRef::Signal(_sig) => {
                 if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                     let sge = format!("%sge_{}_{}", tc, name);
                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", sge, idx).ok();
@@ -3855,13 +3854,13 @@ pub(crate) fn emit_trg_event_epoll_wait(backend: &mut LlvmBackend, out: &mut Str
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            crate::ast::LinkRef::Explicit(_) => {
+            crate::ast_new::LinkRef::Explicit(_) => {
                 let drx = format!("%drx_{}_{}", tc, name);
                 writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();
                 writeln!(out, "  br label %{}", t_skip).ok();
             }
-            crate::ast::LinkRef::Linked(_) => {
+            crate::ast_new::LinkRef::Linked(_) => {
                 let drx = format!("%drx_{}_{}", tc, name);
                 writeln!(out, "  {} = add i64 {}, {}", drx, 1u64 << bit, bit).ok();
                 writeln!(out, "  call void @step(ptr %state, i64 {})", drx).ok();

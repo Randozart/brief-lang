@@ -101,7 +101,11 @@ pub struct Instruction {
 
 impl Instruction {
     pub fn new(result: Option<String>, op: String) -> Self {
-        Instruction { result, op, metadata: None }
+        Instruction {
+            result,
+            op,
+            metadata: None,
+        }
     }
 
     pub fn with_metadata(mut self, md: String) -> Self {
@@ -171,13 +175,15 @@ impl LLVMBuilder {
     /// The op_str is the full operation text (e.g. "add i64 %a, %b").
     fn emit_reg_op(&mut self, op_str: &str) -> String {
         let res = self.gen_reg();
-        self.instructions.push(Instruction::new(Some(res.clone()), op_str.to_string()));
+        self.instructions
+            .push(Instruction::new(Some(res.clone()), op_str.to_string()));
         res
     }
 
     /// Emit a void instruction (no result value).
     fn emit_void(&mut self, op: &str) {
-        self.instructions.push(Instruction::new(None, op.to_string()));
+        self.instructions
+            .push(Instruction::new(None, op.to_string()));
     }
 
     // ── Arithmetic ─────────────────────────────────────────────────
@@ -283,18 +289,35 @@ impl LLVMBuilder {
         ));
     }
 
-    pub fn emit_store_tbaa(&mut self, ty: LlvmType, val: &str, ptr: &str, align: usize, tbaa: &str) {
+    pub fn emit_store_tbaa(
+        &mut self,
+        ty: LlvmType,
+        val: &str,
+        ptr: &str,
+        align: usize,
+        tbaa: &str,
+    ) {
         self.instructions.push(Instruction::new(
             None,
-            format!("store {} {}, ptr {}, align {}, !tbaa !{}", ty, val, ptr, align, tbaa),
+            format!(
+                "store {} {}, ptr {}, align {}, !tbaa !{}",
+                ty, val, ptr, align, tbaa
+            ),
         ));
     }
 
     // ── GEP (GetElementPtr) ────────────────────────────────────────
 
     pub fn emit_gep(&mut self, base_ty: &str, ptr: &str, indices: &[&str]) -> String {
-        let idx_str = indices.iter().map(|i| format!("i64 {}", i)).collect::<Vec<_>>().join(", ");
-        let op = format!("getelementptr inbounds {}, ptr {}, {}", base_ty, ptr, idx_str);
+        let idx_str = indices
+            .iter()
+            .map(|i| format!("i64 {}", i))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let op = format!(
+            "getelementptr inbounds {}, ptr {}, {}",
+            base_ty, ptr, idx_str
+        );
         self.emit_reg_op(&op)
     }
 
@@ -315,15 +338,22 @@ impl LLVMBuilder {
     }
 
     pub fn emit_cond_br(&mut self, cond: &str, true_dest: &str, false_dest: &str) {
-        self.emit_void(&format!("br i1 {}, label %{}, label %{}", cond, true_dest, false_dest));
+        self.emit_void(&format!(
+            "br i1 {}, label %{}, label %{}",
+            cond, true_dest, false_dest
+        ));
     }
 
     pub fn emit_switch(&mut self, val: &str, default_dest: &str, cases: &[(i64, &str)]) {
-        let case_str: String = cases.iter()
+        let case_str: String = cases
+            .iter()
             .map(|(v, d)| format!("i64 {}, label %{}", v, d))
             .collect::<Vec<_>>()
             .join(" ");
-        self.emit_void(&format!("switch i64 {}, label %{} [{}]", val, default_dest, case_str));
+        self.emit_void(&format!(
+            "switch i64 {}, label %{} [{}]",
+            val, default_dest, case_str
+        ));
     }
 
     pub fn emit_ret(&mut self, ty: LlvmType, val: Option<&str>) {
@@ -340,14 +370,21 @@ impl LLVMBuilder {
     // ── Call ───────────────────────────────────────────────────────
 
     pub fn emit_call(&mut self, ret_ty: LlvmType, callee: &str, args: &[(&str, &str)]) -> String {
-        let args_str: Vec<String> = args.iter()
+        let args_str: Vec<String> = args
+            .iter()
             .map(|(ty, val)| format!("{} {}", ty, val))
             .collect();
-        self.emit_reg_op(&format!("call {} @{}({})", ret_ty, callee, args_str.join(", ")))
+        self.emit_reg_op(&format!(
+            "call {} @{}({})",
+            ret_ty,
+            callee,
+            args_str.join(", ")
+        ))
     }
 
     pub fn emit_call_void(&mut self, callee: &str, args: &[(&str, &str)]) {
-        let args_str: Vec<String> = args.iter()
+        let args_str: Vec<String> = args
+            .iter()
             .map(|(ty, val)| format!("{} {}", ty, val))
             .collect();
         self.emit_void(&format!("call void @{}({})", callee, args_str.join(", ")));
@@ -356,14 +393,24 @@ impl LLVMBuilder {
     // ── PHI ─────────────────────────────────────────────────────────
 
     pub fn emit_phi(&mut self, ty: LlvmType, incoming: &[(&str, &str)]) -> String {
-        let incoming_str: Vec<String> = incoming.iter()
+        let incoming_str: Vec<String> = incoming
+            .iter()
             .map(|(val, label)| format!("[ {}, %{} ]", val, label))
             .collect();
         self.emit_reg_op(&format!("phi {} {}", ty, incoming_str.join(", ")))
     }
 
-    pub fn emit_select(&mut self, ty: LlvmType, cond: &str, true_val: &str, false_val: &str) -> String {
-        self.emit_reg_op(&format!("select i1 {}, {} {}, {} {}", cond, ty, true_val, ty, false_val))
+    pub fn emit_select(
+        &mut self,
+        ty: LlvmType,
+        cond: &str,
+        true_val: &str,
+        false_val: &str,
+    ) -> String {
+        self.emit_reg_op(&format!(
+            "select i1 {}, {} {}, {} {}",
+            cond, ty, true_val, ty, false_val
+        ))
     }
 
     // ── Metadata ───────────────────────────────────────────────────
@@ -382,7 +429,8 @@ impl LLVMBuilder {
     pub fn emit_label(&mut self, label: &str) {
         // Labels are represented as special instructions with no result
         // and an op that starts with ":" (formatted below as "label:")
-        self.instructions.push(Instruction::new(None, format!("label:{}", label)));
+        self.instructions
+            .push(Instruction::new(None, format!("label:{}", label)));
     }
 
     // ── Finalization ────────────────────────────────────────────────
@@ -482,7 +530,12 @@ impl TypeConverter {
     /// Uses the type universe to determine the boxing strategy.
     /// Falls back to identity (already i64) when universe lookup fails.
     /// 2026-06-29: Phase 7A — universe-driven, replaces hardcoded match arms.
-    pub fn box_to_i64(builder: &mut LLVMBuilder, val: &str, ty: &BriefType, _universe: Option<&TypeUniverse>) -> String {
+    pub fn box_to_i64(
+        builder: &mut LLVMBuilder,
+        val: &str,
+        ty: &BriefType,
+        _universe: Option<&TypeUniverse>,
+    ) -> String {
         Self::box_to_i64_fallback(builder, val, ty)
     }
 
@@ -490,17 +543,31 @@ impl TypeConverter {
     /// 2026-06-29: Will be removed once all tests go through the full pipeline.
     fn box_to_i64_fallback(builder: &mut LLVMBuilder, val: &str, ty: &BriefType) -> String {
         match ty {
-            BriefType::Custom(__t) if __t == "Bool" => builder.emit_zext(LlvmType::I1, LlvmType::I64, val),
-            BriefType::Custom(__t) if __t == "String" || __t == "Data" => builder.emit_ptrtoint(val, LlvmType::I64),
+            BriefType::Custom(__t) if __t == "Bool" => {
+                builder.emit_zext(LlvmType::I1, LlvmType::I64, val)
+            }
+            BriefType::Custom(__t) if __t == "String" || __t == "Data" => {
+                builder.emit_ptrtoint(val, LlvmType::I64)
+            }
             BriefType::Custom(__t) if __t == "Float" => {
                 let bi = builder.emit_bitcast(LlvmType::Float, LlvmType::I32, val);
                 builder.emit_zext(LlvmType::I32, LlvmType::I64, &bi)
             }
-            BriefType::Custom(__t) if __t == "Float64" => builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val),
-            BriefType::Custom(__t) if __t == "Int8" || __t == "Int16" => builder.emit_sext(LlvmType::I8, LlvmType::I64, val),
-            BriefType::Custom(__t) if __t == "UInt8" || __t == "UInt16" => builder.emit_zext(LlvmType::I8, LlvmType::I64, val),
-            BriefType::Custom(__t) if __t == "Int32" => builder.emit_sext(LlvmType::I32, LlvmType::I64, val),
-            BriefType::Custom(__t) if __t == "UInt32" => builder.emit_zext(LlvmType::I32, LlvmType::I64, val),
+            BriefType::Custom(__t) if __t == "Float64" => {
+                builder.emit_bitcast(LlvmType::Double, LlvmType::I64, val)
+            }
+            BriefType::Custom(__t) if __t == "Int8" || __t == "Int16" => {
+                builder.emit_sext(LlvmType::I8, LlvmType::I64, val)
+            }
+            BriefType::Custom(__t) if __t == "UInt8" || __t == "UInt16" => {
+                builder.emit_zext(LlvmType::I8, LlvmType::I64, val)
+            }
+            BriefType::Custom(__t) if __t == "Int32" => {
+                builder.emit_sext(LlvmType::I32, LlvmType::I64, val)
+            }
+            BriefType::Custom(__t) if __t == "UInt32" => {
+                builder.emit_zext(LlvmType::I32, LlvmType::I64, val)
+            }
             _ => val.to_string(),
         }
     }
@@ -508,23 +575,44 @@ impl TypeConverter {
     /// Unbox an i64 value from %State back to its native type.
     /// Uses the type universe to determine the unboxing strategy.
     /// 2026-06-29: Phase 7A — universe-driven.
-    pub fn unbox_from_i64(builder: &mut LLVMBuilder, val: &str, target_ty: &BriefType, _universe: Option<&TypeUniverse>) -> String {
+    pub fn unbox_from_i64(
+        builder: &mut LLVMBuilder,
+        val: &str,
+        target_ty: &BriefType,
+        _universe: Option<&TypeUniverse>,
+    ) -> String {
         Self::unbox_from_i64_fallback(builder, val, target_ty)
     }
 
     /// Fallback unboxing when universe is not available.
-    fn unbox_from_i64_fallback(builder: &mut LLVMBuilder, val: &str, target_ty: &BriefType) -> String {
+    fn unbox_from_i64_fallback(
+        builder: &mut LLVMBuilder,
+        val: &str,
+        target_ty: &BriefType,
+    ) -> String {
         match target_ty {
-            BriefType::Custom(__t) if __t == "Bool" => builder.emit_trunc(LlvmType::I64, LlvmType::I1, val),
-            BriefType::Custom(__t) if __t == "String" || __t == "Data" => builder.emit_inttoptr(val, LlvmType::I64),
+            BriefType::Custom(__t) if __t == "Bool" => {
+                builder.emit_trunc(LlvmType::I64, LlvmType::I1, val)
+            }
+            BriefType::Custom(__t) if __t == "String" || __t == "Data" => {
+                builder.emit_inttoptr(val, LlvmType::I64)
+            }
             BriefType::Custom(__t) if __t == "Float" => {
                 let tr = builder.emit_trunc(LlvmType::I64, LlvmType::I32, val);
                 builder.emit_bitcast(LlvmType::I32, LlvmType::Float, &tr)
             }
-            BriefType::Custom(__t) if __t == "Float64" => builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val),
-            BriefType::Custom(__t) if __t == "Int8" || __t == "UInt8" => builder.emit_trunc(LlvmType::I64, LlvmType::I8, val),
-            BriefType::Custom(__t) if __t == "Int16" || __t == "UInt16" => builder.emit_trunc(LlvmType::I64, LlvmType::I16, val),
-            BriefType::Custom(__t) if __t == "Int32" || __t == "UInt32" => builder.emit_trunc(LlvmType::I64, LlvmType::I32, val),
+            BriefType::Custom(__t) if __t == "Float64" => {
+                builder.emit_bitcast(LlvmType::I64, LlvmType::Double, val)
+            }
+            BriefType::Custom(__t) if __t == "Int8" || __t == "UInt8" => {
+                builder.emit_trunc(LlvmType::I64, LlvmType::I8, val)
+            }
+            BriefType::Custom(__t) if __t == "Int16" || __t == "UInt16" => {
+                builder.emit_trunc(LlvmType::I64, LlvmType::I16, val)
+            }
+            BriefType::Custom(__t) if __t == "Int32" || __t == "UInt32" => {
+                builder.emit_trunc(LlvmType::I64, LlvmType::I32, val)
+            }
             _ => val.to_string(),
         }
     }
@@ -671,9 +759,14 @@ mod tests {
         // Basic structural check: each non-label line must contain an opcode
         for line in ir.lines() {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.ends_with(':') { continue; }
-            assert!(trimmed.contains("=") || trimmed.starts_with("ret") || trimmed.starts_with("store"),
-                "line '{}' is not valid IR", trimmed);
+            if trimmed.is_empty() || trimmed.ends_with(':') {
+                continue;
+            }
+            assert!(
+                trimmed.contains("=") || trimmed.starts_with("ret") || trimmed.starts_with("store"),
+                "line '{}' is not valid IR",
+                trimmed
+            );
         }
     }
 }

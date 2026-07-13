@@ -1,3 +1,4 @@
+pub mod abi;
 pub mod builder;
 pub mod context;
 pub mod directive;
@@ -5,13 +6,17 @@ pub mod dispatch;
 pub mod emit_expr;
 pub mod emit_stmt;
 pub mod emit_toplevel;
-pub mod expr;
+pub mod function;
 pub mod gpu;
 pub mod hazard;
 pub mod helpers;
+pub mod intrinsics;
 pub mod loop_engine;
 pub mod optimizer;
+pub mod phi;
 pub mod reorder;
+pub mod types;
+pub mod validate;
 
 #[cfg(test)]
 mod tests;

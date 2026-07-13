@@ -1,6 +1,5 @@
-use crate::ast::{Expr, Statement, Type};
+use crate::ast_new::{Expr, Statement, Type};
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
-use crate::features::traits::*;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -157,7 +156,7 @@ impl LlvmBackend {
     /// for the correct unbox operation — enabling custom-type-aware codegen
     /// rather than hardcoded LLVM type string matching.
     pub(super) fn ensure_typed_value(&mut self, out: &mut String, indent: &str,
-        ty: &str, val: &str, brief_ty: Option<crate::ast::Type>, src_ty: Option<&Type>) -> String
+        ty: &str, val: &str, brief_ty: Option<crate::ast_new::Type>, src_ty: Option<&Type>) -> String
     {
         // 2026-07-10: If source is already the target type, return as-is.
         if let Some(src) = src_ty {
@@ -764,7 +763,7 @@ impl LlvmBackend {
                         _ => "",
                     };
                     if !type_name.is_empty() {
-                        let guards: Vec<crate::ast::Expr> = self.ctx.type_universe.as_ref()
+                        let guards: Vec<crate::ast_new::Expr> = self.ctx.type_universe.as_ref()
                             .and_then(|u| u.types.get(type_name))
                             .map(|r| r.guards.clone())
                             .unwrap_or_default();
@@ -1273,9 +1272,9 @@ impl LlvmBackend {
                 }, &StmtDispatch, indent, &mut |_backend: &mut crate::backend::llvm::LlvmBackend,
                                                       _out: &mut String,
                                                       _builder: &mut crate::backend::llvm::LLVMBuilder,
-                                                      _expr: &crate::ast::Expr,
+                                                      _expr: &crate::ast_new::Expr,
                                                       _indent: &str| {
-                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast::Type::int() }
+                    crate::backend::llvm::TypedRegister { name: "%stub".into(), ty: crate::ast_new::Type::int() }
                 });
             }
             Statement::Oracle { body, handler, .. } => {
@@ -1375,18 +1374,18 @@ impl LlvmBackend {
 fn bind_pattern_fields(
     let_bindings: &mut std::collections::HashMap<String, String>,
     let_binding_types: &mut std::collections::HashMap<String, Type>,
-    fields: &[crate::ast::Pattern],
+    fields: &[crate::ast_new::Pattern],
     payload_reg: &str,
 ) {
     for field in fields {
         match field {
-            crate::ast::Pattern::Var(name) => {
+            crate::ast_new::Pattern::Var(name) => {
                 let_bindings.insert(name.clone(), payload_reg.to_string());
                 let_binding_types.insert(name.clone(), Type::int());
             }
-            crate::ast::Pattern::Tuple(subfields) => {
+            crate::ast_new::Pattern::Tuple(subfields) => {
                 for sub in subfields {
-                    if let crate::ast::Pattern::Var(name) = sub {
+                    if let crate::ast_new::Pattern::Var(name) = sub {
                         let_bindings.insert(name.clone(), payload_reg.to_string());
                         let_binding_types.insert(name.clone(), Type::int());
                     }

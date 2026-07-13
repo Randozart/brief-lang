@@ -13,22 +13,8 @@
 //                   (for functions that should stay backend-internal)
 //   (private)     — visible only within this file (for internal helpers)
 
-use crate::ast::{ArrowDir, BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, OpDeclaration, OpRune, OutputType, Pattern, PipeChain, PipeStep, ProjectionTarget, SliceCoordinate, Statement, Type};
+use crate::ast_new::{ArrowDir, BracketOp, Expr, Intrinsic, MatchArm, MatchPattern, OpDeclaration, OpRune, OutputType, Pattern, PipeChain, PipeStep, ProjectionTarget, SliceCoordinate, Statement, Type};
 use crate::backend::llvm::*;
-use crate::features::arrow::{ArrowMutExpr, ArrowDiscardExpr, ArrowTransferExpr};
-use crate::features::binary_op::BinaryOpExpr;
-use crate::features::block::BlockExpr;
-use crate::features::call::CallExpr;
-use crate::features::collection::{ListLiteralExpr, MapLiteralExpr, MultiSliceExpr, SetLiteralExpr, SliceExpr};
-use crate::features::ellipsis::EllipsisExpr;
-use crate::features::field::{FieldAccessExpr, ObjectLiteralExpr, StructInstanceExpr};
-use crate::features::pattern::{MatchExpr, PatternMatchExpr};
-use crate::features::projection::ProjectionExpr;
-use crate::features::sigcall::SigCallExpr;
-use crate::features::subtype::SubtypeProjectionExpr;
-use crate::features::traits::{ExprCodegenLLVM, ExprDispatch};
-use crate::features::tuple::{TupleDestructureExpr, TupleExpr};
-use crate::features::unary_op::UnaryOpExpr;
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -320,7 +306,7 @@ impl LlvmBackend {
             }),
             Expr::Within { body, fallback, .. } => Expr::Within {
                 body: Box::new(Self::rewrite_cell_identifiers(body, cell_name)),
-                bound: 0, retries: 0, unit: crate::ast::TimeUnit::Cycles,
+                bound: 0, retries: 0, unit: crate::ast_new::TimeUnit::Cycles,
                 fallback: Box::new(Self::rewrite_cell_identifiers(fallback, cell_name)),
             },
             // 2026-07-11: Phase 5 — deferred literal carries no cell identifiers
@@ -484,7 +470,7 @@ impl LlvmBackend {
         let wake_symbols: Vec<&str> = self.ctx.triggers.values()
             .filter(|t| t.is_wake)
             .filter_map(|t| match &t.address {
-                crate::ast::LinkRef::Linked(s) => Some(s.as_str()),
+                crate::ast_new::LinkRef::Linked(s) => Some(s.as_str()),
                 _ => None,
             })
             .collect();
@@ -535,10 +521,10 @@ impl LlvmBackend {
     }
 
     // ── FUSABLE PAIRS ────────────────────────────────────────
-    pub(crate) fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast::Transaction)]) -> Vec<(String, String)> {
-        let prg = crate::ast::Program {
-            items: txns.iter().map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect(),
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential, exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None),
+    pub(crate) fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast_new::Transaction)]) -> Vec<(String, String)> {
+        let prg = crate::ast_new::Program {
+            items: txns.iter().map(|(_, t)| crate::ast_new::TopLevel::Transaction((*t).clone())).collect(),
+            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast_new::StrictMode::Off, dispatch_mode: crate::ast_new::DispatchMode::Sequential, exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None),
         };
         let mut pairs = crate::backend::detect_fusable_pairs(&prg);
         pairs.retain(|(a, b)| {
@@ -1288,7 +1274,7 @@ impl LlvmBackend {
     /// Emit LLVM IR for function metadata projections (Address, Name, etc.).
     /// Returns Some(register) if the target is an Fn* variant and the source is a function name.
     pub(super) fn try_emit_fn_projection(&mut self, out: &mut String, source: &Expr, target: &ProjectionTarget, indent: &str) -> Option<TypedRegister> {
-        use crate::ast::ProjectionTarget;
+        use crate::ast_new::ProjectionTarget;
         let name = match source {
             Expr::Identifier(n) => n.clone(),
             _ => return None,
@@ -1632,7 +1618,7 @@ impl LlvmBackend {
         target_name: &str, indent: &str) -> Option<TypedRegister>
     {
         let custom_name = match &src_val.ty {
-            crate::ast::Type::Custom(n) => n.clone(),
+            crate::ast_new::Type::Custom(n) => n.clone(),
             _ => return None,
         };
         let universe = self.ctx.type_universe.as_ref()?;
@@ -1672,7 +1658,7 @@ impl LlvmBackend {
                 let v = format!("%t{}", self.fun.txn_counter);
                 self.fun.txn_counter += 1;
                 // Handle strlen#(arg) — the common meld route for CString.Size
-                if let crate::ast::Intrinsic::Strlen = intrinsic {
+                if let crate::ast_new::Intrinsic::Strlen = intrinsic {
                     if args.len() == 1 {
                         let arg_name = match &args[0] {
                             Expr::Identifier(n) => Some(n.clone()),
@@ -1750,7 +1736,7 @@ impl LlvmBackend {
         // Generic materialization: look up the meld between backing and target,
         // derive each field of the target type from the backing value via routes.
         // Clone all data first to avoid borrow conflicts with mutable self.
-        let meld_routes: Vec<crate::ast::MeldRouteDef> = {
+        let meld_routes: Vec<crate::ast_new::MeldRouteDef> = {
             let universe = match self.ctx.type_universe.as_ref() {
                 Some(u) => u,
                 None => return val.clone(),
@@ -1869,11 +1855,11 @@ impl LlvmBackend {
         &mut self,
         out: &mut String,
         v: &str,
-        inner: &crate::ast::Expr,
-        target_ty: &crate::ast::Type,
+        inner: &crate::ast_new::Expr,
+        target_ty: &crate::ast_new::Type,
         indent: &str,
     ) -> Option<TypedRegister> {
-        use crate::ast::Expr;
+        use crate::ast_new::Expr;
         let (lhs, rhs) = match inner {
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
                 (l.as_ref().clone(), r.as_ref().clone())
@@ -1887,8 +1873,8 @@ impl LlvmBackend {
         let has_meld = self.ctx.type_universe.as_ref()
             .and_then(|tu| {
                 let tn = match target_ty {
-                    crate::ast::Type::Custom(n) => Some(n.as_str()),
-                    crate::ast::Type::Applied(n, _) => Some(n.as_str()),
+                    crate::ast_new::Type::Custom(n) => Some(n.as_str()),
+                    crate::ast_new::Type::Applied(n, _) => Some(n.as_str()),
                     _ => None,
                 };
                 tn.and_then(|n| tu.find_meld(n, cast_ty.universe_key()))

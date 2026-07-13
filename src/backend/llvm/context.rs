@@ -20,16 +20,16 @@
 
 use crate::analysis::dependency_graph::DependencyGraph;
 use crate::analysis::pgo::PgoProfile;
+use crate::analysis::FieldMode;
 use crate::ast::{
-    CellDef, EnumDefinition, Expr, ForeignSignature, InopDeclaration,
-    Statement, TriggerDeclaration, Type,
+    CellDef, EnumDefinition, Expr, ForeignSignature, InopDeclaration, Statement,
+    TriggerDeclaration, Type,
 };
 use crate::backend::llvm::directive::OptimizationRemark;
 use crate::backend::llvm::ChimeraInfo;
 use crate::dbrief::DbriefType;
 use crate::target_spec::TargetSpec;
 use crate::type_universe::TypeUniverse;
-use crate::analysis::FieldMode;
 use std::collections::HashMap;
 
 /// 2026-07-02: Indices of the 4 inline RingBuffer fields in %State.
@@ -64,7 +64,7 @@ pub struct CompilerContext {
     pub field_types: Vec<String>,
     pub field_brief_types: Vec<Type>,
     pub field_initializers: HashMap<String, Option<Expr>>,
-        pub ringbuf_inline: HashMap<String, RingbufInlineFields>,
+    pub ringbuf_inline: HashMap<String, RingbufInlineFields>,
     /// 2026-07-02: Tracks RingBuffer variables whose fields are stored inline
     /// in %State (data_ptr, head, tail, mask) instead of via an opaque handle.
     /// Maps base name → indices of the 4 inline fields.
@@ -147,14 +147,22 @@ impl CompilerContext {
     /// WASM32 uses 32-bit pointers; x86_64 uses 64-bit.
     /// 2026-07-11: Phase 6.
     pub fn pointer_bytes(&self) -> u64 {
-        if self.is_wasm() { 4 } else { 8 }
+        if self.is_wasm() {
+            4
+        } else {
+            8
+        }
     }
 
     /// Get the LLVM integer type name for pointer-width integers.
     /// Used in ptrtoint/inttoptr casts: `i64` on x86_64, `i32` on wasm32.
     /// 2026-07-11: Phase 6.
     pub fn pointer_llvm_type(&self) -> &'static str {
-        if self.is_wasm() { "i32" } else { "i64" }
+        if self.is_wasm() {
+            "i32"
+        } else {
+            "i64"
+        }
     }
 
     pub fn new() -> Self {
@@ -203,7 +211,10 @@ impl CompilerContext {
             has_cycles: false,
             slp_hazard_fns: HashSet::new(),
             target_triple: "x86_64-unknown-linux-gnu".to_string(),
-            data_layout: Some("e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128".to_string()),
+            data_layout: Some(
+                "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128"
+                    .to_string(),
+            ),
             gpu_offload: false,
             gpu_backend: "vulkan".to_string(),
             is_embedded: false,
@@ -430,6 +441,13 @@ pub struct FunctionContext {
 }
 
 impl FunctionContext {
+    /// Generate a unique SSA register name: %tN
+    pub fn gen_reg(&mut self) -> String {
+        let n = self.txn_counter;
+        self.txn_counter += 1;
+        format!("%t{}", n)
+    }
+
     pub fn new() -> Self {
         FunctionContext {
             txn_counter: 0,
@@ -581,9 +599,7 @@ pub struct FunctionGuard {
 
 impl FunctionGuard {
     pub fn new(fun: &FunctionContext) -> Self {
-        FunctionGuard {
-            saved: fun.clone(),
-        }
+        FunctionGuard { saved: fun.clone() }
     }
 
     /// Restore the FunctionContext to the state captured at construction time.
@@ -649,7 +665,8 @@ mod tests {
         // Default x86_64 data layout
         assert!(ctx.data_layout.as_ref().unwrap().contains("p270:32:32"));
         // WASM would have different data layout
-        let wasm_dl = Some("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".to_string());
+        let wasm_dl =
+            Some("e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".to_string());
         assert_ne!(ctx.data_layout, wasm_dl);
     }
 }

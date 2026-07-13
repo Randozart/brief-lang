@@ -1,5 +1,7 @@
-use crate::ast::{Expr, Program, Statement, TopLevel, Type};
-use crate::backend::llvm::{find_perfect_hash, sparsity_ratio, FoldParam, FunctionGuard, LlvmBackend};
+use crate::ast_new::{Expr, Program, Statement, TopLevel, Type};
+use crate::backend::llvm::{
+    find_perfect_hash, sparsity_ratio, FoldParam, FunctionGuard, LlvmBackend,
+};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -25,7 +27,12 @@ impl LlvmBackend {
     // every tick. This is a single call site for all dispatch paths that
     // ensures cell instances with persistent bodies tick once per reactor
     // cycle. See emit_toplevel.rs.
-    pub(crate) fn emit_reactor(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)], fusable: &[(String, String)]) {
+    pub(crate) fn emit_reactor(
+        &mut self,
+        out: &mut String,
+        txns: &[(String, &crate::ast_new::Transaction)],
+        fusable: &[(String, String)],
+    ) {
         self.fused_to_first.clear();
         for (a, b) in fusable {
             let fn_ = format!("{}_{}_fused", a, b);
@@ -36,14 +43,25 @@ impl LlvmBackend {
         let mut fused_txns: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (a, b) in fusable {
             let fn_ = format!("{}_{}_fused", a, b);
-            if used_fused.contains(&fn_) { continue; }
+            if used_fused.contains(&fn_) {
+                continue;
+            }
             used_fused.insert(fn_.clone());
-            fused_txns.insert(a.clone()); fused_txns.insert(b.clone());
+            fused_txns.insert(a.clone());
+            fused_txns.insert(b.clone());
             dispatch.push(fn_);
         }
-        for (n, t) in txns { if !fused_txns.contains(n) && t.is_reactive { dispatch.push(n.clone()); } }
+        for (n, t) in txns {
+            if !fused_txns.contains(n) && t.is_reactive {
+                dispatch.push(n.clone());
+            }
+        }
 
-        writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
+        writeln!(
+            out,
+            "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{"
+        )
+        .ok();
         writeln!(out, "  entry:").ok();
         // 2026-06-27: Clear ssa_old regs at reactor_tick entry — they may
         // contain stale entries from the main function emit (e.g., from
@@ -57,7 +75,9 @@ impl LlvmBackend {
         // but inlining shares one arena across all txns, saving memory.
         self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
-        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.ctx.trigger_names
+        let trigger_snapshot: Vec<(String, crate::ast_new::TriggerDeclaration)> = self
+            .ctx
+            .trigger_names
             .iter()
             .filter_map(|tn| self.ctx.triggers.get(tn).map(|t| (tn.clone(), t.clone())))
             .collect();
@@ -144,19 +164,26 @@ impl LlvmBackend {
     // - Cast(Identifier(n), Int): Ptr<T> field address range
     fn unwrap_cast_to_ident(e: &Expr) -> Option<&str> {
         match e {
-            Expr::Cast(inner, Type::Custom(__t)) if __t == "Int" => Self::unwrap_cast_to_ident(inner),
+            Expr::Cast(inner, Type::Custom(__t)) if __t == "Int" => {
+                Self::unwrap_cast_to_ident(inner)
+            }
             Expr::Identifier(n) => Some(n.as_str()),
             _ => None,
         }
     }
     pub(crate) fn extract_ranges_inner(expr: &Expr, r: &mut HashMap<String, (i64, i64)>) {
         match expr {
-            Expr::And(l, rgt) => { Self::extract_ranges_inner(l, r); Self::extract_ranges_inner(rgt, r); }
+            Expr::And(l, rgt) => {
+                Self::extract_ranges_inner(l, r);
+                Self::extract_ranges_inner(rgt, r);
+            }
             Expr::Lt(l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
                     if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
-                        if *v < e.1 { e.1 = *v; }
+                        if *v < e.1 {
+                            e.1 = *v;
+                        }
                     }
                 }
             }
@@ -164,7 +191,9 @@ impl LlvmBackend {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
                     if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
-                        if *v > e.0 { e.0 = *v; }
+                        if *v > e.0 {
+                            e.0 = *v;
+                        }
                     }
                 }
             }
@@ -172,7 +201,9 @@ impl LlvmBackend {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
                     if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
-                        if v + 1 > e.0 { e.0 = v + 1; }
+                        if v + 1 > e.0 {
+                            e.0 = v + 1;
+                        }
                     }
                 }
             }
@@ -182,11 +213,21 @@ impl LlvmBackend {
 
     // ── DISPATCH HELPERS ─────────────────────────────────────
     pub(crate) fn resolve_dispatch_first_txn(&self, name: &str) -> String {
-        self.fused_to_first.get(name).cloned().unwrap_or_else(|| name.to_string())
+        self.fused_to_first
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
     }
-    pub(crate) fn dispatch_has_pre(&self, txns: &[(String, &crate::ast::Transaction)], name: &str) -> bool {
+    pub(crate) fn dispatch_has_pre(
+        &self,
+        txns: &[(String, &crate::ast_new::Transaction)],
+        name: &str,
+    ) -> bool {
         let first = self.resolve_dispatch_first_txn(name);
-        txns.iter().find(|(n, _)| n == &first).map(|(_, t)| !matches!(t.contract.pre_condition, Expr::Bool(true))).unwrap_or(false)
+        txns.iter()
+            .find(|(n, _)| n == &first)
+            .map(|(_, t)| !matches!(t.contract.pre_condition, Expr::Bool(true)))
+            .unwrap_or(false)
     }
 
     // ── WRITE MASKS (Parallel Dispatch) ──────────────────────
@@ -206,7 +247,9 @@ impl LlvmBackend {
                 let mut mask = 0u64;
                 for w in &writes {
                     if let Some(&idx) = self.ctx.field_index_map.get(w.as_str()) {
-                        if idx < 64 { mask |= 1u64 << idx; }
+                        if idx < 64 {
+                            mask |= 1u64 << idx;
+                        }
                     }
                 }
                 self.txn_write_masks.insert(t.name.clone(), mask);
@@ -225,8 +268,12 @@ impl LlvmBackend {
     // bitmask check (load-and-test) is cheaper than any lock acquire or
     // transactional memory instruction. The mask is only 8 bytes on the stack
     // and the check is 3 ALU ops per txn.
-    pub(crate) fn emit_parallel_reactor(&mut self, out: &mut String, txns: &[(String, &crate::ast::Transaction)],
-                             fusable: &[(String, String)]) {
+    pub(crate) fn emit_parallel_reactor(
+        &mut self,
+        out: &mut String,
+        txns: &[(String, &crate::ast_new::Transaction)],
+        fusable: &[(String, String)],
+    ) {
         self.fused_to_first.clear();
         for (a, b) in fusable {
             let fn_ = format!("{}_{}_fused", a, b);
@@ -237,14 +284,25 @@ impl LlvmBackend {
         let mut fused_txns: std::collections::HashSet<String> = std::collections::HashSet::new();
         for (a, b) in fusable {
             let fn_ = format!("{}_{}_fused", a, b);
-            if used_fused.contains(&fn_) { continue; }
+            if used_fused.contains(&fn_) {
+                continue;
+            }
             used_fused.insert(fn_.clone());
-            fused_txns.insert(a.clone()); fused_txns.insert(b.clone());
+            fused_txns.insert(a.clone());
+            fused_txns.insert(b.clone());
             dispatch.push(fn_);
         }
-        for (n, t) in txns { if !fused_txns.contains(n) && t.is_reactive { dispatch.push(n.clone()); } }
+        for (n, t) in txns {
+            if !fused_txns.contains(n) && t.is_reactive {
+                dispatch.push(n.clone());
+            }
+        }
 
-        writeln!(out, "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{").ok();
+        writeln!(
+            out,
+            "define void @reactor_tick(ptr noalias nocapture %state) local_unnamed_addr #2 {{"
+        )
+        .ok();
         writeln!(out, "  entry:").ok();
         // 2026-07-01: When the thread pool is active (async txns), the worker
         // threads execute the bodies in parallel on the correct state snapshot.
@@ -263,7 +321,9 @@ impl LlvmBackend {
         // Arena init for parallel reactor — shared across all parallel txns.
         self.emit_arena_init(out, "  ");
         self.sampled_triggers.clear();
-        let trigger_snapshot: Vec<(String, crate::ast::TriggerDeclaration)> = self.ctx.trigger_names
+        let trigger_snapshot: Vec<(String, crate::ast_new::TriggerDeclaration)> = self
+            .ctx
+            .trigger_names
             .iter()
             .filter_map(|tn| self.ctx.triggers.get(tn).map(|t| (tn.clone(), t.clone())))
             .collect();
@@ -354,9 +414,13 @@ impl LlvmBackend {
     // The guard clones the entire FunctionContext at scope entry and restores
     // it on drop. This ensures new FunctionContext fields are automatically
     // protected without editing this function.
-    fn emit_inline_txn_body(&mut self, out: &mut String, indent: &str,
-                             txns: &[(String, &crate::ast::Transaction)],
-                             txn_name: &str) {
+    fn emit_inline_txn_body(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        txns: &[(String, &crate::ast_new::Transaction)],
+        txn_name: &str,
+    ) {
         let first_name = self.resolve_dispatch_first_txn(txn_name);
         if let Some((_, txn)) = txns.iter().find(|(n, _)| n == &first_name) {
             // 2026-06-29: FunctionGuard snapshots ALL FunctionContext state;
@@ -368,11 +432,13 @@ impl LlvmBackend {
 
             // Emit precondition assume (for LLVM opt) — the br instruction
             // already guards execution, so this is just for metadata.
-            if !matches!(txn.contract.pre_condition, crate::ast::Expr::Bool(true)) {
+            if !matches!(txn.contract.pre_condition, crate::ast_new::Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, indent);
             }
             for s in &txn.body {
-                if self.fun.terminated { break; }
+                if self.fun.terminated {
+                    break;
+                }
                 self.emit_stmt(out, s, indent);
             }
 
@@ -418,8 +484,14 @@ impl LlvmBackend {
                 self.check_exit_condition_idents_inner(&bop.left, errors);
                 self.check_exit_condition_idents_inner(&bop.right, errors);
             }
-            Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
-            | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+            Expr::Eq(l, r)
+            | Expr::Ne(l, r)
+            | Expr::Lt(l, r)
+            | Expr::Le(l, r)
+            | Expr::Gt(l, r)
+            | Expr::Ge(l, r)
+            | Expr::And(l, r)
+            | Expr::Or(l, r) => {
                 self.check_exit_condition_idents_inner(l, errors);
                 self.check_exit_condition_idents_inner(r, errors);
             }

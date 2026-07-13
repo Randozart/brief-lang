@@ -1,4 +1,4 @@
-use crate::ast::{Annotation, AnnotationMode, Expr};
+use crate::ast_new::{Annotation, AnnotationMode, Expr};
 
 // ── Directive Resolution ────────────────────────────────────────────
 //
@@ -82,7 +82,9 @@ fn resolve_inline(tag: &Annotation, context: DirectiveCtx) -> Option<DirectiveEf
             if tag.speculative() {
                 Some(DirectiveEffect::FunctionAttribute("inlinehint".to_string()))
             } else {
-                Some(DirectiveEffect::FunctionAttribute("alwaysinline".to_string()))
+                Some(DirectiveEffect::FunctionAttribute(
+                    "alwaysinline".to_string(),
+                ))
             }
         }
         _ => None,
@@ -243,11 +245,21 @@ mod tests {
     use super::*;
 
     fn tag(name: &str) -> Annotation {
-        Annotation { name: name.into(), value: Expr::Bool(true), mode: AnnotationMode::Advisory, diagnostic: false }
+        Annotation {
+            name: name.into(),
+            value: Expr::Bool(true),
+            mode: AnnotationMode::Advisory,
+            diagnostic: false,
+        }
     }
 
     fn spec_tag(name: &str) -> Annotation {
-        Annotation { name: name.into(), value: Expr::Bool(true), mode: AnnotationMode::Speculative, diagnostic: false }
+        Annotation {
+            name: name.into(),
+            value: Expr::Bool(true),
+            mode: AnnotationMode::Speculative,
+            diagnostic: false,
+        }
     }
 
     #[test]
@@ -277,7 +289,11 @@ mod tests {
     #[test]
     fn test_inline_on_loop_is_none() {
         let effects = resolve_directives(&[tag("inline")], DirectiveCtx::Loop);
-        assert_eq!(effects.len(), 0, "inline should have no effect on Loop context");
+        assert_eq!(
+            effects.len(),
+            0,
+            "inline should have no effect on Loop context"
+        );
     }
 
     #[test]
@@ -307,7 +323,11 @@ mod tests {
     #[test]
     fn test_unroll_on_txn_is_none() {
         let effects = resolve_directives(&[tag("unroll")], DirectiveCtx::Transaction);
-        assert_eq!(effects.len(), 0, "unroll should have no effect on Transaction context");
+        assert_eq!(
+            effects.len(),
+            0,
+            "unroll should have no effect on Transaction context"
+        );
     }
 
     #[test]
@@ -335,10 +355,7 @@ mod tests {
 
     #[test]
     fn test_multiple_directives() {
-        let effects = resolve_directives(
-            &[tag("inline"), tag("unroll")],
-            DirectiveCtx::Loop,
-        );
+        let effects = resolve_directives(&[tag("inline"), tag("unroll")], DirectiveCtx::Loop);
         // inline has no effect on Loop; unroll does
         assert_eq!(effects.len(), 1);
     }
@@ -357,7 +374,12 @@ mod tests {
 
     #[test]
     fn test_gpu_directive_with_value() {
-        let t = Annotation { name: "gpu".into(), value: Expr::Quoted("threshold=1000".into()), mode: AnnotationMode::Advisory, diagnostic: false };
+        let t = Annotation {
+            name: "gpu".into(),
+            value: Expr::Quoted("threshold=1000".into()),
+            mode: AnnotationMode::Advisory,
+            diagnostic: false,
+        };
         let effects = resolve_directives(&[t], DirectiveCtx::Transaction);
         assert_eq!(effects.len(), 1);
         match &effects[0] {
@@ -381,7 +403,11 @@ mod tests {
     #[test]
     fn test_gpu_directive_on_body_is_none() {
         let effects = resolve_directives(&[tag("gpu")], DirectiveCtx::Body);
-        assert_eq!(effects.len(), 0, "gpu should have no effect on Body context");
+        assert_eq!(
+            effects.len(),
+            0,
+            "gpu should have no effect on Body context"
+        );
     }
 
     #[test]
@@ -416,7 +442,10 @@ mod tests {
     #[test]
     fn test_remark_with_analysis_and_hints() {
         let r = OptimizationRemark::skipped("unroll", "trip count too small".to_string())
-            .with_analysis(vec!["trip count = 3".to_string(), "minimum = 8".to_string()])
+            .with_analysis(vec![
+                "trip count = 3".to_string(),
+                "minimum = 8".to_string(),
+            ])
             .with_hints(vec!["use #unroll to force unrolling".to_string()]);
         let s = r.format();
         assert!(s.contains("trip count = 3"));

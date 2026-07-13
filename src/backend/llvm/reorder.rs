@@ -75,7 +75,11 @@ fn rw_set_of(stmt: &Statement) -> ReadWriteSet {
             // expr is read
             collect_reads_from_expr(expr, &mut reads);
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded {
+            condition,
+            statements,
+            ..
+        } => {
             collect_reads_from_expr(condition, &mut reads);
             for s in statements {
                 let inner = rw_set_of(s);
@@ -100,7 +104,12 @@ fn rw_set_of(stmt: &Statement) -> ReadWriteSet {
                 writes.extend(inner.writes);
             }
         }
-        Statement::Term { values, swan_song, .. } | Statement::TermBang { values, swan_song, .. } => {
+        Statement::Term {
+            values, swan_song, ..
+        }
+        | Statement::TermBang {
+            values, swan_song, ..
+        } => {
             for v in values {
                 if let Some(e) = v {
                     collect_reads_from_expr(e, &mut reads);
@@ -139,7 +148,9 @@ fn rw_set_of(stmt: &Statement) -> ReadWriteSet {
 /// Collect write target variable from an LHS expression.
 fn collect_write_target(expr: &Expr, writes: &mut HashSet<String>) {
     match expr {
-        Expr::Identifier(name) => { writes.insert(name.clone()); }
+        Expr::Identifier(name) => {
+            writes.insert(name.clone());
+        }
         Expr::ListIndex(target, _) => collect_write_target(target, writes),
         Expr::Projection { source, .. } => collect_write_target(source, writes),
         _ => {}
@@ -149,25 +160,40 @@ fn collect_write_target(expr: &Expr, writes: &mut HashSet<String>) {
 /// Collect all variable reads from an expression.
 fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
     match expr {
-        Expr::Identifier(name) => { reads.insert(name.clone()); }
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
-        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
-        | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+        Expr::Identifier(name) => {
+            reads.insert(name.clone());
+        }
+        Expr::Add(l, r)
+        | Expr::Sub(l, r)
+        | Expr::Mul(l, r)
+        | Expr::Div(l, r)
+        | Expr::Eq(l, r)
+        | Expr::Ne(l, r)
+        | Expr::Lt(l, r)
+        | Expr::Le(l, r)
+        | Expr::Gt(l, r)
+        | Expr::Ge(l, r)
+        | Expr::And(l, r)
+        | Expr::Or(l, r) => {
             collect_reads_from_expr(l, reads);
             collect_reads_from_expr(r, reads);
         }
         Expr::Not(e) | Expr::Neg(e) => collect_reads_from_expr(e, reads),
-        Expr::PriorState(_) => {},
+        Expr::PriorState(_) => {}
         Expr::BinaryOp(bop) => {
             collect_reads_from_expr(&bop.left, reads);
             collect_reads_from_expr(&bop.right, reads);
         }
         Expr::UnaryOp(op) => collect_reads_from_expr(&op.operand, reads),
         Expr::Call(_, args) => {
-            for a in args { collect_reads_from_expr(a, reads); }
+            for a in args {
+                collect_reads_from_expr(a, reads);
+            }
         }
         Expr::IntrinsicCall { args, .. } => {
-            for a in args { collect_reads_from_expr(a, reads); }
+            for a in args {
+                collect_reads_from_expr(a, reads);
+            }
         }
         Expr::Projection { source, .. } => collect_reads_from_expr(source, reads),
         Expr::ListIndex(list, idx) => {
@@ -175,7 +201,9 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
             collect_reads_from_expr(idx, reads);
         }
         Expr::ListLiteral(items) => {
-            for item in items { collect_reads_from_expr(item, reads); }
+            for item in items {
+                collect_reads_from_expr(item, reads);
+            }
         }
         Expr::Cast(inner, _) => collect_reads_from_expr(inner, reads),
         Expr::FieldAccess(obj, _) => collect_reads_from_expr(obj, reads),
@@ -188,26 +216,50 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
         }
         Expr::Match { value, arms } => {
             collect_reads_from_expr(value, reads);
-            for arm in arms { collect_reads_from_expr(&arm.body, reads); }
+            for arm in arms {
+                collect_reads_from_expr(&arm.body, reads);
+            }
         }
-        Expr::Slice { value, start, end, stride, mask } => {
+        Expr::Slice {
+            value,
+            start,
+            end,
+            stride,
+            mask,
+        } => {
             collect_reads_from_expr(value, reads);
-            if let Some(s) = start { collect_reads_from_expr(s, reads); }
-            if let Some(e) = end { collect_reads_from_expr(e, reads); }
-            if let Some(s) = stride { collect_reads_from_expr(s, reads); }
-            if let Some(m) = mask { collect_reads_from_expr(m, reads); }
+            if let Some(s) = start {
+                collect_reads_from_expr(s, reads);
+            }
+            if let Some(e) = end {
+                collect_reads_from_expr(e, reads);
+            }
+            if let Some(s) = stride {
+                collect_reads_from_expr(s, reads);
+            }
+            if let Some(m) = mask {
+                collect_reads_from_expr(m, reads);
+            }
         }
         Expr::Tuple(items) => {
-            for item in items { collect_reads_from_expr(item, reads); }
+            for item in items {
+                collect_reads_from_expr(item, reads);
+            }
         }
         Expr::StructInstance(_, fields) => {
-            for (_name, val) in fields { collect_reads_from_expr(val, reads); }
+            for (_name, val) in fields {
+                collect_reads_from_expr(val, reads);
+            }
         }
         Expr::ObjectLiteral(fields) => {
-            for (_name, val) in fields { collect_reads_from_expr(val, reads); }
+            for (_name, val) in fields {
+                collect_reads_from_expr(val, reads);
+            }
         }
         Expr::SetLiteral(items) => {
-            for item in items { collect_reads_from_expr(item, reads); }
+            for item in items {
+                collect_reads_from_expr(item, reads);
+            }
         }
         _ => {}
     }
@@ -239,7 +291,12 @@ fn build_dependency_graph(sets: &[ReadWriteSet]) -> HashMap<usize, HashSet<usize
                 deps.entry(i).or_default().insert(j);
             }
             // Statement i writes; statement j writes → WAW dependency (i before j)
-            if sets[i].writes.intersection(&sets[j].writes).next().is_some() {
+            if sets[i]
+                .writes
+                .intersection(&sets[j].writes)
+                .next()
+                .is_some()
+            {
                 deps.entry(i).or_default().insert(j);
             }
             // Statement i reads; statement j writes → WAR dependency (i before j)
@@ -265,7 +322,10 @@ fn build_dependency_graph(sets: &[ReadWriteSet]) -> HashMap<usize, HashSet<usize
 /// the unscheduled statements are appended in original order. This is a
 /// correctness fallback — the schedule is valid (all known dependencies
 /// are satisfied) but may miss some transitive edges.
-fn topological_sort(body: &[Statement], deps: &HashMap<usize, HashSet<usize>>) -> (Vec<Statement>, bool) {
+fn topological_sort(
+    body: &[Statement],
+    deps: &HashMap<usize, HashSet<usize>>,
+) -> (Vec<Statement>, bool) {
     let n = body.len();
     let mut in_degree = vec![0usize; n];
     for (_, successors) in deps {
@@ -312,13 +372,21 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
-                expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into()))),
-                timeout: None, modifiers: vec![],
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("a".into())),
+                    Box::new(Expr::Identifier("b".into())),
+                ),
+                timeout: None,
+                modifiers: vec![],
             },
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
-                expr: Expr::Add(Box::new(Expr::Identifier("c".into())), Box::new(Expr::Identifier("d".into()))),
-                timeout: None, modifiers: vec![],
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("c".into())),
+                    Box::new(Expr::Identifier("d".into())),
+                ),
+                timeout: None,
+                modifiers: vec![],
             },
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
@@ -332,13 +400,21 @@ mod tests {
         let body = vec![
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
-                expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into()))),
-                timeout: None, modifiers: vec![],
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("a".into())),
+                    Box::new(Expr::Identifier("b".into())),
+                ),
+                timeout: None,
+                modifiers: vec![],
             },
             Statement::Assignment {
                 lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
-                expr: Expr::Add(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Decimal(1))),
-                timeout: None, modifiers: vec![],
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("x".into())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+                timeout: None,
+                modifiers: vec![],
             },
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
@@ -353,9 +429,30 @@ mod tests {
     fn test_reorder_chain() {
         // a = 1; b = a + 1; c = b + 1; — chain, must preserve order
         let body = vec![
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".into()))), expr: Expr::Decimal(1), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".into()))), expr: Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("c".into()))), expr: Expr::Add(Box::new(Expr::Identifier("b".into())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
+            Statement::Assignment {
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".into()))),
+                expr: Expr::Decimal(1),
+                timeout: None,
+                modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".into()))),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("a".into())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+                timeout: None,
+                modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("c".into()))),
+                expr: Expr::Add(
+                    Box::new(Expr::Identifier("b".into())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+                timeout: None,
+                modifiers: vec![],
+            },
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 3);
@@ -363,7 +460,10 @@ mod tests {
         let a_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("a")));
         let b_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("b")));
         let c_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("c")));
-        assert!(a_pos < b_pos && b_pos < c_pos, "chain order must be preserved");
+        assert!(
+            a_pos < b_pos && b_pos < c_pos,
+            "chain order must be preserved"
+        );
     }
 
     #[test]
@@ -372,8 +472,18 @@ mod tests {
         // reorder_body_statements cannot produce cycles (edges are always forward),
         // so test topological_sort directly with a manually constructed cycle graph.
         let body = vec![
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))), expr: Expr::Decimal(1), timeout: None, modifiers: vec![] },
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))), expr: Expr::Decimal(2), timeout: None, modifiers: vec![] },
+            Statement::Assignment {
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
+                expr: Expr::Decimal(1),
+                timeout: None,
+                modifiers: vec![],
+            },
+            Statement::Assignment {
+                lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
+                expr: Expr::Decimal(2),
+                timeout: None,
+                modifiers: vec![],
+            },
         ];
         let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
         deps.insert(0, HashSet::from([1]));
@@ -381,15 +491,22 @@ mod tests {
         let (reordered, has_cycle) = topological_sort(&body, &deps);
         assert!(has_cycle, "Cycle in dependency graph should be detected");
         // Fallback: all statements appear in original order
-        assert_eq!(reordered.len(), 2, "All statements must appear in fallback order");
+        assert_eq!(
+            reordered.len(),
+            2,
+            "All statements must appear in fallback order"
+        );
     }
 
     #[test]
     fn test_reorder_short_body_no_reordering() {
         // 2026-06-19: Bodies with < 3 statements are returned as-is.
-        let body = vec![
-            Statement::Assignment { lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))), expr: Expr::Decimal(1), timeout: None, modifiers: vec![] },
-        ];
+        let body = vec![Statement::Assignment {
+            lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
+            expr: Expr::Decimal(1),
+            timeout: None,
+            modifiers: vec![],
+        }];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 1);
         assert!(!has_cycle);

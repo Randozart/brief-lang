@@ -24,7 +24,9 @@ fn expr_refs_name(expr: &Expr, name: &str) -> bool {
         | Expr::Shl(l, r)
         | Expr::Shr(l, r) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => expr_refs_name(e, name),
-        Expr::Call(_, args) | Expr::IntrinsicCall { args, .. } => args.iter().any(|a| expr_refs_name(a, name)),
+        Expr::Call(_, args) | Expr::IntrinsicCall { args, .. } => {
+            args.iter().any(|a| expr_refs_name(a, name))
+        }
         Expr::Projection { source, .. } => expr_refs_name(source, name),
         Expr::ListIndex(l, i) => expr_refs_name(l, name) || expr_refs_name(i, name),
         Expr::FieldAccess(obj, _) => expr_refs_name(obj, name),
@@ -32,32 +34,50 @@ fn expr_refs_name(expr: &Expr, name: &str) -> bool {
         Expr::Concat(l, r) => expr_refs_name(l, name) || expr_refs_name(r, name),
         Expr::Tuple(items) => items.iter().any(|e| expr_refs_name(e, name)),
         Expr::ListLiteral(items) => items.iter().any(|e| expr_refs_name(e, name)),
-        Expr::MapLiteral(entries) => entries.iter().any(|(k, v)| expr_refs_name(k, name) || expr_refs_name(v, name)),
+        Expr::MapLiteral(entries) => entries
+            .iter()
+            .any(|(k, v)| expr_refs_name(k, name) || expr_refs_name(v, name)),
         Expr::SetLiteral(items) => items.iter().any(|e| expr_refs_name(e, name)),
         Expr::Block(_, last) => expr_refs_name(last, name),
         Expr::Match { value, arms } => {
-            expr_refs_name(value, name)
-                || arms.iter().any(|arm| expr_refs_name(&arm.body, name))
+            expr_refs_name(value, name) || arms.iter().any(|arm| expr_refs_name(&arm.body, name))
         }
         Expr::PatternMatch { value, fields, .. } => {
-            expr_refs_name(value, name)
-                || fields.iter().any(|p| pattern_refs_name(p, name))
+            expr_refs_name(value, name) || fields.iter().any(|p| pattern_refs_name(p, name))
         }
-        Expr::Slice { value, start, end, stride, .. } => {
+        Expr::Slice {
+            value,
+            start,
+            end,
+            stride,
+            ..
+        } => {
             expr_refs_name(value, name)
                 || start.as_ref().map_or(false, |e| expr_refs_name(e, name))
                 || end.as_ref().map_or(false, |e| expr_refs_name(e, name))
                 || stride.as_ref().map_or(false, |e| expr_refs_name(e, name))
         }
-        Expr::ArrowMut { target, index, value, .. } => {
-            expr_refs_name(target, name) || expr_refs_name(index, name)
+        Expr::ArrowMut {
+            target,
+            index,
+            value,
+            ..
+        } => {
+            expr_refs_name(target, name)
+                || expr_refs_name(index, name)
                 || value.as_ref().map_or(false, |v| expr_refs_name(v, name))
         }
         Expr::ArrowDiscard { target, index } => {
             expr_refs_name(target, name) || expr_refs_name(index, name)
         }
-        Expr::ArrowTransfer { dest, source, filter, .. } => {
-            expr_refs_name(dest, name) || expr_refs_name(source, name)
+        Expr::ArrowTransfer {
+            dest,
+            source,
+            filter,
+            ..
+        } => {
+            expr_refs_name(dest, name)
+                || expr_refs_name(source, name)
                 || filter.as_ref().map_or(false, |e| expr_refs_name(e, name))
         }
         Expr::SubtypeProjection { source, .. } => expr_refs_name(source, name),
@@ -70,26 +90,40 @@ fn expr_refs_name(expr: &Expr, name: &str) -> bool {
 
 fn stmt_refs_name(stmt: &Statement, name: &str) -> bool {
     match stmt {
-        Statement::Let { expr: Some(e), .. } | Statement::Assignment { expr: e, .. } => expr_refs_name(e, name),
+        Statement::Let { expr: Some(e), .. } | Statement::Assignment { expr: e, .. } => {
+            expr_refs_name(e, name)
+        }
         Statement::Let { expr: None, .. } => false,
         Statement::Expression(e) => expr_refs_name(e, name),
-        Statement::Term { values, swan_song, .. } => {
-            values.iter().any(|v| v.as_ref().map_or(false, |e| expr_refs_name(e, name)))
-                || swan_song.as_ref().map_or(false, |s| stmt_refs_name(s, name))
+        Statement::Term {
+            values, swan_song, ..
+        } => {
+            values
+                .iter()
+                .any(|v| v.as_ref().map_or(false, |e| expr_refs_name(e, name)))
+                || swan_song
+                    .as_ref()
+                    .map_or(false, |s| stmt_refs_name(s, name))
         }
-        Statement::TermBang { values, swan_song, .. } => {
-            values.iter().any(|v| v.as_ref().map_or(false, |e| expr_refs_name(e, name)))
-                || swan_song.as_ref().map_or(false, |s| stmt_refs_name(s, name))
+        Statement::TermBang {
+            values, swan_song, ..
+        } => {
+            values
+                .iter()
+                .any(|v| v.as_ref().map_or(false, |e| expr_refs_name(e, name)))
+                || swan_song
+                    .as_ref()
+                    .map_or(false, |s| stmt_refs_name(s, name))
         }
-        Statement::Guarded { condition, statements, .. } => {
-            expr_refs_name(condition, name)
-                || statements.iter().any(|s| stmt_refs_name(s, name))
-        }
+        Statement::Guarded {
+            condition,
+            statements,
+            ..
+        } => expr_refs_name(condition, name) || statements.iter().any(|s| stmt_refs_name(s, name)),
         Statement::Escape(Some(expr)) => expr_refs_name(expr, name),
         Statement::Escape(None) => false,
         Statement::Unification { fields, expr, .. } => {
-            fields.iter().any(|p| pattern_refs_name(p, name))
-                || expr_refs_name(expr, name)
+            fields.iter().any(|p| pattern_refs_name(p, name)) || expr_refs_name(expr, name)
         }
         Statement::SyncBlock { body } => body.iter().any(|s| stmt_refs_name(s, name)),
         _ => false,
@@ -126,12 +160,16 @@ fn compute_peak_live_floats(body: &[Statement], float_names: &[String]) -> u32 {
     let mut intervals: Vec<(usize, usize)> = Vec::with_capacity(float_names.len());
     for name in float_names.iter() {
         // Is this name let-bound in this body?
-        let let_idx = body.iter().position(|s| matches!(s, Statement::Let { name: n, .. } if n == name));
+        let let_idx = body
+            .iter()
+            .position(|s| matches!(s, Statement::Let { name: n, .. } if n == name));
         let def_idx = match let_idx {
             Some(idx) => idx,
             None => {
                 // Field or const — first reference is the def point
-                body.iter().position(|s| stmt_refs_name(s, name)).unwrap_or(0)
+                body.iter()
+                    .position(|s| stmt_refs_name(s, name))
+                    .unwrap_or(0)
             }
         };
         // last use: scan forward from def+1
@@ -146,7 +184,10 @@ fn compute_peak_live_floats(body: &[Statement], float_names: &[String]) -> u32 {
     // Sweep program points, count active intervals
     let mut peak = 0u32;
     for i in 0..body.len() {
-        let active = intervals.iter().filter(|(def, last)| *def <= i && i <= *last).count() as u32;
+        let active = intervals
+            .iter()
+            .filter(|(def, last)| *def <= i && i <= *last)
+            .count() as u32;
         peak = peak.max(active);
     }
     peak
@@ -210,7 +251,9 @@ impl LlvmBackend {
     //      filter taps) are counted and packed into the peak register demand.
 
     pub(super) fn is_float_field(&self, name: &str) -> bool {
-        self.ctx.field_index_map.get(name)
+        self.ctx
+            .field_index_map
+            .get(name)
             // 2026-06-29: Check for both "float" (Float) and "double" (Float64)
             .map(|&idx| {
                 let ll_ty = &self.ctx.field_types[idx];
@@ -225,10 +268,15 @@ impl LlvmBackend {
             Expr::Identifier(name) => {
                 self.is_float_field(name)
                     || local_floats.contains(name.as_str())
-                    || self.ctx.constants.get(name.as_str()).map_or(false, |(t, _)| *t == Type::float())
+                    || self
+                        .ctx
+                        .constants
+                        .get(name.as_str())
+                        .map_or(false, |(t, _)| *t == Type::float())
             }
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
-                self.is_float_expr_pre_cg(l, local_floats) || self.is_float_expr_pre_cg(r, local_floats)
+                self.is_float_expr_pre_cg(l, local_floats)
+                    || self.is_float_expr_pre_cg(r, local_floats)
             }
             Expr::Neg(e) => self.is_float_expr_pre_cg(e, local_floats),
             Expr::Cast(_, ty) => *ty == Type::float(),
@@ -240,11 +288,15 @@ impl LlvmBackend {
     pub(super) fn count_cross_float_ops(&self, expr: &Expr, local_floats: &HashSet<String>) -> u32 {
         match expr {
             Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
-                let is_float = self.is_float_expr_pre_cg(l, local_floats) || self.is_float_expr_pre_cg(r, local_floats);
+                let is_float = self.is_float_expr_pre_cg(l, local_floats)
+                    || self.is_float_expr_pre_cg(r, local_floats);
                 let is_cross_field = match (l.as_ref(), r.as_ref()) {
                     (Expr::Identifier(n1), Expr::Identifier(n2)) => n1 != n2,
-                    (e1 @ Expr::AddrOf(_), e2 @ Expr::AddrOf(_)) => e1.as_var_name() != e2.as_var_name(),
-                    (Expr::Identifier(_), Expr::AddrOf(_)) | (Expr::AddrOf(_), Expr::Identifier(_)) => true,
+                    (e1 @ Expr::AddrOf(_), e2 @ Expr::AddrOf(_)) => {
+                        e1.as_var_name() != e2.as_var_name()
+                    }
+                    (Expr::Identifier(_), Expr::AddrOf(_))
+                    | (Expr::AddrOf(_), Expr::Identifier(_)) => true,
                     _ => false,
                 };
                 let mut count = if is_cross_field && is_float { 1 } else { 0 };
@@ -258,13 +310,19 @@ impl LlvmBackend {
         }
     }
 
-    pub(super) fn collect_local_floats_and_temps(&self, body: &[Statement], local_floats: &mut HashSet<String>) -> u32 {
+    pub(super) fn collect_local_floats_and_temps(
+        &self,
+        body: &[Statement],
+        local_floats: &mut HashSet<String>,
+    ) -> u32 {
         let mut temp_count = 0;
         for stmt in body {
             match stmt {
                 Statement::Let { name, ty, expr, .. } => {
                     let is_float = ty.as_ref() == Some(&Type::float())
-                        || expr.as_ref().map_or(false, |e| self.is_float_expr_pre_cg(e, local_floats));
+                        || expr
+                            .as_ref()
+                            .map_or(false, |e| self.is_float_expr_pre_cg(e, local_floats));
                     if is_float {
                         local_floats.insert(name.clone());
                         temp_count += 1;
@@ -333,9 +391,9 @@ impl LlvmBackend {
             }
 
             let reads = crate::backend::collect_read_identifiers(&txn.body);
-            let writes: HashSet<String> =
-                crate::backend::collect_assigned_identifiers(&txn.body)
-                    .into_iter().collect();
+            let writes: HashSet<String> = crate::backend::collect_assigned_identifiers(&txn.body)
+                .into_iter()
+                .collect();
 
             for f in reads.union(&writes) {
                 if self.is_float_field(f) {
@@ -344,7 +402,12 @@ impl LlvmBackend {
             }
 
             for f in reads.iter() {
-                if self.ctx.constants.get(f.as_str()).map_or(false, |(t, _)| *t == Type::float()) {
+                if self
+                    .ctx
+                    .constants
+                    .get(f.as_str())
+                    .map_or(false, |(t, _)| *t == Type::float())
+                {
                     accessed_constants.insert(f.clone());
                 }
             }
@@ -361,7 +424,8 @@ impl LlvmBackend {
                         for s in statements {
                             match s {
                                 Statement::Assignment { expr, .. } => {
-                                    total_cross_ops += self.count_cross_float_ops(expr, &local_floats);
+                                    total_cross_ops +=
+                                        self.count_cross_float_ops(expr, &local_floats);
                                 }
                                 Statement::Let { expr: Some(e), .. } => {
                                     total_cross_ops += self.count_cross_float_ops(e, &local_floats);
@@ -384,7 +448,8 @@ impl LlvmBackend {
         let c = total_cross_ops as usize;
         let shuffle_pressure = std::cmp::min(c, n as usize * 2);
         let const_packed = (accessed_constants.len() + w as usize - 1) / w as usize;
-        let peak = (packed_phis + shuffle_pressure + peak_live_floats as usize + const_packed + 2) as u32;
+        let peak =
+            (packed_phis + shuffle_pressure + peak_live_floats as usize + const_packed + 2) as u32;
 
         if peak >= r {
             self.ctx.slp_hazard_fns.insert("main".to_string());
@@ -414,13 +479,19 @@ impl LlvmBackend {
             self.collect_local_floats_and_temps(&txn.body, &mut local_floats);
             for stmt in &txn.body {
                 match stmt {
-                    Statement::Assignment { expr, .. } | Statement::Let { expr: Some(expr), .. } => {
+                    Statement::Assignment { expr, .. }
+                    | Statement::Let {
+                        expr: Some(expr), ..
+                    } => {
                         count += self.count_float_arith_ops(expr, &local_floats);
                     }
                     Statement::Guarded { statements, .. } => {
                         for s in statements {
                             match s {
-                                Statement::Assignment { expr, .. } | Statement::Let { expr: Some(expr), .. } => {
+                                Statement::Assignment { expr, .. }
+                                | Statement::Let {
+                                    expr: Some(expr), ..
+                                } => {
                                     count += self.count_float_arith_ops(expr, &local_floats);
                                 }
                                 _ => {}
@@ -479,14 +550,20 @@ impl LlvmBackend {
         for stmt in body {
             if let Statement::Let { name, ty, expr, .. } = stmt {
                 let is_float = ty.as_ref() == Some(&Type::float())
-                    || expr.as_ref().map_or(false, |e| self.is_float_expr_pre_cg(e, &local_floats));
+                    || expr
+                        .as_ref()
+                        .map_or(false, |e| self.is_float_expr_pre_cg(e, &local_floats));
                 if is_float {
                     local_floats.insert(name.clone());
                 }
             }
         }
         let float_names: Vec<String> = local_floats.into_iter().collect();
-        let peak = if float_names.is_empty() { 0 } else { compute_peak_live_floats(body, &float_names) };
+        let peak = if float_names.is_empty() {
+            0
+        } else {
+            compute_peak_live_floats(body, &float_names)
+        };
         let (regs, _) = match self.ctx.spec.as_ref() {
             Some(spec) => self.target_hardware(spec),
             None => (16, 4),
@@ -510,8 +587,8 @@ impl LlvmBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
     use crate::ast::Statement::*;
+    use crate::ast::*;
 
     fn float_expr(val: f64) -> Expr {
         Expr::Float(val)
@@ -557,9 +634,9 @@ mod tests {
     #[test]
     fn test_peak_two_sequential() {
         let body = vec![
-            let_stmt("t0", float_expr(1.0)),                               // def t0
-            let_stmt("t1", float_expr(2.0)),                               // def t1
-            assign_stmt("f0", add_expr(ident("t0"), ident("t1"))),         // uses t0, t1
+            let_stmt("t0", float_expr(1.0)),                       // def t0
+            let_stmt("t1", float_expr(2.0)),                       // def t1
+            assign_stmt("f0", add_expr(ident("t0"), ident("t1"))), // uses t0, t1
         ];
         let names = vec!["t0".to_string(), "t1".to_string()];
         // t0: def=0, last_use=2; t1: def=1, last_use=2
@@ -572,10 +649,10 @@ mod tests {
     #[test]
     fn test_peak_no_overlap() {
         let body = vec![
-            let_stmt("t0", float_expr(1.0)),                   // def t0
-            assign_stmt("f0", ident("t0")),                    // last use of t0
-            let_stmt("t1", float_expr(2.0)),                   // def t1
-            assign_stmt("f1", ident("t1")),                    // last use of t1
+            let_stmt("t0", float_expr(1.0)), // def t0
+            assign_stmt("f0", ident("t0")),  // last use of t0
+            let_stmt("t1", float_expr(2.0)), // def t1
+            assign_stmt("f1", ident("t1")),  // last use of t1
         ];
         let names = vec!["t0".to_string(), "t1".to_string()];
         // t0: def=0, last_use=1; t1: def=2, last_use=3
@@ -590,7 +667,10 @@ mod tests {
             let_stmt("t0", float_expr(1.0)),
             let_stmt("t1", float_expr(2.0)),
             let_stmt("t2", float_expr(3.0)),
-            assign_stmt("f0", add_expr(add_expr(ident("t0"), ident("t1")), ident("t2"))),
+            assign_stmt(
+                "f0",
+                add_expr(add_expr(ident("t0"), ident("t1")), ident("t2")),
+            ),
         ];
         let names = vec!["t0".to_string(), "t1".to_string(), "t2".to_string()];
         // All defined at 0,1,2, all used at 3
@@ -603,7 +683,7 @@ mod tests {
     fn test_peak_field_read_def_at_first_use() {
         let body = vec![
             let_stmt("t0", float_expr(1.0)),
-            assign_stmt("f0", add_expr(ident("field_a"), ident("t0"))),   // first use of field_a, last use of t0
+            assign_stmt("f0", add_expr(ident("field_a"), ident("t0"))), // first use of field_a, last use of t0
             assign_stmt("f1", add_expr(ident("field_a"), float_expr(5.0))), // last use of field_a
         ];
         let names = vec!["t0".to_string(), "field_a".to_string()];

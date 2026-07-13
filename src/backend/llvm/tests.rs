@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use super::*;
-use crate::ast::*;
+use crate::ast_new::*;
 
 fn empty_program() -> Program {
         Program {
@@ -4523,7 +4523,7 @@ let spec = crate::target_spec::TargetSpec {
                             ty: Some(Type::bool_()),
                             expr: Some(Expr::IsType(
                                 Box::new(Expr::Decimal(42)),
-                                crate::ast::IsTarget::Type(Type::int()),
+                                crate::ast_new::IsTarget::Type(Type::int()),
                             )),
                             address: None, address_expr: None, bit_range: None,
                             is_override: false, modifiers: vec![],
@@ -6156,7 +6156,7 @@ let spec = crate::target_spec::TargetSpec {
                 MeldRouteDef {
                     accessor: "Size".into(),
                     dest_expr: Expr::IntrinsicCall {
-                        intrinsic: crate::ast::Intrinsic::Strlen,
+                        intrinsic: crate::ast_new::Intrinsic::Strlen,
                         args: vec![Expr::Identifier("Ptr".into())],
                     },
                 },
@@ -6210,8 +6210,8 @@ let spec = crate::target_spec::TargetSpec {
             reactor_speed: None,
             attrs: vec![],
             ffi: None,
-            strict_mode: crate::ast::StrictMode::Off,
-            dispatch_mode: crate::ast::DispatchMode::default(),
+            strict_mode: crate::ast_new::StrictMode::Off,
+            dispatch_mode: crate::ast_new::DispatchMode::default(),
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,
@@ -6245,8 +6245,8 @@ let spec = crate::target_spec::TargetSpec {
             reactor_speed: None,
             attrs: vec![],
             ffi: None,
-            strict_mode: crate::ast::StrictMode::Off,
-            dispatch_mode: crate::ast::DispatchMode::default(),
+            strict_mode: crate::ast_new::StrictMode::Off,
+            dispatch_mode: crate::ast_new::DispatchMode::default(),
             exit_condition: None,
             out_pragmas: vec![],
             default_sig_modifier: None,

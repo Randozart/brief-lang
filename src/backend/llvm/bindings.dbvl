@@ -1,0 +1,25 @@
+# Intrinsic bindings for the LLVM backend
+# Format: intrinsic_name -> LLVM IR template
+# %0, %1, ... refer to arguments by index
+
+AddI64#    -> add nsw i64 %0, %1
+SubI64#    -> sub nsw i64 %0, %1
+MulI64#    -> mul nsw i64 %0, %1
+DivI64#    -> sdiv i64 %0, %1
+RemI64#    -> srem i64 %0, %1
+EqI64#     -> icmp eq i64 %0, %1
+LtI64#     -> icmp slt i64 %0, %1
+FAddF64#   -> fadd double %0, %1
+FSubF64#   -> fsub double %0, %1
+FMulF64#   -> fmul double %0, %1
+FDivF64#   -> fdiv double %0, %1
+Sqrt#      -> call double @llvm.sqrt.f64(double %0)
+PrintInt#  -> call i32 (ptr, ...) @printf(ptr @.fmt_int, i64 %0)
+PrintString# -> call i32 (ptr, ...) @printf(ptr @.fmt_str, ptr %0)
+Malloc#    -> call ptr @malloc(i64 %0)
+Free#      -> call void @free(ptr %0)
+Memcpy#    -> call ptr @memcpy(ptr %0, ptr %1, i64 %2)
+Memset#    -> call ptr @memset(ptr %0, i64 %1, i64 %2)
+GetEnvInt# -> call i64 @getenv_as_i64(ptr %0)
+FloatToInt# -> fptosi double %0 to i64
+IntToFloat# -> sitofp i64 %0 to double
