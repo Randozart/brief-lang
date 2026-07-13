@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Pattern, Statement, Type};
+use crate::ast_new::{Expr, Statement, Type};
 use crate::backend::llvm::LlvmBackend;
 use std::collections::HashSet;
 

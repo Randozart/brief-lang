@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{BitRange, BracketOp, Contract, Expr, ForeignTarget, Intrinsic, Program, Statement, TopLevel, Transaction, Type};
+use crate::ast_new::{BitRange, BracketOp, Contract, Expr, ForeignTarget, Intrinsic, Program, Statement, TopLevel, Transaction, Type};
 use crate::features::traits::{ExprCodegenWebstack, ExprDispatch};
 use crate::view_compiler::{Binding, Directive};
 use std::cell::RefCell;
@@ -1427,7 +1427,7 @@ pub struct WebstackOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
+    use crate::ast_new::*;
 
     #[test]
     fn test_webstack_generates_output() {

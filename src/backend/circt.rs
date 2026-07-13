@@ -2,7 +2,7 @@
 // Invoked via: brief build file.cbv → program.mlir → circt-opt → circt-translate → verilog
 
 use crate::analysis::dependency_graph::DependencyGraph;
-use crate::ast::{BitRange, Contract, Expr, Intrinsic, LinkRef, OutputType, Program, Statement, TopLevel, Type};
+use crate::ast_new::{BitRange, Contract, Expr, Intrinsic, LinkRef, OutputType, Program, Statement, TopLevel, Type};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -829,7 +829,7 @@ impl CirctBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
+    use crate::ast_new::*;
 
     fn make_program(items: Vec<TopLevel>) -> Program {
         Program {

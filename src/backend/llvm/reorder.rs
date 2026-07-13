@@ -16,7 +16,7 @@
 //   2. Avoid LLVM having to push independent ops through alias analysis
 //   3. Keep the emitted IR readable for debugging
 
-use crate::ast::{Expr, Statement};
+use crate::ast_new::{Expr, Statement};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Reorder body statements to maximize instruction-level parallelism.
@@ -364,7 +364,7 @@ fn topological_sort(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
+    use crate::ast_new::*;
 
     #[test]
     fn test_reorder_independent_assignments() {
