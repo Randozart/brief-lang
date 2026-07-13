@@ -1,0 +1,492 @@
+// ── Loop Emission: SSA Register Pipeline ───────────────────────
+//
+// 2026-07-13: Extracted from monolithic loop_engine.rs (4398 lines).
+// Implements Strategy 4 (SSA Register Pipeline) for multi-txn reactive
+// programs, modulo-switch dispatch, and folded multi-txn dispatch.
+//
+// Strategies:
+//   a) SSA canonical loop (single txn, simple bound)
+//   b) SSA with precondition check (rct txn with pre/post)
+//   c) SSA no precondition (rct txn with [true][post])
+//   d) Modulo-rotated dispatch (K ≤ 8 reactive txns)
+//   e) Modulo-switch dispatch (K > 8 reactive txns)
+//   f) Folded multi-txn (enum-key dispatch for folded transactions)
+
+use crate::backend::llvm::*;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fmt::Write;
+
+impl LlvmBackend {
+    // ═══════════════════════════════════════════════════════════════
+    // Modulo-Switch Dispatch
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Try to detect if the reactive transaction set can be dispatched
+    /// via modulo-switch on the counter register.
+    fn try_modulo_switch_dispatch(
+        &mut self,
+        out: &mut String,
+        reactive_txns: &[&(String, &crate::ast::Transaction)],
+    ) -> bool {
+        if reactive_txns.len() < 2 {
+            return false;
+        }
+        let first_pre = &reactive_txns[0].1.contract.pre_condition;
+        let (counter_name, divisor) = match self.extract_mod_info(first_pre) {
+            Some(info) => info,
+            None => return false,
+        };
+        let mut cases: Vec<(i64, &str)> = Vec::new();
+        for (name, txn) in reactive_txns {
+            if !txn.is_reactive {
+                return false;
+            }
+            let pre = &txn.contract.pre_condition;
+            match self.extract_mod_guard(pre, &counter_name, divisor) {
+                Some(val) => cases.push((val, name)),
+                None => return false,
+            }
+        }
+        if cases.len() != reactive_txns.len() {
+            return false;
+        }
+        self.emit_modulo_switch_main(out, reactive_txns, &counter_name, divisor, &cases);
+        true
+    }
+
+    /// Extract (counter_name, divisor) from a modulo precondition.
+    fn extract_mod_info(&self, expr: &Expr) -> Option<(String, i64)> {
+        match expr {
+            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::Mod => {
+                let counter = match l.as_ref() {
+                    Expr::Identifier(n) => n.clone(),
+                    _ => return None,
+                };
+                let divisor = match r.as_ref() {
+                    Expr::Decimal(d) => *d,
+                    _ => return None,
+                };
+                Some((counter, divisor))
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract the expected modulo value from a guard expression.
+    fn extract_mod_guard(&self, expr: &Expr, counter_name: &str, divisor: i64) -> Option<i64> {
+        match expr {
+            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::Eq => {
+                let inner = match l.as_ref() {
+                    Expr::BinaryOp(k, cl, cr) if *k == crate::ast::BinaryOpKind::Mod
+                        && matches!(cl.as_ref(), Expr::Identifier(n) if n == counter_name)
+                        && matches!(cr.as_ref(), Expr::Decimal(d) if *d == divisor) => l.as_ref(),
+                    _ => return None,
+                };
+                match r.as_ref() {
+                    Expr::Decimal(v) => Some(*v),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Emit a modulo-switch dispatch: check counter % divisor and switch
+    /// to the matching transaction body.
+    fn emit_modulo_switch_main(
+        &mut self,
+        out: &mut String,
+        _txns: &[&(String, &crate::ast::Transaction)],
+        counter_name: &str,
+        divisor: i64,
+        cases: &[(i64, &str)],
+    ) {
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        let counter_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
+        let c_gep = self.fun.next_reg_with_prefix("msp");
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            c_gep, counter_idx).ok();
+        let c_val = self.fun.next_reg_with_prefix("msv");
+        writeln!(out, "  {} = load i64, ptr {}, align 8", c_val, c_gep).ok();
+        let mod_val = self.fun.next_reg_with_prefix("msm");
+        writeln!(out, "  {} = srem i64 {}, {}", mod_val, c_val, divisor).ok();
+        writeln!(out, "  switch i64 {}, label %.end [", mod_val).ok();
+        for (val, name) in cases {
+            writeln!(out, "    i64 {}, label %{}", val, name).ok();
+        }
+        writeln!(out, "  ]").ok();
+        for (_val, name) in cases {
+            writeln!(out, "{}:", name).ok();
+            writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
+            writeln!(out, "  br label %.end").ok();
+        }
+        writeln!(out, ".end:").ok();
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Modulo-Rotated Dispatch (K ≤ 8)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit a modulo-rotated dispatch loop. Used when the number of
+    /// reactive transactions is small (K ≤ 8). The loop body checks
+    /// `counter % divisor` and branches to the matching case.
+    pub(crate) fn emit_modulo_rotated(
+        &mut self,
+        out: &mut String,
+        _txns: &[(String, &crate::ast::Transaction)],
+        counter_name: &str,
+        divisor: i64,
+        cases: &[(i64, &str)],
+    ) {
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        writeln!(out, "  br label %.mr_loop").ok();
+        writeln!(out, ".mr_loop:").ok();
+        let counter_idx = self.ctx.field_index_map.get(counter_name).copied().unwrap_or(0);
+        let c_gep = self.fun.next_reg_with_prefix("mrp");
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            c_gep, counter_idx).ok();
+        let c_val = self.fun.next_reg_with_prefix("mrv");
+        writeln!(out, "  {} = load i64, ptr {}, align 8", c_val, c_gep).ok();
+        let mod_val = self.fun.next_reg_with_prefix("mrm");
+        writeln!(out, "  {} = srem i64 {}, {}", mod_val, c_val, divisor).ok();
+        for (val, name) in cases {
+            let eq = self.fun.next_reg_with_prefix("mre");
+            writeln!(out, "  {} = icmp eq i64 {}, {}", eq, mod_val, val).ok();
+            writeln!(out, "  br i1 {}, label %{}, label %.mr_next", eq, name).ok();
+            writeln!(out, "{}:", name).ok();
+            writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
+            writeln!(out, "  br label %.mr_latch").ok();
+            writeln!(out, ".mr_next:").ok();
+        }
+        writeln!(out, "  br label %.mr_latch").ok();
+        writeln!(out, ".mr_latch:").ok();
+        let next = self.fun.next_reg_with_prefix("mrn");
+        writeln!(out, "  {} = add i64 {}, 1", next, c_val).ok();
+        writeln!(out, "  store i64 {}, ptr {}, align 8", next, c_gep).ok();
+        writeln!(out, "  br label %.mr_loop").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SSA Canonical Loop Setup (Single Txn)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Set up a canonical SSA loop for a single transaction.
+    /// Emits phi nodes for counter + field state, header check, and latch.
+    fn emit_ssa_canonical_loop_setup(
+        &mut self,
+        out: &mut String,
+        _txn: &crate::ast::Transaction,
+        bound_name: &str,
+        b_idx: usize,
+        cname: &str,
+    ) {
+        let c_gep = self.fun.next_reg_with_prefix("ssc");
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            c_gep, self.ctx.field_index_map.get(cname).copied().unwrap_or(0)).ok();
+        let init = self.fun.next_reg_with_prefix("ssi");
+        writeln!(out, "  {} = load i64, ptr {}, align 8", init, c_gep).ok();
+        let b_gep = self.fun.next_reg_with_prefix("ssb");
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            b_gep, b_idx).ok();
+        let bound = self.fun.next_reg_with_prefix("ssv");
+        writeln!(out, "  {} = load i64, ptr {}, align 8", bound, b_gep).ok();
+        writeln!(out, "  br label %.ss_loop").ok();
+        writeln!(out, ".ss_loop:").ok();
+        let counter = self.fun.next_reg_with_prefix("ssc");
+        writeln!(out, "  {} = phi i64 [ {}, %.ss_loop ], [ {}, %.ss_latch ]",
+            counter, init, bound).ok();
+        let done = self.fun.next_reg_with_prefix("ssd");
+        writeln!(out, "  {} = icmp sgt i64 {}, {}", done, counter, bound).ok();
+        writeln!(out, "  br i1 {}, label %.ss_body, label %.ss_end", done).ok();
+        writeln!(out, ".ss_body:").ok();
+    }
+
+    /// Emit the body of a canonical SSA transaction.
+    fn emit_ssa_txn_canonical_body(
+        &mut self,
+        out: &mut String,
+        body_stmts: &[&Statement],
+        _post_hoist: &[Vec<Statement>],
+    ) {
+        for stmt in body_stmts {
+            self.emit_statement(out, stmt, "  ");
+        }
+    }
+
+    /// Emit a transaction body with precondition check.
+    fn emit_ssa_txn_with_precond(
+        &mut self,
+        out: &mut String,
+        pre: &Expr,
+        _name: &str,
+        body_stmts: &[&Statement],
+        _post_hoist: &[Vec<Statement>],
+    ) {
+        let cond_val = self.emit_expr(out, pre, "  ");
+        let bool_reg = self.as_bool_reg(out, "  ", &cond_val);
+        let body_label = format!(".spb{}", self.fun.txn_counter);
+        let next_label = format!(".spn{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "  br i1 {}, label %{}, label %{}", bool_reg, body_label, next_label).ok();
+        writeln!(out, "{}:", body_label).ok();
+        for stmt in body_stmts {
+            self.emit_statement(out, stmt, "  ");
+        }
+        writeln!(out, "  br label %{}", next_label).ok();
+        writeln!(out, "{}:", next_label).ok();
+    }
+
+    /// Emit a transaction body without precondition check.
+    fn emit_ssa_txn_no_precond(
+        &mut self,
+        out: &mut String,
+        body_stmts: &[&Statement],
+        _post_hoist: &[Vec<Statement>],
+    ) {
+        for stmt in body_stmts {
+            self.emit_statement(out, stmt, "  ");
+        }
+    }
+
+    /// Pre-allocate SSA registers for multi-txn state fields.
+    fn emit_ssa_mt_prealloc(
+        &mut self,
+        out: &mut String,
+        _txns: &[(String, &crate::ast::Transaction)],
+    ) {
+        // Emit alloca for each state field at function entry
+        for (name, idx) in &self.ctx.field_index_map {
+            let alloca = self.fun.next_reg_with_prefix("sa");
+            let ft = &self.ctx.field_types[*idx];
+            let llvm_type = match ft.as_str() {
+                "float" => "float",
+                "i32" => "i32",
+                "i8" => "i8",
+                s if s == "i8*" || s == "ptr" => "ptr",
+                _ => "i64",
+            };
+            writeln!(out, "  {} = alloca {}, align 8", alloca, llvm_type).ok();
+            self.fun.last_val_temps.insert(name.clone(), alloca);
+        }
+    }
+
+    /// Emit the main SSA register pipeline for multi-txn reactive programs.
+    pub(crate) fn emit_ssa_main(
+        &mut self,
+        out: &mut String,
+        txns: &[(String, &crate::ast::Transaction)],
+        _has_wake_triggers: bool,
+    ) {
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        self.emit_ssa_mt_prealloc(out, txns);
+        writeln!(out, "  br label %.ss_main_loop").ok();
+        writeln!(out, ".ss_main_loop:").ok();
+        // Check each txn's precondition, execute body if true
+        for (name, txn) in txns {
+            if txn.is_reactive {
+                let pre = &txn.contract.pre_condition;
+                let cond_val = self.emit_expr(out, pre, "  ");
+                let bool_reg = self.as_bool_reg(out, "  ", &cond_val);
+                let body_label = format!(".ssb_{}", name);
+                let next_label = format!(".ssn_{}", name);
+                self.fun.txn_counter += 1;
+                writeln!(out, "  br i1 {}, label %{}, label %{}", bool_reg, body_label, next_label).ok();
+                writeln!(out, "{}:", body_label).ok();
+                for stmt in &txn.body {
+                    self.emit_statement(out, stmt, "  ");
+                }
+                writeln!(out, "  br label %{}", next_label).ok();
+                writeln!(out, "{}:", next_label).ok();
+            }
+        }
+        writeln!(out, "  br label %.ss_main_loop").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Folded Multi-Txn Dispatch
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit a folded multi-txn main — dispatch between multiple folded
+    /// transactions via an enum key. Used when multiple transactions
+    /// share a single main() and are dispatched on a counter/state field.
+    pub(crate) fn emit_folded_multi_main(
+        &mut self,
+        out: &mut String,
+        txns: &[(String, &crate::ast::Transaction)],
+        _enum_sizes: &[(String, Option<u64>)],
+        _enum_keys: &HashMap<String, Vec<i64>>,
+        _fold_params: &HashMap<String, crate::backend::llvm::FoldParam>,
+        _fold_pure: &HashMap<String, (bool, Option<i64>)>,
+        counter_idx: usize,
+        total_idx: Option<usize>,
+        total_const_name: Option<&str>,
+        _composed_fn: Option<&str>,
+        _composed_trig_map: Option<&HashMap<String, Vec<(i64, String)>>>,
+        _all_internal_map: Option<&HashMap<String, (usize, i64)>>,
+        _has_wake: bool,
+    ) {
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        let bound_reg = self.fun.next_reg_with_prefix("fmb");
+        if let Some(ti) = total_idx {
+            let gep = self.fun.next_reg_with_prefix("fmgb");
+            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                gep, ti).ok();
+            writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, gep).ok();
+        } else if let Some(tcn) = total_const_name {
+            if let Some(&idx) = self.ctx.field_index_map.get(tcn) {
+                let gep = self.fun.next_reg_with_prefix("fmgb");
+                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                    gep, idx).ok();
+                writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, gep).ok();
+            } else {
+                writeln!(out, "  {} = add i64 0, 1", bound_reg).ok();
+            }
+        } else {
+            writeln!(out, "  {} = add i64 0, 1", bound_reg).ok();
+        }
+        writeln!(out, "  br label %.fm_loop").ok();
+        writeln!(out, ".fm_loop:").ok();
+        let c_gep = self.fun.next_reg_with_prefix("fmg");
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            c_gep, counter_idx).ok();
+        let c_val = self.fun.next_reg_with_prefix("fmv");
+        writeln!(out, "  {} = load i64, ptr {}, align 8", c_val, c_gep).ok();
+        let done = self.fun.next_reg_with_prefix("fmd");
+        writeln!(out, "  {} = icmp slt i64 {}, {}", done, c_val, bound_reg).ok();
+        writeln!(out, "  br i1 {}, label %.fm_body, label %.fm_end", done).ok();
+        writeln!(out, ".fm_body:").ok();
+        for (name, txn) in txns {
+            writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
+        }
+        let next = self.fun.next_reg_with_prefix("fmn");
+        writeln!(out, "  {} = add i64 {}, 1", next, c_val).ok();
+        writeln!(out, "  store i64 {}, ptr {}, align 8", next, c_gep).ok();
+        writeln!(out, "  br label %.fm_loop").ok();
+        writeln!(out, ".fm_end:").ok();
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Post-Loop Print Handling
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Load last-value temps into registers for post-loop printing.
+    pub(crate) fn load_last_val_temps(&mut self, out: &mut String) {
+        let mut sorted_keys: Vec<String> = self.fun.last_val_temps.keys().cloned().collect();
+        sorted_keys.sort();
+        for name in &sorted_keys {
+            if let Some(&idx) = self.ctx.field_index_map.get(name) {
+                let gep = self.fun.next_reg_with_prefix("lvt");
+                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                    gep, idx).ok();
+                let val = self.fun.next_reg_with_prefix("lvv");
+                writeln!(out, "  {} = load i64, ptr {}, align 8", val, gep).ok();
+                self.fun.last_val_temps.insert(name.clone(), val);
+            }
+        }
+    }
+
+    /// Emit a single post-loop print statement.
+    fn emit_post_print(
+        &mut self,
+        out: &mut String,
+        name: &str,
+        reg: &str,
+        _ty: &str,
+        indent: &str,
+    ) {
+        writeln!(out, "{}call void @PrintInt#(i64 {})  ; {}", indent, reg, name).ok();
+    }
+
+    /// Emit hoisted post-loop print calls.
+    pub(crate) fn emit_hoisted_post_loop_prints(
+        &mut self,
+        out: &mut String,
+        hoisted: &[Vec<Statement>],
+    ) {
+        for block in hoisted {
+            for stmt in block {
+                if let Statement::TermBang(Some(e)) = stmt {
+                    self.emit_expr(out, e, "  ");
+                }
+                if let Statement::Term(Some(e)) = stmt {
+                    self.emit_expr(out, e, "  ");
+                }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Trigger Step Function
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit the trigger step function: check dirty flags and recompute
+    /// transactions whose trigger conditions are met.
+    pub(crate) fn emit_trg_step(
+        &mut self,
+        out: &mut String,
+        _dep_graph: &crate::analysis::dependency_graph::DependencyGraph,
+        trigger_names: &[String],
+    ) {
+        writeln!(out, "define void @trg_step(ptr %state) local_unnamed_addr {{").ok();
+        for trg_name in trigger_names {
+            if let Some(trg) = self.ctx.triggers.get(trg_name) {
+                let cond_val = self.emit_expr(out, &trg.instance, "  ");
+                let bool_reg = self.as_bool_reg(out, "  ", &cond_val);
+                let body_label = format!(".trg_{}", trg_name);
+                let next_label = format!(".trg_next_{}", trg_name);
+                writeln!(out, "  br i1 {}, label %{}, label %{}", bool_reg, body_label, next_label).ok();
+                writeln!(out, "{}:", body_label).ok();
+                if let Some((txn_name, _txn)) = self.ctx.txns.iter()
+                    .find(|(_, t)| t.contract.pre_condition == trg.instance)
+                {
+                    writeln!(out, "  call void @txn_{}(ptr %state)", txn_name).ok();
+                }
+                writeln!(out, "  br label %{}", next_label).ok();
+                writeln!(out, "{}:", next_label).ok();
+            }
+        }
+        writeln!(out, "  ret void").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// Emit a trigger event via epoll_wait.
+    pub(crate) fn emit_trg_event_epoll_wait(
+        _backend: &mut LlvmBackend,
+        _out: &mut String,
+    ) {
+        // Placeholder: epoll-based trigger wait is platform-specific
+    }
+
+    /// Emit a cycle count increment.
+    pub(crate) fn emit_cycle_count_increment(
+        _backend: &mut LlvmBackend,
+        _out: &mut String,
+    ) {
+        // Placeholder: cycle counting is architecture-specific
+    }
+
+}

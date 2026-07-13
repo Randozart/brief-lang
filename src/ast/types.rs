@@ -39,6 +39,16 @@ pub enum Type {
 // 2026-07-12: Named type factories. These create Custom() references that
 // are resolved through the TypeUniverse at type-check time.
 impl Type {
+    /// Return the universe lookup key for this type.
+    /// Custom("Float") → "Float", Applied("List", [T]) → "List".
+    pub fn universe_key(&self) -> Option<&str> {
+        match self {
+            Type::Custom(name) => Some(name.as_str()),
+            Type::Applied(name, _) => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
     pub fn int() -> Type {
         Type::Custom("Int".to_string())
     }

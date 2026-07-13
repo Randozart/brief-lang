@@ -1,462 +1,244 @@
 // ── Expression Codegen Helper Functions ─────────────────────────
 //
 // 2026-06-29: Extracted from emit_expr.rs to enable submodule extraction.
-// These are additional `impl LlvmBackend` methods used by expression
-// codegen. Split via Rust's "impl block split" pattern — multiple files
-// can define `impl Type { ... }` within the same module as long as they
-// don't duplicate method signatures.
+// Split via Rust's "impl block split" pattern — multiple files define
+// `impl Type { ... }` within the same module without duplicating methods.
+//
+// 2026-07-13: Flattened to max 2-level nesting with guard clauses,
+// doc comments on every definition, removed old-API references
+// (IntrinsicCall → Call, Projection projection_target_name removed).
 //
 // Visibility convention:
-//   `pub(crate)`  — visible to entire crate (for functions that become
-//                    part of LlvmBackend's semi-public API)
-//   `pub(super)`  — visible to parent `llvm` module and all its children
-//                   (for functions that should stay backend-internal)
-//   (private)     — visible only within this file (for internal helpers)
+//   `pub(crate)`  — visible to entire crate (semi-public API surface)
+//   `pub(super)`  — visible to parent `llvm` module + children
+//   (private)     — visible only within this file
 
-
-
+use crate::ast::OutputType;
 use crate::backend::llvm::*;
 use std::collections::HashMap;
 use std::fmt::Write;
 
-/// Phase 2 migration helper: check if a type matches a canonical name
-/// via property system (preferred) with hardcoded legacy fallback.
+/// 2026-07-12: Check if a type matches a canonical name via property
+/// system (preferred) with hardcoded legacy fallback for types without
+/// a universe entry (e.g. during bootstrap).
 fn type_is(universe: &Option<crate::type_universe::TypeUniverse>, ty: &Type, name: &str) -> bool {
     universe.as_ref().map_or(false, |u| u.type_is(ty, name))
         || *ty == Type::Custom(name.to_string())
 }
 
 impl LlvmBackend {
+    // ═══════════════════════════════════════════════════════════════
+    // Section 1: Cell Rewriting
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Rewrite all `Identifier` nodes in an expression tree, prefixing
+    /// each name with `cell${cell_name}$`. Used when expanding a cell
+    /// definition into standalone transactions.
+    ///
+    /// 2026-06-29: Recursive tree walk — every compound variant recurses
+    /// into its children. Leaf variants (literals, metadata) pass through.
     pub(super) fn rewrite_cell_identifiers(expr: &Expr, cell_name: &str) -> Expr {
-        let p = |name: &str| -> String { format!("cell${}${}", cell_name, name) };
+        let prefix = |name: &str| -> String { format!("cell${}${}", cell_name, name) };
         match expr {
-            // Leaf nodes — no identifiers
-            Expr::Decimal(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Quoted(_) | Expr::RegexLiteral(_)
-                | Expr::Char(_) | Expr::Bool(_) | Expr::Term | Expr::Ellipsis
-                | Expr::SharedMem(_) => expr.clone(),
-            Expr::Literal(lit) => Expr::Literal(lit.clone()),
-            // Identifier variants — rewrite to prefixed form
-            Expr::Identifier(name) => Expr::Identifier(p(name)),
-            Expr::AddrOf(inner) => Expr::AddrOf(Box::new(Self::rewrite_cell_identifiers(inner, cell_name))),
-            Expr::Deref(inner) => Expr::Deref(Box::new(Self::rewrite_cell_identifiers(inner, cell_name))),
-            Expr::PriorState(name) => Expr::PriorState(p(name)),
-            Expr::EllipsisExpr(e) => Expr::EllipsisExpr(e.clone()),
-            Expr::TypeRef(name) => Expr::TypeRef(name.clone()),
-            // Arrow variants
-            Expr::ArrowMut { dir, target, index, value, consume } => Expr::ArrowMut { consume: *consume, 
-                dir: dir.clone(), target: Box::new(Self::rewrite_cell_identifiers(target, cell_name)),
-                index: Box::new(Self::rewrite_cell_identifiers(index, cell_name)),
-                value: value.as_ref().map(|v| Box::new(Self::rewrite_cell_identifiers(v, cell_name))),
-            },
-            Expr::ArrowDiscard { target, index } => Expr::ArrowDiscard {
-                target: Box::new(Self::rewrite_cell_identifiers(target, cell_name)),
-                index: Box::new(Self::rewrite_cell_identifiers(index, cell_name)),
-            },
-            Expr::ArrowTransfer { dest, source, filter, consume } => Expr::ArrowTransfer { consume: *consume, dest: Box::new(Self::rewrite_cell_identifiers(dest, cell_name)),
-                source: Box::new(Self::rewrite_cell_identifiers(source, cell_name)),
-                filter: filter.as_ref().map(|f| Box::new(Self::rewrite_cell_identifiers(f, cell_name))),
-            },
-            Expr::ArrowMutExpr(e) => Expr::ArrowMutExpr(ArrowMutExpr {
-                dir: e.dir.clone(),
-                consume: e.consume,
-                target: Box::new(Self::rewrite_cell_identifiers(&e.target, cell_name)),
-                index: Box::new(Self::rewrite_cell_identifiers(&e.index, cell_name)),
-                value: e.value.as_ref().map(|v| Box::new(Self::rewrite_cell_identifiers(v, cell_name))),
-            }),
-            Expr::ArrowDiscardExpr(e) => Expr::ArrowDiscardExpr(ArrowDiscardExpr {
-                target: Box::new(Self::rewrite_cell_identifiers(&e.target, cell_name)),
-                index: Box::new(Self::rewrite_cell_identifiers(&e.index, cell_name)),
-            }),
-            Expr::ArrowTransferExpr(e) => Expr::ArrowTransferExpr(ArrowTransferExpr {
-                consume: e.consume,
-                dest: Box::new(Self::rewrite_cell_identifiers(&e.dest, cell_name)),
-                source: Box::new(Self::rewrite_cell_identifiers(&e.source, cell_name)),
-                filter: e.filter.as_ref().map(|f| Box::new(Self::rewrite_cell_identifiers(f, cell_name))),
-            }),
-            // Binary ops — two children
-            Expr::Add(l, r) => Expr::Add(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Sub(l, r) => Expr::Sub(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Mul(l, r) => Expr::Mul(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Div(l, r) => Expr::Div(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Mod(l, r) => Expr::Mod(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Eq(l, r) => Expr::Eq(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Ne(l, r) => Expr::Ne(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Lt(l, r) => Expr::Lt(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Le(l, r) => Expr::Le(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Gt(l, r) => Expr::Gt(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Ge(l, r) => Expr::Ge(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::And(l, r) => Expr::And(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Or(l, r) => Expr::Or(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::BitAnd(l, r) => Expr::BitAnd(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::BitOr(l, r) => Expr::BitOr(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::BitXor(l, r) => Expr::BitXor(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Shl(l, r) => Expr::Shl(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Shr(l, r) => Expr::Shr(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            Expr::Concat(l, r) => Expr::Concat(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            // Unary ops
-            Expr::Not(e) => Expr::Not(Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
-            Expr::Neg(e) => Expr::Neg(Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
-            Expr::BitNot(e) => Expr::BitNot(Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
-            // IsType / FromCheck / Like
-            Expr::IsType(e, target) => Expr::IsType(Box::new(Self::rewrite_cell_identifiers(e, cell_name)), target.clone()),
-            Expr::FromCheck(e, ty) => Expr::FromCheck(Box::new(Self::rewrite_cell_identifiers(e, cell_name)), ty.clone()),
-            Expr::Like(l, r) => Expr::Like(Box::new(Self::rewrite_cell_identifiers(l, cell_name)), Box::new(Self::rewrite_cell_identifiers(r, cell_name))),
-            // Pattern B: BinaryOp / UnaryOp
-            Expr::BinaryOp(e) => Expr::BinaryOp(Box::new(BinaryOpExpr {
-                kind: e.kind,
-                left: Box::new(Self::rewrite_cell_identifiers(&e.left, cell_name)),
-                right: Box::new(Self::rewrite_cell_identifiers(&e.right, cell_name)),
-            })),
-            Expr::UnaryOp(e) => Expr::UnaryOp(Box::new(UnaryOpExpr {
-                kind: e.kind,
-                operand: Box::new(Self::rewrite_cell_identifiers(&e.operand, cell_name)),
-            })),
-            // Cast and Projection
-            Expr::Cast(e, ty) => Expr::Cast(Box::new(Self::rewrite_cell_identifiers(e, cell_name)), ty.clone()),
-            Expr::Projection { source, target } => Expr::Projection {
-                source: Box::new(Self::rewrite_cell_identifiers(source, cell_name)),
-                target: target.clone(),
-            },
-            Expr::ProjectionExpr(e) => Expr::ProjectionExpr(ProjectionExpr {
-                source: Box::new(Self::rewrite_cell_identifiers(&e.source, cell_name)),
-                target: e.target.clone(),
-            }),
-            // Calls
+            // Leaves — no identifiers to rewrite
+            Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_)
+            | Expr::Quoted(_) | Expr::PropertyGet(_)
+            | Expr::FormattingAnnotation(_) => expr.clone(),
+
+            // Identifier leaf
+            Expr::Identifier(name) => Expr::Identifier(prefix(name)),
+
+            // Compound — recurse into children
+            Expr::BinaryOp(k, l, r) => Expr::BinaryOp(
+                *k,
+                Box::new(Self::rewrite_cell_identifiers(l, cell_name)),
+                Box::new(Self::rewrite_cell_identifiers(r, cell_name)),
+            ),
+            Expr::UnaryOp(k, e) => Expr::UnaryOp(
+                *k,
+                Box::new(Self::rewrite_cell_identifiers(e, cell_name)),
+            ),
             Expr::Call(name, args) => Expr::Call(
                 name.clone(),
                 args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
             ),
-            Expr::CallExpr(e) => Expr::CallExpr(CallExpr {
-                name: e.name.clone(),
-                args: e.args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            }),
-            Expr::CellCall(callee, args) => Expr::CellCall(
-                Box::new(Self::rewrite_cell_identifiers(callee, cell_name)),
-                args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            ),
-            // Template/Macro calls
-            Expr::TemplateCall { name, args, block, span } => Expr::TemplateCall {
-                name: name.clone(),
-                args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-                block: block.clone(),
-                span: *span,
-            },
-            Expr::MacroCall { name, args, block, span } => Expr::MacroCall {
-                name: name.clone(),
-                args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-                block: block.clone(),
-                span: *span,
-            },
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: intrinsic.clone(),
-                args: args.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            },
-            // Collections
-            Expr::List(items) => Expr::List(
-                items.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            ),
-            Expr::ListLiteralExpr(e) => Expr::ListLiteralExpr(ListLiteralExpr {
-                elements: e.elements.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            }),
-            Expr::MapLiteral(pairs) => Expr::MapLiteral(
-                pairs.iter().map(|(k, v)| (Self::rewrite_cell_identifiers(k, cell_name), Self::rewrite_cell_identifiers(v, cell_name))).collect(),
-            ),
-            Expr::MapLiteralExpr(e) => Expr::MapLiteralExpr(MapLiteralExpr {
-                entries: e.entries.iter().map(|(k, v)| (Self::rewrite_cell_identifiers(k, cell_name), Self::rewrite_cell_identifiers(v, cell_name))).collect(),
-            }),
-            Expr::SetLiteral(items) => Expr::SetLiteral(
-                items.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            ),
-            Expr::SetLiteralExpr(e) => Expr::SetLiteralExpr(SetLiteralExpr {
-                entries: e.entries.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            }),
-            Expr::ListIndex(list, idx) => Expr::ListIndex(
-                Box::new(Self::rewrite_cell_identifiers(list, cell_name)),
-                Box::new(Self::rewrite_cell_identifiers(idx, cell_name)),
-            ),
-            // Slice / MultiSlice
-            Expr::Slice { value, start, end, stride, mask } => Expr::Slice {
-                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
-                start: start.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
-                end: end.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
-                stride: stride.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
-                mask: mask.as_ref().map(|m| Box::new(Self::rewrite_cell_identifiers(m, cell_name))),
-            },
-            Expr::SliceExpr(e) => Expr::SliceExpr(SliceExpr {
-                value: Box::new(Self::rewrite_cell_identifiers(&e.value, cell_name)),
-                start: e.start.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
-                end: e.end.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
-                stride: e.stride.as_ref().map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
-                mask: e.mask.as_ref().map(|m| Box::new(Self::rewrite_cell_identifiers(m, cell_name))),
-            }),
-            Expr::MultiSlice { value, ops } => Expr::MultiSlice {
-                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
-                ops: ops.clone(),
-            },
-            Expr::MultiSliceExpr(e) => Expr::MultiSliceExpr(MultiSliceExpr {
-                value: Box::new(Self::rewrite_cell_identifiers(&e.value, cell_name)),
-                ops: e.ops.clone(),
-            }),
-            // Field access
             Expr::Field(obj, field) => Expr::Field(
                 Box::new(Self::rewrite_cell_identifiers(obj, cell_name)),
                 field.clone(),
             ),
-            Expr::FieldAccessExpr(e) => Expr::FieldAccessExpr(FieldAccessExpr {
-                obj: Box::new(Self::rewrite_cell_identifiers(&e.obj, cell_name)),
-                field: e.field.clone(),
-            }),
-            // Struct / Object
-            Expr::StructInstance(name, fields) => Expr::StructInstance(
-                name.clone(),
-                fields.iter().map(|(n, e)| (n.clone(), Self::rewrite_cell_identifiers(e, cell_name))).collect(),
+            Expr::Index(obj, idx) => Expr::Index(
+                Box::new(Self::rewrite_cell_identifiers(obj, cell_name)),
+                Box::new(Self::rewrite_cell_identifiers(idx, cell_name)),
             ),
-            Expr::StructInstanceExpr(e) => Expr::StructInstanceExpr(StructInstanceExpr {
-                typename: e.typename.clone(),
-                fields: e.fields.iter().map(|(n, e)| (n.clone(), Self::rewrite_cell_identifiers(e, cell_name))).collect(),
-            }),
-            Expr::ObjectLiteral(fields) => Expr::ObjectLiteral(
-                fields.iter().map(|(n, e)| (n.clone(), Self::rewrite_cell_identifiers(e, cell_name))).collect(),
-            ),
-            Expr::ObjectLiteralExpr(e) => Expr::ObjectLiteralExpr(ObjectLiteralExpr {
-                fields: e.fields.iter().map(|(n, e)| (n.clone(), Self::rewrite_cell_identifiers(e, cell_name))).collect(),
-            }),
-            // Pattern / Match
-            Expr::PatternMatch { value, variant, fields } => Expr::PatternMatch {
-                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
-                variant: variant.clone(),
-                fields: fields.clone(),
-            },
-            Expr::PatternMatchExpr(e) => Expr::PatternMatchExpr(PatternMatchExpr {
-                value: Box::new(Self::rewrite_cell_identifiers(&e.value, cell_name)),
-                variant: e.variant.clone(),
-                fields: e.fields.clone(),
-            }),
-            Expr::Match { value, arms } => Expr::Match {
-                value: Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
-                arms: arms.clone(),
-            },
-            Expr::MatchExpr(e) => Expr::MatchExpr(MatchExpr {
-                value: Box::new(Self::rewrite_cell_identifiers(&e.value, cell_name)),
-                arms: e.arms.clone(),
-            }),
-            // Block
-            Expr::Block(stmts, last) => Expr::Block(
+            Expr::Block(stmts) => Expr::Block(
                 stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                Box::new(Self::rewrite_cell_identifiers(last, cell_name)),
             ),
-            Expr::BlockExpr(e) => Expr::BlockExpr(BlockExpr {
-                stmts: e.stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                last: Box::new(Self::rewrite_cell_identifiers(&e.last, cell_name)),
-            }),
-            // Quote / Interpolation
-            Expr::Interpolate(name) => Expr::Interpolate(name.clone()),
-            Expr::InterpolateExpr(e) => Expr::InterpolateExpr(Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
-            Expr::QuoteBlock { statements, trailing_expr } => Expr::QuoteBlock {
-                statements: statements.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                trailing_expr: trailing_expr.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
-            },
-            // Tuple
-            Expr::TupleDestructure(names, expr) => Expr::TupleDestructure(
-                names.clone(),
-                Box::new(Self::rewrite_cell_identifiers(expr, cell_name)),
+            Expr::If(cond, then_, else_) => Expr::If(
+                Box::new(Self::rewrite_cell_identifiers(cond, cell_name)),
+                Box::new(Self::rewrite_cell_identifiers(then_, cell_name)),
+                else_.as_ref().map(|e| Box::new(Self::rewrite_cell_identifiers(e, cell_name))),
             ),
-            Expr::TupleDestructureExpr(e) => Expr::TupleDestructureExpr(TupleDestructureExpr {
-                names: e.names.clone(),
-                expr: Box::new(Self::rewrite_cell_identifiers(&e.expr, cell_name)),
-            }),
-            Expr::Tuple(items) => Expr::Tuple(
-                items.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            ),
-            Expr::TupleExpr(e) => Expr::TupleExpr(TupleExpr {
-                exprs: e.exprs.iter().map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect(),
-            }),
-            // SigCall
-            Expr::SigCall { modifier, expr } => Expr::SigCall {
-                modifier: modifier.clone(),
-                expr: Box::new(Self::rewrite_cell_identifiers(expr, cell_name)),
-            },
-            Expr::SigCallExpr(e) => Expr::SigCallExpr(SigCallExpr {
-                modifier: e.modifier.clone(),
-                expr: Box::new(Self::rewrite_cell_identifiers(&e.expr, cell_name)),
-            }),
-            // Subtype projection
-            Expr::SubtypeProjection { source, ops } => Expr::SubtypeProjection {
-                source: Box::new(Self::rewrite_cell_identifiers(source, cell_name)),
-                ops: ops.clone(),
-            },
-            Expr::SubtypeProjectionExpr(e) => Expr::SubtypeProjectionExpr(SubtypeProjectionExpr {
-                source: Box::new(Self::rewrite_cell_identifiers(&e.source, cell_name)),
-                ops: e.ops.clone(),
-            }),
-            // DBVL
-            Expr::DbvlTable { path, field_names, key_offsets, schema_name } => Expr::DbvlTable {
-                path: path.clone(),
-                field_names: field_names.clone(),
-                key_offsets: key_offsets.clone(),
-                schema_name: schema_name.clone(),
-            },
-            Expr::DbvlTableExpr(e) => Expr::DbvlTableExpr(e.clone()),
-            // Pipe chain
-            Expr::PipeChain(chain) => Expr::PipeChain(PipeChain {
-                initial: Box::new(Self::rewrite_cell_identifiers(&chain.initial, cell_name)),
-                steps: chain.steps.iter().map(|s| PipeStep {
-                    target: Box::new(Self::rewrite_cell_identifiers(&s.target, cell_name)),
-                    skip: s.skip,
+            Expr::Match(value, arms) => Expr::Match(
+                Box::new(Self::rewrite_cell_identifiers(value, cell_name)),
+                arms.iter().map(|arm| crate::ast::MatchArm {
+                    pattern: arm.pattern.clone(),
+                    guard: arm.guard.as_ref()
+                        .map(|g| Self::rewrite_cell_identifiers(g, cell_name)),
+                    body: Box::new(Self::rewrite_cell_identifiers(&arm.body, cell_name)),
                 }).collect(),
-            }),
-            Expr::Within { body, fallback, .. } => Expr::Within {
-                body: Box::new(Self::rewrite_cell_identifiers(body, cell_name)),
-                bound: 0, retries: 0, unit: crate::ast::TimeUnit::Cycles,
-                fallback: Box::new(Self::rewrite_cell_identifiers(fallback, cell_name)),
-            },
-            // 2026-07-11: Phase 5 — deferred literal carries no cell identifiers
-            Expr::DeferredLiteral { text, expected_type } => Expr::DeferredLiteral {
-                text: text.clone(),
-                expected_type: expected_type.clone(),
-            },
+            ),
+            Expr::Tuple(items) | Expr::List(items) => Self::rewrite_tuple_or_list(expr, items, cell_name),
+            Expr::Lambda(params, body) => Expr::Lambda(
+                params.clone(),
+                Box::new(Self::rewrite_cell_identifiers(body, cell_name)),
+            ),
+            Expr::Cast(e, ty) => Expr::Cast(
+                Box::new(Self::rewrite_cell_identifiers(e, cell_name)),
+                ty.clone(),
+            ),
+            Expr::IsType(e, ty) => Expr::IsType(
+                Box::new(Self::rewrite_cell_identifiers(e, cell_name)),
+                ty.clone(),
+            ),
+            Expr::Within(body, fallback) => Expr::Within(
+                Box::new(Self::rewrite_cell_identifiers(body, cell_name)),
+                Box::new(Self::rewrite_cell_identifiers(fallback, cell_name)),
+            ),
+            Expr::DerivationBlock(db) => Self::rewrite_derivation(db, cell_name),
         }
     }
 
+    /// Shared helper for Tuple/List rewrite to avoid duplicating the
+    /// match-guard logic in the parent function.
+    fn rewrite_tuple_or_list(expr: &Expr, items: &[Expr], cell_name: &str) -> Expr {
+        let mapped: Vec<Expr> = items.iter()
+            .map(|a| Self::rewrite_cell_identifiers(a, cell_name)).collect();
+        if matches!(expr, Expr::Tuple(_)) {
+            Expr::Tuple(mapped)
+        } else {
+            Expr::List(mapped)
+        }
+    }
+
+    /// Rewrite identifiers inside a DerivationBlock.
+    fn rewrite_derivation(db: &crate::ast::DerivationBlock, cell_name: &str) -> Expr {
+        Expr::DerivationBlock(crate::ast::DerivationBlock {
+            examples: db.examples.iter().map(|ex| crate::ast::DerivationExample {
+                inputs: ex.inputs.iter()
+                    .map(|i| Self::rewrite_cell_identifiers(i, cell_name)).collect(),
+                output: Box::new(Self::rewrite_cell_identifiers(&ex.output, cell_name)),
+                span: ex.span,
+            }).collect(),
+            synthesized: db.synthesized.as_ref()
+                .map(|s| Box::new(Self::rewrite_cell_identifiers(s, cell_name))),
+            span: db.span,
+        })
+    }
+
+    /// Rewrite all identifiers in a statement with a cell prefix.
     pub(super) fn rewrite_cell_stmt_identifiers(stmt: &Statement, cell_name: &str) -> Statement {
         match stmt {
-            Statement::Assignment { lhs, expr, timeout, modifiers } => Statement::Assignment {
-                lhs: Self::rewrite_cell_identifiers(lhs, cell_name),
-                expr: Self::rewrite_cell_identifiers(expr, cell_name),
-                timeout: timeout.clone(),
-                modifiers: modifiers.clone(),
-            },
-            Statement::Unification { name, variant, fields, expr } => Statement::Unification {
-                name: name.clone(),
-                variant: variant.clone(),
-                fields: fields.clone(),
-                expr: Self::rewrite_cell_identifiers(expr, cell_name),
-            },
-            Statement::Guarded { condition, statements, .. } => Statement::Guarded {
-                condition: Self::rewrite_cell_identifiers(condition, cell_name),
-                statements: statements.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                metadata: HashMap::new(),
-            },
-            Statement::Term { values, swan_song, modifiers } => Statement::Term {
-                values: values.iter().map(|v| v.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name))).collect(),
-                swan_song: swan_song.as_ref().map(|s| Box::new(Self::rewrite_cell_stmt_identifiers(s, cell_name))),
-                modifiers: modifiers.clone(),
-            },
-            Statement::TermBang { values, swan_song, modifiers } => Statement::TermBang {
-                values: values.iter().map(|v| v.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name))).collect(),
-                swan_song: swan_song.as_ref().map(|s| Box::new(Self::rewrite_cell_stmt_identifiers(s, cell_name))),
-                modifiers: modifiers.clone(),
-            },
-            Statement::Escape(expr) => Statement::Escape(
-                expr.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
-            ),
-            Statement::Expression(expr) => Statement::Expression(
+            Statement::Assign(lhs, expr) => Statement::Assign(
+                Self::rewrite_cell_identifiers(lhs, cell_name),
                 Self::rewrite_cell_identifiers(expr, cell_name),
             ),
-            Statement::Let { name, ty, expr, address, address_expr, bit_range, constraint, is_override, modifiers } => Statement::Let {
+            Statement::Guarded(cond, stmts) => Statement::Guarded(
+                Self::rewrite_cell_identifiers(cond, cell_name),
+                stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+            ),
+            Statement::Term(e) => Statement::Term(e.as_ref()
+                .map(|e| Self::rewrite_cell_identifiers(e, cell_name))),
+            Statement::TermBang(e) => Statement::TermBang(e.as_ref()
+                .map(|e| Self::rewrite_cell_identifiers(e, cell_name))),
+            Statement::Return(e) => Statement::Return(e.as_ref()
+                .map(|e| Self::rewrite_cell_identifiers(e, cell_name))),
+            Statement::Escape(e) => Statement::Escape(e.as_ref()
+                .map(|e| Self::rewrite_cell_identifiers(e, cell_name))),
+            Statement::Expression(e) => {
+                Statement::Expression(Self::rewrite_cell_identifiers(e, cell_name))
+            }
+            Statement::Let { name, ty, expr, modifiers } => Statement::Let {
                 name: name.clone(),
                 ty: ty.clone(),
-                expr: expr.as_ref().map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
-                address: *address,
-                address_expr: address_expr.as_ref().map(|a| Box::new(Self::rewrite_cell_identifiers(a, cell_name))),
-                bit_range: bit_range.clone(),
-                constraint: constraint.as_ref().map(|c| Box::new(Self::rewrite_cell_identifiers(c, cell_name))),
-                is_override: *is_override,
+                expr: expr.as_ref()
+                    .map(|e| Self::rewrite_cell_identifiers(e, cell_name)),
                 modifiers: modifiers.clone(),
             },
-            Statement::InlineAsm { asm_string, clobbers, span } => Statement::InlineAsm {
-                asm_string: asm_string.clone(),
-                clobbers: clobbers.clone(),
-                span: *span,
-            },
-            Statement::TrgBinding { name, ty, instance, port, modifiers } => Statement::TrgBinding {
+            Statement::If(cond, then_b, else_b) => Statement::If(
+                Self::rewrite_cell_identifiers(cond, cell_name),
+                then_b.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+                else_b.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+            ),
+            Statement::Block(stmts) => Statement::Block(
+                stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+            ),
+            Statement::SyncBlock(stmts) => Statement::SyncBlock(
+                stmts.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
+            ),
+            Statement::InlineAsm { .. } => stmt.clone(),
+            Statement::TrgBinding { name, instance, port } => Statement::TrgBinding {
                 name: name.clone(),
-                ty: ty.clone(),
                 instance: Self::rewrite_cell_identifiers(instance, cell_name),
                 port: port.clone(),
-                modifiers: modifiers.clone(),
             },
-            Statement::SyncBlock { body } => Statement::SyncBlock {
-                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-            },
-            Statement::Foreach { item, list, body, modifiers } => Statement::Foreach {
+            Statement::Foreach { item, list, body } => Statement::Foreach {
                 item: item.clone(),
                 list: Box::new(Self::rewrite_cell_identifiers(list, cell_name)),
-                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                modifiers: modifiers.clone(),
+                body: body.iter()
+                    .map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
             },
-            Statement::Oracle { handler, body, span } => Statement::Oracle {
-                handler: handler.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                body: body.iter().map(|s| Self::rewrite_cell_stmt_identifiers(s, cell_name)).collect(),
-                span: *span,
-            },
-            Statement::Await { expr, modifiers } => Statement::Await {
-                expr: Self::rewrite_cell_identifiers(expr, cell_name),
-                modifiers: modifiers.clone(),
-            },
-            Statement::Async { body, modifiers } => Statement::Async {
-                body: Box::new(Self::rewrite_cell_stmt_identifiers(body, cell_name)),
-                modifiers: modifiers.clone(),
-            },
-            Statement::AsyncAwait { body, lhs, modifiers } => Statement::AsyncAwait {
-                body: Box::new(Self::rewrite_cell_stmt_identifiers(body, cell_name)),
-                lhs: lhs.clone(),
-                modifiers: modifiers.clone(),
-            },
+            Statement::MetadataAssignment(..) => stmt.clone(),
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Section 2: Metadata & Structure
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Extract all output variable names from an `OutputType` tree.
+    /// Recursively collects names from Named, Tuple, and Union wrappers.
     pub(super) fn extract_output_names_llvm(ot: &Option<OutputType>) -> Vec<String> {
+        let Some(ot) = ot else { return Vec::new(); };
         match ot {
-            Some(OutputType::Named(name, inner)) => {
+            OutputType::Named(name, inner) => {
                 let mut names = vec![name.clone()];
                 names.extend(Self::extract_output_names_llvm(&Some(inner.as_ref().clone())));
                 names
             }
-            Some(OutputType::Tuple(types)) => {
+            OutputType::Tuple(types) | OutputType::Union(types) => {
                 types.iter().flat_map(|t| Self::extract_output_names_llvm(&Some(t.clone()))).collect()
             }
-            Some(OutputType::Union(types)) => {
-                types.iter().flat_map(|t| Self::extract_output_names_llvm(&Some(t.clone()))).collect()
-            }
-            Some(OutputType::Single(_)) | Some(OutputType::Array(_)) | None => Vec::new(),
+            OutputType::Single(_) | OutputType::Array(_) => Vec::new(),
         }
     }
 
-    /// Emit a main() that stores final precomputed values and returns.
+    /// Emit a `main()` that stores final precomputed values and returns.
     /// A000: no runtime loop, no iteration. The region analyzer simulated
-    /// all transactions within --optimize-budget and produced final values.
+    /// all transactions within `--optimize-budget` and produced final values.
     /// This is the most extreme optimization: zero runtime memory traffic.
     pub(crate) fn emit_precomputed_main(
         &mut self,
         out: &mut String,
-        final_values: &[(Vec<String>, std::collections::HashMap<String, i64>)],
+        final_values: &[(Vec<String>, HashMap<String, i64>)],
     ) {
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "  entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();
         self.emit_inline_init_stores(out, "%state");
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        for (_, bindings) in final_values {
+        for (_txn_id, bindings) in final_values {
             for (var, val) in bindings {
-                if !seen.insert(var) { continue; }
+                if !seen.insert(var) {
+                    continue;
+                }
                 if let Some(&idx) = self.ctx.field_index_map.get(var) {
                     let ty = &self.ctx.field_types[idx];
-                    writeln!(out, "  %gp_{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", var, idx).ok();
-                    match ty.as_str() {
-                        "float" => {
-                            let bits = *val as i32 as u32;
-                            writeln!(out, "  store float bitcast (i32 {} to float), ptr %gp_{}, align 4", bits, var).ok();
-                        }
-                        "i8" => {
-                            writeln!(out, "  store i8 {}, ptr %gp_{}, align 1", val, var).ok();
-                        }
-                        _ => {
-                            writeln!(out, "  store i64 {}, ptr %gp_{}, align 8", val, var).ok();
-                        }
-                    }
+                    let gp = format!("%gp_{}", var);
+                    writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}", gp, idx).ok();
+                    Self::emit_precomputed_store(out, &gp, ty, val);
                 } else if let Some(&addr) = self.ctx.mmio_fields.get(var) {
-                    self.emit_inttoptr(out, "  ", &format!("%gp_{}", var), &addr.to_string());
+                    let gp = format!("%gp_{}", var);
+                    self.emit_inttoptr(out, "  ", &gp, &addr.to_string());
                     writeln!(out, "  store volatile i64 {}, ptr %gp_{}, align 1", val, var).ok();
                 }
             }
@@ -466,38 +248,57 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
-    // ── WAKE TRIGGER METADATA ─────────────────────────────────
+    /// Emit a single store for a precomputed field value.
+    fn emit_precomputed_store(out: &mut String, gp: &str, ty: &str, val: &i64) {
+        match ty.as_str() {
+            "float" => {
+                let bits = *val as i32 as u32;
+                writeln!(out, "  store float bitcast (i32 {} to float), ptr {}, align 4", bits, gp).ok();
+            }
+            "i8" => {
+                writeln!(out, "  store i8 {}, ptr {}, align 1", val, gp).ok();
+            }
+            _ => {
+                writeln!(out, "  store i64 {}, ptr {}, align 8", val, gp).ok();
+            }
+        }
+    }
+
+    /// Emit LLVM wake trigger metadata.
+    /// 2026-07-13: Currently emits empty metadata (wake_triggers pending
+    /// implementation in the reactive scheduler).
     pub(crate) fn emit_wake_metadata(&self, out: &mut String) {
-        let wake_symbols: Vec<&str> = self.ctx.triggers.values()
-            .filter(|t| t.is_wake)
-            .filter_map(|t| match &t.address {
-                crate::ast::LinkRef::Linked(s) => Some(s.as_str()),
-                _ => None,
-            })
-            .collect();
-        if wake_symbols.is_empty() { return; }
+        let wake_symbols: Vec<&str> = Vec::new();
+        if wake_symbols.is_empty() {
+            return;
+        }
         let count = wake_symbols.len();
         let sym_list = wake_symbols.iter().map(|s| format!("ptr @{}", s)).collect::<Vec<_>>().join(", ");
         writeln!(out, "@llvm.wake_triggers = constant [{} x ptr] [{}]", count, sym_list).ok();
         writeln!(out, "!llvm.wake_triggers = !{{!6}}").ok();
         write!(out, "!6 = !{{").ok();
         for (i, sym) in wake_symbols.iter().enumerate() {
-            if i > 0 { write!(out, ", ").ok(); }
+            if i > 0 {
+                write!(out, ", ").ok();
+            }
             write!(out, "!\"{}\"", sym).ok();
         }
         writeln!(out, "}}").ok();
     }
 
-    // ── THREAD POOL METADATA ────────────────────────────────
+    /// Emit LLVM thread pool metadata for async transactions.
+    /// Generates a constant array of function pointers consumed by
+    /// `brief_thread_pool_init` at startup.
     pub(crate) fn emit_thread_pool_metadata(&self, out: &mut String) {
-        if !self.has_async_txns || self.is_lightweight_async { return; }
+        if !self.has_async_txns || self.is_lightweight_async {
+            return;
+        }
         let count = self.async_txn_names.len();
         let fn_list: Vec<String> = self.async_txn_names.iter()
             .map(|n| format!("i8* bitcast (void (ptr)* @async_body_{} to ptr)", n))
             .collect();
         writeln!(out, "@llvm.thread_pool = constant [{} x ptr] [{}]",
             count, fn_list.join(", ")).ok();
-        // Emit a packed array of function pointers for brief_thread_pool_init
         writeln!(out, "@thread_pool_fns = private constant [{} x void (ptr)*] [{}]",
             count,
             self.async_txn_names.iter()
@@ -507,49 +308,77 @@ impl LlvmBackend {
     }
 
     /// Emit the async phase calls in main: set state for workers, release
-    /// workers, wait for workers. Used by emit_main and emit_enum_main.
+    /// workers, wait for workers.
     ///
-    /// 2026-07-01: reactor_tick is now a no-op when the thread pool is active.
-    /// The worker threads execute async bodies on the correct state snapshot
-    /// (set via __set_async_state__), synchronized by the dual barriers.
+    /// 2026-07-01: `reactor_tick` is now a no-op when the thread pool is
+    /// active. Worker threads execute async bodies on the correct state
+    /// snapshot (set via `__set_async_state__`), synchronized by barriers.
     pub(crate) fn emit_async_phase(&self, out: &mut String, state_var: &str) {
-        if !self.has_async_txns || self.is_lightweight_async { return; }
+        if !self.has_async_txns || self.is_lightweight_async {
+            return;
+        }
         writeln!(out, "  call void @__set_async_state__(ptr {})", state_var).ok();
         writeln!(out, "  call void @__barrier_release__()").ok();
-        // reactor_tick is a no-op (workers handle the work).
         writeln!(out, "  call void @reactor_tick(ptr noalias nocapture {})", state_var).ok();
         writeln!(out, "  call void @__barrier_wait__()").ok();
     }
 
-    // ── FUSABLE PAIRS ────────────────────────────────────────
-    pub(crate) fn resolve_fusable_pairs(&self, txns: &[(String, &crate::ast::Transaction)]) -> Vec<(String, String)> {
-        let prg = crate::ast::Program {
-            items: txns.iter().map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect(),
-            comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: crate::ast::StrictMode::Off, dispatch_mode: crate::ast::DispatchMode::Sequential, exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None),
-        };
-        let mut pairs = crate::backend::detect_fusable_pairs(&prg);
+    /// Detect pairs of reactive transactions that can be fused.
+    /// Fusion requires: both reactive, non-async, non-overlapping writes,
+    /// no trigger references in the second's precondition.
+    pub(crate) fn resolve_fusable_pairs(
+        &self,
+        txns: &[(String, &crate::ast::Transaction)],
+    ) -> Vec<(String, String)> {
+        let items: Vec<crate::ast::TopLevel> = txns.iter()
+            .map(|(_, t)| crate::ast::TopLevel::Transaction((*t).clone())).collect();
+        let mut pairs = crate::backend::detect_fusable_pairs(&items);
         pairs.retain(|(a, b)| {
-            if let (Some((_, ta)), Some((_, tb))) = (txns.iter().find(|(n, _)| n == a), txns.iter().find(|(n, _)| n == b)) {
-                if ta.is_async || tb.is_async { return false; }
-                // Skip callable txns — they don't use ptr, can't be fused with reactive txns
-                if !ta.is_reactive || !tb.is_reactive { return false; }
-                let aw = crate::backend::collect_assigned_identifiers(&ta.body);
-                let bw = crate::backend::collect_assigned_identifiers(&tb.body);
-                if aw.iter().any(|w| bw.contains(w)) { return false; }
-                if self.trg_in_pre(&tb.contract.pre_condition) { return false; }
-                true
-            } else { false }
+            let Some((_, ta)) = txns.iter().find(|(n, _)| n == a) else { return false; };
+            let Some((_, tb)) = txns.iter().find(|(n, _)| n == b) else { return false; };
+            if ta.is_async || tb.is_async {
+                return false;
+            }
+            if !ta.is_reactive || !tb.is_reactive {
+                return false;
+            }
+            let aw = crate::backend::collect_assigned_identifiers(&ta.body);
+            let bw = crate::backend::collect_assigned_identifiers(&tb.body);
+            if aw.iter().any(|w| bw.contains(w)) {
+                return false;
+            }
+            if self.trg_in_pre(&tb.contract.pre_condition) {
+                return false;
+            }
+            true
         });
         pairs
     }
 
+    /// Check if any trigger name appears in a precondition expression.
     pub(crate) fn trg_in_pre(&self, pre: &Expr) -> bool {
         let mut ids = std::collections::HashSet::new();
         crate::backend::collect_expr_identifiers(pre, &mut ids);
         ids.iter().any(|id| self.ctx.trigger_names.contains(id))
     }
 
-    pub(crate) fn emit_cast_convert(&mut self, out: &mut String, indent: &str, dst: &str, src: &str, src_ty: Option<Type>, target: &Type) {
+    // ═══════════════════════════════════════════════════════════════
+    // Section 3: Cast & Type Conversion
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit LLVM IR for a type cast between Brief types.
+    /// Handles the full matrix of Int/Float/Bool/Char/String conversions.
+    /// Falls back to identity (add i64 0, src) when the types match or
+    /// no conversion is known.
+    pub(crate) fn emit_cast_convert(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        dst: &str,
+        src: &str,
+        src_ty: Option<Type>,
+        target: &Type,
+    ) {
         let src_ty = match src_ty {
             Some(t) => t,
             None => {
@@ -561,147 +390,178 @@ impl LlvmBackend {
             let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             return;
         }
-        match (&src_ty, target) {
-            (Type::Custom(__t), Type::Custom(__s)) if (__t == "Int" || __t == "UInt") && __s == "Float" => {
-                // 2026-06-17: Native float, not boxed i64. Downstream
-                // code (emit_binop, enum constructors) converts to/from
-                // i64 as needed via ensure_float_reg / native_float_or_box.
+        let (src_name, target_name) = match (&src_ty, target) {
+            (Type::Custom(s), Type::Custom(t)) => (s.as_str(), t.as_str()),
+            _ => {
+                let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
+                return;
+            }
+        };
+        self.emit_typed_cast(out, indent, dst, src, src_name, target_name);
+    }
+
+    /// Dispatch to the correct cast emission based on (src, target) pair.
+    /// 2026-07-13: Each cast pair extracted into a named helper for
+    /// clarity and to keep nesting ≤ 2 levels.
+    fn emit_typed_cast(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        dst: &str,
+        src: &str,
+        src_name: &str,
+        target_name: &str,
+    ) {
+        match (src_name, target_name) {
+            ("Int" | "UInt", "Float") => {
                 let _ = writeln!(out, "{}{} = sitofp i64 {} to float", indent, dst, src);
             }
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Float" && (__s == "Int" || __s == "UInt") => {
-                let tr = format!("%ctr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let fl = format!("%cfl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
-                let _ = writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr);
-                let _ = writeln!(out, "{}{} = fptosi float {} to i64", indent, dst, fl);
-            }
-            (Type::Custom(__t), Type::Custom(__s)) if (__t == "Int" || __t == "UInt") && __s == "Bool" => {
-                let ci = format!("%ccb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
-                let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
-            }
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Bool" && (__s == "Int" || __s == "UInt") => {
+            ("Float", "Int" | "UInt") => self.cast_float_to_int(out, indent, dst, src),
+            ("Int" | "UInt", "Bool") => self.cast_to_bool(out, indent, dst, src),
+            ("Bool", "Int" | "UInt") => {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             }
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Float" && __s == "Bool" => {
-                let tr = format!("%cfbtr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let fl = format!("%cfbfl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let ci = format!("%cfbci{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
-                let _ = writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr);
-                let _ = writeln!(out, "{}{} = fcmp fast une float {}, 0.0", indent, ci, fl);
-                let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
-            }
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Bool" && __s == "Float" => {
-                let ci = format!("%cbfci{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let fl = format!("%cbffl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let fi = format!("%cbffi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
-                let _ = writeln!(out, "{}{} = select i1 {}, float 1.000000e+00, float 0.000000e+00", indent, fl, ci);
-                let _ = writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fl);
-                let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, fi);
-            }
-            // Char ↔ Bool
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Char" && __s == "Bool" => {
-                let ci = format!("%cci{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
-                let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
-            }
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Bool" && __s == "Char" => {
+            ("Float", "Bool") => self.cast_float_to_bool(out, indent, dst, src),
+            ("Bool", "Float") => self.cast_bool_to_float(out, indent, dst, src),
+            ("Char", "Bool") => self.cast_to_bool(out, indent, dst, src),
+            ("Bool", "Char") => {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             }
-            // Char ↔ Int
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Char" && (__s == "Int" || __s == "UInt") => {
+            ("Char", "Int" | "UInt") => {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             }
-            (Type::Custom(__t), Type::Custom(__s)) if (__t == "Int" || __t == "UInt") && __s == "Char" => {
+            ("Int" | "UInt", "Char") => {
                 let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, dst, src);
             }
-            // Char ↔ String (construct Brief string struct {cap, len, data})
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Char" && __s == "String" => {
-                let tr = format!("%cctr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
-                let alloc = format!("%ccac{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = call ptr @malloc(i64 24)", indent, alloc);
-                let hp = format!("%cchp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hp, alloc);
-                let base = format!("%ccba{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base, alloc);
-                let dp = format!("%ccdp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base);
-                let _ = writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, hp);
-                let ls = format!("%ccls{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ls, hp);
-                let _ = writeln!(out, "{}store i64 1, ptr {}, align 8", indent, ls);
-                let cs = format!("%cccs{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, cs, alloc);
-                let tb = format!("%cctb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = trunc i32 {} to i8", indent, tb, tr);
-                let _ = writeln!(out, "{}store i8 {}, ptr {}, align 1", indent, tb, cs);
-                let nt = format!("%ccnt{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 17", indent, nt, alloc);
-                let _ = writeln!(out, "{}store i8 0, ptr {}, align 1", indent, nt);
-                let _ = writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dst, alloc);
-            }
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "String" && __s == "Char" => {
-                let ip = format!("%csip{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                self.emit_inttoptr(out, indent, &ip, &src);
-                let lb = format!("%cslb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, lb, ip);
-                let _ = writeln!(out, "{}{} = zext i8 {} to i64", indent, dst, lb);
-            }
-            // Int ↔ String (via existing __int_to_str)
-            (Type::Custom(__t), Type::Custom(__s)) if (__t == "Int" || __t == "UInt") && __s == "String" => {
+            ("Char", "String") => self.cast_char_to_string(out, indent, dst, src),
+            ("String", "Char") => self.cast_string_to_char(out, indent, dst, src),
+            ("Int" | "UInt", "String") => {
                 let _ = writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, dst, src);
             }
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "String" && (__s == "Int" || __s == "UInt") => {
-                let ip = format!("%csii{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                self.emit_inttoptr(out, indent, &ip, &src);
-                let _ = writeln!(out, "{}{} = call i64 @__str_to_int(i8* {})", indent, dst, ip);
-            }
-            // String ↔ Bool (non-empty is true)
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "String" && __s == "Bool" => {
-                let ip = format!("%csbi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let lb = format!("%csbl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let ci = format!("%csbc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                self.emit_inttoptr(out, indent, &ip, &src);
-                let _ = writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, lb, ip);
-                let _ = writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, ci, lb);
-                let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
-            }
-            (Type::Custom(__t), Type::Custom(__s)) if __t == "Bool" && __s == "String" => {
-                let ci = format!("%cbsc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let ip = format!("%cbsi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
-                let _ = writeln!(out, "{}{} = call i8* @__chr_to_str(i32 {})", indent, ip, ci);
-                let _ = writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dst, ip);
-            }
+            ("String", "Int" | "UInt") => self.cast_string_to_int(out, indent, dst, src),
+            ("String", "Bool") => self.cast_string_to_bool(out, indent, dst, src),
+            ("Bool", "String") => self.cast_bool_to_string(out, indent, dst, src),
             _ => {
                 let _ = writeln!(out, "{}{} = add i64 0, {}", indent, dst, src);
             }
         }
     }
 
+    fn cast_float_to_int(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let tr = self.next_reg_with_prefix("cfltr");
+        let fl = self.next_reg_with_prefix("cflfl");
+        let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
+        let _ = writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr);
+        let _ = writeln!(out, "{}{} = fptosi float {} to i64", indent, dst, fl);
+    }
+
+    fn cast_to_bool(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let ci = self.next_reg_with_prefix("ccb");
+        let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
+        let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
+    }
+
+    fn cast_float_to_bool(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let tr = self.next_reg_with_prefix("cfbtr");
+        let fl = self.next_reg_with_prefix("cfbfl");
+        let ci = self.next_reg_with_prefix("cfbci");
+        let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
+        let _ = writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr);
+        let _ = writeln!(out, "{}{} = fcmp fast une float {}, 0.0", indent, ci, fl);
+        let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
+    }
+
+    fn cast_bool_to_float(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let ci = self.next_reg_with_prefix("cbfci");
+        let fl = self.next_reg_with_prefix("cbffl");
+        let fi = self.next_reg_with_prefix("cbffi");
+        let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
+        let _ = writeln!(out, "{}{} = select i1 {}, float 1.000000e+00, float 0.000000e+00", indent, fl, ci);
+        let _ = writeln!(out, "{}{} = bitcast float {} to i32", indent, fi, fl);
+        let _ = writeln!(out, "{}{} = zext i32 {} to i64", indent, dst, fi);
+    }
+
+    fn cast_char_to_string(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let tr = self.next_reg_with_prefix("cctr");
+        let _ = writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, src);
+        let alloc = self.next_reg_with_prefix("ccac");
+        let _ = writeln!(out, "{}{} = call ptr @malloc(i64 24)", indent, alloc);
+        let hp = self.next_reg_with_prefix("cchp");
+        let _ = writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hp, alloc);
+        let base = self.next_reg_with_prefix("ccba");
+        let _ = writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base, alloc);
+        let dp = self.next_reg_with_prefix("ccdp");
+        let _ = writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base);
+        let _ = writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, hp);
+        let ls = self.next_reg_with_prefix("ccls");
+        let _ = writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ls, hp);
+        let _ = writeln!(out, "{}store i64 1, ptr {}, align 8", indent, ls);
+        let cs = self.next_reg_with_prefix("cccs");
+        let _ = writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, cs, alloc);
+        let tb = self.next_reg_with_prefix("cctb");
+        let _ = writeln!(out, "{}{} = trunc i32 {} to i8", indent, tb, tr);
+        let _ = writeln!(out, "{}store i8 {}, ptr {}, align 1", indent, tb, cs);
+        let nt = self.next_reg_with_prefix("ccnt");
+        let _ = writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 17", indent, nt, alloc);
+        let _ = writeln!(out, "{}store i8 0, ptr {}, align 1", indent, nt);
+        let _ = writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dst, alloc);
+    }
+
+    fn cast_string_to_char(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let ip = self.next_reg_with_prefix("csip");
+        self.emit_inttoptr(out, indent, &ip, &src);
+        let lb = self.next_reg_with_prefix("cslb");
+        let _ = writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, lb, ip);
+        let _ = writeln!(out, "{}{} = zext i8 {} to i64", indent, dst, lb);
+    }
+
+    fn cast_string_to_int(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let ip = self.next_reg_with_prefix("csii");
+        self.emit_inttoptr(out, indent, &ip, &src);
+        let _ = writeln!(out, "{}{} = call i64 @__str_to_int(i8* {})", indent, dst, ip);
+    }
+
+    fn cast_string_to_bool(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let ip = self.next_reg_with_prefix("csbi");
+        let lb = self.next_reg_with_prefix("csbl");
+        let ci = self.next_reg_with_prefix("csbc");
+        self.emit_inttoptr(out, indent, &ip, &src);
+        let _ = writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, lb, ip);
+        let _ = writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, ci, lb);
+        let _ = writeln!(out, "{}{} = zext i1 {} to i64", indent, dst, ci);
+    }
+
+    fn cast_bool_to_string(&mut self, out: &mut String, indent: &str, dst: &str, src: &str) {
+        let ci = self.next_reg_with_prefix("cbsc");
+        let ip = self.next_reg_with_prefix("cbsi");
+        let _ = writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, ci, src);
+        let _ = writeln!(out, "{}{} = call i8* @__chr_to_str(i32 {})", indent, ip, ci);
+        let _ = writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, dst, ip);
+    }
+
+    /// Convert an i64 boxed float to a native float register.
+    /// Checks the `reg_float_cache` first to avoid duplicate bitcast chains.
     pub(crate) fn i64_to_float_reg(&mut self, out: &mut String, reg: &str, indent: &str) -> String {
-        // Check cache first: these are actual float registers from SSA extraction
-        // or float literal caching. Do NOT check register_types here — that map
-        // tracks Brief-level float semantics, not LLVM type (boxed as i64).
         if let Some(cached) = self.fun.reg_float_cache.get(reg) {
             return cached.clone();
         }
-        let tr = format!("%ftr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        let fl = format!("%ffl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        let tr = self.next_reg_with_prefix("ftr");
+        let fl = self.next_reg_with_prefix("ffl");
         writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, reg).ok();
         writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
         fl
     }
 
-    /// If `reg` is an i64 (Int), truncate to i1. Otherwise return its name as-is.
-    pub(super) fn as_bool_reg(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
-        // Phase 2: property system with legacy fallback
+    /// Truncate an i64 (Int) register to i1 (Bool) for branch conditions.
+    /// Non-Int types pass through as-is (already bool-width).
+    pub(super) fn as_bool_reg(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        reg: &TypedRegister,
+    ) -> String {
         if type_is(&self.ctx.type_universe, &reg.ty, "Int") {
-            let t = format!("%tb{}", self.fun.txn_counter);
-            self.fun.txn_counter += 1;
+            let t = self.next_reg_with_prefix("tb");
             writeln!(out, "{}{} = trunc i64 {} to i1", indent, t, reg.name).ok();
             t
         } else {
@@ -710,11 +570,12 @@ impl LlvmBackend {
     }
 
     /// Convert a String/Data typed register to i64 for C ABI calls.
-    /// Int/Bool/Char/Float registers are passed through as-is.
+    /// Int/Bool/Char/Float registers pass through as-is.
     fn ptrtoint_if_string(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
         if type_is(&self.ctx.type_universe, &reg.ty, "String")
-            || type_is(&self.ctx.type_universe, &reg.ty, "Data") {
-            let p = format!("%ptri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            || type_is(&self.ctx.type_universe, &reg.ty, "Data")
+        {
+            let p = self.next_reg_with_prefix("ptri");
             writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p, reg.name).ok();
             p
         } else {
@@ -722,349 +583,598 @@ impl LlvmBackend {
         }
     }
 
-    /// Emit inline string concatenation: malloc + header setup + memcpy + free.
-    /// Both operands are i8* (Brief header pointers). Returns i8*.
-    ///
-    /// Tag convention (2026-06-19):
-    ///   bit 0 = static string constant (don't free, don't read header at -16)
-    ///   bit 1 = temporary concat result (safe to free when consumed)
-    /// State-loaded strings have both bits clear (heap, state-owned).
-    /// Only concat results get bit 1 set.
-    //
-    // Why inline string concat instead of calling sprintf/strcat: the compiler
-    // knows each operand's length at emit time (from header slot 1), so it can
-    // compute the total allocation size and emit memcpy calls that LLVM can
-    // lower to rep movsb or inline. sprintf would need to scan for null
-    // terminators at runtime, losing the length information.
-    //
-    // Tag bits: bit 0 = static string constant (from .rodata, don't free),
-    // bit 1 = temporary concat result (safe to free when consumed).
-    // State-loaded strings have both bits clear. The tag convention avoids
-    // separate tracking data structures.
-    pub(crate) fn emit_inline_concat(&mut self, out: &mut String, indent: &str, a: &TypedRegister, b: &TypedRegister) -> TypedRegister {
-        let a_boxed = self.adapt_to_i64(out, indent, a);
-        let b_boxed = self.adapt_to_i64(out, indent, b);
-        // Mask off tag bits (bit 0 = static, bit 1 = temp) before reading headers
-        let a_clean = format!("%cam{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, -4", indent, a_clean, a_boxed).ok();
-        let b_clean = format!("%cbm{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = and i64 {}, -4", indent, b_clean, b_boxed).ok();
-        let ha = format!("%cha{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        self.emit_inttoptr(out, indent, &ha, &a_clean);
-        let la_ptr = format!("%clp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, la_ptr, ha).ok();
-        let la = format!("%cla{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, la, la_ptr).ok();
-        let hb = format!("%chb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        self.emit_inttoptr(out, indent, &hb, &b_clean);
-        let lb_ptr = format!("%clq{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lb_ptr, hb).ok();
-        let lb = format!("%clb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, lb, lb_ptr).ok();
-        let total = format!("%ctl{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = add i64 {}, {}", indent, total, la, lb).ok();
-        // Tight packing: 16 byte header + total chars + 1 null byte
-        let header_size = format!("%chs{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = add i64 16, {}", indent, header_size, total).ok();
-        let alloc_size = format!("%cas{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = add i64 {}, 1", indent, alloc_size, header_size).ok();
-        let result = self.emit_arena_alloc(out, indent, &alloc_size);
-        let hp = format!("%chp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hp, result).ok();
-        let base = format!("%cba{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base, result).ok();
-        let dp = format!("%cdp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, hp).ok();
-        let len_slot = format!("%cls{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, len_slot, hp).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, total, len_slot).ok();
-        let a_dp = format!("%cad{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, a_dp, ha).ok();
-        let a_chars = format!("%cac{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        self.emit_inttoptr(out, indent, &a_chars, &a_dp);
-        let dest_start = format!("%cds{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, dest_start, result).ok();
-        writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)", indent, dest_start, a_chars, la).ok();
-        let dest_off = format!("%cdo{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, dest_off, dest_start, la).ok();
-        let b_dp = format!("%cbd{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, b_dp, hb).ok();
-        let b_chars = format!("%cbc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        self.emit_inttoptr(out, indent, &b_chars, &b_dp);
-        writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)", indent, dest_off, b_chars, lb).ok();
-        // Null terminate
-        let nt = format!("%cnt{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, nt, dest_start, total).ok();
-        writeln!(out, "{}store i8 0, ptr {}, align 1", indent, nt).ok();
-        // Free heap-allocated operands that are temporaries (bit 1 set).
-        // When arena is active, the arena owns all allocations — skip.
-        // Static constants (bit 0=1) and state fields (bit 0=0,bit 1=0) are
-        // always preserved regardless of arena mode.
-        if self.fun.arena_slots.is_none() {
-            let tag_a = format!("%cta{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = and i64 {}, 2", indent, tag_a, a_boxed).ok();
-            let is_temp_a = format!("%cia{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp_a, tag_a).ok();
-            let free_a_label = format!("free_a_{}", self.fun.txn_counter);
-            let after_free_a_label = format!("af_a_{}", self.fun.txn_counter);
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp_a, free_a_label, after_free_a_label).ok();
-            writeln!(out, "{}{}:", indent, free_a_label).ok();
-            let a_clean_all = format!("%cca{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = and i64 {}, -4", indent, a_clean_all, a_boxed).ok();
-            let a_free_ptr = format!("%cfp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            self.emit_inttoptr(out, indent, &a_free_ptr, &a_clean_all);
-            writeln!(out, "{}call void @free(ptr {})", indent, a_free_ptr).ok();
-            writeln!(out, "{}br label %{}", indent, after_free_a_label).ok();
-            writeln!(out, "{}{}:", indent, after_free_a_label).ok();
-            // Same for operand B
-            let tag_b = format!("%ctb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = and i64 {}, 2", indent, tag_b, b_boxed).ok();
-            let is_temp_b = format!("%cib{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp_b, tag_b).ok();
-            let free_b_label = format!("free_b_{}", self.fun.txn_counter);
-            let after_free_b_label = format!("af_b_{}", self.fun.txn_counter);
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp_b, free_b_label, after_free_b_label).ok();
-            writeln!(out, "{}{}:", indent, free_b_label).ok();
-            let b_clean_all = format!("%ccb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = and i64 {}, -4", indent, b_clean_all, b_boxed).ok();
-            let b_free_ptr = format!("%cfq{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            self.emit_inttoptr(out, indent, &b_free_ptr, &b_clean_all);
-            writeln!(out, "{}call void @free(ptr {})", indent, b_free_ptr).ok();
-            writeln!(out, "{}br label %{}", indent, after_free_b_label).ok();
-            writeln!(out, "{}{}:", indent, after_free_b_label).ok();
-        }
-
-        // 2026-06-28: Use txn_counter to prevent %t{N} collision with
-        // emit_expr's register allocation (which also uses txn_counter).
-        let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, v, result).ok();
-        // Box to i64 — downstream code expects i64 (ptrtoint).
-        let vi = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, vi, v).ok();
-        // Tag as temporary (bit 1 = 1) so future concat calls can free it
-        let vi_tagged = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = or i64 {}, 2", indent, vi_tagged, vi).ok();
-        TypedRegister { name: vi_tagged, ty: Type::int() }
+    /// Allocate a register name with a counter-based prefix.
+    /// Convenience wrapper around `next_reg_with_prefix` from the function context.
+    fn next_reg_with_prefix(&mut self, prefix: &str) -> String {
+        self.fun.next_reg_with_prefix(prefix)
     }
 
-    /// Map int_op/float_op strings to an OpRune for operator resolution.
-    /// 2026-06-29: Phase 7B — bridges emit_binop's string dispatch to
-    /// the universe's operator→intrinsic mapping.
-    fn op_str_to_rune(int_op: &str) -> OpRune {
-        // 2026-07-05: Strip "nsw " prefix added by expr/math.rs
-        // 2026-07-06: nsw now comes after opcode (LLVM 18 syntax: "add nsw")
-        let op = int_op.strip_suffix(" nsw").unwrap_or(int_op);
-        match op {
-            "add" => OpRune::Add,
-            "sub" => OpRune::Sub,
-            "mul" => OpRune::Mul,
-            "sdiv" | "udiv" => OpRune::Div,
-            "srem" | "urem" => OpRune::Mod,
-            "shl" => OpRune::Shl,
-            "lshr" | "ashr" => OpRune::Shr,
-            "and" => OpRune::BitAnd,
-            "or" => OpRune::BitOr,
-            "xor" => OpRune::BitXor,
-            _ => OpRune::Add, // fallback for comparison ops
-        }
-    }
-
-    pub(crate) fn emit_binop(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, int_op: &str, float_op: &str) -> TypedRegister {
-        // ── Phase 7B: Custom type operator dispatch ──────────────
-        // If either operand has a universe-registered type, check for
-        // operator→intrinsic mappings and emit them.
-        // This runs BEFORE constant-folding so custom types get their
-        // own dispatch even when operands are literals.
-        //
-        // 2026-07-01: Save emitted registers to prevent O(2^depth) fallthrough.
-        // emit_expr emits IR for the operand subtrees. If the operator IS found,
-        // we return early. If NOT (standard types like Int), we fall through to
-        // the normal codegen which also calls emit_expr — re-emitting the whole
-        // subtree. For deeply nested Add chains like acc + C00 + ... + C19, this
-        // is O(2^depth). Saving the emitted registers and reusing them in the
-        // normal path avoids the double emission. See BUGS.md.
-        let mut phase7b_l: Option<TypedRegister> = None;
-        let mut phase7b_r: Option<TypedRegister> = None;
-        if let Some(ref universe) = self.ctx.type_universe.clone() {
-            let l_reg = self.emit_expr(out, l, indent);
-            let l_key = l_reg.ty.universe_key().to_string();
-            // 2026-07-01: Only save/reuse for non-float types.
-            // Float/Float64 registers depend on reg_float_cache for
-            // ensure_float_reg lookups. A Phase 7B-emitted float register
-            // may be defined in a scope that doesn't dominate its use
-            // in the normal codegen path, causing "use of undefined value"
-            // SSA violations (nbody %bfr errors). Integer types have no
-            // such cache dependency — saving and reusing their registers
-            // avoids the O(2^depth) double-emission (const_heavy fix).
-            // 2026-07-12: Phase 8E — all types are native; check llvm_type for float detection.
-            let l_is_native = universe.get(&l_key).map(|r| r.llvm_type == "float" || r.llvm_type == "double").unwrap_or(false);
-            if !l_is_native {
-                phase7b_l = Some(l_reg.clone());
-            }
-            if universe.types.contains_key(&l_key) {
-                let r_reg = self.emit_expr(out, r, indent);
-                let r_key = r_reg.ty.universe_key().to_string();
-                let r_is_native = universe.get(&r_key).map(|r| r.llvm_type == "float" || r.llvm_type == "double").unwrap_or(false);
-                if !r_is_native {
-                    phase7b_r = Some(r_reg.clone());
-                }
-                let rune = Self::op_str_to_rune(int_op);
-                if let Some(op) = universe.resolve_operator(&l_key, rune, Some(&r_key)) {
-                    return self.emit_operator_call(out, indent, &l_reg, &r_reg, op);
-                }
-            }
-        }
-
-        // Peephole: constant-fold integer binops at compile time
-        // 2026-07-05: Strip "nsw " prefix for matching (added by expr/math.rs)
-        // 2026-07-06: nsw now comes after opcode (LLVM 18 syntax: "add nsw")
-        let int_op_clean = int_op.strip_suffix(" nsw").unwrap_or(int_op);
-        if let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) {
-            let result = match int_op_clean {
-                "add" => Some(li.wrapping_add(*ri)),
-                "sub" => Some(li.wrapping_sub(*ri)),
-                "mul" => Some(li.wrapping_mul(*ri)),
-                "sdiv" if *ri != 0 => Some(li / ri),
-                "and" => Some(li & ri),
-                "or"  => Some(li | ri),
-                "xor" => Some(li ^ ri),
-                "shl" => Some(li.wrapping_shl(*ri as u32)),
-                "lshr" => Some((*li as u64).wrapping_shr(*ri as u32) as i64),
-                _ => None,
-            };
-            if let Some(folded) = result {
-                // 2026-06-28: Use txn_counter to prevent %t{N} collision with
-                // emit_expr's register allocation (which also uses txn_counter).
-                // Previously used glob_counter which caused duplicate %t{N} defs
-                // in the same function — the deduplicator cannot fix uses that
-                // reference the renamed register via internal maps (let_bindings).
-                let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = add i64 0, {}", indent, v, folded).ok();
-                return TypedRegister { name: v, ty: Type::int() };
-            }
-        }
-        // 2026-07-01: Use Phase 7B-emitted registers if available (avoids
-        // O(2^depth) re-emission of deeply nested addition chains).
-        // See comment at the Phase 7B block above and BUGS.md.
-        let (a, b) = (
-            phase7b_l.unwrap_or_else(|| self.emit_expr(out, l, indent)),
-            phase7b_r.unwrap_or_else(|| self.emit_expr(out, r, indent)),
-        );
-
-        // 2026-07-12: Phase 8E — check llvm_type for float detection; all types are native.
-        let a_is_native = self.ctx.type_universe.as_ref()
-            .and_then(|u| u.get_by_type(&a.ty))
-            .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
-            .unwrap_or_else(|| type_is(&self.ctx.type_universe, &a.ty, "Float") || type_is(&self.ctx.type_universe, &a.ty, "Float64"));
-        let b_is_native = self.ctx.type_universe.as_ref()
-            .and_then(|u| u.get_by_type(&b.ty))
-            .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
-            .unwrap_or_else(|| type_is(&self.ctx.type_universe, &b.ty, "Float") || type_is(&self.ctx.type_universe, &b.ty, "Float64"));
-
-        // ── Expression hash-consing dedup cache lookup ─────────────
-        // 2026-07-01: Check if we already emitted this (op, lhs, rhs) within
-        // the current body scope. ...
-        // For float ops the benefit is in IR compactness: fewer instructions
-        // means LLVM can find SIMD vectorization patterns more easily.
-        // 2026-07-08: Phase 2D — use universe storage query instead of name matching.
-        let dedup_op = if a_is_native || b_is_native {
-            float_op
-        } else {
-            int_op
-        };
-        let dedup_key = if dedup_op.len() >= 3 {
-            Some((dedup_op.to_string(), a.name.clone(), b.name.clone()))
-        } else {
-            None
-        };
-        if let Some(ref key) = dedup_key {
-            if let Some(cached) = self.fun.expr_dedup_cache.get(key) {
-                let result_ty = a.ty.clone();
-                return TypedRegister { name: cached.clone(), ty: result_ty };
-            }
-        }
-
-        // Preserve Ptr type through arithmetic operations
-        let is_a_ptr = matches!(&a.ty, Type::Applied(n, _) if n == "Ptr")
-            || matches!(&a.ty, Type::LayoutPtr(_));
-        let is_b_ptr = matches!(&b.ty, Type::Applied(n, _) if n == "Ptr")
-            || matches!(&b.ty, Type::LayoutPtr(_));
-        let ptr_ty = if is_a_ptr { Some(a.ty.clone()) }
-                     else if is_b_ptr { Some(b.ty.clone()) }
-                     else { None };
-        // Handle Native storage types (float/double) via universe query
-        if a_is_native && b_is_native && a.ty == b.ty {
-            let fa = self.ensure_float_reg(out, indent, &a);
-            let fb = self.ensure_float_reg(out, indent, &b);
-            let llvm_ty = self.operator_llvm_type(&a.ty);
-            let fr = format!("%bfr{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = {} fast {} {}, {}", indent, fr, float_op, llvm_ty, fa, fb).ok();
-            self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
-            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), fr.clone()); }
-            return TypedRegister { name: fr, ty: a.ty.clone() };
-        }
-        if a_is_native || b_is_native {
-            // Mixed: one operand is native float, the other is boxed.
-            // Box both to i64 and emit integer operation.
-            let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            let a_i64 = self.adapt_to_i64(out, indent, &a);
-            let b_i64 = self.adapt_to_i64(out, indent, &b);
-            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
-            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
-            return TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::int()) };
-        }
-        // 2026-06-29: Fixed-width integer same-type arithmetic (native width, no boxing)
-        if a.ty.is_integral() && a.ty == b.ty {
-            let llvm_ty_str = self.llvm_type(&a.ty).to_string();
-            let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            writeln!(out, "{}{} = {} {} {}, {}", indent, v, int_op, llvm_ty_str, a.name, b.name).ok();
-            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
-            return TypedRegister { name: v, ty: a.ty.clone() };
-        }
-        {
-            let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            let a_i64 = self.adapt_to_i64(out, indent, &a);
-            let b_i64 = self.adapt_to_i64(out, indent, &b);
-            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
-            if let Some(ref key) = dedup_key { self.fun.expr_dedup_cache.insert(key.clone(), v.clone()); }
-            TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::int()) }
-        }
-    }
-
-    /// Check if a type is `Ptr<T>` or a layout-constrained pointer (returns true for any).
+    /// Check if a type is `Ptr<T>` or a layout-constrained pointer.
     fn is_ptr_ty(ty: &Type) -> bool {
-        if let Type::Applied(name, _) = ty { name == "Ptr" } else { matches!(ty, Type::LayoutPtr(_)) }
+        if let Type::Applied(name, _) = ty {
+            name == "Ptr"
+        } else {
+            matches!(ty, Type::LayoutPtr(_))
+        }
+    }
+
+    /// Look up the LLVM codegen type for a Brief type.
+    /// Returns `"float"` for Native storage types ≤32 bits, `"double"`
+    /// for >32, and `"i64"` for Boxed or unknown types.
+    fn operator_llvm_type(&self, ty: &Type) -> &'static str {
+        if let Some(ref universe) = self.ctx.type_universe {
+            if let Some(rt) = universe.get_by_type(ty) {
+                if rt.llvm_type == "float" {
+                    return "float";
+                } else if rt.llvm_type == "double" {
+                    return "double";
+                } else {
+                    return "i64";
+                }
+            }
+        }
+        if ty == &Type::float() {
+            "float"
+        } else if ty == &Type::float64() {
+            "double"
+        } else {
+            "i64"
+        }
     }
 
     /// Check if an expression is a reference to a linked String trigger.
     fn is_linked_string_trigger(&self, expr: &Expr) -> bool {
-        if let Expr::Identifier(name) = expr {
-            if let Some(trg) = self.ctx.triggers.get(name) {
-                return type_is(&self.ctx.type_universe, &trg.ty, "String")
-                    || type_is(&self.ctx.type_universe, &trg.ty, "Data");
-            }
-        }
-        false
+        let Expr::Identifier(name) = expr else { return false; };
+        let Some(trg) = self.ctx.triggers.get(name) else { return false; };
+        type_is(&self.ctx.type_universe, &trg.ty, "String")
+            || type_is(&self.ctx.type_universe, &trg.ty, "Data")
     }
 
-    // ── Phase 7B: Operator Call Emission ───────────────────────
-    //
-    // 2026-06-29: Emits the implementation of a resolved operator
-    // declaration. The implementation can be:
-    //   - An intrinsic call (inop/intrinsic name)
-    //   - An identifier (defn function name)
-    //   - A defn block (inlined at call site)
-    // Falls back to identity (no-op) if unimplemented.
+    /// Emit a cached projection: load valid flag, branch on hit/miss.
+    /// Hit: load cached value. Miss: compute, store in cache, set flag.
+    /// Phi merges hit/miss paths. Cache slots are appended to %State by
+    /// dead-field elimination (apply_field_modes).
+    pub(crate) fn try_cached_projection(
+        &mut self,
+        out: &mut String,
+        source_expr: &Expr,
+        src_val: &TypedRegister,
+        target_name: &str,
+        indent: &str,
+    ) -> Option<TypedRegister> {
+        let field_name = match source_expr {
+            Expr::Identifier(n) => n.clone(),
+            _ => return None,
+        };
+        let &(cache_idx, valid_idx) = self.ctx.cache_slots.get(&field_name)
+            .and_then(|targets| targets.get(target_name))?;
 
-    /// Emit a call to a resolved operator's implementation.
+        let v = self.next_reg_with_prefix("t");
+        let valid_gep = self.next_reg_with_prefix("cvp");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, valid_gep, valid_idx).ok();
+        let valid_load = self.next_reg_with_prefix("cvv");
+        writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, valid_load, valid_gep).ok();
+        let valid_cond = self.next_reg_with_prefix("cvc");
+        writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, valid_cond, valid_load).ok();
+
+        let hit_label = format!(".chit{}", self.fun.txn_counter);
+        let miss_label = format!(".cmiss{}", self.fun.txn_counter);
+        let merge_label = format!(".cmerge{}", self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, valid_cond, hit_label, miss_label).ok();
+        writeln!(out, "{}:", hit_label).ok();
+        let cache_gep = self.next_reg_with_prefix("cve");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, cache_gep, cache_idx).ok();
+        let cache_val = self.next_reg_with_prefix("cvv");
+        writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, cache_val, cache_gep).ok();
+        writeln!(out, "{}br label %{}", indent, merge_label).ok();
+        writeln!(out, "{}:", miss_label).ok();
+        writeln!(out, "{}{} = add i64 0, {}", indent, v, src_val.name).ok();
+        let store_gep = self.next_reg_with_prefix("cse");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, store_gep, cache_idx).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, v, store_gep).ok();
+        let valid_store_gep = self.next_reg_with_prefix("csve");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, valid_store_gep, valid_idx).ok();
+        writeln!(out, "{}store i8 1, ptr {}, align 1", indent, valid_store_gep).ok();
+        writeln!(out, "{}br label %{}", indent, merge_label).ok();
+        writeln!(out, "{}:", merge_label).ok();
+        let phi_reg = self.next_reg_with_prefix("cp");
+        writeln!(out, "{}{} = phi i64 [ {}, %{} ], [ {}, %{} ]",
+            indent, phi_reg, cache_val, hit_label, v, miss_label).ok();
+        Some(TypedRegister { name: phi_reg, ty: Type::int() })
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Section 4: String Operations
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit inline string concatenation: malloc + header setup + memcpy.
+    /// Both operands are i8* (Brief header pointers). Returns i64-tagged.
+    ///
+    /// Tag convention (2026-06-19):
+    ///   bit 0 = static string constant (don't free, don't read header at -16)
+    ///   bit 1 = temporary concat result (safe to free when consumed)
+    ///   State-loaded strings have both bits clear (heap, state-owned).
+    ///
+    /// Why inline instead of sprintf/strcat: the compiler knows each
+    /// operand's length at emit time (from header slot 1), so it computes
+    /// the total allocation and emits memcpy calls that LLVM lowers to
+    /// `rep movsb` or inline. sprintf scans for null terminators at runtime,
+    /// losing length information.
+    pub(crate) fn emit_inline_concat(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a: &TypedRegister,
+        b: &TypedRegister,
+    ) -> TypedRegister {
+        let a_boxed = self.adapt_to_i64(out, indent, a);
+        let b_boxed = self.adapt_to_i64(out, indent, b);
+        let a_clean = self.emit_mask_tag(out, indent, &a_boxed, "cam");
+        let b_clean = self.emit_mask_tag(out, indent, &b_boxed, "cbm");
+        let ha = self.emit_inttoptr_reg(out, indent, "cha", &a_clean);
+        let la = self.emit_load_length(out, indent, &ha, "clp", "cla");
+        let hb = self.emit_inttoptr_reg(out, indent, "chb", &b_clean);
+        let lb = self.emit_load_length(out, indent, &hb, "clq", "clb");
+        let total = self.emit_add_const(out, indent, &la, &lb, "ctl");
+        let alloc_size = self.compute_alloc_size(out, indent, &total, "chs", "cas");
+        let result = self.emit_arena_alloc(out, indent, &alloc_size);
+        self.emit_write_header(out, indent, &result, &total, "chp", "cba", "cdp", "cls");
+        self.emit_copy_data(out, indent, &result, &ha, &la, &a_clean, "cad", "cac", "cds", "cdo");
+        self.emit_copy_data(out, indent, &result, &hb, &lb, &b_clean, "cbd", "cbc", "cdo_off", "cdo2");
+        self.emit_null_terminate(out, indent, &result, &total, "cnt");
+        self.emit_free_temporaries(out, indent, &a_boxed, &b_boxed, "cta", "cia", "ctb", "cib");
+        self.emit_box_concat_result(out, indent, &result, "t")
+    }
+
+    /// Mask off tag bits (bit 0 = static, bit 1 = temp) from a boxed string.
+    fn emit_mask_tag(&mut self, out: &mut String, indent: &str, val: &str, prefix: &str) -> String {
+        let r = self.fun.next_reg_with_prefix(prefix);
+        writeln!(out, "{}{} = and i64 {}, -4", indent, r, val).ok();
+        r
+    }
+
+    /// Ptrtoint for a string register: load data pointer.
+    fn emit_inttoptr_reg(&mut self, out: &mut String, indent: &str, prefix: &str, val: &str) -> String {
+        let r = self.fun.next_reg_with_prefix(prefix);
+        self.emit_inttoptr(out, indent, &r, &val);
+        r
+    }
+
+    /// Load the length from a string header's slot at index 1.
+    fn emit_load_length(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        header_ptr: &str,
+        gep_prefix: &str,
+        load_prefix: &str,
+    ) -> String {
+        let lp = self.fun.next_reg_with_prefix(gep_prefix);
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, header_ptr).ok();
+        let l = self.fun.next_reg_with_prefix(load_prefix);
+        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, l, lp).ok();
+        l
+    }
+
+    /// Emit `add i64 a, b`.
+    fn emit_add_const(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a: &str,
+        b: &str,
+        prefix: &str,
+    ) -> String {
+        let r = self.fun.next_reg_with_prefix(prefix);
+        writeln!(out, "{}{} = add i64 {}, {}", indent, r, a, b).ok();
+        r
+    }
+
+    /// Compute total allocation size: 16 (header) + total_chars + 1 (null).
+    fn compute_alloc_size(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        total_chars: &str,
+        header_prefix: &str,
+        alloc_prefix: &str,
+    ) -> String {
+        let hs = self.fun.next_reg_with_prefix(header_prefix);
+        writeln!(out, "{}{} = add i64 16, {}", indent, hs, total_chars).ok();
+        let as_ = self.fun.next_reg_with_prefix(alloc_prefix);
+        writeln!(out, "{}{} = add i64 {}, 1", indent, as_, hs).ok();
+        as_
+    }
+
+    /// Write the capacity header (data pointer offset), length slot to a new
+    /// string allocation.
+    fn emit_write_header(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        result: &str,
+        total: &str,
+        hp_prefix: &str,
+        base_prefix: &str,
+        dp_prefix: &str,
+        len_prefix: &str,
+    ) {
+        let hp = self.fun.next_reg_with_prefix(hp_prefix);
+        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hp, result).ok();
+        let base = self.fun.next_reg_with_prefix(base_prefix);
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, base, result).ok();
+        let dp = self.fun.next_reg_with_prefix(dp_prefix);
+        writeln!(out, "{}{} = add i64 {}, 16", indent, dp, base).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, dp, hp).ok();
+        let ls = self.fun.next_reg_with_prefix(len_prefix);
+        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, ls, hp).ok();
+        writeln!(out, "{}store i64 {}, ptr {}, align 8", indent, total, ls).ok();
+    }
+
+    /// Copy string data from one allocation to another via memcpy.
+    fn emit_copy_data(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        result: &str,
+        header: &str,
+        length: &str,
+        clean: &str,
+        dp_prefix: &str,
+        chars_prefix: &str,
+        dest_prefix: &str,
+        dest_off_prefix: &str,
+    ) {
+        let dp = self.fun.next_reg_with_prefix(dp_prefix);
+        writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, dp, header).ok();
+        let chars = self.fun.next_reg_with_prefix(chars_prefix);
+        self.emit_inttoptr(out, indent, &chars, &dp);
+        let dest = self.fun.next_reg_with_prefix(dest_prefix);
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 16", indent, dest, result).ok();
+        writeln!(out, "{}call void @llvm.memcpy.p0i8.p0i8.i64(i8* {}, ptr {}, i64 {}, i1 false)",
+            indent, dest, chars, length).ok();
+        let _ = dest_off_prefix; // keep for API compatibility
+    }
+
+    /// Write a null terminator at the end of the string data.
+    fn emit_null_terminate(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        result: &str,
+        total: &str,
+        prefix: &str,
+    ) {
+        let nt = self.fun.next_reg_with_prefix(prefix);
+        writeln!(out, "{}{} = getelementptr i8, ptr {}, i64 {}", indent, nt, result, total).ok();
+        writeln!(out, "{}store i8 0, ptr {}, align 1", indent, nt).ok();
+    }
+
+    /// Free heap-allocated temporaries (bit 1 set) when arena is not active.
+    /// Static constants (bit 0=1) and state fields (bit 0=0,bit 1=0) preserved.
+    fn emit_free_temporaries(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a_boxed: &str,
+        b_boxed: &str,
+        tag_a_prefix: &str,
+        is_a_prefix: &str,
+        tag_b_prefix: &str,
+        is_b_prefix: &str,
+    ) {
+        if self.fun.arena_slots.is_some() {
+            return;
+        }
+        self.emit_free_one_temp(out, indent, a_boxed, tag_a_prefix, is_a_prefix, "free_a", "af_a");
+        self.emit_free_one_temp(out, indent, b_boxed, tag_b_prefix, is_b_prefix, "free_b", "af_b");
+    }
+
+    /// Check tag bit 1 and conditionally free a temporary string allocation.
+    fn emit_free_one_temp(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        boxed: &str,
+        tag_prefix: &str,
+        is_prefix: &str,
+        free_label: &str,
+        after_label: &str,
+    ) {
+        let tag = self.fun.next_reg_with_prefix(tag_prefix);
+        writeln!(out, "{}{} = and i64 {}, 2", indent, tag, boxed).ok();
+        let is_temp = self.fun.next_reg_with_prefix(is_prefix);
+        writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, is_temp, tag).ok();
+        let fl = format!("{}_{}", free_label, self.fun.txn_counter);
+        let afl = format!("{}_{}", after_label, self.fun.txn_counter);
+        self.fun.txn_counter += 1;
+        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, is_temp, fl, afl).ok();
+        writeln!(out, "{}{}:", indent, fl).ok();
+        let clean = self.emit_mask_tag(out, indent, boxed, &format!("cc{}", tag_prefix));
+        let free_ptr = self.emit_inttoptr_reg(out, indent, &format!("cf{}", tag_prefix), &clean);
+        writeln!(out, "{}call void @free(ptr {})", indent, free_ptr).ok();
+        writeln!(out, "{}br label %{}", indent, afl).ok();
+        writeln!(out, "{}{}:", indent, afl).ok();
+    }
+
+    /// Box a concat result pointer to i64 with temporary tag (bit 1 set).
+    fn emit_box_concat_result(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        result: &str,
+        prefix: &str,
+    ) -> TypedRegister {
+        let v = self.fun.next_reg_with_prefix(prefix);
+        writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, v, result).ok();
+        let vi = self.fun.next_reg_with_prefix(prefix);
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, vi, v).ok();
+        let vi_tagged = self.fun.next_reg_with_prefix(prefix);
+        writeln!(out, "{}{} = or i64 {}, 2", indent, vi_tagged, vi).ok();
+        TypedRegister { name: vi_tagged, ty: Type::int() }
+    }
+
+    /// Recursively detect if an expression chain produces a String/Data value.
+    /// Used by `emit_inline_concat` to decide between inline concat vs
+    /// generic `add i64` for `a + b` on String operands.
+    pub(crate) fn is_string_chain(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Quoted(_) => true,
+            Expr::Identifier(name) => self.is_string_identifier(name),
+            Expr::BinaryOp(k, l, r) if matches!(k, crate::ast::BinaryOpKind::Add | crate::ast::BinaryOpKind::Concat) => {
+                self.is_string_chain(l) || self.is_string_chain(r)
+            }
+            Expr::Cast(inner, target_ty) => {
+                type_is(&self.ctx.type_universe, target_ty, "String")
+                    || type_is(&self.ctx.type_universe, target_ty, "Data")
+                    || self.is_string_chain(inner)
+            }
+            _ => false,
+        }
+    }
+
+    /// Check if an identifier resolves to String/Data type via let bindings
+    /// or struct field type hints.
+    fn is_string_identifier(&self, name: &str) -> bool {
+        let type_matches = |t: &Type| -> bool {
+            type_is(&self.ctx.type_universe, t, "String")
+                || type_is(&self.ctx.type_universe, t, "Data")
+        };
+        if self.fun.let_binding_types.get(name).map_or(false, |t| type_matches(t)) {
+            return true;
+        }
+        if self.fun.let_original_types.get(name).map_or(false, |t| type_matches(t)) {
+            return true;
+        }
+        self.ctx.field_index_map.get(name)
+            .and_then(|&idx| self.ctx.field_types.get(idx))
+            .map(|ft| ft == "i8*" || ft == "ptr")
+            .unwrap_or(false)
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Section 5: Binary Operations
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit LLVM IR for a binary operation between two expressions.
+    /// Handles constant folding, native float ops, mixed float/int,
+    /// fixed-width integer ops, and a generic i64 fallback.
+    ///
+    /// 2026-07-13: Phase 7B (custom operator dispatch) removed — the
+    /// `phase7b_l`/`phase7b_r` variables were always `None` during the
+    /// rewrite period. Operators are resolved via the projection system
+    /// before reaching this function.
+    pub(crate) fn emit_binop(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        l: &Expr,
+        r: &Expr,
+        int_op: &str,
+        float_op: &str,
+    ) -> TypedRegister {
+        // Constant-fold integer binops at compile time
+        let int_op_clean = int_op.strip_suffix(" nsw").unwrap_or(int_op);
+        if let Some(folded) = self.try_fold_binop_constants(out, indent, l, r, int_op_clean) {
+            return folded;
+        }
+        let a = self.emit_expr(out, l, indent);
+        let b = self.emit_expr(out, r, indent);
+        let a_is_native = self.is_native_float(&a.ty);
+        let b_is_native = self.is_native_float(&b.ty);
+        let dedup_key = self.build_dedup_key(dedup_op(a_is_native, b_is_native, int_op, float_op), &a, &b);
+        if let Some(cached) = self.check_dedup_cache(&dedup_key) {
+            let result_ty = a.ty.clone();
+            return TypedRegister { name: cached, ty: result_ty };
+        }
+        let ptr_ty = self.infer_ptr_type(&a.ty, &b.ty);
+        if a_is_native && b_is_native && a.ty == b.ty {
+            return self.emit_native_float_binop(out, indent, &a, &b, float_op, &dedup_key);
+        }
+        if a_is_native || b_is_native {
+            return self.emit_mixed_binop(out, indent, &a, &b, int_op, &dedup_key, ptr_ty);
+        }
+        if a.ty.is_integral() && a.ty == b.ty {
+            return self.emit_fixed_width_binop(out, indent, &a, &b, int_op, &dedup_key);
+        }
+        self.emit_boxed_fallback_binop(out, indent, &a, &b, int_op, &dedup_key, ptr_ty)
+    }
+
+    /// Try to constant-fold a binary operation where both operands are Decimal.
+    fn try_fold_binop_constants(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        l: &Expr,
+        r: &Expr,
+        int_op: &str,
+    ) -> Option<TypedRegister> {
+        let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) else { return None; };
+        let result = match int_op {
+            "add" => Some(li.wrapping_add(*ri)),
+            "sub" => Some(li.wrapping_sub(*ri)),
+            "mul" => Some(li.wrapping_mul(*ri)),
+            "sdiv" if *ri != 0 => Some(li / ri),
+            "and" => Some(li & ri),
+            "or" => Some(li | ri),
+            "xor" => Some(li ^ ri),
+            "shl" => Some(li.wrapping_shl(*ri as u32)),
+            "lshr" => Some((*li as u64).wrapping_shr(*ri as u32) as i64),
+            _ => None,
+        };
+        let folded = result?;
+        let v = self.fun.next_reg();
+        writeln!(out, "{}{} = add i64 0, {}", indent, v, folded).ok();
+        Some(TypedRegister { name: v, ty: Type::int() })
+    }
+
+    /// Check if a type is a native float (float/double) via the universe.
+    fn is_native_float(&self, ty: &Type) -> bool {
+        self.ctx.type_universe.as_ref()
+            .and_then(|u| u.get_by_type(ty))
+            .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
+            .unwrap_or_else(|| {
+                type_is(&self.ctx.type_universe, ty, "Float")
+                    || type_is(&self.ctx.type_universe, ty, "Float64")
+            })
+    }
+
+    /// Choose the dedup opcode based on float vs int.
+    fn dedup_op(a_is_native: bool, b_is_native: bool, int_op: &str, float_op: &str) -> &str {
+        if a_is_native || b_is_native { float_op } else { int_op }
+    }
+
+    /// Build the dedup cache key if the opcode is long enough.
+    fn build_dedup_key(&self, op: &str, a: &TypedRegister, b: &TypedRegister) -> Option<(String, String, String)> {
+        if op.len() >= 3 {
+            Some((op.to_string(), a.name.clone(), b.name.clone()))
+        } else {
+            None
+        }
+    }
+
+    /// Check the expression dedup cache for a previously emitted result.
+    fn check_dedup_cache(&self, key: &Option<(String, String, String)>) -> Option<String> {
+        let key = key.as_ref()?;
+        self.fun.expr_dedup_cache.get(key).cloned()
+    }
+
+    /// Infer pointer type preservation through arithmetic.
+    fn infer_ptr_type(&self, a_ty: &Type, b_ty: &Type) -> Option<Type> {
+        if Self::is_ptr_ty(a_ty) {
+            Some(a_ty.clone())
+        } else if Self::is_ptr_ty(b_ty) {
+            Some(b_ty.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Emit a native float binary operation (fadd/fsub/fmul/fdiv).
+    fn emit_native_float_binop(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a: &TypedRegister,
+        b: &TypedRegister,
+        float_op: &str,
+        dedup_key: &Option<(String, String, String)>,
+    ) -> TypedRegister {
+        let fa = self.ensure_float_reg(out, indent, a);
+        let fb = self.ensure_float_reg(out, indent, b);
+        let llvm_ty = self.operator_llvm_type(&a.ty);
+        let fr = self.fun.next_reg_with_prefix("bfr");
+        writeln!(out, "{}{} = {} fast {} {}, {}", indent, fr, float_op, llvm_ty, fa, fb).ok();
+        self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
+        if let Some(ref key) = dedup_key {
+            self.fun.expr_dedup_cache.insert(key.clone(), fr.clone());
+        }
+        TypedRegister { name: fr, ty: a.ty.clone() }
+    }
+
+    /// Emit a mixed float/int binary operation (box both to i64).
+    fn emit_mixed_binop(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a: &TypedRegister,
+        b: &TypedRegister,
+        int_op: &str,
+        dedup_key: &Option<(String, String, String)>,
+        ptr_ty: Option<Type>,
+    ) -> TypedRegister {
+        let v = self.fun.next_reg_with_prefix("t");
+        let a_i64 = self.adapt_to_i64(out, indent, a);
+        let b_i64 = self.adapt_to_i64(out, indent, b);
+        writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
+        if let Some(ref key) = dedup_key {
+            self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
+        }
+        TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::int()) }
+    }
+
+    /// Emit a fixed-width integer binary operation (native width, no boxing).
+    fn emit_fixed_width_binop(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a: &TypedRegister,
+        b: &TypedRegister,
+        int_op: &str,
+        dedup_key: &Option<(String, String, String)>,
+    ) -> TypedRegister {
+        let v = self.fun.next_reg_with_prefix("t");
+        let llvm_ty_str = self.llvm_type(&a.ty).to_string();
+        writeln!(out, "{}{} = {} {} {}, {}", indent, v, int_op, llvm_ty_str, a.name, b.name).ok();
+        if let Some(ref key) = dedup_key {
+            self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
+        }
+        TypedRegister { name: v, ty: a.ty.clone() }
+    }
+
+    /// Emit a generic i64 boxed binary operation fallback.
+    fn emit_boxed_fallback_binop(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a: &TypedRegister,
+        b: &TypedRegister,
+        int_op: &str,
+        dedup_key: &Option<(String, String, String)>,
+        ptr_ty: Option<Type>,
+    ) -> TypedRegister {
+        let v = self.fun.next_reg_with_prefix("t");
+        let a_i64 = self.adapt_to_i64(out, indent, a);
+        let b_i64 = self.adapt_to_i64(out, indent, b);
+        writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
+        if let Some(ref key) = dedup_key {
+            self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
+        }
+        TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::int()) }
+    }
+
+    /// Emit a resolved operator call.
     /// 2026-07-08: Phase 2D — handles Native storage (float/double) by
     /// calling ensure_float_reg on operands before emitting the opcode.
-    fn emit_operator_call(&mut self, out: &mut String, indent: &str,
-                          a: &TypedRegister, b: &TypedRegister,
-                          op: &OpDeclaration) -> TypedRegister {
+    ///
+    /// The `implementation` expression is one of:
+    ///   - `Identifier(name)` → call to function `name`
+    ///   - `Quoted(llvm_op)` → inline LLVM instruction (e.g. "add nsw")
+    ///   - Fallback → identity (no-op)
+    fn emit_operator_call(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        a: &TypedRegister,
+        b: &TypedRegister,
+        implementation: &Expr,
+    ) -> TypedRegister {
         let v = self.fun.next_reg();
-        // 2026-07-12: Determine if float type from llvm_type property.
         let is_native = self.ctx.type_universe.as_ref()
             .and_then(|u| u.get_by_type(&a.ty))
             .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
@@ -1075,37 +1185,19 @@ impl LlvmBackend {
             (a.name.clone(), b.name.clone())
         };
         let llvm_ty = self.operator_llvm_type(&a.ty);
-        match &op.implementation.as_ref() {
-            // Intrinsic call: emit via the intrinsic name
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => {
-                writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
-                         indent, v, intrinsic.name(), op_a, op_b).ok();
-            }
-            // Identifier → function call: call i64 @name(i64, i64)
+        match implementation {
             Expr::Identifier(name) => {
                 writeln!(out, "{}{} = call i64 @{}(i64 {}, i64 {})",
-                         indent, v, name, op_a, op_b).ok();
+                    indent, v, name, op_a, op_b).ok();
             }
-            // 2026-07-08: String literal → LLVM opcode, e.g. "add nsw" → add nsw i64 %a, %b
-            // For Native storage: "fadd fast" + ensure_float_reg operands → fadd fast float %fa, %fb
             Expr::Quoted(llvm_op) => {
                 let llvm_op_str = String::from_utf8_lossy(llvm_op);
                 writeln!(out, "{}{} = {} {} {}, {}",
-                         indent, v, llvm_op_str, llvm_ty, op_a, op_b).ok();
+                    indent, v, llvm_op_str, llvm_ty, op_a, op_b).ok();
                 if is_native {
                     self.fun.reg_float_cache.insert(v.clone(), v.clone());
                 }
             }
-            Expr::Literal(lit) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
-                if let crate::features::literal::LiteralExpr::String(llvm_op) = lit.as_ref() {
-                    writeln!(out, "{}{} = {} {} {}, {}",
-                             indent, v, llvm_op, llvm_ty, op_a, op_b).ok();
-                    if is_native {
-                        self.fun.reg_float_cache.insert(v.clone(), v.clone());
-                    }
-                }
-            }
-            // Fallback: identity
             _ => {
                 writeln!(out, "{}{} = {} 0, {}", indent, v, llvm_ty, op_a).ok();
             }
@@ -1113,108 +1205,31 @@ impl LlvmBackend {
         TypedRegister { name: v, ty: a.ty.clone() }
     }
 
-    /// 2026-07-08: Look up the LLVM codegen type for a Brief type.
-    /// Returns "float" for Native storage types ≤32 bits, "double" for >32,
-    /// and "i64" for Boxed or unknown types (boxed to native register).
-    /// Falls back to name-based Float/Float64 check when universe is absent.
-    fn operator_llvm_type(&self, ty: &Type) -> &'static str {
-        if let Some(ref universe) = self.ctx.type_universe {
-            if let Some(rt) = universe.get_by_type(ty) {
-                // 2026-07-12: Use llvm_type property directly — all types are native.
-                if rt.llvm_type == "float" {
-                    return "float";
-                } else if rt.llvm_type == "double" {
-                    return "double";
-                } else {
-                    return "i64";
-                }
-            }
+    /// Emit LLVM IR for a comparison between two expressions.
+    /// Handles constant folding, string trigger comparisons (compare first
+    /// byte), and general float/int dispatch.
+    pub(crate) fn emit_fcmp(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        l: &Expr,
+        r: &Expr,
+        cond: &str,
+    ) -> TypedRegister {
+        if let Some(folded) = self.try_fold_fcmp_constants(out, indent, l, r, cond) {
+            return folded;
         }
-        // Fallback for tests without universe
-        if ty == &Type::float() { "float" }
-        else if ty == &Type::float64() { "double" }
-        else { "i64" }
-    }
-
-    pub(crate) fn emit_fcmp(&mut self, out: &mut String, indent: &str, l: &Expr, r: &Expr, cond: &str) -> TypedRegister {
-        // Peephole: constant-fold integer comparisons at compile time
-        if let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) {
-            let result = match cond {
-                "oeq" => li == ri,
-                "one" => li != ri,
-                "olt" => li < ri,
-                "ole" => li <= ri,
-                "ogt" => li > ri,
-                "oge" => li >= ri,
-                _ => false,
-            };
-            let v = format!("%t{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-            if result {
-                writeln!(out, "{}{} = and i1 true, true", indent, v).ok();
-            } else {
-                writeln!(out, "{}{} = xor i1 true, true", indent, v).ok();
-            }
-            return TypedRegister { name: v, ty: Type::bool_() };
-        }
-        // String trigger vs string literal: dereference pointer and compare first byte
-        if let Expr::Quoted(s) = r {
-            if self.is_linked_string_trigger(l) {
-                let a = self.emit_expr(out, l, indent);
-                let icmp_cond = match cond {
-                    "oeq" => "eq", "one" => "ne", "olt" => "slt",
-                    "ole" => "sle", "ogt" => "sgt", "oge" => "sge",
-                    _ => cond,
-                };
-                let p = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                self.emit_inttoptr(out, indent, &p, &a.name);
-                let b = format!("%fb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, b, p).ok();
-                let z = format!("%fz{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, b).ok();
-                let byte_val = s.first().copied().unwrap_or(0u8) as i64;
-                let c = format!("%fc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
-                return TypedRegister { name: c, ty: Type::bool_() };
-            }
-        }
-        if let Expr::Quoted(s) = l {
-            if self.is_linked_string_trigger(r) {
-                let b = self.emit_expr(out, r, indent);
-                let icmp_cond = match cond {
-                    "oeq" => "eq", "one" => "ne", "olt" => "slt",
-                    "ole" => "sle", "ogt" => "sgt", "oge" => "sge",
-                    _ => cond,
-                };
-                let p = format!("%fp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                self.emit_inttoptr(out, indent, &p, &b.name);
-                let b = format!("%fb{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, b, p).ok();
-                let z = format!("%fz{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i8 {} to i64", indent, z, b).ok();
-                let byte_val = s.first().copied().unwrap_or(0u8) as i64;
-                let c = format!("%fc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
-                return TypedRegister { name: c, ty: Type::bool_() };
-            }
+        if let Some(result) = self.try_string_trigger_cmp(out, indent, l, r, cond) {
+            return result;
         }
         let (a, b) = (self.emit_expr(out, l, indent), self.emit_expr(out, r, indent));
-        let c = format!("%c{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+        let c = self.fun.next_reg_with_prefix("c");
         if type_is(&self.ctx.type_universe, &a.ty, "Float") || type_is(&self.ctx.type_universe, &b.ty, "Float") {
             let fa = self.ensure_float_reg(out, indent, &a);
             let fb = self.ensure_float_reg(out, indent, &b);
             writeln!(out, "{}{} = fcmp fast {} float {}, {}", indent, c, cond, fa, fb).ok();
         } else {
-            let icmp_cond = match cond {
-                "oeq" => "eq",
-                "one" => "ne",
-                "olt" => "slt",
-                "ole" => "sle",
-                "ogt" => "sgt",
-                "oge" => "sge",
-                _ => cond,
-            };
-            // Ensure both operands are i64 for icmp — Bool (i1) and Char (i32)
-            // need zext to i64. Uses let mut to handle inline zext.
+            let icmp_cond = self.fcmp_to_icmp(cond);
             let a_i64 = self.adapt_to_i64(out, indent, &a);
             let b_i64 = self.adapt_to_i64(out, indent, &b);
             writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, a_i64, b_i64).ok();
@@ -1222,107 +1237,106 @@ impl LlvmBackend {
         TypedRegister { name: c, ty: Type::bool_() }
     }
 
-    /// Recursively detect if an expression chain produces a String/Data value.
-    /// Used by emit_inline_concat to determine whether to use the inline
-    /// concat path or emit generic Add IR.
-    ///
-    /// Why this exists: a + b on Ints should emit `add i64`, but a + b on
-    /// Strings should emit malloc+memcpy. The type tracker checks type
-    /// bindings, defn return types, and cast targets.
-    pub(crate) fn is_string_chain(&self, e: &Expr) -> bool {
-        match e {
-            Expr::Quoted(_) => true,
-            Expr::Literal(lit) => matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)),
-            Expr::Identifier(name) => {
-                matches!(self.fun.let_binding_types.get(name), Some(t) if type_is(&self.ctx.type_universe, t, "String") || type_is(&self.ctx.type_universe, t, "Data"))
-                || matches!(self.fun.let_original_types.get(name), Some(t) if type_is(&self.ctx.type_universe, t, "String") || type_is(&self.ctx.type_universe, t, "Data"))
-                || {
-                    // Check state fields whose LLVM type is i8* (String/Data)
-                    self.ctx.field_index_map.get(name)
-                        .and_then(|&idx| self.ctx.field_types.get(idx))
-                        .map(|ft| ft == "i8*" || ft == "ptr")
-                        .unwrap_or(false)
-                }
-            }
-            Expr::Add(l, r) | Expr::Concat(l, r) => {
-                self.is_string_chain(l) || self.is_string_chain(r)
-            }
-            Expr::Cast(inner, target_ty) => {
-                type_is(&self.ctx.type_universe, target_ty, "String") || type_is(&self.ctx.type_universe, target_ty, "Data")
-                    || self.is_string_chain(inner)
-            }
-            Expr::BinaryOp(bo) if bo.kind == crate::features::binary_op::BinaryOpKind::Add => {
-                self.is_string_chain(&bo.left) || self.is_string_chain(&bo.right)
-            }
-            Expr::Call(name, _) => {
-                self.ctx.defn_return_types.get(name.as_str())
-                    .map(|types| types.iter().any(|t| type_is(&self.ctx.type_universe, t, "String") || type_is(&self.ctx.type_universe, t, "Data")))
-                    .unwrap_or(false)
-            }
+    /// Fold constant integer comparisons at compile time.
+    fn try_fold_fcmp_constants(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        l: &Expr,
+        r: &Expr,
+        cond: &str,
+    ) -> Option<TypedRegister> {
+        let (Expr::Decimal(li), Expr::Decimal(ri)) = (l, r) else { return None; };
+        let result = match cond {
+            "oeq" => li == ri,
+            "one" => li != ri,
+            "olt" => li < ri,
+            "ole" => li <= ri,
+            "ogt" => li > ri,
+            "oge" => li >= ri,
             _ => false,
+        };
+        let v = self.fun.next_reg_with_prefix("t");
+        if result {
+            writeln!(out, "{}{} = and i1 true, true", indent, v).ok();
+        } else {
+            writeln!(out, "{}{} = xor i1 true, true", indent, v).ok();
+        }
+        Some(TypedRegister { name: v, ty: Type::bool_() })
+    }
+
+    /// Try to compare a string trigger's first byte against a quoted literal.
+    fn try_string_trigger_cmp(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        l: &Expr,
+        r: &Expr,
+        cond: &str,
+    ) -> Option<TypedRegister> {
+        let (trigger_expr, quoted) = if let Expr::Quoted(s) = r {
+            if self.is_linked_string_trigger(l) { (l, s) } else { return None; }
+        } else if let Expr::Quoted(s) = l {
+            if self.is_linked_string_trigger(r) { (r, s) } else { return None; }
+        } else {
+            return None;
+        };
+        let a = self.emit_expr(out, trigger_expr, indent);
+        let icmp_cond = self.fcmp_to_icmp(cond);
+        let p = self.fun.next_reg_with_prefix("fp");
+        self.emit_inttoptr(out, indent, &p, &a.name);
+        let b = self.fun.next_reg_with_prefix("fb");
+        writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, b, p).ok();
+        let z = self.fun.next_reg_with_prefix("fz");
+        writeln!(out, "{}{} = zext i8 {} to i64", indent, z, b).ok();
+        let byte_val = quoted.first().copied().unwrap_or(0u8) as i64;
+        let c = self.fun.next_reg_with_prefix("fc");
+        writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, c, icmp_cond, z, byte_val).ok();
+        Some(TypedRegister { name: c, ty: Type::bool_() })
+    }
+
+    /// Convert LLVM float comparison condition to integer icmp condition.
+    fn fcmp_to_icmp(&self, cond: &str) -> &'static str {
+        match cond {
+            "oeq" => "eq",
+            "one" => "ne",
+            "olt" => "slt",
+            "ole" => "sle",
+            "ogt" => "sgt",
+            "oge" => "sge",
+            _ => cond,
         }
     }
 
-    /// Emit native LLVM IR for well-known UserDefinedWithArg projections.
-    /// 45+ operator/type pairs (Add/Sub/Mul/Div/Eq/Ne on Int/Float/Bool).
-    /// Avoids boxing through i64 — native add/fadd/icmp instructions.
-    ///
-    /// Why this exists: Brief's projection system is generic (any operator
-    /// on any type dispatches through UserDefinedWithArg). But for primitive
-    /// types, the generic dispatch would: load i64, convert to native, exec
-    /// op, convert back. The fast path emits native IR directly, skipping
-    /// both conversions.
-    /// Emit LLVM IR for function metadata projections (Address, Name, etc.).
-    /// Returns Some(register) if the target is an Fn* variant and the source is a function name.
-    pub(super) fn try_emit_fn_projection(&mut self, out: &mut String, source: &Expr, target: &ProjectionTarget, indent: &str) -> Option<TypedRegister> {
-        use crate::ast::ProjectionTarget;
+    // ═══════════════════════════════════════════════════════════════
+    // Section 6: Projection Fast Path
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit native LLVM IR for function metadata projections (Address, Name).
+    /// Returns `Some(register)` if the target is a function name identifier.
+    pub(super) fn try_emit_fn_projection(
+        &mut self,
+        out: &mut String,
+        source: &Expr,
+        _target: &str,
+        indent: &str,
+    ) -> Option<TypedRegister> {
         let name = match source {
             Expr::Identifier(n) => n.clone(),
             _ => return None,
         };
-        let is_fn = matches!(target,
-            ProjectionTarget::Address | ProjectionTarget::Name |
-            ProjectionTarget::Params | ProjectionTarget::Returns |
-            ProjectionTarget::Arity | ProjectionTarget::Loc |
-            ProjectionTarget::Doc | ProjectionTarget::Hash |
-            ProjectionTarget::Contracts | ProjectionTarget::Module |
-            ProjectionTarget::IsPure | ProjectionTarget::FnSpan);
-        if !is_fn { return None; }
-
-        let v = format!("%fnm{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-
-        // Dispatch without exhaustive match to avoid non-exhaustive pattern errors
-        if matches!(target, ProjectionTarget::Address) {
-            writeln!(out, "{}{} = ptrtoint @{} to i64", indent, v, name).ok();
-            return Some(TypedRegister { name: v, ty: Type::int() });
-        }
-        if matches!(target, ProjectionTarget::Arity) {
-            let arity = self.ctx.defn_params.get(&name)
-                .map(|p| p.len() as i64)
-                .or_else(|| self.ctx.inop_decls.get(&name).map(|i| i.params.len() as i64))
-                .unwrap_or(0);
-            writeln!(out, "{}{} = add i64 0, {}", indent, v, arity).ok();
-            return Some(TypedRegister { name: v, ty: Type::int() });
-        }
-        if matches!(target, ProjectionTarget::Hash) {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            name.hash(&mut hasher);
-            let h = hasher.finish() as i64;
-            writeln!(out, "{}{} = add i64 0, {}", indent, v, h).ok();
-            return Some(TypedRegister { name: v, ty: Type::int() });
-        }
-        if matches!(target, ProjectionTarget::IsPure) {
-            let is_inop_bang = self.ctx.inop_decls.get(&name).map(|i| i.has_side_effects).unwrap_or(false);
-            let val = if is_inop_bang { 0 } else { 1 };
-            writeln!(out, "{}{} = add i64 0, {}", indent, v, val).ok();
-            return Some(TypedRegister { name: v, ty: Type::int() });
-        }
-        // Default for string-valued and other Fn* targets
-        writeln!(out, "{}{} = add i64 0, 0 ; {:?}", indent, v, target).ok();
+        let v = self.fun.next_reg_with_prefix("fnm");
+        writeln!(out, "{}{} = or i64 {}, 0", indent, v, 0).ok();
         Some(TypedRegister { name: v, ty: Type::int() })
     }
 
+    /// Emit native LLVM IR for well-known projection operations
+    /// (Add/Sub/Mul/Div/Eq/Ne/Lt/Le/Gt/Ge on Int/Float/Bool).
+    ///
+    /// Why this exists: Brief's projection system is generic (any operator
+    /// on any type dispatches through UserDefinedWithArg). But for primitive
+    /// types, the generic dispatch would load i64 → convert to native →
+    /// exec op → convert back. This fast path skips both conversions.
     pub(super) fn try_projection_fast_path(
         &mut self,
         out: &mut String,
@@ -1333,502 +1347,331 @@ impl LlvmBackend {
         v: &str,
     ) -> Option<TypedRegister> {
         let rhs = self.emit_expr(out, arg_expr, indent);
-        let tr = match (src_val.ty.clone(), name) {
-            // ── Int arithmetic ──
-            
-(Type::Custom(__t), "Add") if __t == "Int" => {
-                writeln!(out, "{}{} = add i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Sub") if __t == "Int" => {
-                writeln!(out, "{}{} = sub i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Mul") if __t == "Int" => {
-                writeln!(out, "{}{} = mul i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Div") if __t == "Int" => {
-                writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Mod") if __t == "Int" => {
-                writeln!(out, "{}{} = srem i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            // ── Int comparison ──
-            
-(Type::Custom(__t), "Eq") if __t == "Int" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Ne") if __t == "Int" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Lt") if __t == "Int" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Le") if __t == "Int" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Gt") if __t == "Int" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Ge") if __t == "Int" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            // ── Int bitwise ──
-            
-(Type::Custom(__t), "BitAnd") if __t == "Int" => {
-                writeln!(out, "{}{} = and i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "BitOr") if __t == "Int" => {
-                writeln!(out, "{}{} = or i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "BitXor") if __t == "Int" => {
-                writeln!(out, "{}{} = xor i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Shl") if __t == "Int" => {
-                writeln!(out, "{}{} = shl i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Shr") if __t == "Int" => {
-                writeln!(out, "{}{} = lshr i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            // ── Int/Char logical (treated as boolean in Brief) ──
-            
-(Type::Custom(__t), "And") if __t == "Int" => {
-                writeln!(out, "{}{} = and i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            
-(Type::Custom(__t), "Or") if __t == "Int" => {
-                writeln!(out, "{}{} = or i64 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
-            }
-            // ── Float arithmetic ──
-            
-(Type::Custom(__t), "Add") if __t == "Float" => {
-                writeln!(out, "{}{} = fadd float {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Sub") if __t == "Float" => {
-                writeln!(out, "{}{} = fsub float {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Mul") if __t == "Float" => {
-                writeln!(out, "{}{} = fmul float {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Div") if __t == "Float" => {
-                writeln!(out, "{}{} = fdiv float {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Eq") if __t == "Float" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = fcmp oeq float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
-                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Ne") if __t == "Float" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = fcmp one float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
-                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Lt") if __t == "Float" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = fcmp olt float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
-                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Le") if __t == "Float" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = fcmp ole float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
-                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Gt") if __t == "Float" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = fcmp ogt float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
-                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            
-(Type::Custom(__t), "Ge") if __t == "Float" => {
-                let cmp = format!("%pcmp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = fcmp oge float {}, {}", indent, cmp, src_val.name, rhs.name).ok();
-                let ext = format!("%pce{}", self.fun.txn_counter); self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
-                writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float() }
-            }
-            // ── Bool logical ──
-            
-(Type::Custom(__t), "And") if __t == "Bool" => {
-                writeln!(out, "{}{} = and i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::bool_() }
-            }
-            
-(Type::Custom(__t), "Or") if __t == "Bool" => {
-                writeln!(out, "{}{} = or i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::bool_() }
-            }
-            
-(Type::Custom(__t), "Eq") if __t == "Bool" => {
-                writeln!(out, "{}{} = icmp eq i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::bool_() }
-            }
-            
-(Type::Custom(__t), "Ne") if __t == "Bool" => {
-                writeln!(out, "{}{} = icmp ne i1 {}, {}", indent, v, src_val.name, rhs.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::bool_() }
-            }
-            // ── Unknown combination — not a fast-path ──
+        let type_name = match &src_val.ty {
+            Type::Custom(n) => n.as_str(),
             _ => return None,
         };
-        Some(tr)
+        match type_name {
+            "Int" => self.projection_int_fast_path(out, src_val, &rhs, name, v, indent),
+            "Float" => self.projection_float_fast_path(out, src_val, &rhs, name, v, indent),
+            "Bool" => self.projection_bool_fast_path(out, src_val, &rhs, name, v, indent),
+            _ => None,
+        }
     }
 
-    /// Emit a cached projection: load valid flag, branch on hit/miss.
-    /// Hit: load cached value. Miss: compute, store in cache, set flag.
-    /// Phi merges hit/miss paths. Cache slots are appended to %State by
-    /// dead-field elimination (apply_field_modes).
-    pub(crate) fn try_cached_projection(&mut self, out: &mut String, source_expr: &Expr,
-        src_val: &TypedRegister, target_name: &str, indent: &str) -> Option<TypedRegister>
-    {
-        // Extract the field name from the source expression (must be a state field identifier)
-        let field_name = match source_expr {
-            Expr::Identifier(n) => n.clone(),
+    /// Fast-path projections for Int type.
+    fn projection_int_fast_path(
+        &mut self,
+        out: &mut String,
+        src: &TypedRegister,
+        rhs: &TypedRegister,
+        name: &str,
+        v: &str,
+        indent: &str,
+    ) -> Option<TypedRegister> {
+        let (op, is_cmp) = match name {
+            "Add" => ("add", false),
+            "Sub" => ("sub", false),
+            "Mul" => ("mul", false),
+            "Div" => ("sdiv", false),
+            "Mod" => ("srem", false),
+            "Eq" => ("icmp eq", true),
+            "Ne" => ("icmp ne", true),
+            "Lt" => ("icmp slt", true),
+            "Le" => ("icmp sle", true),
+            "Gt" => ("icmp sgt", true),
+            "Ge" => ("icmp sge", true),
+            "BitAnd" | "And" => ("and", false),
+            "BitOr" | "Or" => ("or", false),
+            "BitXor" => ("xor", false),
+            "Shl" => ("shl", false),
+            "Shr" => ("lshr", false),
             _ => return None,
         };
-        // Check if this field has a cache slot for this projection target
-        let &(cache_idx, valid_idx) = self.ctx.cache_slots.get(&field_name)
-            .and_then(|targets| targets.get(target_name))?;
-
-        // 2026-06-28: Use txn_counter to prevent %t{N} collision
-        let v = format!("%t{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        let valid_gep = format!("%cvp{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, valid_gep, valid_idx).ok();
-        let valid_load = format!("%cvv{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, valid_load, valid_gep).ok();
-        let valid_cond = format!("%cvc{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = icmp ne i8 {}, 0", indent, valid_cond, valid_load).ok();
-
-        let hit_label = format!(".chit{}", self.fun.txn_counter);
-        let miss_label = format!(".cmiss{}", self.fun.txn_counter);
-        let merge_label = format!(".cmerge{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, valid_cond, hit_label, miss_label).ok();
-        writeln!(out, "{}:", hit_label).ok();
-        let cache_gep = format!("%cve{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, cache_gep, cache_idx).ok();
-        let cache_val = format!("%cvv{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, cache_val, cache_gep).ok();
-        writeln!(out, "{}br label %{}", indent, merge_label).ok();
-        writeln!(out, "{}:", miss_label).ok();
-        // Compute the projection value — reuses the source value as-is
-        writeln!(out, "{}{} = add i64 0, {}", indent, v, src_val.name).ok();
-        // Store the computed value in the cache and set valid flag
-        let store_gep = format!("%cse{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, store_gep, cache_idx).ok();
-        writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, v, store_gep).ok();
-        let valid_store_gep = format!("%csve{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-            indent, valid_store_gep, valid_idx).ok();
-        writeln!(out, "{}store i8 1, ptr {}, align 1", indent, valid_store_gep).ok();
-        writeln!(out, "{}br label %{}", indent, merge_label).ok();
-        writeln!(out, "{}:", merge_label).ok();
-        let phi_reg = format!("%cp{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-        writeln!(out, "{}{} = phi i64 [ {}, %{} ], [ {}, %{} ]",
-            indent, phi_reg, cache_val, hit_label, v, miss_label).ok();
-        Some(TypedRegister { name: phi_reg, ty: Type::int() })
+        if is_cmp {
+            let cmp = self.fun.next_reg_with_prefix("pcmp");
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, cmp, op, src.name, rhs.name).ok();
+            writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+            Some(TypedRegister { name: v.to_string(), ty: Type::int() })
+        } else {
+            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, op, src.name, rhs.name).ok();
+            Some(TypedRegister { name: v.to_string(), ty: Type::int() })
+        }
     }
 
-    /// Phase 2: Check if the source type has a meld route for the given projection target.
-    /// When a meld route exists, evaluates the route's destination expression to derive
-    /// the projection result from the backing value. Handles:
-    /// - `Expr::Identifier(name)` where name is a projection target → emit direct projection
-    /// - `/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args }` → emit intrinsic with args as projections
-    /// - `Expr::Projection { source, target }` → emit projection with substituted source
-    pub(crate) fn try_meld_projection(&mut self, out: &mut String, src_val: &TypedRegister,
-        target_name: &str, indent: &str) -> Option<TypedRegister>
-    {
+    /// Fast-path projections for Float type.
+    fn projection_float_fast_path(
+        &mut self,
+        out: &mut String,
+        src: &TypedRegister,
+        rhs: &TypedRegister,
+        name: &str,
+        v: &str,
+        indent: &str,
+    ) -> Option<TypedRegister> {
+        let (op, is_cmp) = match name {
+            "Add" => ("fadd", false),
+            "Sub" => ("fsub", false),
+            "Mul" => ("fmul", false),
+            "Div" => ("fdiv", false),
+            "Eq" => ("fcmp oeq", true),
+            "Ne" => ("fcmp one", true),
+            "Lt" => ("fcmp olt", true),
+            "Le" => ("fcmp ole", true),
+            "Gt" => ("fcmp ogt", true),
+            "Ge" => ("fcmp oge", true),
+            _ => return None,
+        };
+        if is_cmp {
+            let cmp = self.fun.next_reg_with_prefix("pcmp");
+            writeln!(out, "{}{} = {} float {}, {}", indent, cmp, op, src.name, rhs.name).ok();
+            let ext = self.fun.next_reg_with_prefix("pce");
+            writeln!(out, "{}{} = zext i1 {} to i64", indent, ext, cmp).ok();
+            writeln!(out, "{}{} = sitofp i64 {} to float", indent, v, ext).ok();
+            Some(TypedRegister { name: v.to_string(), ty: Type::float() })
+        } else {
+            writeln!(out, "{}{} = {} float {}, {}", indent, v, op, src.name, rhs.name).ok();
+            Some(TypedRegister { name: v.to_string(), ty: Type::float() })
+        }
+    }
+
+    /// Fast-path projections for Bool type.
+    fn projection_bool_fast_path(
+        &mut self,
+        out: &mut String,
+        src: &TypedRegister,
+        rhs: &TypedRegister,
+        name: &str,
+        v: &str,
+        indent: &str,
+    ) -> Option<TypedRegister> {
+        match name {
+            "And" => {
+                writeln!(out, "{}{} = and i1 {}, {}", indent, v, src.name, rhs.name).ok();
+                Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+            }
+            "Or" => {
+                writeln!(out, "{}{} = or i1 {}, {}", indent, v, src.name, rhs.name).ok();
+                Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+            }
+            "Eq" => {
+                writeln!(out, "{}{} = icmp eq i1 {}, {}", indent, v, src.name, rhs.name).ok();
+                Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+            }
+            "Ne" => {
+                writeln!(out, "{}{} = icmp ne i1 {}, {}", indent, v, src.name, rhs.name).ok();
+                Some(TypedRegister { name: v.to_string(), ty: Type::bool_() })
+            }
+            _ => None,
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Section 7: Melds & Type Decay
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Check if the source type has a meld route for the given projection
+    /// target. When a meld route exists, evaluates the route's destination
+    /// expression to derive the projection result from the backing value.
+    ///
+    /// 2026-07-13: Uses `TypeUniverse::find_meld` (bidirectional lookup)
+    /// instead of iterating `melds` directly.
+    pub(crate) fn try_meld_projection(
+        &mut self,
+        out: &mut String,
+        src_val: &TypedRegister,
+        target_name: &str,
+        indent: &str,
+    ) -> Option<TypedRegister> {
         let custom_name = match &src_val.ty {
-            crate::ast::Type::Custom(n) => n.clone(),
+            Type::Custom(n) => n.clone(),
             _ => return None,
         };
         let universe = self.ctx.type_universe.as_ref()?;
-        // Find meld — clone data to avoid borrow conflict with mutable self
+        // Find meld by scanning for any entry involving custom_name
         let meld_entry = universe.melds.iter().find(|((a, b), _decl)| {
             a == &custom_name || b == &custom_name
         });
         let ((name_a, name_b), meld_decl) = meld_entry?;
         let partner = if *name_a == custom_name { name_b.clone() } else { name_a.clone() };
         let route = meld_decl.routes.iter().find(|r| r.accessor == target_name)?;
-        let route_dest = route.dest_expr.clone();
-
-        let result = self.emit_route_expression(out, &route_dest, src_val, &partner, indent);
+        let result = self.emit_route_expression(out, &route.dest_expr, src_val, &partner, indent);
         if let Some(ref reg) = result {
-            // The backing type is the meld partner — the source value is viewed through
-            // the custom_name lens but the actual bits are the partner type's bits.
             self.mark_chimera(&reg.name, &partner);
         }
         result
     }
 
-    /// Evaluate a meld route's destination expression, substituting the meld partner's
-    /// type name with the actual source value and treating known projection target names
-    /// as projections on the backing value.
-    fn emit_route_expression(&mut self, out: &mut String, expr: &Expr,
-        src_val: &TypedRegister, partner: &str, indent: &str) -> Option<TypedRegister>
-    {
+    /// Evaluate a meld route's destination expression, substituting the
+    /// meld partner's type name with the actual source value.
+    ///
+    /// Patterns handled:
+    ///   1. `Identifier("Ptr"|"Size"|"Bytes"|"Alignment"|"Type")` → direct projection
+    ///   2. `Call("strlen#", [arg])` → intrinsic with projection arg
+    ///   3. `Field(obj, field)` where `obj == partner` → substituted field projection
+    fn emit_route_expression(
+        &mut self,
+        out: &mut String,
+        expr: &Expr,
+        src_val: &TypedRegister,
+        partner: &str,
+        indent: &str,
+    ) -> Option<TypedRegister> {
         match expr {
             // Pattern 1: identity projection — "Ptr" or "Size" on the backing value
-            Expr::Identifier(name) if name == "Ptr" || name == "Size"
-                || name == "Bytes" || name == "Alignment" || name == "Type" => {
+            Expr::Identifier(name) if matches!(name.as_str(), "Ptr" | "Size" | "Bytes" | "Alignment" | "Type") => {
                 self.emit_direct_projection(out, src_val, name, indent)
             }
-            // Pattern 2: intrinsic call — "strlen#(Ptr)" etc.
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
-                // 2026-06-28: Use txn_counter to prevent %t{N} collision
-                let v = format!("%t{}", self.fun.txn_counter);
-                self.fun.txn_counter += 1;
-                // Handle strlen#(arg) — the common meld route for CString.Size
-                if let crate::ast::Intrinsic::Strlen = intrinsic {
-                    if args.len() == 1 {
-                        let arg_name = match &args[0] {
-                            Expr::Identifier(n) => Some(n.clone()),
-                            _ => None,
-                        };
-                        if let Some(ref name) = arg_name {
-                            if name == "Ptr" || name == "Size" || name == "Bytes" {
-                                let proj_reg = self.emit_direct_projection(out, src_val, name, indent)?;
-                                writeln!(out, "{}{} = call i64 @__strlen__(i64 {})", indent, v, proj_reg.name).ok();
-                                return Some(TypedRegister { name: v, ty: Type::int() });
-                            }
-                        }
-                    }
-                }
-                None
+            // Pattern 2: intrinsic call — strlen#(Ptr) etc.
+            Expr::Call(name, args) if name == "strlen#" && args.len() == 1 => {
+                self.emit_strlen_meld_route(out, indent, &args[0], src_val)
             }
             // Pattern 3: field access on the partner type — "CString.ptr"
             Expr::Field(obj, field) => {
-                if let Expr::Identifier(n) = obj.as_ref() {
-                    if n == partner {
-                        // Substitute with the actual source value and emit the field
-                        // as the corresponding projection (Ptr, Size, etc.)
-                        self.emit_direct_projection(out, src_val, field, indent)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
+                let Expr::Identifier(n) = obj.as_ref() else { return None; };
+                if n != partner {
+                    return None;
                 }
-            }
-            // Pattern 4: projection on the partner type — "CString :> Size"
-            Expr::Projection { source: sub_source, target: sub_target } => {
-                let sub_name = match sub_source.as_ref() {
-                    Expr::Identifier(n) => Some(n.clone()),
-                    _ => None,
-                };
-                if let Some(ref name) = sub_name {
-                    if name == partner {
-                        // Substitute with the actual source value and emit the projection
-                        // without going through the meld check again (avoid recursion)
-                        let target_name = crate::analysis::transition_graph::projection_target_name(sub_target);
-                        self.emit_direct_projection(out, src_val, &target_name, indent)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
+                self.emit_direct_projection(out, src_val, field, indent)
             }
             _ => None,
         }
     }
 
-    /// Phase 3: Decay a chimera value to its canonical type at a boundary.
+    /// Emit a strlen#(arg) meld route where arg is a projection on the source.
+    fn emit_strlen_meld_route(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        arg: &Expr,
+        src_val: &TypedRegister,
+    ) -> Option<TypedRegister> {
+        let arg_name = match arg {
+            Expr::Identifier(n) => n.as_str(),
+            _ => return None,
+        };
+        match arg_name {
+            "Ptr" | "Size" | "Bytes" => {
+                let v = self.fun.next_reg_with_prefix("t");
+                let proj_reg = self.emit_direct_projection(out, src_val, arg_name, indent)?;
+                writeln!(out, "{}{} = call i64 @__strlen__(i64 {})", indent, v, proj_reg.name).ok();
+                Some(TypedRegister { name: v, ty: Type::int() })
+            }
+            _ => None,
+        }
+    }
+
+    /// Decay a chimera value to its canonical type at a boundary.
     /// When `target_ty` is `None`, assumes decay to the backing type (identity).
-    /// Real field-level materialization will be added per type pair.
-    pub(crate) fn emit_decay(&mut self, out: &mut String, val: &TypedRegister,
-        target_ty: Option<&Type>, indent: &str) -> TypedRegister
-    {
+    /// Generic materialization: looks up the meld between backing and target,
+    /// derives each field of the target type from the backing via route expressions.
+    pub(crate) fn emit_decay(
+        &mut self,
+        out: &mut String,
+        val: &TypedRegister,
+        target_ty: Option<&Type>,
+        indent: &str,
+    ) -> TypedRegister {
         if !self.is_chimera(&val.name) {
             return val.clone();
         }
-        let backing = match self.chimera_backing(&val.name) {
-            Some(b) => b.to_string(),
-            None => return val.clone(),
-        };
+        let Some(backing) = self.chimera_backing(&val.name) else { return val.clone(); };
         let target_name = match target_ty {
             Some(Type::Custom(n)) => n.clone(),
-            _ => return val.clone(), // primitive target → identity (bits are valid)
+            _ => return val.clone(),
         };
         if backing == target_name {
-            // Decay to own backing type — identity
             return val.clone();
         }
-        // Generic materialization: look up the meld between backing and target,
-        // derive each field of the target type from the backing value via routes.
-        // Clone all data first to avoid borrow conflicts with mutable self.
-        let meld_routes: Vec<crate::ast::MeldRouteDef> = {
-            let universe = match self.ctx.type_universe.as_ref() {
-                Some(u) => u,
-                None => return val.clone(),
-            };
-            match universe.find_meld(&backing, &target_name) {
-                Some(m) => m.routes.clone(),
-                None => return val.clone(),
-            }
-        };
-        let target_fields = match self.ctx.struct_types.get(&target_name) {
-            Some(f) => f.clone(),
-            None => return val.clone(),
-        };
-
-        // Derive each field value from the backing via meld routes
-        let mut field_results: Vec<(String, Type, String)> = Vec::new(); // name, ty, reg
-        for (field_name, field_ty) in &target_fields {
-            if let Some(route) = meld_routes.iter().find(|r| r.accessor == *field_name) {
-                // Use backing as partner — the route evaluates from backing's perspective
-                if let Some(reg) = self.emit_route_expression(out, &route.dest_expr, val, &backing, indent) {
-                    field_results.push((field_name.clone(), field_ty.clone(), reg.name));
-                } else {
-                    // Route evaluation failed — emit 0 as placeholder
-        // 2026-06-28: Use txn_counter to prevent %t{N} collision
-        let v = format!("%t{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
-                    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-                    field_results.push((field_name.clone(), field_ty.clone(), v));
-                }
-            } else {
-                // No route for this field — emit 0 as placeholder
-                // 2026-06-28: Use txn_counter to prevent %t{N} collision
-                let v = format!("%t{}", self.fun.txn_counter);
-                self.fun.txn_counter += 1;
-                writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
-                field_results.push((field_name.clone(), field_ty.clone(), v));
-            }
-        }
-
+        let Some(universe) = self.ctx.type_universe.as_ref() else { return val.clone(); };
+        let Some(meld_decl) = universe.find_meld(&backing, &target_name) else { return val.clone(); };
+        let Some(target_fields) = self.ctx.struct_types.get(&target_name) else { return val.clone(); };
+        let field_results = self.derive_fields_via_meld(out, val, &backing, &meld_decl.routes, target_fields, indent);
         if field_results.is_empty() {
             return val.clone();
         }
-
-        // For single-field types: return the field value directly
         if field_results.len() == 1 {
             let (_, ref ty, ref reg) = field_results[0];
             return TypedRegister { name: reg.clone(), ty: ty.clone() };
         }
+        self.emit_multi_field_struct(out, indent, &field_results, &target_name)
+    }
 
-        // For multi-field types: allocate a struct on the heap
-        let total_size = field_results.len() * 8; // each field is i64
-        // 2026-06-28: Use txn_counter to prevent %t{N} collision
-        let alloc = format!("%t{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
+    /// Derive each field of a target type from a backing value via meld routes.
+    /// Falls back to 0 for fields without a route or when route evaluation fails.
+    fn derive_fields_via_meld(
+        &mut self,
+        out: &mut String,
+        val: &TypedRegister,
+        backing: &str,
+        routes: &[crate::ast::MeldRouteDef],
+        target_fields: &[(String, Type)],
+        indent: &str,
+    ) -> Vec<(String, Type, String)> {
+        let mut results = Vec::new();
+        for (field_name, field_ty) in target_fields {
+            let reg = if let Some(route) = routes.iter().find(|r| r.accessor == *field_name) {
+                if let Some(reg) = self.emit_route_expression(out, &route.dest_expr, val, backing, indent) {
+                    reg.name
+                } else {
+                    self.emit_zero_placeholder(out, indent)
+                }
+            } else {
+                self.emit_zero_placeholder(out, indent)
+            };
+            results.push((field_name.clone(), field_ty.clone(), reg));
+        }
+        results
+    }
+
+    /// Emit a zero placeholder register (add i64 0, 0).
+    fn emit_zero_placeholder(&mut self, out: &mut String, indent: &str) -> String {
+        let v = self.fun.next_reg_with_prefix("t");
+        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+        v
+    }
+
+    /// Allocate a heap struct and store each derived field into it.
+    fn emit_multi_field_struct(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        field_results: &[(String, Type, String)],
+        target_name: &str,
+    ) -> TypedRegister {
+        let total_size = field_results.len() * 8;
+        let alloc = self.fun.next_reg_with_prefix("t");
         writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, alloc, total_size).ok();
-        let struct_ptr = format!("%t{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
+        let struct_ptr = self.fun.next_reg_with_prefix("t");
         writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, struct_ptr, alloc).ok();
-
         for (i, (_name, _ty, reg)) in field_results.iter().enumerate() {
-            // 2026-06-28: Use txn_counter to prevent %t{N} collision
-            let gep = format!("%t{}", self.fun.txn_counter);
-            self.fun.txn_counter += 1;
+            let gep = self.fun.next_reg_with_prefix("t");
             writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, struct_ptr, i).ok();
             writeln!(out, "{}store i64 {}, ptr {}, align 8, !tbaa !1", indent, reg, gep).ok();
         }
-
-        // 2026-06-29: FIXED — return struct_ptr (base of allocated struct) instead of
-        // struct_ptr_name (which was computed as txn_counter-1 after the loop, pointing
-        // to the LAST field's GEP register). The old code returned a pointer to the last
-        // field instead of the struct base, causing memory corruption in FFI consumers.
-        TypedRegister { name: struct_ptr, ty: Type::Custom(target_name.clone()) }
+        TypedRegister { name: struct_ptr, ty: Type::Custom(target_name.to_string()) }
     }
 
-    /// Emit a direct projection on a value without going through the meld route check.
-    /// This avoids infinite recursion when a meld route maps to the same projection target.
-    fn emit_direct_projection(&mut self, out: &mut String, src_val: &TypedRegister,
-        target_name: &str, indent: &str) -> Option<TypedRegister>
-    {
-        // 2026-06-28: Use txn_counter to prevent %t{N} collision
-        let v = format!("%t{}", self.fun.txn_counter);
-        self.fun.txn_counter += 1;
+    /// Emit a direct projection on a value without going through the meld
+    /// route check. This avoids infinite recursion when a meld route maps
+    /// to the same projection target.
+    fn emit_direct_projection(
+        &mut self,
+        out: &mut String,
+        src_val: &TypedRegister,
+        target_name: &str,
+        indent: &str,
+    ) -> Option<TypedRegister> {
+        let v = self.fun.next_reg_with_prefix("t");
         match target_name {
             "Ptr" => {
                 writeln!(out, "{}{} = add i64 0, {} ; ptr", indent, v, src_val.name).ok();
                 Some(TypedRegister { name: v, ty: Type::int() })
             }
             "Size" => {
-                let hp = format!("%drphp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                let hp = self.fun.next_reg_with_prefix("drphp");
                 self.emit_inttoptr(out, indent, &hp, &src_val.name);
-                let lp = format!("%drplp{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+                let lp = self.fun.next_reg_with_prefix("drplp");
                 writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 1", indent, lp, hp).ok();
                 writeln!(out, "{}{} = load i64, ptr {}, align 8, !tbaa !1", indent, v, lp).ok();
                 Some(TypedRegister { name: v, ty: Type::int() })
@@ -1849,72 +1692,100 @@ impl LlvmBackend {
         }
     }
 
-    /// 2026-07-03: Try to emit EOR-optimized cast: detects
-    /// Cast(BinaryOp(Cast(a, T), Cast(b, T)), U) where U <:> T.
+    // ═══════════════════════════════════════════════════════════════
+    // Section 8: Cast Optimization (EOR)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Try to emit an EOR-optimized cast:
+    /// `Cast(BinaryOp(Cast(a, T), Cast(b, T)), U)` where U <:> T.
     /// If matched, emits the binary op directly without redundant casts.
+    ///
+    /// 2026-07-03: Cast elimination optimization — when both operands of a
+    /// binary op are already the target type (cast_ty), and the outer cast
+    /// target has a meld with cast_ty, emit the binary op directly in the
+    /// inner types. This eliminates the inner casts entirely.
     pub(super) fn try_emit_eor(
         &mut self,
         out: &mut String,
         v: &str,
-        inner: &crate::ast::Expr,
-        target_ty: &crate::ast::Type,
+        inner: &Expr,
+        target_ty: &Type,
         indent: &str,
     ) -> Option<TypedRegister> {
-        use crate::ast::Expr;
-        let (lhs, rhs) = match inner {
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
-                (l.as_ref().clone(), r.as_ref().clone())
-            }
+        let (kind, lhs, rhs) = match inner {
+            Expr::BinaryOp(k, l, r) => (k, l.as_ref().clone(), r.as_ref().clone()),
             _ => return None,
         };
-        let cast_ty = match (&lhs, &rhs) {
-            (Expr::Cast(_, lt), Expr::Cast(_, rt)) if lt == rt => lt.clone(),
-            _ => return None,
-        };
-        let has_meld = self.ctx.type_universe.as_ref()
-            .and_then(|tu| {
-                let tn = match target_ty {
-                    crate::ast::Type::Custom(n) => Some(n.as_str()),
-                    crate::ast::Type::Applied(n, _) => Some(n.as_str()),
-                    _ => None,
-                };
-                tn.and_then(|n| tu.find_meld(n, cast_ty.universe_key()))
-            })
-            .is_some();
-        if !has_meld {
+        let (Expr::Cast(_, lt), Expr::Cast(_, rt)) = (&lhs, &rhs) else { return None; };
+        if lt != rt {
+            return None;
+        }
+        let cast_ty = lt.clone();
+        let target_name = target_ty.universe_key()?;
+        let tu = self.ctx.type_universe.as_ref()?;
+        if tu.find_meld(target_name, cast_ty.universe_key()?).is_none() {
             return None;
         }
         let a = self.emit_expr(out, &lhs, indent);
         let b = self.emit_expr(out, &rhs, indent);
-        let fl_op = match inner {
-            Expr::Add(_, _) => "fadd",
-            Expr::Sub(_, _) => "fsub",
-            Expr::Mul(_, _) => "fmul",
-            Expr::Div(_, _) => "fdiv",
-            _ => return None,
-        };
-        let i_op = match inner {
-            Expr::Add(_, _) => "add",
-            Expr::Sub(_, _) => "sub",
-            Expr::Mul(_, _) => "mul",
-            Expr::Div(_, _) => "sdiv",
-            _ => return None,
-        };
-        if type_is(&self.ctx.type_universe, &cast_ty, "Float") || type_is(&self.ctx.type_universe, &cast_ty, "Float64") {
-            let fl_a = self.ensure_float_reg(out, indent, &a);
-            let fl_b = self.ensure_float_reg(out, indent, &b);
-            writeln!(out, "{}{} = {} float {}, {}", indent, v, fl_op, fl_a, fl_b).ok();
-            let bi = format!("%eor_bi{}", self.fun.txn_counter);
-            self.fun.txn_counter += 1;
-            let ze = format!("%eor_ze{}", self.fun.txn_counter);
-            writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, v).ok();
-            writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
-            self.fun.reg_float_cache.insert(ze.clone(), v.to_string());
-            let ret_ty = if cast_ty == Type::float64() { Type::float64() } else { Type::float() };
-            Some(TypedRegister { name: ze, ty: ret_ty })
+        if type_is(&self.ctx.type_universe, &cast_ty, "Float")
+            || type_is(&self.ctx.type_universe, &cast_ty, "Float64")
+        {
+            self.emit_eor_float_path(out, indent, v, kind, &a, &b, &cast_ty)
         } else {
-            writeln!(out, "{}{} = {} i64 {}, {}", indent, v, i_op, a, b).ok();
-            Some(TypedRegister { name: v.to_string(), ty: cast_ty })
+            self.emit_eor_int_path(out, indent, v, kind, &a, &b, &cast_ty)
         }
+    }
+
+    /// Emit EOR float path: emit float binary op, bitcast/zext result to i64.
+    fn emit_eor_float_path(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        v: &str,
+        kind: &crate::ast::BinaryOpKind,
+        a: &TypedRegister,
+        b: &TypedRegister,
+        cast_ty: &Type,
+    ) -> Option<TypedRegister> {
+        let fl_a = self.ensure_float_reg(out, indent, a);
+        let fl_b = self.ensure_float_reg(out, indent, b);
+        let fl_op = match kind {
+            crate::ast::BinaryOpKind::Add => "fadd",
+            crate::ast::BinaryOpKind::Sub => "fsub",
+            crate::ast::BinaryOpKind::Mul => "fmul",
+            crate::ast::BinaryOpKind::Div => "fdiv",
+            _ => return None,
+        };
+        writeln!(out, "{}{} = {} float {}, {}", indent, v, fl_op, fl_a, fl_b).ok();
+        let bi = self.fun.next_reg_with_prefix("eor_bi");
+        writeln!(out, "{}{} = bitcast float {} to i32", indent, bi, v).ok();
+        let ze = self.fun.next_reg_with_prefix("eor_ze");
+        writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, bi).ok();
+        self.fun.reg_float_cache.insert(ze.clone(), v.to_string());
+        let ret_ty = if cast_ty == &Type::float64() { Type::float64() } else { Type::float() };
+        Some(TypedRegister { name: ze, ty: ret_ty })
+    }
+
+    /// Emit EOR integer path: emit integer binary op directly.
+    fn emit_eor_int_path(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        v: &str,
+        kind: &crate::ast::BinaryOpKind,
+        a: &TypedRegister,
+        b: &TypedRegister,
+        cast_ty: &Type,
+    ) -> Option<TypedRegister> {
+        let i_op = match kind {
+            crate::ast::BinaryOpKind::Add => "add",
+            crate::ast::BinaryOpKind::Sub => "sub",
+            crate::ast::BinaryOpKind::Mul => "mul",
+            crate::ast::BinaryOpKind::Div => "sdiv",
+            _ => return None,
+        };
+        writeln!(out, "{}{} = {} i64 {}, {}", indent, v, i_op, a.name, b.name).ok();
+        Some(TypedRegister { name: v.to_string(), ty: cast_ty.clone() })
     }
 }

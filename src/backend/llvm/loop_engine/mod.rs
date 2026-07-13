@@ -1,0 +1,318 @@
+// ── Loop Emission: Module Root ──────────────────────────────────
+//
+// 2026-07-13: Split from monolithic loop_engine.rs (4398 lines)
+// into four submodules: mod.rs (dispatch + exit eval), counter.rs
+// (counter-based strategies), ssa.rs (SSA register pipeline), and
+// analysis.rs (free-standing helpers). All old-style Expr/Statement
+// patterns migrated to new-style unified variants.
+//
+// Loop strategies (documented per submodule):
+//   counter.rs — Pure Counter Fold, Pure Counter Phi, Hybrid Countable
+//   ssa.rs     — SSA Register Pipeline, Modulo Switch, Folded Multi-Txn
+
+pub mod analysis;
+pub mod counter;
+pub mod ssa;
+
+use crate::backend::llvm::*;
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::fmt::Write;
+
+impl LlvmBackend {
+    // ═══════════════════════════════════════════════════════════════
+    // Exit Expression Evaluator
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Recursively evaluate a boolean expression for loop exit conditions.
+    /// All values are emitted as `i64` for uniformity; comparisons are
+    /// zext'd from `i1`. Handles both new-style unified Expr variants
+    /// (`BinaryOp`, `UnaryOp`) and resolves state field references to
+    /// GEP+load sequences.
+    pub(crate) fn emit_exit_expr(
+        &mut self,
+        out: &mut String,
+        expr: &Expr,
+        indent: &str,
+    ) -> String {
+        let v = self.fun.next_reg();
+        match expr {
+            Expr::Decimal(n) => {
+                return self.emit_expr(out, expr, indent).name;
+            }
+            Expr::Float(f) => {
+                let bits = f.to_bits() as i64;
+                writeln!(out, "{}{} = add i64 0, {}", indent, v, bits).ok();
+                return v;
+            }
+            Expr::Bool(_) | Expr::Quoted(_) => {
+                return self.emit_expr(out, expr, indent).name;
+            }
+            Expr::Identifier(name) => {
+                return self.emit_exit_identifier(out, indent, name, &v);
+            }
+            Expr::UnaryOp(kind, inner) => {
+                let op = self.emit_exit_expr(out, inner, indent);
+                match kind {
+                    crate::ast::UnaryOpKind::Not => {
+                        let one = format!("%eno{}", self.fun.txn_counter);
+                        self.fun.txn_counter += 1;
+                        writeln!(out, "{}{} = xor i64 {}, 1", indent, one, op).ok();
+                        writeln!(out, "{}{} = and i64 {}, 1", indent, v, one).ok();
+                    }
+                    _ => {
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, op).ok();
+                    }
+                }
+                return v;
+            }
+            Expr::BinaryOp(kind, l, r) => {
+                return self.emit_exit_binop(out, indent, kind, l, r, &v);
+            }
+            _ => {
+                return self.emit_expr(out, expr, indent).name;
+            }
+        }
+    }
+
+    /// Emit a state field load for an exit condition identifier.
+    fn emit_exit_identifier(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        name: &str,
+        v: &str,
+    ) -> String {
+        let Some(&idx) = self.ctx.field_index_map.get(name) else {
+            return self.emit_expr(out, &Expr::Identifier(name.to_string()), indent).name;
+        };
+        let p = self.fun.next_reg_with_prefix("gep_exit");
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            indent, p, idx).ok();
+        let ft = &self.ctx.field_types[idx];
+        match ft.as_str() {
+            "i64" => {
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, v, p).ok();
+            }
+            "i32" => {
+                let l = self.fun.next_reg_with_prefix("exit_l");
+                writeln!(out, "{}{} = load i32, ptr {}, align 4", indent, l, p).ok();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, v, l).ok();
+            }
+            "i8" => {
+                let l = self.fun.next_reg_with_prefix("exit_l");
+                writeln!(out, "{}{} = load i8, ptr {}, align 1", indent, l, p).ok();
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, v, l).ok();
+            }
+            s if s == "i8*" || s == "ptr" => {
+                let l = self.fun.next_reg_with_prefix("exit_l");
+                writeln!(out, "{}{} = load ptr, ptr {}, align 8", indent, l, p).ok();
+                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, l).ok();
+            }
+            _ if ft.starts_with("float") => {
+                let l = self.fun.next_reg_with_prefix("exit_l");
+                writeln!(out, "{}{} = load i32, ptr {}, align 4", indent, l, p).ok();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, v, l).ok();
+            }
+            _ => {
+                writeln!(out, "{}{} = load i64, ptr {}, align 8", indent, v, p).ok();
+            }
+        }
+        v.to_string()
+    }
+
+    /// Emit a binary operation for exit condition evaluation.
+    fn emit_exit_binop(
+        &mut self,
+        out: &mut String,
+        indent: &str,
+        kind: &crate::ast::BinaryOpKind,
+        l: &Expr,
+        r: &Expr,
+        v: &str,
+    ) -> String {
+        match kind {
+            crate::ast::BinaryOpKind::Eq
+            | crate::ast::BinaryOpKind::Neq
+            | crate::ast::BinaryOpKind::Lt
+            | crate::ast::BinaryOpKind::Gt
+            | crate::ast::BinaryOpKind::Le
+            | crate::ast::BinaryOpKind::Ge => {
+                let (op, negate) = self.exit_comparison_op(kind);
+                let left = self.emit_exit_expr(out, l, indent);
+                let right = self.emit_exit_expr(out, r, indent);
+                let cmp = self.fun.next_reg_with_prefix("ecmp");
+                writeln!(out, "{}{} = icmp {} i64 {}, {}", indent, cmp, op, left, right).ok();
+                if negate {
+                    let not_cmp = self.fun.next_reg_with_prefix("enot");
+                    writeln!(out, "{}{} = xor i1 {}, -1", indent, not_cmp, cmp).ok();
+                    writeln!(out, "{}{} = zext i1 {} to i64", indent, v, not_cmp).ok();
+                } else {
+                    writeln!(out, "{}{} = zext i1 {} to i64", indent, v, cmp).ok();
+                }
+            }
+            crate::ast::BinaryOpKind::And => {
+                let left = self.emit_exit_expr(out, l, indent);
+                let right = self.emit_exit_expr(out, r, indent);
+                writeln!(out, "{}{} = and i64 {}, {}", indent, v, left, right).ok();
+            }
+            crate::ast::BinaryOpKind::Or => {
+                let left = self.emit_exit_expr(out, l, indent);
+                let right = self.emit_exit_expr(out, r, indent);
+                writeln!(out, "{}{} = or i64 {}, {}", indent, v, left, right).ok();
+            }
+            _ => {
+                let left = self.emit_exit_expr(out, l, indent);
+                let right = self.emit_exit_expr(out, r, indent);
+                let op = self.exit_arith_op(kind);
+                writeln!(out, "{}{} = {} i64 {}, {}", indent, v, op, left, right).ok();
+            }
+        }
+        v.to_string()
+    }
+
+    /// Map a comparison BinaryOpKind to LLVM icmp predicate and negation flag.
+    fn exit_comparison_op(&self, kind: &crate::ast::BinaryOpKind) -> (&'static str, bool) {
+        match kind {
+            crate::ast::BinaryOpKind::Eq => ("eq", false),
+            crate::ast::BinaryOpKind::Neq => ("eq", true),
+            crate::ast::BinaryOpKind::Lt => ("slt", false),
+            crate::ast::BinaryOpKind::Gt => ("sgt", false),
+            crate::ast::BinaryOpKind::Le => ("sle", false),
+            crate::ast::BinaryOpKind::Ge => ("sge", false),
+            _ => ("eq", false),
+        }
+    }
+
+    /// Map an arithmetic BinaryOpKind to LLVM integer opcode.
+    fn exit_arith_op(&self, kind: &crate::ast::BinaryOpKind) -> &'static str {
+        match kind {
+            crate::ast::BinaryOpKind::Add => "add",
+            crate::ast::BinaryOpKind::Sub => "sub",
+            crate::ast::BinaryOpKind::Mul => "mul",
+            crate::ast::BinaryOpKind::Div => "sdiv",
+            crate::ast::BinaryOpKind::Mod => "srem",
+            crate::ast::BinaryOpKind::BitAnd => "and",
+            crate::ast::BinaryOpKind::BitOr => "or",
+            crate::ast::BinaryOpKind::BitXor => "xor",
+            crate::ast::BinaryOpKind::Shl => "shl",
+            crate::ast::BinaryOpKind::Shr => "lshr",
+            _ => "add",
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Main Loop Entry Points
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Emit the main() function using a memcpy round-trip + reactor_tick.
+    /// Used for multi-txn reactive programs with wake triggers.
+    /// The memcpy round-trip saves/restores all state fields so each
+    /// reactor tick sees a consistent snapshot.
+    pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
+        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+        writeln!(out, "entry:").ok();
+        writeln!(out, "  %state = alloca %State, align 8").ok();
+        self.emit_inline_init_stores(out, "%state");
+        writeln!(out, "  %state_save = alloca %State, align 8").ok();
+        writeln!(out, "  br label %.loop").ok();
+        writeln!(out, ".loop:").ok();
+        let state_bytes = (self.ctx.field_types.len() * 8) as i64;
+        writeln!(out, "  call void @llvm.memcpy.p0p0i64(ptr %state_save, ptr %state, i64 {}, i1 false)",
+            state_bytes).ok();
+        writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
+        if has_wake_triggers {
+            writeln!(out, "  %any_active = call i1 @llvm.wake.any()").ok();
+            writeln!(out, "  br i1 %any_active, label %.loop, label %.end").ok();
+        } else {
+            writeln!(out, "  call void @__wait_for_trigger__()").ok();
+            writeln!(out, "  br label %.loop").ok();
+        }
+        writeln!(out, ".end:").ok();
+        writeln!(out, "  ret i32 0").ok();
+        writeln!(out, "}}").ok();
+        writeln!(out).ok();
+    }
+
+    /// Pre-extract float fields into SSA registers before loop body.
+    /// Allows LLVM SROA to handle float fields as scalars.
+    pub(crate) fn pre_extract_float_fields(&mut self, out: &mut String) {
+        for (name, idx) in &self.ctx.field_index_map {
+            if idx >= &self.ctx.field_types.len() {
+                continue;
+            }
+            let ft = &self.ctx.field_types[*idx];
+            if ft != "float" {
+                continue;
+            }
+            let gep = self.fun.next_reg_with_prefix("pfg");
+            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                gep, idx).ok();
+            let reg = self.fun.next_reg_with_prefix("pfl");
+            writeln!(out, "  {} = load float, ptr {}, align 4", reg, gep).ok();
+            self.fun.last_val_temps.insert(name.clone(), reg);
+        }
+    }
+
+    /// Pre-extract integer fields into SSA registers before loop body.
+    pub(crate) fn pre_extract_int_fields(&mut self, out: &mut String) {
+        for (name, idx) in &self.ctx.field_index_map {
+            if idx >= &self.ctx.field_types.len() {
+                continue;
+            }
+            let ft = &self.ctx.field_types[*idx];
+            if ft != "i64" {
+                continue;
+            }
+            let gep = self.fun.next_reg_with_prefix("pig");
+            writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                gep, idx).ok();
+            let reg = self.fun.next_reg_with_prefix("pil");
+            writeln!(out, "  {} = load i64, ptr {}, align 8", reg, gep).ok();
+            self.fun.last_val_temps.insert(name.clone(), reg);
+        }
+    }
+
+    /// Load all state fields into SSA registers at loop body entry.
+    /// Used by A005e strategy to give LLVM SROA the full picture.
+    pub(crate) fn pre_load_all_fields(
+        &mut self,
+        out: &mut String,
+        state_ptr: &str,
+        filter: Option<&HashSet<String>>,
+    ) {
+        for (name, idx) in &self.ctx.field_index_map {
+            if let Some(f) = filter {
+                if !f.contains(name) {
+                    continue;
+                }
+            }
+            if idx >= &self.ctx.field_types.len() {
+                continue;
+            }
+            let ft = &self.ctx.field_types[*idx];
+            let gep = self.fun.next_reg_with_prefix("plg");
+            writeln!(out, "  {} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}",
+                gep, state_ptr, idx).ok();
+            let reg = self.fun.next_reg_with_prefix("pll");
+            match ft.as_str() {
+                "float" => {
+                    writeln!(out, "  {} = load float, ptr {}, align 4", reg, gep).ok();
+                }
+                "i8" => {
+                    writeln!(out, "  {} = load i8, ptr {}, align 1", reg, gep).ok();
+                }
+                "i32" => {
+                    writeln!(out, "  {} = load i32, ptr {}, align 4", reg, gep).ok();
+                }
+                s if s == "i8*" || s == "ptr" => {
+                    writeln!(out, "  {} = load ptr, ptr {}, align 8", reg, gep).ok();
+                }
+                _ => {
+                    writeln!(out, "  {} = load i64, ptr {}, align 8", reg, gep).ok();
+                }
+            }
+            self.fun.last_val_temps.insert(name.clone(), reg);
+        }
+    }
+}

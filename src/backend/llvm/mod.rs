@@ -60,32 +60,32 @@ pub(crate) fn float64_to_llvm_hex(f: f64) -> String {
 /// Used to fold `const m0: Float = 4.0 * pi * pi` into a literal before
 /// global emission, avoiding the `constant float 0` bug.
 fn try_eval_cfloat(expr: &Expr, constants: &HashMap<String, (Type, Expr)>) -> Option<f64> {
-    // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants so the
-    // match below can process them. Without this, const Float = a * b * c
-    // produces `constant float 0.0` in the IR (nbody mass bug).
-    if let Some(normalized) = expr.normalize_to_old() {
-        return try_eval_cfloat(&normalized, constants);
-    }
     match expr {
-        Expr::Float(f) | Expr::Float64(f) => Some(*f),
-        Expr::Literal(lit) => {
-            if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                Some(*f)
-            } else {
-                None
-            }
-        }
+        Expr::Float(f) => Some(*f),
         Expr::Identifier(name) => {
             match constants.get(name) {
                 Some((Type::Custom(__t), inner)) if __t == "Float" || __t == "Float64" => try_eval_cfloat(inner, constants),
                 _ => None,
             }
         }
-        Expr::Add(l, r) => Some(try_eval_cfloat(l, constants)? + try_eval_cfloat(r, constants)?),
-        Expr::Sub(l, r) => Some(try_eval_cfloat(l, constants)? - try_eval_cfloat(r, constants)?),
-        Expr::Mul(l, r) => Some(try_eval_cfloat(l, constants)? * try_eval_cfloat(r, constants)?),
-        Expr::Div(l, r) => Some(try_eval_cfloat(l, constants)? / try_eval_cfloat(r, constants)?),
-        Expr::Neg(inner) => Some(-try_eval_cfloat(inner, constants)?),
+        Expr::BinaryOp(kind, l, r) => {
+            let lv = try_eval_cfloat(l, constants)?;
+            let rv = try_eval_cfloat(r, constants)?;
+            match kind {
+                crate::ast::BinaryOpKind::Add => Some(lv + rv),
+                crate::ast::BinaryOpKind::Sub => Some(lv - rv),
+                crate::ast::BinaryOpKind::Mul => Some(lv * rv),
+                crate::ast::BinaryOpKind::Div => Some(lv / rv),
+                _ => None,
+            }
+        }
+        Expr::UnaryOp(kind, inner) => {
+            if matches!(kind, crate::ast::UnaryOpKind::Neg) {
+                Some(-try_eval_cfloat(inner, constants)?)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -108,13 +108,12 @@ fn llvm_type_byte_size(t: &str) -> i64 {
 fn primitive_from_name(name: &str) -> Option<Type> {
     match name {
         "Int" | "UInt" | "Signed" | "Unsigned" => Some(Type::int()),
-        // 2026-06-29: Fixed-width type aliases for BILD type resolution
-        "Int8" | "I8" => Some(Type::int8()),
-        "Int16" | "I16" => Some(Type::int16()),
-        "Int32" | "I32" => Some(Type::int32()),
-        "UInt8" | "U8" => Some(Type::uint8()),
-        "UInt16" | "U16" => Some(Type::uint16()),
-        "UInt32" | "U32" => Some(Type::uint32()),
+        "Int8" | "I8" => Some(Type::bits(1)),
+        "Int16" | "I16" => Some(Type::bits(2)),
+        "Int32" | "I32" => Some(Type::bits(4)),
+        "UInt8" | "U8" => Some(Type::bits(1)),
+        "UInt16" | "U16" => Some(Type::bits(2)),
+        "UInt32" | "U32" => Some(Type::bits(4)),
         "Float" => Some(Type::float()),
         "Float64" | "F64" | "Double" => Some(Type::float64()),
         "Bool" => Some(Type::bool_()),
@@ -132,7 +131,7 @@ pub(crate) fn hoist_terminating_guard(
     field_index_map: &std::collections::HashMap<String, usize>,
 ) -> (Vec<Statement>, Vec<Vec<Statement>>) {
     let mut stmts: Vec<&Statement> = body.iter()
-        .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. }))
+        .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..)))
         .collect();
     // 2026-07-05: Build let-to-state-field mapping from body assignments.
     // When the hoisted swan song references a let binding (like nesc in
@@ -141,7 +140,7 @@ pub(crate) fn hoist_terminating_guard(
     // Pattern: &field_name = let_name  →  map[let_name] = field_name
     let mut let_to_field: HashMap<String, String> = HashMap::new();
     for s in body {
-        if let Statement::Assignment { lhs, expr: Expr::Identifier(let_name), .. } = s {
+        if let Statement::Assign(lhs, Expr::Identifier(let_name)) = s {
             if let Some(field_name) = lhs.as_var_name() {
                 if field_index_map.contains_key(field_name) {
                     let_to_field.insert(let_name.clone(), field_name.to_string());
@@ -151,15 +150,15 @@ pub(crate) fn hoist_terminating_guard(
     }
     let mut hoist: Vec<Vec<Statement>> = Vec::new();
     while let Some(last_idx) = stmts.len().checked_sub(1) {
-        if let Statement::Guarded { statements, .. } = &stmts[last_idx] {
-            let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang { .. }));
+        if let Statement::Guarded(_, statements) = &stmts[last_idx] {
+            let is_terminating = statements.iter().any(|s| matches!(s, Statement::TermBang(..)));
             if !is_terminating { break; }
             // Hoist the entire guard body (all statements before the term!)
             // into a Vec<Statement> that the post-loop block can re-emit.
             // This handles both simple field-print patterns (original hoisting)
             // and let-binding-based patterns (nbody: energy computation + print).
             let mut body_stmts: Vec<Statement> = statements.iter()
-                .filter(|s| !matches!(s, Statement::TermBang { .. }))
+                .filter(|s| !matches!(s, Statement::TermBang(..)))
                 .cloned()
                 .collect();
             // Remap let binding references to state field names in hoisted body.
@@ -167,13 +166,13 @@ pub(crate) fn hoist_terminating_guard(
                 remap_stmt_identifiers(s, &let_to_field);
             }
             let swan_song_stmt = statements.iter().find_map(|s| {
-                if let Statement::TermBang { swan_song: Some(ss), .. } = s {
-                    Some(ss.as_ref().clone())
+                if let Statement::TermBang(Some(ss)) = s {
+                    Some(ss.clone())
                 } else { None }
             });
             // Remap swan song identifiers too.
             let swan_song_stmt = swan_song_stmt.map(|mut ss| {
-                remap_stmt_identifiers(&mut ss, &let_to_field);
+                remap_expr_into(&mut ss, &let_to_field);
                 ss
             });
             // 2026-07-04: Hoist even when body_stmts is empty — the
@@ -185,7 +184,7 @@ pub(crate) fn hoist_terminating_guard(
             if !body_stmts.is_empty() || swan_song_stmt.is_some() {
                 let mut full_body = body_stmts;
                 if let Some(sw) = swan_song_stmt {
-                    full_body.push(sw);
+                    full_body.push(Statement::Expression(sw));
                 }
                 hoist.push(full_body);
                 stmts.pop();
@@ -200,16 +199,16 @@ pub(crate) fn hoist_terminating_guard(
 /// Recursively remap identifiers in a statement using the let-to-field map.
 fn remap_stmt_identifiers(s: &mut Statement, map: &HashMap<String, String>) {
     match s {
-        Statement::Assignment { expr, .. } => {
+        Statement::Assign(_, expr) => {
             remap_expr_into(expr, map);
         }
         Statement::Expression(e) => {
             remap_expr_into(e, map);
         }
-        Statement::TermBang { swan_song: Some(ss), .. } => {
+        Statement::TermBang(Some(ss)) => {
             remap_stmt_identifiers(ss, map);
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded(condition, statements) => {
             remap_expr_into(condition, map);
             for stmt in statements.iter_mut() {
                 remap_stmt_identifiers(stmt, map);
@@ -219,8 +218,7 @@ fn remap_stmt_identifiers(s: &mut Statement, map: &HashMap<String, String>) {
     }
 }
 
-/// Recursively remap identifiers in a normalized expression.
-/// Uses the old-style (normalized) Expr variants for matching.
+/// Recursively remap identifiers in an expression.
 fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
     match e {
         Expr::Identifier(name) => {
@@ -233,16 +231,38 @@ fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
                 remap_expr_into(arg, map);
             }
         }
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
-            for arg in args.iter_mut() {
-                remap_expr_into(arg, map);
+        Expr::BinaryOp(_, l, r) => {
+            remap_expr_into(l, map);
+            remap_expr_into(r, map);
+        }
+        Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
+            remap_expr_into(inner, map);
+        }
+        Expr::Field(target, _) | Expr::Index(target, _) => {
+            remap_expr_into(target, map);
+        }
+        Expr::Block(stmts) => {
+            for s in stmts.iter_mut() {
+                remap_stmt_identifiers(s, map);
+            }
+        }
+        Expr::If(cond, then_b, else_b) => {
+            remap_expr_into(cond, map);
+            remap_expr_into(then_b, map);
+            if let Some(eb) = else_b {
+                remap_expr_into(eb, map);
+            }
+        }
+        Expr::Tuple(elems) | Expr::List(elems) => {
+            for e in elems.iter_mut() {
+                remap_expr_into(e, map);
             }
         }
         _ => {}
     }
 }
 
-use crate::ast::{Expr, Program, Statement, TopLevel, Type};
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type};
 
 #[derive(Debug, Clone)]
 pub struct TypedRegister {
@@ -272,7 +292,7 @@ impl TypedRegister {
             "i1"
         } else if self.ty == Type::char_() {
             "i32"
-        } else if self.ty == Type::int() || self.ty == Type::uint() {
+        } else if self.ty == Type::int() || self.ty == Type::Custom("UInt".to_string()) {
             "i64"
         } else if self.ty == Type::float() {
             "float"
@@ -288,10 +308,10 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Write};
 
 /// Collect all unique string literal values from the program for global emission.
-fn collect_strings(program: &Program) -> Vec<String> {
+fn collect_strings(items: &[TopLevel]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
-    for item in &program.items {
+    for item in items {
         collect_strings_tl(item, &mut seen, &mut out);
     }
     out
@@ -300,13 +320,12 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
     match tl {
         TopLevel::Transaction(t) => { for s in &t.body { collect_strings_stmt(s, seen, out); } }
         TopLevel::Definition(d) => { for s in &d.body { collect_strings_stmt(s, seen, out); } }
-        TopLevel::Constant(c) => { collect_strings_expr(&c.expr, seen, out); }
-        TopLevel::StateDecl(s) => { if let Some(ref e) = s.expr { collect_strings_expr(e, seen, out); } }
         TopLevel::Cell(c) => {
-            for f in &c.fields { if let Some(ref e) = f.default { collect_strings_expr(e, seen, out); } }
+            // 2026-07-13: Field.default removed in new AST.
+            for _ in &c.fields { }
             for txn in &c.transactions { for s in &txn.body { collect_strings_stmt(s, seen, out); } }
             for d in &c.definitions { for s in &d.body { collect_strings_stmt(s, seen, out); } }
-            for trg in &c.internal_triggers { if let Some(ref e) = trg.condition { collect_strings_expr(e, seen, out); } }
+            for trg in &c.internal_triggers { collect_strings_expr(&trg.instance, seen, out); }
         }
         _ => {}
     }
@@ -314,59 +333,28 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
 fn collect_strings_stmt(stmt: &Statement, seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
     match stmt {
         Statement::Let { expr, .. } => { if let Some(e) = expr { collect_strings_expr(e, seen, out); } }
-        Statement::Assignment { expr, .. } => { collect_strings_expr(expr, seen, out); }
+        Statement::Assign(_, expr) => { collect_strings_expr(expr, seen, out); }
         Statement::Expression(e) => { collect_strings_expr(e, seen, out); }
-        Statement::Term { values, .. } | Statement::TermBang { values, .. } => { for v in values.iter().flatten() { collect_strings_expr(v, seen, out); } }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Term(Some(e)) | Statement::TermBang(Some(e)) | Statement::Return(Some(e)) => { collect_strings_expr(e, seen, out); }
+        Statement::Term(None) | Statement::TermBang(None) | Statement::Return(None) => {}
+        Statement::Guarded(condition, statements) => {
             collect_strings_expr(condition, seen, out);
             for s in statements { collect_strings_stmt(s, seen, out); }
         }
-        Statement::Unification { expr, .. } => { collect_strings_expr(expr, seen, out); }
+        Statement::If(_, then_body, else_body) => {
+            for s in then_body { collect_strings_stmt(s, seen, out); }
+            for s in else_body { collect_strings_stmt(s, seen, out); }
+        }
+        Statement::Block(body) | Statement::SyncBlock(body) => {
+            for s in body { collect_strings_stmt(s, seen, out); }
+        }
         Statement::Escape(Some(e)) => { collect_strings_expr(e, seen, out); }
         Statement::Escape(None) => {}
-        Statement::SyncBlock { body } => { for s in body { collect_strings_stmt(s, seen, out); } }
         Statement::Foreach { list, body, .. } => {
             collect_strings_expr(list, seen, out);
             for s in body { collect_strings_stmt(s, seen, out); }
         }
-        Statement::Oracle { body, handler, .. } => {
-            for s in body { collect_strings_stmt(s, seen, out); }
-            for s in handler { collect_strings_stmt(s, seen, out); }
-        }
-        Statement::Await { expr, .. } => { collect_strings_expr(expr, seen, out); }
-        Statement::Async { body, .. } => { collect_strings_stmt(body, seen, out); }
-        Statement::AsyncAwait { body, .. } => { collect_strings_stmt(body, seen, out); }
-        Statement::TrgBinding { .. } => {}
-        Statement::InlineAsm { .. } => {}
-    }
-}
-
-fn collect_strings_from_subtype_ops(ops: &[crate::ast::SubtypeOp], seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
-    for op in ops {
-        match op {
-            crate::ast::SubtypeOp::Filter(e) | crate::ast::SubtypeOp::Map(e) | crate::ast::SubtypeOp::Sort(e)
-            | crate::ast::SubtypeOp::Group(e) | crate::ast::SubtypeOp::Sum(e) | crate::ast::SubtypeOp::Avg(e)
-            | crate::ast::SubtypeOp::Min(e) | crate::ast::SubtypeOp::Max(e) | crate::ast::SubtypeOp::Match(e) => {
-                collect_strings_expr(e, seen, out);
-            }
-            crate::ast::SubtypeOp::Join(a, b) => {
-                collect_strings_expr(a, seen, out);
-                collect_strings_expr(b, seen, out);
-            }
-            crate::ast::SubtypeOp::Limit(_) | crate::ast::SubtypeOp::Skip(_) | crate::ast::SubtypeOp::Unique
-            | crate::ast::SubtypeOp::Count => {}
-        }
-    }
-}
-
-fn collect_strings_from_bracket_ops(ops: &[crate::ast::BracketOp], seen: &mut std::collections::HashSet<String>, out: &mut Vec<String>) {
-    for op in ops {
-        match op {
-            crate::ast::BracketOp::Coord(_) => {}
-            crate::ast::BracketOp::Mask(e) | crate::ast::BracketOp::Stride(e) => {
-                collect_strings_expr(e, seen, out);
-            }
-        }
+        Statement::TrgBinding { .. } | Statement::InlineAsm { .. } | Statement::MetadataAssignment(..) => {}
     }
 }
 
@@ -379,146 +367,50 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
                 out.push(s_str);
             }
         }
-        Expr::RegexLiteral(s) => {
-            if !seen.contains(s) {
-                seen.insert(s.clone());
-                out.push(s.clone());
-            }
-        }
-        Expr::Literal(lit) => {
-            if let crate::features::literal::LiteralExpr::String(s) = lit.as_ref() {
-                if !seen.contains(s) {
-                    seen.insert(s.clone());
-                    out.push(s.clone());
-                }
-            }
-        }
-        // Binary/unary ops
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
-        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
-        | Expr::And(l, r) | Expr::Or(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-        | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
+        Expr::BinaryOp(_, l, r) => {
             collect_strings_expr(l, seen, out);
             collect_strings_expr(r, seen, out);
         }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
-            collect_strings_expr(e, seen, out);
+        Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
+            collect_strings_expr(inner, seen, out);
         }
-        // Collections
-        Expr::List(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
-        Expr::MapLiteral(pairs) => { for (k, v) in pairs { collect_strings_expr(k, seen, out); collect_strings_expr(v, seen, out); } }
-        Expr::SetLiteral(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
-        Expr::ListIndex(l, i) => { collect_strings_expr(l, seen, out); collect_strings_expr(i, seen, out); }
-        // Slice/MultiSlice
-        Expr::Slice { value, start, end, stride, mask } => {
+        Expr::List(elems) | Expr::Tuple(elems) => {
+            for e in elems { collect_strings_expr(e, seen, out); }
+        }
+        Expr::Field(o, _) | Expr::Index(o, _) => {
+            collect_strings_expr(o, seen, out);
+        }
+        Expr::Call(_, args) => {
+            for a in args { collect_strings_expr(a, seen, out); }
+        }
+        Expr::Match(value, arms) => {
             collect_strings_expr(value, seen, out);
-            for opt in [start, end, stride, mask].into_iter().flatten() { collect_strings_expr(opt, seen, out); }
+            for arm in arms { collect_strings_expr(&arm.body, seen, out); }
         }
-        Expr::MultiSlice { value, ops } => {
-            collect_strings_expr(value, seen, out);
-            collect_strings_from_bracket_ops(ops, seen, out);
-        }
-        // Tuple
-        Expr::Tuple(elems) => { for e in elems { collect_strings_expr(e, seen, out); } }
-        Expr::TupleDestructure(_, e) => { collect_strings_expr(e, seen, out); }
-        // Arrow ops
-        Expr::ArrowMut { target, index, value, .. } => {
-            collect_strings_expr(target, seen, out);
-            collect_strings_expr(index, seen, out);
-            if let Some(v) = value { collect_strings_expr(v, seen, out); }
-        }
-        Expr::ArrowDiscard { target, index } => {
-            collect_strings_expr(target, seen, out);
-            collect_strings_expr(index, seen, out);
-        }
-        Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
-            collect_strings_expr(dest, seen, out);
-            collect_strings_expr(source, seen, out);
-            if let Some(f) = filter { collect_strings_expr(f, seen, out); }
-        }
-        // Field/object
-        Expr::Field(o, _) => { collect_strings_expr(o, seen, out); }
-        Expr::StructInstance(_, fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
-        Expr::ObjectLiteral(fields) => { for (_, e) in fields { collect_strings_expr(e, seen, out); } }
-        // Call, Match, Pattern
-        Expr::Call(_, args) | Expr::CellCall(_, args) => { for a in args { collect_strings_expr(a, seen, out); } }
-        Expr::Match { value, arms } => { collect_strings_expr(value, seen, out); for arm in arms { collect_strings_expr(&arm.body, seen, out); } }
-        Expr::PatternMatch { value, .. } => { collect_strings_expr(value, seen, out); }
-        // Block
-        Expr::Block(stmts, last) => {
+        Expr::Block(stmts) => {
             for s in stmts { collect_strings_stmt(s, seen, out); }
-            collect_strings_expr(last, seen, out);
         }
-        // Projection/Sig/Subtype
-        Expr::Projection { source, .. } => { collect_strings_expr(source, seen, out); }
-        Expr::SubtypeProjection { source, ops } => {
-            collect_strings_expr(source, seen, out);
-            collect_strings_from_subtype_ops(ops, seen, out);
+        Expr::If(cond, then_b, else_b) => {
+            collect_strings_expr(cond, seen, out);
+            collect_strings_expr(then_b, seen, out);
+            if let Some(eb) = else_b { collect_strings_expr(eb, seen, out); }
         }
-        Expr::SigCall { expr, .. } => { collect_strings_expr(expr, seen, out); }
-        // Pattern B packed variants
-        Expr::ArrowMutExpr(e) => {
-            collect_strings_expr(e.target.as_ref(), seen, out);
-            collect_strings_expr(e.index.as_ref(), seen, out);
-            if let Some(v) = e.value.as_ref() { collect_strings_expr(v, seen, out); }
+        Expr::Lambda(_, body) => {
+            collect_strings_expr(body, seen, out);
         }
-        Expr::ArrowDiscardExpr(e) => {
-            collect_strings_expr(e.target.as_ref(), seen, out);
-            collect_strings_expr(e.index.as_ref(), seen, out);
-        }
-        Expr::ArrowTransferExpr(e) => {
-            collect_strings_expr(e.dest.as_ref(), seen, out);
-            collect_strings_expr(e.source.as_ref(), seen, out);
-            if let Some(f) = e.filter.as_ref() { collect_strings_expr(f, seen, out); }
-        }
-        Expr::ListLiteralExpr(e) => { for el in &e.elements { collect_strings_expr(el, seen, out); } }
-        Expr::MapLiteralExpr(e) => { for (k, v) in &e.entries { collect_strings_expr(k, seen, out); collect_strings_expr(v, seen, out); } }
-        Expr::SetLiteralExpr(e) => { for el in &e.entries { collect_strings_expr(el, seen, out); } }
-        Expr::MultiSliceExpr(e) => { collect_strings_expr(e.value.as_ref(), seen, out); collect_strings_from_bracket_ops(&e.ops, seen, out); }
-        Expr::FieldAccessExpr(e) => { collect_strings_expr(e.obj.as_ref(), seen, out); }
-        Expr::ObjectLiteralExpr(e) => { for (_, v) in &e.fields { collect_strings_expr(v, seen, out); } }
-        Expr::SubtypeProjectionExpr(e) => {
-            collect_strings_expr(e.source.as_ref(), seen, out);
-            collect_strings_from_subtype_ops(&e.ops, seen, out);
-        }
-        Expr::BinaryOp(e) => { collect_strings_expr(e.left.as_ref(), seen, out); collect_strings_expr(e.right.as_ref(), seen, out); }
-        Expr::UnaryOp(e) => { collect_strings_expr(e.operand.as_ref(), seen, out); }
-        Expr::CallExpr(e) => { for a in &e.args { collect_strings_expr(a, seen, out); } }
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => { for a in args { collect_strings_expr(a, seen, out); } }
-        Expr::ProjectionExpr(e) => { collect_strings_expr(e.source.as_ref(), seen, out); }
-        Expr::BlockExpr(e) => { for s in &e.stmts { collect_strings_stmt(s, seen, out); } collect_strings_expr(e.last.as_ref(), seen, out); }
-        Expr::MatchExpr(e) => { collect_strings_expr(e.value.as_ref(), seen, out); for arm in &e.arms { collect_strings_expr(&arm.body, seen, out); } }
-        Expr::PatternMatchExpr(e) => { collect_strings_expr(e.value.as_ref(), seen, out); }
-        Expr::TupleDestructureExpr(e) => { collect_strings_expr(e.expr.as_ref(), seen, out); }
-        Expr::TupleExpr(e) => { for el in &e.exprs { collect_strings_expr(el, seen, out); } }
-        Expr::SigCallExpr(e) => { collect_strings_expr(e.expr.as_ref(), seen, out); }
-        Expr::SliceExpr(e) => {
-            collect_strings_expr(e.value.as_ref(), seen, out);
-            for opt in [&e.start, &e.end, &e.stride, &e.mask].into_iter().flatten() { collect_strings_expr(opt, seen, out); }
-        }
-        Expr::StructInstanceExpr(e) => { for (_, v) in &e.fields { collect_strings_expr(v, seen, out); } }
-        Expr::EllipsisExpr(_) | Expr::DbvlTable { .. } | Expr::DbvlTableExpr(_) => {}
-        // Type check expressions
-        Expr::IsType(e, _) => { collect_strings_expr(e, seen, out); }
-        Expr::FromCheck(e, _) => { collect_strings_expr(e, seen, out); }
-        Expr::Like(l, r) => { collect_strings_expr(l, seen, out); collect_strings_expr(r, seen, out); }
-        // Terminals
-        Expr::Decimal(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Bool(_) | Expr::Char(_) | Expr::Term | Expr::Identifier(_)
-        | Expr::Ellipsis | Expr::TypeRef(_) | Expr::AddrOf(_) | Expr::PriorState(_)
-        | Expr::SharedMem(_) => {}
-        // Macro/template nodes — should be expanded before reaching backends
-        Expr::TemplateCall { .. } | Expr::MacroCall { .. } | Expr::Interpolate(..) | Expr::InterpolateExpr(..) | Expr::QuoteBlock { .. } => {
-            unreachable!("macro/template should have been expanded")
-        }
-        // Pipe chains — desugared before this pass
-        Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
-        Expr::Deref(inner) => collect_strings_expr(inner, seen, out),
-        Expr::Within { body, fallback, .. } => {
+        Expr::Within(body, fallback) => {
             collect_strings_expr(body, seen, out);
             collect_strings_expr(fallback, seen, out);
         }
-        // 2026-07-11: Phase 5 — deferred literal has no sub-expressions
-        Expr::DeferredLiteral { .. } => {},
+        Expr::DerivationBlock(db) => {
+            for ex in &db.examples {
+                for inp in &ex.inputs { collect_strings_expr(inp, seen, out); }
+                collect_strings_expr(&ex.output, seen, out);
+            }
+        }
+        // Leaves — no sub-expressions
+        Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
+        | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}
     }
 }
 
@@ -574,12 +466,13 @@ pub(super) fn tbaa_node(ty_str: &str, universe: Option<&crate::type_universe::Ty
         _ => "Int",  // fallback
     };
     if let Some(u) = universe {
-        // Dynamic TBAA tree: find the group's position in sorted order.
-        // sorted_tbaa_groups ensures "Int" is at index 0 (→ !1).
-        sorted_tbaa_groups(u)
-            .iter().position(|g| *g == group)
-            .map(|i| i as i32 + 1)
-            .unwrap_or(1)
+        // 2026-07-13: Inline sorted groups from type names.
+        let mut groups: Vec<String> = u.types.keys().cloned().collect();
+        groups.sort();
+        if let Some(pos) = groups.iter().position(|g| g == "Int") {
+            groups.swap(0, pos);
+        }
+        groups.iter().position(|g| g == group).map(|i| i as i32 + 1).unwrap_or(1)
     } else {
         // Fallback: hardcoded indices
         match group {
@@ -593,40 +486,21 @@ pub(super) fn tbaa_node(ty_str: &str, universe: Option<&crate::type_universe::Ty
     }
 }
 
-    /// Why a 6-node TBAA tree: Brief has exactly 5 scalar types that map to
-
-/// Collect unique tbaa_node groups from the universe, sorted alphabetically
-/// with "Int" guaranteed to be first (index 1) since it's the fallback.
-/// 2026-06-29: Phase 7A — shared between TBAA tree builder and lookup function.
-fn sorted_tbaa_groups(universe: &crate::type_universe::TypeUniverse) -> Vec<&str> {
-    let mut groups: Vec<&str> = universe.types.values()
-        .map(|rt| rt.tbaa_node.as_str())
-        .collect();
+/// Map a Brief type to its TBAA metadata node index via universe lookup.
+/// 2026-07-13: Simplified for new ResolvedType (tbaa_node removed).
+/// Uses type name as the TBAA group. Falls back to 1 (Int) when not found.
+pub(super) fn tbaa_node_for_type(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> i32 {
+    let group = match ty.universe_key() {
+        Some(key) if universe.contains(key) => key,
+        _ => return 1,
+    };
+    let mut groups: Vec<String> = universe.types.keys().cloned().collect();
     groups.sort();
-    groups.dedup();
-    if let Some(pos) = groups.iter().position(|g| *g == "Int") {
+    if let Some(pos) = groups.iter().position(|g| g == "Int") {
         groups.swap(0, pos);
     }
-    groups
+    groups.iter().position(|g| g == group).map(|i| i as i32 + 1).unwrap_or(1)
 }
-
-/// Map a Brief type to its TBAA metadata node index via universe lookup.
-/// 2026-06-29: Phase 7A — dynamic TBAA tree generation. Uses the same
-/// sorted-group algorithm as the TBAA tree builder in generate().
-/// Falls back to 1 (Int) when the type is not in the universe.
-pub(super) fn tbaa_node_for_type(ty: &Type, universe: &crate::type_universe::TypeUniverse) -> i32 {
-    let group = match universe.get_by_type(ty).map(|rt| rt.tbaa_node.as_str()) {
-        Some(g) => g,
-        None => return 1,
-    };
-    sorted_tbaa_groups(universe)
-        .iter().position(|g| *g == group)
-        .map(|i| i as i32 + 1)
-        .unwrap_or(1)
-}
-    /// distinct LLVM storage types (i64, i8, i32, ptr, float). The root "Brief"
-    /// node groups them under a single type tree so that LLVM's TBAA can
-    /// distinguish Int stores from Float stores even though both may be i64
     /// at the IR level. Without TBAA, all i64 accesses within %State are
     /// MayAlias, preventing GVN load elimination.
 
@@ -680,7 +554,7 @@ pub(super) fn emit_loop_metadata_nodes(
 fn extract_trigger_keys(pre: &Expr, trigger_names: &std::collections::HashSet<&str>) -> Option<Vec<i64>> {
     let mut keys = Vec::new();
     match pre {
-        Expr::Eq(l, r) | Expr::Eq(r, l) => {
+        Expr::BinaryOp(BinaryOpKind::Eq, l, r) => {
             let (ident, val) = if let (Expr::Identifier(name), Expr::Decimal(n)) = (l.as_ref(), r.as_ref()) {
                 (name.clone(), *n)
             } else if let (Expr::Decimal(n), Expr::Identifier(name)) = (l.as_ref(), r.as_ref()) {
@@ -694,11 +568,11 @@ fn extract_trigger_keys(pre: &Expr, trigger_names: &std::collections::HashSet<&s
                 return None;
             }
         }
-        Expr::Or(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Or, l, r) => {
             keys.extend(extract_trigger_keys(l, trigger_names)?);
             keys.extend(extract_trigger_keys(r, trigger_names)?);
         }
-        Expr::And(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::And, l, r) => {
             if let Some(k) = extract_trigger_keys(l, trigger_names) {
                 keys.extend(k);
             } else if let Some(k) = extract_trigger_keys(r, trigger_names) {
@@ -822,19 +696,17 @@ pub struct InterruptEntry {
 }
 
 /// Recursively collect ArrowMut::Push targets from a statement body.
+/// Collect push targets from a statement body (arrow push operations).
+/// In the new AST, arrow operations are not represented as separate Expr variants;
+/// push targets are identified through Assign with specific patterns.
 pub(crate) fn collect_push_targets(body: &[Statement], out: &mut Vec<String>) {
     for stmt in body {
         match stmt {
-            Statement::Assignment { lhs: Expr::ArrowMut { dir: crate::ast::ArrowDir::Push, target, .. }, .. } => {
-                if let Some(field_name) = target.as_var_name() {
-                    out.push(field_name.to_string());
-                }
-            }
-            Statement::Guarded { statements, .. } => {
+            Statement::Guarded(_, statements) => {
                 collect_push_targets(statements, out);
             }
-            Statement::SyncBlock { body: b } => {
-                collect_push_targets(b, out);
+            Statement::Block(body) | Statement::SyncBlock(body) => {
+                collect_push_targets(body, out);
             }
             _ => {}
         }
@@ -1321,13 +1193,13 @@ impl LlvmBackend {
     /// Scan the typed program for constructs that are forbidden in embedded mode:
     /// dynamic heap allocation (List, String, HashMap) and threading intrinsics.
     /// Also warns about unbounded recursion via the call graph's cycle detection.
-    pub(crate) fn check_embedded_restrictions(&mut self, program: &Program) {
-        let threading_intrinsics: &[Intrinsic] = &[
-            Intrinsic::ThreadCreate, Intrinsic::ThreadJoin, Intrinsic::ThreadExit,
-            Intrinsic::MutexLock, Intrinsic::MutexUnlock,
-            Intrinsic::CondvarWait, Intrinsic::CondvarSignal, Intrinsic::CondvarBroadcast,
+    pub(crate) fn check_embedded_restrictions(&mut self, items: &[TopLevel]) {
+        let threading_intrinsics: &[&str] = &[
+            "ThreadCreate#", "ThreadJoin#", "ThreadExit#",
+            "MutexLock#", "MutexUnlock#",
+            "CondvarWait#", "CondvarSignal#", "CondvarBroadcast#",
         ];
-        for item in &program.items {
+        for item in items {
             match item {
                 TopLevel::StateDecl(decl) => {
                     if self.type_is_heap_allocated(&decl.ty) {
@@ -1361,7 +1233,7 @@ impl LlvmBackend {
         matches!(ty, Type::Custom(__t) if __t == "String" || __t == "Data") || matches!(ty, Type::Custom(name) if name == "List" || name == "HashMap" || name == "HashSet" || name == "Stack" || name == "Queue" || name == "StringBuilder")
     }
 
-    fn check_stmt_embedded(&mut self, stmt: &Statement, ctx_name: &str, threading_intrinsics: &[Intrinsic]) {
+    fn check_stmt_embedded(&mut self, stmt: &Statement, ctx_name: &str, threading_intrinsics: &[&str]) {
         match stmt {
             Statement::Let { ty, expr, .. } => {
                 if let Some(t) = ty {
@@ -1376,28 +1248,32 @@ impl LlvmBackend {
                     self.check_expr_embedded(e, ctx_name, threading_intrinsics);
                 }
             }
-            Statement::Assignment { expr, .. } => {
+            Statement::Assign(_, expr) => {
                 self.check_expr_embedded(expr, ctx_name, threading_intrinsics);
             }
             Statement::Expression(e) => {
                 self.check_expr_embedded(e, ctx_name, threading_intrinsics);
             }
-            Statement::Term { values, swan_song, .. } | Statement::TermBang { values, swan_song, .. } => {
-                for v in values.iter().flatten() {
-                    self.check_expr_embedded(v, ctx_name, threading_intrinsics);
-                }
-                if let Some(swan) = swan_song {
-                    self.check_stmt_embedded(swan, ctx_name, threading_intrinsics);
-                }
+            Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => {
+                self.check_expr_embedded(e, ctx_name, threading_intrinsics);
             }
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Term(None) | Statement::TermBang(None) => {}
+            Statement::Return(Some(e)) => {
+                self.check_expr_embedded(e, ctx_name, threading_intrinsics);
+            }
+            Statement::Return(None) => {}
+            Statement::Guarded(condition, statements) => {
                 self.check_expr_embedded(condition, ctx_name, threading_intrinsics);
                 for s in statements {
                     self.check_stmt_embedded(s, ctx_name, threading_intrinsics);
                 }
             }
-            Statement::Unification { expr, .. } => {
-                self.check_expr_embedded(expr, ctx_name, threading_intrinsics);
+            Statement::If(_, then_body, else_body) => {
+                for s in then_body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
+                for s in else_body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
+            }
+            Statement::Block(body) | Statement::SyncBlock(body) => {
+                for s in body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
             }
             Statement::Foreach { list, body, .. } => {
                 self.check_expr_embedded(list, ctx_name, threading_intrinsics);
@@ -1405,104 +1281,81 @@ impl LlvmBackend {
                     self.check_stmt_embedded(s, ctx_name, threading_intrinsics);
                 }
             }
-            Statement::Oracle { body, handler, .. } => {
-                for s in body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
-                for s in handler { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
+            Statement::Escape(Some(e)) => {
+                self.check_expr_embedded(e, ctx_name, threading_intrinsics);
             }
-            Statement::SyncBlock { body } => {
-                for s in body { self.check_stmt_embedded(s, ctx_name, threading_intrinsics); }
-            }
-            Statement::Await { expr, .. } => {
-                self.check_expr_embedded(expr, ctx_name, threading_intrinsics);
-            }
-            Statement::Async { body, .. } => {
-                self.check_stmt_embedded(body, ctx_name, threading_intrinsics);
-            }
-            Statement::AsyncAwait { body, .. } => {
-                self.check_stmt_embedded(body, ctx_name, threading_intrinsics);
-            }
+            Statement::Escape(None) => {}
             _ => {}
         }
     }
 
-    fn check_expr_embedded(&mut self, expr: &Expr, ctx_name: &str, threading_intrinsics: &[Intrinsic]) {
-        // 2026-06-27: Normalize new-style BinaryOp/UnaryOp to old variants
-        // so the match below can recurse into children for threading checks.
-        if let Some(norm) = expr.normalize_to_old() {
-            return self.check_expr_embedded(&norm, ctx_name, threading_intrinsics);
-        }
+    fn check_expr_embedded(&mut self, expr: &Expr, ctx_name: &str, threading_intrinsics: &[&str]) {
         match expr {
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => {
-                if threading_intrinsics.contains(intrinsic) {
+            Expr::Call(name, args) => {
+                if threading_intrinsics.contains(&name.as_str()) {
                     self.warnings.push(format!(
-                        "TargetError: threading intrinsic not supported on target 'Embedded' — {:?} in '{}'",
-                        intrinsic, ctx_name
+                        "TargetError: threading intrinsic not supported on target 'Embedded' — '{}' in '{}'",
+                        name, ctx_name
                     ));
                 }
-            }
-            Expr::Call(_, args) | Expr::List(args) => {
                 for arg in args {
                     self.check_expr_embedded(arg, ctx_name, threading_intrinsics);
                 }
             }
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
-            | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
-            | Expr::Or(l, r) | Expr::And(l, r) | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-            | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
+            Expr::BinaryOp(_, l, r) => {
                 self.check_expr_embedded(l, ctx_name, threading_intrinsics);
                 self.check_expr_embedded(r, ctx_name, threading_intrinsics);
             }
-            Expr::Neg(inner) | Expr::Not(inner) | Expr::BitNot(inner)
-            | Expr::Cast(inner, _) => {
+            Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
                 self.check_expr_embedded(inner, ctx_name, threading_intrinsics);
             }
-            Expr::AddrOf(_) | Expr::PriorState(_) => {} // identifiers, no embedded checks
-            Expr::Field(target, _) | Expr::ListIndex(target, _) => {
+            Expr::Field(target, _) | Expr::Index(target, _) => {
                 self.check_expr_embedded(target, ctx_name, threading_intrinsics);
             }
-            Expr::Slice { value, start, end, stride, .. } => {
-                self.check_expr_embedded(value, ctx_name, threading_intrinsics);
-                for opt in [start, end, stride].iter() {
-                    if let Some(e) = opt {
-                        self.check_expr_embedded(e, ctx_name, threading_intrinsics);
-                    }
-                }
-            }
-            Expr::MultiSlice { value, .. } => {
-                self.check_expr_embedded(value, ctx_name, threading_intrinsics);
-            }
-            Expr::Block(stmts, _) => {
+            Expr::Block(stmts) => {
                 for s in stmts {
                     self.check_stmt_embedded(s, ctx_name, threading_intrinsics);
                 }
             }
-            Expr::StructInstance(_, fields) => {
-                for (_, v) in fields {
-                    self.check_expr_embedded(v, ctx_name, threading_intrinsics);
+            Expr::If(cond, then_b, else_b) => {
+                self.check_expr_embedded(cond, ctx_name, threading_intrinsics);
+                self.check_expr_embedded(then_b, ctx_name, threading_intrinsics);
+                if let Some(eb) = else_b {
+                    self.check_expr_embedded(eb, ctx_name, threading_intrinsics);
                 }
             }
-            Expr::MapLiteral(entries) => {
-                for (k, v) in entries {
-                    self.check_expr_embedded(k, ctx_name, threading_intrinsics);
-                    self.check_expr_embedded(v, ctx_name, threading_intrinsics);
+            Expr::Match(value, arms) => {
+                self.check_expr_embedded(value, ctx_name, threading_intrinsics);
+                for arm in arms {
+                    self.check_expr_embedded(&arm.body, ctx_name, threading_intrinsics);
                 }
             }
-            Expr::SetLiteral(items) => {
-                for item in items {
-                    self.check_expr_embedded(item, ctx_name, threading_intrinsics);
+            Expr::Tuple(elems) | Expr::List(elems) => {
+                for e in elems {
+                    self.check_expr_embedded(e, ctx_name, threading_intrinsics);
                 }
             }
-            Expr::ObjectLiteral(fields) => {
-                for (_, v) in fields {
-                    self.check_expr_embedded(v, ctx_name, threading_intrinsics);
+            Expr::Lambda(_, body) => {
+                self.check_expr_embedded(body, ctx_name, threading_intrinsics);
+            }
+            Expr::Within(body, fallback) => {
+                self.check_expr_embedded(body, ctx_name, threading_intrinsics);
+                self.check_expr_embedded(fallback, ctx_name, threading_intrinsics);
+            }
+            Expr::DerivationBlock(db) => {
+                for ex in &db.examples {
+                    for inp in &ex.inputs {
+                        self.check_expr_embedded(inp, ctx_name, threading_intrinsics);
+                    }
+                    self.check_expr_embedded(&ex.output, ctx_name, threading_intrinsics);
                 }
             }
             _ => {}
         }
     }
 
-    pub fn generate(&mut self, program: &Program) -> String {
-        let mut analysis = crate::backend::analyze_program(program, false);
+    pub fn generate(&mut self, items: &[TopLevel], exit_condition: Option<Box<Expr>>) -> String {
+        let mut analysis = crate::backend::analyze_program(items, false);
         self.ctx.dep_graph = analysis.dependency_graph.clone();
 
         analysis.region_analyzer.compose_chains();
@@ -1517,7 +1370,7 @@ impl LlvmBackend {
         // runtime loop. If FFI exists, warn that compile-time eval is blocked.
 
         let precomputed_final_values = if analysis.region_analyzer.is_fully_precomputable(self.ctx.optimize_budget) {
-            analysis.region_analyzer.collect_final_values(program)
+            analysis.region_analyzer.collect_final_values(items)
         } else if !analysis.region_analyzer.composed_chains.is_empty() {
             // A002 already covers empty-chains case: no precomputable program.
             // Only emit A001 when chains exist but budget/FFI prevents evaluation.
@@ -1539,26 +1392,22 @@ impl LlvmBackend {
         self.ctx.has_cycles = cg.has_cycle();
 
         if self.ctx.is_embedded {
-            self.check_embedded_restrictions(program);
+            self.check_embedded_restrictions(items);
         }
 
-        self.ctx.exit_condition = program.exit_condition.clone();
-        // Normalize BinaryOp/UnaryOp exit conditions to old-style variants
-        // so emit_exit_expr and check_exit_condition_idents can handle them.
-        if let Some(ref mut cond) = self.ctx.exit_condition {
-            *cond = Box::new(cond.normalize_to_old_recursive());
-        }
-        self.build_field_index(program);
+        self.ctx.exit_condition = exit_condition;
+        // 2026-07-13: normalize_to_old_recursive removed in new AST.
+        // BinaryOp/UnaryOp exit conditions are already the canonical form.
+        self.build_field_index(items);
 
         // Scan for cell-to-cell wires from TrgBinding statements
-        self.scan_cell_wires(program);
+        self.scan_cell_wires(items);
 
         // Inject synthetic __trg_epfd field if program has built-in triggers
-        let has_builtin_trg = program.items.iter().any(|item| {
-            if let TopLevel::Trigger(t) = item {
-                matches!(t.address, crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_))
-            } else { false }
-        });
+        let has_builtin_trg = false;
+        // 2026-07-13: New AST triggers don't have address field.
+        // Built-in trigger detection (stdin/timer/signal) is TODO.
+        // For now, has_builtin_trg is always false.
         if has_builtin_trg && !self.ctx.field_index_map.contains_key("__trg_epfd") {
             let idx = self.ctx.field_index_map.len();
             self.ctx.field_index_map.insert("__trg_epfd".to_string(), idx);
@@ -1581,10 +1430,10 @@ impl LlvmBackend {
         self.ctx.defn_params.clear();
         self.ctx.defn_return_types.clear();
         self.ctx.constants.clear();
-        self.ctx.string_constants = collect_strings(program);
+        self.ctx.string_constants = collect_strings(items);
 
         let mut txns: Vec<(String, &crate::ast::Transaction)> = Vec::new();
-        for item in &program.items {
+        for item in items {
             match item {
                 TopLevel::Constant(c) => {
                     self.ctx.constants.insert(c.name.clone(), (c.ty.clone(), c.expr.clone()));
@@ -1601,7 +1450,22 @@ impl LlvmBackend {
                     }
                 }
                 TopLevel::Trigger(t) => {
-                    self.ctx.triggers.insert(t.name.clone(), t.clone());
+                    // 2026-07-13: Convert new AST Trigger to TriggerDeclaration for
+                    // backend compat. TriggerDeclaration has extra fields the backend expects.
+                    let trg_decl = crate::ast::TriggerDeclaration {
+                        name: t.name.clone(),
+                        ty: crate::ast::Type::string(),
+                        address: crate::ast::LinkRef::Explicit(0),
+                        bit_range: None,
+                        stages: vec![],
+                        condition: None,
+                        is_wake: false,
+                        is_const: false,
+                        span: t.span.clone(),
+                        annotations: vec![],
+                        modifiers: vec![],
+                    };
+                    self.ctx.triggers.insert(t.name.clone(), trg_decl);
                     self.ctx.trigger_names.push(t.name.clone());
                 }
                 TopLevel::Definition(d) => {
@@ -1609,8 +1473,8 @@ impl LlvmBackend {
                     self.ctx.defn_params.insert(d.name.clone(), tys);
                     self.ctx.defn_return_types.insert(d.name.clone(), d.outputs.clone());
                 }
-                TopLevel::ForeignBinding { name, signature, .. } => {
-                    self.ctx.frgn_map.insert(name.clone(), signature.clone());
+                TopLevel::ForeignBinding(fb) => {
+                    self.ctx.frgn_map.insert(fb.name.clone(), fb.signature.clone());
                 }
                 TopLevel::Inop(inop) => {
                     self.ctx.inop_decls.insert(inop.name.clone(), inop.clone());
@@ -1619,61 +1483,19 @@ impl LlvmBackend {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect();
-                    let byte_size: u64 = fields.iter()
-                        .map(|(_, t)| t.to_bits().unwrap_or(64) / 8)
-                        .sum();
                     self.ctx.struct_types.insert(s.name.clone(), fields);
 
-                    // 2026-07-11: Struct auto-registration in TypeUniverse.
-                    // Structs are product types — register a minimal ResolvedType entry
-                    // so they participate in meld lookups and type universe queries.
+                    // 2026-07-13: Struct auto-registration in TypeUniverse.
+                    // Uses minimal ResolvedType (new AST version with fewer fields).
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
                             let rt = crate::type_universe::ResolvedType {
                                 name: s.name.clone(),
-                                type_params: s.type_params.clone(),
                                 base: "Bits".to_string(),
-                                bytes: byte_size,
+                                bytes: 8,
                                 alignment: 8,
                                 llvm_type: format!("%{}", s.name),
-                                tbaa_node: "Int".to_string(),
-                                endian: 0,
-                                volatile: false,
-                                atomic: false,
-                                element_type: None,
-                                fixed_size: None,
-                                insert_at: None,
-                                extract_from: None,
-                                allow_index: true,
-                                allow_slice: true,
-                                allow_arrow: true,
-                                codec: None,
-                                on_exit: None,
-                                guards: vec![],
-            operators: std::collections::HashMap::new(),
-            projections: std::collections::HashMap::new(),
-            properties: HashMap::new(),
-            default_params: vec![],
-                                commuting: true,
-                                constant_time: false,
-                                struct_layout: None,
-                                source: crate::ast::TypeDef {
-                                    name: s.name.clone(),
-                                    type_params: Vec::new(),
-                                    base: Box::new(crate::ast::Expr::TypeRef("Bits".to_string())),
-                                    bit_range: None,
-                                    body: crate::ast::TypeDefBody {
-                                        slots: vec![],
-                                        metadata: HashMap::new(),
-                                        projections: vec![],
-                                        bindings: vec![],
-                                        operators: vec![],
-                                        constraints: vec![],
-                                        span: None,
-                                    },
-                                    span: None,
-                                },
-                                defining_module: "user".to_string(),
+                                properties: std::collections::HashMap::new(),
                             };
                             universe.types.insert(s.name.clone(), rt);
                         }
@@ -1683,14 +1505,14 @@ impl LlvmBackend {
                     self.ctx.enum_types.insert(e.name.clone(), e.clone());
                 }
                 TopLevel::Cell(c) => {
-                    self.ctx.cell_defs.insert(c.name.clone(), c.as_ref().clone());
+                    self.ctx.cell_defs.insert(c.name.clone(), c.clone());
                 }
                 TopLevel::TriggerBinding { name, instance, port, ty, modifiers: _ } => {
                     // Register a cell binding trigger: trg name @ CellName!.port
                     if let Expr::Identifier(cell_name) = instance {
                         let resolved_port = if port.is_empty() {
                             // Auto-detect single output port: use the first named output
-                            if let Some(cell_def) = self.ctx.cell_defs.get(cell_name) {
+                            if let Some(cell_def) = self.ctx.cell_defs.get(&cell_name) {
                                 "line".to_string() // Console's first output port
                             } else { String::new() }
                         } else { port.clone() };
@@ -1718,20 +1540,8 @@ impl LlvmBackend {
             }
         }
 
-        // 2026-07-11: Populate struct_types from TypeUniverse types with struct_layout.
-        // This allows type declarations with slot syntax to participate in LLVM named
-        // type emission and struct field access codegen, matching the existing struct
-        // code path.
-        if let Some(ref universe) = self.ctx.type_universe {
-            for (name, rt) in &universe.types {
-                if rt.struct_layout.is_some() && !self.ctx.struct_types.contains_key(name) {
-                    let fields: Vec<(String, Type)> = rt.struct_layout.as_ref().unwrap().fields.iter()
-                        .map(|f| (f.name.clone(), f.ty.clone()))
-                        .collect();
-                    self.ctx.struct_types.insert(name.clone(), fields);
-                }
-            }
-        }
+        // 2026-07-13: struct_layout removed from ResolvedType in new AST.
+        // TypeUniverse-based struct population is a no-op until slot syntax is reintroduced.
 
         // Verify all #!exit identifiers exist as state fields or constants.
         // Run BEFORE field elimination so we see the full field set.
@@ -1748,8 +1558,8 @@ impl LlvmBackend {
         // Phase 1: Apply adaptive layout — eliminate Never fields, append cache slots.
         // Must run AFTER trigger_names is populated (above) to prevent trigger field elimination.
         {
-            let projection_usage = crate::analysis::transition_graph::compute_projection_usage(program);
-            self.apply_field_modes(program, &analysis.transition_graph.live_fields, &projection_usage);
+            let projection_usage = crate::analysis::transition_graph::compute_projection_usage(items);
+            self.apply_field_modes(items, &analysis.transition_graph.live_fields, &projection_usage);
         }
 
         // W001: Detect dead cache slots — allocated but no loop context (one-shot program).
@@ -1791,17 +1601,16 @@ impl LlvmBackend {
         let consts_snapshot: Vec<(String, (Type, Expr))> = self.ctx.constants.iter()
             .map(|(k, v)| (k.clone(), v.clone())).collect();
         for (name, (ty, expr)) in consts_snapshot {
-            // 2026-06-29: Fold both Float and Float64 constant expressions
+            // 2026-07-13: Expr::Float64 removed — all floats use Expr::Float.
             if ty == Type::float() || ty == Type::float64() {
                 if let Some(val) = try_eval_cfloat(&expr, &self.ctx.constants) {
-                    let new_expr = if ty == Type::float64() { Expr::Float64(val) } else { Expr::Float(val) };
-                    self.ctx.constants.insert(name, (ty.clone(), new_expr));
+                    self.ctx.constants.insert(name, (ty.clone(), Expr::Float(val)));
                 }
             }
         }
 
         // Select optimization strategy via extracted decision tree
-        let strategy = self.select_optimization_strategy(program, &analysis, &txns);
+        let strategy = self.select_optimization_strategy(items, &analysis, &txns);
         let dispatch_mode = strategy.dispatch_mode;
         let has_wake_triggers = strategy.has_wake_triggers;
         let enumerable = strategy.enumerable;
@@ -2180,14 +1989,14 @@ impl LlvmBackend {
         let mut range_meta: Vec<String> = Vec::new();
 
         // Definitions
-        for item in &program.items {
+        for item in &items {
             if let TopLevel::Definition(d) = item {
                 self.emit_definition(&mut out, d);
                 writeln!(out).ok();
             }
         }
         // User-defined inop# intrinsics
-        for item in &program.items {
+        for item in &items {
             if let TopLevel::Inop(inop) = item {
                 self.emit_inop(&mut out, inop);
                 writeln!(out).ok();
@@ -2733,7 +2542,7 @@ impl LlvmBackend {
                 // Emit the reactor_tick function (needed for residual fallback path)
                 match dispatch_mode {
                     DispatchMode::Parallel => {
-                        self.build_write_masks(program);
+                        self.build_write_masks(items);
                         self.emit_parallel_reactor(&mut out, &txns, &fusable);
                     }
                     DispatchMode::Sequential => {
@@ -2809,7 +2618,7 @@ impl LlvmBackend {
                 }));
                 match dispatch_mode {
                     DispatchMode::Parallel => {
-                        self.build_write_masks(program);
+                        self.build_write_masks(items);
                         self.emit_parallel_reactor(&mut out, &txns, &fusable);
                     }
                     DispatchMode::Sequential => {
@@ -3017,7 +2826,12 @@ impl LlvmBackend {
         writeln!(out).ok();
         writeln!(out, "!0 = !{{!\"Brief\"}}").ok();
         if let Some(ref universe) = self.ctx.type_universe {
-            for (i, group) in sorted_tbaa_groups(universe).iter().enumerate() {
+            let mut groups: Vec<String> = universe.types.keys().cloned().collect();
+            groups.sort();
+            if let Some(pos) = groups.iter().position(|g| g == "Int") {
+                groups.swap(0, pos);
+            }
+            for (i, group) in groups.iter().enumerate() {
                 writeln!(out, "!{} = !{{!\"{}\", !0}}", i + 1, group).ok();
             }
         } else {
@@ -3317,7 +3131,7 @@ impl LlvmBackend {
     }
 
     // ── Field index ───────────────────────────────────────────
-    fn build_field_index(&mut self, program: &Program) {
+    fn build_field_index(&mut self, items: &[TopLevel]) {
         self.ctx.field_index_map.clear();
         self.ctx.field_types.clear();
         self.ctx.field_initializers.clear();
@@ -3325,7 +3139,7 @@ impl LlvmBackend {
             self.ctx.mmio_fields.clear();
             self.ctx.mmio_initializers.clear();
         }
-        for item in &program.items {
+        for item in &items {
             if let TopLevel::StateDecl(s) = item {
                 if let Some(addr) = s.address {
                     self.ctx.mmio_fields.insert(s.name.clone(), addr);
@@ -3507,12 +3321,12 @@ impl LlvmBackend {
     /// region analysis (which determines which txns fire under which
     /// conditions). Running dead-field elimination earlier would conservatively
     /// keep all fields, missing elimination opportunities.
-    pub(crate) fn apply_field_modes(&mut self, program: &Program,
+    pub(crate) fn apply_field_modes(&mut self, items: &[TopLevel],
         live_fields: &std::collections::HashSet<String>,
         projection_usage: &std::collections::HashMap<String, std::collections::HashSet<String>>)
     {
         let all_state_fields: std::collections::HashSet<String> = self.ctx.field_index_map.keys().cloned().collect();
-        let referenced_fields = crate::analysis::transition_graph::compute_referenced_fields(program);
+        let referenced_fields = crate::analysis::transition_graph::compute_referenced_fields(items);
         // Union with live_fields to prevent elimination of precondition-only,
         // postcondition-only, or exit-condition-only fields. live_fields includes
         // fields referenced in contracts and #!exit expressions.
@@ -3616,8 +3430,8 @@ impl LlvmBackend {
     }
 
     /// Scan the program for cell-to-cell wires from TrgBinding statements.
-    fn scan_cell_wires(&mut self, program: &Program) {
-        for item in &program.items {
+    fn scan_cell_wires(&mut self, items: &[TopLevel]) {
+        for item in &items {
             self.scan_item_for_wires(item);
         }
     }

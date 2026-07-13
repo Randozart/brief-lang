@@ -12,6 +12,7 @@ pub use resolve::*;
 pub use validate::*;
 
 use crate::ast::Type;
+use crate::ast::top::MeldDeclaration;
 use std::collections::HashMap;
 
 /// Resolved metadata for a single type in the universe.
@@ -27,16 +28,26 @@ pub struct ResolvedType {
 
 /// Central type definition registry.
 /// Built during the type-checking pass from all `TopLevel::TypeDef` items.
+/// Also holds meld declarations for cross-type field derivations.
 #[derive(Debug, Clone)]
 pub struct TypeUniverse {
     pub types: HashMap<String, ResolvedType>,
+    /// Melds keyed by (type_a, type_b). Both orderings are stored.
+    pub melds: HashMap<(String, String), MeldDeclaration>,
 }
 
 impl TypeUniverse {
     pub fn new() -> Self {
         TypeUniverse {
             types: HashMap::new(),
+            melds: HashMap::new(),
         }
+    }
+
+    /// Look up a meld between two types (checks both orderings).
+    pub fn find_meld(&self, a: &str, b: &str) -> Option<&MeldDeclaration> {
+        self.melds.get(&(a.to_string(), b.to_string()))
+            .or_else(|| self.melds.get(&(b.to_string(), a.to_string())))
     }
 
     pub fn get(&self, name: &str) -> Option<&ResolvedType> {

@@ -2,8 +2,13 @@
 // 2026-07-12: Phase 0.2 — New architecture top-level types.
 // No InopDeclaration, no TopLevel::Inop.
 // Added Export struct and Contract.is_entry.
+//
+// 2026-07-13: Added backend-compat types (TriggerDeclaration, ForeignSignature,
+// EnumDefinition, etc.) and expanded TopLevel variants so that legacy backend
+// code (mod.rs, dispatch.rs, circt.rs, verilog.rs, c.rs) can still pattern-match.
+// These will be migrated to the new AST types as each backend is rewritten.
 
-use crate::ast::{DerivationBlock, Expr, Formatting, PropertyValue, Type};
+use crate::ast::{BitRange, DerivationBlock, Expr, Formatting, PropertyValue, Type};
 use crate::errors::Span;
 use std::collections::HashMap;
 
@@ -18,6 +23,58 @@ pub enum TopLevel {
     Export(Export),
     Meld(Meld),
     Trigger(Trigger),
+    // ── Backend-compat variants (old AST) ─────────────────────────────
+    Constant(Constant),
+    ForeignBinding(ForeignBinding),
+    Inop(InopDeclaration),
+    Struct(StructDefinition),
+    Enum(EnumDefinition),
+    TriggerBinding {
+        name: String,
+        ty: Option<Type>,
+        instance: Expr,
+        port: String,
+        modifiers: Vec<Annotation>,
+    },
+    StateDecl(StateDecl),
+    Signature(Signature),
+    LinkDependency(LinkDependency),
+    ResourceDecl(ResourceDeclaration),
+    RStruct(RStructDefinition),
+    TypeDef(Box<TypeDef>),
+    Codec(CodecDeclaration),
+    Assertion {
+        pre: Expr,
+        chain: Vec<String>,
+    },
+    Fuzzed {
+        item: Box<TopLevel>,
+        cases: Vec<FuzzCase>,
+    },
+    Statement(Box<Statement>),
+    MacroDef {
+        name: String,
+        params: Vec<(String, MacroArgType)>,
+        return_type: Option<MacroArgType>,
+        body: Vec<Statement>,
+    },
+    TemplateDef {
+        name: String,
+        params: Vec<(String, MacroArgType)>,
+        return_type: Option<MacroArgType>,
+        body: Vec<Statement>,
+    },
+    RenderBlock(RenderBlock),
+    Stylesheet(String),
+    SvgComponent {
+        name: String,
+        content: String,
+    },
+    SyncGroup {
+        domains: Vec<String>,
+        item: Box<TopLevel>,
+    },
+    Cfg(CfgGuard),
 }
 
 // ── Definition ─────────────────────────────────────────────────────────
@@ -47,6 +104,8 @@ pub struct Transaction {
     pub is_async: bool,
     pub type_params: Vec<TypeParam>,
     pub parameters: Vec<(String, Type)>,
+    pub output_type: Option<OutputType>,
+    pub outputs: Vec<Type>,
     pub contract: Contract,
     pub body: Vec<Statement>,
     pub metadata: HashMap<String, PropertyValue>,
@@ -215,6 +274,25 @@ pub struct Meld {
     pub span: Option<Span>,
 }
 
+/// A meld route defines how one type's field is derived from another type.
+#[derive(Debug, Clone)]
+pub struct MeldRouteDef {
+    /// The projection target name (e.g. "Ptr", "Size")
+    pub accessor: String,
+    /// The expression that computes this field from the partner type
+    pub dest_expr: Expr,
+}
+
+/// A bidirectional type compatibility declaration.
+/// Allows viewing type A as type B and vice versa via named routes.
+#[derive(Debug, Clone)]
+pub struct MeldDeclaration {
+    pub name_a: String,
+    pub name_b: String,
+    pub routes: Vec<MeldRouteDef>,
+    pub span: Option<Span>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Trigger {
     pub name: String,
@@ -234,4 +312,351 @@ pub struct TypeBinding {
     pub name: String,
     pub ty: Type,
     pub span: Option<Span>,
+}
+
+// ── Backend-Compat Types (old AST) ─────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct Constant {
+    pub name: String,
+    pub ty: Type,
+    pub expr: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResultType {
+    Projection(Vec<Type>),
+    TrueAssertion,
+    VoidType,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ForeignTarget {
+    Native,
+    Wasm,
+    C,
+    Python,
+    Js,
+    Swift,
+    Go,
+    Metropolitan,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForeignSignature {
+    pub name: String,
+    pub location: String,
+    pub inputs: Vec<(String, Type)>,
+    pub result_type: ResultType,
+    pub wasm_impl: Option<String>,
+    pub wasm_setup: Option<String>,
+    pub span: Option<Span>,
+}
+
+impl Default for ForeignSignature {
+    fn default() -> Self {
+        ForeignSignature {
+            name: String::new(),
+            location: String::new(),
+            inputs: Vec::new(),
+            result_type: ResultType::VoidType,
+            wasm_impl: None,
+            wasm_setup: None,
+            span: None,
+        }
+    }
+}
+
+/// Foreign function binding — a `frgn` declaration that wraps an external function.
+#[derive(Debug, Clone)]
+pub struct ForeignBinding {
+    pub name: String,
+    pub location: String,
+    pub target: ForeignTarget,
+    pub inputs: Vec<(String, Type)>,
+    pub success_output: Vec<(String, Type)>,
+    pub error_type: String,
+    pub error_fields: Vec<(String, Type)>,
+    pub input_layout: Option<()>,
+    pub output_layout: Option<()>,
+    pub precondition: Option<String>,
+    pub postcondition: Option<String>,
+    pub buffer_mode: Option<String>,
+    pub default_watchdog: Option<(u64, u64, u64, Box<Expr>)>,
+    pub wasm_impl: Option<String>,
+    pub wasm_setup: Option<String>,
+    pub span: Option<Span>,
+}
+
+impl ForeignBinding {
+    pub fn new(name: String, location: String, target: ForeignTarget) -> Self {
+        ForeignBinding {
+            name,
+            location,
+            target,
+            inputs: Vec::new(),
+            success_output: Vec::new(),
+            error_type: "Error".to_string(),
+            error_fields: Vec::new(),
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            default_watchdog: None,
+            span: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum LinkRef {
+    Explicit(u64),
+    Linked(String),
+    Stdin,
+    Timer(u64),
+    Signal(String),
+}
+
+#[derive(Debug, Clone)]
+pub struct TriggerDeclaration {
+    pub name: String,
+    pub ty: Type,
+    pub address: LinkRef,
+    pub bit_range: Option<BitRange>,
+    pub stages: Vec<String>,
+    pub condition: Option<Expr>,
+    pub is_wake: bool,
+    pub is_const: bool,
+    pub span: Option<Span>,
+    pub annotations: Vec<TypeBinding>,
+    pub modifiers: Vec<Annotation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InopDeclaration {
+    pub name: String,
+    pub params: Vec<(String, Type)>,
+    pub outputs: Vec<Type>,
+    pub contract: Contract,
+    pub llvm_body: Vec<String>,
+    pub has_side_effects: bool,
+    pub has_state_access: bool,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumDefinition {
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    pub variants: Vec<EnumVariant>,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub enum EnumVariant {
+    Unit(String),
+    Tuple(String, Vec<Type>),
+    Struct(String, Vec<(String, Type)>),
+}
+
+#[derive(Debug, Clone)]
+pub struct StateDecl {
+    pub name: String,
+    pub ty: Type,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Signature {
+    pub name: String,
+    pub params: Vec<(String, Type)>,
+    pub outputs: Vec<Type>,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LinkDependency {
+    pub path: String,
+    pub source_lang: LinkLanguage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LinkLanguage {
+    C, Cpp, Rust, Zig, Python, Java, AssemblyScript, Bitcode, Object,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResourceDeclaration {
+    pub name: String,
+    pub ty: Type,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RStructDefinition {
+    pub name: String,
+    pub fields: Vec<StructField>,
+    pub transactions: Vec<Transaction>,
+    pub view_html: String,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructDefinition {
+    pub name: String,
+    pub type_params: Vec<String>,
+    pub parent: Option<Type>,
+    pub fields: Vec<StructField>,
+    pub transactions: Vec<Transaction>,
+    pub view_html: Option<String>,
+    pub span: Option<Span>,
+    pub modifiers: Vec<Annotation>,
+    pub variants: Vec<StructVariant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructVariant {
+    pub contract: Option<Contract>,
+    pub fields: Vec<StructField>,
+    pub additions: Vec<StructField>,
+    pub removals: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Visibility {
+    Public,
+    Sedentary,
+    Private,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructField {
+    pub name: String,
+    pub ty: Type,
+    pub default: Option<Expr>,
+    pub visibility: Visibility,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeDef {
+    pub name: String,
+    pub type_params: Vec<TypeParam>,
+    pub base: Box<Expr>,
+    pub bit_range: Option<BitRange>,
+    pub body: TypeDefBody,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeDefBody {
+    pub slots: Vec<TypeDefSlot>,
+    pub metadata: HashMap<String, PropertyValue>,
+    pub projections: Vec<ProjectionDef>,
+    pub bindings: Vec<TypeBinding>,
+    pub operators: Vec<OperatorDef>,
+    pub constraints: Vec<Expr>,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TypeDefSlot {
+    pub name: String,
+    pub ty: Type,
+    pub bit_range: Option<BitRange>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProjectionDef {
+    pub name: String,
+    pub expr: Expr,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OperatorDef {
+    pub op: String,
+    pub impl_name: String,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CodecDeclaration {
+    pub name: String,
+    pub parse_handler: Option<String>,
+    pub format_handler: Option<String>,
+    pub constraints: Vec<Expr>,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FuzzCase {
+    pub bindings: Vec<(String, Expr)>,
+    pub expected: Expr,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub enum MacroArgType {
+    Expr, Stmt, Block, Type, Int, String, Bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct RenderBlock {
+    pub struct_name: String,
+    pub view_html: String,
+    pub span: Option<Span>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CfgGuard {
+    pub condition: CfgCondition,
+    pub items: Vec<TopLevel>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum CfgCondition {
+    Eq(String, String),
+    Ne(String, String),
+    And(Box<CfgCondition>, Box<CfgCondition>),
+    Or(Box<CfgCondition>, Box<CfgCondition>),
+    Not(Box<CfgCondition>),
+    Bool(bool),
+}
+
+impl CfgCondition {
+    pub fn evaluate(&self, target_os: &str, target_arch: &str, board: &str) -> Result<bool, String> {
+        match self {
+            CfgCondition::Eq(key, val) => {
+                let actual = match key.as_str() {
+                    "target_os" => target_os,
+                    "target_arch" => target_arch,
+                    "board" => board,
+                    _ => return Err(format!("unknown cfg key \"{}\"", key)),
+                };
+                Ok(actual == val)
+            }
+            CfgCondition::Ne(key, val) => {
+                let actual = match key.as_str() {
+                    "target_os" => target_os,
+                    "target_arch" => target_arch,
+                    "board" => board,
+                    _ => return Err(format!("unknown cfg key \"{}\"", key)),
+                };
+                Ok(actual != val)
+            }
+            CfgCondition::And(a, b) => {
+                if !a.evaluate(target_os, target_arch, board)? { return Ok(false); }
+                b.evaluate(target_os, target_arch, board)
+            }
+            CfgCondition::Or(a, b) => {
+                if a.evaluate(target_os, target_arch, board)? { return Ok(true); }
+                b.evaluate(target_os, target_arch, board)
+            }
+            CfgCondition::Not(c) => {
+                Ok(!c.evaluate(target_os, target_arch, board)?)
+            }
+            CfgCondition::Bool(b) => Ok(*b),
+        }
+    }
 }

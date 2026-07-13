@@ -117,9 +117,9 @@ pub struct RegionAnalyzer {
 }
 
 impl RegionAnalyzer {
-    /// Run the full analysis pipeline on a parsed program.
-    pub fn analyze(program: &Program) -> Self {
-        let mut analyzer = RegionAnalyzer {
+    /// Create an empty analyzer (no program loaded).
+    pub fn empty() -> Self {
+        RegionAnalyzer {
             var_info: HashMap::new(),
             trigger_vars: HashSet::new(),
             regions: Vec::new(),
@@ -133,7 +133,12 @@ impl RegionAnalyzer {
             region_scores: Vec::new(),
             budget_plan: None,
             composed_chains: Vec::new(),
-        };
+        }
+    }
+
+    /// Run the full analysis pipeline on a parsed program.
+    pub fn analyze(program: &Program) -> Self {
+        let mut analyzer = RegionAnalyzer::empty();
 
         analyzer.register_declarations(program);
         analyzer.build_dependency_graph(program);

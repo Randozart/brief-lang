@@ -470,18 +470,15 @@ impl WebstackGenerator {
                         }
                     }
                 }
-                TopLevel::ForeignBinding {
-                    name, signature, ..
-                } => {
+                TopLevel::ForeignBinding(fb) => {
                     // Track FFI bindings for code generation
                     self.ffi_bindings
-                        .insert(signature.name.clone(), signature.inputs.len());
+                        .insert(fb.name.clone(), fb.inputs.len());
                     // Track JS FFI implementations — the wasm_impl/wasm_setup fields
-                    // contain JavaScript code used for both wasm-bindgen and TS emitter.
-                    if let Some(impl_code) = &signature.wasm_impl {
-                        self.ffi_ts_impl.insert(signature.name.clone(), impl_code.clone());
+                    if let Some(impl_code) = &fb.wasm_impl {
+                        self.ffi_ts_impl.insert(fb.name.clone(), impl_code.clone());
                     }
-                    if let Some(setup_code) = &signature.wasm_setup {
+                    if let Some(setup_code) = &fb.wasm_setup {
                         self.ffi_ts_setups.insert(setup_code.clone());
                     }
                 }

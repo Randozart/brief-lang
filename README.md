@@ -17,7 +17,6 @@ Brief is a declarative, contract-enforced logic language designed for building v
 | `.abv` | **Accelerated Brief** | SPIR-V GPU kernel |
 | `.cbv` | **Circuit Brief** | CIRCT hardware description (Verilog/VHDL) |
 | `.dbv` / `.dbvs` / `.dbvl` | **Data Brief** | Configuration data parsed by Brief itself |
-| `.sbv` / `.sebv` / `.srbv` | **Strict Brief** | Same as base variant, but full contracts required |
 
 The main sources of inspiration are Rust (by Graydon Hoare and the Rust community) and Dialog (by Linus Åkesson). Specifically the fact that both have a very strict compiler, that catches bad code before it ever compiles, simply through smart conventions. Especially the declarative nature is inspired by Dialog, as a direct successor of Prolog, since Dialog showed that setting up a series of predicates could be sufficient to have a compiler figure out a complex runtime capable of simulating a world. And the reactor loop? That was inspired by, well... React. As such, everything in Brief is designed to, in some way, aid in predictable runtime cascades. You set up the first billiard ball, and based on the variables present describing the overall "state", the rest of the balls predictably scatter.
 
@@ -194,7 +193,7 @@ Each variant has a different *contract baseline* and *feature set* appropriate t
 | `.ebv` (Embed) | sugar allowed | All available | C, Rust (Python/Java warned) | Bare-metal MCU |
 | `.cbv` (Circuit) | sugar banned | Hardware subset only | Banned | Hardware synthesis |
 | `.dbv` (Data) | No contracts | None | None | Configuration |
-| **Strict** (`.sbv`, `.sebv`, `.srbv`) | sugar banned — full `[pre][post]` required | Same as base | Same as base | Safety-critical, formal verification |
+
 
 The rationale: **contracts are optimization information**. The more complete your contracts, the more the compiler can prove, and the faster your program runs. Sugar syntax (`[[post]`, `[pre]]`) is a convenience for prototyping, but strict variants force you to commit to full specifications. This is what makes Brief different from total languages (Coq, Agda — must prove everything upfront) and mainstream languages (C, Rust — prove nothing by default).
 
