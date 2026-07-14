@@ -1,0 +1,23 @@
+# Extension → backend routing.
+# Compiled into the binary via include_str!.
+# --backend CLI flag overrides.
+
+[".bv"]
+backend = "llvm"
+defaults = ["--budget", "256"]
+
+[".ebv"]
+backend = "llvm"
+defaults = ["--optimize-size", "--budget", "0"]
+
+[".cbv"]
+backend = "circt"
+defaults = []
+
+[".rbv"]
+backend = "webstack"
+defaults = ["--target", "wasm"]
+
+[".abv"]
+backend = "gpu"
+defaults = ["--gpu-offload"]
