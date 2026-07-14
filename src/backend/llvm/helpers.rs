@@ -16,8 +16,19 @@
 use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::*;
+use crate::type_universe::ResolvedType;
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::LazyLock;
+
+static TYPE_CONFIG: LazyLock<crate::config::TypeConfig> = LazyLock::new(|| {
+    crate::config::TypeConfig::load()
+});
+
+/// Derive LLVM type string from a ResolvedType using the global type config.
+fn rt_llvm_type(rt: &ResolvedType) -> String {
+    crate::config::derive_llvm_type(rt.primitive(), rt.bytes, &*TYPE_CONFIG)
+}
 
 /// 2026-07-12: Check if a type matches a canonical name via property
 /// system (preferred) with hardcoded legacy fallback for types without
@@ -614,13 +625,11 @@ impl LlvmBackend {
     fn operator_llvm_type(&self, ty: &Type) -> &'static str {
         if let Some(ref universe) = self.ctx.type_universe {
             if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
-                if rt.llvm_type == "float" {
-                    return "float";
-                } else if rt.llvm_type == "double" {
-                    return "double";
-                } else {
-                    return "i64";
-                }
+                return match rt.primitive() {
+                    Some("Float") if rt.bytes <= 4 => "float",
+                    Some("Float") => "double",
+                    _ => "i64",
+                };
             }
         }
         if ty == &Type::float() {
@@ -1047,7 +1056,7 @@ impl LlvmBackend {
     fn is_native_float(&self, ty: &Type) -> bool {
         self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
-            .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
+            .map(|r| r.primitive() == Some("Float"))
             .unwrap_or_else(|| {
                 type_is(&self.ctx.type_universe, ty, "Float")
                     || type_is(&self.ctx.type_universe, ty, "Float64")
@@ -1187,7 +1196,7 @@ impl LlvmBackend {
         let v = self.fun.next_reg();
         let is_native = self.ctx.type_universe.as_ref()
             .and_then(|u| a.ty.universe_key().and_then(|k| u.get(k)))
-            .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
+            .map(|r| r.primitive() == Some("Float"))
             .unwrap_or(false);
         let (op_a, op_b) = if is_native {
             (self.ensure_float_reg(out, indent, a), self.ensure_float_reg(out, indent, b))

@@ -312,7 +312,6 @@ mod tests {
             base: "Bits".to_string(),
             bytes,
             alignment: 8,
-            llvm_type: "i64".to_string(),
             properties: HashMap::new(),
         }
     }

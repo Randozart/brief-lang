@@ -250,11 +250,20 @@ impl LlvmBackend {
 
     /// Emit a user function call.
     fn emit_user_call(&mut self, out: &mut String, v: &str, name: &str, args: &[Expr], indent: &str) -> TypedRegister {
-        let arg_regs: Vec<String> = args.iter()
-            .map(|a| self.emit_expr(out, a, indent).name)
+        // 2026-07-14: collect typed registers so call includes argument types
+        let arg_regs: Vec<TypedRegister> = args.iter()
+            .map(|a| self.emit_expr(out, a, indent))
             .collect();
-        writeln!(out, "{}{} = call i64 @{}({})", indent, v, name, arg_regs.join(", ")).ok();
-        TypedRegister { name: v.to_string(), ty: Type::int() }
+        let arg_strs: Vec<String> = arg_regs.iter()
+            .map(|reg| format!("{} {}", crate::backend::llvm::types::lower_type(&reg.ty), reg.name))
+            .collect();
+        // 2026-07-14: user call return type from defn_return_types — fall back to i64
+        let ret_type = self.ctx.defn_return_types.get(name)
+            .and_then(|types| types.first().cloned())
+            .unwrap_or(Type::int());
+        let ret_llvm = crate::backend::llvm::types::lower_type(&ret_type);
+        writeln!(out, "{}{} = call {} @{}({})", indent, v, ret_llvm, name, arg_strs.join(", ")).ok();
+        TypedRegister { name: v.to_string(), ty: ret_type }
     }
 
     /// Emit a binary operation.
@@ -266,15 +275,30 @@ impl LlvmBackend {
         let fast = if is_float { " fast" } else { "" };
         match kind {
             crate::ast::BinaryOpKind::Add => {
-                writeln!(out, "{}{} = fadd{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                // 2026-07-14: Add must branch on is_float — fadd i64 is invalid LLVM IR
+                if is_float {
+                    writeln!(out, "{}{} = fadd{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = add i64 {}, {}", indent, v, l.name, r.name).ok();
+                }
                 TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }
             crate::ast::BinaryOpKind::Sub => {
-                writeln!(out, "{}{} = fsub{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                // 2026-07-14: Sub must branch on is_float — fsub i64 is invalid LLVM IR
+                if is_float {
+                    writeln!(out, "{}{} = fsub{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = sub i64 {}, {}", indent, v, l.name, r.name).ok();
+                }
                 TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }
             crate::ast::BinaryOpKind::Mul => {
-                writeln!(out, "{}{} = fmul{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                // 2026-07-14: Mul must branch on is_float — fmul i64 is invalid LLVM IR
+                if is_float {
+                    writeln!(out, "{}{} = fmul{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = mul i64 {}, {}", indent, v, l.name, r.name).ok();
+                }
                 TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }
             crate::ast::BinaryOpKind::Div => {
@@ -361,7 +385,14 @@ impl LlvmBackend {
         kind: &crate::ast::UnaryOpKind, operand: &TypedRegister, indent: &str) -> TypedRegister {
         match kind {
             crate::ast::UnaryOpKind::Neg => {
-                writeln!(out, "{}{} = sub i64 0, {}", indent, v, operand.name).ok();
+                // 2026-07-14: Neg must use fsub for float operands — sub i64 is invalid for doubles
+                let is_float = operand.ty == Type::float() || operand.ty == Type::float64();
+                if is_float {
+                    let fty = if operand.ty == Type::float64() { "double" } else { "float" };
+                    writeln!(out, "{}{} = fsub {} -0.0, {}", indent, v, fty, operand.name).ok();
+                } else {
+                    writeln!(out, "{}{} = sub i64 0, {}", indent, v, operand.name).ok();
+                }
                 TypedRegister { name: v.to_string(), ty: operand.ty.clone() }
             }
             crate::ast::UnaryOpKind::Not => {

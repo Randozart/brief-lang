@@ -2084,13 +2084,16 @@ no explicit float marker is emitted, it still uses `fadd` instead of `add`.
 
 **Impact**: Benchmarks with integer arithmetic (ring_buffer, print_loop, etc.)
 fail to compile to binary with `clang: error: invalid operand type for instruction`.
-The `--llvm` flag still produces the `.ll` file for debugging.
 
 **Workaround**: Use `--llvm` to emit IR only, then manually fix the `fadd`/`fsub`/
 `fmul`/`fdiv` instructions to `add`/`sub`/`mul`/`sdiv` before running `clang`.
 
-**Fix**: In `emit_binary_op`, select the instruction mnemonic based on the LLVM
-type string of the operands: use `add`/`sub`/`mul`/`sdiv` for integer types,
-`fadd`/`fsub`/`fmul`/`fdiv` for float/double types.
+**Fix**: Applied `if is_float { fadd } else { add i64 }` guard to Add/Sub/Mul
+arms in `emit_binary_op` (they unconditionally emitted `f`-prefixed instructions).
+Identical to the `Div` arm which already had the correct guard. Additionally
+fixed `emit_unary_op::Neg` (float `fsub -0.0` path), `emit_stmt.rs` store/return
+instructions (hardcoded `"i64"` → `lower_type(&val.ty)`), and `emit_user_call`
+(lookup `defn_return_types` for real return type). All five fixes in one commit.
 
-**Files**: `src/backend/llvm/emit_expr.rs`
+**Files**: `src/backend/llvm/emit_expr.rs`, `src/backend/llvm/emit_stmt.rs`  
+**Plan**: `docs/plans/2026-07-14-fix-backend-type-bugs.md`

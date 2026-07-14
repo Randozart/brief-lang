@@ -334,8 +334,14 @@ fn emit_external_call(
     backend: &mut LlvmBackend, out: &mut String, v: &str, name: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let regs = emit_args(backend, out, args, indent);
+    // 2026-07-14: emit typed args so call includes argument types
+    let typed_regs: Vec<BTypedRegister> = args.iter()
+        .map(|a| backend.emit_expr(out, a, indent))
+        .collect();
+    let arg_strs: Vec<String> = typed_regs.iter()
+        .map(|reg| format!("{} {}", crate::backend::llvm::types::lower_type(&reg.ty), reg.name))
+        .collect();
     let clean_name = name.trim_end_matches('#');
-    writeln!(out, "{}{} = call i64 @{}({})", indent, v, clean_name, regs.join(", ")).ok();
+    writeln!(out, "{}{} = call i64 @{}({})", indent, v, clean_name, arg_strs.join(", ")).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }

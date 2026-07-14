@@ -31,16 +31,22 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let val = backend.emit_expr(out, rhs, indent);
             if let Expr::Identifier(name) = lhs {
                 if let Some(reg) = backend.fun.let_bindings.get(name) {
-                    writeln!(out, "{}store i64 {}, ptr {}", indent, val.name, reg).ok();
+                    // 2026-07-14: store type must match val.ty — hardcoded i64 breaks bool/float assigns
+                    let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                    writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
                 // 2026-07-14: Handle MMIO and regular state field assignments
                 } else if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
                     let ptr = backend.fun.gen_reg();
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
-                    writeln!(out, "{}store volatile i64 {}, ptr {}", indent, val.name, ptr).ok();
+                    // 2026-07-14: volatile store type must match val.ty — hardcoded i64 breaks MMIO bools
+                    let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                    writeln!(out, "{}store volatile {} {}, ptr {}", indent, store_ty, val.name, ptr).ok();
                 } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                     let ptr = backend.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr %State, ptr %state, i32 0, i32 {}", indent, ptr, idx).ok();
-                    writeln!(out, "{}store i64 {}, ptr {}", indent, val.name, ptr).ok();
+                    // 2026-07-14: state field store type must match val.ty — hardcoded i64 breaks bool/float fields
+                    let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                    writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, ptr).ok();
                 }
             }
             TypedRegister { name: val.name, ty: Type::void() }
@@ -49,7 +55,9 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Term(val) | Statement::TermBang(val) => {
             if let Some(val) = val {
                 let reg = backend.emit_expr(out, val, indent);
-                writeln!(out, "{}ret i64 {}", indent, reg.name).ok();
+                // 2026-07-14: return type must match reg.ty — hardcoded i64 breaks bool/float returns
+                let ret_ty = crate::backend::llvm::types::lower_type(&reg.ty);
+                writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
                 backend.fun.terminated = true;
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
@@ -57,16 +65,29 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Return(val) => {
             if let Some(val) = val {
                 let reg = backend.emit_expr(out, val, indent);
-                writeln!(out, "{}ret i64 {}", indent, reg.name).ok();
+                // 2026-07-14: return type must match reg.ty — hardcoded i64 breaks bool/float returns
+                let ret_ty = crate::backend::llvm::types::lower_type(&reg.ty);
+                writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
                 backend.fun.terminated = true;
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::Guarded(cond, body) => {
             let cond_reg = backend.emit_expr(out, cond, indent);
-            let then_lbl = format!("guard.then{}", backend.fun.gen_reg());
-            let end_lbl = format!("guard.end{}", backend.fun.gen_reg());
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_reg.name, then_lbl, end_lbl).ok();
+            // 2026-07-14: labels need a counter without % prefix — gen_reg() returns %tN
+            let label_n = backend.fun.txn_counter;
+            backend.fun.txn_counter += 1;
+            let then_lbl = format!("guard.then{}", label_n);
+            let end_lbl = format!("guard.end{}", label_n);
+            // 2026-07-14: bool cond is i8 — trunc to i1 for br instruction
+            let cond_i1 = if cond_reg.ty == Type::bool_() {
+                let b = backend.fun.gen_reg();
+                writeln!(out, "{}{} = trunc i8 {} to i1", indent, b, cond_reg.name).ok();
+                b
+            } else {
+                cond_reg.name.clone()
+            };
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, then_lbl, end_lbl).ok();
             writeln!(out, "{}{}:", indent, then_lbl).ok();
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);
@@ -77,10 +98,21 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         }
         Statement::If(cond, then, else_) => {
             let cond_reg = backend.emit_expr(out, cond, indent);
-            let then_lbl = format!("if.then{}", backend.fun.gen_reg());
-            let else_lbl = format!("if.else{}", backend.fun.gen_reg());
-            let end_lbl = format!("if.end{}", backend.fun.gen_reg());
-            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_reg.name, then_lbl, else_lbl).ok();
+            // 2026-07-14: labels need a counter without % prefix — gen_reg() returns %tN
+            let label_n = backend.fun.txn_counter;
+            backend.fun.txn_counter += 1;
+            let then_lbl = format!("if.then{}", label_n);
+            let else_lbl = format!("if.else{}", label_n);
+            let end_lbl = format!("if.end{}", label_n);
+            // 2026-07-14: bool cond is i8 — trunc to i1 for br instruction
+            let cond_i1 = if cond_reg.ty == Type::bool_() {
+                let b = backend.fun.gen_reg();
+                writeln!(out, "{}{} = trunc i8 {} to i1", indent, b, cond_reg.name).ok();
+                b
+            } else {
+                cond_reg.name.clone()
+            };
+            writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_i1, then_lbl, else_lbl).ok();
             writeln!(out, "{}{}:", indent, then_lbl).ok();
             for stmt in then {
                 emit_statement(backend, out, stmt, indent);

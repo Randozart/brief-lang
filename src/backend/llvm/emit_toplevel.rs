@@ -2,8 +2,18 @@ use crate::analysis::bild_asm;
 use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type};
 use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
-use crate::type_universe::TypeUniverse;
+use crate::type_universe::{ResolvedType, TypeUniverse};
 use std::fmt::Write;
+use std::sync::LazyLock;
+
+static TYPE_CONFIG: LazyLock<crate::config::TypeConfig> = LazyLock::new(|| {
+    crate::config::TypeConfig::load()
+});
+
+/// Derive LLVM type string from a ResolvedType using the global type config.
+fn rt_llvm_type(rt: &ResolvedType) -> String {
+    crate::config::derive_llvm_type(rt.primitive(), rt.bytes, &*TYPE_CONFIG)
+}
 
 impl LlvmBackend {
     /// Check if any modifier has the given name and extract its export name.
@@ -293,23 +303,22 @@ impl LlvmBackend {
         }
     }
 
-    pub(super) fn llvm_type(&self, ty: &Type) -> &str {
+    pub(super) fn llvm_type(&self, ty: &Type) -> String {
         // 2026-07-10: Phase 1 — check for user-defined struct types first.
         // Struct types are passed by pointer at the FFI boundary, so return
         // "ptr" (LLVM opaque pointer). The named struct type is declared in
         // `declare_struct_types()` for the foreign caller's reference.
         if let Type::Custom(name) = ty {
             if self.ctx.struct_types.contains_key(name) {
-                return "ptr";
+                return "ptr".to_string();
             }
         }
-        // 2026-06-29: Phase 7A — universe query replaces match arms.
-        // Falls back to a minimal inline match when universe is not available
-        // (e.g., in unit tests that construct LlvmBackend directly).
+        // 2026-07-14: Universe query with derive_llvm_type replaces
+        // the removed ResolvedType.llvm_type field.
         self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
-            .map(|r| r.llvm_type.as_str())
-            .unwrap_or_else(|| Self::fallback_llvm_type(ty))
+            .map(rt_llvm_type)
+            .unwrap_or_else(|| Self::fallback_llvm_type(ty).to_string())
     }
 
 
@@ -540,7 +549,7 @@ impl LlvmBackend {
         // own alignment without modifying the backend.
         if let Some(u) = &self.ctx.type_universe {
             for rt in u.types.values() {
-                if rt.llvm_type == ty {
+                if rt_llvm_type(rt) == ty {
                     return rt.alignment as u32;
                 }
             }

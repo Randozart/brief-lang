@@ -1516,7 +1516,6 @@ impl LlvmBackend {
                                 base: "Bits".to_string(),
                                 bytes,
                                 alignment: 8,
-                                llvm_type: format!("%{}", s.name),
                                 properties: std::collections::HashMap::new(),
                             };
                             universe.types.insert(s.name.clone(), rt);

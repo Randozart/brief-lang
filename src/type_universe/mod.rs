@@ -16,14 +16,28 @@ use crate::ast::top::MeldDeclaration;
 use std::collections::HashMap;
 
 /// Resolved metadata for a single type in the universe.
+/// llvm_type is NOT stored here — it is derived at query time from
+/// (primitive, bytes) via config/llvm-primitives.toml.
 #[derive(Debug, Clone)]
 pub struct ResolvedType {
     pub name: String,
     pub base: String,
     pub bytes: u64,
     pub alignment: u64,
-    pub llvm_type: String,
     pub properties: HashMap<String, crate::ast::PropertyValue>,
+}
+
+impl ResolvedType {
+    /// Read the `primitive` metadata property, if set.
+    pub fn primitive(&self) -> Option<&str> {
+        self.properties.get("primitive").and_then(|pv| {
+            if let crate::ast::PropertyValue::Identifier(name) = pv {
+                Some(name.as_str())
+            } else {
+                None
+            }
+        })
+    }
 }
 
 /// Central type definition registry.
