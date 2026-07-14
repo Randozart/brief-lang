@@ -4,6 +4,137 @@
 
 The Layout DSL is a declarative binary grammar for describing the physical arrangement of bits in any Brief type. It replaces the old opaque `codec` concept with a formal pattern language that the compiler can reason about, validate, transform, and prove.
 
+## Tutorial
+
+This section walks through the Layout DSL from simple to complex. You can read it in order or jump to any example.
+
+### 1. The simplest layout — a named slice
+
+```brief
+type FourBytes <: Bits {
+    bytes <~ 4;
+    layout <~ [first: 16, second: 16];
+}
+```
+
+Two fields, each 16 bits. `first` occupies bits 0-15, `second` occupies bits 16-31. Endianness is target-adaptive (no `le:` or `be:` prefix).
+
+Reading `x.first` returns bits 0-15 as an integer. Writing to `x.first` changes bits 0-15 without touching bits 16-31.
+
+### 2. Float32 — standard IEEE 754 layout
+
+```brief
+type Float32 <: Bits {
+    bytes <~ 4;
+    primitive <~ Float;
+    layout <~ le: [sign: 1, exp: 8, mant: 23];
+}
+```
+
+- `sign: 1` — bit 31
+- `exp: 8` — bits 23-30
+- `mant: 23` — bits 0-22
+
+The fields are read-only (no `!` prefix). The compiler generates getters for all three, but the user cannot write `x.sign = 0` directly. Changing bits here would corrupt the float's value.
+
+### 3. Mutable fields with `!`
+
+```brief
+type PngChunk <: Bits {
+    bytes <~ 12;
+    layout <~ be: [$length: 32, kind: 32, data: {$length}, !crc: 32];
+}
+```
+
+- `$length: 32` — structural field, controls `data` size. Readable, not directly writable.
+- `kind: 32` — read-only. User can read it, can't set it.
+- `data: {$length}` — variable-length region. The `$length` field determines how many bytes this occupies.
+- `!crc: 32` — MUTABLE. The user can read `chunk.crc` and write `chunk.crc = 42`. Writing to `!crc` only touches the last 32 bits — it cannot corrupt `$length`, `kind`, or `data`.
+
+### 4. String — variable-width UTF-8 pattern
+
+```brief
+type String <: Bits {
+    bytes <~ 8;
+    primitive <~ String;
+    layout <~ be: (@codepoint: (
+        0x00..0x7F |
+        0xC2..0xDF 0x80..0xBF |
+        0xE0 0xA0..0xBF 0x80..0xBF |
+        0xE1..0xEC {0x80..0xBF, 2} |
+        0xED 0x80..0x9F 0x80..0xBF |
+        0xEE..0xEF {0x80..0xBF, 2} |
+        0xF0 0x90..0xBF {0x80..0xBF, 2} |
+        0xF1..0xF3 {0x80..0xBF, 3} |
+        0xF4 0x80..0x8F {0x80..0xBF, 2}
+    ))*;
+}
+```
+
+This is the full UTF-8 specification as a binary regular expression:
+- `0x00..0x7F` — single-byte ASCII character (0-127)
+- `0xC2..0xDF 0x80..0xBF` — two-byte character (128-2047)
+- `0xE0 0xA0..0xBF {0x80..0xBF, 2}` — three-byte, special case for 0xE0
+- Each alternative matches exactly one Unicode codepoint, labeled `@codepoint`
+- The outer `*` repeats for the entire string
+
+The compiler's DFA engine validates every string literal against this pattern at compile time. If the literal contains invalid UTF-8, compilation fails with a precise error.
+
+### 5. List<T> — generic collection with typed reference
+
+```brief
+type List<T> <: Bits {
+    bytes <~ 16;
+    layout <~ le: [$length: 64, data_ptr: 64, elements: {$length, $T}];
+}
+```
+
+The typed reference `{$length, $T}` means:
+1. `$length` stores the number of elements
+2. There are `$length` consecutive elements of type T starting at `data_ptr`
+3. Each element follows T's own layout rules
+
+Accessing `list[5]` generates: bounds check `5 < $length`, GEP into `data_ptr` at offset `5 * sizeof(T)`, load value.
+
+### 6. HashMap<K,V> — typed pair array
+
+```brief
+type HashMap<K, V> <: Bits {
+    bytes <~ 24;
+    layout <~ le: [$capacity: 64, $length: 64, seed: 64,
+                   slots: {$capacity, ($K, $V)}];
+}
+```
+
+The `($K, $V)` pair type is a two-element tuple. The compiler knows each pair occupies `sizeof(K) + sizeof(V)` bytes. Key and value follow their respective layouts within each slot.
+
+### 7. Melding layouts — bit-shuffling between types
+
+```brief
+meld Float32 <:> MyCustomFloat {
+    layout {
+        sign <:> sign;
+        exp  <:> exp;
+        mant <:> mant;
+    }
+}
+```
+
+This declares that `Float32` and `MyCustomFloat` are structurally equivalent at the field level. The normalizer reads both layouts, computes bit positions, and auto-synthesizes the shuffle instructions. No manual bit-shifting code required.
+
+### 8. What you cannot do
+
+```brief
+// ERROR: $length is structural, cannot be marked mutable
+type Bad <: Bits { layout <~ be: [$length: 32, !$length: 32]; }
+
+chunk.$length = 42;        // ERROR: $ prefix fields are structural
+chunk.data = something;    // ERROR: data is length-dependent, not writeable
+chunk.nonexistent = 1;     // ERROR: no field named nonexistent in layout
+```
+
+The compiler enforces all three at compile time.
+
 ## Two Pattern Forms, One Concept
 
 Every type is `Bits(N)`. The `layout` metadata describes how those N bytes are arranged:
@@ -16,6 +147,42 @@ Every type is `Bits(N)`. The `layout` metadata describes how those N bytes are a
 | Typical use | Float, hardware registers, structs | Strings, protocols, packed formats |
 
 The parser distinguishes them syntactically: `[...]` is always fixed-width slicing, `(...)` is always variable-width pattern.
+
+## Access Model
+
+Every named field in a layout has a compiler-enforced access level:
+
+| Syntax | Access | Compiler generates | Example |
+|--------|--------|-------------------|---------|
+| `name: N` | Read-only | Getter (reads bits N..M) | `sign: 1` |
+| `!name: N` | Read/write | Getter + setter (setter only touches bits N..M) | `!crc: 32` |
+| `$name: N` | Structural read-only | Getter only, no setter ever | `$length: 32` |
+
+### Rules
+
+1. **`$`-prefixed fields cannot have `!`**. `$length: 32` controls the size of the `data` region. If you could write to it, the data region would be silently corrupted. The only way to change a `$` field is through a proper API call (`list.append(x)` reallocates and validates).
+
+2. **`!` fields are guaranteed safe**. Writing to `!crc` masks the value to 32 bits and ORs it into the correct bit position. It cannot corrupt `$length` or `kind` because the layout defines exactly which bits belong to each field.
+
+3. **Read-only fields still construct correctly**. You can build a valid value of the type (e.g., `Float32 { sign: 0, exp: 127, mant: 0 }` at construction). The restriction is on *mutation after construction*.
+
+4. **Typed reference fields (`{$name, T}`) are always structural**. They read from the pointer but cannot be assigned directly. Element mutation goes through index accessors (`list[5] = x`), which the compiler bounds-checks against `$length`.
+
+### Accessor auto-generation
+
+For any type with a fixed-width layout, the normalizer auto-generates accessor annotations:
+
+```brief
+chunk.$length    // → reads bits 0-31, returns as i32  (structural)
+chunk.kind       // → reads bits 32-63, returns as i32  (read-only)
+chunk.crc        // → reads bits ?-?  (getter)
+chunk.crc = 42   // → masks to 32 bits, shifts, ORs   (setter, because !crc)
+chunk.data       // → reads $length elements from pointer (typed ref)
+list[5]          // → bounds-check 5 < $length, GEP, load
+map[key]         // → hash key, find slot, return value
+```
+
+These accessors are compiler-internal lowering rules. The user writes `chunk.crc` and the compiler emits the correct shift/mask — no function call overhead.
 
 ## How the Compiler Uses Layout Information
 
