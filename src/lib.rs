@@ -28,6 +28,7 @@ pub mod ast;
 pub mod analysis;
 pub mod archive;
 pub mod backend;
+pub mod bvir;
 pub mod config;
 pub mod features;
 pub mod type_universe;
