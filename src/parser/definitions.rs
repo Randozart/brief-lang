@@ -500,6 +500,14 @@ impl<'a> Parser<'a> {
                     metadata.insert("primitive".into(), PropertyValue::Identifier(prim_name));
                     continue;
                 }
+                // 2026-07-14: Handle `layout <~ ...` — store pattern as raw string
+                if slot_name == "layout" && self.check(&Token::TildeArrow) {
+                    self.advance();
+                    let raw = self.read_layout_body()?;
+                    self.eat(&Token::Semicolon);
+                    metadata.insert("layout".into(), PropertyValue::String(raw));
+                    continue;
+                }
                 // 2026-07-14: Handle `op Add <~ custom_add(#L, #R)` — type-level operation binding
                 if slot_name == "op" {
                     let op_name = self.expect_identifier()?;

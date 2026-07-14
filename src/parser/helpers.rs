@@ -174,6 +174,38 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// 2026-07-14: Read the body of a `layout <~ <...>` pattern.
+    /// Consumes tokens from opening `<` to matching `>`, tracking nested
+    /// brackets `[]`, parens `()`, and braces `{}`. Returns the raw text
+    /// sliced from the source for accuracy.
+    pub fn read_layout_body(&mut self) -> Result<String, SyntaxError> {
+        let start = self.peek_with_span().map(|(_, s)| s.start).unwrap_or(self.pos);
+        self.expect(Token::Lt)?;
+        let mut depth: u64 = 1;
+        loop {
+            let Some((tok, span)) = self.tokens.get(self.pos).cloned() else {
+                return Err(SyntaxError::InvalidExpression {
+                    reason: "unexpected end of file in layout body (missing >)".into(),
+                    span: crate::errors::Span::new(0, 0, 0, 0),
+                });
+            };
+            match tok {
+                Token::Lt => { depth += 1; self.pos += 1; }
+                Token::Gt => {
+                    depth -= 1;
+                    self.pos += 1;
+                    if depth == 0 {
+                        let raw = &self.source[start..span.start];
+                        return Ok(raw.trim().to_string());
+                    }
+                }
+                Token::LBrace | Token::LParen | Token::LBracket => { depth += 1; self.pos += 1; }
+                Token::RBrace | Token::RParen | Token::RBracket => { depth -= 1; self.pos += 1; }
+                _ => { self.pos += 1; }
+            }
+        }
+    }
+
     /// Check if we're at end of file.
     pub fn is_at_end(&self) -> bool {
         self.pos >= self.tokens.len()
