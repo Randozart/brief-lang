@@ -4,6 +4,7 @@ pub mod circt_normalizer;
 pub mod llvm;
 pub mod normalizer;
 pub mod webstack;
+pub mod webstack_normalizer;
 
 use crate::analysis::call_graph::CallGraph;
 use crate::analysis::dependency_graph::DependencyGraph;

@@ -68,7 +68,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             brief_compiler::backend::circt_normalizer::normalize(&mut items, &mut universe)?;
         }
         BackendKind::Webstack => {
-            // Webstack normalizer not yet implemented — pass through
+            brief_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe)?;
         }
     }
 
