@@ -7,7 +7,7 @@
 //
 // WARNING: This is an EDUCATIONAL file. It shows the "why" and
 // "how" of type derivation, not production code. Some patterns
-// reference intrinsics (Strlen#, Fadd#) that may be planned.
+// reference intrinsics (StrLen#, FAdd#) that may be planned.
 // ─────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ type Int <: Bits @/0..63 {
 // ─────────────────────────────────────────────────────────────
 // 2. Float — IEEE 754 single-precision
 //
-// Compiled via Fadd#/Fsub#/Fmul#/Fdiv# intrinsics.
+// Compiled via FAdd#/FSub#/FMul#/FDiv# intrinsics.
 // ─────────────────────────────────────────────────────────────
 
 type Float <: Bits @/0..31 {
@@ -55,14 +55,14 @@ type Float <: Bits @/0..31 {
     alignment <~ 8;
 
     // Arithmetic via #-intrinsics (compiler provides these):
-    Add(rhs)  = _ :> Fadd#(rhs);
-    Sub(rhs)  = _ :> Fsub#(rhs);
-    Mul(rhs)  = _ :> Fmul#(rhs);
-    Div(rhs)  = _ :> Fdiv#(rhs);
-    Neg       <~ _:> Fneg#;
-    Eq(rhs)   = _ :> FcmpOq#(rhs);
-    Lt(rhs)   = _ :> FcmpOlt#(rhs);
-    Gt(rhs)   = _ :> FcmpOgt#(rhs);
+    Add(rhs)  = _ :> FAdd#(rhs);
+    Sub(rhs)  = _ :> FSub#(rhs);
+    Mul(rhs)  = _ :> FMul#(rhs);
+    Div(rhs)  = _ :> FDiv#(rhs);
+    Neg       <~ _:> FNeg#;
+    Eq(rhs)   = _ :> FCmpOq#(rhs);
+    Lt(rhs)   = _ :> FCmpOlt#(rhs);
+    Gt(rhs)   = _ :> FCmpOgt#(rhs);
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ type String <: Bits @/0..127 {
 
     Size         <~ _ :> Len;         // Number of bytes
     IsEmpty      <~ _ :> Size == 0;
-    At(i)        = _ :> Ptr :> load_u8#(i);   // Read char at index
+    At(i)        = _ :> Ptr :> LoadU8#(i);   // Read char at index
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -231,12 +231,12 @@ type CString <: Bits @/0..63 {
     bytes <~ 8;       // Just a pointer
 
     // Zero-cost: reads char via pointer arithmetic, no strlen
-    At(i)     = _ :> Ptr :> load_u8#(i);
+    At(i)     = _ :> Ptr :> LoadU8#(i);
 
     // O(N) cost: strlen only when Size is explicitly queried
-    Size      <~ _ :> Ptr :> Strlen#;
+    Size      <~ _ :> Ptr :> StrLen#;
 
-    IsEmpty   <~ _ :> Ptr :> load_u8#(0) == '\0';
+    IsEmpty   <~ _ :> Ptr :> LoadU8#(0) == '\0';
 };
 
 // ─────────────────────────────────────────────────────────────

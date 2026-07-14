@@ -33,9 +33,9 @@ defn shm_unlink_res(name: String) -> Result<Void, ShmError> {
     term Err(ShmOther("shm_unlink failed"));
 };
 
-// Replaced: frgn __ftruncate_shm with Ftruncate# intrinsic
+// Replaced: frgn __ftruncate_shm with FTruncate# intrinsic
 defn shm_ftruncate(fd: Int, length: Int) -> Result<Void, ShmError> {
-    let ret = Ftruncate#(fd, length);
+    let ret = FTruncate#(fd, length);
     [ret == 0] {
         term Ok(void);
     };

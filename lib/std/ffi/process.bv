@@ -14,36 +14,36 @@ defn spawn_with_output_res(command: String, args: List<String>) -> Result<String
     term SpawnWithOutput#(command, args);
 };
 
-// Replaced: frgn __env_var with Getenv# intrinsic
+// Replaced: frgn __env_var with GetEnv# intrinsic
 defn env_var_res(name: String) -> Result<String, String> {
-    let val = Getenv#(name);
+    let val = GetEnv#(name);
     [val != ""] {
         term Ok(val);
     };
     term Err("env var not found");
 };
 
-// Replaced: frgn __set_env_var with Setenv# intrinsic
+// Replaced: frgn __set_env_var with SetEnv# intrinsic
 defn set_env_var_res(name: String, value: String) -> Result<Void, String> {
-    let ret = Setenv#(name, value);
+    let ret = SetEnv#(name, value);
     [ret == 0] {
         term Ok(void);
     };
     term Err("setenv failed");
 };
 
-// Replaced: frgn __current_dir with Getcwd# intrinsic
+// Replaced: frgn __current_dir with GetCwd# intrinsic
 defn current_dir_res() -> Result<String, String> {
-    let dir = Getcwd#();
+    let dir = GetCwd#();
     [dir != ""] {
         term Ok(dir);
     };
     term Err("getcwd failed");
 };
 
-// Replaced: frgn __set_current_dir with Chdir# intrinsic
+// Replaced: frgn __set_current_dir with ChDir# intrinsic
 defn set_current_dir_res(path: String) -> Result<Void, String> {
-    let ret = Chdir#(path);
+    let ret = ChDir#(path);
     [ret == 0] {
         term Ok(void);
     };

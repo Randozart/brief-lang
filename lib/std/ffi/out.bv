@@ -21,7 +21,7 @@ defn print_int(n: Int) -> Bool {
 
 /// Print a character to stdout.
 defn putchar(c: Char) -> Int {
-    term Putchar#(c);
+    term PutChar#(c);
 };
 
 /// Print a string to stdout (no newline).
@@ -36,5 +36,5 @@ defn print_float(f: Float) -> Bool {
 
 /// Print a string followed by newline.
 defn println(msg: String) -> Bool {
-    term Println#(msg);
+    term PrintLn#(msg);
 };

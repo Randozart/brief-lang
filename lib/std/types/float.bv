@@ -14,9 +14,9 @@ type Float16 <: Bits {
     llvm <~ "half";
     tbaa <~ "FloatNode";
 
-    op Add(Float16) -> Float16 = fadd16#;
-    op Sub(Float16) -> Float16 = fsub16#;
-    op Mul(Float16) -> Float16 = fmul16#;
+    op Add(Float16) -> Float16 = FAdd16#;
+    op Sub(Float16) -> Float16 = FSub16#;
+    op Mul(Float16) -> Float16 = FMul16#;
 };
 
 // 4-lane SIMD float vector
@@ -26,7 +26,7 @@ type Float4 <: Bits {
     llvm <~ "<4 x float>";
     tbaa <~ "FloatNode";
 
-    op Add(Float4) -> Float4 = fadd_v4f32#;
-    op Sub(Float4) -> Float4 = fsub_v4f32#;
-    op Mul(Float4) -> Float4 = fmul_v4f32#;
+    op Add(Float4) -> Float4 = FAddV4F32#;
+    op Sub(Float4) -> Float4 = FSubV4F32#;
+    op Mul(Float4) -> Float4 = FMulV4F32#;
 };
