@@ -10,7 +10,8 @@ use crate::type_universe::TypeUniverse;
 /// 2026-07-14: Normalize the AST for LLVM backend emission.
 /// Attaches llvm_type property to every ResolvedType in the universe.
 /// For types with fixed-width layout, parses the pattern and attaches
-/// field-level bit offset annotations.
+/// field-level bit offset annotations. For melds with layout mappings,
+/// synthesizes bit-shuffle instructions.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
     let prim_config = TypeConfig::load();
 
@@ -28,6 +29,13 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
         }
     }
 
+    // 2026-07-14: Process meld layout mappings — synthesize bit-shuffles
+    for item in items.iter() {
+        if let TopLevel::Meld(m) = &item {
+            synthesize_meld_shuffle(m, universe)?;
+        }
+    }
+
     // Validate intrinsics against supported set
     let op_config = OpConfig::load();
     let supported = build_supported_ops(&op_config);
@@ -41,6 +49,52 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
         .iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
         rt.properties.retain(|k, _| keep.contains(k));
+    }
+
+    Ok(())
+}
+
+/// 2026-07-14: For a meld with layout mappings, compute bit positions and
+/// attach shuffle metadata to the source type's properties.
+fn synthesize_meld_shuffle(meld: &crate::ast::top::Meld, universe: &mut TypeUniverse) -> Result<(), String> {
+    // Find layout mappings: bindings["layout.sign"] = "sign"
+    let layout_mappings: Vec<(&str, &str)> = meld.bindings.iter()
+        .filter(|(k, _)| k.starts_with("layout."))
+        .map(|(k, v)| (k.strip_prefix("layout.").unwrap(), v.as_str()))
+        .collect();
+
+    if layout_mappings.is_empty() {
+        return Ok(());
+    }
+
+    // Get resolved types for both source and target
+    let source_rt = match universe.get(&meld.name) {
+        Some(rt) => rt.clone(),
+        None => return Ok(()),
+    };
+    let target_rt = match universe.get(&meld.target) {
+        Some(rt) => rt.clone(),
+        None => return Ok(()),
+    };
+
+    // For each mapped field, compute the shuffle
+    for (src_field, dst_field) in &layout_mappings {
+        let src_offset = source_rt.properties.get(&format!("field.{}.offset", src_field))
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(0);
+        let src_width = source_rt.properties.get(&format!("field.{}.width", src_field))
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(64);
+        let dst_offset = target_rt.properties.get(&format!("field.{}.offset", dst_field))
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(0);
+        let dst_width = target_rt.properties.get(&format!("field.{}.width", dst_field))
+            .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(64);
+
+        // Attach shuffle annotation on the source type
+        let uni = format!("shuffle.{}.src_offset", dst_field);
+        let rt = universe.types.get_mut(&meld.name).unwrap();
+        rt.properties.insert(format!("shuffle.{}.src_offset", dst_field), PropertyValue::Int(src_offset as i64));
+        rt.properties.insert(format!("shuffle.{}.src_width", dst_field), PropertyValue::Int(src_width as i64));
+        rt.properties.insert(format!("shuffle.{}.dst_offset", dst_field), PropertyValue::Int(dst_offset as i64));
+        rt.properties.insert(format!("shuffle.{}.dst_width", dst_field), PropertyValue::Int(dst_width as i64));
     }
 
     Ok(())
