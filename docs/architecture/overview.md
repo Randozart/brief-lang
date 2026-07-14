@@ -1,286 +1,128 @@
-<!-- 2026-06-09 -->
-
 # Brief Compiler Architecture Overview
 
-## System Architecture
-
-The Brief compiler transforms Brief source code into executable output
-across multiple backends (LLVM IR, VHDL, Webstack, C, etc.). The pipeline
-follows a layered pass architecture:
-
-**Phases 1-6 (2026-07-03):** The pointer system was extended with
-layout-constrained pointers (`Type::LayoutPtr`), layout-compatible casts,
-spatial intrinsics (`__memcpy#`/`__memcmp#`/`__memset#`/`__hash#`),
-function pointers via `:> Ptr`, opaque handles, and EOR optimization.
-The architecture was renamed per this feature set. All code follows the
-max-2-levels flat control flow rule.
-
-```mermaid
-flowchart LR
-    Source --> Lexer
-    Lexer --> Parser
-    Parser --> TypeUniverse
-    TypeUniverse --> ImportResolver
-    ImportResolver --> Desugarer
-    Desugarer --> Typechecker
-    Typechecker --> ProofEngine
-    ProofEngine --> Annotator
-    Annotator --> Analysis
-    Analysis --> Codegen
-    Codegen --> Output
-```
-
-## Module Responsibilities
-
-| Module | File | Responsibility |
-|--------|------|----------------|
-| Lexer | `lexer.rs` | Tokenizes source text into `Token` stream using `logos` |
-| Parser | `parser.rs` | Pratt-style precedence climbing, produces `Program` AST. Tracks `sed_item_names` for file-private items. Parses `<:` struct derivation syntax. |
-| Type-Universe | `type_universe.rs` | Pass 1: collect/resolve/freeze `Type Name <: Base` declarations |
-| Import Resolver | `import_resolver.rs` | Resolves `import` paths, builds module graph. Filters `sed` items from exported symbols. Cache stores `(Program, Vec<String>)` pairs. |
-| Desugarer | `desugarer.rs` | Lowers sugar syntax to core AST. Flattens struct derivation chains (parent fields → child), detects field collisions. |
-| Typechecker | `typechecker.rs` | Infers and checks types, validates contracts. Enforces field visibility (`Sedentary` cross-file check). Validates struct derivation upcast (`B <: A → B compatible with A`). |
-| Proof Engine | `proof_engine.rs` | Symbolic verification of contracts, convergence analysis |
-| Annotator | `annotator.rs` | File-level attribute processing |
-| Analysis | `analysis/` | Call graph, dependency graph (trg dirty-flag), dataflow, transition graph, PGO, region, SLP hazard |
-| Backend | `backend/` | Code generation for target (LLVM, CIRCT, Webstack, etc.) |
-| Interpreter | `interpreter.rs` | Reference implementation — evaluates Brief directly |
-
-## Annotation Arrow (`<~`) — Compile-Time Metadata
-
-**Added 2026-07-11 (Phase 1A).** The `<~` token (TildeArrow) is Brief's
-universal metadata attachment mechanism. Inside any body block
-(type/definition/transaction/guard), `name <~ expr;` declares compile-time
-metadata:
-
-- **Type bodies**: `bytes <~ 8; alignment <~ 4;` — type properties
-- **Definition bodies**: `jira <~ "FIN-8422";` — item metadata
-- **Transaction bodies**: `priority <~ 2;` — item metadata
-- **Guard branches**: `priority <~ 1;` — branch-scoped metadata
-
-The `~>` prefix annotation syntax `(name: val) ~> item` has been removed;
-all metadata now uses inline `<~` inside body blocks.
-
-Hashtag pragmas (`#volatile` → `volatile <~ true`) remain as shorthand inside
-type bodies.
-
-## Generic Property System (Phase 1B)
-
-**Added 2026-07-11 (Phase 1B).** Every `ResolvedType` now carries a
-`properties: HashMap<String, PropertyValue>` alongside its ~30 hardcoded
-fields. During the migration (Phases 1B–2), ALL bindings are dual-written:
-known metadata names set both the hardcoded field AND the properties map;
-`apply_binding()` inserts into both.
-
-Accessor methods prefer the properties map with legacy fallback:
-```rust
-impl ResolvedType {
-    pub fn get_property_str(&self, key: &str) -> Option<&str>;
-    pub fn get_property_int(&self, key: &str) -> Option<i64>;
-    pub fn get_property_bool(&self, key: &str) -> Option<bool>;
-    pub fn get_property(&self, key: &str) -> Option<&PropertyValue>;
-    pub fn has_property(&self, key: &str) -> bool;
-}
-```
-
-Convenience methods on `TypeUniverse` wrap property queries for common
-codegen patterns, replacing `Custom("Int")` matches:
-```rust
-impl TypeUniverse {
-    pub fn llvm_type_for(&self, ty: &Type) -> Option<&str>;
-    pub fn byte_size_for(&self, ty: &Type) -> Option<u64>;
-    pub fn is_native(&self, ty: &Type) -> Option<bool>;
-    pub fn tbaa_for(&self, ty: &Type) -> Option<&str>;
-    pub fn alignment_for(&self, ty: &Type) -> Option<u64>;
-}
-```
-
-After Phase 2 completes, the ~30 hardcoded fields on `ResolvedType` will be
-removed entirely — the properties map will be the single source of truth.
-
-## Bootstrap Type Universe
-
-**Added 2026-06-30 (Phase C).** The 14 built-in primitive types (`Int`,
-`Float`, `Bool`, etc.) are defined in `lib/std/types/bootstrap.bv` using the
-`<~` annotation syntax. Every `.bv` file auto-imports this file via the
-ImportResolver. Previously these were hardcoded Rust struct literals in
-`type_universe.rs`.
-
-The compiler uses **Pattern B**: each language construct has its own file
-in `src/features/` with co-located struct definition, parse helper,
-typechecking, evaluation, and per-backend codegen. The pass files become
-thin routers that delegate to feature modules.
+## Pipeline
 
 ```
-src/features/
-  traits.rs           — Expr traits (ExprTypecheck, ExprEval, ExprCodegen*)
-                        + Statement traits (StmtTypecheck, StmtEval, StmtCodegen*)
-  literal.rs          — Expr::Literal(LiteralExpr) — Phase 1.1
-  binary_op.rs        — Expr::BinaryOp(BinaryOpExpr) — Phase 1.2
-  unary_op.rs         — Expr::UnaryOp(UnaryOpExpr) — Phase 1.2
-  call.rs             — Expr::CallExpr(CallExpr) — Phase 1.3
-  projection.rs       — Expr::ProjectionExpr(ProjectionExpr) — Phase 1.3
-  collection.rs       — List/Map/Set literal exprs — Phase 1.3
-  tuple.rs            — Tuple, TupleDestructure exprs — Phase 1.3
-  field.rs            — FieldAccess, StructInstance, ObjectLiteral — Phase 1.3
-  pattern.rs          — PatternMatch, Match exprs — Phase 1.4
-  block.rs            — BlockExpr — Phase 1.4
-  arrow.rs            — ArrowMut, ArrowDiscard, ArrowTransfer — Phase 1.4
-  subtype.rs          — SubtypeProjectionExpr — Phase 1.4
-  sigcall.rs          — SigCallExpr — Phase 1.4
-  dbvl.rs             — DbvlTableExpr — Phase 1.4
-  ellipsis.rs         — EllipsisExpr — Phase 1.4
-  stmt/
-    mod.rs            — Module declarations
-    assignment.rs     — AssignmentStmt — Phase 2
-    let_binding.rs    — LetBindingStmt
-    guarded.rs        — GuardedStmt
-    term.rs           — TermStmt, TermBangStmt
-    escape.rs         — EscapeStmt
-    expression.rs     — ExpressionStmt
-    unification.rs    — UnificationStmt
-    inline_asm.rs     — InlineAsmStmt
-    local_trigger.rs  — LocalTriggerStmt
-    alka.rs           — AlkaStmt
-    on_exit.rs        — OnExitStmt
-    sync_block.rs     — SyncBlockStmt
-    foreach.rs        — ForeachStmt (NEW 2026-06-15)
-  toplevel/
-    mod.rs            — Module declarations
-    typedef.rs        — TopLevel::TypeDef — Phase 1.5
-    signature.rs      — TopLevel::Signature — Phase 3
-    definition.rs     — TopLevel::Definition
-    transaction.rs    — TopLevel::Transaction
-    state_decl.rs     — TopLevel::StateDecl
-    trigger.rs        — TopLevel::Trigger
-    constant.rs       — TopLevel::Constant
-    import_lnk.rs     — TopLevel::Import
-    foreign.rs        — TopLevel::ForeignBinding
-    resource.rs       — TopLevel::ResourceDecl
-    struct_def.rs     — TopLevel::Struct
-    rstruct.rs        — TopLevel::RStruct
-    enum_def.rs       — TopLevel::Enum
-    render.rs         — TopLevel::RenderBlock
-    svg.rs            — TopLevel::SvgComponent
-    sync_group.rs     — TopLevel::SyncGroup
-    test.rs           — TestItem (pragmas)
-    assertion.rs      — AssertionItem (pragmas)
+                        FAST PATH (default, zero overhead)
+Source ─► Lex ─► Parse ─► Resolve ─► Analyze ─► Codegen ─► (.ll) ─► clang ─► binary
+                              │                       │
+                              │  TypeUniverse          │  CompilerContext
+                              │  populated from         │  built during
+                              │  bootstrap.bv +         │  generate()
+                              │  TypeDefs               │
+                              ▼                       ▼
+                          Read-only                 Read-only
+
+
+                         PLUGIN PATH (--plugin path/to/exe)
+Source ─► Lex ─► Parse ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► Analyze ─► Codegen ─► .ll
+                              │            │                                  │
+                              │       .bvir text                         .bvir text
+                              │       (stdin/pipe)                       (stdout/pipe)
+                              ▼            ▼                                  ▼
+                          TypeUniverse   plugins see                   plugins see
+                          written as     &mut Vec<TopLevel>            &mut String
+                          (universe ...) + &mut TypeUniverse          (final IR)
+
+
+                         BVIR DEBUG PATH (--emit-bvir)
+Source ─► ... ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► ... ─► .ll
+                              │            │                    │
+                              │       ┌────┴────┐          ┌───┴────┐
+                              │    program.bvir      program.bvir
+                              │    .before           .after
+                              ▼
+                          Plugin authors diff these
+                          to see what their plugin mutated
 ```
 
-## Pass Data Flow
+## Frontend/Backend Detachment
 
-See `channel-map.md` for detailed per-pass data contracts.
+```
+SOURCE ──► PARSER ──► AST ──► UNIVERSE ──► BACKEND
+                           │                  │
+                           │  NEVER mutates   │
+                           │  the AST         │
+                           └──────────────────┘
 
-## Backend Architecture (LLVM)
+The frontend OWNS:   Expr, Statement, Type, TopLevel, TypeDef, PropertyValue
+The backend READS:    All of the above, via &reference
+The backend OWNS:    CompilerContext, TypedRegister, LLVM IR output string
+```
 
-The LLVM backend (`src/backend/llvm/`) uses a three-tier context architecture
-to prevent state leakage between compiled functions:
+## Type System — Metadata Driven
 
-| Context | Scope | Mutability | Contents |
-|---------|-------|------------|----------|
-| `CompilerContext` | Global (entire compilation) | Immutable during codegen | AST definitions, FFI signatures, target spec, type info |
-| `FunctionContext` | Per-function/transaction | Mutable (scoped) | SSA counter, local bindings, phi state, arena |
-| `BlockContext` | Per-basic-block | Mutable (transient) | Current label |
+The compiler does NOT hardcode primitive type mappings in Rust match arms.
+Type metadata declared in **source** drives all backend emission decisions.
 
-## LLVM Loop Dispatch Architecture
+```
+Source type definition:
+  type Int <: Bits { bytes <~ 8; primitive <~ Int; }
 
-The compiler has three dispatch paths for countable loops, chosen
-adaptively based on transaction characteristics:
+Flow:
+  parser ──► TypeDefBody.metadata["primitive"] = "Int"
+  resolve ──► ResolvedType.properties["primitive"] = PropertyValue::Identifier("Int")
+  codegen ──► derive_llvm_type(Some("Int"), 8, &config) → "i64"
+```
 
-### A005a — Inline SSA (insertvalue chain)
-- Single `%State` phi + `extractvalue`/`insertvalue` for field access
-- Selected when `write_density >= 0.5 && field_count < 8 && !has_body_ffi`
-- Best for dense-write, small-state loops (e.g., knucleotide: 4 fields)
-- Added `a849b2d` (2026-07-05)
+The Rust binary is a thin reader of the type system defined in Brief source.
 
-### A005c — Per-Field Phi (default for most loops)
-- Each state field gets its own SSA phi node at loop header
-- Selected for sparse writes, large states, or FFI-containing bodies
-- Supports: Path A (zero stores in hot loop), phi commit block,
-  parallel-safe mode (ssa_old cache keeps old phi values),
-  dead-field liveness analysis, !invariant.load for read-only fields
-- Reverted from A005e hybrid memory mode in `4ff9bde` (2026-07-05)
+## Modules
 
-### A000c — Pure Counter Fold
-- For pure bodies with compile-time constant bounds — O(1) single store
+### Frontend (`src/ast/`, `src/parser/`, `src/lexer.rs`)
 
-### Optimization Results (2026-07-07)
+| Module | Purpose |
+|--------|---------|
+| `ast/expr.rs` | `Expr` enum — all expression variants |
+| `ast/top.rs` | `TopLevel`, `Statement`, `Transaction`, `TypeDef`, `Trigger`, etc. |
+| `ast/types.rs` | `Type` enum, `PropertyValue` — type system |
+| `lexer.rs` | Logos-based tokenizer |
+| `parser/` | Recursive descent parser → `Vec<TopLevel>` |
 
-All measurements at BOUND=50000000, 5 iterations, CLOCK_MONOTONIC.
-Run-to-run variation is ~5-10%. Ranges show min/max across 3+ runs.
+### Mid-End — BVIR (`src/bvir/`)
 
-| Benchmark | Best | Current | MISMATCH | Key change |
-|-----------|------|---------|----------|------------|
-| nbody_newton | **0.63x** | **0.68–0.74x** | Fixed | Phase C+E + vector phi |
-| nbody_sqrt | **0.72x** | **0.72–0.86x** | Fixed | Vector phi + flexible base extraction |
-| nbody_sqrt_idio | **0.72x** | **0.70–0.81x** | Fixed | Vector phi + flexible base extraction |
-| fannkuch_redux | **0.99x** | **0.95–1.02x** | MATCH | Hybrid rotation + terminating guard filter |
-| knucleotide | **0.99x** | **0.98–1.00x** | MATCH | Precomputation fix |
-| mandelbrot | **1.10x** | **0.99–1.00x** | MATCH | IR bug fix |
-| queue_drain | **1.02x** | **0.97–0.99x** | MATCH | IR bug fix |
-| float_math | **0.83x** | **0.81–0.84x** | MATCH | Liveness fix |
-| fasta | MISMATCH | **0.96–1.01x** | Fixed | PutChar FFI detection |
-| bit_clear | MISMATCH | **1.00–1.20x** | Fixed | Expr::Ne + A005c decreasing support |
-| sparse_dispatch | 0x (broken) | **0.08–0.10x** | Fixed | Dispatch collapse + modulo-switch |
+| Module | Purpose |
+|--------|---------|
+| `bvir/sexpr.rs` | S-expression tokenizer, parser, pretty-printer |
+| `bvir/serialize.rs` | Walk `Vec<TopLevel>` + `TypeUniverse` → `.bvir` text |
+| `bvir/deserialize.rs` | `.bvir` text → `Vec<TopLevel>` + `TypeUniverse` |
 
-Note: ~10% regression on nbody_sqrt_idio from a849b2d (0.64x) to ae5b016 (0.70x)
-is the inherent cost of correct backedge values. The old code had poison/UB
-(elements 1-3 of vector phis were undefined). See
-`docs/plans/2026-07-06-isolate-extractelement-regression.md` for full analysis.
+### Analysis (`src/analysis/`)
 
-Key architectural decisions:
-- **A005c over A005e** (`4ff9bde`): Per-field phis eliminate memory traffic
-  vs hybrid counter-phi+memory. interval_step: 0.01x vs 1.00x (100× faster).
-- **FFI guard in dispatch** (`981819c`): A005a blocked for FFI-containing
-  bodies to prevent LLVM from eliminating fprintf through @stdout analysis.
-- **Vector phi emission** (`a849b2d`): Groups of 4 related fields (vx0..vx3)
-  promoted to `<4 x float>` phis, eliminating register spills from 32 scalar
-  float phis. Reduced phi count from 32 to ~14 (fits in 16 XMM regs).
-- **Rotation decomposition** (`ca9f483`): GEP-reload latch breaks 12-element
-  circular phi chain for fannkuch_redux. Failed step-k approach documented
-  in `docs/plans/2026-07-05-fannkuch-rotation-decomposition.md`.
-- **Dispatch collapse** (`d4e3e14`): When modulo-switch dispatch has exactly
-  8 cases matching `[count % 8 == 0..7]`, collapse to a single body with
-  `count += 8` and adjusted guard `(count + 8) % 8 == 0`. Eliminates 7/8
-  of dispatch overhead. sparse_dispatch: 1.35x → 0.09x. See
-  `docs/plans/2026-07-07-sparse-dispatch-collapse.md`.
-- **Hybrid rotation hot/cold path** (`0dba619`): When `rotation_step > 1`,
-  emit a pre-check `count + step <= bound` that branches to a straight-line
-  hot path (no exit checks for step-1 copies) or an exit-check cold path
-  (final partial trip). Saves ~3 exit checks per full trip for step=4,
-  reducing fannkuch_redux from 1.29x to 0.94x. See
-  `docs/plans/2026-07-07-fannkuch-straight-line-rotation.md`.
-- **Terminating guard filter in rotation copies** (`2cbcfe3`): The hybrid
-  rotation hot path re-emits body copies from the original txn body, which
-  still contains the `[count == N] { term! -> print_int#(checksum) }`
-  terminating guard. Although the guard was already hoisted to post_hoist
-  by `hoist_terminating_guard`, the rotation copies were not filtering
-  `Statement::Guarded` containing a `TermBang` — generating 4 dead
-  `icmp eq` + `br i1` per 4-iteration batch (~50M branches for N=50M).
-  Skip them with the same `terminating_guard()` check used elsewhere.
-  fannkuch_redux: 1.14x → 0.99x. See
-  `docs/plans/2026-07-07-fannkuch-straight-line-rotation.md`.
-- **Expr::Ne in extract_bounded_pre + A005c decreasing support** (`82752a0`):
-  The precondition `[reg != 0]` (popcount decay) was not recognized as a
-  bounded-pre expression because `extract_bounded_pre` did not handle
-  `Expr::Ne`.  Added the match arm; the variable's direction is validated
-  by `extract_valid_bounded_pre` against `IncrementInfo`.  The A005c
-  per-field phi path previously only supported `icmp slt` (increasing)
-  in its header exit check.  Added `is_decreasing` parameter; emit `icmp
-  sgt` when true.  The dispatch gate was also extended to accept
-  `bound_literal` programs (which have no state field or constant for
-  the bound).  bit_clear now routes through A005c instead of A006,
-  eliminating `any_fired`/`cycle_count` overhead from the hot loop.
-- **Vector phi grouping with flexible base extraction** (`82752a0`):
-  `build_vector_phi_groups` previously required field names matching
-  `[a-z][a-z][0-9]+` (exactly two letters then digits).  Now strips
-  trailing digits from any field name and groups by the base (e.g.,
-  `vel_x_0` → base `vel_x_`, `vx0` → `vx`, `x0` → `x`).  A sequential-
-  index guard (first 4 members must have indices 0, 1, 2, 3) prevents
-  false positives from matrix fields (p00/p01 vs p10/p11 all sharing
-  base `p`).  No expression-shape consistency check is required because
-  the vector phi is register-storage aggregation, not SIMD arithmetic.
-  nbody_sqrt: 0.72x (best known).  kalman_filter: 0.99x (no false
-  positive from matrix fields).
+| Module | Purpose |
+|--------|---------|
+| `region.rs` | `RegionAnalyzer` — 9 phases: declarations, deps, frontier, regions, value sets, chains, bounds, scores |
+| `transition_graph.rs` | `ReactorTransitionGraph` — reactive transaction scheduling |
+| `dependency_graph.rs` | `DependencyGraph` — topological ordering of state fields |
 
-See `docs/architecture/backend-refactor.md` for the full architecture guide.
+### Plugins (`src/plugin/`)
+
+| Module | Purpose |
+|--------|---------|
+| `plugin/mod.rs` | `Plugin` trait, `PluginManager`, `PluginHook`, `PluginAction` |
+| `plugin/loader.rs` | Native `.so`/`.dylib` loading via `libloading` |
+| `plugin/runner.rs` | External plugin subprocess chain (stdin/stdout BVIR) |
+
+### Backend (`src/backend/llvm/`)
+
+| Module | Purpose |
+|--------|---------|
+| `context.rs` | `CompilerContext` — all backend state |
+| `mod.rs` | `LlvmBackend`, `generate()`, `build_field_index()`, report, main emission |
+| `emit_expr.rs` | Expression → LLVM IR |
+| `emit_stmt.rs` | Statement → LLVM IR |
+| `emit_toplevel.rs` | Top-level item → LLVM IR, `llvm_type()`, `init_state` |
+| `helpers.rs` | `emit_async_phase()`, `type_is()`, casts |
+| `loop_engine/` | `emit_main()`, `emit_ssa_main()`, folded counters |
+| `types.rs` | `lower_type()`, `type_size()`, config loader |
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `config/llvm-primitives.toml` | (primitive, bytes) → LLVM type string mapping |
+| `src/config.rs` | `TypeConfig` reader, `derive_llvm_type()` |
+| `src/compile.rs` | Compilation pipeline driver |
+| `src/main.rs` | CLI entry point with `--plugin` and `--emit-bvir` |
+| `src/lib.rs` | Crate root, module declarations |
+| `docs/architecture/backend-type-dispatch.md` | Type dispatch design (mandatory reading) |
