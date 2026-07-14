@@ -222,41 +222,85 @@ impl LlvmBackend {
     /// Emit a binary operation.
     fn emit_binary_op(&mut self, out: &mut String, v: &str,
         kind: &crate::ast::BinaryOpKind, l: &TypedRegister, r: &TypedRegister, indent: &str) -> TypedRegister {
+        let is_float = l.ty == Type::float() || r.ty == Type::float() 
+            || l.ty == Type::float64() || r.ty == Type::float64();
+        let ty_str = if is_float { "double" } else { "i64" };
+        let fast = if is_float { " fast" } else { "" };
         match kind {
             crate::ast::BinaryOpKind::Add => {
-                writeln!(out, "{}{} = add i64 {}, {}", indent, v, l.name, r.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
+                writeln!(out, "{}{} = fadd{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }
             crate::ast::BinaryOpKind::Sub => {
-                writeln!(out, "{}{} = sub i64 {}, {}", indent, v, l.name, r.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
+                writeln!(out, "{}{} = fsub{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }
             crate::ast::BinaryOpKind::Mul => {
-                writeln!(out, "{}{} = mul i64 {}, {}", indent, v, l.name, r.name).ok();
-                TypedRegister { name: v.to_string(), ty: Type::int() }
+                writeln!(out, "{}{} = fmul{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }
             crate::ast::BinaryOpKind::Div => {
-                writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, l.name, r.name).ok();
+                if is_float {
+                    writeln!(out, "{}{} = fdiv{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, l.name, r.name).ok();
+                }
+                TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
+            }
+            crate::ast::BinaryOpKind::Mod => {
+                writeln!(out, "{}{} = srem i64 {}, {}", indent, v, l.name, r.name).ok();
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
             crate::ast::BinaryOpKind::Eq => {
                 let icmp = self.fun.gen_reg();
-                writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                if is_float {
+                    writeln!(out, "{}{} = fcmp oeq {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = icmp eq i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                }
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::Neq => {
                 let icmp = self.fun.gen_reg();
-                writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                if is_float {
+                    writeln!(out, "{}{} = fcmp one {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = icmp ne i64 {}, {}", indent, icmp, l.name, r.name).ok();
+                }
                 writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::Lt => {
-                writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, v, l.name, r.name).ok();
+                if is_float {
+                    writeln!(out, "{}{} = fcmp olt {} {}, {}", indent, v, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, v, l.name, r.name).ok();
+                }
+                TypedRegister { name: v.to_string(), ty: Type::bool_() }
+            }
+            crate::ast::BinaryOpKind::Le => {
+                if is_float {
+                    writeln!(out, "{}{} = fcmp ole {} {}, {}", indent, v, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, v, l.name, r.name).ok();
+                }
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::Gt => {
-                writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, v, l.name, r.name).ok();
+                if is_float {
+                    writeln!(out, "{}{} = fcmp ogt {} {}, {}", indent, v, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, v, l.name, r.name).ok();
+                }
+                TypedRegister { name: v.to_string(), ty: Type::bool_() }
+            }
+            crate::ast::BinaryOpKind::Ge => {
+                if is_float {
+                    writeln!(out, "{}{} = fcmp oge {} {}, {}", indent, v, ty_str, l.name, r.name).ok();
+                } else {
+                    writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, v, l.name, r.name).ok();
+                }
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::And => {

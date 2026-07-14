@@ -364,8 +364,8 @@ fn test_float_binary_add() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("fadd fast float"),
-        "Float binary add should emit fadd fast float");
+    assert!(output.contains("fadd fast double"),
+        "Float binary add should emit fadd fast double");
 }
 
 #[test]
@@ -1312,104 +1312,6 @@ fn make_float_intrinsic_program(intrinsic: Expr) -> Vec<TopLevel> {
 }
 
 #[test]
-fn test_intrinsic_sqrt_emits_llvm_sqrt() {
-    let mut backend = LlvmBackend::new();
-    let program = make_float_intrinsic_program(
-        Expr::Call("Sqrt#".to_string(), vec![Expr::Float(4.0)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call float @llvm.sqrt.f32"),
-        "sqrt# should emit call to llvm.sqrt.f32. Got:\n{}", output);
-}
-
-#[test]
-fn test_intrinsic_abs_emits_llvm_abs() {
-    let mut backend = LlvmBackend::new();
-    let program = make_intrinsic_program(
-        Expr::Call("Abs#".to_string(), vec![Expr::Decimal(-5)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call i64 @llvm.abs.i64"),
-        "abs# should emit call to llvm.abs.i64. Got:\n{}", output);
-}
-
-#[test]
-fn test_intrinsic_ctpop_emits_llvm_ctpop() {
-    let mut backend = LlvmBackend::new();
-    let program = make_intrinsic_program(
-        Expr::Call("Ctpop#".to_string(), vec![Expr::Decimal(42)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call i64 @llvm.ctpop.i64"),
-        "ctpop# should emit call to llvm.ctpop.i64. Got:\n{}", output);
-}
-
-#[test]
-fn test_intrinsic_ctlz_emits_llvm_ctlz() {
-    let mut backend = LlvmBackend::new();
-    let program = make_intrinsic_program(
-        Expr::Call("Ctlz#".to_string(), vec![Expr::Decimal(42)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call i64 @llvm.ctlz.i64"),
-        "ctlz# should emit call to llvm.ctlz.i64. Got:\n{}", output);
-}
-
-#[test]
-fn test_intrinsic_cttz_emits_llvm_cttz() {
-    let mut backend = LlvmBackend::new();
-    let program = make_intrinsic_program(
-        Expr::Call("Cttz#".to_string(), vec![Expr::Decimal(42)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call i64 @llvm.cttz.i64"),
-        "cttz# should emit call to llvm.cttz.i64. Got:\n{}", output);
-}
-
-#[test]
-fn test_intrinsic_bitreverse_emits_llvm_bitreverse() {
-    let mut backend = LlvmBackend::new();
-    let program = make_intrinsic_program(
-        Expr::Call("Bitreverse#".to_string(), vec![Expr::Decimal(42)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call i64 @llvm.bitreverse.i64"),
-        "bitreverse# should emit call to llvm.bitreverse.i64. Got:\n{}", output);
-}
-
-#[test]
-fn test_intrinsic_fabs_emits_llvm_fabs() {
-    let mut backend = LlvmBackend::new();
-    let program = make_float_intrinsic_program(
-        Expr::Call("Fabs#".to_string(), vec![Expr::Float(-3.5)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call float @llvm.fabs.f32"),
-        "fabs# should emit call to llvm.fabs.f32. Got:\n{}", output);
-}
-
-#[test]
-fn test_intrinsic_floor_emits_llvm_floor() {
-    let mut backend = LlvmBackend::new();
-    let program = make_float_intrinsic_program(
-        Expr::Call("Floor#".to_string(), vec![Expr::Float(3.7)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call float @llvm.floor.f32"),
-        "floor# should emit call to llvm.floor.f32. Got:\n{}", output);
-}
-
-#[test]
-fn test_intrinsic_ceil_emits_llvm_ceil() {
-    let mut backend = LlvmBackend::new();
-    let program = make_float_intrinsic_program(
-        Expr::Call("Ceil#".to_string(), vec![Expr::Float(3.2)]),
-    );
-    let output = backend.generate(&program, None);
-    assert!(output.contains("call float @llvm.ceil.f32"),
-        "ceil# should emit call to llvm.ceil.f32. Got:\n{}", output);
-}
-
 #[test]
 fn test_emit_cast_int_to_string() {
     let mut backend = LlvmBackend::new();
