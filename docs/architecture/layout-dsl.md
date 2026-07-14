@@ -135,6 +135,79 @@ chunk.nonexistent = 1;     // ERROR: no field named nonexistent in layout
 
 The compiler enforces all three at compile time.
 
+## The `#` Prefix — Layout Access
+
+Every layout field and layout operation is accessed with the `#` prefix:
+
+```brief
+packet.#magic        // layout field read — compiler reads at known bit position
+packet.#crc = 42     // layout field write — masks to field width, only touches those bits
+packet.#payload_len  // structural field — $ prefixed, no setter
+list.#length         // structural field on a collection
+list.#get(i)         // layout operation — declared as op get(i) <~ fn
+list.#halve(arg)     // custom layout operation
+```
+
+`#` means "this is a compiler-defined thing on this type" — consistent with `Sqrt#`, `Add#`, `Len#` globally. No dot-access without `#` for layout things. The only exception is bracket syntax `list[5]` which desugars to `list.#get(5)`, already documented elsewhere.
+
+## Complete Examples
+
+### HashMap<K, V> with operation bindings
+
+```brief
+type HashMap<K, V> <: Bits {
+    bytes <~ 24;
+    layout <~ le: [$capacity: 64, $length: 64, seed: 64,
+                   slots: {$capacity, ($K, $V)}];
+
+    op get(key)    <~ hashmap_lookup(#self, #key);
+    op set(key, val) <~ hashmap_insert(#self, #key, #val);
+    op len()       <~ field_read(#self.$length);
+    op capacity()  <~ field_read(#self.$capacity);
+}
+
+// Usage:
+map.#get("user:42")       // explicit layout op call
+map.#len()                // reads $length field via bound op
+map.#capacity()           // reads $capacity field via bound op
+map.#set("user:42", user) // inserts via bound op
+```
+
+### SecurePacket with inline variable-width payload
+
+```brief
+type SecurePacket <: Bits {
+    bytes <~ 12;   // header size: magic + version + flags + payload_len + crc
+    layout <~ be: [
+        magic: 16,
+        $version: 8,
+        $flags: 8,
+        $payload_len: 32,
+        payload: {$payload_len, (
+            @codepoint: (
+                0x00..0x7F |
+                0xC2..0xDF 0x80..0xBF |
+                0xE0 0xA0..0xBF 0x80..0xBF |
+                0xE1..0xEC {0x80..0xBF, 2} |
+                0xED 0x80..0x9F 0x80..0xBF |
+                0xEE..0xEF {0x80..0xBF, 2} |
+                0xF0 0x90..0xBF {0x80..0xBF, 2} |
+                0xF1..0xF3 {0x80..0xBF, 3} |
+                0xF4 0x80..0x8F {0x80..0xBF, 2}
+            )
+        )*},
+        !crc: 32
+    ];
+}
+
+// Usage:
+packet.#magic            // read the 16-bit magic number at bit 0
+packet.#crc = checksum   // write the CRC — only touches last 32 bits
+packet.#payload_len      // read the structural payload length field
+```
+
+The variable-width `payload` field is inline — it follows directly after the header fields. `bytes <~ 12` is the header size (magic + version + flags + payload_len + crc). The total runtime footprint is `12 + payload_byte_count`.
+
 ## Two Pattern Forms, One Concept
 
 Every type is `Bits(N)`. The `layout` metadata describes how those N bytes are arranged:
