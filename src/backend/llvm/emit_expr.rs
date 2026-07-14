@@ -12,6 +12,8 @@
 use crate::ast::{Expr, Statement, Type};
 use crate::backend::llvm::{LlvmBackend, TypedRegister};
 use crate::backend::llvm::intrinsics::emit_intrinsic_call;
+use crate::ast::*;
+use crate::backend::llvm::emit_stmt;
 use crate::backend::llvm::types::lower_type;
 use std::fmt::Write;
 
@@ -126,6 +128,10 @@ impl LlvmBackend {
             // ── Field access ─────────────────────────────────────────
             Expr::Field(obj, field) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
+                // 2026-07-14: Layout field access — #fieldname triggers bit-shift/mask
+                if field.starts_with('#') {
+                    return self.emit_layout_field_read(out, v, &obj_reg, field, indent);
+                }
                 // Struct field access via extractvalue or GEP
                 writeln!(out, "{}{} = extractvalue {} {}, {}", indent, v,
                     lower_type(&obj_reg.ty), obj_reg.name, field).ok();
@@ -430,5 +436,40 @@ impl LlvmBackend {
         indent: &str,
     ) -> TypedRegister {
         emit_intrinsic_call(self, out, v, name, args, indent)
+    }
+
+    /// 2026-07-14: Emit bit-shift/mask for layout field access (value.#fieldname).
+    /// Reads offset and width from ResolvedType properties attached by the normalizer.
+    pub(crate) fn emit_layout_field_read(
+        &mut self, out: &mut String, v: &str,
+        obj_reg: &TypedRegister, field: &str, indent: &str,
+    ) -> TypedRegister {
+        let field_name = &field[1..];
+        let offset_key = format!("field.{}.offset", field_name);
+        let width_key = format!("field.{}.width", field_name);
+        let (offset, width) = self.ctx.type_universe.as_ref()
+            .and_then(|u| crate::type_universe::resolve_type(u, &obj_reg.ty))
+            .map(|rt| {
+                let off = rt.properties.get(&offset_key)
+                    .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(0);
+                let wid = rt.properties.get(&width_key)
+                    .and_then(|pv| if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }).unwrap_or(64);
+                (off, wid)
+            })
+            .unwrap_or((0, 64));
+
+        if offset == 0 && width == 64 {
+            return TypedRegister { name: obj_reg.name.clone(), ty: Type::int() };
+        }
+        let shifted = self.fun.gen_reg();
+        writeln!(out, "{}{} = lshr {} {}, {}", indent, shifted,
+            lower_type(&obj_reg.ty), obj_reg.name, offset).ok();
+        if width < 64 {
+            let mask = (1u128 << width).wrapping_sub(1);
+            writeln!(out, "{}{} = and {} {}, {}", indent, v,
+                lower_type(&obj_reg.ty), shifted, mask).ok();
+            return TypedRegister { name: v.to_string(), ty: Type::int() };
+        }
+        TypedRegister { name: shifted, ty: Type::int() }
     }
 }
