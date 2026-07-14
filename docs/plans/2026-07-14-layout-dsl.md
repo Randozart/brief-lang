@@ -71,66 +71,142 @@ The `<:>` operator inside `layout { }` maps a field from the LHS layout to the c
 
 ## The Layout DSL Specification
 
-### Access model
+### Inline vs Heap Indirection
 
-Every named field in a layout has an access level:
-
-| Syntax | Access | Example |
-|--------|--------|---------|
-| `name: N` | Read-only — compiler generates a getter but no setter | `sign: 1` |
-| `!name: N` | Read/write — compiler generates both getter and setter | `!crc: 32` |
-| `$name: N` | Read-only structural field — cannot be written directly, controls dependent fields | `$length: 32` |
-
-The compiler guarantees that writing to a `!`-prefixed field only touches the bits assigned to that field. It cannot corrupt adjacent bits because the layout defines exactly which bit range belongs to each field.
-
-`$`-prefixed fields are structural invariants. Writing to `$length` would invalidate the `data` region that depends on it. These fields are readable through accessors but never directly writable — the only way to change them is through a proper API call (e.g., `list.append(x)`) that reallocates and validates.
-
-### Typed references for generic collections
+The DSL must distinguish data that follows inline from data behind a pointer. The `*` operator binds a pointer field to its target region:
 
 ```brief
-type List<T> <: Bits {
-    bytes <~ 16;
-    layout <~ le: [$length: 64, data_ptr: 64, elements: {$length, $T}];
+// Inline variable-width: data follows inline after the header fields
+type PngChunk <: Bits {
+    bytes <~ 12;
+    layout <~ be: [$length: 32, kind: 32, data: {$length}, !crc: 32];
 }
 
+// Heap variable-width: * binds data_ptr to the elements region
+type List<T> <: Bits {
+    bytes <~ 16;
+    layout <~ le: [$length: 64, data_ptr: *elements, elements: {$length, $T}];
+}
+```
+
+Without `*`, a variable-width field `{$length}` is inline — it occupies space immediately after the preceding field. With `*`, the preceding field is a pointer to memory elsewhere, and the variable-width region describes the data at that pointer.
+
+This also resolves the `bytes <~ N` ambiguity. For inline variable types, `bytes` is the minimum size (header + minimum inline data). For heap types, `bytes` is the handle size only — the total footprint is `bytes + total_pointed_to_size`.
+
+## Operation Bindings for Collections
+
+Layout describes structure. Operation bindings describe behavior. The `op` keyword binds a collection operation to a function:
+
+```brief
 type HashMap<K, V> <: Bits {
     bytes <~ 24;
     layout <~ le: [$capacity: 64, $length: 64, seed: 64,
                    slots: {$capacity, ($K, $V)}];
+
+    // Collection operations — bound to functions
+    op get(key)    <~ hashmap_lookup(#self, #key);
+    op set(key, val) <~ hashmap_insert(#self, #key, #val);
+    op len()       <~ field_read(#self.$length);      // auto-synthesizable
+    op capacity()  <~ field_read(#self.$capacity);    // auto-synthesizable
+    op iter()      <~ hashmap_iter(#self);            // iterator binding
 }
 ```
 
-A typed reference `{$name, T}` tells the compiler:
-1. The field `$name` stores the element count
-2. The next field is a pointer to `$name` consecutive elements of type T
-3. Each element follows T's own layout rules
-4. The normalizer can emit bounds-checking: every index access is validated against `$name`
+The compiler knows:
+- `#self` is the HashMap value
+- `$length` and `$capacity` are structural fields — `field_read` is a builtin that emits the correct bit slice
+- `get` and `set` call user-provided functions — the compiler validates the signatures but doesn't care about internal behavior
+- `iter` returns an iterator — the layout tells the compiler the slot structure for SMT-level reasoning
 
-For `HashMap<K,V>`, the slots field is `$capacity` consecutive key-value pairs. The compiler knows each pair occupies `sizeof(K) + sizeof(V)` bytes, and the key/value within each pair follow their respective layouts.
-
-The `$T`, `$K`, `$V` placeholders are generic type parameters resolved at monomorphization. The normalizer substitutes the concrete type's layout when the generic is instantiated.
-
-### Auto-accessor synthesis
-
-For any type with a fixed-width layout, the compiler auto-generates field accessors:
+For simpler collections, the compiler can auto-synthesize:
 
 ```brief
-chunk.length   // reads bits 0-31  → getter
-chunk.kind     // reads bits 32-63  → getter
-chunk.crc      // writes bits ?-?   → getter AND setter (because !crc)
-chunk.data     // reads $length elements from the pointer → getter
+type List<T> <: Bits {
+    bytes <~ 16;
+    layout <~ le: [$length: 64, data_ptr: *elements, elements: {$length, $T}];
+
+    // These can be auto-synthesized from layout alone
+    op get(i)    <~ field_index(#self.$data_ptr, #i, T);
+    op set(i, v) <~ field_index(#self.$data_ptr, #i, T) <- #v;
+    op len()     <~ field_read(#self.$length);
+}
 ```
 
-The getter for `!crc` reads the bits and returns the value. The setter takes a value, masks it to the field's bit width, shifts it to the field's position, and ORs it into the type value — without corrupting adjacent fields.
+`field_index` is a builtin that emits: `bounds_check(i < $length); ptr = data_ptr + i * sizeof(T); load/store`.
 
-For collection types:
+The same pattern extends to any collection:
 
 ```brief
-list[5]        // bounds-check: 5 < length → GEP → load
-map[key]       // hash key → find slot → return value
+type RingBuffer<T> <: Bits {
+    bytes <~ 24;
+    layout <~ le: [$capacity: 64, $head: 64, $tail: 64,
+                   slots: {$capacity, $T}];
+
+    op push(v)   <~ ring_push(#self, #v);
+    op pop()     <~ ring_pop(#self);
+    op len()     <~ ring_len(#self);
+}
 ```
 
-These accessors are generated by the normalizer during Phase F. They are not user-visible functions — they are compiler-internal lowering rules. The user writes `list[i]` and the compiler emits the correct bounds-checked GEP.
+## Padding
+
+Anonymous fields `_: N` for padding bits that don't have a semantic name:
+
+```brief
+type AlignedStruct <: Bits {
+    bytes <~ 8;
+    layout <~ le: [a: 8, _: 24, b: 32];
+    // a occupies bits 0-7, 24 bits of padding, b occupies bits 32-63
+}
+```
+
+## Concurrency
+
+Bitfield read-modify-write is non-atomic. The compiler restricts `!` writable fields to thread-local contexts by default. For atomic access:
+
+```brief
+type SharedFlags <: Bits {
+    bytes <~ 4;
+    layout <~ le: [atomic: !flag: 1, _: 31];
+    // atomic: prefix generates atomic CAS loop for writes
+}
+```
+
+The `atomic:` prefix on a `!` field tells the normalizer to emit an atomic compare-and-swap loop instead of a non-atomic read-modify-write.
+
+## Runtime Validation
+
+Compile-time DFA validation handles literals. For runtime data (network, file I/O):
+
+```brief
+let bytes: Bytes = socket.read();
+let chunk = bytes.validate_as<PngChunk>();
+// The compiler generates a DFA-based validator from the layout
+// If validation fails: error with precise byte position
+```
+
+The `validate_as<T>()` call compiles the layout's DFA at compile time and runs it at runtime over the byte buffer. This is an explicit call — the compiler does not inject hidden runtime checks on every dereference. Performance overhead is opt-in.
+
+## Auto-Accessor Synthesis
+
+For types with fixed-width layouts, the normalizer auto-generates:
+
+```brief
+// Given: layout <~ le: [$length: 32, kind: 32, !crc: 32]
+
+chunk.$length           // → getter: reads bits 0-31
+chunk.kind              // → getter: reads bits 32-63
+chunk.crc               // → getter: reads bits 64-95
+chunk.crc = 42          // → setter: mask to 32 bits, shift, OR (because !crc)
+
+// Given: layout <~ le: [... data_ptr: *elements, elements: {$length, $T}]
+
+list[5]                 // → bounds-check 5 < $length, GEP, load
+list[5] = val           // → bounds-check, GEP, store
+list.len()              // → field_read($length)
+```
+
+These are compiler-internal lowering rules. Zero function call overhead.
 
 ## Implementation Phases (Updated)
 

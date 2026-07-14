@@ -360,5 +360,86 @@ range       ::= integer ".." integer
 | `src/bvir/layout.rs` | Recursive descent DSL → LayoutPattern parser |
 | `src/parser/definitions.rs` | `layout <~` and `layout { ... }` in meld parsing |
 | `src/backend/normalizer.rs` | Bit-shuffling synthesis, DFA validation |
-| `config/llvm-primitives.toml` | (unaffected — still handles type→LLVM string mapping) |
+| `config/llvm-primitives.toml` | (unaffected — still handles type→LLVM type string mapping) |
 | `docs/plans/2026-07-14-layout-dsl.md` | Implementation plan |
+
+## Inline vs Heap Indirection
+
+The `*` operator distinguishes inline variable-width fields from heap-allocated ones:
+
+```brief
+// Inline: data follows directly after the header fields
+type PngChunk <: Bits {
+    layout <~ be: [$length: 32, kind: 32, data: {$length}, !crc: 32];
+}
+
+// Heap: data_ptr points to the elements region on the heap
+type List<T> <: Bits {
+    layout <~ le: [$length: 64, data_ptr: *elements, elements: {$length, $T}];
+}
+```
+
+Without `*`, a variable-width field is inline. With `*`, the preceding field is a pointer to memory elsewhere.
+
+## Operation Bindings for Collections
+
+Layout describes structure. `op` bindings describe behavior. The same `op` syntax used for arithmetic operations extends to collection operations:
+
+```brief
+type HashMap<K, V> <: Bits {
+    bytes <~ 24;
+    layout <~ le: [$capacity: 64, $length: 64, seed: 64,
+                   slots: {$capacity, ($K, $V)}];
+
+    op get(key)    <~ hashmap_lookup(#self, #key);
+    op set(key, val) <~ hashmap_insert(#self, #key, #val);
+    op len()       <~ field_read(#self.$length);
+}
+
+type List<T> <: Bits {
+    bytes <~ 16;
+    layout <~ le: [$length: 64, data_ptr: *elements, elements: {$length, $T}];
+
+    // Auto-synthesizable from layout alone
+    op get(i)    <~ field_index(#self.$data_ptr, #i, T);
+    op set(i, v) <~ field_index(#self.$data_ptr, #i, T) <- #v;
+    op len()     <~ field_read(#self.$length);
+}
+```
+
+`field_read` and `field_index` are builtins:
+- `field_read(#self.$name)` — emit the correct bit slice for field `$name`
+- `field_index(#self.$ptr, #i, T)` — emit `bounds_check(i < $len); ptr + i * sizeof(T); load`
+
+User-defined functions (`hashmap_lookup`, `hashmap_insert`) are provided by the standard library. The compiler validates signatures but doesn't need to know the internal algorithm. The layout provides the memory shape for SMT-level reasoning; the bound function provides the runtime behavior.
+
+## Padding
+
+Anonymous fields `_: N` for padding:
+
+```brief
+type AlignedStruct <: Bits {
+    bytes <~ 8;
+    layout <~ le: [a: 8, _: 24, b: 32];
+}
+```
+
+## Concurrency
+
+Bitfield read-modify-write is non-atomic. The `atomic:` prefix on a `!` field generates atomic CAS loops:
+
+```brief
+type SharedFlags <: Bits {
+    bytes <~ 4;
+    layout <~ le: [atomic: !flag: 1, _: 31];
+}
+```
+
+## Runtime Validation
+
+`validate_as<T>()` compiles the layout's DFA at compile time and runs it at runtime over a byte buffer:
+
+```brief
+let bytes: Bytes = socket.read();
+let chunk = bytes.validate_as<PngChunk>();  // explicit, opt-in
+```
