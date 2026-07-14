@@ -9,6 +9,8 @@ use crate::type_universe::TypeUniverse;
 
 /// 2026-07-14: Normalize the AST for LLVM backend emission.
 /// Attaches llvm_type property to every ResolvedType in the universe.
+/// For types with fixed-width layout, parses the pattern and attaches
+/// field-level bit offset annotations.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
     let prim_config = TypeConfig::load();
 
@@ -17,6 +19,13 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
         let prim = rt.primitive();
         let llvm_ty = derive_llvm_type(prim, rt.bytes, &prim_config);
         rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
+
+        // 2026-07-14: Parse layout pattern and attach field annotations
+        if let Some(PropertyValue::String(layout_str)) = rt.properties.get("layout") {
+            if let Ok(pat) = crate::bvir::layout::parse_layout_pattern(layout_str) {
+                attach_layout_fields(rt, &pat);
+            }
+        }
     }
 
     // Validate intrinsics against supported set
@@ -28,13 +37,38 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     // Strip metadata LLVM doesn't use
-    let keep: HashSet<String> = ["primitive", "llvm_type", "encoding"]
+    let keep: HashSet<String> = ["primitive", "llvm_type", "encoding", "layout"]
         .iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
         rt.properties.retain(|k, _| keep.contains(k));
     }
 
     Ok(())
+}
+
+/// 2026-07-14: Walk a LayoutPattern and attach field-level annotations.
+fn attach_layout_fields(rt: &mut crate::type_universe::ResolvedType, pat: &crate::ast::layout::LayoutPattern) {
+    if let crate::ast::layout::LayoutPattern::Slice(fields) = pat {
+        let mut offset = 0u64;
+        for field in fields {
+            // Attach offset and width as properties
+            rt.properties.insert(
+                format!("field.{}.offset", field.name),
+                PropertyValue::Int(offset as i64),
+            );
+            rt.properties.insert(
+                format!("field.{}.width", field.name),
+                PropertyValue::Int(field.bits as i64),
+            );
+            if field.mutable {
+                rt.properties.insert(
+                    format!("field.{}.mutable", field.name),
+                    PropertyValue::Bool(true),
+                );
+            }
+            offset += field.bits;
+        }
+    }
 }
 
 use std::collections::HashSet;
