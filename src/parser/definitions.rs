@@ -500,6 +500,22 @@ impl<'a> Parser<'a> {
                     metadata.insert("primitive".into(), PropertyValue::Identifier(prim_name));
                     continue;
                 }
+                // 2026-07-14: Handle `op Add <~ custom_add(#L, #R)` — type-level operation binding
+                if slot_name == "op" {
+                    let op_name = self.expect_identifier()?;
+                    self.expect(Token::TildeArrow)?;
+                    let fn_name = self.expect_identifier()?;
+                    self.expect(Token::LParen)?;
+                    let mut params = Vec::new();
+                    while !self.check(&Token::RParen) {
+                        params.push(self.expect_identifier()?);
+                        if !self.check(&Token::RParen) { self.expect(Token::Comma)?; }
+                    }
+                    self.advance(); // consume RParen
+                    self.eat(&Token::Semicolon);
+                    metadata.insert(format!("op.{}", op_name), PropertyValue::Identifier(fn_name));
+                    continue;
+                }
                 // 2026-07-14: Handle `bytes <~ 8` and `name: Type` slot syntax
                 let slot_ty = if self.eat(&Token::TildeArrow) {
                     self.parse_expression()?;
