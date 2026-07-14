@@ -1,5 +1,6 @@
 pub mod bindgen;
 pub mod circt;
+pub mod circt_normalizer;
 pub mod llvm;
 pub mod normalizer;
 pub mod webstack;
