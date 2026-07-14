@@ -61,7 +61,7 @@ impl Interpreter {
             crate::ast::Pattern::Wildcard => true,
             crate::ast::Pattern::Literal(lit) => {
                 let lit_val = match lit {
-                    Expr::Decimal(n) => Value::Bits(n.to_le_bytes().to_vec()),
+                    Expr::Decimal(n) => Value::Int(*n),
                     Expr::Bool(b) => Value::Bits(vec![if *b { 1 } else { 0 }]),
                     _ => return false,
                 };
@@ -106,7 +106,7 @@ impl Interpreter {
         let mut result = Vec::new();
         for coord in coords {
             match coord {
-                Expr::Decimal(n) => result.push(Value::Bits(n.to_le_bytes().to_vec())),
+                Expr::Decimal(n) => result.push(Value::Int(*n)),
                 _ => return Err(RuntimeError::TypeError { expected: "integer".to_string(), found: format!("{:?}", coord) }),
             }
         }
@@ -129,6 +129,12 @@ pub type ForeignFn = fn(Vec<Value>) -> Result<Value, RuntimeError>;
 pub enum Value {
     /// The sole representational storage cell for program data.
     Bits(Vec<u8>),
+
+    /// 2026-07-14: Typed value variants for generic op dispatch.
+    /// These allow the interpreter to distinguish int from float values
+    /// when both would be valid as raw Bits(Vec<u8>).
+    Int(i64),
+    Float(f64),
 
     // Compiler-internal meta-objects (never reach user code):
     Defn(String),
@@ -166,6 +172,7 @@ impl Value {
     // values (zero_bits(4), zext of 1-byte bool) convert correctly.
     pub fn as_i64(&self) -> Option<i64> {
         match self {
+            Value::Int(n) => Some(*n),
             Value::Bits(bytes) => {
                 let mut arr = [0u8; 8];
                 let copy_len = bytes.len().min(8);
@@ -179,6 +186,7 @@ impl Value {
     /// Extract first 8 bytes as f64.
     pub fn as_f64(&self) -> Option<f64> {
         match self {
+            Value::Float(f) => Some(*f),
             Value::Bits(bytes) if bytes.len() >= 8 => {
                 let arr: [u8; 8] = bytes[..8].try_into().ok()?;
                 Some(f64::from_le_bytes(arr))
@@ -203,12 +211,12 @@ impl Value {
 
 /// Convert i64 to 8-byte little-endian Bits value.
 pub fn i64_to_bits(n: i64) -> Value {
-    Value::Bits(n.to_le_bytes().to_vec())
+    Value::Int(n)
 }
 
 /// Convert f64 to 8-byte little-endian Bits value.
 pub fn f64_to_bits(f: f64) -> Value {
-    Value::Bits(f.to_le_bytes().to_vec())
+    Value::Float(f)
 }
 
 /// Convert bool to 1-byte Bits value.

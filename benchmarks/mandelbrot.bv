@@ -4,7 +4,7 @@
 
 
 let count: Int = 0;
-let N: Int = GetEnvInt#("BOUND");
+let N: Int = GetEnv#("BOUND");
 let seed: Int = 42;
 let zr: Int = 100;
 let zi: Int = 0;
@@ -34,8 +34,8 @@ rct txn mb [count < N][count == N] {
     let nzi: Int = nt3 + zi * ncr / SCALE;
     let nesc: Int = escapes + nzr * nzr / SCALE + nzi * nzi / SCALE;
     seed = ns2;  cr = ncr;  ci = nci;  t1 = nt1;  t2 = nt2;  t3 = nt3;  zr = nzr;  zi = nzi;  escapes = nesc;
-    [count % 5000000 == 0] { PrintInt#(nesc); };
+    [count % 5000000 == 0] { Print#(nesc); };
     count = count + 1;
-    [count == N] { term! -> PrintInt#(nesc); };
+    [count == N] { term! -> Print#(nesc); };
     term;
 };

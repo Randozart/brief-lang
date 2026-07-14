@@ -35,6 +35,8 @@ fn json_value_to_value(json: serde_json::Value) -> Value {
 fn value_to_json_value(val: &Value) -> serde_json::Value {
     match val {
         Value::Void => serde_json::Value::Null,
+        Value::Int(n) => serde_json::Value::Number(serde_json::Number::from(*n)),
+        Value::Float(f) => serde_json::Value::Number(serde_json::Number::from_f64(*f).unwrap_or(0.into())),
         Value::Bits(b) => {
             if b.len() == 8 {
                 let n = i64::from_le_bytes(b[..8].try_into().unwrap_or([0u8; 8]));

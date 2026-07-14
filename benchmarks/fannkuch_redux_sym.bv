@@ -8,7 +8,7 @@
 
 
 let count: Int = 0;
-let N: Int = GetEnvInt#("BOUND");
+let N: Int = GetEnv#("BOUND");
 let seed: Int = 42;
 let max_flips: Int = 0;
 let checksum: Int = 0;
@@ -55,10 +55,10 @@ rct txn fan [count < N][count == N] {
     count = count + 1;
 
     [count % 5000000 == 0] {
-        PrintInt#(checksum);
+        Print#(checksum);
     };
     [count == N] {
-        term! -> PrintInt#(checksum);
+        term! -> Print#(checksum);
     };
     term;
 };

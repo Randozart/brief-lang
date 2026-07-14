@@ -17,7 +17,7 @@
 // C reference: queue_drain_c.c
 
 
-let N: Int = GetEnvInt#("BOUND");
+let N: Int = GetEnv#("BOUND");
 let count: Int = 0;
 import "std/core/ring_buffer.bv";
 let queue: RingBuffer<Int> = [0];
@@ -28,7 +28,7 @@ rct txn work [count < N][count == N] {
     &count = count + 1;
 
     [count % 5000000 == 0] {
-        PrintInt#(count);
+        Print#(count);
     };
 
     term;

@@ -16,7 +16,7 @@ import "link/brief_rt.c";
 
 /// Print an integer to stdout.
 defn print_int(n: Int) -> Bool {
-    term PrintInt#(n);
+    term Print#(n);
 };
 
 /// Print a character to stdout.
@@ -31,7 +31,7 @@ defn print_str(msg: String) -> Bool {
 
 /// Print a float to stdout.
 defn print_float(f: Float) -> Bool {
-    term PrintFloat#(f);
+    term Print#(f);
 };
 
 /// Print a string followed by newline.

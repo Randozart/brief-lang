@@ -44,7 +44,7 @@ defn println(msg: String) -> Bool [msg != ""][term == true] {
 };
 
 defn print_int(n: Int) -> Bool [[term == true] {
-    term PrintInt#(n);
+    term Print#(n);
 };
 
 defn input() -> String [true][term :> Size >= 0] {

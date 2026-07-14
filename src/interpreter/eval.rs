@@ -143,7 +143,7 @@ fn eval_binary_op(
             let ra = rv.as_i64();
             match (la, ra) {
                 (Some(a), Some(b)) => Ok(i64_to_bits(a.wrapping_add(b))),
-                _ => execute_intrinsic("AddI64#", &[lv, rv], heap),
+                _ => execute_intrinsic("Add#", &[lv, rv], heap),
             }
         }
         BinaryOpKind::Sub => {
@@ -151,7 +151,7 @@ fn eval_binary_op(
             let ra = rv.as_i64();
             match (la, ra) {
                 (Some(a), Some(b)) => Ok(i64_to_bits(a.wrapping_sub(b))),
-                _ => execute_intrinsic("SubI64#", &[lv, rv], heap),
+                _ => execute_intrinsic("Sub#", &[lv, rv], heap),
             }
         }
         BinaryOpKind::Mul => {
@@ -159,7 +159,7 @@ fn eval_binary_op(
             let ra = rv.as_i64();
             match (la, ra) {
                 (Some(a), Some(b)) => Ok(i64_to_bits(a.wrapping_mul(b))),
-                _ => execute_intrinsic("MulI64#", &[lv, rv], heap),
+                _ => execute_intrinsic("Mul#", &[lv, rv], heap),
             }
         }
         BinaryOpKind::Eq => Ok(bool_to_bits(lv.as_i64() == rv.as_i64())),
