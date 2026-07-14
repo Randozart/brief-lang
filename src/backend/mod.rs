@@ -1,6 +1,7 @@
 pub mod bindgen;
 pub mod circt;
 pub mod llvm;
+pub mod normalizer;
 pub mod webstack;
 
 use crate::analysis::call_graph::CallGraph;

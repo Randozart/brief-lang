@@ -59,6 +59,19 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         universe = restored_universe;
     }
 
+    // Normalizer pass — annotate AST for the selected backend
+    match opts.backend {
+        BackendKind::Llvm | BackendKind::Gpu => {
+            brief_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe)?;
+        }
+        BackendKind::Circt => {
+            // CIRCT normalizer not yet implemented — pass through
+        }
+        BackendKind::Webstack => {
+            // Webstack normalizer not yet implemented — pass through
+        }
+    }
+
     let mut output = String::new();
     let ext = match opts.backend {
         BackendKind::Llvm => {

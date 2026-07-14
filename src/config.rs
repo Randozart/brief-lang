@@ -45,3 +45,38 @@ pub fn derive_llvm_type(primitive: Option<&str>, bytes: u64, config: &TypeConfig
     }
     format!("i{}", bytes * 8)
 }
+
+/// Maps (operation, primitive, bytes) → LLVM IR template.
+/// Loaded from config/llvm-ops.toml at compile time.
+/// Structure: { op_name: { primitive_name: { bytes: template } } }
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct OpConfig {
+    op: HashMap<String, HashMap<String, HashMap<String, String>>>,
+}
+
+impl OpConfig {
+    /// Load the built-in op config file.
+    pub fn load() -> Self {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/llvm-ops.toml");
+        let content = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
+        toml::from_str(&content)
+            .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path.display(), e))
+    }
+
+    /// Look up the LLVM IR template for (operation, primitive, bytes).
+    /// Returns None if no mapping exists.
+    pub fn lookup(&self, op: &str, primitive: &str, bytes: u64) -> Option<&str> {
+        let key = bytes.to_string();
+        self.op
+            .get(op)
+            .and_then(|prims| prims.get(primitive))
+            .and_then(|sizes| sizes.get(&key))
+            .map(|s| s.as_str())
+    }
+
+    /// Check if an operation is supported for the given type.
+    pub fn is_supported(&self, op: &str, primitive: &str, bytes: u64) -> bool {
+        self.lookup(op, primitive, bytes).is_some()
+    }
+}
