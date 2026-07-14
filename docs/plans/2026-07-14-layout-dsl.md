@@ -180,12 +180,12 @@ Compile-time DFA validation handles literals. For runtime data (network, file I/
 
 ```brief
 let bytes: Bytes = socket.read();
-let chunk = bytes.validate_as<PngChunk>();
+let chunk = bytes.ValidateAs#<PngChunk>();
 // The compiler generates a DFA-based validator from the layout
 // If validation fails: error with precise byte position
 ```
 
-The `validate_as<T>()` call compiles the layout's DFA at compile time and runs it at runtime over the byte buffer. This is an explicit call — the compiler does not inject hidden runtime checks on every dereference. Performance overhead is opt-in.
+The `ValidateAs#<T>()` call compiles the layout's DFA at compile time and runs it at runtime over the byte buffer. This is an explicit call — the compiler does not inject hidden runtime checks on every dereference. Performance overhead is opt-in.
 
 ## Auto-Accessor Synthesis
 

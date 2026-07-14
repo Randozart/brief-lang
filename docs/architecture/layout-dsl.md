@@ -510,9 +510,9 @@ type SharedFlags <: Bits {
 
 ## Runtime Validation
 
-`validate_as<T>()` compiles the layout's DFA at compile time and runs it at runtime over a byte buffer:
+`ValidateAs#<T>()` compiles the layout's DFA at compile time and runs it at runtime over a byte buffer:
 
 ```brief
 let bytes: Bytes = socket.read();
-let chunk = bytes.validate_as<PngChunk>();  // explicit, opt-in
+let chunk = ValidateAs#<PngChunk>(bytes);  // explicit, opt-in
 ```
