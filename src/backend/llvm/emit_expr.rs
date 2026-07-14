@@ -242,16 +242,27 @@ impl LlvmBackend {
         TypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
     }
 
-    /// Emit a string literal as a global constant + GEP.
+    /// Emit a string literal as stack-allocated bytes + GEP.
+    /// 2026-07-14: Use alloca instead of global constant to avoid placement
+    /// issues (globals must be at module level, not inside functions).
     fn emit_string_literal(&mut self, out: &mut String, v: &str, bytes: &[u8], indent: &str) -> TypedRegister {
-        let str_name = format!(".str{}", self.fun.gen_reg());
-        let escaped: String = bytes.iter().flat_map(|&b| std::ascii::escape_default(b)).map(|c| c as char).collect();
-        writeln!(out, "{}@{} = private unnamed_addr constant [{} x i8] c\"{}\\00\", align 1",
-            indent, str_name, bytes.len() + 1, escaped).ok();
-        let gep = self.fun.gen_reg();
-        writeln!(out, "{}{} = getelementptr inbounds ([{} x i8], ptr @{}, i32 0, i32 0)",
-            indent, gep, bytes.len() + 1, str_name).ok();
-        TypedRegister { name: gep, ty: Type::string() }
+        let len = bytes.len() + 1;
+        let alloca = self.fun.gen_reg();
+        writeln!(out, "{}{} = alloca [{} x i8], align 1", indent, alloca, len).ok();
+        for (i, &b) in bytes.iter().enumerate() {
+            let ptr = self.fun.gen_reg();
+            writeln!(out, "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
+                indent, ptr, len, alloca, i).ok();
+            writeln!(out, "{}store i8 {}, ptr {}", indent, b, ptr).ok();
+        }
+        // null terminator
+        let last = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 {}",
+            indent, last, len, alloca, bytes.len()).ok();
+        writeln!(out, "{}store i8 0, ptr {}", indent, last).ok();
+        writeln!(out, "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 0",
+            indent, v, len, alloca).ok();
+        TypedRegister { name: v.to_string(), ty: Type::string() }
     }
 
     /// Emit a user function call.
@@ -340,35 +351,43 @@ impl LlvmBackend {
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::Lt => {
+                let icmp = self.fun.gen_reg();
                 if is_float {
-                    writeln!(out, "{}{} = fcmp olt {} {}, {}", indent, v, ty_str, l.name, r.name).ok();
+                    writeln!(out, "{}{} = fcmp olt {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, v, l.name, r.name).ok();
+                    writeln!(out, "{}{} = icmp slt i64 {}, {}", indent, icmp, l.name, r.name).ok();
                 }
+                writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::Le => {
+                let icmp = self.fun.gen_reg();
                 if is_float {
-                    writeln!(out, "{}{} = fcmp ole {} {}, {}", indent, v, ty_str, l.name, r.name).ok();
+                    writeln!(out, "{}{} = fcmp ole {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, v, l.name, r.name).ok();
+                    writeln!(out, "{}{} = icmp sle i64 {}, {}", indent, icmp, l.name, r.name).ok();
                 }
+                writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::Gt => {
+                let icmp = self.fun.gen_reg();
                 if is_float {
-                    writeln!(out, "{}{} = fcmp ogt {} {}, {}", indent, v, ty_str, l.name, r.name).ok();
+                    writeln!(out, "{}{} = fcmp ogt {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, v, l.name, r.name).ok();
+                    writeln!(out, "{}{} = icmp sgt i64 {}, {}", indent, icmp, l.name, r.name).ok();
                 }
+                writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::Ge => {
+                let icmp = self.fun.gen_reg();
                 if is_float {
-                    writeln!(out, "{}{} = fcmp oge {} {}, {}", indent, v, ty_str, l.name, r.name).ok();
+                    writeln!(out, "{}{} = fcmp oge {} {}, {}", indent, icmp, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, v, l.name, r.name).ok();
+                    writeln!(out, "{}{} = icmp sge i64 {}, {}", indent, icmp, l.name, r.name).ok();
                 }
+                writeln!(out, "{}{} = zext i1 {} to i8", indent, v, icmp).ok();
                 TypedRegister { name: v.to_string(), ty: Type::bool_() }
             }
             crate::ast::BinaryOpKind::And => {

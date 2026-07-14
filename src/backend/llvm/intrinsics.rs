@@ -106,13 +106,13 @@ fn emit_print(
     match resolve_arg_primitive(backend, &reg).as_str() {
         "Float" => {
             let fl = backend.ensure_float_reg(out, indent, &reg);
-            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @.fmt_float, double {})", indent, fl).ok();
+            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @FMT_FLOAT, double {})", indent, fl).ok();
         }
         "String" => {
-            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @.fmt_str, ptr {})", indent, reg.name).ok();
+            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @FMT_STR, ptr {})", indent, reg.name).ok();
         }
         _ => {
-            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @.fmt_int, i64 {})", indent, reg.name).ok();
+            writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @FMT_INT, i64 {})", indent, reg.name).ok();
         }
     }
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();

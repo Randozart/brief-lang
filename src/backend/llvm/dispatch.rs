@@ -108,7 +108,7 @@ impl LlvmBackend {
                 if has_pre {
                     let reg = format!("%pr{}", i);
                     let txn = self.resolve_dispatch_first_txn(txn_name);
-                    writeln!(out, "  {} = call i1 @pre_{}(ptr %state)", reg, txn).ok();
+                    writeln!(out, "  {} = call i8 @pre_{}(ptr %state)", reg, txn).ok();
                     pre_regs.push(reg);
                 } else {
                     pre_regs.push("true".to_string());
@@ -119,7 +119,9 @@ impl LlvmBackend {
                 let b = format!("b{}", i);
                 let c = format!("ck{}", i);
                 let pr = &pre_regs[i];
-                writeln!(out, "  br i1 {}, label %{}, label %{}", pr, b, c).ok();
+                let pr_i1 = self.fun.gen_reg();
+                writeln!(out, "  {} = trunc i8 {} to i1", pr_i1, pr).ok();
+                writeln!(out, "  br i1 {}, label %{}, label %{}", pr_i1, b, c).ok();
                 writeln!(out, "{}:", b).ok();
                 // Inline txn body instead of `call @txn_name` — shares the
                 // arena across all txns in the tick and avoids function-call
@@ -347,9 +349,9 @@ impl LlvmBackend {
                 let has_pre = self.dispatch_has_pre(txns, txn_name);
                 if has_pre {
                     let first_txn = self.resolve_dispatch_first_txn(txn_name);
-                    writeln!(out, "  %pr{} = call i1 @pre_{}(ptr %state)", i, first_txn).ok();
+                    writeln!(out, "  %pr{} = call i8 @pre_{}(ptr %state)", i, first_txn).ok();
                 } else {
-                    writeln!(out, "  %pr{} = add i1 0, 1", i).ok();
+                    writeln!(out, "  %pr{} = add i8 0, 1", i).ok();
                 }
             }
 
@@ -359,13 +361,17 @@ impl LlvmBackend {
                 let next_c = format!("ck{}", i + 1);
 
                 if i == 0 {
-                    writeln!(out, "  br i1 %pr0, label %b0, label %ck1").ok();
+                    let pr0_i1 = self.fun.gen_reg();
+                    writeln!(out, "  {} = trunc i8 %pr0 to i1", pr0_i1).ok();
+                    writeln!(out, "  br i1 {}, label %b0, label %ck1", pr0_i1).ok();
                 } else {
                     let c = format!("ck{}", i);
                     writeln!(out, "{}:", c).ok();
                     let wm = self.txn_write_masks.get(txn_name).copied().unwrap_or(0);
                     if wm == 0 {
-                        writeln!(out, "  br i1 %pr{}, label %{}, label %{}", i, b, next_c).ok();
+                        let pr_i1 = self.fun.gen_reg();
+                        writeln!(out, "  {} = trunc i8 %pr{} to i1", pr_i1, i).ok();
+                        writeln!(out, "  br i1 {}, label %{}, label %{}", pr_i1, b, next_c).ok();
                     } else {
                         let fm = format!("%fm{}", i);
                         let ca = format!("%ca{}", i);
@@ -373,8 +379,12 @@ impl LlvmBackend {
                         writeln!(out, "  {} = load i64, ptr %fired_mask", fm).ok();
                         writeln!(out, "  {} = and i64 {}, {}", ca, fm, wm).ok();
                         writeln!(out, "  {} = icmp eq i64 {}, 0", nc, ca).ok();
-                        writeln!(out, "  %can{} = and i1 %pr{}, {}", i, i, nc).ok();
-                        writeln!(out, "  br i1 %can{}, label %{}, label %{}", i, b, next_c).ok();
+                        let nc_i8 = self.fun.gen_reg();
+                        writeln!(out, "  {} = zext i1 {} to i8", nc_i8, nc).ok();
+                        writeln!(out, "  %can{} = and i8 %pr{}, {}", i, i, nc_i8).ok();
+                        let can_i1 = self.fun.gen_reg();
+                        writeln!(out, "  {} = trunc i8 %can{} to i1", can_i1, i).ok();
+                        writeln!(out, "  br i1 {}, label %{}, label %{}", can_i1, b, next_c).ok();
                     }
                 }
             }

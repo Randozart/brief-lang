@@ -1549,8 +1549,8 @@ impl LlvmBackend {
         let cond = self.emit_expr(out, pre, indent);
         let i1 = format!("%pi{}", self.fun.txn_counter); self.fun.txn_counter += 1;
         if cond.ty == Type::bool_() {
-            // cond is already i1 (native bool)
-            writeln!(out, "{}{} = and i1 {}, true", indent, i1, cond).ok();
+            // 2026-07-14: bool is i8 — trunc to i1 for br/assume
+            writeln!(out, "{}{} = trunc i8 {} to i1", indent, i1, cond).ok();
         } else {
             writeln!(out, "{}{} = icmp ne i64 {}, 0", indent, i1, cond).ok();
         }
@@ -1633,7 +1633,7 @@ impl LlvmBackend {
         // @link trigger globals. argmemonly + readonly is the tightest
         // constraint — tells LLVM the function only reads memory through
         // its pointer arguments.
-        writeln!(out, "define internal i1 @pre_{}(ptr noalias nocapture align 8 %state) #10 {{", name).ok();
+        writeln!(out, "define internal i8 @pre_{}(ptr noalias nocapture align 8 %state) #10 {{", name).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0;
         self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();
@@ -1645,11 +1645,13 @@ impl LlvmBackend {
         self.fun.ssa_old_float_regs.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         if cond.ty == Type::bool_() {
-            writeln!(out, "  ret i1 {}", cond).ok();
+            writeln!(out, "  ret i8 {}", cond).ok();
         } else {
             let i1 = format!("%ri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            let i8_reg = format!("%r8{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
-            writeln!(out, "  ret i1 {}", i1).ok();
+            writeln!(out, "  {} = zext i1 {} to i8", i8_reg, i1).ok();
+            writeln!(out, "  ret i8 {}", i8_reg).ok();
         }
         writeln!(out, "}}").ok();
 

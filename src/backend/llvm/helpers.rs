@@ -585,6 +585,11 @@ impl LlvmBackend {
             let t = self.next_reg_with_prefix("tb");
             writeln!(out, "{}{} = trunc i64 {} to i1", indent, t, reg.name).ok();
             t
+        } else if type_is(&self.ctx.type_universe, &reg.ty, "Bool") {
+            // 2026-07-14: Bool is i8 — trunc to i1 for br
+            let t = self.next_reg_with_prefix("tb");
+            writeln!(out, "{}{} = trunc i8 {} to i1", indent, t, reg.name).ok();
+            t
         } else {
             reg.name.clone()
         }
@@ -1277,9 +1282,9 @@ impl LlvmBackend {
         };
         let v = self.fun.next_reg_with_prefix("t");
         if result {
-            writeln!(out, "{}{} = and i1 true, true", indent, v).ok();
+            writeln!(out, "{}{} = and i8 1, 1", indent, v).ok();
         } else {
-            writeln!(out, "{}{} = xor i1 true, true", indent, v).ok();
+            writeln!(out, "{}{} = xor i8 1, 1", indent, v).ok();
         }
         Some(TypedRegister { name: v, ty: Type::bool_() })
     }
