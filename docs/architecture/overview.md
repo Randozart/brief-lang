@@ -3,48 +3,70 @@
 ## Pipeline
 
 ```
-                        FAST PATH (default, zero overhead)
-Source ─► Lex ─► Parse ─► Resolve ─► Analyze ─► Codegen ─► (.ll) ─► clang ─► binary
-                              │                       │
-                              │  TypeUniverse          │  Backend chosen by
-                              │  populated from         │  --backend flag or
-                              │  bootstrap.bv +         │  config/targets.toml
-                              │  TypeDefs               │
-                              ▼                       ▼
-                          Read-only                 Read-only
+                         FAST PATH (default, zero overhead)
+Source ─► Lex ─► Parse ─► Resolve ─► [NORMALIZE] ─► Codegen ─► (.ll) ─► clang ─► binary
+                                          │
+                                    Reads backend configs
+                                    Attaches resolved types
+                                    Strips irrelevant metadata
+                                    Validates intrinsics/ffi/melds
 
 
                          PLUGIN PATH (--plugin path/to/exe)
-Source ─► Lex ─► Parse ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► Analyze ─► Codegen ─► .ll
-                              │            │                                  │
-                              │       .bvir text                         .bvir text
-                              │       (stdin/pipe)                       (stdout/pipe)
-                              ▼            ▼                                  ▼
-                          TypeUniverse   plugins see                   plugins see
-                          written as     &mut Vec<TopLevel>            &mut String
-                          (universe ...) + &mut TypeUniverse          (final IR)
+Source ─► Lex ─► Parse ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► [NORMALIZE] ─► Codegen
+                                                                                        │
+                                                                                   Same normalizer
+                                                                                   Same annotations
+                                                                                   Same stripping
 
 
                          BVIR DEBUG PATH (--emit-bvir)
-Source ─► ... ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► ... ─► .ll
-                              │            │                    │
-                              │       ┌────┴────┐          ┌───┴────┐
-                              │    program.bvir      program.bvir
-                              │    .before           .after
-                              ▼
-                          Plugin authors diff these
-                          to see what their plugin mutated
+Source ─► ... ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► [NORMALIZE] ─► Codegen
+                                                                                        │
+                                                                                   Writes .bvir.after
+                                                                                   after normalization
 
 
                          BACKEND DISPATCH (--backend selects)
-Source → Parse → Resolve → match opts.backend {
-    "llvm"     → LlvmBackend::new().generate()   → .ll  → clang → binary
-    "circt"    → CirctBackend::new().generate()  → .mlir → circt-opt → verilog
-    "webstack" → WebstackGenerator::generate()   → .ts   → tsc → wasm
+Source → Parse → Resolve → NORMALIZE (reads configs, annotates AST) → Codegen
+                              │                                          │
+                         Reads backend configs                       Reads annotations
+                         Walks AST once                              Never reads configs
+                         Attaches llvm_type/bit_width/js_type         Never matches on primitive
+                         to every type reference                     Just emits annotated AST
+
+## Normalizer Stage
+
+The normalizer runs between the plugin chain and codegen. It reads the backend's config files and walks the entire AST once, attaching pre-resolved annotations so the codegen never needs to read config files or match on `primitive`/`bytes`.
+
+### What each normalizer does
+
+| Backend | Normalizer | Annotations attached | Metadata stripped |
+|---------|-----------|---------------------|-------------------|
+| **LLVM** | `LlvmNormalizer` | `llvm_type` ("double", "i64", "ptr") on every type ref | `hardware`, `jira_ticket`, `rest_route`, `encoding` if unused |
+| **CIRCT** | `CirctNormalizer` | `bit_width` (64, 32, 16) on every type ref | `primitive`, `encoding`, `llvm_type`, `jira_ticket` |
+| **GPU** | `GpuNormalizer` | `llvm_type` + `gpu_kernel` on kernel Txns | `hardware`, `jira_ticket` |
+| **Webstack** | `WebstackNormalizer` | `js_type` ("number", "string", "boolean") on every type ref | `hardware`, `bit_width` |
+
+### Normalizer trait
+
+```rust
+pub trait BackendNormalizer: std::fmt::Debug {
+    fn name(&self) -> &str;
+    fn normalize(&self, items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String>;
 }
 ```
 
-## Frontend/Backend Detachment
+### How the normalizer resolves operations
+
+Every `Expr::Call("Add#", args)` in the AST is resolved by the normalizer:
+
+1. Look at the argument types → derive `primitive` + `bytes`
+2. Look up `(Add, primitive, bytes)` in backend's `ops.toml`
+3. If found: attach the resolved lowering as an annotation on the Call node
+4. If not found: error — operation not supported for these types on this backend
+
+The backend reads the annotation and emits the pre-resolved IR template directly.
 
 ```
 SOURCE ──► PARSER ──► AST ──► UNIVERSE ──► BACKEND
@@ -73,8 +95,8 @@ Brief distinguishes between two kinds of compiler-known operations:
 | Kind | Syntax | Dispatch | Configurable |
 |------|--------|----------|--------------|
 | **Operation** | `+`, `==`, `++`, `list[i]` | Config file: `(op, primitive, bytes)` → IR template | Yes — any backend provides its own `ops.toml` |
-| **Intrinsic** | `Sqrt#(x)`, `Malloc#(64)` | Backend chooses: LLVM intrinsic, external call, or error | Backend decides per call |
-| **Override** | `op Add <~ custom_fn(#L, #R)` | Type registry check before config lookup | Per-type in source |
+| **Intrinsic** | `Sqrt#(x)`, `Malloc#(64)` | Normalizer validates against backend's supported list; backend chooses how to emit | Backend declares support in config |
+| **Override** | `op Add <~ custom_fn(#L, #R)` | Normalizer registers type-level override in dispatch table | Per-type in source |
 
 Example:
 ```brief
@@ -185,6 +207,16 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | `plugin/mod.rs` | `Plugin` trait, `PluginManager`, `PluginHook` |
 | `plugin/loader.rs` | Native `.so`/`.dylib` loading |
 | `plugin/runner.rs` | External plugin chain (stdin/stdout BVIR) |
+
+### Normalizer (`src/backend/normalizer.rs`)
+
+| Module | Purpose |
+|--------|---------|
+| `normalizer.rs` | Shared helpers: `attach_llvm_types()`, `validate_intrinsics()`, `collect_intrinsic_calls()` |
+| `llvm/normalizer.rs` | `LlvmNormalizer` — attaches `llvm_type`, strips irrelevant metadata |
+| `circt/normalizer.rs` | `CirctNormalizer` — attaches `bit_width`, rejects Print#/Malloc# |
+| `webstack/normalizer.rs` | `WebstackNormalizer` — attaches `js_type` |
+| `gpu/normalizer.rs` | `GpuNormalizer` — attaches `llvm_type`, marks kernel entry points |
 
 ### Backend (`src/backend/`)
 
