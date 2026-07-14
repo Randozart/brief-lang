@@ -91,22 +91,10 @@ impl Plugin for ValidationPlugin {
 mod tests {
     use super::super::{PluginManager, Plugin};
     use super::*;
-    use crate::ast::{Comment, DispatchMode, StrictMode};
+    use crate::ast::TopLevel;
 
-    fn empty_program() -> Program {
-        Program {
-            items: Vec::new(),
-            comments: Vec::new(),
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::default(),
-            exit_condition: None,
-            out_pragmas: Vec::new(),
-            watchdog_defaults: (None, None),
-            default_sig_modifier: None,
-        }
+    fn empty_program() -> Vec<TopLevel> {
+        vec![]
     }
 
     #[test]

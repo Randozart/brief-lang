@@ -1,4 +1,4 @@
-use crate::ast::Annotation;
+use crate::ast::{Annotation, Expr};
 
 
 
@@ -61,7 +61,8 @@ pub fn resolve_directives(tags: &[Annotation], context: DirectiveCtx) -> Vec<Dir
     let mut effects = Vec::new();
 
     for tag in tags {
-        let effect = match tag.name.as_str() {
+        let directive_name = tag.name.trim_start_matches('?');
+        let effect = match directive_name {
             "inline" => resolve_inline(tag, context),
             "unroll" => resolve_unroll(tag, context),
             "vectorize" => resolve_vectorize(tag, context),
@@ -249,18 +250,14 @@ mod tests {
     fn tag(name: &str) -> Annotation {
         Annotation {
             name: name.into(),
-            value: Expr::Bool(true),
-            mode: AnnotationMode::Advisory,
-            diagnostic: false,
+            value: Some(Expr::Bool(true)),
         }
     }
 
     fn spec_tag(name: &str) -> Annotation {
         Annotation {
-            name: name.into(),
-            value: Expr::Bool(true),
-            mode: AnnotationMode::Speculative,
-            diagnostic: false,
+            name: format!("?{}", name),
+            value: Some(Expr::Bool(true)),
         }
     }
 
@@ -378,9 +375,7 @@ mod tests {
     fn test_gpu_directive_with_value() {
         let t = Annotation {
             name: "gpu".into(),
-            value: Expr::Quoted("threshold=1000".into()),
-            mode: AnnotationMode::Advisory,
-            diagnostic: false,
+            value: Some(Expr::Quoted("threshold=1000".into())),
         };
         let effects = resolve_directives(&[t], DirectiveCtx::Transaction);
         assert_eq!(effects.len(), 1);

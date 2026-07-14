@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 7ef1f6a2765fcce3b09ad6c6c7d6f95f8be970cea23de4e2baaed62f60ff48cc # shrinks to stmt = Alka(AlkaBlock { dangerous: false, content: "FENCE ALL;", span: None })
+cc be55cedaba905c2ca057a61aada03545af7215a85ae6c340b1be3c32d13ad641 # shrinks to stmt = Term(Some(BinaryOp(Div, UnaryOp(Neg, BinaryOp(Neq, BinaryOp(Add, Decimal(0), BinaryOp(Add, Decimal(0), BinaryOp(Or, Decimal(-9415943309631184), Quoted([32, 115, 32, 78, 45, 98, 95, 115, 95])))), Call("s6o0k_x", [Call("gz_0d1lpz_nz", []), BinaryOp(Gt, Float(-3.4428811324420376e-148), UnaryOp(BitNot, Decimal(-3250186547441150282)))]))), UnaryOp(Not, UnaryOp(Neg, Float(-1.1887791587989426e173))))))

@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Statement};
+use crate::ast::{BinaryOpKind, Expr, Statement};
 
 /// Describes where a pointer value originates from — used to detect
 /// dangling borrows and to refine parallel-txn write sets.

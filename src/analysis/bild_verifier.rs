@@ -122,16 +122,12 @@ mod tests {
     fn make_inop(name: &str, params: Vec<(&str, Type)>, body: Vec<&str>) -> InopDeclaration {
         InopDeclaration {
             name: name.to_string(),
-            type_params: vec![],
             params: params.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
             outputs: vec![Type::int()],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: body.into_iter().map(|s| s.to_string()).collect(),
-            fallback: None,
             has_side_effects: false,
             has_state_access: false,
-            section: None,
-            llvm_body_spans: vec![],
             span: None,
         }
     }

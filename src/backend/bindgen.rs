@@ -303,49 +303,17 @@ fn emit_py_class(out: &mut String, name: &str, rt: &ResolvedType) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Expr, TypeBinding, TypeDef, TypeDefBody, Type};
+    use crate::ast::Type;
     use crate::type_universe::{ResolvedType, TypeUniverse};
 
     fn make_test_type(name: &str, bytes: u64) -> ResolvedType {
         ResolvedType {
             name: name.to_string(),
-            type_params: vec![],
             base: "Bits".to_string(),
             bytes,
             alignment: 8,
             llvm_type: "i64".to_string(),
-            tbaa_node: "Int".to_string(),
-            endian: 0,
-            volatile: false,
-            atomic: false,
-            defining_module: "builtin".to_string(),
-            element_type: None,
-            fixed_size: Some(true),
-            insert_at: None,
-            extract_from: None,
-            allow_index: true,
-            allow_slice: true,
-            allow_arrow: true,
-            codec: None,
-            on_exit: None,
-            guards: vec![],
-            operators: std::collections::HashMap::new(),
-            projections: HashMap::new(),
             properties: HashMap::new(),
-            // 2026-07-08: Phase 2B — test defaults
-            default_params: vec![],
-            commuting: true,
-            constant_time: false,
-            struct_layout: None,
-            source: TypeDef {
-                name: name.to_string(),
-                type_params: vec![],
-                base: Box::new(Expr::TypeRef("Bits".to_string())),
-                bit_range: None,
-                body: TypeDefBody { slots: vec![], metadata: HashMap::new(),
-                projections: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None },
-                span: None,
-            },
         }
     }
 
@@ -355,10 +323,7 @@ mod tests {
         types.insert("Header".to_string(), make_test_type("Header", 16));
         TypeUniverse {
             types,
-            resolution_order: vec!["Packet".to_string(), "Header".to_string()],
             melds: HashMap::new(),
-            meld_warnings: Vec::new(),
-            codecs: HashMap::new(),
         }
     }
 

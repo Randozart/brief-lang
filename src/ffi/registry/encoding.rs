@@ -228,8 +228,8 @@ mod tests {
 
     #[test]
     fn test_encoding_sha256_passthrough_non_string() {
-        let result = encoding_sha256_impl(vec![Value::Bits(crate::interpreter::i64_to_bits(42))]);
+        let result = encoding_sha256_impl(vec![crate::interpreter::i64_to_bits(42)]);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), Value::Bits(crate::interpreter::i64_to_bits(42)));
+        assert_eq!(result.unwrap(), crate::interpreter::i64_to_bits(42));
     }
 }

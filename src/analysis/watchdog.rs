@@ -425,7 +425,7 @@ mod tests {
             parameters: vec![],
             output_type: None,
             outputs: vec![],
-            contract: Contract { pre_condition: pre, post_condition: post, watchdog, span: None },
+            contract: Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog, span: None },
             body,
             metadata: HashMap::new(),
             derivation: None,
@@ -634,6 +634,7 @@ mod tests {
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(10)),
             ),
+            is_entry: false,
             watchdog: None,
             span: None,
         };
@@ -642,6 +643,7 @@ mod tests {
         let contract_flat = Contract {
             pre_condition: Expr::Bool(true),
             post_condition: Expr::Bool(true),
+            is_entry: false,
             watchdog: None,
             span: None,
         };

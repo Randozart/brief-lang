@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOpKind, Expr, TopLevel};
+use crate::ast::{BinaryOpKind, Contract, Expr, Statement, TopLevel, Transaction, Type};
 use std::collections::HashMap;
 
 /// Parameter range analysis for transaction parameters.
@@ -209,7 +209,6 @@ impl ParameterRanges {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::*;
 
     fn make_txn_with_precondition(
         name: &str,
@@ -218,46 +217,30 @@ mod tests {
     ) -> TopLevel {
         TopLevel::Transaction(Transaction {
             name: name.to_string(),
+            type_params: vec![],
             parameters: param_names.iter().map(|n| (n.to_string(), Type::int())).collect(),
             contract: Contract {
                 pre_condition: pre,
                 post_condition: Expr::Bool(true),
-                span: None,
+                is_entry: false,
                 watchdog: None,
+                span: None,
             },
             body: vec![],
             is_async: false,
             is_reactive: false,
-            reactor_speed: None,
-            span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
+            outputs: Vec::new(),
+            output_type: None,
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
-                 outputs: Vec::new(),
-         output_type: None,
             derivation: None,
-     })
+            span: None,
+        })
     }
 
     #[test]
     fn test_empty_program_no_ranges() {
-        let program = Program {
-            items: vec![],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let program: Vec<TopLevel> = vec![];
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
         assert!(pr.ranges.is_empty());
@@ -265,19 +248,7 @@ mod tests {
 
     #[test]
     fn test_single_unbounded_param() {
-        let program = Program {
-            items: vec![make_txn_with_precondition("f", &["x"], Expr::Bool(true))],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let program: Vec<TopLevel> = vec![make_txn_with_precondition("f", &["x"], Expr::Bool(true))];
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
         assert!(!pr.has_lower_bound("f", "x"));
@@ -286,23 +257,11 @@ mod tests {
 
     #[test]
     fn test_lower_bound_x_gt_0() {
-        let program = Program {
-            items: vec![make_txn_with_precondition(
-                "f",
-                &["x"],
-                Expr::BinaryOp(BinaryOpKind::Gt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0))),
-            )],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let program: Vec<TopLevel> = vec![make_txn_with_precondition(
+            "f",
+            &["x"],
+            Expr::BinaryOp(BinaryOpKind::Gt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0))),
+        )];
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
         assert!(pr.has_lower_bound("f", "x"));
@@ -312,23 +271,11 @@ mod tests {
 
     #[test]
     fn test_upper_bound_x_le_10() {
-        let program = Program {
-            items: vec![make_txn_with_precondition(
-                "f",
-                &["x"],
-                Expr::BinaryOp(BinaryOpKind::Le, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(10))),
-            )],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let program: Vec<TopLevel> = vec![make_txn_with_precondition(
+            "f",
+            &["x"],
+            Expr::BinaryOp(BinaryOpKind::Le, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(10))),
+        )];
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
         assert!(pr.has_upper_bound("f", "x"));
@@ -338,26 +285,14 @@ mod tests {
 
     #[test]
     fn test_both_bounds_from_and() {
-        let program = Program {
-            items: vec![make_txn_with_precondition(
-                "f",
-                &["x"],
-                Expr::BinaryOp(BinaryOpKind::And, 
-                    Box::new(Expr::BinaryOp(BinaryOpKind::Gt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0)))),
-                    Box::new(Expr::BinaryOp(BinaryOpKind::Lt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100)))),
-                ),
-            )],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let program: Vec<TopLevel> = vec![make_txn_with_precondition(
+            "f",
+            &["x"],
+            Expr::BinaryOp(BinaryOpKind::And,
+                Box::new(Expr::BinaryOp(BinaryOpKind::Gt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0)))),
+                Box::new(Expr::BinaryOp(BinaryOpKind::Lt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100)))),
+            ),
+        )];
         let mut pr = ParameterRanges::new();
         pr.analyze(&program);
         assert!(pr.has_lower_bound("f", "x"));

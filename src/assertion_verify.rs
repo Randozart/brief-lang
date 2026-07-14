@@ -1,37 +1,15 @@
-// Copyright 2026 Randy Smits-Schreuder Goedheijt
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//
-// Runtime Exception for Use as a Language:
-// When the Work or any Derivative Work thereof is used to generate code
-// ("generated code"), such generated code shall not be subject to the
-// terms of this License, provided that the generated code itself is not
-// a Derivative Work of the Work. This exception does not apply to code
-// that is itself a compiler, interpreter, or similar tool that incorporates
-// or embeds the Work.
-
 /// Feature C: Assertion Verification with `sig -> true`
 ///
 /// Enables compile-time verification that functions always return Bool = true.
 /// Example: sig always_succeeds: String -> true; asserts the function always succeeds.
-use crate::ast::{BinaryOpKind, Definition, Expr, ResultType, Signature, Statement, Type};
+use crate::ast::{BinaryOpKind, Definition, Expr, Signature, Statement, Type};
 use std::collections::HashMap;
 
 /// Verify that a sig's `-> true` assertion is valid
 pub fn verify_true_assertion(sig: &Signature, defn: &Definition) -> Result<(), String> {
-    // Check that sig has TrueAssertion result type
-    if !matches!(ResultType::Projection(sig.outputs.clone()), ResultType::TrueAssertion) {
-        return Ok(()); // Not an assertion, nothing to verify
+    // Check that the sig declares Bool output
+    if sig.outputs.is_empty() || sig.outputs[0] != Type::bool_() {
+        return Ok(());
     }
 
     // Check that definition produces Bool
@@ -157,15 +135,6 @@ fn is_provably_true(expr: &Expr, vars: &HashMap<String, Expr>) -> bool {
             }
         }
 
-        Expr::Identifier(name) if name.starts_with('@') => {
-            // Check prior state value
-            let prior_name = format!("@{}", name);
-            match vars.get(&prior_name) {
-                Some(Expr::Bool(true)) => true,
-                _ => false,
-            }
-        }
-
         _ => false, // Conservative: unknown expressions not provably true
     }
 }
@@ -175,10 +144,6 @@ fn extract_vars_from_expr(expr: &Expr, vars: &mut HashMap<String, Expr>) {
     match expr {
         Expr::Identifier(name) => {
             vars.entry(name.clone()).or_insert(Expr::Bool(false));
-        }
-        Expr::Identifier(name) if name.starts_with('@') => {
-            let prior_name = format!("@{}", name);
-            vars.entry(prior_name).or_insert(Expr::Bool(false));
         }
         Expr::BinaryOp(BinaryOpKind::And, l, r) | Expr::BinaryOp(BinaryOpKind::Or, l, r)
         | Expr::BinaryOp(BinaryOpKind::Eq, l, r) | Expr::BinaryOp(BinaryOpKind::Neq, l, r) => {
@@ -192,17 +157,15 @@ fn extract_vars_from_expr(expr: &Expr, vars: &mut HashMap<String, Expr>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Contract, Definition, ResultType, Signature, Type};
+    use crate::ast::{Contract, Definition, Signature};
 
     #[test]
     fn test_literal_true_assertion() {
         let sig = Signature {
             name: "always_true".to_string(),
-            params: vec![], modifier: None, output_type: None,
-            result_type: ResultType::TrueAssertion,
-            source: Some("always_true_defn".to_string()),
-            alias: None,
-            bound_defn: None,
+            params: vec![],
+            outputs: vec![Type::bool_()],
+            span: None,
         };
 
         let defn = Definition {
@@ -223,6 +186,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            span: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -232,11 +196,9 @@ mod tests {
     fn test_false_assertion_fails() {
         let sig = Signature {
             name: "always_false".to_string(),
-            params: vec![], modifier: None, output_type: None,
-            result_type: ResultType::TrueAssertion,
-            source: Some("always_false_defn".to_string()),
-            alias: None,
-            bound_defn: None,
+            params: vec![],
+            outputs: vec![Type::bool_()],
+            span: None,
         };
 
         let defn = Definition {
@@ -257,6 +219,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            span: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -266,11 +229,9 @@ mod tests {
     fn test_variable_assigned_true() {
         let sig = Signature {
             name: "check_x".to_string(),
-            params: vec![("".to_string(), Type::bool_())], modifier: None, output_type: None,
-            result_type: ResultType::TrueAssertion,
-            source: Some("check_x_defn".to_string()),
-            alias: None,
-            bound_defn: None,
+            params: vec![("".to_string(), Type::bool_())],
+            outputs: vec![Type::bool_()],
+            span: None,
         };
 
         let defn = Definition {
@@ -294,6 +255,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            span: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_ok());
@@ -303,11 +265,9 @@ mod tests {
     fn test_non_bool_output_fails() {
         let sig = Signature {
             name: "not_bool".to_string(),
-            params: vec![], modifier: None, output_type: None,
-            result_type: ResultType::TrueAssertion,
-            source: Some("not_bool_defn".to_string()),
-            alias: None,
-            bound_defn: None,
+            params: vec![],
+            outputs: vec![Type::bool_()],
+            span: None,
         };
 
         let defn = Definition {
@@ -330,6 +290,7 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            span: None,
         };
 
         assert!(verify_true_assertion(&sig, &defn).is_err());
@@ -339,11 +300,9 @@ mod tests {
     fn test_no_assertion_type_skipped() {
         let sig = Signature {
             name: "regular_sig".to_string(),
-            params: vec![], modifier: None, output_type: None,
-            result_type: ResultType::Projection(vec![Type::bool_()]),
-            source: Some("regular_sig_defn".to_string()),
-            alias: None,
-            bound_defn: None,
+            params: vec![],
+            outputs: vec![Type::int()],
+            span: None,
         };
 
         let defn = Definition {
@@ -364,9 +323,10 @@ mod tests {
             metadata: HashMap::new(),
             modifiers: vec![],
             derivation: None,
+            span: None,
         };
 
-        // Should be OK because this is not a TrueAssertion
+        // Should be OK because the sig output is Int, not Bool (no assertion)
         assert!(verify_true_assertion(&sig, &defn).is_ok());
     }
 }

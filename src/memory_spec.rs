@@ -293,14 +293,14 @@ mod tests {
         assert_eq!(estimate_type_size(&Type::int()), 8);
         assert_eq!(
             estimate_type_size(&Type::Constrained(
-                Box::new(Type::uint()),
+                Box::new(Type::Custom("UInt".to_string())),
                 BitRange::Any(8)
             )),
             1
         );
         assert_eq!(
             estimate_type_size(&Type::Constrained(
-                Box::new(Type::uint()),
+                Box::new(Type::Custom("UInt".to_string())),
                 BitRange::Any(32)
             )),
             4

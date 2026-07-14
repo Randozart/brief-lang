@@ -800,7 +800,7 @@ mod tests {
     #[test]
     fn test_circt_sized_int() {
         let mut backend = CirctBackend::new();
-        let ty = Type::Constrained(Box::new(Type::uint()), crate::ast::BitRange::Single(8));
+        let ty = Type::Constrained(Box::new(Type::Custom("UInt".to_string())), crate::ast::BitRange::Single(8));
         let output = backend.generate(&[
             make_state_decl("byte", ty),
         ]);
@@ -810,7 +810,7 @@ mod tests {
     #[test]
     fn test_circt_sized_int_32() {
         let mut backend = CirctBackend::new();
-        let ty = Type::Constrained(Box::new(Type::uint()), crate::ast::BitRange::Single(32));
+        let ty = Type::Constrained(Box::new(Type::Custom("UInt".to_string())), crate::ast::BitRange::Single(32));
         let output = backend.generate(&[
             make_state_decl("word", ty),
         ]);

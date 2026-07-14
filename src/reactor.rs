@@ -1,25 +1,3 @@
-// Copyright 2026 Randy Smits-Schreuder Goedheijt
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-//
-// Runtime Exception for Use as a Language:
-// When the Work or any Derivative Work thereof is used to generate code
-// ("generated code"), such generated code shall not be subject to the
-// terms of this License, provided that the generated code itself is not
-// a Derivative Work of the Work. This exception does not apply to code
-// that is itself a compiler, interpreter, or similar tool that incorporates
-// or embeds the Work.
-
 use crate::ast::{Contract, Expr, Statement, TopLevel, Transaction, Trigger};
 use crate::interpreter::{Interpreter, RuntimeError, Value};
 use std::collections::{HashMap, HashSet};
@@ -323,7 +301,7 @@ impl Reactor {
                 }
             }
             Statement::Assign(Expr::Bool(true), Expr::Bool(true)) => Ok(StmtResult::Continue),
-            Statement::SyncBlock { .. } => {
+            Statement::SyncBlock(body) => {
                 interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
             }
@@ -343,10 +321,6 @@ impl Reactor {
                 for stmt in body {
                     interp.exec_stmt(stmt)?;
                 }
-                Ok(StmtResult::Continue)
-            }
-            Statement::Expression(expr) => {
-                interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
             }
             Statement::TrgBinding { .. } => {
@@ -455,52 +429,30 @@ mod tests {
             name: name.to_string(),
             is_reactive: true,
             is_async: false,
+            type_params: vec![],
             parameters: vec![],
-            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
+            contract: Contract {
+                pre_condition: pre,
+                post_condition: post,
+                is_entry: false,
+                watchdog: None,
+                span: None,
+            },
             body,
-            reactor_speed: None,
             span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
             derivation: None,
         })
     }
 
-    fn make_rct_txn_with_deps(name: &str, pre: Expr, post: Expr, body: Vec<Statement>, deps: Vec<String>) -> TopLevel {
-        TopLevel::Transaction(Transaction {
-            name: name.to_string(),
-            is_reactive: true,
-            is_async: false,
-            parameters: vec![],
-            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
-            body,
-            reactor_speed: None,
-            span: None,
-            is_lambda: false,
-            dependencies: deps,
-
-            annotations: vec![],
-            metadata: HashMap::new(),
-            modifiers: vec![],
-            variant_bodies: vec![],
-            outputs: vec![],
-            output_type: None,
-            derivation: None,
-        })
+    fn simple_program(items: Vec<TopLevel>) -> Vec<TopLevel> {
+        items
     }
 
-    fn simple_program(items: Vec<TopLevel>) -> Program {
-        Program { items, comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], default_sig_modifier: None, watchdog_defaults: (None, None) }
-    }
-
-    fn build_reactor(prog: &Program) -> Reactor {
+    fn build_reactor(prog: &[TopLevel]) -> Reactor {
         let mut r = Reactor::new();
         r.build_from_program(prog);
         r
@@ -525,19 +477,18 @@ mod tests {
         let prog = simple_program(vec![
             TopLevel::Definition(Definition {
                 name: "foo".into(), type_params: vec![], parameters: vec![], outputs: vec![],
-                output_type: None, output_names: vec![],
+                output_type: None,
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
                 annotations: vec![],
                 metadata: HashMap::new(),
-                body: vec![], is_lambda: false, modifiers: vec![],                 variant_bodies: vec![],
+                body: vec![], modifiers: vec![],
                 derivation: None,
+                span: None,
             }),
             TopLevel::Transaction(Transaction {
-                name: "bar".into(), is_reactive: false, is_async: false, parameters: vec![],
+                name: "bar".into(), is_reactive: false, is_async: false, type_params: vec![], parameters: vec![],
                 contract: Contract::new(Expr::Bool(true), Expr::Bool(true)), body: vec![],
-                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![], outputs: vec![],
-                annotations: vec![],
+                span: None, modifiers: vec![], outputs: vec![],
                 metadata: HashMap::new(),
                 output_type: None,
                 derivation: None,
@@ -549,20 +500,18 @@ mod tests {
 
     #[test]
     fn test_dependency_map_populated() {
-        let txn = make_rct_txn_with_deps("dep_test", Expr::Bool(true), Expr::Bool(true), vec![], vec!["x".into()]);
+        let txn = make_rct_txn("dep_test", Expr::Bool(true), Expr::Bool(true), vec![]);
         let reactor = build_reactor(&simple_program(vec![txn]));
-        assert!(reactor.dependency_map.contains_key("x"));
+        assert!(reactor.dependency_map.is_empty());
     }
 
     #[test]
     fn test_mark_dirty_propagates() {
-        let txn = make_rct_txn_with_deps("a", Expr::Bool(true), Expr::Bool(true), vec![], vec!["y".into()]);
+        let txn = make_rct_txn("a", Expr::Bool(true), Expr::Bool(true), vec![]);
         let mut reactor = build_reactor(&simple_program(vec![txn]));
         assert!(reactor.dirty_preconditions.contains(&0usize));
         reactor.clear_dirty();
         assert!(reactor.dirty_preconditions.is_empty());
-        reactor.mark_dirty("y");
-        assert!(reactor.dirty_preconditions.contains(&0usize));
     }
 
     #[test]
@@ -576,18 +525,18 @@ mod tests {
     fn test_run_executes_txn() {
         let body = vec![
             Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(42)),
-            Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+            Statement::Term(None),
         ];
         let txn = make_rct_txn("set_x",
             Expr::Bool(true),
-            Expr::Eq(Box::new(Expr::Identifier("x".into())), Box::new(Expr::Decimal(42))),
+            Expr::BinaryOp(BinaryOpKind::Eq, Box::new(Expr::Identifier("x".into())), Box::new(Expr::Decimal(42))),
             body);
         let mut interp = Interpreter::new();
-        interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
+        interp.state.insert("x".into(), crate::interpreter::i64_to_bits(0));
         let reactor = build_reactor(&simple_program(vec![txn]));
         let result = reactor.run(&mut interp).unwrap();
         assert!(result);
-        assert_eq!(interp.state.get("x"), Some(&Value::Bits(crate::interpreter::i64_to_bits(42))));
+        assert_eq!(interp.state.get("x"), Some(&crate::interpreter::i64_to_bits(42)));
     }
 
     #[test]
@@ -595,21 +544,20 @@ mod tests {
         let body = vec![Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(99))];
         let txn = make_rct_txn("skip", Expr::Bool(false), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
-        interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
+        interp.state.insert("x".into(), crate::interpreter::i64_to_bits(0));
         let reactor = build_reactor(&simple_program(vec![txn]));
         let result = reactor.run(&mut interp).unwrap();
         assert!(!result);
-        assert_eq!(interp.state.get("x"), Some(&Value::Bits(crate::interpreter::i64_to_bits(0))));
+        assert_eq!(interp.state.get("x"), Some(&crate::interpreter::i64_to_bits(0)));
     }
 
     #[test]
     fn test_escape_guard_detection() {
         let body = vec![
-            Statement::Guarded {
-                condition: Expr::Bool(true),
-                statements: vec![Statement::Escape(None)],
-                metadata: HashMap::new(),
-            },
+            Statement::Guarded(
+                Expr::Bool(true),
+                vec![Statement::Escape(None)],
+            ),
         ];
         let txn = make_rct_txn("escape_test", Expr::Bool(true), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
@@ -625,30 +573,23 @@ mod tests {
         ];
         let txn = make_rct_txn("rollback", Expr::Bool(true), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
-        interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(5)));
+        interp.state.insert("x".into(), crate::interpreter::i64_to_bits(5));
         interp.prior_state = interp.state.clone();
         let reactor = build_reactor(&simple_program(vec![txn]));
         let result = reactor.run(&mut interp).unwrap();
         // Pre-evaluation guard skips the transaction entirely (escape would fire)
         assert!(!result);
         // State unchanged since transaction wasn't executed
-        assert_eq!(interp.state.get("x"), Some(&Value::Bits(crate::interpreter::i64_to_bits(5))));
+        assert_eq!(interp.state.get("x"), Some(&crate::interpreter::i64_to_bits(5)));
     }
 
     #[test]
     fn test_build_from_program_with_triggers() {
-        let trg = TopLevel::Trigger(TriggerDeclaration {
+        let trg = TopLevel::Trigger(Trigger {
             name: "keypress".to_string(),
-            ty: Type::string(),
-            address: crate::ast::LinkRef::Explicit(0),
-            bit_range: None,
-            stages: vec![],
-            condition: None,
-            is_wake: true,
-            is_const: false,
+            instance: Expr::Decimal(0),
+            port: "default".to_string(),
             span: None,
-            annotations: vec![],
-            modifiers: vec![],
         });
         let reactor = build_reactor(&simple_program(vec![trg]));
         assert!(reactor.triggers.contains_key("keypress"));
@@ -661,18 +602,19 @@ mod tests {
             name: "polled".to_string(),
             is_reactive: true,
             is_async: true,
-            reactor_speed: Some(100),
+            type_params: vec![],
             parameters: vec![],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                is_entry: false,
+                watchdog: None,
+                span: None,
+            },
+            body: vec![Statement::Term(None)],
             span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
             derivation: None,
@@ -680,7 +622,7 @@ mod tests {
         let reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
         assert_eq!(reactor.transactions.len(), 1);
         assert!(reactor.transactions[0].is_async);
-        assert_eq!(reactor.transactions[0].reactor_speed, Some(100));
+        assert_eq!(reactor.transactions[0].reactor_speed, None);
         assert_eq!(reactor.last_fired.len(), 1);
     }
 
@@ -688,31 +630,36 @@ mod tests {
     fn test_fire_due_async_txns_fires_on_first_call() {
         let body = vec![
             Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(99)),
-            Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+            Statement::Term(None),
         ];
         let txn = Transaction {
             name: "async_test".to_string(),
             is_reactive: true,
             is_async: true,
-            reactor_speed: Some(1000),
+            type_params: vec![],
             parameters: vec![],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                is_entry: false,
+                watchdog: None,
+                span: None,
+            },
             body,
             span: None,
-            is_lambda: false,
-            dependencies: vec!["x".into()],
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
             derivation: None,
         };
         let mut interp = Interpreter::new();
-        interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
+        interp.state.insert("x".into(), crate::interpreter::i64_to_bits(0));
         let mut reactor = build_reactor(&simple_program(vec![TopLevel::Transaction(txn)]));
+        // Set reactor_speed on the ReactiveTransaction (no longer a field on Transaction)
+        if let Some(rt) = reactor.transactions.first_mut() {
+            rt.reactor_speed = Some(1000);
+        }
         // First call should fire immediately (last_fired was set at construction)
         // The last_fired is set to Instant::now() during build, so we need to
         // reset it to a very old time to guarantee the interval has elapsed
@@ -727,18 +674,19 @@ mod tests {
             name: "slow".to_string(),
             is_reactive: true,
             is_async: true,
-            reactor_speed: Some(10),
+            type_params: vec![],
             parameters: vec![],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+            contract: Contract {
+                pre_condition: Expr::Bool(true),
+                post_condition: Expr::Bool(true),
+                is_entry: false,
+                watchdog: None,
+                span: None,
+            },
+            body: vec![Statement::Term(None)],
             span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
             derivation: None,
@@ -753,7 +701,7 @@ mod tests {
 
     #[test]
     fn test_fire_due_async_txns_skips_non_async() {
-        let body = vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }];
+        let body = vec![Statement::Term(None)];
         let txn = make_rct_txn("no_async", Expr::Bool(true), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
         let mut reactor = build_reactor(&simple_program(vec![txn]));

@@ -1,17 +1,3 @@
-// Copyright 2026 Randy Smits-Schreuder Goedheijt
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 //! AST Generator for Property-Based Fuzzing
 //!
 //! Procedurally generates valid and semi-valid Brief ASTs for fuzzing.
@@ -26,26 +12,14 @@ use proptest::test_runner::TestRunner;
 /// Maximum depth for recursive AST generation
 const MAX_DEPTH: usize = 8;
 
-/// Generate a random Brief program
-pub fn arb_program(max_depth: usize) -> impl Strategy<Value = Program> {
+/// Generate a random Brief program (returns Vec<TopLevel>)
+pub fn arb_program(max_depth: usize) -> impl Strategy<Value = Vec<TopLevel>> {
     let max_depth = max_depth.min(MAX_DEPTH);
     (0usize..=5usize).prop_flat_map(move |num_items| {
         proptest::collection::vec(
             arb_top_level(max_depth),
             num_items..=num_items + 3,
-        ).prop_map(|items| Program {
-            items,
-            comments: vec![],
-            reactor_speed: None,
-            attrs: vec![],
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        })
+        )
     })
 }
 
@@ -69,18 +43,11 @@ pub fn arb_state_decl(max_depth: usize) -> impl Strategy<Value = TopLevel> {
         arb_identifier(),
         arb_type(),
         arb_expr(max_depth).prop_map(Some),
-    ).prop_map(|(name, ty, expr)| {
+    ).prop_map(|(name, ty, _expr)| {
         TopLevel::StateDecl(StateDecl {
             name,
             ty,
-            expr,
-            address: None,
-            bit_range: None,
-            is_override: false,
-            os_mode: false,
             span: None,
-            attrs: Vec::new(),
-        constraint: None,
         })
     })
 }
@@ -89,21 +56,12 @@ pub fn arb_state_decl(max_depth: usize) -> impl Strategy<Value = TopLevel> {
 pub fn arb_trigger_decl(_max_depth: usize) -> impl Strategy<Value = TopLevel> {
     (
         arb_identifier(),
-        arb_simple_type(),
-        any::<u64>(),
-    ).prop_map(|(name, ty, addr)| {
-        TopLevel::Trigger(TriggerDeclaration {
+    ).prop_map(|(name,)| {
+        TopLevel::Trigger(Trigger {
             name,
-            ty,
-            address: LinkRef::Explicit(addr),
-            bit_range: None,
-            stages: Vec::new(),
-            condition: None,
-            is_wake: true,
-            is_const: false,
+            instance: Expr::Decimal(0),
+            port: "default".to_string(),
             span: None,
-            annotations: vec![],
-            modifiers: vec![],
         })
     })
 }
@@ -121,22 +79,17 @@ pub fn arb_transaction(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             is_async: false,
             is_reactive,
             name,
+            type_params: Vec::new(),
             parameters: Vec::new(),
             contract,
             body,
-            reactor_speed: None,
             span: None,
-            is_lambda: false,
-            dependencies: Vec::new(),
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
-                 outputs: Vec::new(),
-         output_type: None,
+            outputs: Vec::new(),
+            output_type: None,
             derivation: None,
-     })
+        })
     })
 }
 
@@ -150,6 +103,7 @@ pub fn arb_contract(max_depth: usize) -> impl Strategy<Value = Contract> {
         Contract {
             pre_condition: pre,
             post_condition: post,
+            is_entry: false,
             watchdog: None,
             span: None,
         }
@@ -170,15 +124,13 @@ pub fn arb_definition(max_depth: usize) -> impl Strategy<Value = TopLevel> {
             parameters: Vec::new(),
             outputs: vec![return_type],
             output_type: None,
-            output_names: vec![None],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            body: vec![Statement::Term { values: vec![Some(body)], modifiers: vec![], swan_song: None }],
-            is_lambda: false,
+            body: vec![Statement::Term(Some(body))],
             annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
+            span: None,
         })
     })
 }
@@ -241,12 +193,12 @@ pub fn arb_statement_list(max_depth: usize) -> impl Strategy<Value = Vec<Stateme
 /// Generate a random statement
 pub fn arb_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
     let max_depth = max_depth.min(MAX_DEPTH);
-    
+
     if max_depth == 0 {
         // At max depth, only generate leaf statements
         return arb_term_statement(max_depth).boxed();
     }
-    
+
     prop_oneof![
         // Assignment: &var = expr;
         arb_assignment(max_depth),
@@ -260,11 +212,6 @@ pub fn arb_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
         arb_escape_statement(),
         // Expression: expr;
         arb_expr_statement(max_depth),
-        // DISABLED: alka/on_exit — not ready for use.
-        // Alka block: alka { ... };
-        // arb_alka_statement(),
-        // OnExit block pragma: #on_exit { ... };
-        // arb_on_exit_statement(max_depth),
     ].boxed()
 }
 
@@ -275,12 +222,7 @@ fn arb_assignment(max_depth: usize) -> impl Strategy<Value = Statement> {
         arb_identifier().prop_map(|name| Expr::Identifier(name)),
         arb_expr(max_depth),
     ).prop_map(|(lhs, expr)| {
-        Statement::Assign {
-            lhs,
-            expr,
-            timeout: None,
-            modifiers: vec![],
-        }
+        Statement::Assign(lhs, expr)
     })
 }
 
@@ -296,12 +238,7 @@ fn arb_let_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
             name,
             ty: Some(ty),
             expr,
-            address: None,
-            address_expr: None,
-            bit_range: None,
-            is_override: false,
             modifiers: vec![],
-            constraint: None,
         }
     })
 }
@@ -313,11 +250,7 @@ fn arb_guarded_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
         arb_expr(max_depth),
         proptest::collection::vec(arb_statement(max_depth.saturating_sub(1)), 1usize..=3usize),
     ).prop_map(|(condition, statements)| {
-        Statement::Guarded {
-            condition,
-            statements,
-            metadata: HashMap::new(),
-        }
+        Statement::Guarded(condition, statements)
     })
 }
 
@@ -325,36 +258,10 @@ fn arb_guarded_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
 fn arb_term_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
     let max_depth = max_depth.min(MAX_DEPTH);
     prop_oneof![
-        Just(Statement::Term { values: vec![], modifiers: vec![], swan_song: None }),
-        arb_expr(max_depth).prop_map(|e| Statement::Term { values: vec![Some(e)], modifiers: vec![], swan_song: None }),
+        Just(Statement::Term(None)),
+        arb_expr(max_depth).prop_map(|e| Statement::Term(Some(e))),
     ]
 }
-
-// DISABLED: alka/on_exit — not ready for use.
-// /// Generate a random alka block
-// fn arb_alka_statement() -> impl Strategy<Value = Statement> {
-//     prop_oneof![
-//         Just(Statement::Alka(AlkaBlock {
-//             dangerous: false,
-//             content: "FENCE ALL;".to_string(),
-//             span: None,
-//         })),
-//         Just(Statement::Alka(AlkaBlock {
-//             dangerous: true,
-//             content: "PULSE DOORBELL @ 0x90;".to_string(),
-//             span: None,
-//         })),
-//     ]
-// }
-// /// Generate a random #on_exit block pragma
-// fn arb_on_exit_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
-//     let max_depth = max_depth.min(MAX_DEPTH);
-//     let sub_depth = max_depth.saturating_sub(1);
-//     proptest::collection::vec(arb_statement(sub_depth), 1..3)
-//         .prop_map(|body| {
-//             Statement::OnExit { body, span: None }
-//         })
-// }
 
 /// Generate a random escape statement
 fn arb_escape_statement() -> impl Strategy<Value = Statement> {
@@ -373,11 +280,11 @@ fn arb_expr_statement(max_depth: usize) -> impl Strategy<Value = Statement> {
 /// Generate a random expression
 pub fn arb_expr(max_depth: usize) -> impl Strategy<Value = Expr> {
     let max_depth = max_depth.min(MAX_DEPTH);
-    
+
     if max_depth == 0 {
         return arb_leaf_expr().boxed();
     }
-    
+
     prop_oneof![
         // Leaf expressions
         arb_leaf_expr(),
@@ -387,10 +294,6 @@ pub fn arb_expr(max_depth: usize) -> impl Strategy<Value = Expr> {
         arb_unary_expr(max_depth),
         // Function calls
         arb_call_expr(max_depth),
-        // Prior state access
-        arb_identifier().prop_map(|name| Expr::PriorState(name)),
-        // Owned ref
-        arb_identifier().prop_map(|name| Expr::AddrOf(Box::new(Expr::Identifier(name)))),
     ].boxed()
 }
 
@@ -420,50 +323,23 @@ fn arb_binary_expr(max_depth: usize) -> impl Strategy<Value = Expr> {
     let sub_depth = max_depth.saturating_sub(1);
     (
         arb_expr(sub_depth),
-        arb_binary_op(),
+        arb_binary_op_kind(),
         arb_expr(sub_depth),
     ).prop_map(|(left, op, right)| {
-        match op {
-            BinOp::Add => Expr::Add(Box::new(left), Box::new(right)),
-            BinOp::Sub => Expr::Sub(Box::new(left), Box::new(right)),
-            BinOp::Mul => Expr::Mul(Box::new(left), Box::new(right)),
-            BinOp::Div => Expr::Div(Box::new(left), Box::new(right)),
-            BinOp::Mod => Expr::Mod(Box::new(left), Box::new(right)),
-            BinOp::Eq => Expr::Eq(Box::new(left), Box::new(right)),
-            BinOp::Ne => Expr::Ne(Box::new(left), Box::new(right)),
-            BinOp::Lt => Expr::Lt(Box::new(left), Box::new(right)),
-            BinOp::Le => Expr::Le(Box::new(left), Box::new(right)),
-            BinOp::Gt => Expr::Gt(Box::new(left), Box::new(right)),
-            BinOp::Ge => Expr::Ge(Box::new(left), Box::new(right)),
-            BinOp::And => Expr::And(Box::new(left), Box::new(right)),
-            BinOp::Or => Expr::Or(Box::new(left), Box::new(right)),
-            BinOp::BitAnd => Expr::BitAnd(Box::new(left), Box::new(right)),
-            BinOp::BitOr => Expr::BitOr(Box::new(left), Box::new(right)),
-            BinOp::BitXor => Expr::BitXor(Box::new(left), Box::new(right)),
-            BinOp::Shl => Expr::Shl(Box::new(left), Box::new(right)),
-            BinOp::Shr => Expr::Shr(Box::new(left), Box::new(right)),
-        }
+        Expr::BinaryOp(op, Box::new(left), Box::new(right))
     })
 }
 
-#[derive(Clone, Copy, Debug)]
-enum BinOp {
-    Add, Sub, Mul, Div, Mod,
-    Eq, Ne, Lt, Le, Gt, Ge,
-    And, Or,
-    BitAnd, BitOr, BitXor, Shl, Shr,
-}
-
-fn arb_binary_op() -> impl Strategy<Value = BinOp> {
+fn arb_binary_op_kind() -> impl Strategy<Value = BinaryOpKind> {
     prop_oneof![
-        Just(BinOp::Add), Just(BinOp::Sub), Just(BinOp::Mul),
-        Just(BinOp::Div), Just(BinOp::Mod),
-        Just(BinOp::Eq), Just(BinOp::Ne),
-        Just(BinOp::Lt), Just(BinOp::Le),
-        Just(BinOp::Gt), Just(BinOp::Ge),
-        Just(BinOp::And), Just(BinOp::Or),
-        Just(BinOp::BitAnd), Just(BinOp::BitOr),
-        Just(BinOp::BitXor), Just(BinOp::Shl), Just(BinOp::Shr),
+        Just(BinaryOpKind::Add), Just(BinaryOpKind::Sub), Just(BinaryOpKind::Mul),
+        Just(BinaryOpKind::Div), Just(BinaryOpKind::Mod),
+        Just(BinaryOpKind::Eq), Just(BinaryOpKind::Neq),
+        Just(BinaryOpKind::Lt), Just(BinaryOpKind::Le),
+        Just(BinaryOpKind::Gt), Just(BinaryOpKind::Ge),
+        Just(BinaryOpKind::And), Just(BinaryOpKind::Or),
+        Just(BinaryOpKind::BitAnd), Just(BinaryOpKind::BitOr),
+        Just(BinaryOpKind::BitXor), Just(BinaryOpKind::Shl), Just(BinaryOpKind::Shr),
     ]
 }
 
@@ -472,9 +348,9 @@ fn arb_unary_expr(max_depth: usize) -> impl Strategy<Value = Expr> {
     let max_depth = max_depth.min(MAX_DEPTH);
     let sub_depth = max_depth.saturating_sub(1);
     prop_oneof![
-        arb_expr(sub_depth).prop_map(|e| Expr::Not(Box::new(e))),
-        arb_expr(sub_depth).prop_map(|e| Expr::Neg(Box::new(e))),
-        arb_expr(sub_depth).prop_map(|e| Expr::BitNot(Box::new(e))),
+        arb_expr(sub_depth).prop_map(|e| Expr::UnaryOp(UnaryOpKind::Not, Box::new(e))),
+        arb_expr(sub_depth).prop_map(|e| Expr::UnaryOp(UnaryOpKind::Neg, Box::new(e))),
+        arb_expr(sub_depth).prop_map(|e| Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(e))),
     ]
 }
 
@@ -524,7 +400,6 @@ fn arb_string_literal() -> impl Strategy<Value = String> {
 pub fn arb_type() -> impl Strategy<Value = Type> {
     prop_oneof![
         Just(Type::int()),
-        Just(Type::uint()),
         Just(Type::float()),
         Just(Type::bool_()),
         Just(Type::string()),
@@ -537,7 +412,6 @@ pub fn arb_type() -> impl Strategy<Value = Type> {
             .prop_flat_map(|n| {
                 prop_oneof![
                     (Just(Type::int()), Just(n)).prop_map(|(t, n)| Type::Constrained(Box::new(t), BitRange::Any(n))),
-                    (Just(Type::uint()), Just(n)).prop_map(|(t, n)| Type::Constrained(Box::new(t), BitRange::Any(n))),
                 ]
             }),
     ]
@@ -547,7 +421,6 @@ pub fn arb_type() -> impl Strategy<Value = Type> {
 fn arb_simple_type() -> impl Strategy<Value = Type> {
     prop_oneof![
         Just(Type::int()),
-        Just(Type::uint()),
         Just(Type::float()),
         Just(Type::bool_()),
         Just(Type::string()),
@@ -598,14 +471,10 @@ mod tests {
 
     fn measure_expr_depth(expr: &Expr) -> usize {
         match expr {
-            Expr::BinaryOp(BinaryOpKind::Add, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Sub, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Mul, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Div, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Mod, Box::new(l), Box::new(r))
-            | Expr::BinaryOp(BinaryOpKind::Eq, Box::new(l), Box::new(r)) | Expr::Ne(l, r) | Expr::BinaryOp(BinaryOpKind::Lt, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Le, Box::new(l), Box::new(r))
-            | Expr::BinaryOp(BinaryOpKind::Gt, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Ge, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::And, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Or, Box::new(l), Box::new(r))
-            | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-            | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+            Expr::BinaryOp(_, l, r) => {
                 1 + measure_expr_depth(l).max(measure_expr_depth(r))
             }
-            Expr::UnaryOp(UnaryOpKind::Not, Box::new(e)) | Expr::UnaryOp(UnaryOpKind::Neg, Box::new(e)) | Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(e)) => 1 + measure_expr_depth(e),
+            Expr::UnaryOp(_, e) => 1 + measure_expr_depth(e),
             Expr::Call(_, args) => {
                 1 + args.iter().map(measure_expr_depth).max().unwrap_or(0)
             }
@@ -628,7 +497,7 @@ mod tests {
                 Statement::Assign(_, _)
                     | Statement::Let { .. }
                     | Statement::Guarded(_, _)
-                    | Statement::Term(None) | Statement::TermBang(None)
+                    | Statement::Term(_) | Statement::TermBang(_)
                     | Statement::Escape(_)
                     | Statement::Expression(_)
             );

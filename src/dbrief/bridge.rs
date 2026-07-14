@@ -385,7 +385,7 @@ mod tests {
                                     _ => panic!("Expected string entry key"),
                                 }
                                 match ev {
-                                    ast::Expr::Call(ref name_str, ref args) if name_str == "StructInstance" && args.len() == 2 => {
+                                    ast::Expr::Call(name_str, args) if name_str == "StructInstance" && args.len() == 2 => {
                                         let name = &args[0];
                                         assert!(matches!(name, ast::Expr::Identifier(n) if n == "Item"));
                                     }

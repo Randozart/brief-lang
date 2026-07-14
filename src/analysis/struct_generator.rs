@@ -143,22 +143,18 @@ mod tests {
 
     #[test]
     fn test_struct_generation() {
-        let mut memory = std::collections::HashMap::new();
-        memory.insert(
+        let mut memory_b = std::collections::BTreeMap::new();
+        memory_b.insert(
             "0x8000A000".to_string(),
-            MemoryMapping { size: 1, mem_type: "flipflop".to_string(), element_bits: 8 },
+            MemoryMapping { mem_type: "flipflop".to_string(), element_bits: 8 },
         );
-        memory.insert(
+        memory_b.insert(
             "0x8000A004".to_string(),
-            MemoryMapping { size: 1, mem_type: "flipflop".to_string(), element_bits: 8 },
+            MemoryMapping { mem_type: "flipflop".to_string(), element_bits: 8 },
         );
 
         let config = HardwareConfig {
-            project: crate::ast::ProjectConfig { name: "test".to_string(), version: "0.1.0".to_string() },
-            target: crate::ast::TargetConfig { fpga: "test".to_string(), clock_hz: 100_000_000, platform: None, synthesis: None },
-            interface: crate::ast::InterfaceConfig { name: "axi4-lite".to_string(), address_width: Some(18), data_width: Some(32), controller: None, situs: None },
-            memory,
-            io: None,
+            memory: memory_b,
         };
 
         let output = StructGenerator::generate(&config);
