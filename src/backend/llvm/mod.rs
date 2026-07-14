@@ -1456,7 +1456,7 @@ impl LlvmBackend {
                     }
                 }
                 TopLevel::Trigger(trg) => {
-                    // 2026-07-13: Convert new AST Trigger to TriggerDeclaration.
+                    // 2026-07-14: Convert new AST Trigger to TriggerDeclaration.
                     // The new Trigger struct has name/instance/port/span fields.
                     let trg_decl = crate::ast::TriggerDeclaration {
                         name: trg.name.clone(),
@@ -1465,7 +1465,8 @@ impl LlvmBackend {
                         bit_range: None,
                         stages: vec![],
                         condition: None,
-                        is_wake: false,
+                        // 2026-07-14: Triggers whose name starts with __wake are wake triggers
+                        is_wake: trg.name.starts_with("__wake") || trg.port == "__wake",
                         is_const: false,
                         span: trg.span.clone(),
                         annotations: vec![],
@@ -2267,8 +2268,19 @@ impl LlvmBackend {
                                 });
                             if let Some(tv) = total_val {
                                 // A000: pure counter fold (O(1) — single store, no loop)
+                                // 2026-07-14: Wrap in define i32 @main() so emitted IR is valid
                                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
+                                writeln!(out, "define i32 @main() local_unnamed_addr #9 {{").ok();
+                                writeln!(out, "entry:").ok();
+                                writeln!(out, "  %state = alloca %State, align 8").ok();
+                                self.emit_inline_init_stores(&mut out, "%state");
                                 self.emit_folded_pure_counter(&mut out, counter_idx, tv);
+                                if self.ctx.exit_condition.is_some() {
+                                    self.emit_exit_check(&mut out);
+                                    writeln!(out, ".end:").ok();
+                                }
+                                writeln!(out, "  ret i32 0").ok();
+                                writeln!(out, "}}").ok();
                                 true
                         } else {
                             // Adaptive dispatch: A005a (inline SSA) vs A005c (per-field phi).

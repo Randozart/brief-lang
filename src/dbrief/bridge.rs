@@ -54,9 +54,13 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
             } else {
                 for entry in &group.entries {
                     if let Some(ref key) = entry.key {
+                        let entry_expr = data_entry_to_expr(entry, group.schema_name.as_deref(), &doc.schemas);
                         data_map.push((
                             ast::Expr::Quoted(key.clone().into()),
-                            ast::Expr::Tuple(vec![]), // placeholder value
+                            ast::Expr::List(vec![
+                                ast::Expr::Quoted(key.clone().into()),
+                                entry_expr,
+                            ]),
                         ));
                     }
                 }
@@ -382,7 +386,7 @@ mod tests {
                         let key = &pairs[0];
                         let val = &pairs[1];
                         match key {
-                            ast::Expr::Quoted(s) => assert_eq!(s.as_slice(), b"Item"),
+                            ast::Expr::Quoted(s) => assert_eq!(s.as_slice(), b"rusty_key", "Expected first entry key"),
                             _ => panic!("Expected string key"),
                         }
                         match val {

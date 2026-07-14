@@ -52,7 +52,7 @@ pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
         dataflow_errors: Vec::new(),
         optimize_mode: optimize,
         transition_graph,
-        region_analyzer: RegionAnalyzer::empty(),
+        region_analyzer: RegionAnalyzer::analyze(items),
         dependency_graph,
     }
 }

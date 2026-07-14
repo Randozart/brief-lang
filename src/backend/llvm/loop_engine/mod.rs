@@ -205,34 +205,59 @@ impl LlvmBackend {
     // Main Loop Entry Points
     // ═══════════════════════════════════════════════════════════════
 
+    /// 2026-07-14: Emit an exit condition check at a loop header.
+    /// Evaluates exit_condition, truncates to i1, branches to .end on true.
+    pub(crate) fn emit_exit_check(&mut self, out: &mut String) {
+        let cond = match self.ctx.exit_condition.as_ref() {
+            Some(c) => c.clone(),
+            None => return,
+        };
+        let val = self.emit_exit_expr(out, &cond, "  ");
+        let t = self.fun.gen_reg();
+        writeln!(out, "  {} = trunc i64 {} to i1", t, val).ok();
+        writeln!(out, "  br i1 {}, label %.end, label %.continue", t).ok();
+        writeln!(out, ".continue:").ok();
+    }
+
     /// Emit the main() function using a memcpy round-trip + reactor_tick.
     /// Used for multi-txn reactive programs with wake triggers.
     /// The memcpy round-trip saves/restores all state fields so each
     /// reactor tick sees a consistent snapshot.
-    pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
-        writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
-        writeln!(out, "entry:").ok();
-        writeln!(out, "  %state = alloca %State, align 8").ok();
-        self.emit_inline_init_stores(out, "%state");
-        writeln!(out, "  %state_save = alloca %State, align 8").ok();
-        writeln!(out, "  br label %.loop").ok();
-        writeln!(out, ".loop:").ok();
-        let state_bytes = (self.ctx.field_types.len() * 8) as i64;
-        writeln!(out, "  call void @llvm.memcpy.p0p0i64(ptr %state_save, ptr %state, i64 {}, i1 false)",
-            state_bytes).ok();
-        writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
-        if has_wake_triggers {
-            writeln!(out, "  %any_active = call i1 @llvm.wake.any()").ok();
-            writeln!(out, "  br i1 %any_active, label %.loop, label %.end").ok();
-        } else {
-            writeln!(out, "  call void @__wait_for_trigger__()").ok();
-            writeln!(out, "  br label %.loop").ok();
-        }
-        writeln!(out, ".end:").ok();
-        writeln!(out, "  ret i32 0").ok();
-        writeln!(out, "}}").ok();
-        writeln!(out).ok();
+pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
+    writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
+    writeln!(out, "entry:").ok();
+    writeln!(out, "  %state = alloca %State, align 8").ok();
+    self.emit_inline_init_stores(out, "%state");
+    // 2026-07-14: Initialize thread pool for async programs
+    if self.has_async_txns && !self.is_lightweight_async {
+        writeln!(out, "  call void @__thread_pool_init__(i32 {}, ptr @thread_pool_fns)",
+            self.async_txn_names.len()).ok();
     }
+    self.emit_exit_check(out);
+    writeln!(out, "  %state_save = alloca %State, align 8").ok();
+    writeln!(out, "  br label %.loop").ok();
+    writeln!(out, ".loop:").ok();
+    let state_bytes = (self.ctx.field_types.len() * 8) as i64;
+    writeln!(out, "  call void @llvm.memcpy.p0p0i64(ptr %state_save, ptr %state, i64 {}, i1 false)",
+        state_bytes).ok();
+    // 2026-07-14: Use async phase for async programs
+    if self.has_async_txns && !self.is_lightweight_async {
+        self.emit_async_phase(out, "%state");
+    } else {
+        writeln!(out, "  call void @reactor_tick(ptr noalias nocapture %state)").ok();
+    }
+    if has_wake_triggers {
+        writeln!(out, "  %any_active = call i1 @llvm.wake.any()").ok();
+        writeln!(out, "  br i1 %any_active, label %.loop, label %.end").ok();
+    } else {
+        writeln!(out, "  call void @__wait_for_trigger__()").ok();
+        writeln!(out, "  br label %.loop").ok();
+    }
+    writeln!(out, ".end:").ok();
+    writeln!(out, "  ret i32 0").ok();
+    writeln!(out, "}}").ok();
+    writeln!(out).ok();
+}
 
     /// Pre-extract float fields into SSA registers before loop body.
     /// Allows LLVM SROA to handle float fields as scalars.
