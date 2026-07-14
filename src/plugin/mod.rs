@@ -1,30 +1,30 @@
 // ── Phase 7: Plugin System ─────────────────────────────────────────
 //
-// 2026-07-11: Compiler plugin system. Plugins are WASM (or native .so)
-// modules loaded at compile time that can observe/transform the program
-// at defined hook points in the compilation pipeline.
+// 2026-07-11: Compiler plugin system. Plugins can observe and transform
+// the program at defined hook points.
 //
 // Architecture:
-//   Plugin trait — the interface every plugin implements.
+//   Plugin trait — interface every plugin implements.
 //   PluginManager — loads, stores, and invokes plugins.
 //   PluginHook — enum identifying pipeline hook points.
+//   PluginAction — Continue or Abort with error.
 //
-// Future: WASM plugin loading via wasmtime (feature-gated).
+// External plugins are standalone executables that read/write BVIR
+// format via stdin/stdout. See docs/plans/2026-07-14-bvir-plugin-midend.md
 
 pub mod loader;
-
+pub mod runner;
 
 use crate::ast::TopLevel;
 use crate::type_universe::TypeUniverse;
 
 /// Hook points in the compilation pipeline where plugins can run.
-/// 2026-07-11: Phase 7.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginHook {
     /// After parsing and import resolution, before desugaring.
     AfterParse,
-    /// After type checking completes.
-    AfterTypeCheck,
+    /// After type resolution — universe is fully populated. Primary plugin hook.
+    AfterResolve,
     /// After analysis, before code generation.
     BeforeCodegen,
     /// After LLVM IR is generated.
@@ -32,7 +32,6 @@ pub enum PluginHook {
 }
 
 /// Result of running a plugin at a hook point.
-/// 2026-07-11: Phase 7.
 #[derive(Debug)]
 pub enum PluginAction {
     /// Continue compilation normally.
@@ -43,38 +42,42 @@ pub enum PluginAction {
 
 /// A single compiler plugin. Each plugin can observe and optionally
 /// transform the program at defined hook points.
-/// 2026-07-11: Phase 7.
 pub trait Plugin: std::fmt::Debug {
     /// Human-readable plugin name.
     fn name(&self) -> &str;
 
-    /// Called at the given hook point. Returns an action.
-    /// The default implementation does nothing.
+    /// Called at the given hook point. Gets mutable access to the AST
+    /// and the type universe. Default implementation does nothing.
     fn on_hook(
         &self,
         _hook: PluginHook,
         _program: &mut Vec<TopLevel>,
-        _universe: &TypeUniverse,
+        _universe: &mut TypeUniverse,
+    ) -> PluginAction {
+        PluginAction::Continue
+    }
+
+    /// Called when the backend has emitted the final IR string.
+    /// The plugin can inspect or modify the IR before it is written to disk.
+    fn on_ir_ready(
+        &self,
+        _ir: &mut String,
     ) -> PluginAction {
         PluginAction::Continue
     }
 }
 
 /// Manages plugin lifecycle: loading, hook dispatch, and cleanup.
-/// 2026-07-11: Phase 7.
 #[derive(Debug)]
 pub struct PluginManager {
-    /// Loaded plugins in registration order.
     plugins: Vec<Box<dyn Plugin>>,
 }
 
 impl PluginManager {
-    /// Create an empty plugin manager (no plugins loaded).
     pub fn new() -> Self {
         PluginManager { plugins: Vec::new() }
     }
 
-    /// Register a plugin. The plugin is appended to the hook chain.
     pub fn register(&mut self, plugin: Box<dyn Plugin>) {
         self.plugins.push(plugin);
     }
@@ -85,26 +88,32 @@ impl PluginManager {
         &self,
         hook: PluginHook,
         program: &mut Vec<TopLevel>,
-        universe: &TypeUniverse,
+        universe: &mut TypeUniverse,
     ) -> PluginAction {
         for plugin in &self.plugins {
             let action = plugin.on_hook(hook, program, universe);
-            match action {
-                PluginAction::Continue => {}
-                PluginAction::Abort(msg) => {
-                    return PluginAction::Abort(format!("[plugin:{}] {}", plugin.name(), msg));
-                }
+            if let PluginAction::Abort(msg) = action {
+                return PluginAction::Abort(format!("[plugin:{}] {}", plugin.name(), msg));
             }
         }
         PluginAction::Continue
     }
 
-    /// Number of loaded plugins.
+    /// Run all plugins at the AfterCodegen hook with the final IR.
+    pub fn run_ir_hooks(&self, ir: &mut String) -> PluginAction {
+        for plugin in &self.plugins {
+            let action = plugin.on_ir_ready(ir);
+            if let PluginAction::Abort(msg) = action {
+                return PluginAction::Abort(format!("[plugin:{}] {}", plugin.name(), msg));
+            }
+        }
+        PluginAction::Continue
+    }
+
     pub fn len(&self) -> usize {
         self.plugins.len()
     }
 
-    /// True if no plugins are loaded.
     pub fn is_empty(&self) -> bool {
         self.plugins.is_empty()
     }

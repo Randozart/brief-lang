@@ -3,31 +3,60 @@
 // Pipeline: lex -> parse -> typecheck -> codegen -> output.
 // 2026-07-14: Wire real LlvmBackend instead of stub codegen.
 //             Add binary compilation via clang. Add --out / --optimize-budget flags.
+// 2026-07-14: Plugin path — serialize to BVIR, run external plugins, deserialize.
 
 use std::path::Path;
 use std::process::Command;
 
 use brief_compiler::backend::llvm::LlvmBackend;
 use brief_compiler::lexer::Token;
+use brief_compiler::plugin::runner::run_plugin_chain;
+use brief_compiler::plugin::PluginManager;
 use brief_compiler::type_universe::TypeUniverse;
 
 /// Options parsed from the `brief-compiler build` CLI flags.
 pub struct BuildOptions {
-    /// Path to the source `.bv` file.
     pub file_path: String,
-    /// Emit `.ll` only; skip binary compilation (`--llvm`).
     pub emit_ir_only: bool,
-    /// Output directory (`--out <dir>`). `None` → same directory as input file.
     pub out_dir: Option<String>,
-    /// Max simulation steps before runtime fallback (`--optimize-budget <N>`).
     pub optimize_budget: u64,
-    /// Enable GPU offload codegen (`--gpu-offload`).
     pub gpu_offload: bool,
+    /// Paths to external plugin executables.
+    pub plugin_paths: Vec<String>,
+    /// Write .bvir files before and after plugins.
+    pub emit_bvir: bool,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
-    let (items, universe) = parse_and_check(file_path, source)?;
+    let (mut items, mut universe) = parse_and_check(file_path, source)?;
+
+    // Plugin path: serialize to BVIR, run plugins, deserialize.
+    let has_plugins = !opts.plugin_paths.is_empty();
+    if has_plugins || opts.emit_bvir {
+        let bvir_before = brief_compiler::bvir::to_bvir(&items, &universe);
+        if opts.emit_bvir {
+            let path = format!("{}.bvir.before", file_path.strip_suffix(".bv").unwrap_or(file_path));
+            std::fs::write(&path, &bvir_before)
+                .map_err(|e| format!("cannot write '{}': {}", path, e))?;
+        }
+
+        let bvir_after = if has_plugins {
+            run_plugin_chain(&bvir_before, &opts.plugin_paths)?
+        } else {
+            bvir_before.clone()
+        };
+
+        if opts.emit_bvir {
+            let path = format!("{}.bvir.after", file_path.strip_suffix(".bv").unwrap_or(file_path));
+            std::fs::write(&path, &bvir_after)
+                .map_err(|e| format!("cannot write '{}': {}", path, e))?;
+        }
+
+        let (restored_items, restored_universe) = brief_compiler::bvir::from_bvir(&bvir_after)?;
+        items = restored_items;
+        universe = restored_universe;
+    }
 
     let mut backend = LlvmBackend::new()
         .with_optimize_budget(opts.optimize_budget)
@@ -37,7 +66,16 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         backend = backend.with_gpu_offload(true);
     }
 
-    let llvm_ir = backend.generate(&items, None);
+    let mut llvm_ir = backend.generate(&items, None);
+
+    // AfterCodegen plugin hook — run before writing IR to disk.
+    if has_plugins {
+        let pm = PluginManager::new();
+        let action = pm.run_ir_hooks(&mut llvm_ir);
+        if let brief_compiler::plugin::PluginAction::Abort(msg) = action {
+            return Err(msg);
+        }
+    }
 
     let ll_path = determine_out_path(file_path, opts.out_dir.as_deref())?;
 
@@ -46,8 +84,6 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     println!("wrote {}", ll_path);
 
     if !opts.emit_ir_only {
-        // 2026-07-14: Compile .ll to binary using clang.
-        // The `.ll` file is kept for debugging.
         let binary_path = ll_path.strip_suffix(".ll").unwrap_or(&ll_path);
         compile_to_binary(&ll_path, binary_path)?;
     }

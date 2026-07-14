@@ -50,6 +50,8 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv>              Compile a Brief source file", name);
     eprintln!("  {} build <file.bv> --llvm        Emit LLVM IR only, no binary", name);
     eprintln!("  {} build <file.bv> --out <dir>   Set output directory", name);
+    eprintln!("  {} build <file.bv> --plugin <exe> Run external plugin", name);
+    eprintln!("  {} build <file.bv> --emit-bvir    Write .bvir IR files", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
@@ -65,12 +67,16 @@ fn print_usage(program: &str) {
 ///   --out <dir>             output directory
 ///   --optimize-budget <N>   simulation budget (default 256)
 ///   --gpu-offload           enable GPU offload
+///   --plugin <path>         add a plugin executable to the chain
+///   --emit-bvir             write .bvir files before/after plugins
 fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut file_path: Option<String> = None;
     let mut emit_ir_only = false;
     let mut out_dir: Option<String> = None;
     let mut optimize_budget = 256u64;
     let mut gpu_offload = false;
+    let mut plugin_paths = Vec::new();
+    let mut emit_bvir = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -90,6 +96,13 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             optimize_budget = val.parse()
                 .map_err(|_| format!("invalid --optimize-budget value: '{}'", val))?;
             i += 2;
+        } else if arg == "--plugin" {
+            let path = args.get(i + 1).ok_or("--plugin requires a path argument")?;
+            plugin_paths.push(path.clone());
+            i += 2;
+        } else if arg == "--emit-bvir" {
+            emit_bvir = true;
+            i += 1;
         } else if arg.starts_with('-') {
             return Err(format!("unknown flag: {}", arg));
         } else if file_path.is_some() {
@@ -107,6 +120,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         out_dir,
         optimize_budget,
         gpu_offload,
+        plugin_paths,
+        emit_bvir,
     })
 }
 
