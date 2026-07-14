@@ -13,12 +13,12 @@
 
 
 let ops: Int = 0;
-let N: Int = getenv_int#("BOUND");
+let N: Int = GetEnvInt#("BOUND");
 
 rct txn work [ops < N][ops == N] {
     ops = ops + 1;
     [ops % 5000000 == 0] {
-        print_int#(ops);
+        PrintInt#(ops);
     };
     term;
 };

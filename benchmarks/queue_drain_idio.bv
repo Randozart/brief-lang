@@ -11,7 +11,7 @@
 // against the symmetric variant's C reference.
 
 
-let N: Int = getenv_int#("BOUND");
+let N: Int = GetEnvInt#("BOUND");
 let count: Int = 0;
 let queue: List<Int> = [0];
 
@@ -21,7 +21,7 @@ rct txn work [count < N][count == N] {
     &count = count + 1;
 
     [count % 5000000 == 0] {
-        print_int#(count);
+        PrintInt#(count);
     };
 
     term;

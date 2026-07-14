@@ -7,7 +7,7 @@
 //       --out benchmarks --optimize-budget 256
 
 
-let bound: Int = getenv_int#("BOUND");
+let bound: Int = GetEnvInt#("BOUND");
 let count: Int = 0;
 
 // State vector (3 floats)
@@ -96,7 +96,7 @@ rct txn propagate [
         let energy: Float = x0 * x0 + p00 + p11 + p22;
         let ei: Float = x1 * x1 + p01 + p12;
         let ej: Float = x2 * x2 + p02 + p21;
-        print_float#(energy + ei + ej);
+        PrintFloat#(energy + ei + ej);
     };
 
     term;

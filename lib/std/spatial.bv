@@ -19,25 +19,25 @@
 // Copies N bytes from src to dst. Non-overlapping.
 // Returns true on success. Emits @llvm.memcpy.
 defn block_copy(dst: Ptr, src: Ptr, n: Int) -> Bool {
-    term __memcpy#(dst, src, n);
+    term Memcpy#(dst, src, n);
 };
 
 // ── Block compare ────────────────────────────────────────────
 // Compares N bytes. Returns 0 if equal.
 // Emits @llvm.memcmp.
 defn block_compare(a: Ptr, b: Ptr, n: Int) -> Int {
-    term __memcmp#(a, b, n);
+    term Memcmp#(a, b, n);
 };
 
 // ── Block fill ───────────────────────────────────────────────
 // Sets N bytes to val. Returns true on success.
 // Emits @llvm.memset.
 defn block_fill(ptr: Ptr, val: Int, n: Int) -> Bool {
-    term __memset#(ptr, val, n);
+    term Memset#(ptr, val, n);
 };
 
 // ── Block hash ───────────────────────────────────────────────
 // Computes FNV-1a hash of N bytes. Returns 64-bit hash.
 defn block_hash(ptr: Ptr, n: Int) -> Int {
-    term __hash#(ptr, n);
+    term Hash#(ptr, n);
 };

@@ -2074,26 +2074,34 @@ this.
 
 - **Date**: 2026-07-14
 - **Issue**: LLVM backend emits `fadd i64` (float add with integer operands) for
-  some integer addition operations in `ring_buffer.bv`. Clang rejects this as
-  invalid IR.
+  integer addition, `br i1` with `i8` bool operand, and `call @print_int(%x)` without
+  argument types — three layers of type bugs blocking all benchmark compilation.
 
-**Root Cause**: `emit_binary_op` in `src/backend/llvm/emit_expr.rs` selects the
-instruction mnemonic based on the expression type without checking whether the
-actual operand types are float or integer. When a `BinaryOp` with type `i64` but
-no explicit float marker is emitted, it still uses `fadd` instead of `add`.
+**Root Cause**: Three independent bugs in the Phase 7 backend refactoring:
+  1. `emit_binary_op` Add/Sub/Mul unconditionally emit `f`-prefixed instructions
+     (`fadd i64` is invalid IR). `Div` was already correct — three arms missed.
+  2. `emit_stmt.rs` hardcoded `"i64"` on all store/return instructions.
+     `emit_user_call` dropped argument types on `call` instructions.
+  3. Bool registers are `i8` (from `lower_type("Bool") → "i8"`) but `br i1` expects `i1`.
 
-**Impact**: Benchmarks with integer arithmetic (ring_buffer, print_loop, etc.)
-fail to compile to binary with `clang: error: invalid operand type for instruction`.
+**Impact**: All benchmarks with integer arithmetic or function calls failed.
 
-**Workaround**: Use `--llvm` to emit IR only, then manually fix the `fadd`/`fsub`/
-`fmul`/`fdiv` instructions to `add`/`sub`/`mul`/`sdiv` before running `clang`.
+**Fix**: 7-part fix across `emit_expr.rs` and `emit_stmt.rs`:
+  1. Add/Sub/Mul: `if is_float { fadd/fsub/fmul } else { add/sub/mul i64 }` guard
+  2. `Neg`: `fsub double -0.0` for float operands
+  3. Store instructions: `lower_type(&val.ty)` instead of hardcoded `"i64"`
+  4. Return instructions: `lower_type(&reg.ty)` instead of hardcoded `"i64"`
+  5. `emit_user_call`/`emit_external_call`: typed argument list (`call @fn(i64 %x)`)
+  6. Guard/If: `trunc i8 %cond to i1` before `br i1`
+  7. Guard/If labels: fixed `%`-in-label-name bug (labels used `gen_reg()` which
+     returns `%tN` — labels must be bare identifiers without `%`)
 
-**Fix**: Applied `if is_float { fadd } else { add i64 }` guard to Add/Sub/Mul
-arms in `emit_binary_op` (they unconditionally emitted `f`-prefixed instructions).
-Identical to the `Div` arm which already had the correct guard. Additionally
-fixed `emit_unary_op::Neg` (float `fsub -0.0` path), `emit_stmt.rs` store/return
-instructions (hardcoded `"i64"` → `lower_type(&val.ty)`), and `emit_user_call`
-(lookup `defn_return_types` for real return type). All five fixes in one commit.
+**Also**: Renamed all `snake_case#` intrinsic calls across the entire codebase
+(benchmarks, std lib, test fixtures) to PascalCase (`PrintInt#`, `GetEnvInt#`,
+`Sqrt#`, etc.). Removed the snake_case→PascalCase normalization fallback from
+`get_intrinsic_signature()` — it was a band-aid that only fixed the typechecker
+but not the backend or interpreter.
 
-**Files**: `src/backend/llvm/emit_expr.rs`, `src/backend/llvm/emit_stmt.rs`  
+**Files**: `src/backend/llvm/emit_expr.rs`, `src/backend/llvm/emit_stmt.rs`,
+`src/backend/llvm/intrinsics.rs`, `src/intrinsic_signatures.rs`, and ~50 `.bv` files
 **Plan**: `docs/plans/2026-07-14-fix-backend-type-bugs.md`

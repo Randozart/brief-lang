@@ -36,15 +36,15 @@ frgn __wait_for_event() -> Void ;
 // Uses transparent FFI — no compiler magic.
 
 defn print(msg: String) -> Bool [msg != ""][term == true] {
-    term print#(msg);
+    term Print#(msg);
 };
 
 defn println(msg: String) -> Bool [msg != ""][term == true] {
-    term print#(msg + "\n");
+    term Print#(msg + "\n");
 };
 
 defn print_int(n: Int) -> Bool [[term == true] {
-    term print_int#(n);
+    term PrintInt#(n);
 };
 
 defn input() -> String [true][term :> Size >= 0] {
@@ -109,16 +109,16 @@ defn consume() -> Bool {
 
 // ===== FILE IO (Intrinsics) =====
 // Replaced: frgn __read_file/__write_file (TOML-based) with
-// read_file#/write_file# intrinsics. The remaining file operations
+// ReadFile#/WriteFile# intrinsics. The remaining file operations
 // (file_exists, delete_file, etc.) keep their frgn declarations
 // as no intrinsic equivalent exists yet.
 
 defn read_file_res(path: String) -> Result<String, String> {
-    term read_file#(path);
+    term ReadFile#(path);
 };
 
 defn write_file_res(path: String, content: String) -> Result<Void, String> {
-    term write_file#(path, content);
+    term WriteFile#(path, content);
 };
 
 frgn __file_exists(path: String) -> Result<Bool, String> from "std::fs::metadata";

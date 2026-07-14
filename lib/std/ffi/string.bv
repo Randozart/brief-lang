@@ -28,7 +28,7 @@ frgn __quote(s: String) -> Result<String, StringError>;
 frgn __unquote(s: String) -> Result<String, StringError>;
 // Encoding
 defn bytes(s: String) -> Result<List<Int>, StringError> {
-    term Ok(str_bytes#(s));
+    term Ok(StrBytes#(s));
 };
 frgn __from_bytes(list: List<Int>) -> Result<String, StringError>;
 // Complex replacement

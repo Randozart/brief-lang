@@ -3,7 +3,7 @@
 
 
 let count: Int = 0;
-let N: Int = getenv_int#("BOUND");
+let N: Int = GetEnvInt#("BOUND");
 let seed: Int = 42;
 const IM: Int = 139968;
 const IA: Int = 3877;
@@ -15,7 +15,7 @@ const IC: Int = 29573;
 // expression so the LCG advances correctly each tick.
 rct txn fasta [count < N][count == N] {
     seed = (seed * IA + IC) % IM;
-    putchar#(seed % 26 + 97);
+    Putchar#(seed % 26 + 97);
     count = count + 1;
     term;
 };

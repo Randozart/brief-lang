@@ -15,39 +15,7 @@ pub struct Signature {
 /// Look up the signature of a # intrinsic by name.
 /// Returns None if the name is unknown (it's either a user function or an error).
 pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
-    // Direct lookup first.
-    let result = lookup_exact(name);
-    if result.is_some() {
-        return result;
-    }
-    // 2026-07-14: Fallback — benchmarks use snake_case (print_int#) but
-    // intrinsics are registered as PascalCase (PrintInt#). Normalize and retry.
-    // Only attempt when the name contains underscores (avoid pointless retries).
-    if name.contains('_') && name.ends_with('#') {
-        let normalized = snake_to_pascal(name);
-        if normalized != name {
-            return lookup_exact(&normalized);
-        }
-    }
-    None
-}
-
-/// Convert snake_case to PascalCase. Used for intrinsic name normalization.
-/// Example: "print_int#" -> "PrintInt#".
-fn snake_to_pascal(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut capitalize = true;
-    for c in s.chars() {
-        if c == '_' {
-            capitalize = true;
-        } else if capitalize {
-            result.push(c.to_ascii_uppercase());
-            capitalize = false;
-        } else {
-            result.push(c);
-        }
-    }
-    result
+    lookup_exact(name)
 }
 
 /// Exact match on PascalCase intrinsic names. Extracted from

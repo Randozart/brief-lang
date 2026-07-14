@@ -28,19 +28,19 @@
 
 let a: Int = 0;
 let b: Int = 0;
-let N: Int = getenv_int#("BOUND");
+let N: Int = GetEnvInt#("BOUND");
 
 rct async txn inc_a [a < N][a == N] {
     a = a + 1;
     [a % 5000000 == 0] {
-        print_int#(a);
+        PrintInt#(a);
     };
     term;
 };
 rct async txn inc_b [b < N][b == N] {
     b = b + 1;
     [b % 5000000 == 0] {
-        print_int#(b);
+        PrintInt#(b);
     };
     term;
 };

@@ -3,7 +3,7 @@
 // Symmetric with C reference: saves p0 before rotation for checksum.
 
 let count: Int = 0;
-let N: Int = getenv_int#("BOUND");
+let N: Int = GetEnvInt#("BOUND");
 let seed: Int = 42;
 let max_flips: Int = 0;
 let checksum: Int = 0;
@@ -37,6 +37,6 @@ rct txn fan [count < N][count == N] {
     p6 = p7;  p7 = p8;  p8 = p9;  p9 = p10;  p10 = p11;  p11 = saved;
     checksum = nchecksum;  max_flips = nmax;
     count = count + 1;
-    [count == N] { term! -> print_int#(checksum); };
+    [count == N] { term! -> PrintInt#(checksum); };
     term;
 };

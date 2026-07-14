@@ -29,8 +29,8 @@
 // for it inside the handler.
 //
 // Terminal raw mode must be enabled by the application before use:
-//   tty_raw_mode#(true);  // enable
-//   tty_raw_mode#(false); // disable on exit
+//   TtyRawMode#(true);  // enable
+//   TtyRawMode#(false); // disable on exit
 
 cell! Console -> line: String, line_id: Int {
     line: String = "";

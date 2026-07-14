@@ -4,7 +4,7 @@
 //
 // RingBuffer<T> <: List<T> — same interface as List: <- for push, <- for pop.
 // The InsertAt/ExtractFrom strategy bindings redirect these operations to
-// the ring_push#/ring_pop# intrinsics, which the LLVM backend inlines as
+// the RingPush#/RingPop# intrinsics, which the LLVM backend inlines as
 // head/tail arithmetic (~10-15 instructions vs ~40+ for arena List).
 //
 // Capacity is fixed at init time (power of 2). The mask = capacity - 1

@@ -26,7 +26,7 @@ rct txn compute [count < total][count == total] {
     acc_b = acc_b + count;
     count = count + 1;
     [count == total] {
-        term! -> print_int#(acc_a + acc_b);
+        term! -> PrintInt#(acc_a + acc_b);
     };
     term;
 };

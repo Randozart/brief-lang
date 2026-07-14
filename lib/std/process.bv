@@ -5,47 +5,47 @@ import "std/result";
 
 // ===== PROCESS SPAWNING (Intrinsics) =====
 // Replaced: frgn __spawn/__spawn_with_output (TOML-based) with
-// spawn#/spawn_with_output# intrinsics. Remaining frgns (env_var,
+// Spawn#/SpawnWithOutput# intrinsics. Remaining frgns (env_var,
 // set_env_var, etc.) have no intrinsic equivalent yet.
 
 defn spawn_res(command: String, args: List<String>) -> Result<Int, String> {
-    term spawn#(command, args);
+    term Spawn#(command, args);
 };
 
 defn spawn_with_output_res(command: String, args: List<String>) -> Result<String, String> {
-    term spawn_with_output#(command, args);
+    term SpawnWithOutput#(command, args);
 };
 
-// Replaced: frgn __env_var with getenv# intrinsic
+// Replaced: frgn __env_var with Getenv# intrinsic
 defn env_var_res(name: String) -> Result<String, String> {
-    let val = getenv#(name);
+    let val = Getenv#(name);
     [val != ""] {
         term Ok(val);
     };
     term Err("env var not found");
 };
 
-// Replaced: frgn __set_env_var with setenv# intrinsic
+// Replaced: frgn __set_env_var with Setenv# intrinsic
 defn set_env_var_res(name: String, value: String) -> Result<Void, String> {
-    let ret = setenv#(name, value);
+    let ret = Setenv#(name, value);
     [ret == 0] {
         term Ok(void);
     };
     term Err("setenv failed");
 };
 
-// Replaced: frgn __current_dir with getcwd# intrinsic
+// Replaced: frgn __current_dir with Getcwd# intrinsic
 defn current_dir_res() -> Result<String, String> {
-    let dir = getcwd#();
+    let dir = Getcwd#();
     [dir != ""] {
         term Ok(dir);
     };
     term Err("getcwd failed");
 };
 
-// Replaced: frgn __set_current_dir with chdir# intrinsic
+// Replaced: frgn __set_current_dir with Chdir# intrinsic
 defn set_current_dir_res(path: String) -> Result<Void, String> {
-    let ret = chdir#(path);
+    let ret = Chdir#(path);
     [ret == 0] {
         term Ok(void);
     };

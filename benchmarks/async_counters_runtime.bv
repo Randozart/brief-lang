@@ -8,21 +8,21 @@
 //       --out benchmarks --optimize-budget 256
 
 
-let bound: Int = getenv_int#("BOUND");
+let bound: Int = GetEnvInt#("BOUND");
 let a: Int = 0;
 let b: Int = 0;
 
 rct txn inc_a [bound > 0 && a < bound][a == bound] {
     a = a + 1;
     [a % 5000000 == 0] {
-        print_int#(a);
+        PrintInt#(a);
     };
     term;
 };
 rct txn inc_b [bound > 0 && b < bound][b == bound] {
     b = b + 1;
     [b % 5000000 == 0] {
-        print_int#(b);
+        PrintInt#(b);
     };
     term;
 };

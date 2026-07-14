@@ -17,30 +17,30 @@
 /// Global work-item ID for the given dimension (0, 1, or 2).
 /// Returns a unique thread identifier within the entire grid.
 defn get_global_id(dim: Int) -> Int {
-    term get_global_id#(dim);
+    term GetGlobalId#(dim);
 };
 
 /// Local work-item ID within the workgroup for the given dimension.
 /// Returns the thread's position within its workgroup (0..block_size-1).
 defn get_local_id(dim: Int) -> Int {
-    term get_local_id#(dim);
+    term GetLocalId#(dim);
 };
 
 /// Workgroup ID for the given dimension.
 /// Returns which workgroup this thread belongs to.
 defn get_group_id(dim: Int) -> Int {
-    term get_group_id#(dim);
+    term GetGroupId#(dim);
 };
 
 /// Number of workgroups in the given dimension.
 /// Returns the total grid size for this dimension.
 defn get_num_groups(dim: Int) -> Int {
-    term get_num_groups#(dim);
+    term GetNumGroups#(dim);
 };
 
 /// Workgroup-level barrier.
 /// Synchronizes all threads in the workgroup. All threads must
 /// reach the barrier before any thread continues past it.
 defn barrier() -> Bool {
-    term barrier#();
+    term Barrier#();
 };

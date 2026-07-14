@@ -28,7 +28,7 @@ frgn __quote(s: String) -> Result<String, StringError>;
 frgn __unquote(s: String) -> Result<String, StringError>;
 // Encoding
 defn bytes(s: String) -> Result<List<Int>, StringError> {
-    term Ok(str_bytes#(s));
+    term Ok(StrBytes#(s));
 };
 frgn __from_bytes(list: List<Int>) -> Result<String, StringError>;
 // Complex replacement
@@ -266,7 +266,7 @@ defn repeat(s: String, count: Int) [count >= 0][term :> Size == s :> Size * coun
 
 // Type conversions
 defn to_string(n: Int) [true][term :> Size >= 0] -> String {
-  term int_to_str#(n);
+  term IntToStr#(n);
 };
 
 defn to_float(s: String) [true][term >= 0.0 || term < 0.0] -> Float {

@@ -12,7 +12,7 @@ inop! atomic_load(ptr: Ptr<Int>) -> Int
     %p = inttoptr i64 %ptr to ptr;
     %v = load atomic i64, ptr %p acquire, align 8
     term %v;
-} fallback volatile_load#(ptr);
+} fallback VolatileLoad#(ptr);
 
 inop! atomic_store(ptr: Ptr<Int>, val: Int) -> Int
     [ptr as Int >= 0][true]
@@ -20,7 +20,7 @@ inop! atomic_store(ptr: Ptr<Int>, val: Int) -> Int
     %p = inttoptr i64 %ptr to ptr;
     store atomic i64 %val, ptr %p release, align 8
     term %val;
-} fallback volatile_store#(ptr, val);
+} fallback VolatileStore#(ptr, val);
 
 inop! atomic_cas(ptr: Ptr<Int>, expected: Int, desired: Int) -> Int
     [ptr as Int >= 0][true]

@@ -33,5 +33,5 @@ sig #out OUT__exit() -> Bool from exit;
 // ===== CONVENIENCE WRAPPERS =====
 
 defn OUT__println(msg: String) -> Bool [true][term == true] {
-    term print#(msg + "\n");
+    term Print#(msg + "\n");
 };

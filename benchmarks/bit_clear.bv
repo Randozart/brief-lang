@@ -23,7 +23,7 @@ rct txn clear_bit [reg != 0][reg == 0] {
     let next_reg = reg & (reg - 1);
 
     [next_reg % 100000 == 0] {
-        print_int#(next_reg);
+        PrintInt#(next_reg);
     };
 
     reg = next_reg;

@@ -7,7 +7,7 @@
 //
 // WARNING: This is an EDUCATIONAL file. It shows the "why" and
 // "how" of type derivation, not production code. Some patterns
-// reference intrinsics (strlen#, fadd#) that may be planned.
+// reference intrinsics (Strlen#, Fadd#) that may be planned.
 // ─────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────
@@ -47,7 +47,7 @@ type Int <: Bits @/0..63 {
 // ─────────────────────────────────────────────────────────────
 // 2. Float — IEEE 754 single-precision
 //
-// Compiled via fadd#/fsub#/fmul#/fdiv# intrinsics.
+// Compiled via Fadd#/Fsub#/Fmul#/Fdiv# intrinsics.
 // ─────────────────────────────────────────────────────────────
 
 type Float <: Bits @/0..31 {
@@ -55,14 +55,14 @@ type Float <: Bits @/0..31 {
     alignment <~ 8;
 
     // Arithmetic via #-intrinsics (compiler provides these):
-    Add(rhs)  = _ :> fadd#(rhs);
-    Sub(rhs)  = _ :> fsub#(rhs);
-    Mul(rhs)  = _ :> fmul#(rhs);
-    Div(rhs)  = _ :> fdiv#(rhs);
-    Neg       <~ _:> fneg#;
-    Eq(rhs)   = _ :> fcmp_oq#(rhs);
-    Lt(rhs)   = _ :> fcmp_olt#(rhs);
-    Gt(rhs)   = _ :> fcmp_ogt#(rhs);
+    Add(rhs)  = _ :> Fadd#(rhs);
+    Sub(rhs)  = _ :> Fsub#(rhs);
+    Mul(rhs)  = _ :> Fmul#(rhs);
+    Div(rhs)  = _ :> Fdiv#(rhs);
+    Neg       <~ _:> Fneg#;
+    Eq(rhs)   = _ :> FcmpOq#(rhs);
+    Lt(rhs)   = _ :> FcmpOlt#(rhs);
+    Gt(rhs)   = _ :> FcmpOgt#(rhs);
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ type List <: Bits @/0..191 {
 
     Size         <~ _ :> Len;
     IsEmpty      <~ _ :> Size == 0;
-    At(i)        = _ :> Ptr :> load_elem#(i);
+    At(i)        = _ :> Ptr :> LoadElem#(i);
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -133,10 +133,10 @@ type HashMap_KV <: Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
     bytes      <~ BUCKETS * ENTRY_SIZE as Int;
     fixedsize  <~ true;
 
-    // Uses a _lookup# intrinsic for O(1) hashed access
-    Contains(k)  = _ :> _lookup#(k) > -1;
-    Get(k)       = _ :> _lookup#(k) :> At;
-    Insert(k,v)  = _ :> _insert#(k, v);
+    // Uses a Lookup# intrinsic for O(1) hashed access
+    Contains(k)  = _ :> Lookup#(k) > -1;
+    Get(k)       = _ :> Lookup#(k) :> At;
+    Insert(k,v)  = _ :> Insert#(k, v);
 };
 
 // View B: List<(K,V)>-inherited
@@ -145,8 +145,8 @@ type HashMap_KV <: Bits @/0..(BUCKETS * ENTRY_SIZE * 8) {
 
 type HashMap <: List {
     elementtype <~ (K, V);
-    Contains(k)  = _ :> _lookup#(k) > -1;
-    Get(k)       = _ :> _lookup#(k) :> At;
+    Contains(k)  = _ :> Lookup#(k) > -1;
+    Get(k)       = _ :> Lookup#(k) :> At;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -174,9 +174,9 @@ type Matrix4x4 <: Bits @/0..(16 * 8 - 1) {
     At(col, row) = _ @/((col * 4 + row) * 32)..((col * 4 + row) * 32 + 31);
 
     // Custom projections
-    Transpose    <~ _ :> _transpose_matrix#;
-    Determinant  <~ _ :> _det_matrix#;
-    Multiply(m)  <~ _ :> _mul_matrix#(m);
+    Transpose    <~ _ :> TransposeMatrix#;
+    Determinant  <~ _ :> DetMatrix#;
+    Multiply(m)  <~ _ :> MulMatrix#(m);
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -216,8 +216,8 @@ type Counter <: Bits @/0..7 {
     elementtype  <~ "Int";        // Ignored by CBV
     allowindex   <~ false;        // Ignored by CBV — no index instr in HW
 
-    Incr         <~ _ :> _count_inc#;
-    Reset        <~ _ :> _count_rst#;
+    Incr         <~ _ :> CountInc#;
+    Reset        <~ _ :> CountRst#;
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -234,7 +234,7 @@ type CString <: Bits @/0..63 {
     At(i)     = _ :> Ptr :> load_u8#(i);
 
     // O(N) cost: strlen only when Size is explicitly queried
-    Size      <~ _ :> Ptr :> strlen#;
+    Size      <~ _ :> Ptr :> Strlen#;
 
     IsEmpty   <~ _ :> Ptr :> load_u8#(0) == '\0';
 };

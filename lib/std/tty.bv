@@ -18,15 +18,15 @@
 import "link/brief_rt.c";
 
 defn tty_raw_mode_inner(enable: Int) -> Int {
-    term tty_raw_mode#(enable);
+    term TtyRawMode#(enable);
 };
 
 defn tty_size_inner() -> Int {
-    term tty_size#();
+    term TtySize#();
 };
 
 defn tty_read_key_inner() -> Int {
-    term tty_read_key#();
+    term TtyReadKey#();
 };
 
 defn raw_mode(enable: Bool) -> Bool {
