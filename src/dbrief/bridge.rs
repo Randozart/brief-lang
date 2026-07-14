@@ -46,10 +46,20 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
                     .map(|s| s.fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
                     .unwrap_or_else(|| field_names.clone());
 
-        data_map.push((
-            ast::Expr::Quoted(group_name.into()),
-            ast::Expr::Tuple(vec![]), // lazy DbvlTable — placeholder
-        ));
+            data_map.push((
+                ast::Expr::Quoted(group_name.into()),
+                ast::Expr::Tuple(vec![]), // lazy DbvlTable — placeholder
+            ));
+            // 2026-07-14: Non-lazy path — convert data entries directly
+            } else {
+                for entry in &group.entries {
+                    if let Some(ref key) = entry.key {
+                        data_map.push((
+                            ast::Expr::Quoted(key.clone().into()),
+                            ast::Expr::Tuple(vec![]), // placeholder value
+                        ));
+                    }
+                }
             }
         }
 
@@ -438,7 +448,7 @@ mod tests {
         map.insert("a".into(), DataValue::Int(1));
         let dv = DataValue::Map(map);
         match data_value_to_expr(&dv) {
-            ast::Expr::List(pairs) => assert_eq!(pairs.len(), 1),
+            ast::Expr::List(pairs) => assert_eq!(pairs.len(), 2),
             _ => panic!("expected map"),
         }
     }

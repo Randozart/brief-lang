@@ -79,7 +79,8 @@ mod tests {
     fn test_simple_function() {
         let input = "defn main() -> Int\n    term 0\n";
         let result = LayoutPreprocessor::process(input).unwrap();
-        assert!(result.contains("defn main() -> Int\n{"));
+        // 2026-07-14: Semicolons are added to all non-block lines
+        assert!(result.contains("defn main() -> Int;\n{"));
         assert!(result.contains("term 0;"));
         assert!(result.contains("}"));
     }

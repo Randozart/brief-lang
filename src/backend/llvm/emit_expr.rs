@@ -115,21 +115,12 @@ impl LlvmBackend {
 
             // ── Tuple ────────────────────────────────────────────────
             Expr::Tuple(exprs) => {
-                if let Some(first) = exprs.first() {
-                    self.emit_expr(out, first, indent)
-                } else {
-                    TypedRegister { name: v.to_string(), ty: Type::void() }
-                }
+                self.emit_heap_seq(out, v, exprs, indent)
             }
 
             // ── List literal ─────────────────────────────────────────
             Expr::List(exprs) => {
-                // Emit a stack allocation for the list
-                let count = exprs.len();
-                let alloca = self.fun.gen_reg();
-                writeln!(out, "{}{} = alloca i64, i64 {}", indent, alloca, count).ok();
-                writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, alloca).ok();
-                TypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+                self.emit_heap_seq(out, v, exprs, indent)
             }
 
             // ── Field access ─────────────────────────────────────────
@@ -142,24 +133,45 @@ impl LlvmBackend {
             }
 
             // ── Index ────────────────────────────────────────────────
+            // 2026-07-14: List/seq indexing uses 2-slot heap protocol.
+            // Ptr-typed values are heap-allocated sequences; others use extractelement.
             Expr::Index(obj, index) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
                 let idx_reg = self.emit_expr(out, index, indent);
-                writeln!(out, "{}{} = extractelement {} {}, {}",
-                    indent, v, lower_type(&obj_reg.ty), obj_reg.name, idx_reg.name).ok();
+                if matches!(obj_reg.ty, Type::Ptr(_)) {
+                    let ptr = self.fun.gen_reg();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
+                    let offset = self.fun.gen_reg();
+                    writeln!(out, "{}{} = add i64 {}, 1", indent, offset, idx_reg.name).ok();
+                    let gep = self.fun.gen_reg();
+                    writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+                    writeln!(out, "{}{} = load i64, ptr {}", indent, v, gep).ok();
+                } else {
+                    writeln!(out, "{}{} = extractelement {} {}, {}",
+                        indent, v, lower_type(&obj_reg.ty), obj_reg.name, idx_reg.name).ok();
+                }
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
 
             // ── Cast ─────────────────────────────────────────────────
+            // 2026-07-14: Added string conversion paths. i64→ptr calls
+            // __int_to_str__, ptr→i64 calls __str_to_int after inttoptr.
             Expr::Cast(expr, target) => {
                 let src = self.emit_expr(out, expr, indent);
                 let target_ll = lower_type(target);
+                let src_ll = lower_type(&src.ty);
                 if target_ll == "double" {
                     writeln!(out, "{}{} = sitofp i64 {} to double", indent, v, src.name).ok();
-                } else if target_ll == "i64" && src.ty == Type::float64() {
+                } else if target_ll == "i64" && src_ll == "double" {
                     writeln!(out, "{}{} = fptosi double {} to i64", indent, v, src.name).ok();
+                } else if src_ll == "i64" && target_ll == "ptr" {
+                    // 2026-07-14: Int → String: call runtime helper
+                    writeln!(out, "{}{} = call i64 @__int_to_str__(i64 {})", indent, v, src.name).ok();
+                } else if src_ll == "ptr" && target_ll == "i64" {
+                    // 2026-07-14: String → Int: call runtime with ptr
+                    writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, src.name).ok();
                 } else {
-                    writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, lower_type(&src.ty), src.name, target_ll).ok();
+                    writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
                 }
                 TypedRegister { name: v.to_string(), ty: target.clone() }
             }
@@ -197,6 +209,32 @@ impl LlvmBackend {
     }
 
     // ── Sub-helpers ──────────────────────────────────────────────────
+
+    /// 2026-07-14: Emit a heap-allocated sequence (list/tuple) with 2-slot header.
+    /// Protocol: slot 0 = length (i64), slots 1..N = elements.
+    /// Empty seq → @ll_empty_list global sentinel.
+    /// Non-empty → malloc((2+N)*8), bitcast, store N, store elements, ptrtoint.
+    fn emit_heap_seq(&mut self, out: &mut String, v: &str, exprs: &[Expr], indent: &str) -> TypedRegister {
+        let count = exprs.len();
+        if count == 0 {
+            writeln!(out, "{}{} = ptrtoint ptr @ll_empty_list to i64", indent, v).ok();
+        } else {
+            let total = (2 + count) * 8;
+            let raw = self.fun.gen_reg();
+            writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, raw, total).ok();
+            let hdr = self.fun.gen_reg();
+            writeln!(out, "{}{} = bitcast ptr {} to ptr", indent, hdr, raw).ok();
+            writeln!(out, "{}store i64 {}, ptr {}", indent, count as i64, hdr).ok();
+            for (i, elem) in exprs.iter().enumerate() {
+                let e = self.emit_expr(out, elem, indent);
+                let slot = self.fun.gen_reg();
+                writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, slot, hdr, i + 1).ok();
+                writeln!(out, "{}store i64 {}, ptr {}", indent, e.name, slot).ok();
+            }
+            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, v, hdr).ok();
+        }
+        TypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
+    }
 
     /// Emit a string literal as a global constant + GEP.
     fn emit_string_literal(&mut self, out: &mut String, v: &str, bytes: &[u8], indent: &str) -> TypedRegister {

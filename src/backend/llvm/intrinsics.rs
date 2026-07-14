@@ -77,6 +77,10 @@ pub fn emit_intrinsic_call(
         // ── GPU ──────────────────────────────────────────────────
         "GetGlobalId#" => emit_get_global_id(backend, out, v, args, indent),
 
+        // ── List operations ──────────────────────────────────────
+        // 2026-07-14: Len# loads length from 2-slot header slot 0.
+        "Len#" => emit_len(backend, out, v, args, indent),
+
         // ── Unknown — emit as external call ──────────────────────
         _ => emit_external_call(backend, out, v, name, args, indent),
     }
@@ -312,6 +316,19 @@ fn emit_get_global_id(
 // 2026-07-12: For unknown intrinsics, emit as a call to the intrinsic
 // name without the # suffix. This preserves compatibility with old
 // code that may call custom #-named functions.
+
+// ─── Len# ───────────────────────────────────────────────────────
+// 2026-07-14: Load length from 2-slot header (slot 0).
+fn emit_len(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let list = emit_arg(backend, out, &args[0], indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, list).ok();
+    writeln!(out, "{}{} = load i64, ptr {}", indent, v, ptr).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
 
 fn emit_external_call(
     backend: &mut LlvmBackend, out: &mut String, v: &str, name: &str,

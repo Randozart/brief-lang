@@ -1250,8 +1250,9 @@ mod tests {
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "unsafe intrinsic should be ineligible");
-        assert!(result.reasons.iter().any(|r| r.contains("unsafe intrinsic")),
-            "reason should mention unsafe intrinsic");
+        // 2026-07-14: Non-# intrinsic calls are classified as FFI calls
+        assert!(result.reasons.iter().any(|r| r.contains("FFI call")),
+            "reason should mention FFI call");
     }
 
     #[test]

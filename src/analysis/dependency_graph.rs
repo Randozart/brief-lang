@@ -328,6 +328,32 @@ mod tests {
         })
     }
 
+    // 2026-07-14: Helper to create a transaction whose body records
+    // a state variable dependency: lhs depends on rhs_names.
+    fn make_txn_assign(lhs: &str, rhs: &[&str]) -> TopLevel {
+        let rhs_expr = if rhs.len() == 1 {
+            Expr::Identifier(rhs[0].to_string())
+        } else {
+            let binary = rhs.iter().map(|n| Expr::Identifier(n.to_string())).collect::<Vec<_>>();
+            Expr::BinaryOp(BinaryOpKind::Add, Box::new(binary[0].clone()), Box::new(binary[1].clone()))
+        };
+        TopLevel::Transaction(Transaction {
+            name: format!("txn_{}", lhs),
+            is_reactive: false,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
+            body: vec![Statement::Assign(Expr::Identifier(lhs.to_string()), rhs_expr)],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+        })
+    }
+
     #[test]
     fn test_empty_program() {
         let graph = DependencyGraph::build(&[]).unwrap();
@@ -350,6 +376,7 @@ mod tests {
         let graph = DependencyGraph::build(&[
             make_trigger("sensor", Type::int()),
             make_state_decl("derived", Type::int()),
+            make_txn_assign("derived", &["sensor"]),
         ]).unwrap();
         assert_eq!(graph.topo_order.len(), 2);
         let sensor_pos = graph.topo_order.iter().position(|v| v == "sensor").unwrap();
@@ -365,6 +392,8 @@ mod tests {
             make_trigger("a", Type::int()),
             make_state_decl("b", Type::int()),
             make_state_decl("c", Type::int()),
+            make_txn_assign("b", &["a"]),
+            make_txn_assign("c", &["b"]),
         ]).unwrap();
         let pos_a = graph.topo_order.iter().position(|v| v == "a").unwrap();
         let pos_b = graph.topo_order.iter().position(|v| v == "b").unwrap();
@@ -377,6 +406,8 @@ mod tests {
         let result = DependencyGraph::build(&[
             make_state_decl("a", Type::int()),
             make_state_decl("b", Type::int()),
+            make_txn_assign("a", &["b"]),
+            make_txn_assign("b", &["a"]),
         ]);
         assert!(result.is_err(), "cycle should be detected");
         if let Err(e) = result {
@@ -390,6 +421,7 @@ mod tests {
             make_trigger("a", Type::int()),
             make_trigger("b", Type::int()),
             make_state_decl("sum", Type::int()),
+            make_txn_assign("sum", &["a", "b"]),
         ]).unwrap();
         assert_eq!(graph.topo_order.len(), 3);
         assert!(graph.bit_index["a"] < graph.bit_index["sum"]);

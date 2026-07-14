@@ -1498,16 +1498,22 @@ impl LlvmBackend {
                     let fields: Vec<(String, Type)> = s.fields.iter()
                         .map(|f| (f.name.clone(), f.ty.clone()))
                         .collect();
-                    self.ctx.struct_types.insert(s.name.clone(), fields);
+                    self.ctx.struct_types.insert(s.name.clone(), fields.clone());
 
-                    // 2026-07-13: Struct auto-registration in TypeUniverse.
-                    // Uses minimal ResolvedType (new AST version with fewer fields).
+                    // 2026-07-14: Struct auto-registration in TypeUniverse with
+                    // dynamic byte size computed from field types.
                     if let Some(ref mut universe) = self.ctx.type_universe {
                         if !universe.types.contains_key(&s.name) {
+                            let bytes: u64 = fields.iter().map(|(_, ty)| {
+                                match ty {
+                                    Type::Custom(n) if n == "Bool" => 1,
+                                    _ => 8,
+                                }
+                            }).sum();
                             let rt = crate::type_universe::ResolvedType {
                                 name: s.name.clone(),
                                 base: "Bits".to_string(),
-                                bytes: 8,
+                                bytes,
                                 alignment: 8,
                                 llvm_type: format!("%{}", s.name),
                                 properties: std::collections::HashMap::new(),
@@ -1515,6 +1521,14 @@ impl LlvmBackend {
                             universe.types.insert(s.name.clone(), rt);
                         }
                     }
+                }
+                // 2026-07-14: Register TypeDef slots as struct types so
+                // test_type_with_slots_populates_struct_types passes.
+                TopLevel::TypeDef(td) => {
+                    let fields: Vec<(String, Type)> = td.body.slots.iter()
+                        .map(|s| (s.name.clone(), s.ty.clone()))
+                        .collect();
+                    self.ctx.struct_types.insert(td.name.clone(), fields);
                 }
                 TopLevel::Enum(e) => {
                     self.ctx.enum_types.insert(e.name.clone(), e.clone());
@@ -3116,7 +3130,12 @@ impl LlvmBackend {
         }
         for item in items {
             if let TopLevel::StateDecl(s) = item {
-                let addr = 0u64;
+                // 2026-07-14: Preserve prepopulated MMIO addresses from with_mmio_addresses()
+                let addr = if self.ctx.mmio_prepopulated && self.ctx.mmio_fields.contains_key(&s.name) {
+                    *self.ctx.mmio_fields.get(&s.name).unwrap()
+                } else {
+                    0u64
+                };
                 self.ctx.mmio_fields.insert(s.name.clone(), addr);
                 self.ctx.mmio_initializers.insert(s.name.clone(), None);
                 if self.ctx.mmio_prepopulated && self.ctx.mmio_fields.contains_key(&s.name) {

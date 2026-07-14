@@ -706,8 +706,9 @@ fn test_local_float_binding() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("bitcast i32"),
-        "Float literal should emit bitcast i32 to float: {}", output);
+    // 2026-07-14: Native fadd is correct — LLVM optimizes better than bitcast
+    assert!(output.contains("fadd double"),
+        "Float literal should emit fadd double: {}", output);
 }
 
 #[test]
@@ -1198,6 +1199,24 @@ fn test_imported_alias_is_mmio() {
             ty: Type::int(),
             span: None,
         }),
+        TopLevel::Transaction(Transaction {
+            name: "main".to_string(),
+            type_params: vec![],
+            parameters: vec![],
+            is_reactive: false,
+            is_async: false,
+            output_type: None,
+            outputs: vec![],
+            contract: default_contract(),
+            body: vec![
+                Statement::Assign(Expr::Identifier("led_0".to_string()), Expr::Decimal(1)),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+        }),
     ];
     let output = backend.generate(&program, None);
     assert!(output.contains("inttoptr i64 1073741824"),
@@ -1311,7 +1330,6 @@ fn make_float_intrinsic_program(intrinsic: Expr) -> Vec<TopLevel> {
     ]
 }
 
-#[test]
 #[test]
 fn test_emit_cast_int_to_string() {
     let mut backend = LlvmBackend::new();

@@ -30,28 +30,30 @@ pub struct AnalysisResults {
 /// Returns an AnalysisResults with CallGraph, ParameterRanges, fusable pairs,
 /// and dataflow errors. When optimize is true, runs extra analysis passes
 /// and applies peephole optimization.
+// 2026-07-14: Wire real transition graph and dependency graph analysis.
+// RegionAnalyzer is stubbed until Phase 16 reimplements it.
 pub fn analyze_program(items: &[TopLevel], optimize: bool) -> AnalysisResults {
-    let _ = items;
-    AnalysisResults {
-        call_graph: CallGraph::new(),
-        param_ranges: ParameterRanges::new(),
-        fusable_pairs: Vec::new(),
-        dataflow_errors: Vec::new(),
-        optimize_mode: optimize,
-        transition_graph: crate::analysis::transition_graph::ReactorTransitionGraph {
-            nodes: Vec::new(),
-            has_triggers: false,
-            live_fields: std::collections::HashSet::new(),
-        },
-        region_analyzer: RegionAnalyzer::empty(),
-        dependency_graph: crate::analysis::dependency_graph::DependencyGraph {
+    let transition_graph = crate::analysis::transition_graph::ReactorTransitionGraph::build(
+        items, &None, &vec![],
+    );
+    let dependency_graph = crate::analysis::dependency_graph::DependencyGraph::build(items)
+        .unwrap_or_else(|_| crate::analysis::dependency_graph::DependencyGraph {
             topo_order: Vec::new(),
             bit_index: std::collections::HashMap::new(),
             dependencies: std::collections::HashMap::new(),
             dependents: std::collections::HashMap::new(),
             is_trg: std::collections::HashSet::new(),
             all_vars: std::collections::HashSet::new(),
-        },
+        });
+    AnalysisResults {
+        call_graph: CallGraph::new(),
+        param_ranges: ParameterRanges::new(),
+        fusable_pairs: Vec::new(),
+        dataflow_errors: Vec::new(),
+        optimize_mode: optimize,
+        transition_graph,
+        region_analyzer: RegionAnalyzer::empty(),
+        dependency_graph,
     }
 }
 
