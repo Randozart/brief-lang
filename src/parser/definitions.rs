@@ -25,6 +25,8 @@ impl<'a> Parser<'a> {
             Some(Token::Import) => self.parse_import().map(TopLevel::Import),
             Some(Token::Meld) => self.parse_meld().map(TopLevel::Meld),
             Some(Token::Trg) => self.parse_top_level_trg().map(TopLevel::Trigger),
+            // 2026-07-14: Handle `type Name <: Parent { slots }` definitions
+            Some(Token::Type) => self.parse_type_definition().map(TopLevel::TypeDef),
             _ => {
                 let name = self.expect_identifier()?;
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
@@ -36,6 +38,11 @@ impl<'a> Parser<'a> {
     pub fn parse_program(&mut self) -> Result<Vec<TopLevel>, SyntaxError> {
         let mut items = Vec::new();
         while !self.is_at_end() {
+            // 2026-07-14: Eat semicolons between top-level items (e.g. `defn foo() {};`)
+            while self.eat(&Token::Semicolon) {}
+            if self.is_at_end() {
+                break;
+            }
             let item = self.parse_top_level()?;
             items.push(item);
         }
@@ -46,13 +53,20 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse: defn name<T>(params) -> RetType [pre][post] { body } [:= { ... }]
+    // 2026-07-14: Parens are optional (mirrors parse_transaction) so that
+    // `defn name -> Int { ... }` works without empty `()`. Test files and
+    // the standard library use both forms.
     fn parse_definition(&mut self) -> Result<Definition, SyntaxError> {
         self.pos += 1; // consume 'defn'
         let name = self.expect_identifier()?;
         let type_params = self.parse_type_params()?;
-        self.expect(Token::LParen)?;
-        let parameters = self.parse_parameter_list()?;
-        self.expect(Token::RParen)?;
+        let parameters = if self.eat(&Token::LParen) {
+            let p = self.parse_parameter_list()?;
+            self.expect(Token::RParen)?;
+            p
+        } else {
+            Vec::new()
+        };
         let output_type = self.parse_output_type()?;
         let contract = self.parse_contract()?;
         let body = self.parse_block()?;
@@ -397,5 +411,60 @@ impl<'a> Parser<'a> {
     /// Wrap top-level statements in an implicit [#] transaction if needed.
     fn wrap_implicit_entry(&self, _items: &mut Vec<TopLevel>) {
         // Placeholder: full implementation in Phase 16E
+    }
+
+    /// 2026-07-14: Parse: type Name <: Parent { slot; slot; }
+    fn parse_type_definition(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
+        self.pos += 1;
+        // 2026-07-14: Type name may be Int, Float, etc. which lex as dedicated
+        // tokens not Identifier. Try expect_identifier first, then check for
+        // built-in type name tokens (TypeInt, TypeFloat, etc).
+        let name = match self.peek() {
+            Some(Token::TypeInt) => { self.advance(); "Int".to_string() }
+            Some(Token::TypeFloat) => { self.advance(); "Float".to_string() }
+            Some(Token::TypeUInt) => { self.advance(); "UInt".to_string() }
+            Some(Token::TypeString) => { self.advance(); "String".to_string() }
+            Some(Token::TypeBool) => { self.advance(); "Bool".to_string() }
+            Some(Token::TypeChar) => { self.advance(); "Char".to_string() }
+            _ => self.expect_identifier()?,
+        };
+        let base = if self.eat(&Token::LtColon) {
+            self.parse_expression()?
+        } else {
+            Expr::Identifier("Bits".to_string())
+        };
+        let mut slots = Vec::new();
+        if self.eat(&Token::LBrace) {
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                let slot_name = self.expect_identifier()?;
+                // 2026-07-14: Handle `bytes <~ 8` and `bytes: Type` slot syntax
+                let slot_ty = if self.eat(&Token::TildeArrow) {
+                    self.parse_expression()?;
+                    Type::int()
+                } else {
+                    self.expect(Token::Colon)?;
+                    self.parse_type()?
+                };
+                self.eat(&Token::Semicolon);
+                slots.push(TypeDefSlot { name: slot_name, ty: slot_ty, bit_range: None });
+            }
+            self.expect(Token::RBrace)?;
+        }
+        Ok(Box::new(TypeDef {
+            name,
+            type_params: vec![],
+            base: Box::new(base),
+            bit_range: None,
+            body: TypeDefBody {
+                slots,
+                metadata: std::collections::HashMap::new(),
+                projections: vec![],
+                bindings: vec![],
+                operators: vec![],
+                constraints: vec![],
+                span: None,
+            },
+            span: None,
+        }))
     }
 }

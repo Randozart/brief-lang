@@ -28,11 +28,8 @@ impl LayoutPreprocessor {
             // Detect mixed indentation
             let indent = line.len() - trimmed.len();
             if indent > 0 {
-                let first_char = line
-                    .as_bytes()
-                    .get(line.len() - trimmed.len())
-                    .copied()
-                    .unwrap_or(0);
+                // 2026-07-14: First char is at index 0, not `indent`
+                let first_char = line.as_bytes().first().copied().unwrap_or(0);
                 if first_char == b'\t' {
                     had_tabs = true;
                 } else if first_char == b' ' {

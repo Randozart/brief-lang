@@ -162,10 +162,14 @@ impl Value {
     }
 
     /// Extract first 8 bytes as little-endian i64.
+    // 2026-07-14: Zero-pad buffers shorter than 8 bytes so small bit
+    // values (zero_bits(4), zext of 1-byte bool) convert correctly.
     pub fn as_i64(&self) -> Option<i64> {
         match self {
-            Value::Bits(bytes) if bytes.len() >= 8 => {
-                let arr: [u8; 8] = bytes[..8].try_into().ok()?;
+            Value::Bits(bytes) => {
+                let mut arr = [0u8; 8];
+                let copy_len = bytes.len().min(8);
+                arr[..copy_len].copy_from_slice(&bytes[..copy_len]);
                 Some(i64::from_le_bytes(arr))
             }
             _ => None,

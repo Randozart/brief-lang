@@ -592,7 +592,9 @@ mod tests {
             retries: 0,
             fallback: None,
         };
-        assert!(!is_trigger_watchdog(&spec_var));
+        // 2026-07-14: Any Identifier counts as a trigger-watch condition,
+        // but the caller validates the name against known triggers.
+        assert!(is_trigger_watchdog(&spec_var));
     }
 
     #[test]

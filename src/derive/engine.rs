@@ -103,6 +103,10 @@ fn matches_pattern(expr: &Expr, inputs: &[Expr], output: &Expr) -> bool {
             }
             false
         }
+        // 2026-07-14: Identity pattern — identifier matching the expected value
+        (Expr::Identifier(name), Expr::Decimal(expected)) => {
+            var_value(name, inputs).map_or(false, |v| v == *expected)
+        }
         _ => false,
     }
 }

@@ -28,6 +28,8 @@ fn rune_to_op_name(rune: &str) -> Option<&'static str> {
         "^" => "BitXor",
         "<<" => "Shl",
         ">>" => "Shr",
+        // 2026-07-14: String concatenation operator was missing
+        "++" => "Concat",
         "[]" => "ExtractFrom",
         "[]=" => "InsertAt",
         "()" => "Call",

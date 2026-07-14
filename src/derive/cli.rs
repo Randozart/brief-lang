@@ -85,6 +85,7 @@ mod tests {
     #[test]
     fn test_lex_source_error() {
         let result = lex_source("\"unterminated string");
-        assert!(result.is_ok()); // lexer doesn't error on unterminated strings
+        // 2026-07-14: logos lexer rejects unterminated strings — this IS an error
+        assert!(result.is_err());
     }
 }
