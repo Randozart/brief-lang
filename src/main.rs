@@ -9,6 +9,8 @@ mod library;
 use std::env;
 use std::path::Path;
 
+use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 2 {
@@ -50,7 +52,7 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv>              Compile a Brief source file", name);
     eprintln!("  {} build <file.bv> --llvm        Emit LLVM IR only, no binary", name);
     eprintln!("  {} build <file.bv> --out <dir>   Set output directory", name);
-    eprintln!("  {} build <file.bv> --plugin <exe> Run external plugin", name);
+    eprintln!("  {} build <file.bv> --backend <name>  Select backend: llvm, circt, webstack, gpu", name);
     eprintln!("  {} build <file.bv> --emit-bvir    Write .bvir IR files", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
@@ -69,6 +71,7 @@ fn print_usage(program: &str) {
 ///   --gpu-offload           enable GPU offload
 ///   --plugin <path>         add a plugin executable to the chain
 ///   --emit-bvir             write .bvir files before/after plugins
+///   --backend <name>        select backend (llvm, circt, webstack, gpu)
 fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut file_path: Option<String> = None;
     let mut emit_ir_only = false;
@@ -77,6 +80,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut gpu_offload = false;
     let mut plugin_paths = Vec::new();
     let mut emit_bvir = false;
+    let mut backend_override: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -103,6 +107,10 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         } else if arg == "--emit-bvir" {
             emit_bvir = true;
             i += 1;
+        } else if arg == "--backend" {
+            let name = args.get(i + 1).ok_or("--backend requires a name argument (llvm, circt, webstack, gpu)")?;
+            backend_override = Some(name.clone());
+            i += 2;
         } else if arg.starts_with('-') {
             return Err(format!("unknown flag: {}", arg));
         } else if file_path.is_some() {
@@ -114,6 +122,20 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     }
 
     let file_path = file_path.ok_or("missing file argument")?;
+
+    // Resolve backend: CLI override or extension lookup
+    let backend = match &backend_override {
+        Some(name) => TargetConfig::resolve(name)?,
+        None => {
+            let ext = get_extension(&file_path);
+            let config = TargetConfig::load();
+            match config.lookup(&ext) {
+                Some(entry) => TargetConfig::resolve(&entry.backend)?,
+                None => BackendKind::Llvm,
+            }
+        }
+    };
+
     Ok(compile::BuildOptions {
         file_path,
         emit_ir_only,
@@ -122,6 +144,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         gpu_offload,
         plugin_paths,
         emit_bvir,
+        backend,
     })
 }
 

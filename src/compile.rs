@@ -12,6 +12,7 @@ use brief_compiler::backend::llvm::LlvmBackend;
 use brief_compiler::lexer::Token;
 use brief_compiler::plugin::runner::run_plugin_chain;
 use brief_compiler::plugin::PluginManager;
+use brief_compiler::target::{BackendKind, TargetConfig};
 use brief_compiler::type_universe::TypeUniverse;
 
 /// Options parsed from the `brief-compiler build` CLI flags.
@@ -21,10 +22,10 @@ pub struct BuildOptions {
     pub out_dir: Option<String>,
     pub optimize_budget: u64,
     pub gpu_offload: bool,
-    /// Paths to external plugin executables.
     pub plugin_paths: Vec<String>,
-    /// Write .bvir files before and after plugins.
     pub emit_bvir: bool,
+    /// Selected backend (resolved from extension + --backend flag).
+    pub backend: BackendKind,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -58,34 +59,60 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         universe = restored_universe;
     }
 
-    let mut backend = LlvmBackend::new()
-        .with_optimize_budget(opts.optimize_budget)
-        .with_type_universe(universe);
+    let mut output = String::new();
+    let ext = match opts.backend {
+        BackendKind::Llvm => {
+            let mut b = LlvmBackend::new()
+                .with_optimize_budget(opts.optimize_budget)
+                .with_type_universe(universe);
+            if opts.gpu_offload {
+                b = b.with_gpu_offload(true);
+            }
+            output = b.generate(&items, None);
 
-    if opts.gpu_offload {
-        backend = backend.with_gpu_offload(true);
-    }
-
-    let mut llvm_ir = backend.generate(&items, None);
-
-    // AfterCodegen plugin hook — run before writing IR to disk.
-    if has_plugins {
-        let pm = PluginManager::new();
-        let action = pm.run_ir_hooks(&mut llvm_ir);
-        if let brief_compiler::plugin::PluginAction::Abort(msg) = action {
-            return Err(msg);
+            // AfterCodegen plugin hook
+            if has_plugins {
+                let pm = PluginManager::new();
+                let action = pm.run_ir_hooks(&mut output);
+                if let brief_compiler::plugin::PluginAction::Abort(msg) = action {
+                    return Err(msg);
+                }
+            }
+            ".ll"
         }
-    }
+        BackendKind::Circt => {
+            let mut b = brief_compiler::backend::circt::CirctBackend::new();
+            output = b.generate(&items);
+            ".mlir"
+        }
+        BackendKind::Webstack => {
+            let result = brief_compiler::backend::webstack::WebstackGenerator::new()
+                .generate(&items, &[], "program");
+            output = result.ts_code;
+            ".ts"
+        }
+        BackendKind::Gpu => {
+            let mut b = LlvmBackend::new()
+                .with_optimize_budget(opts.optimize_budget)
+                .with_type_universe(universe)
+                .with_gpu_offload(true);
+            output = b.generate(&items, None);
+            ".ll"
+        }
+    };
 
-    let ll_path = determine_out_path(file_path, opts.out_dir.as_deref())?;
+    let out_path = determine_out_path(file_path, opts.out_dir.as_deref())?;
+    let out_path = out_path.replace(".ll", ext);
 
-    std::fs::write(&ll_path, &llvm_ir)
-        .map_err(|e| format!("cannot write '{}': {}", ll_path, e))?;
-    println!("wrote {}", ll_path);
+    std::fs::write(&out_path, &output)
+        .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
+    println!("wrote {}", out_path);
 
     if !opts.emit_ir_only {
-        let binary_path = ll_path.strip_suffix(".ll").unwrap_or(&ll_path);
-        compile_to_binary(&ll_path, binary_path)?;
+        let binary_path = out_path.strip_suffix(ext).unwrap_or(&out_path);
+        if opts.backend == BackendKind::Llvm || opts.backend == BackendKind::Gpu {
+            compile_ll_to_binary(&out_path, binary_path)?;
+        }
     }
 
     Ok(())
@@ -116,7 +143,7 @@ fn determine_out_path(file_path: &str, out_dir: Option<&str>) -> Result<String, 
 }
 
 /// Compile a `.ll` file to a binary using clang.
-fn compile_to_binary(ll_path: &str, binary_path: &str) -> Result<(), String> {
+fn compile_ll_to_binary(ll_path: &str, binary_path: &str) -> Result<(), String> {
     // 2026-07-14: Same flags used by benchmarks/build_and_bench.sh linking fallback.
     let status = Command::new("clang")
         .args([
