@@ -18,7 +18,6 @@ impl<'a> Parser<'a> {
             Some(Token::Escape) => self.parse_escape_statement(),
             Some(Token::Foreach) => self.parse_foreach_statement(),
             Some(Token::Trg) => self.parse_trg_binding(),
-            Some(Token::Asm) => self.parse_inline_asm(),
             Some(Token::Sync) => self.parse_sync_block(),
             Some(Token::LBrace) => self.parse_block_statement(),
             Some(Token::LBracket) => self.parse_guard_statement_bracket(),

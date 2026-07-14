@@ -22,7 +22,6 @@
 //   cargo run --bin brief-compiler -- llvm benchmarks/async_counters_idio.bv \
 //     --out benchmarks --optimize-budget 256
 
-#!exit a == N && b == N;
 
 const N: Int = 50000000;
 

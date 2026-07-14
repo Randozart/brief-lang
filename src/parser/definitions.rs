@@ -258,7 +258,14 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(Token::RParen)?;
-            self.eat_identifier("from");
+            if !self.eat(&Token::From) {
+                let tok = self.advance().unwrap();
+                return Err(SyntaxError::UnexpectedToken {
+                    expected: "from".into(),
+                    found: format!("{}", tok.0),
+                    span: self.make_span(tok.1),
+                });
+            }
             let module = self.expect_string()?;
             self.expect(Token::Semicolon)?;
             return Ok(Import {

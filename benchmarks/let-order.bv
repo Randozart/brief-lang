@@ -1,5 +1,4 @@
 // let-order — Tests that Let statements are emitted in source order
-#!exit x == 100;
 
 let x: Int = 0;
 

@@ -129,7 +129,7 @@ rct txn simulate [
     let nvy2: Float32 = vy2 + dy02*m0*mag02 + dy12*m1*mag12 - dy23*m3*mag23 - dy24*m4*mag24;
     let nvz2: Float32 = vz2 + dz02*m0*mag02 + dz12*m1*mag12 - dz23*m3*mag23 - dz24*m4*mag24;
     let nvx3: Float32 = vx3 + dx03*m0*mag03 + dx13*m1*mag13 + dx23*m2*mag23 - dx34*m4*mag34;
-    let nvy3: Float32 = vy3 + dy03*m0*mag03 + dy13*m1*mag13 + dy23*m2*mag23 - dx34*m4*mag34;
+    let nvy3: Float32 = vy3 + dy03*m0*mag03 + dy13*m1*mag13 + dy23*m2*mag23 - dy34*m4*mag34;
     let nvz3: Float32 = vz3 + dz03*m0*mag03 + dz13*m1*mag13 + dz23*m2*mag23 - dz34*m4*mag34;
     let nvx4: Float32 = vx4 + dx04*m0*mag04 + dx14*m1*mag14 + dx24*m2*mag24 + dx34*m3*mag34;
     let nvy4: Float32 = vy4 + dy04*m0*mag04 + dy14*m1*mag14 + dy24*m2*mag24 + dy34*m3*mag34;

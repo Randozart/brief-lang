@@ -72,14 +72,24 @@ impl<'a> Parser<'a> {
     }
 
     /// Get the current token as an identifier string, or error.
+    /// 2026-07-14: Also accepts keyword tokens that are commonly used as
+    /// identifiers (reg, op, bank, asm, stage, cell, etc.).
     pub fn expect_identifier(&mut self) -> Result<String, SyntaxError> {
         match self.advance() {
-            Some((Token::Identifier(name), span)) => Ok(name),
-            Some((tok, span)) => Err(SyntaxError::UnexpectedToken {
-                expected: "identifier".into(),
-                found: format!("{}", tok),
-                span: self.make_span(span),
-            }),
+            Some((Token::Identifier(name), _)) => Ok(name),
+            Some((tok, span)) => {
+                // 2026-07-14: Many keywords are also used as identifiers
+                // in benchmarks and user code. Accept them gracefully.
+                if let Some(name) = self.keyword_as_identifier(&tok) {
+                    Ok(name)
+                } else {
+                    Err(SyntaxError::UnexpectedToken {
+                        expected: "identifier".into(),
+                        found: format!("{}", tok),
+                        span: self.make_span(span),
+                    })
+                }
+            }
             None => Err(SyntaxError::UnexpectedEOF {
                 expected: "identifier".into(),
                 span: Span::dummy(),
@@ -204,6 +214,43 @@ impl<'a> Parser<'a> {
                 _ => { self.pos += 1; }
             }
         }
+    }
+
+    /// 2026-07-14: Bridge between lexer keyword tokens and parser identifier matching.
+    /// Maps keyword tokens (Frgn, Struct, Enum, Ok, etc.) to their string representations.
+    pub fn keyword_as_identifier(&self, tok: &Token) -> Option<String> {
+        Some(match tok {
+            Token::Sig => "sig".into(), Token::Export => "export".into(),
+            Token::Defn => "defn".into(), Token::Let => "let".into(),
+            Token::Const => "const".into(), Token::Txn => "txn".into(),
+            Token::Rct => "rct".into(), Token::Async => "async".into(),
+            Token::Await => "await".into(), Token::Term => "term".into(),
+            Token::TermBang => "term!".into(), Token::Escape => "escape".into(),
+            Token::Uni => "uni".into(), Token::Is => "is".into(),
+            Token::Like => "like".into(), Token::Import => "import".into(),
+            Token::From => "from".into(), Token::As => "as".into(),
+            Token::Frgn => "frgn".into(), Token::FrgnBang => "frgn!".into(),
+            Token::Meld => "meld".into(), Token::Reg => "reg".into(),
+            Token::Op => "op".into(), Token::Type => "type".into(),
+            Token::Cell => "cell".into(), Token::Struct => "struct".into(),
+            Token::Rstruct => "rstruct".into(), Token::Render => "render".into(),
+            Token::Enum => "enum".into(), Token::Trg => "trg".into(),
+            Token::Within => "within".into(), Token::PtrBang => "Ptr!".into(),
+            Token::Ok => "Ok".into(), Token::Err => "Err".into(),
+            Token::Match => "match".into(), Token::Template => "template".into(),
+            Token::Macro => "macro".into(), Token::Quote => "quote".into(),
+            Token::Dollar => "$".into(), Token::DollarBang => "$!".into(),
+            Token::Foreach => "foreach".into(), Token::Pvt => "pvt".into(),
+            Token::Sed => "sed".into(), Token::Sync => "sync".into(),
+            Token::Some => "some".into(), Token::None => "none".into(),
+            Token::When => "when".into(), Token::Cycles => "cycles".into(),
+            Token::Cyc => "cyc".into(), Token::Ms => "ms".into(),
+            Token::Seconds => "seconds".into(), Token::Minute => "minute".into(),
+            Token::Minutes => "minutes".into(), Token::Nanoseconds => "nanoseconds".into(),
+            Token::Input => "input".into(), Token::Output => "output".into(),
+            Token::BoolTrue => "true".into(), Token::BoolFalse => "false".into(),
+            _ => return None,
+        })
     }
 
     /// Check if we're at end of file.

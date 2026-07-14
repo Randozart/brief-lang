@@ -9,8 +9,8 @@
 8 = "add nsw i64 %a, %b"
 
 [op.Add.Float]
-4 = "fadd float %a, %b"
-8 = "fadd double %a, %b"
+4 = "fadd fast float %a, %b"
+8 = "fadd fast double %a, %b"
 
 [op.Sub.Int]
 1 = "sub nsw i8 %a, %b"
@@ -19,8 +19,8 @@
 8 = "sub nsw i64 %a, %b"
 
 [op.Sub.Float]
-4 = "fsub float %a, %b"
-8 = "fsub double %a, %b"
+4 = "fsub fast float %a, %b"
+8 = "fsub fast double %a, %b"
 
 [op.Mul.Int]
 1 = "mul nsw i8 %a, %b"
@@ -29,8 +29,8 @@
 8 = "mul nsw i64 %a, %b"
 
 [op.Mul.Float]
-4 = "fmul float %a, %b"
-8 = "fmul double %a, %b"
+4 = "fmul fast float %a, %b"
+8 = "fmul fast double %a, %b"
 
 [op.Div.Int]
 1 = "sdiv i8 %a, %b"
@@ -39,8 +39,8 @@
 8 = "sdiv i64 %a, %b"
 
 [op.Div.Float]
-4 = "fdiv float %a, %b"
-8 = "fdiv double %a, %b"
+4 = "fdiv fast float %a, %b"
+8 = "fdiv fast double %a, %b"
 
 [op.Rem.Int]
 1 = "srem i8 %a, %b"
@@ -127,8 +127,8 @@
 8 = "sub i64 0, %a"
 
 [op.Neg.Float]
-4 = "fneg float %a"
-8 = "fneg double %a"
+4 = "fneg fast float %a"
+8 = "fneg fast double %a"
 
 [op.Sqrt.Float]
 4 = "call float @llvm.sqrt.f32(float %a)"

@@ -100,11 +100,7 @@ pub enum Token {
     #[token("meld")]
     Meld,
 
-    #[token("syscall")]
-    Syscall,
-
     #[token("syscall!")]
-    SyscallBang,
 
     #[token("reg")]
     Reg,
@@ -133,23 +129,13 @@ pub enum Token {
     #[token("trg")]
     Trg,
 
-    #[token("link")]
-    Link,
 
-    #[token("asm")]
-    Asm,
 
-    #[token("stage")]
-    Stage,
 
-    #[token("on")]
-    On,
 
     #[token("within")]
     Within,
 
-    #[token("bank")]
-    Bank,
 
     #[token("Ptr!")]
     PtrBang,
@@ -653,8 +639,6 @@ impl std::fmt::Display for Token {
             Token::Frgn => write!(f, "frgn"),
             Token::FrgnBang => write!(f, "frgn!"),
             Token::Meld => write!(f, "meld"),
-            Token::Syscall => write!(f, "syscall"),
-            Token::SyscallBang => write!(f, "syscall!"),
             Token::Reg => write!(f, "reg"),
             Token::Op => write!(f, "op"),
             Token::Type => write!(f, "type"),
@@ -664,12 +648,7 @@ impl std::fmt::Display for Token {
             Token::Render => write!(f, "render"),
             Token::Enum => write!(f, "enum"),
             Token::Trg => write!(f, "trg"),
-            Token::Link => write!(f, "link"),
-            Token::Asm => write!(f, "asm"),
-            Token::Stage => write!(f, "stage"),
-            Token::On => write!(f, "on"),
             Token::Within => write!(f, "within"),
-            Token::Bank => write!(f, "bank"),
             Token::PtrBang => write!(f, "Ptr!"),
             Token::Ok => write!(f, "Ok"),
             Token::Err => write!(f, "Err"),

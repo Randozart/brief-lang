@@ -285,7 +285,7 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fadd{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = add i64 {}, {}", indent, v, l.name, r.name).ok();
+                    writeln!(out, "{}{} = add nsw i64 {}, {}", indent, v, l.name, r.name).ok();
                 }
                 TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }
@@ -294,7 +294,7 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fsub{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = sub i64 {}, {}", indent, v, l.name, r.name).ok();
+                    writeln!(out, "{}{} = sub nsw i64 {}, {}", indent, v, l.name, r.name).ok();
                 }
                 TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }
@@ -303,7 +303,7 @@ impl LlvmBackend {
                 if is_float {
                     writeln!(out, "{}{} = fmul{} {} {}, {}", indent, v, fast, ty_str, l.name, r.name).ok();
                 } else {
-                    writeln!(out, "{}{} = mul i64 {}, {}", indent, v, l.name, r.name).ok();
+                    writeln!(out, "{}{} = mul nsw i64 {}, {}", indent, v, l.name, r.name).ok();
                 }
                 TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
             }

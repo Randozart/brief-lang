@@ -31,9 +31,7 @@ const IA: Int = 3877;
 const IC: Int = 29573;
 
 rct txn fan [count < N][count == N] {
-    seed = seed * IA;
-    seed = seed + IC;
-    seed = seed % IM;
+    let ns: Int = (seed * IA + IC) % IM;
 
     seed = p0;
     p0 = p1;
@@ -47,16 +45,18 @@ rct txn fan [count < N][count == N] {
     p8 = p9;
     p9 = p10;
     p10 = p11;
-    p11 = seed;
 
-    checksum = checksum + seed % 13;
-    max_flips = max_flips + checksum % 17;
-
-    count = count + 1;
-
-    [count % 5000000 == 0] {
-        Print#(checksum);
+    let f: Int = p0;
+    [f == 0] {
+        checksum = checksum - ns;
+        term! -> PrintInt#(count);
     };
+    [f != 0] {
+        checksum = checksum + ns;
+    };
+    count = count + 1;
+    term;
+};
     [count == N] {
         term! -> Print#(checksum);
     };
