@@ -5,6 +5,7 @@
 pub mod sexpr;
 pub mod serialize;
 pub mod deserialize;
+pub mod layout;
 
 pub use serialize::to_bvir;
 pub use deserialize::from_bvir;
