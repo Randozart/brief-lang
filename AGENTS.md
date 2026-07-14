@@ -768,6 +768,7 @@ the execution paths.
 | **Feature docs** | `docs/architecture/features/` |
 | **Channel map** | `docs/architecture/channel-map.md` |
 | **Optimization decision tree** | `docs/design/optimization-decision-tree.md` |
+| **Backend type dispatch** | `docs/architecture/backend-type-dispatch.md` — **READ THIS FIRST** before modifying any backend type code. No hardcoded `"Int" → i64` mappings. Types are driven by source metadata + config file. |
 | **Backend dispatch** | `docs/architecture/features/backend-dispatch.md` |
 | **Benchmark strategy** | `docs/architecture/benchmark-strategy.md` |
 | **Kani harnesses** | `docs/architecture/kani-harnesses.md` |

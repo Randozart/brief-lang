@@ -488,10 +488,19 @@ impl<'a> Parser<'a> {
             Expr::Identifier("Bits".to_string())
         };
         let mut slots = Vec::new();
+        let mut metadata = std::collections::HashMap::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 let slot_name = self.expect_identifier()?;
-                // 2026-07-14: Handle `bytes <~ 8` and `bytes: Type` slot syntax
+                // 2026-07-14: Handle `primitive <~ Name` as type metadata, not a slot
+                if slot_name == "primitive" && self.check(&Token::TildeArrow) {
+                    self.advance();
+                    let prim_name = self.expect_identifier()?;
+                    self.eat(&Token::Semicolon);
+                    metadata.insert("primitive".into(), PropertyValue::Identifier(prim_name));
+                    continue;
+                }
+                // 2026-07-14: Handle `bytes <~ 8` and `name: Type` slot syntax
                 let slot_ty = if self.eat(&Token::TildeArrow) {
                     self.parse_expression()?;
                     Type::int()
@@ -511,7 +520,7 @@ impl<'a> Parser<'a> {
             bit_range: None,
             body: TypeDefBody {
                 slots,
-                metadata: std::collections::HashMap::new(),
+                metadata,
                 projections: vec![],
                 bindings: vec![],
                 operators: vec![],
