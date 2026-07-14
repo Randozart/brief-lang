@@ -11,6 +11,7 @@
 
 mod display;
 mod expr;
+pub mod layout;
 pub mod top;
 mod types;
 
