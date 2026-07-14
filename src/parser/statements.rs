@@ -43,7 +43,7 @@ impl<'a> Parser<'a> {
     }
 
     /// let name: Type = expr;
-    fn parse_let_statement(&mut self) -> Result<Statement, SyntaxError> {
+    pub fn parse_let_statement(&mut self) -> Result<Statement, SyntaxError> {
         self.pos += 1;
         let name = self.expect_identifier()?;
         let ty = self.parse_optional_type()?;

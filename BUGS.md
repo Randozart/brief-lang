@@ -2069,3 +2069,28 @@ but does not prevent use-after-free. Future borrow checker work will address
 this.
 
 **Files**: N/A — gap in the compiler architecture, not a specific bug.
+
+---
+
+- **Date**: 2026-07-14
+- **Issue**: LLVM backend emits `fadd i64` (float add with integer operands) for
+  some integer addition operations in `ring_buffer.bv`. Clang rejects this as
+  invalid IR.
+
+**Root Cause**: `emit_binary_op` in `src/backend/llvm/emit_expr.rs` selects the
+instruction mnemonic based on the expression type without checking whether the
+actual operand types are float or integer. When a `BinaryOp` with type `i64` but
+no explicit float marker is emitted, it still uses `fadd` instead of `add`.
+
+**Impact**: Benchmarks with integer arithmetic (ring_buffer, print_loop, etc.)
+fail to compile to binary with `clang: error: invalid operand type for instruction`.
+The `--llvm` flag still produces the `.ll` file for debugging.
+
+**Workaround**: Use `--llvm` to emit IR only, then manually fix the `fadd`/`fsub`/
+`fmul`/`fdiv` instructions to `add`/`sub`/`mul`/`sdiv` before running `clang`.
+
+**Fix**: In `emit_binary_op`, select the instruction mnemonic based on the LLVM
+type string of the operands: use `add`/`sub`/`mul`/`sdiv` for integer types,
+`fadd`/`fsub`/`fmul`/`fdiv` for float/double types.
+
+**Files**: `src/backend/llvm/emit_expr.rs`

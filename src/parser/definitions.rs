@@ -27,6 +27,15 @@ impl<'a> Parser<'a> {
             Some(Token::Trg) => self.parse_top_level_trg().map(TopLevel::Trigger),
             // 2026-07-14: Handle `type Name <: Parent { slots }` definitions
             Some(Token::Type) => self.parse_type_definition().map(TopLevel::TypeDef),
+            // 2026-07-14: Top-level let — state variable declaration
+            Some(Token::Let) => {
+                let stmt = self.parse_let_statement()?;
+                Ok(TopLevel::Statement(Box::new(stmt)))
+            }
+            // 2026-07-14: Top-level const — compile-time constant
+            Some(Token::Const) => {
+                Ok(TopLevel::Constant(self.parse_const_declaration()?))
+            }
             _ => {
                 let name = self.expect_identifier()?;
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
@@ -94,6 +103,22 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// Parse: const name: Type = expr;
+    // 2026-07-14: Top-level compile-time constant declaration.
+    fn parse_const_declaration(&mut self) -> Result<Constant, SyntaxError> {
+        self.pos += 1; // consume 'const'
+        let name = self.expect_identifier()?;
+        let ty = self.parse_optional_type()?.unwrap_or(Type::int());
+        self.expect(Token::Eq)?;
+        let expr = self.parse_expression()?;
+        self.expect(Token::Semicolon)?;
+        Ok(Constant {
+            name,
+            ty,
+            expr,
+        })
+    }
+
     /// Parse: txn name [pre][post] { body }
     fn parse_transaction(
         &mut self,
@@ -132,12 +157,41 @@ impl<'a> Parser<'a> {
     /// Parse: rct txn name [pre][post] { body }
     fn parse_reactive_transaction(&mut self) -> Result<Transaction, SyntaxError> {
         self.pos += 1; // consume 'rct'
-                       // 'txn' after 'rct' — expect the identifier
-        let next = self.expect_identifier()?;
-        if next != "txn" {
-            return self.error_at_current(&format!("expected 'txn' after 'rct', found '{}'", next));
+        // 2026-07-14: 'txn' is a keyword token (Token::Txn), not an identifier.
+        // Use eat() instead of expect_identifier() to match the keyword token.
+        if !self.eat(&Token::Txn) {
+            let found = match self.peek() {
+                Some(t) => format!("{}", t),
+                None => "EOF".to_string(),
+            };
+            return self.error_at_current(&format!("expected 'txn' after 'rct', found '{}'", found));
         }
-        self.parse_transaction(true, false)
+        let name = self.expect_identifier()?;
+        let parameters = if self.eat(&Token::LParen) {
+            let p = self.parse_parameter_list()?;
+            self.expect(Token::RParen)?;
+            p
+        } else {
+            Vec::new()
+        };
+        let contract = self.parse_contract()?;
+        let body = self.parse_block()?;
+        let derivation = self.parse_derivation_block()?;
+        Ok(Transaction {
+            name,
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters,
+            output_type: None,
+            outputs: Vec::new(),
+            contract,
+            body,
+            metadata: std::collections::HashMap::new(),
+            derivation,
+            modifiers: vec![],
+            span: None,
+        })
     }
 
     /// Parse: cell name { ... }

@@ -1,6 +1,7 @@
 // ── Brief Compiler CLI Entry Point ────────────────────────────────────
 // 2026-07-12: Phase 7 — Clean CLI dispatch.
 // Flat code: max 2 nesting. No unqualified unwraps.
+// 2026-07-14: Add --llvm, --out, --optimize-budget, --gpu-offload flags to build.
 
 mod compile;
 mod library;
@@ -46,19 +47,74 @@ fn print_usage(program: &str) {
         .unwrap_or("brief-compiler");
     eprintln!("Brief Compiler");
     eprintln!("Usage:");
-    eprintln!("  {} build <file.bv>     Compile a Brief source file", name);
-    eprintln!("  {} check <file.bv>     Type-check only", name);
-    eprintln!("  {} derive <file.bv>    Synthesize derivation blocks", name);
-    eprintln!("  {} library <file.bv>   Compile to .a library", name);
-    eprintln!("  {} init <name>         Create a new project", name);
-    eprintln!("  {} help                Show this help", name);
+    eprintln!("  {} build <file.bv>              Compile a Brief source file", name);
+    eprintln!("  {} build <file.bv> --llvm        Emit LLVM IR only, no binary", name);
+    eprintln!("  {} build <file.bv> --out <dir>   Set output directory", name);
+    eprintln!("  {} check <file.bv>               Type-check only", name);
+    eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
+    eprintln!("  {} library <file.bv>             Compile to .a library", name);
+    eprintln!("  {} init <name>                   Create a new project", name);
+    eprintln!("  {} help                          Show this help", name);
+}
+
+/// Parse `build` subcommand arguments into a `BuildOptions`.
+///
+/// Accepts:
+///   <file.bv>               (positional, required)
+///   --llvm                  emit IR only, no binary
+///   --out <dir>             output directory
+///   --optimize-budget <N>   simulation budget (default 256)
+///   --gpu-offload           enable GPU offload
+fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
+    let mut file_path: Option<String> = None;
+    let mut emit_ir_only = false;
+    let mut out_dir: Option<String> = None;
+    let mut optimize_budget = 256u64;
+    let mut gpu_offload = false;
+
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "--llvm" {
+            emit_ir_only = true;
+            i += 1;
+        } else if arg == "--gpu-offload" {
+            gpu_offload = true;
+            i += 1;
+        } else if arg == "--out" {
+            let val = args.get(i + 1).ok_or("--out requires a directory argument")?;
+            out_dir = Some(val.clone());
+            i += 2;
+        } else if arg == "--optimize-budget" {
+            let val = args.get(i + 1).ok_or("--optimize-budget requires a number argument")?;
+            optimize_budget = val.parse()
+                .map_err(|_| format!("invalid --optimize-budget value: '{}'", val))?;
+            i += 2;
+        } else if arg.starts_with('-') {
+            return Err(format!("unknown flag: {}", arg));
+        } else if file_path.is_some() {
+            return Err(format!("unexpected positional argument: '{}'", arg));
+        } else {
+            file_path = Some(arg.clone());
+            i += 1;
+        }
+    }
+
+    let file_path = file_path.ok_or("missing file argument")?;
+    Ok(compile::BuildOptions {
+        file_path,
+        emit_ir_only,
+        out_dir,
+        optimize_budget,
+        gpu_offload,
+    })
 }
 
 fn run_build(args: &[String]) -> Result<(), String> {
-    let file_path = args.first().ok_or("missing file argument")?;
-    let source = std::fs::read_to_string(file_path)
-        .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
-    compile::compile_source(file_path, &source)
+    let opts = parse_build_args(args)?;
+    let source = std::fs::read_to_string(&opts.file_path)
+        .map_err(|e| format!("cannot read '{}': {}", opts.file_path, e))?;
+    compile::compile_source(&opts.file_path, &source, &opts)
 }
 
 fn run_check(args: &[String]) -> Result<(), String> {

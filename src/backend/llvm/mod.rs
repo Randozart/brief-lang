@@ -3217,6 +3217,17 @@ impl LlvmBackend {
                     .insert(name.clone(), self.ctx.field_types.len());
                 self.push_field_type(&trig_ty);
                 self.ctx.field_initializers.insert(name.clone(), None);
+            // 2026-07-14: Top-level `let name: Type = expr;` — register as state field.
+            // The initializer expr is stored in field_initializers so emit_init_state
+            // can evaluate and store the runtime value at startup.
+            } else if let TopLevel::Statement(stmt) = item {
+                if let crate::ast::Statement::Let { name, ty, expr, .. } = stmt.as_ref() {
+                    let field_ty = ty.clone().unwrap_or(crate::ast::Type::int());
+                    self.ctx.field_index_map
+                        .insert(name.clone(), self.ctx.field_types.len());
+                    self.push_field_type(&field_ty);
+                    self.ctx.field_initializers.insert(name.clone(), expr.clone());
+                }
             } else if let TopLevel::Cell(c) = item {
                 // Cell fields are handled differently depending on whether the
                 // cell is persistent (threaded) or sync (non-threaded).

@@ -389,9 +389,20 @@ pub fn infer_statement(stmt: &Statement, ctx: &mut TypecheckContext) -> Result<(
 
 /// Type-check a complete program.
 pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), Vec<TypeError>> {
+    // 2026-07-14: Pre-collect state variable bindings from top-level `let`
+    // so they are visible to all transactions and definitions.
+    let state_bindings: HashMap<String, Type> = items.iter().filter_map(|item| {
+        if let TopLevel::Statement(stmt) = item {
+            if let Statement::Let { name, ty, .. } = stmt.as_ref() {
+                return ty.clone().map(|t| (name.clone(), t));
+            }
+        }
+        None
+    }).collect();
+
     let mut errors = Vec::new();
     for item in items {
-        if let Err(e) = check_top_level(item, universe) {
+        if let Err(e) = check_top_level(item, universe, &state_bindings) {
             errors.push(e);
         }
     }
@@ -403,8 +414,12 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
 }
 
 /// Type-check a top-level item.
-fn check_top_level(item: &TopLevel, universe: &TypeUniverse) -> Result<(), TypeError> {
+fn check_top_level(item: &TopLevel, universe: &TypeUniverse, state_bindings: &HashMap<String, Type>) -> Result<(), TypeError> {
     let mut ctx = TypecheckContext::new(universe);
+    // 2026-07-14: Inject state variable bindings so transactions/defns can reference them.
+    for (name, ty) in state_bindings {
+        ctx.bindings.insert(name.clone(), ty.clone());
+    }
     match item {
         TopLevel::Definition(defn) => {
             for (name, ty) in &defn.parameters {

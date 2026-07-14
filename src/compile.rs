@@ -1,30 +1,121 @@
 // ── Compilation Pipeline ──────────────────────────────────────────────
 // 2026-07-12: Phase 7 — Compile a Brief source file end-to-end.
 // Pipeline: lex -> parse -> typecheck -> codegen -> output.
+// 2026-07-14: Wire real LlvmBackend instead of stub codegen.
+//             Add binary compilation via clang. Add --out / --optimize-budget flags.
 
+use std::path::Path;
+use std::process::Command;
+
+use brief_compiler::backend::llvm::LlvmBackend;
 use brief_compiler::lexer::Token;
+use brief_compiler::type_universe::TypeUniverse;
 
-/// Compile a Brief source file: produce an executable binary.
-pub fn compile_source(file_path: &str, source: &str) -> Result<(), String> {
-    let items = parse_and_check(file_path, source)?;
-    let llvm_ir = codegen(&items)?;
-    write_output(file_path, &llvm_ir)?;
+/// Options parsed from the `brief-compiler build` CLI flags.
+pub struct BuildOptions {
+    /// Path to the source `.bv` file.
+    pub file_path: String,
+    /// Emit `.ll` only; skip binary compilation (`--llvm`).
+    pub emit_ir_only: bool,
+    /// Output directory (`--out <dir>`). `None` → same directory as input file.
+    pub out_dir: Option<String>,
+    /// Max simulation steps before runtime fallback (`--optimize-budget <N>`).
+    pub optimize_budget: u64,
+    /// Enable GPU offload codegen (`--gpu-offload`).
+    pub gpu_offload: bool,
+}
+
+/// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
+pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
+    let (items, universe) = parse_and_check(file_path, source)?;
+
+    let mut backend = LlvmBackend::new()
+        .with_optimize_budget(opts.optimize_budget)
+        .with_type_universe(universe);
+
+    if opts.gpu_offload {
+        backend = backend.with_gpu_offload(true);
+    }
+
+    let llvm_ir = backend.generate(&items, None);
+
+    let ll_path = determine_out_path(file_path, opts.out_dir.as_deref())?;
+
+    std::fs::write(&ll_path, &llvm_ir)
+        .map_err(|e| format!("cannot write '{}': {}", ll_path, e))?;
+    println!("wrote {}", ll_path);
+
+    if !opts.emit_ir_only {
+        // 2026-07-14: Compile .ll to binary using clang.
+        // The `.ll` file is kept for debugging.
+        let binary_path = ll_path.strip_suffix(".ll").unwrap_or(&ll_path);
+        compile_to_binary(&ll_path, binary_path)?;
+    }
+
     Ok(())
 }
 
 /// Type-check only: don't generate code.
 pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
-    parse_and_check(file_path, source)?;
+    let (_items, _universe) = parse_and_check(file_path, source)?;
     println!("OK");
     Ok(())
 }
 
-/// Lex + parse + typecheck a source file.
-fn parse_and_check(file_path: &str, source: &str) -> Result<Vec<brief_compiler::ast::TopLevel>, String> {
+/// Determine the output `.ll` file path from the input path and optional output directory.
+fn determine_out_path(file_path: &str, out_dir: Option<&str>) -> Result<String, String> {
+    let p = Path::new(file_path);
+    let base = p.file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("cannot determine output path from '{}'", file_path))?;
+
+    let parent = match out_dir {
+        Some(dir) => dir.trim_end_matches('/').to_string(),
+        None => p.parent()
+            .map(|d| d.to_string_lossy().to_string())
+            .unwrap_or_else(|| ".".to_string()),
+    };
+
+    Ok(format!("{}/{}.ll", parent, base))
+}
+
+/// Compile a `.ll` file to a binary using clang.
+fn compile_to_binary(ll_path: &str, binary_path: &str) -> Result<(), String> {
+    // 2026-07-14: Same flags used by benchmarks/build_and_bench.sh linking fallback.
+    let status = Command::new("clang")
+        .args([
+            "-O3",
+            "-march=native",
+            "-ffast-math",
+            ll_path,
+            "-o",
+            binary_path,
+            "-lm",
+        ])
+        .status()
+        .map_err(|e| format!(
+            "failed to invoke clang: {} (is clang installed? use --llvm to emit IR only)",
+            e
+        ))?;
+
+    if !status.success() {
+        return Err(format!(
+            "clang failed to compile '{}' to binary '{}'",
+            ll_path, binary_path,
+        ));
+    }
+
+    println!("wrote {}", binary_path);
+    Ok(())
+}
+
+/// Lex + parse + typecheck a source file, returning the TypeUniverse for the backend.
+fn parse_and_check(file_path: &str, source: &str) -> Result<(Vec<brief_compiler::ast::TopLevel>, TypeUniverse), String> {
     let tokens = lex(source)?;
     let items = parse(file_path, &tokens, source)?;
-    check_types(&items)?;
-    Ok(items)
+    let universe = TypeUniverse::new();
+    check_types(&items, &universe)?;
+    Ok((items, universe))
 }
 
 /// Lex the source into tokens.
@@ -34,8 +125,8 @@ fn lex(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, String> {
     let mut tokens = Vec::new();
     for result in lexer {
         let token = result.map_err(|_| "lex error".to_string())?;
-        let range = 0..0; // span info from logos
-        tokens.push((token, range));
+        // 2026-07-12: span info from logos — currently stubbed.
+        tokens.push((token, 0..0));
     }
     Ok(tokens)
 }
@@ -46,79 +137,11 @@ fn parse(file_path: &str, tokens: &[(Token, std::ops::Range<usize>)], source: &s
     parser.parse_program().map_err(|e| format!("{}: parse error: {}", file_path, e))
 }
 
-/// Type-check the program.
-fn check_types(items: &[brief_compiler::ast::TopLevel]) -> Result<(), String> {
-    let universe = brief_compiler::type_universe::TypeUniverse::new();
-    brief_compiler::typechecker::check_program(items, &universe)
+/// Type-check the program against a TypeUniverse.
+fn check_types(items: &[brief_compiler::ast::TopLevel], universe: &TypeUniverse) -> Result<(), String> {
+    brief_compiler::typechecker::check_program(items, universe)
         .map_err(|errors| {
             let msgs: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
             format!("type errors:\n  {}", msgs.join("\n  "))
         })
-}
-
-/// Generate LLVM IR from the AST.
-fn codegen(items: &[brief_compiler::ast::TopLevel]) -> Result<String, String> {
-    // Simplified: delegate to backend
-    let mut out = String::new();
-    out.push_str("; Generated by Brief Compiler\n");
-    out.push_str("target triple = \"x86_64-unknown-linux-gnu\"\n");
-    out.push_str("\n");
-
-    for item in items {
-        if let brief_compiler::ast::TopLevel::Definition(defn) = item {
-            let _ = codegen_definition(defn, &mut out);
-        }
-    }
-
-    // Add main function if needed
-    if !out.contains("define i64 @main") {
-        out.push_str("\ndefine i64 @main() {\n");
-        out.push_str("  ret i64 0\n");
-        out.push_str("}\n");
-    }
-
-    Ok(out)
-}
-
-/// Generate LLVM IR for a definition.
-fn codegen_definition(defn: &brief_compiler::ast::Definition, out: &mut String) -> Result<(), String> {
-    use std::fmt::Write;
-
-    let params: Vec<String> = defn.parameters.iter()
-        .enumerate()
-        .map(|(i, (name, ty))| {
-            let llvm_ty = brief_compiler::backend::llvm::types::lower_type(ty);
-            format!("{} %{}", llvm_ty, if name.is_empty() { format!("p{}", i) } else { name.clone() })
-        })
-        .collect();
-
-    let ret_ty = defn.output_type.as_ref()
-        .map(|ot| match ot {
-            brief_compiler::ast::OutputType::Single(ty) => brief_compiler::backend::llvm::types::lower_type(ty),
-            _ => "i64".into(),
-        })
-        .unwrap_or_else(|| "void".into());
-
-    writeln!(out, "define {} @{}({}) {{", ret_ty, defn.name, params.join(", "))
-        .map_err(|e| format!("write error: {}", e))?;
-    writeln!(out, "  ret {} 0", ret_ty)
-        .map_err(|e| format!("write error: {}", e))?;
-    writeln!(out, "}}")
-        .map_err(|e| format!("write error: {}", e))?;
-    writeln!(out).map_err(|e| format!("write error: {}", e))?;
-
-    Ok(())
-}
-
-/// Write the output LLVM IR file.
-fn write_output(file_path: &str, llvm_ir: &str) -> Result<(), String> {
-    let out_path = if file_path.ends_with(".bv") {
-        file_path.replace(".bv", ".ll")
-    } else {
-        format!("{}.ll", file_path)
-    };
-    std::fs::write(&out_path, llvm_ir)
-        .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
-    println!("wrote {}", out_path);
-    Ok(())
 }
