@@ -312,11 +312,35 @@ impl<'a> Parser<'a> {
         let name = self.expect_identifier()?;
         self.expect(Token::Arrow)?;
         let target = self.expect_identifier()?;
-        self.expect(Token::Semicolon)?;
+        // 2026-07-14: Optional body with layout { field <:> field; } mappings
+        let mut bindings = std::collections::HashMap::new();
+        if self.eat(&Token::LBrace) {
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                // Expect "layout" as the block keyword
+                let keyword = self.expect_identifier()?;
+                if keyword == "layout" {
+                    self.expect(Token::LBrace)?;
+                    while !self.check(&Token::RBrace) && !self.is_at_end() {
+                        let lhs = self.expect_identifier()?;
+                        self.expect(Token::Meld)?; // <:>
+                        let rhs = self.expect_identifier()?;
+                        self.eat(&Token::Semicolon);
+                        bindings.insert(format!("layout.{}", lhs), rhs);
+                    }
+                    self.expect(Token::RBrace)?;
+                } else {
+                    return Err(SyntaxError::InvalidExpression {
+                        reason: format!("expected 'layout' in meld body, got '{}'", keyword),
+                        span: crate::errors::Span::new(0, 0, 0, 0),
+                    });
+                }
+            }
+            self.expect(Token::RBrace)?;
+        }
         Ok(Meld {
             name,
             target,
-            bindings: std::collections::HashMap::new(),
+            bindings,
             span: None,
         })
     }
