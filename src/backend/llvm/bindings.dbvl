@@ -1,6 +1,6 @@
-# Intrinsic bindings for the LLVM backend
-# Format: intrinsic_name -> LLVM IR template
-# %0, %1, ... refer to arguments by index
+// Intrinsic bindings for the LLVM backend
+// Format: intrinsic_name -> LLVM IR template
+// %0, %1, ... refer to arguments by index
 
 AddI64#    -> add nsw i64 %0, %1
 SubI64#    -> sub nsw i64 %0, %1

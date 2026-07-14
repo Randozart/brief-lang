@@ -20,17 +20,17 @@ use std::collections::HashMap;
 
 /// Run all fuzz cases in a program and return any errors found.
 pub fn check_fuzz_cases(
-    program: &crate::ast::Program,
+    program: &[crate::ast::TopLevel],
     interpreter: &mut Interpreter,
 ) -> Vec<FuzzError> {
     let mut errors = Vec::new();
 
-    for item in &program.items {
+    for item in program {
         match item {
             TopLevel::Fuzzed { item: inner, cases } => {
                 let mut case_idx = 0;
                 for fuzz_case in cases {
-                    let errs = verify_fuzz_case(inner, fuzz_case, case_idx, interpreter);
+                    let errs = verify_fuzz_case(&inner, fuzz_case, case_idx, interpreter);
                     errors.extend(errs);
                     case_idx += 1;
                 }
@@ -120,8 +120,8 @@ fn verify_defn_fuzz(
         }
     };
 
-    // Call the definition.
-    let actual = match interpreter.call_defn(&function, &args) {
+    // Execute the definition body.
+    let actual = match exec_body(&defn.body, interpreter) {
         Ok(v) => v,
         Err(e) => {
             return vec![FuzzError::EvaluationError {
@@ -182,8 +182,8 @@ fn verify_txn_fuzz(
         }
     };
 
-    // Call the transaction.
-    let actual = match interpreter.call_txn(&function, &args) {
+    // Execute the transaction body.
+    let actual = match exec_body(&txn.body, interpreter) {
         Ok(v) => v,
         Err(e) => {
             return vec![FuzzError::EvaluationError {
@@ -381,4 +381,13 @@ fn format_value(val: &Value) -> String {
         }
         _ => format!("{:?}", val),
     }
+}
+
+/// Execute a block of statements using the interpreter and return the last value.
+fn exec_body(body: &[crate::ast::Statement], interpreter: &mut Interpreter) -> Result<Value, crate::errors::RuntimeError> {
+    let mut result = Value::Void;
+    for stmt in body {
+        result = interpreter.exec_stmt(stmt)?;
+    }
+    Ok(result)
 }

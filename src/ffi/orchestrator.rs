@@ -108,56 +108,18 @@ impl Orchestrator {
             .validate_precondition(binding, &ffi_args)
             .map_err(|e| RuntimeError::ContractViolation(e))?;
 
-        // 3. Allocate buffer (Metro Pipe)
-        let input_layout = binding.input_layout.as_ref().ok_or_else(|| {
-            RuntimeError::UndefinedForeignFunction(format!(
-                "Missing input layout for {}",
-                binding.name
-            ))
-        })?;
-        let output_layout = binding.output_layout.as_ref().ok_or_else(|| {
-            RuntimeError::UndefinedForeignFunction(format!(
-                "Missing output layout for {}",
-                binding.name
-            ))
-        })?;
+        // 3. Execute foreign function directly (legacy path)
+        let result_value = foreign_fn(args)?;
 
-        let buffer_size = input_layout.size_bytes.max(output_layout.size_bytes);
-        let mut buffer = vec![0u8; buffer_size];
+        // 4. Convert back to interpreter value
+        let mut result_val = result_value;
 
-        // 4. Drop input into the pipe
-        self.mapper
-            .drop(&mut buffer, input_layout, &ffi_args)
-            .map_err(|e| RuntimeError::UnhandledOutcome(e))?;
-
-        // 5. Execute foreign function
-        // Note: For now, we still use the old ForeignFn signature which takes Vec<Value>.
-        // In a true Metro system, we would pass the buffer pointer.
-        // We simulate this by passing the buffer as Value::Data.
-        let result_value = foreign_fn(vec![Value::Bits(buffer)])?;
-
-        // 6. Fetch result from the pipe
-        // The foreign function might have written directly to a buffer it received,
-        // or returned a new buffer.
-        let result_buffer = match result_value {
-            Value::Bits(d) => d,
-            _ => return Ok(result_value), // Fallback for old functions that return direct values
-        };
-
-        let ffi_result = self
-            .mapper
-            .fetch(&result_buffer, output_layout)
-            .map_err(|e| RuntimeError::UnhandledOutcome(e))?;
-
-        // 7. Validate post-conditions
+        // 5. Validate post-conditions
         self.sentinel
-            .validate_postcondition(binding, &ffi_result)
+            .validate_postcondition(binding, &FfiValue::from_interpreter_value(&result_val))
             .map_err(|e| RuntimeError::ContractViolation(e))?;
 
-        // 8. Convert back to interpreter value
-        let mut result_val = ffi_result.to_interpreter_value();
-
-        // 9. Wrap in Result (v2 "logically closed" pattern)
+        // Wrap in Result (v2 "logically closed" pattern)
         let error_fields = &binding.error_fields;
         let error_type_name = &binding.error_type;
 

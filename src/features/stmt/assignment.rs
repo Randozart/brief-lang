@@ -1,4 +1,4 @@
-// ── Statement::Assignment — Assignment Statement ──────────────────
+// ── Statement::Assign — Assignment Statement ──────────────────
 //
 // Phase 2/4: Pattern B feature struct with 4 trait implementations.
 
@@ -33,7 +33,7 @@ impl StmtEval for AssignmentStmt {
                 let name = expr.as_var_name().ok_or_else(|| RuntimeError::TypeMismatch("AddrOf LHS must be an identifier".to_string()))?.to_string();
                 ctx.state.insert(name, value);
             }
-            Expr::ListIndex(list_expr, index_expr) => {
+            Expr::Index(list_expr, index_expr) => {
                 let list_name = match list_expr.as_ref() {
                     Expr::Identifier(n) => n.clone(),
                     expr @ Expr::AddrOf(_) => {

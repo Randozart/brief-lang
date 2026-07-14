@@ -61,7 +61,7 @@ impl LlvmBackend {
             // 2026-07-12: Intrinsic call if name ends with '#', else user call.
             Expr::Call(name, args) => {
                 if name.ends_with('#') {
-                    emit_intrinsic_call(self, out, v, name, args, indent, &mut self.fun)
+                    self.emit_intrinsic_call_dispatch(out, v, name, args, indent)
                 } else {
                     self.emit_user_call(out, v, name, args, indent)
                 }
@@ -100,16 +100,16 @@ impl LlvmBackend {
                 let end_lbl = format!("if.end{}", end_l);
                 writeln!(out, "{}br i1 {}, label %{}, label %{}",
                     indent, cond_reg.name, then_lbl, else_lbl).ok();
-                writeln!(out, "{}:", indent, then_lbl).ok();
+                writeln!(out, "{}{}:", indent, then_lbl).ok();
                 let then_reg = self.emit_expr(out, then, indent);
                 writeln!(out, "{}br label %{}", indent, end_lbl).ok();
-                writeln!(out, "{}:", indent, else_lbl).ok();
+                writeln!(out, "{}{}:", indent, else_lbl).ok();
                 let else_reg = match else_ {
                     Some(e) => self.emit_expr(out, e, indent),
                     None => TypedRegister { name: self.fun.gen_reg(), ty: Type::void() },
                 };
                 writeln!(out, "{}br label %{}", indent, end_lbl).ok();
-                writeln!(out, "{}:", indent, end_lbl).ok();
+                writeln!(out, "{}{}:", indent, end_lbl).ok();
                 TypedRegister { name: v.to_string(), ty: then_reg.ty }
             }
 
@@ -294,7 +294,7 @@ impl LlvmBackend {
     }
 
     /// Emit a statement (delegates to emit_stmt module).
-    fn emit_statement(&mut self, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
+    pub(crate) fn emit_statement(&mut self, out: &mut String, stmt: &Statement, indent: &str) -> TypedRegister {
         crate::backend::llvm::emit_stmt::emit_statement(self, out, stmt, indent)
     }
 
@@ -308,8 +308,14 @@ impl LlvmBackend {
         self.fun.let_binding_types.get(name).cloned().unwrap_or(Type::int())
     }
 
-    /// Ensure a value is in a float register (load if needed).
-    fn ensure_float_reg(&mut self, out: &mut String, indent: &str, reg: &str) -> String {
-        reg.to_string()
+    fn emit_intrinsic_call_dispatch(
+        &mut self,
+        out: &mut String,
+        v: &str,
+        name: &str,
+        args: &[Expr],
+        indent: &str,
+    ) -> TypedRegister {
+        emit_intrinsic_call(self, out, v, name, args, indent)
     }
 }

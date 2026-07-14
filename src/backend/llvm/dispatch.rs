@@ -1,5 +1,6 @@
 
-
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type};
+use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{
     find_perfect_hash, sparsity_ratio, FoldParam, FunctionGuard, LlvmBackend,
 };
@@ -174,11 +175,11 @@ impl LlvmBackend {
     }
     pub(crate) fn extract_ranges_inner(expr: &Expr, r: &mut HashMap<String, (i64, i64)>) {
         match expr {
-            Expr::And(l, rgt) => {
+            Expr::BinaryOp(BinaryOpKind::And, l, rgt) => {
                 Self::extract_ranges_inner(l, r);
                 Self::extract_ranges_inner(rgt, r);
             }
-            Expr::Lt(l, rgt) => {
+            Expr::BinaryOp(BinaryOpKind::Lt, l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
                     if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
@@ -188,7 +189,7 @@ impl LlvmBackend {
                     }
                 }
             }
-            Expr::Ge(l, rgt) => {
+            Expr::BinaryOp(BinaryOpKind::Ge, l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
                     if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
@@ -198,7 +199,7 @@ impl LlvmBackend {
                     }
                 }
             }
-            Expr::Gt(l, rgt) => {
+            Expr::BinaryOp(BinaryOpKind::Gt, l, rgt) => {
                 if let Some(n) = Self::unwrap_cast_to_ident(l.as_ref()) {
                     if let Expr::Decimal(v) = rgt.as_ref() {
                         let e = r.entry(n.to_string()).or_insert((i64::MIN, i64::MAX));
@@ -240,9 +241,9 @@ impl LlvmBackend {
     // lowest indices (0..N). Cache slots and internal variables get higher
     // indices. A u64 mask is cheap to and/or/test and saturates any practical
     // state size. If >64 fields are needed, this should switch to u128.
-    pub(crate) fn build_write_masks(&mut self, program: &Program) {
+    pub(crate) fn build_write_masks(&mut self, items: &[TopLevel]) {
         self.txn_write_masks.clear();
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Transaction(t) = item {
                 let writes = crate::backend::collect_assigned_identifiers(&t.body);
                 let mut mask = 0u64;
@@ -440,7 +441,7 @@ impl LlvmBackend {
                 if self.fun.terminated {
                     break;
                 }
-                self.emit_stmt(out, s, indent);
+                emit_statement(self, out, s, indent);
             }
 
             // 2026-07-01: Use restore_preserve_counters — SSA register counters
@@ -481,22 +482,11 @@ impl LlvmBackend {
                     ));
                 }
             }
-            Expr::BinaryOp(bop) => {
-                self.check_exit_condition_idents_inner(&bop.left, errors);
-                self.check_exit_condition_idents_inner(&bop.right, errors);
-            }
-            Expr::Eq(l, r)
-            | Expr::Ne(l, r)
-            | Expr::Lt(l, r)
-            | Expr::Le(l, r)
-            | Expr::Gt(l, r)
-            | Expr::Ge(l, r)
-            | Expr::And(l, r)
-            | Expr::Or(l, r) => {
+            Expr::BinaryOp(_, l, r) => {
                 self.check_exit_condition_idents_inner(l, errors);
                 self.check_exit_condition_idents_inner(r, errors);
             }
-            Expr::Not(e) => self.check_exit_condition_idents_inner(e, errors),
+            Expr::UnaryOp(_, e) => self.check_exit_condition_idents_inner(e, errors),
             _ => {}
         }
     }

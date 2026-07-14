@@ -10,36 +10,36 @@ use crate::parser::Parser;
 /// Phase 1a: Expand all template calls in the program.
 pub fn expand_templates(program: &mut Program, ctx: &mut MacroContext) -> Result<(), String> {
     collect_template_defs(program, ctx);
-    expand_template_calls_in_items(&mut program.items, ctx)
+    expand_template_calls_in_items(&mut items, ctx)
 }
 
 /// Phase 1b: Expand all macro calls in the program.
 /// Re-runs Phase 1a on macro output since macros can emit template calls.
-pub fn expand_macros(program: &mut Program, ctx: &mut MacroContext) -> Result<(), String> {    collect_macro_defs(program, ctx);    expand_macro_calls_in_items(&mut program.items, ctx)?;
+pub fn expand_macros(program: &mut Program, ctx: &mut MacroContext) -> Result<(), String> {    collect_macro_defs(program, ctx);    expand_macro_calls_in_items(&mut items, ctx)?;
     // Re-run Phase 1a: macros may emit template calls
-    expand_template_calls_in_items(&mut program.items, ctx)
+    expand_template_calls_in_items(&mut items, ctx)
 }
 
 // ── Collection ────────────────────────────────────────────────
 
 fn collect_template_defs(program: &mut Program, ctx: &mut MacroContext) {
     let mut i = 0;
-    while i < program.items.len() {
-        if let TopLevel::TemplateDef { name, params, return_type, body } = &program.items[i] {
+    while i < items.len() {
+        if let TopLevel::TemplateDef { name, params, return_type, body } = &items[i] {
             let def = TemplateDef { name: name.clone(), params: params.clone(), return_type: return_type.clone(), body: body.clone() };
             ctx.templates.insert(name.clone(), def);
-            program.items.remove(i);
+            items.remove(i);
         } else { i += 1; }
     }
 }
 
 pub(crate) fn collect_macro_defs(program: &mut Program, ctx: &mut MacroContext) {
     let mut i = 0;
-    while i < program.items.len() {
-        if let TopLevel::MacroDef { name, params, return_type, body } = &program.items[i] {
+    while i < items.len() {
+        if let TopLevel::MacroDef { name, params, return_type, body } = &items[i] {
             let def = MacroDef { name: name.clone(), params: params.clone(), return_type: return_type.clone(), body: body.clone() };
             ctx.macros.insert(name.clone(), def);
-            program.items.remove(i);
+            items.remove(i);
         } else { i += 1; }
     }
 }
@@ -155,7 +155,7 @@ fn expand_template_in_stmts_inner(
                 }
             }
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded(condition, statements) => {
             if let Some(e) = expand_template_in_expr(condition, ctx)? {
                 *condition = e;
                 *changed = true;
@@ -186,7 +186,7 @@ fn expand_template_in_stmts_inner(
                 expand_template_in_stmts_inner(ss, ctx, changed)?;
             }
         }
-        Statement::Assignment { lhs, expr, .. } => {
+        Statement::Assign(lhs, expr) => {
             if let Some(e) = expand_template_in_expr(lhs, ctx)? {
                 *lhs = e;
                 *changed = true;
@@ -362,7 +362,7 @@ fn expand_macro_in_stmts_inner(
                 }
             }
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded(condition, statements) => {
             if let Some(e) = expand_macro_in_expr(condition, ctx)? {
                 *condition = e;
                 *changed = true;
@@ -393,7 +393,7 @@ fn expand_macro_in_stmts_inner(
                 expand_macro_in_stmts_inner(ss, ctx, changed)?;
             }
         }
-        Statement::Assignment { lhs, expr, .. } => {
+        Statement::Assign(lhs, expr) => {
             if let Some(e) = expand_macro_in_expr(lhs, ctx)? {
                 *lhs = e;
                 *changed = true;
@@ -462,8 +462,8 @@ fn expand_macro_in_expr(
 // ── Validation ────────────────────────────────────────────────
 
 /// Validate that no compile-time-only intrinsics remain after macro expansion.
-pub fn validate_no_compile_time_intrinsics(program: &Program) -> Result<(), String> {
-    for item in &program.items {
+pub fn validate_no_compile_time_intrinsics(program: &[TopLevel]) -> Result<(), String> {
+    for item in &items {
         if let TopLevel::Statement(stmt) = item {
             check_stmt_for_intrinsics(stmt)?;
         }
@@ -477,7 +477,7 @@ fn check_stmt_for_intrinsics(stmt: &Statement) -> Result<(), String> {
         Statement::Let { expr, .. } => {
             if let Some(e) = expr { check_expr_for_intrinsics(e) } else { Ok(()) }
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded(condition, statements) => {
             check_expr_for_intrinsics(condition)?;
             for s in statements { check_stmt_for_intrinsics(s)?; }
             Ok(())
@@ -516,7 +516,7 @@ mod tests {
         };
         let mut ctx = MacroContext::new();
         assert!(expand_templates(&mut program, &mut ctx).is_ok());
-        assert!(program.items.is_empty());
+        assert!(items.is_empty());
     }
 
     #[test]
@@ -653,9 +653,9 @@ mod tests {
         let mut ctx = MacroContext::new();
         let result = expand_templates(&mut program, &mut ctx);
         assert!(result.is_ok(), "expand_templates failed: {:?}", result.err());
-        assert_eq!(program.items.len(), 1, "Expected 1 item after expansion");
+        assert_eq!(items.len(), 1, "Expected 1 item after expansion");
         // The expanded call should be present — no panic on TemplateDef removal
-        assert!(matches!(&program.items[0], TopLevel::Statement(_)));
+        assert!(matches!(&items[0], TopLevel::Statement(_)));
     }
 
     #[test]
@@ -685,7 +685,7 @@ mod tests {
         };
         let mut ctx = MacroContext::new();
         collect_macro_defs(&mut program, &mut ctx);
-        assert!(program.items.is_empty());
+        assert!(items.is_empty());
         assert!(ctx.macros.contains_key("m"));
     }
 
@@ -697,14 +697,14 @@ mod tests {
         let mut program = parser.parse().expect("Parsing should succeed");
         let mut ctx = MacroContext::new();
         collect_macro_defs(&mut program, &mut ctx);
-        expand_macro_calls_in_items(&mut program.items, &mut ctx).expect("Macro expansion should succeed");
-        for item in &program.items {
+        expand_macro_calls_in_items(&mut items, &mut ctx).expect("Macro expansion should succeed");
+        for item in &items {
             assert_no_macro_call(item);
         }
-        let has_defn = program.items.iter().any(|item| matches!(item, TopLevel::Definition(_)));
+        let has_defn = items.iter().any(|item| matches!(item, TopLevel::Definition(_)));
         assert!(has_defn, "Expanded program should contain a Definition");
         // Body should have 2 statements: the let + term
-        if let Some(TopLevel::Definition(defn)) = program.items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
+        if let Some(TopLevel::Definition(defn)) = items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
             assert!(defn.body.len() >= 2, "Expected at least 2 statements in defn body, got {:?}", defn.body);
         }
     }
@@ -717,12 +717,12 @@ mod tests {
         let mut program = parser.parse().expect("Parsing should succeed");
         let mut ctx = MacroContext::new();
         collect_macro_defs(&mut program, &mut ctx);
-        expand_macro_calls_in_items(&mut program.items, &mut ctx).expect("Macro expansion should succeed");
-        for item in &program.items {
+        expand_macro_calls_in_items(&mut items, &mut ctx).expect("Macro expansion should succeed");
+        for item in &items {
             assert_no_macro_call(item);
         }
         // After expansion, the defn body should contain 2 statements: the let + term
-        if let Some(TopLevel::Definition(defn)) = program.items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
+        if let Some(TopLevel::Definition(defn)) = items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
             assert_eq!(defn.body.len(), 2, "Expected 2 statements in defn body after expansion, got {:?}", defn.body);
         }
     }
@@ -735,12 +735,12 @@ mod tests {
         let mut program = parser.parse().expect("Parsing should succeed");
         let mut ctx = MacroContext::new();
         collect_macro_defs(&mut program, &mut ctx);
-        expand_macro_calls_in_items(&mut program.items, &mut ctx).expect("Macro expansion should succeed");
-        for item in &program.items {
+        expand_macro_calls_in_items(&mut items, &mut ctx).expect("Macro expansion should succeed");
+        for item in &items {
             assert_no_macro_call(item);
         }
         // After expansion, the defn body should contain 2 statements: the let + term
-        if let Some(TopLevel::Definition(defn)) = program.items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
+        if let Some(TopLevel::Definition(defn)) = items.iter().find(|item| matches!(item, TopLevel::Definition(_))) {
             assert_eq!(defn.body.len(), 2, "Expected 2 statements in defn body after expansion");
         }
     }
@@ -777,13 +777,13 @@ mod tests {
                     assert_no_macro_call_in_expr(e);
                 }
             }
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 assert_no_macro_call_in_expr(condition);
                 for s in statements {
                     assert_no_macro_call_in_stmt(s);
                 }
             }
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assign(lhs, expr) => {
                 assert_no_macro_call_in_expr(lhs);
                 assert_no_macro_call_in_expr(expr);
             }

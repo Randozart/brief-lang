@@ -53,7 +53,7 @@ pub fn check_bild(inop: &InopDeclaration) -> Vec<BildError> {
         }
 
         // Use source span line number if available
-        let source_line = inop.llvm_body_spans.get(i).map(|s| s.line).unwrap_or(i);
+        let source_line = i;
 
         let after_semi = trimmed.strip_suffix(';').unwrap_or(trimmed);
 

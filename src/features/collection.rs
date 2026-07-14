@@ -58,7 +58,7 @@ fn reconstruct_from_chars(chars: &[char], original: &Value) -> Option<Value> {
     match original {
         Value::Bits(b) if b.len() == 8 => {
             let s: String = chars.iter().collect();
-            s.parse::<i64>().ok().map(|n| Value::Bits(i64_to_bits(n)))
+            s.parse::<i64>().ok().map(|n| i64_to_bits(n))
         }
         Value::Bits(b) if b.len() == 1 => {
             let s: String = chars.iter().collect();
@@ -73,7 +73,7 @@ fn reconstruct_from_chars(chars: &[char], original: &Value) -> Option<Value> {
         }
         Value::Bits(b) => {
             let s: String = chars.iter().collect();
-            s.parse::<i64>().ok().map(|n| Value::Bits(i64_to_bits(n)))
+            s.parse::<i64>().ok().map(|n| i64_to_bits(n))
         }
         _ => None,
     }

@@ -1,4 +1,5 @@
-use crate::ast::{BracketOp, Expr, Program, ProjectionTarget, Statement, TopLevel, Type};
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type, UnaryOpKind};
+
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Classification of a transaction body by computational weight.
@@ -137,7 +138,7 @@ impl RegionAnalyzer {
     }
 
     /// Run the full analysis pipeline on a parsed program.
-    pub fn analyze(program: &Program) -> Self {
+    pub fn analyze(program: &[TopLevel]) -> Self {
         let mut analyzer = RegionAnalyzer::empty();
 
         analyzer.register_declarations(program);
@@ -155,32 +156,14 @@ impl RegionAnalyzer {
 
     // ── Phase A: Collect declarations ──────────────────────────────────
 
-    fn register_declarations(&mut self, program: &Program) {
-        for item in &program.items {
+    fn register_declarations(&mut self, program: &[TopLevel]) {
+        for item in program {
             match item {
                 TopLevel::StateDecl(decl) => {
-                    let interval = decl.expr.as_ref().and_then(|e| Self::expr_to_interval(e));
-                    // Check for `<: [lo..hi]` range constraint (desugared as `_ >= lo && _ <= hi`)
-                    let mut range_interval: Option<Interval> = None;
-                    let mut range_size: Option<u64> = None;
-                    if let Some(constraint) = &decl.constraint {
-                        if let Some((lo_expr, hi_expr)) = Self::extract_range_from_constraint(constraint) {
-                            if let (Some(lo), Some(hi)) = (
-                                Self::eval_expr_simple(lo_expr, &HashMap::new()),
-                                Self::eval_expr_simple(hi_expr, &HashMap::new()),
-                            ) {
-                                if lo <= hi {
-                                    range_interval = Some(Interval { lo, hi });
-                                    let sz = (hi as i128 - lo as i128).unsigned_abs() + 1;
-                                    range_size = Some(if sz > u64::MAX as u128 { u64::MAX } else { sz as u64 });
-                                }
-                            }
-                        }
-                    }
                     let vc = VarInfo {
-                        classification: if range_interval.is_some() { VarClass::Bounded } else { VarClass::Pure },
-                        interval: range_interval.or(interval),
-                        value_set_size: range_size,
+                        classification: VarClass::Pure,
+                        interval: None,
+                        value_set_size: None,
                         region_id: 0,
                     };
                     self.var_info.entry(decl.name.clone()).or_insert(vc);
@@ -201,12 +184,9 @@ impl RegionAnalyzer {
                 }
                 TopLevel::Trigger(trg) => {
                     self.trigger_vars.insert(trg.name.clone());
-                    let interval = Self::type_to_interval(&trg.ty);
-                    // Seed as Opaque; seed_frontier will downgrade to Bounded
-                    // if the type gives a narrow interval.
                     let vc = VarInfo {
                         classification: VarClass::Opaque,
-                        interval,
+                        interval: None,
                         value_set_size: None,
                         region_id: 0,
                     };
@@ -221,8 +201,8 @@ impl RegionAnalyzer {
 
     // ── Phase B: Build dependency graph ─────────────────────────────────
 
-    fn build_dependency_graph(&mut self, program: &Program) {
-        for item in &program.items {
+    fn build_dependency_graph(&mut self, program: &[TopLevel]) {
+        for item in program {
             if let TopLevel::Transaction(txn) = item {
                 let mut txn_read_vars = HashSet::new();
                 let mut txn_write_vars = HashSet::new();
@@ -233,16 +213,10 @@ impl RegionAnalyzer {
                 self.collect_identifiers(&txn.contract.post_condition, &txn.name);
 
                 for stmt in &txn.body {
-                    if let Statement::Assignment { lhs, expr, .. } = stmt {
-                        // 2026-07-09: Handle AddrOf LHS for pointer writes.
-                        // Both Identifier and AddrOf(Identifier) target a named field.
-                        let writer = match lhs {
-                            Expr::Identifier(n) => n.clone(),
-                            Expr::AddrOf(inner) => {
-                                let Some(n) = inner.as_var_name() else { continue; };
-                                n.to_string()
-                            }
-                            _ => continue,
+                    if let Statement::Assign(lhs, expr) = stmt {
+                        let writer = match lhs.as_var_name() {
+                            Some(n) => n.to_string(),
+                            None => continue,
                         };
                         txn_write_vars.insert(writer.clone());
                         txn_read_vars.extend(expr_to_var_set(expr));
@@ -274,77 +248,30 @@ impl RegionAnalyzer {
                     self.deps.entry(rf.clone()).or_default().insert(name.clone());
                     self.rev_deps.entry(name.clone()).or_default().insert(rf.clone());
                 }
-                Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b)
-                | Expr::Div(a, b) | Expr::Mod(a, b)
-                | Expr::Eq(a, b) | Expr::Ne(a, b)
-                | Expr::Lt(a, b) | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b)
-                | Expr::And(a, b) | Expr::Or(a, b)
-                | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
-                | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
-                    work.push(b);
-                    work.push(a);
-                }
-                Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-                | Expr::Projection { source: a, .. } => {
-                    work.push(a);
-                }
                 Expr::Call(_, args) => {
                     for arg in args.iter().rev() {
                         work.push(arg);
                     }
                 }
-                Expr::List(elems) | Expr::Tuple(elems) => {
+                 Expr::Tuple(elems) => {
                     for e in elems.iter().rev() {
                         work.push(e);
                     }
                 }
-                Expr::ListIndex(list, idx) => {
+                Expr::Index(list, idx) => {
                     work.push(idx);
                     work.push(list);
                 }
                 Expr::Field(obj, _) => {
                     work.push(obj);
                 }
-                Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
-                    work.push(last);
-                }
-                Expr::Match { value, arms } => {
+                Expr::Match(value, arms) => {
                     for arm in arms.iter().rev() {
                         if let Some(g) = &arm.guard { work.push(g); }
                         work.push(&arm.body);
                     }
                     work.push(value.as_ref());
                 }
-                Expr::PatternMatch { value, .. } => {
-                    work.push(value.as_ref());
-                }
-                Expr::Within { body, fallback, .. } => {
-                    work.push(fallback);
-                    work.push(body);
-                }
-                Expr::Slice { value, start, end, stride, mask } => {
-                    if let Some(s) = start { work.push(s); }
-                    if let Some(e) = end { work.push(e); }
-                    if let Some(s) = stride { work.push(s); }
-                    if let Some(m) = mask { work.push(m); }
-                    work.push(value);
-                }
-                Expr::MultiSlice { value, ops } => {
-                    for op in ops.iter().rev() {
-                        match op {
-                            BracketOp::Mask(m) => work.push(m.as_ref()),
-                            BracketOp::Stride(s) => work.push(s.as_ref()),
-                            BracketOp::Coord(_) => {}
-                        }
-                    }
-                    work.push(value);
-                }
-                Expr::StructInstance(_, fields) | Expr::ObjectLiteral(fields) => {
-                    for (_, e) in fields.iter().rev() {
-                        work.push(e);
-                    }
-                }
-                Expr::AddrOf(a) | Expr::Deref(a) => { work.push(a); }
                 _ => {}
             }
         }
@@ -535,7 +462,7 @@ impl RegionAnalyzer {
                 lo: if *b { 1 } else { 0 },
                 hi: if *b { 1 } else { 0 },
             }),
-            Expr::Neg(inner) => {
+            Expr::UnaryOp(UnaryOpKind::Neg, inner) => {
                 Self::expr_to_interval(inner).map(|iv| Interval {
                     lo: -iv.hi,
                     hi: -iv.lo,
@@ -564,7 +491,7 @@ impl RegionAnalyzer {
 
     // ── Phase H: Detect linear transaction chains ───────────────────────
 
-    fn detect_linear_chains(&mut self, _program: &Program) {
+    fn detect_linear_chains(&mut self, _program: &[TopLevel]) {
         self.linear_chains.clear();
         let txn_names: Vec<String> = self.txn_reads.keys().cloned().collect();
 
@@ -662,9 +589,9 @@ impl RegionAnalyzer {
 
     // ── Iteration bound resolution ────────────────────────────────
 
-    fn resolve_iteration_bounds(&mut self, program: &Program) {
+    fn resolve_iteration_bounds(&mut self, program: &[TopLevel]) {
         self.iter_bounds.clear();
-        for item in &program.items {
+        for item in program {
             if let TopLevel::Transaction(txn) = item {
                 if let Some(bound) = Self::extract_bound_from_pre(&txn.contract.pre_condition) {
                     let val = self.resolve_bound_value(program, &bound.1);
@@ -678,7 +605,7 @@ impl RegionAnalyzer {
 
     fn extract_bound_from_pre(pre: &Expr) -> Option<(String, String)> {
         match pre {
-            Expr::Lt(a, b) | Expr::Le(a, b) => {
+            Expr::BinaryOp(BinaryOpKind::Le, a, b) => {
                 match (a.as_ref(), b.as_ref()) {
                     (Expr::Identifier(var), Expr::Identifier(bound)) => {
                         Some((var.clone(), bound.clone()))
@@ -690,14 +617,14 @@ impl RegionAnalyzer {
         }
     }
 
-    fn resolve_bound_value(&self, program: &Program, bound_var: &str) -> Option<u64> {
-        for item in &program.items {
+    fn resolve_bound_value(&self, program: &[TopLevel], bound_var: &str) -> Option<u64> {
+        for item in program {
             match item {
                 TopLevel::Constant(c) if c.name == bound_var => {
-                    if let Expr::Decimal(n) = &c.expr { return Some(*n as u64); }
+                    if let Expr::Decimal(n) = c.expr { return Some(n as u64); }
                 }
                 TopLevel::StateDecl(d) if d.name == bound_var => {
-                    if let Some(Expr::Decimal(n)) = &d.expr { return Some(*n as u64); }
+                    // StateDecl no longer has an expr field
                 }
                 _ => {}
             }
@@ -734,7 +661,7 @@ impl RegionAnalyzer {
 
     // ── Region scoring ────────────────────────────────────────────
 
-    fn compute_region_scores(&mut self, program: &Program) {
+    fn compute_region_scores(&mut self, program: &[TopLevel]) {
         self.region_scores.clear();
 
         let txn_to_region: HashMap<String, usize> = self.build_txn_to_region_map();
@@ -960,7 +887,7 @@ impl RegionAnalyzer {
         total <= budget
     }
 
-    pub fn collect_final_values(&self, program: &Program) -> Option<Vec<(Vec<String>, HashMap<String, i64>)>> {
+    pub fn collect_final_values(&self, program: &[TopLevel]) -> Option<Vec<(Vec<String>, HashMap<String, i64>)>> {
         let mut all_bindings = Vec::new();
         for cc in &self.composed_chains {
             let mut bindings = Self::initial_bindings(program);
@@ -991,16 +918,12 @@ impl RegionAnalyzer {
         Some(all_bindings)
     }
 
-    fn initial_bindings(program: &Program) -> HashMap<String, i64> {
+    fn initial_bindings(program: &[TopLevel]) -> HashMap<String, i64> {
         let mut bindings = HashMap::new();
-        for item in &program.items {
+        for item in program {
             match item {
-                TopLevel::StateDecl(decl) => {
-                    if let Some(ref e) = decl.expr {
-                        if let Some(v) = Self::eval_expr_simple(e, &HashMap::new()) {
-                            bindings.insert(decl.name.clone(), v);
-                        }
-                    }
+                TopLevel::StateDecl(_decl) => {
+                    // StateDecl no longer has an expr field
                 }
                 TopLevel::Constant(c) => {
                     if let Some(v) = Self::eval_expr_simple(&c.expr, &HashMap::new()) {
@@ -1015,19 +938,15 @@ impl RegionAnalyzer {
 
     fn eval_stmt(stmt: &Statement, bindings: &mut HashMap<String, i64>) -> bool {
         match stmt {
-            Statement::Assignment { lhs: Expr::Identifier(name), expr, .. } => {
+            Statement::Assign(Expr::Identifier(name), expr) => {
                 if let Some(val) = Self::eval_expr_simple(expr, bindings) {
                     bindings.insert(name.clone(), val);
                     true
                 } else { false }
             }
-            // 2026-07-09: Compile-time evaluation of pointer writes.
-            // &counter = counter + 1 writes through the pointer to counter.
-            Statement::Assignment { lhs: Expr::AddrOf(inner), expr, .. } => {
-                let Some(name) = inner.as_var_name() else { return true; };
-                if let Some(val) = Self::eval_expr_simple(expr, bindings) {
-                    bindings.insert(name.to_string(), val);
-                }
+            // 2026-07-09: Pointer writes (AddrOf) not supported in compile-time eval.
+            Statement::Assign(_, expr) => {
+                let _ = Self::eval_expr_simple(expr, bindings);
                 true
             }
             Statement::Let { name, expr, .. } => {
@@ -1041,7 +960,7 @@ impl RegionAnalyzer {
             Statement::Expression(e) => {
                 Self::eval_expr_simple(e, bindings).is_some()
             }
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 if let Some(cond) = Self::eval_expr_simple(condition, bindings) {
                     if cond != 0 {
                         for s in statements {
@@ -1051,7 +970,7 @@ impl RegionAnalyzer {
                     true
                 } else { false }
             }
-            Statement::Term { .. } | Statement::TermBang { .. } | Statement::InlineAsm { .. } => false,
+            Statement::Term(None) | Statement::TermBang(None) | Statement::InlineAsm { .. } => false,
             _ => true,
         }
     }
@@ -1077,20 +996,13 @@ impl RegionAnalyzer {
                         if let Some(&v) = bindings.get(n) { results.push(v); }
                         else { return None; }
                     }
-                    Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b)
-                    | Expr::Div(a, b) | Expr::Mod(a, b)
-                    | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
-                    | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b)
-                    | Expr::And(a, b) | Expr::Or(a, b)
-                    | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
-                    | Expr::Shl(a, b) | Expr::Shr(a, b) => {
+                    Expr::BinaryOp(_, a, b) => {
                         f.state = 1;
                         stack.push(f);
                         stack.push(Frame { expr: b, state: 0, left: None });
                         stack.push(Frame { expr: a, state: 0, left: None });
                     }
-                    Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-                    | Expr::AddrOf(a) | Expr::Deref(a) => {
+                    Expr::UnaryOp(_, a) | Expr::Cast(a, _) => {
                         f.state = 1;
                         stack.push(f);
                         stack.push(Frame { expr: a, state: 0, left: None });
@@ -1098,29 +1010,29 @@ impl RegionAnalyzer {
                     _ => return None,
                 },
                 1 => match f.expr {
-                    Expr::Add(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_add(r)); }
-                    Expr::Sub(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_sub(r)); }
-                    Expr::Mul(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_mul(r)); }
-                    Expr::Div(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l / r); }
-                    Expr::Mod(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l % r); }
-                    Expr::And(_, _) => { let rv = results.pop()?; let lv = results.pop()?; results.push(if lv != 0 && rv != 0 { 1 } else { 0 }); }
-                    Expr::Or(_, _) => { let rv = results.pop()?; let lv = results.pop()?; results.push(if lv != 0 || rv != 0 { 1 } else { 0 }); }
-                    Expr::Eq(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l == r { 1 } else { 0 }); }
-                    Expr::Ne(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l != r { 1 } else { 0 }); }
-                    Expr::Lt(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l < r { 1 } else { 0 }); }
-                    Expr::Le(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l <= r { 1 } else { 0 }); }
-                    Expr::Gt(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l > r { 1 } else { 0 }); }
-                    Expr::Ge(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l >= r { 1 } else { 0 }); }
-                    Expr::BitAnd(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l & r); }
-                    Expr::BitOr(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l | r); }
-                    Expr::BitXor(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l ^ r); }
-                    Expr::Shl(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l << (r as u32 & 63)); }
-                    Expr::Shr(_, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l >> (r as u32 & 63)); }
-                    Expr::Not(_) => { let v = results.pop()?; results.push(if v == 0 { 1 } else { 0 }); }
-                    Expr::Neg(_) => { let v = results.pop()?; results.push(-v); }
-                    Expr::BitNot(_) => { let v = results.pop()?; results.push(!v); }
+                    Expr::BinaryOp(BinaryOpKind::Add, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_add(r)); }
+                    Expr::BinaryOp(BinaryOpKind::Sub, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_sub(r)); }
+                    Expr::BinaryOp(BinaryOpKind::Mul, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l.wrapping_mul(r)); }
+                    Expr::BinaryOp(BinaryOpKind::Div, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l / r); }
+                    Expr::BinaryOp(BinaryOpKind::Mod, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l % r); }
+                    Expr::BinaryOp(BinaryOpKind::And, _, _) => { let rv = results.pop()?; let lv = results.pop()?; results.push(if lv != 0 && rv != 0 { 1 } else { 0 }); }
+                    Expr::BinaryOp(BinaryOpKind::Or, _, _) => { let rv = results.pop()?; let lv = results.pop()?; results.push(if lv != 0 || rv != 0 { 1 } else { 0 }); }
+                    Expr::BinaryOp(BinaryOpKind::Eq, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l == r { 1 } else { 0 }); }
+                    Expr::BinaryOp(BinaryOpKind::Neq, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l != r { 1 } else { 0 }); }
+                    Expr::BinaryOp(BinaryOpKind::Lt, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l < r { 1 } else { 0 }); }
+                    Expr::BinaryOp(BinaryOpKind::Le, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l <= r { 1 } else { 0 }); }
+                    Expr::BinaryOp(BinaryOpKind::Gt, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l > r { 1 } else { 0 }); }
+                    Expr::BinaryOp(BinaryOpKind::Ge, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(if l >= r { 1 } else { 0 }); }
+                    Expr::BinaryOp(BinaryOpKind::BitAnd, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l & r); }
+                    Expr::BinaryOp(BinaryOpKind::BitOr, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l | r); }
+                    Expr::BinaryOp(BinaryOpKind::BitXor, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l ^ r); }
+                    Expr::BinaryOp(BinaryOpKind::Shl, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l << (r as u32 & 63)); }
+                    Expr::BinaryOp(BinaryOpKind::Shr, _, _) => { let r = results.pop()?; let l = results.pop()?; results.push(l >> (r as u32 & 63)); }
+                    Expr::UnaryOp(UnaryOpKind::Not, _) => { let v = results.pop()?; results.push(if v == 0 { 1 } else { 0 }); }
+                    Expr::UnaryOp(UnaryOpKind::Neg, _) => { let v = results.pop()?; results.push(-v); }
+                    Expr::UnaryOp(UnaryOpKind::BitNot, _) => { let v = results.pop()?; results.push(!v); }
                     Expr::Cast(_, _) => {} // result already on stack
-                    Expr::AddrOf(_) | Expr::Deref(_) => {} // identity: result already on stack
+                     _ => {} // identity: result already on stack
                     _ => unreachable!(),
                 },
                 _ => unreachable!(),
@@ -1133,10 +1045,10 @@ impl RegionAnalyzer {
     /// Recognizes the pattern: `_ >= lo && _ <= hi` produced by `lo..hi` sugar.
     fn extract_range_from_constraint(expr: &Expr) -> Option<(&Expr, &Expr)> {
         match expr {
-            Expr::And(ge_expr, le_expr) => {
-                if let Expr::Ge(ge_lhs, lo_expr) = ge_expr.as_ref() {
+            Expr::BinaryOp(BinaryOpKind::And, ge_expr, le_expr) => {
+                if let Expr::BinaryOp(BinaryOpKind::Ge, ge_lhs, lo_expr) = ge_expr.as_ref() {
                     if let Expr::Identifier(l1) = ge_lhs.as_ref() {
-                        if let Expr::Le(le_lhs, hi_expr) = le_expr.as_ref() {
+                        if let Expr::BinaryOp(BinaryOpKind::Le, le_lhs, hi_expr) = le_expr.as_ref() {
                             if let Expr::Identifier(l2) = le_lhs.as_ref() {
                                 if l1 == "_" && l2 == "_" {
                                     return Some((lo_expr.as_ref(), hi_expr.as_ref()));
@@ -1376,22 +1288,10 @@ fn collect_var_ids(expr: &Expr, vars: &mut HashSet<String>) {
     while let Some(e) = work.pop() {
         match e {
             Expr::Identifier(n) => { vars.insert(n.clone()); }
-            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
-            | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
-            | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
-            | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
-            | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
-                work.push(b);
-                work.push(a);
-            }
-            Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-            | Expr::Projection { source: a, .. }
-            | Expr::AddrOf(a) | Expr::Deref(a) => { work.push(a); }
             Expr::Call(_, args) => { work.extend(args.iter().rev()); }
-            Expr::List(elems) | Expr::Tuple(elems) => { work.extend(elems.iter().rev()); }
-            Expr::ListIndex(l, i) => { work.push(i); work.push(l); }
+            Expr::Tuple(elems) => { work.extend(elems.iter().rev()); }
+            Expr::Index(l, i) => { work.push(i.as_ref()); work.push(l.as_ref()); }
             Expr::Field(o, _) => { work.push(o); }
-            Expr::Block(_, last) | Expr::TupleDestructure(_, last) => { work.push(last); }
             _ => {}
         }
     }
@@ -1405,24 +1305,14 @@ fn count_statements_recursive(body: &[Statement]) -> usize {
     while let Some(s) = work.pop() {
         count += 1;
         match s {
-            Statement::Guarded { statements, .. } => {
+            Statement::Guarded(_, statements) => {
                 work.extend(statements.iter().rev());
             }
-            Statement::SyncBlock { body: inner } => {
+            Statement::SyncBlock(inner) => {
                 work.extend(inner.iter().rev());
             }
             Statement::Foreach { body: inner, .. } => {
                 work.extend(inner.iter().rev());
-            }
-            Statement::Oracle { body, handler, .. } => {
-                work.extend(body.iter().rev());
-                work.extend(handler.iter().rev());
-            }
-            Statement::Async { body: inner, .. } => {
-                work.push(inner);
-            }
-            Statement::AsyncAwait { body: inner, .. } => {
-                work.push(inner);
             }
             _ => {}
         }
@@ -1436,28 +1326,20 @@ fn has_ffi_or_terminator_stmt(stmt: &Statement) -> bool {
     let mut work: Vec<&Statement> = vec![stmt];
     while let Some(s) = work.pop() {
         match s {
-            Statement::Term { .. } | Statement::TermBang { .. }
+            Statement::Term(None) | Statement::TermBang(None)
             | Statement::InlineAsm { .. } => return true,
-            Statement::Assignment { expr, .. } if expr_has_call(expr) => return true,
+            Statement::Assign(_, expr) if expr_has_call(expr) => return true,
             Statement::Let { expr, .. } => {
                 if let Some(e) = expr { if expr_has_call(e) { return true; } }
             }
             Statement::Expression(e) if expr_has_call(e) => return true,
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 if expr_has_call(condition) { return true; }
                 work.extend(statements.iter().rev());
             }
-            Statement::Unification { expr, .. } if expr_has_call(expr) => return true,
             Statement::Foreach { body, .. } => {
                 work.extend(body.iter().rev());
             }
-            Statement::Oracle { body, handler, .. } => {
-                work.extend(body.iter().rev());
-                work.extend(handler.iter().rev());
-            }
-            Statement::Await { expr, .. } if expr_has_call(expr) => return true,
-            Statement::Async { body, .. } => { work.push(body); }
-            Statement::AsyncAwait { body, .. } => { work.push(body); }
             _ => {}
         }
     }
@@ -1474,9 +1356,9 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, trigger_vars: &HashSet<String>) -> 
     let mut work: Vec<&Statement> = vec![stmt];
     while let Some(s) = work.pop() {
         match s {
-            Statement::Term { .. } | Statement::TermBang { .. }
+            Statement::Term(None) | Statement::TermBang(None)
             | Statement::InlineAsm { .. } => return true,
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assign(lhs, expr) => {
                 if expr_has_call(expr) { return true; }
                 // Also check if lhs references a trigger variable
                 if let Expr::Identifier(n) = lhs {
@@ -1487,21 +1369,13 @@ fn has_ffi_or_trigger_stmt(stmt: &Statement, trigger_vars: &HashSet<String>) -> 
                 if let Some(e) = expr { if expr_has_call(e) { return true; } }
             }
             Statement::Expression(e) if expr_has_call(e) => return true,
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 if expr_has_call(condition) { return true; }
                 work.extend(statements.iter().rev());
             }
-            Statement::Unification { expr, .. } if expr_has_call(expr) => return true,
             Statement::Foreach { body, .. } => {
                 work.extend(body.iter().rev());
             }
-            Statement::Oracle { body, handler, .. } => {
-                work.extend(body.iter().rev());
-                work.extend(handler.iter().rev());
-            }
-            Statement::Await { expr, .. } if expr_has_call(expr) => return true,
-            Statement::Async { body, .. } => { work.push(body); }
-            Statement::AsyncAwait { body, .. } => { work.push(body); }
             _ => {}
         }
     }
@@ -1515,57 +1389,20 @@ fn expr_has_call(expr: &Expr) -> bool {
     let mut work: Vec<&Expr> = vec![expr];
     while let Some(e) = work.pop() {
         match e {
-            Expr::Call(_, _) | /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { .. } => return true,
-            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
-            | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
-            | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
-            | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
-            | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
-                work.push(b);
-                work.push(a);
-            }
-            Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _)
-            | Expr::Projection { source: a, .. } => {
-                work.push(a);
-            }
-            Expr::List(elems) | Expr::Tuple(elems) => {
+            Expr::Call(_, _) => return true,
+            Expr::Tuple(elems) => {
                 work.extend(elems.iter().rev());
             }
-            Expr::ListIndex(l, i) => {
+            Expr::Index(l, i) => {
                 work.push(i);
                 work.push(l);
             }
             Expr::Field(o, _) => {
                 work.push(o);
             }
-            Expr::Block(_, last) | Expr::TupleDestructure(_, last) => {
-                work.push(last);
-            }
-            Expr::Match { value, arms } => {
+            Expr::Match(value, arms) => {
                 for arm in arms.iter().rev() {
                     work.push(&arm.body);
-                }
-                work.push(value);
-            }
-            Expr::PatternMatch { value, .. } => {
-                work.push(value);
-            }
-            Expr::StructInstance(_, fields) | Expr::ObjectLiteral(fields) => {
-                for (_, e) in fields.iter().rev() {
-                    work.push(e);
-                }
-            }
-            Expr::Slice { value, start, end, stride, mask } => {
-                if let Some(m) = mask { work.push(m); }
-                if let Some(s) = stride { work.push(s); }
-                if let Some(e) = end { work.push(e); }
-                if let Some(s) = start { work.push(s); }
-                work.push(value);
-            }
-            Expr::MultiSlice { value, ops } => {
-                for op in ops.iter().rev() {
-                    if let BracketOp::Mask(m) = op { work.push(m); }
-                    if let BracketOp::Stride(s) = op { work.push(s); }
                 }
                 work.push(value);
             }
@@ -1577,41 +1414,37 @@ fn expr_has_call(expr: &Expr) -> bool {
 
 fn has_term_or_unify_escape(body: &[Statement]) -> bool {
     body.iter().any(|s| matches!(s,
-        Statement::Term { .. } | Statement::TermBang { .. } | Statement::Unification { .. }
+//         Statement::Term(None) | Statement::TermBang(None) | Statement::Unification { .. }
         | Statement::Escape(_) | Statement::InlineAsm { .. }
     ))
 }
 
 fn is_counter_bump_stmt(stmt: &Statement, counter_var: &str) -> bool {
-    // 2026-07-09: Handle both Identifier and AddrOf LHS.
     let lhs_name = match stmt {
-        Statement::Assignment { lhs: Expr::Identifier(n), .. } => Some(n.as_str()),
-        Statement::Assignment { lhs: Expr::AddrOf(inner), .. } => inner.as_var_name(),
+        Statement::Assign(Expr::Identifier(n), _) => Some(n.as_str()),
         _ => None,
     };
     let Some(name) = lhs_name else { return false; };
     if name != counter_var { return false; }
-    if let Statement::Assignment { expr: Expr::Add(a, b), .. } = stmt {
-        let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(n) if n == counter_var);
-        let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(n) if n == counter_var);
-        let pos_int = |e: &Expr| matches!(e, Expr::Decimal(d) if *d > 0);
-        return (lhs_in_a && pos_int(b)) || (lhs_in_b && pos_int(a));
+    if let Statement::Assign(_, expr) = stmt {
+        if let Expr::BinaryOp(BinaryOpKind::Add, a, b) = expr {
+            let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(n) if n == counter_var);
+            let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(n) if n == counter_var);
+            let pos_int = |e: &Expr| matches!(e, Expr::Decimal(d) if *d > 0);
+            return (lhs_in_a && pos_int(b)) || (lhs_in_b && pos_int(a));
+        }
     }
     false
 }
 
 fn find_counter_var(body: &[Statement]) -> Option<String> {
     for s in body {
-        // 2026-07-09: Handle both Identifier and AddrOf LHS (pointer write).
         let (lhs_name, expr) = match s {
-            Statement::Assignment { lhs: Expr::Identifier(n), expr, .. } => (Some(n.clone()), expr),
-            Statement::Assignment { lhs: Expr::AddrOf(inner), expr, .. } => {
-                (inner.as_var_name().map(|n| n.to_string()), expr)
-            }
+            Statement::Assign(Expr::Identifier(n), expr) => (Some(n.clone()), expr),
             _ => continue,
         };
         let Some(name) = lhs_name else { continue; };
-        if let Expr::Add(a, b) = expr {
+        if let Expr::BinaryOp(BinaryOpKind::Add, a, b) = expr {
             let lhs_in_a = matches!(a.as_ref(), Expr::Identifier(an) if *an == name);
             let lhs_in_b = matches!(b.as_ref(), Expr::Identifier(bn) if *bn == name);
             let pos_int = |e: &Expr| matches!(e, Expr::Decimal(d) if *d > 0);
@@ -1625,15 +1458,13 @@ fn find_counter_var(body: &[Statement]) -> Option<String> {
 
 fn find_write_expr(body: &[Statement], var: &str) -> Option<Expr> {
     for s in body {
-        // 2026-07-09: Handle both Identifier and AddrOf LHS.
         let lhs_name = match s {
-            Statement::Assignment { lhs: Expr::Identifier(n), .. } => Some(n.as_str()),
-            Statement::Assignment { lhs: Expr::AddrOf(inner), .. } => inner.as_var_name(),
+            Statement::Assign(Expr::Identifier(n), _) => Some(n.as_str()),
             _ => None,
         };
         if let Some(n) = lhs_name {
             if n == var {
-                if let Statement::Assignment { expr, .. } = s {
+                if let Statement::Assign(_, expr) = s {
                     return Some(expr.clone());
                 }
             }
@@ -1648,65 +1479,31 @@ fn substitute_var(body: &[Statement], old_var: &str, new_expr: &Expr) -> Vec<Sta
 
 fn substitute_stmt(stmt: &Statement, old_var: &str, new_expr: &Expr) -> Statement {
     match stmt {
-        Statement::Assignment { lhs, expr, timeout, modifiers } => {
-            Statement::Assignment {
-                lhs: lhs.clone(),
-                expr: substitute_expr(expr, old_var, new_expr),
-                timeout: timeout.clone(),
-                modifiers: modifiers.clone(),
-            }
+        Statement::Assign(lhs, expr) => {
+            Statement::Assign(lhs.clone(), substitute_expr(expr, old_var, new_expr))
         }
-        Statement::Let { name, ty, expr, address, address_expr, bit_range, is_override, modifiers, .. } => {
+        Statement::Let { name, expr, .. } => {
             Statement::Let {
                 name: name.clone(),
-                ty: ty.clone(),
+                ty: None,
                 expr: expr.as_ref().map(|e| substitute_expr(e, old_var, new_expr)),
-                address: *address,
-                address_expr: address_expr.as_ref().map(|e| Box::new(substitute_expr(e, old_var, new_expr))),
-                bit_range: bit_range.clone(),
-                is_override: *is_override,
-                modifiers: modifiers.clone(),
-                constraint: None,
+                modifiers: vec![],
             }
         }
-        Statement::Guarded { condition, statements, .. } => {
-            Statement::Guarded {
-                condition: substitute_expr(&condition, old_var, new_expr),
-                statements: substitute_var(&statements, old_var, new_expr),
-                metadata: HashMap::new(),
-            }
+        Statement::Guarded(condition, statements) => {
+            Statement::Guarded(
+                substitute_expr(condition, old_var, new_expr),
+                substitute_var(statements, old_var, new_expr),
+            )
         }
         Statement::Expression(e) => Statement::Expression(substitute_expr(e, old_var, new_expr)),
-        Statement::Term { values, modifiers, swan_song } => {
-            Statement::Term {
-                values: values.iter().map(|v| v.as_ref().map(|x| substitute_expr(x, old_var, new_expr))).collect(),
-                swan_song: swan_song.as_ref().map(|s| {
-                    let mut v = substitute_var(std::slice::from_ref(s.as_ref()), old_var, new_expr);
-                    Box::new(v.pop().unwrap_or(Statement::Escape(None)))
-                }),
-                modifiers: modifiers.clone(),
-            }
-        }
-        Statement::TermBang { values, modifiers, swan_song } => {
-            Statement::TermBang {
-                values: values.iter().map(|v| v.as_ref().map(|x| substitute_expr(x, old_var, new_expr))).collect(),
-                swan_song: swan_song.as_ref().map(|s| {
-                    let mut v = substitute_var(std::slice::from_ref(s.as_ref()), old_var, new_expr);
-                    Box::new(v.pop().unwrap_or(Statement::Escape(None)))
-                }),
-                modifiers: modifiers.clone(),
-            }
-        }
-        Statement::Escape(e) => Statement::Escape(e.as_ref().map(|x| substitute_expr(x, old_var, new_expr))),
-        Statement::SyncBlock { body } => Statement::SyncBlock { body: body.clone() },
-        Statement::Unification { name, variant, fields, expr } => {
-            Statement::Unification {
-                name: name.clone(),
-                variant: variant.clone(),
-                fields: fields.clone(),
-                expr: substitute_expr(expr, old_var, new_expr),
-            }
-        }
+        Statement::Term(Some(e)) => Statement::Term(Some(substitute_expr(e, old_var, new_expr))),
+        Statement::Term(None) => Statement::Term(None),
+        Statement::TermBang(Some(e)) => Statement::TermBang(Some(substitute_expr(e, old_var, new_expr))),
+        Statement::TermBang(None) => Statement::TermBang(None),
+        Statement::Escape(Some(e)) => Statement::Escape(Some(substitute_expr(e, old_var, new_expr))),
+        Statement::Escape(None) => Statement::Escape(None),
+        Statement::SyncBlock(body) => Statement::SyncBlock(body.clone()),
         other => other.clone(),
     }
 }
@@ -1718,28 +1515,28 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
     let owned_old = old_var.to_string();
 
     // ── Helper function pointers for binary/unary ops ──
-    fn add(l: Expr, r: Expr) -> Expr { Expr::Add(Box::new(l), Box::new(r)) }
-    fn sub(l: Expr, r: Expr) -> Expr { Expr::Sub(Box::new(l), Box::new(r)) }
-    fn mul(l: Expr, r: Expr) -> Expr { Expr::Mul(Box::new(l), Box::new(r)) }
-    fn div(l: Expr, r: Expr) -> Expr { Expr::Div(Box::new(l), Box::new(r)) }
-    fn modop(l: Expr, r: Expr) -> Expr { Expr::Mod(Box::new(l), Box::new(r)) }
-    fn eq(l: Expr, r: Expr) -> Expr { Expr::Eq(Box::new(l), Box::new(r)) }
-    fn ne(l: Expr, r: Expr) -> Expr { Expr::Ne(Box::new(l), Box::new(r)) }
-    fn lt(l: Expr, r: Expr) -> Expr { Expr::Lt(Box::new(l), Box::new(r)) }
-    fn le(l: Expr, r: Expr) -> Expr { Expr::Le(Box::new(l), Box::new(r)) }
-    fn gt(l: Expr, r: Expr) -> Expr { Expr::Gt(Box::new(l), Box::new(r)) }
-    fn ge(l: Expr, r: Expr) -> Expr { Expr::Ge(Box::new(l), Box::new(r)) }
-    fn and(l: Expr, r: Expr) -> Expr { Expr::And(Box::new(l), Box::new(r)) }
-    fn or(l: Expr, r: Expr) -> Expr { Expr::Or(Box::new(l), Box::new(r)) }
-    fn bitand(l: Expr, r: Expr) -> Expr { Expr::BitAnd(Box::new(l), Box::new(r)) }
-    fn bitor(l: Expr, r: Expr) -> Expr { Expr::BitOr(Box::new(l), Box::new(r)) }
-    fn bitxor(l: Expr, r: Expr) -> Expr { Expr::BitXor(Box::new(l), Box::new(r)) }
-    fn shl(l: Expr, r: Expr) -> Expr { Expr::Shl(Box::new(l), Box::new(r)) }
-    fn shr(l: Expr, r: Expr) -> Expr { Expr::Shr(Box::new(l), Box::new(r)) }
-    fn concat(l: Expr, r: Expr) -> Expr { Expr::Concat(Box::new(l), Box::new(r)) }
-    fn not(v: Expr) -> Expr { Expr::Not(Box::new(v)) }
-    fn neg(v: Expr) -> Expr { Expr::Neg(Box::new(v)) }
-    fn bitnot(v: Expr) -> Expr { Expr::BitNot(Box::new(v)) }
+    fn add(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Add, Box::new(l), Box::new(r)) }
+    fn sub(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Sub, Box::new(l), Box::new(r)) }
+    fn mul(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Mul, Box::new(l), Box::new(r)) }
+    fn div(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Div, Box::new(l), Box::new(r)) }
+    fn modop(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Mod, Box::new(l), Box::new(r)) }
+    fn eq(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Eq, Box::new(l), Box::new(r)) }
+    fn ne(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Neq, Box::new(l), Box::new(r)) }
+    fn lt(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Lt, Box::new(l), Box::new(r)) }
+    fn le(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Le, Box::new(l), Box::new(r)) }
+    fn gt(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Gt, Box::new(l), Box::new(r)) }
+    fn ge(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Ge, Box::new(l), Box::new(r)) }
+    fn and(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::And, Box::new(l), Box::new(r)) }
+    fn or(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Or, Box::new(l), Box::new(r)) }
+    fn bitand(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::BitAnd, Box::new(l), Box::new(r)) }
+    fn bitor(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::BitOr, Box::new(l), Box::new(r)) }
+    fn bitxor(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::BitXor, Box::new(l), Box::new(r)) }
+    fn shl(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Shl, Box::new(l), Box::new(r)) }
+    fn shr(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Shr, Box::new(l), Box::new(r)) }
+    fn concat(l: Expr, r: Expr) -> Expr { Expr::BinaryOp(BinaryOpKind::Concat, Box::new(l), Box::new(r)) }
+    fn not(v: Expr) -> Expr { Expr::UnaryOp(UnaryOpKind::Not, Box::new(v)) }
+    fn neg(v: Expr) -> Expr { Expr::UnaryOp(UnaryOpKind::Neg, Box::new(v)) }
+    fn bitnot(v: Expr) -> Expr { Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(v)) }
 
     // Work stack entries
     enum W {
@@ -1784,39 +1581,32 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
                 Expr::Identifier(n) if n == owned_old => {
                     results.push(owned_new.clone());
                 }
-                expr @ Expr::AddrOf(_) if expr.as_var_name() == Some(owned_old.as_str()) => { let n = owned_old.clone();
-                    results.push(owned_new.clone());
-                }
                 Expr::Identifier(n) => { results.push(Expr::Identifier(n)); }
-                expr @ Expr::AddrOf(_) => { results.push(expr.clone()); }
-                Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_)
-                | Expr::Char(_) | Expr::Bool(_) | Expr::Term
-                | Expr::Ellipsis | Expr::RegexLiteral(_) | Expr::TypeRef(_)
-                | Expr::SharedMem(_) | Expr::Literal(_) => {
+                   Expr::Bool(_) => {
                     results.push(e);
                 }
-                Expr::Add(a, b) => binop!(work, add, *a, *b),
-                Expr::Sub(a, b) => binop!(work, sub, *a, *b),
-                Expr::Mul(a, b) => binop!(work, mul, *a, *b),
-                Expr::Div(a, b) => binop!(work, div, *a, *b),
-                Expr::Mod(a, b) => binop!(work, modop, *a, *b),
-                Expr::Eq(a, b) => binop!(work, eq, *a, *b),
-                Expr::Ne(a, b) => binop!(work, ne, *a, *b),
-                Expr::Lt(a, b) => binop!(work, lt, *a, *b),
-                Expr::Le(a, b) => binop!(work, le, *a, *b),
-                Expr::Gt(a, b) => binop!(work, gt, *a, *b),
-                Expr::Ge(a, b) => binop!(work, ge, *a, *b),
-                Expr::And(a, b) => binop!(work, and, *a, *b),
-                Expr::Or(a, b) => binop!(work, or, *a, *b),
-                Expr::BitAnd(a, b) => binop!(work, bitand, *a, *b),
-                Expr::BitOr(a, b) => binop!(work, bitor, *a, *b),
-                Expr::BitXor(a, b) => binop!(work, bitxor, *a, *b),
-                Expr::Shl(a, b) => binop!(work, shl, *a, *b),
-                Expr::Shr(a, b) => binop!(work, shr, *a, *b),
-                Expr::Concat(a, b) => binop!(work, concat, *a, *b),
-                Expr::Not(a) => unop!(work, not, *a),
-                Expr::Neg(a) => unop!(work, neg, *a),
-                Expr::BitNot(a) => unop!(work, bitnot, *a),
+                Expr::BinaryOp(BinaryOpKind::Add, a, b) => binop!(work, add, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Sub, a, b) => binop!(work, sub, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Mul, a, b) => binop!(work, mul, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Div, a, b) => binop!(work, div, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Mod, a, b) => binop!(work, modop, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Eq, a, b) => binop!(work, eq, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Neq, a, b) => binop!(work, ne, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Lt, a, b) => binop!(work, lt, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Le, a, b) => binop!(work, le, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Gt, a, b) => binop!(work, gt, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Ge, a, b) => binop!(work, ge, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::And, a, b) => binop!(work, and, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Or, a, b) => binop!(work, or, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::BitAnd, a, b) => binop!(work, bitand, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::BitOr, a, b) => binop!(work, bitor, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::BitXor, a, b) => binop!(work, bitxor, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Shl, a, b) => binop!(work, shl, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Shr, a, b) => binop!(work, shr, *a, *b),
+                Expr::BinaryOp(BinaryOpKind::Concat, a, b) => binop!(work, concat, *a, *b),
+                Expr::UnaryOp(UnaryOpKind::Not, a) => unop!(work, not, *a),
+                Expr::UnaryOp(UnaryOpKind::Neg, a) => unop!(work, neg, *a),
+                Expr::UnaryOp(UnaryOpKind::BitNot, a) => unop!(work, bitnot, *a),
                 Expr::Cast(a, t) => {
                     let t2 = t;
                     work.push(W::Args(1, Box::new(move |v| Expr::Cast(Box::new(v[0].clone()), t2.clone()))));
@@ -1832,7 +1622,7 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
                 }
                 Expr::List(elems) => {
                     let n = elems.len();
-                    work.push(W::Args(n, Box::new(Expr::ListLiteral)));
+                    work.push(W::Args(n, Box::new(Expr::List)));
                     for e in elems.into_iter().rev() {
                         work.push(W::Proc(e));
                     }
@@ -1844,133 +1634,15 @@ fn substitute_expr(expr: &Expr, old_var: &str, new_expr: &Expr) -> Expr {
                         work.push(W::Proc(e));
                     }
                 }
-                Expr::ListIndex(l, i) => {
-                    work.push(W::Args(2, Box::new(|v| Expr::ListIndex(Box::new(v[0].clone()), Box::new(v[1].clone())))));
-                    work.push(W::Proc(*i));
-                    work.push(W::Proc(*l));
-                }
-                Expr::Projection { source, target: ref t } => {
-                    let t2 = t.clone();
-                    work.push(W::Args(1, Box::new(move |v| Expr::Projection { source: Box::new(v[0].clone()), target: t2.clone() })));
-                    work.push(W::Proc(*source));
-                }
                 Expr::Field(obj, f) => {
                     let f2 = f;
                     work.push(W::Args(1, Box::new(move |v| Expr::Field(Box::new(v[0].clone()), f2.clone()))));
                     work.push(W::Proc(*obj));
                 }
-                Expr::Block(stmts, last) => {
-                    let s = substitute_var(&stmts, &owned_old, &owned_new);
-                    work.push(W::Args(1, Box::new(move |v| Expr::Block(s.clone(), Box::new(v[0].clone())))));
-                    work.push(W::Proc(*last));
-                }
-                Expr::TupleDestructure(bindings, body) => {
-                    let b = bindings;
-                    work.push(W::Args(1, Box::new(move |v| Expr::TupleDestructure(b.clone(), Box::new(v[0].clone())))));
-                    work.push(W::Proc(*body));
-                }
-                Expr::Match { value, arms } => {
-                    let arms2 = arms.clone();
-                    let num_children = 1 + arms.iter().map(|a| 1 + a.guard.is_some() as usize).sum::<usize>();
-                    work.push(W::Args(num_children, Box::new(move |v| {
-                        let mut idx = 1;
-                        Expr::Match {
-                            value: Box::new(v[0].clone()),
-                            arms: arms2.iter().map(|arm| {
-                                let guard_result = if arm.guard.is_some() {
-                                    let r = v[idx].clone(); idx += 1; Some(Box::new(r))
-                                } else { None };
-                                let body = v[idx].clone(); idx += 1;
-                                crate::ast::MatchArm {
-                                    pattern: arm.pattern.clone(),
-                                    guard: guard_result,
-                                    body: Box::new(body),
-                                }
-                            }).collect(),
-                        }
-                    })));
-                    work.push(W::Proc(*value));
-                    for arm in arms.into_iter().rev() {
-                        work.push(W::Proc(*arm.body));
-                        if let Some(g) = arm.guard {
-                            work.push(W::Proc(*g));
-                        }
-                    }
-                }
-                Expr::PatternMatch { value, variant, fields } => {
-                    let v = variant;
-                    let f = fields;
-                    work.push(W::Args(1, Box::new(move |v2| Expr::PatternMatch {
-                        value: Box::new(v2[0].clone()), variant: v.clone(), fields: f.clone(),
-                    })));
-                    work.push(W::Proc(*value));
-                }
-                Expr::StructInstance(name, fields) => {
-                    let n = name;
-                    let names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-                    let count = fields.len();
-                    work.push(W::Args(count, Box::new(move |v| {
-                        Expr::StructInstance(n.clone(), names.iter().cloned().zip(v.into_iter()).collect())
-                    })));
-                    for (_, e) in fields.into_iter().rev() {
-                        work.push(W::Proc(e));
-                    }
-                }
-                Expr::ObjectLiteral(fields) => {
-                    let names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
-                    let count = fields.len();
-                    work.push(W::Args(count, Box::new(move |v| {
-                        Expr::ObjectLiteral(names.iter().cloned().zip(v.into_iter()).collect())
-                    })));
-                    for (_, e) in fields.into_iter().rev() {
-                        work.push(W::Proc(e));
-                    }
-                }
-                Expr::Slice { value, start, end, stride, mask } => {
-                    let has_start = start.is_some();
-                    let has_end = end.is_some();
-                    let has_stride = stride.is_some();
-                    let has_mask = mask.is_some();
-                    let child_count = 1
-                        + has_start as usize + has_end as usize
-                        + has_stride as usize + has_mask as usize;
-                    work.push(W::Args(child_count, Box::new(move |v| {
-                        let mut idx = 0;
-                        let sv = v[idx].clone(); idx += 1;
-                        let st = if has_start { let r = v[idx].clone(); idx += 1; Some(Box::new(r)) } else { None };
-                        let en = if has_end { let r = v[idx].clone(); idx += 1; Some(Box::new(r)) } else { None };
-                        let strd = if has_stride { let r = v[idx].clone(); idx += 1; Some(Box::new(r)) } else { None };
-                        let msk = if has_mask { let r = v[idx].clone(); idx += 1; Some(Box::new(r)) } else { None };
-                        Expr::Slice { value: Box::new(sv), start: st, end: en, stride: strd, mask: msk }
-                    })));
-                    work.push(W::Proc(*value));
-                    if let Some(s) = start { work.push(W::Proc(*s)); }
-                    if let Some(e) = end { work.push(W::Proc(*e)); }
-                    if let Some(s) = stride { work.push(W::Proc(*s)); }
-                    if let Some(m) = mask { work.push(W::Proc(*m)); }
-                }
-                Expr::MultiSlice { value, ops } => {
-                    let child_count = 1 + ops.iter().filter(|op| matches!(op, BracketOp::Mask(_) | BracketOp::Stride(_))).count();
-                    let ops_clone = ops.clone();
-                    work.push(W::Args(child_count, Box::new(move |v| {
-                        let mut idx = 1;
-                        Expr::MultiSlice {
-                            value: Box::new(v[0].clone()),
-                            ops: ops_clone.iter().map(|op| match op {
-                                BracketOp::Coord(c) => BracketOp::Coord(c.clone()),
-                                BracketOp::Mask(_) => { let r = v[idx].clone(); idx += 1; BracketOp::Mask(Box::new(r)) }
-                                BracketOp::Stride(_) => { let r = v[idx].clone(); idx += 1; BracketOp::Stride(Box::new(r)) }
-                            }).collect(),
-                        }
-                    })));
-                    work.push(W::Proc(*value));
-                    for op in ops.into_iter().rev() {
-                        match op {
-                            BracketOp::Coord(_) => {}
-                            BracketOp::Mask(m) => work.push(W::Proc(*m)),
-                            BracketOp::Stride(s) => work.push(W::Proc(*s)),
-                        }
-                    }
+                Expr::Index(l, i) => {
+                    work.push(W::Args(2, Box::new(|v| Expr::Index(Box::new(v[0].clone()), Box::new(v[1].clone())))));
+                    work.push(W::Proc(*i));
+                    work.push(W::Proc(*l));
                 }
                 other => { results.push(other); }
             },
@@ -2065,12 +1737,7 @@ mod tests {
     }
 
     fn assign(lhs: &str, expr: Expr) -> Statement {
-        Statement::Assignment {
-            lhs: Expr::Identifier(lhs.to_string()),
-            expr,
-            timeout: None,
-            modifiers: vec![],
-        }
+        Statement::Assign(Expr::Identifier(lhs.to_string()), expr)
     }
 
     fn int(n: i64) -> Expr {
@@ -2081,8 +1748,8 @@ mod tests {
         Expr::Identifier(name.to_string())
     }
 
-    fn add(a: Expr, b: Expr) -> Expr {
-        Expr::Add(Box::new(a), Box::new(b))
+    fn _add(a: Expr, b: Expr) -> Expr {
+        Expr::BinaryOp(BinaryOpKind::Add, Box::new(a), Box::new(b))
     }
 
     fn mk_program(items: Vec<TopLevel>) -> Program {
@@ -2215,7 +1882,7 @@ mod tests {
             make_state("total", int(100)),
             make_txn(
                 "proc",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![assign("count", add(ident("count"), int(1)))],
             ),
@@ -2384,7 +2051,7 @@ mod tests {
         let body_a = vec![assign("x", int(42))];
         let body_b = vec![assign("y", add(ident("x"), int(1)))];
         let result = substitute_var(&body_b, "x", &int(42));
-        if let Statement::Assignment { expr, .. } = &result[0] {
+        if let Statement::Assign(_, expr) = &result[0] {
             assert!(!format!("{:?}", expr).contains("Identifier(\"x\")"));
         }
     }
@@ -2397,7 +2064,7 @@ mod tests {
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn("step_a",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("x", int(42)),
@@ -2405,7 +2072,7 @@ mod tests {
                 ],
             ),
             make_txn("step_b",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("y", add(ident("x"), int(1))),
@@ -2452,7 +2119,7 @@ mod tests {
             make_state("c", int(0)),
             make_state("count", int(0)),
             make_txn("heavy",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("a", int(1)),
@@ -2480,7 +2147,7 @@ mod tests {
             make_state("a", int(0)),
             make_state("count", int(0)),
             make_txn("with_term",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("a", int(1)),
@@ -2508,7 +2175,7 @@ mod tests {
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn("step_a",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("x", int(42)),
@@ -2516,7 +2183,7 @@ mod tests {
                 ],
             ),
             make_txn("step_b",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("y", add(ident("x"), int(1))),
@@ -2551,7 +2218,7 @@ mod tests {
             make_state("count", int(0)),
             make_state("x", int(0)),
             make_txn("heavy",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("x", int(1)),
@@ -2573,7 +2240,7 @@ mod tests {
             make_state("x", int(0)),
             make_state("y", int(0)),
             make_txn("step_a",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("x", int(42)),
@@ -2581,7 +2248,7 @@ mod tests {
                 ],
             ),
             make_txn("step_b",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("y", add(ident("x"), int(1))),
@@ -2615,7 +2282,7 @@ mod tests {
                 ],
             ),
             make_txn("step_b",
-                Expr::Lt(Box::new(ident("count")), Box::new(ident("total"))),
+                Expr::BinaryOp(BinaryOpKind::Lt, Box::new(ident("count")), Box::new(ident("total"))),
                 Expr::Bool(true),
                 vec![
                     assign("y", add(ident("x"), int(1))),

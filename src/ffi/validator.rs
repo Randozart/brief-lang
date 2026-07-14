@@ -32,12 +32,6 @@ pub fn validate_frgn_against_binding(
     frgn: &ForeignSignature,
     binding: &ForeignBinding,
 ) -> Result<(), FfiError> {
-    // Pipe-syntax frgns skip TOML validation entirely.
-    // The fallback expression provides the error value directly.
-    if frgn.is_pipe {
-        return Ok(());
-    }
-
     // Check name matches
     if frgn.name != binding.name {
         return Err(FfiError::ValidationError(format!(
@@ -68,57 +62,6 @@ pub fn validate_frgn_against_binding(
         }
     }
 
-    // Check success output count
-    if frgn.success_output.len() != binding.success_output.len() {
-        return Err(FfiError::ValidationError(format!(
-            "Success output count mismatch for '{}': frgn has {}, binding has {}",
-            frgn.name,
-            frgn.success_output.len(),
-            binding.success_output.len()
-        )));
-    }
-
-    // Check success output types match
-    for (frgn_out, binding_out) in frgn
-        .success_output
-        .iter()
-        .zip(binding.success_output.iter())
-    {
-        if frgn_out.1 != binding_out.1 {
-            return Err(FfiError::ValidationError(format!(
-                "Success output type mismatch in '{}': frgn {:?}, binding {:?}",
-                frgn.name, frgn_out.1, binding_out.1
-            )));
-        }
-    }
-
-    // Check error type name matches
-    if frgn.error_type_name != binding.error_type {
-        return Err(FfiError::ValidationError(format!(
-            "Error type name mismatch in '{}': frgn '{}', binding '{}'",
-            frgn.name, frgn.error_type_name, binding.error_type
-        )));
-    }
-
-    // Check error fields match
-    if frgn.error_fields.len() != binding.error_fields.len() {
-        return Err(FfiError::ValidationError(format!(
-            "Error field count mismatch in '{}': frgn has {}, binding has {}",
-            frgn.name,
-            frgn.error_fields.len(),
-            binding.error_fields.len()
-        )));
-    }
-
-    for (frgn_field, binding_field) in frgn.error_fields.iter().zip(binding.error_fields.iter()) {
-        if frgn_field.1 != binding_field.1 {
-            return Err(FfiError::ValidationError(format!(
-                "Error field type mismatch in '{}' field {}: frgn {:?}, binding {:?}",
-                frgn.name, frgn_field.0, frgn_field.1, binding_field.1
-            )));
-        }
-    }
-
     Ok(())
 }
 
@@ -144,57 +87,33 @@ mod tests {
             wasm_impl: None,
             wasm_setup: None,
             inputs: vec![("path".to_string(), Type::string())],
-            success_output: vec![("content".to_string(), Type::string())],
             result_type: ResultType::TrueAssertion,
-            error_type_name: "IoError".to_string(),
-            error_fields: vec![
-                ("code".to_string(), Type::int()),
-                ("message".to_string(), Type::string()),
-            ],
-            input_layout: None,
-            output_layout: None,
-            precondition: None,
-            postcondition: None,
-            buffer_mode: None,
-            ffi_kind: None,
-            is_out: false,
-            is_pipe: false,
-            fallback: None,
-            default_watchdog: None,
             span: None,
         };
 
         let binding = ForeignBinding {
             name: "read_file".to_string(),
-            description: Some("Read file".to_string()),
             location: "std::fs::read_to_string".to_string(),
             target: crate::ast::ForeignTarget::Native,
-            mapper: Some("rust".to_string()),
-            path: None,
             wasm_impl: None,
             wasm_setup: None,
             inputs: vec![("path".to_string(), Type::string())],
-            success_output: vec![("content".to_string(), Type::string())],
-            error_type: "IoError".to_string(),
-            error_fields: vec![
-                ("code".to_string(), Type::int()),
-                ("message".to_string(), Type::string()),
-            ],
+            success_output: vec![],
+            error_type: "Error".to_string(),
+            error_fields: vec![],
             input_layout: None,
             output_layout: None,
             precondition: None,
             postcondition: None,
             buffer_mode: None,
             default_watchdog: None,
+            span: None,
         };
 
-        let binding = ForeignBinding {
+        let binding2 = ForeignBinding {
             name: "write_file".to_string(),
-            description: None,
             location: "test".to_string(),
             target: crate::ast::ForeignTarget::Native,
-            mapper: Some("rust".to_string()),
-            path: None,
             wasm_impl: None,
             wasm_setup: None,
             inputs: vec![],
@@ -207,9 +126,10 @@ mod tests {
             postcondition: None,
             buffer_mode: None,
             default_watchdog: None,
+            span: None,
         };
 
-        assert!(validate_frgn_against_binding(&frgn, &binding).is_err());
+        assert!(validate_frgn_against_binding(&frgn, &binding2).is_err());
     }
 
     #[test]

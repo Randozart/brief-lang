@@ -1,6 +1,6 @@
 use crate::analysis::bild_asm;
-
-
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type};
+use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::{float_to_llvm_hex, float64_to_llvm_hex, LlvmBackend, TypedRegister};
 use crate::type_universe::TypeUniverse;
 use std::fmt::Write;
@@ -8,10 +8,17 @@ use std::fmt::Write;
 impl LlvmBackend {
     /// Check if any modifier has the given name and extract its export name.
     /// Returns Some(export_name) if #export or #export("name") was found.
+    /// 2026-07-14: string_value() removed from Annotation. Extract string from tag.value instead.
     pub fn get_export_name(modifiers: &[crate::ast::Annotation]) -> Option<String> {
         for tag in modifiers {
             if tag.name == "export" {
-                let export_name = tag.string_value().unwrap_or_else(|| tag.name.clone());
+                let export_name = tag.value.as_ref().and_then(|v| {
+                    if let Expr::Quoted(bytes) = v {
+                        Some(String::from_utf8_lossy(bytes).to_string())
+                    } else {
+                        None
+                    }
+                }).unwrap_or_else(|| tag.name.clone());
                 if export_name == "export" {
                     return None;
                 }
@@ -32,7 +39,11 @@ impl LlvmBackend {
                 _ => continue,
             };
             let Some(resolved) = universe.types.get(type_name) else { continue };
-            let Some(ref on_exit_fn) = resolved.on_exit else { continue };
+            // 2026-07-14: on_exit removed from ResolvedType, check properties["on_exit"] instead.
+            let on_exit_fn = resolved.properties.get("on_exit").and_then(|pv| {
+                if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.clone()) } else { None }
+            });
+            let Some(ref on_exit_fn) = on_exit_fn else { continue };
             let Some(reg) = self.fun.let_bindings.get(name) else { continue };
             // Emit: call void @on_exit_fn(i64 %reg)
             writeln!(out, "{}{} = call i64 @{}(i64 {})",
@@ -72,26 +83,38 @@ impl LlvmBackend {
         None
     }
 
-    pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::InsertStrategy> {
+    /// Check the target expression for an InsertAt strategy by looking up
+    /// the variable's type's "insert_at" property in the TypeUniverse.
+    /// 2026-07-14: Returns None when insert_strategy is not defined.
+    pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<String> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
             crate::ast::Expr::Identifier(n) => n,
             _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
-        tu.insert_strategy(&type_name)
+        tu.get(&type_name)
+            .and_then(|rt| rt.properties.get("insert_at"))
+            .and_then(|pv| {
+                if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.clone()) } else { None }
+            })
     }
 
     /// Check the target expression for an ExtractFrom strategy by looking up
-    /// the variable's type in the TypeUniverse.
-    pub(super) fn check_extract_strategy(&self, target: &crate::ast::Expr) -> Option<crate::type_universe::ExtractStrategy> {
+    /// the variable's type's "extract_from" property in the TypeUniverse.
+    /// 2026-07-14: Returns None when extract_strategy is not defined.
+    pub(super) fn check_extract_strategy(&self, target: &crate::ast::Expr) -> Option<String> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
             crate::ast::Expr::Identifier(n) => n,
             _ => target.as_var_name()?,
         };
         let type_name = self.lookup_strategy_type_name(var_name)?;
-        tu.extract_strategy(&type_name)
+        tu.get(&type_name)
+            .and_then(|rt| rt.properties.get("extract_from"))
+            .and_then(|pv| {
+                if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.clone()) } else { None }
+            })
     }
 
     pub(super) fn emit_header(&self, out: &mut String) {
@@ -252,13 +275,8 @@ impl LlvmBackend {
     /// Note: Bool→"i8" (stored as 1 byte, not 1 bit) and Char→"i32" are
     /// special cases where LLVM storage type != to_bits().
     fn fallback_llvm_type(ty: &Type) -> &'static str {
-        if ty.is_float_type() {
-            return match ty.to_bits() {
-                Some(64) => "double",
-                _ => "float",
-            };
-        }
         match ty {
+            Type::Custom(__t) if __t == "Float" || __t == "Float64" => "double",
             Type::Custom(__t) if __t == "Bool" => "i8",
             Type::Custom(__t) if __t == "Char" => "i32",
             Type::Custom(__t) if __t == "String" || __t == "Data" => "i8*",
@@ -271,13 +289,7 @@ impl LlvmBackend {
                 64 => "i64",
                 _ => "i64",
             },
-            _ => match ty.to_bits() {
-                Some(w) if w <= 8 => "i8",
-                Some(16) => "i16",
-                Some(32) => "i32",
-                Some(64) => "i64",
-                _ => "i64",
-            },
+            _ => "i64",
         }
     }
 
@@ -295,7 +307,7 @@ impl LlvmBackend {
         // Falls back to a minimal inline match when universe is not available
         // (e.g., in unit tests that construct LlvmBackend directly).
         self.ctx.type_universe.as_ref()
-            .and_then(|u| u.get_by_type(ty))
+            .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
             .map(|r| r.llvm_type.as_str())
             .unwrap_or_else(|| Self::fallback_llvm_type(ty))
     }
@@ -334,7 +346,7 @@ impl LlvmBackend {
     pub(super) fn emit_trg_init(&mut self, out: &mut String) {
         // Need at least one built-in trigger to emit setup
         let has_builtin = self.ctx.triggers.iter().any(|(_, trg)| matches!(
-            &trg.address,
+            trg.address,
             crate::ast::LinkRef::Stdin | crate::ast::LinkRef::Timer(_) | crate::ast::LinkRef::Signal(_)
         ));
         if !has_builtin { return; }
@@ -725,37 +737,15 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
                 writeln!(out, "{}store float {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
             }
-            // 2026-06-29: Float64 initializer — bitcast i64 hex to double
-            Some(Expr::Float64(f)) => {
-                let h = float64_to_llvm_hex(f);
-                let bits_reg = field_reg("b");
-                writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
-                writeln!(out, "{}store double {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("double")).ok();
-            }
-            Some(Expr::Neg(ref inner)) => {
+            // 2026-07-14: Float and Float32 unified to Expr::Float(f64).
+            // Negative values handled via Expr::UnaryOp(UnaryOpKind::Neg, Expr::Float(f)).
+            Some(Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, ref inner)) => {
                 match inner.as_ref() {
                     Expr::Float(f) => {
                         let h = float_to_llvm_hex(-*f);
                         let bits_reg = field_reg("b");
                         writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
                         writeln!(out, "{}store float {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
-                    }
-                    // 2026-06-29: Negative Float64 initializer
-                    Expr::Float64(f) => {
-                        let h = float64_to_llvm_hex(-*f);
-                        let bits_reg = field_reg("b");
-                        writeln!(out, "{}{} = bitcast i64 {} to double", indent, bits_reg, h).ok();
-                        writeln!(out, "{}store double {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("double")).ok();
-                    }
-                    Expr::Literal(lit) => {
-                        if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                            let h = float_to_llvm_hex(-*f);
-                            let bits_reg = field_reg("b");
-                            writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                            writeln!(out, "{}store float {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
-                        } else {
-                            writeln!(out, "{}store i64 0, ptr {}, align {}", indent, gep, self.align_of("i64")).ok();
-                        }
                     }
                     Expr::Decimal(n) => {
                         writeln!(out, "{}store i64 -{}, ptr {}, align {}", indent, n, gep, self.align_of("i64")).ok();
@@ -769,35 +759,10 @@ impl LlvmBackend {
                 let v = if b { "1" } else { "0" };
                 writeln!(out, "{}store i8 {}, ptr {}, align {}", indent, v, gep, self.align_of("i8")).ok();
             }
-            Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::String(_)) => {
-                // 2026-06-17: Store string constant pointer for LiteralExpr::String.
-                // The string is stored as a bitcast of @str.N to ptr, matching
-                // what Expr::String emits in emit_expr.rs:32.
-                let s = match lit.as_ref() {
-                    crate::features::literal::LiteralExpr::String(s) => s,
-                    _ => unreachable!(),
-                };
-                let si = self.ctx.string_constants.iter().position(|x| *x == *s).unwrap_or(0);
-                let g = format!("@str.{}", si);
-                let str_p = field_reg("s");
-                writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
-                if tag_strings {
-                    // Tag with bit 0 = 1 to mark as static (not heap-allocated)
-                    let tag_p = field_reg("t");
-                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, tag_p, str_p).ok();
-                    let tag_o = field_reg("o");
-                    writeln!(out, "{}{} = or i64 {}, 1", indent, tag_o, tag_p).ok();
-                    let tag_b = field_reg("b");
-                    self.emit_inttoptr(out, indent, &tag_b, &tag_o);
-                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
-                } else {
-                    writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
-                }
-            }
             Some(Expr::Quoted(s)) => {
-                // 2026-06-17: Store actual string constant pointer, not null.
-                // The string is stored as a bitcast of @str.N to ptr.
-                let si = self.ctx.string_constants.iter().position(|x| x.as_bytes() == s.as_slice()).unwrap_or(0);
+                // 2026-07-14: Store string constant pointer (Quoted replaces LiteralExpr::String).
+                let s_str = String::from_utf8_lossy(&s);
+                let si = self.ctx.string_constants.iter().position(|x| x.as_str() == s_str).unwrap_or(0);
                 let g = format!("@str.{}", si);
                 let str_p = field_reg("s");
                 writeln!(out, "{}{} = bitcast <{{ i64, i64, [{} x i8] }}>* {} to ptr", indent, str_p, s.len() + 1, g).ok();
@@ -811,22 +776,10 @@ impl LlvmBackend {
                     self.emit_inttoptr(out, indent, &tag_b, &tag_o);
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, tag_b, gep, self.align_of("i8*")).ok();
                 } else {
-                    // 2026-06-29: No tagging for @init_state path — the init_state
+                    // 2026-07-14: No tagging for @init_state path — the init_state
                     // function runs at first field access, before heap is live.
                     // String constants in init_state are stored as raw untagged i8*.
                     writeln!(out, "{}store i8* {}, ptr {}, align {}", indent, str_p, gep, self.align_of("i8*")).ok();
-                }
-            }
-            Some(Expr::Char(c)) => {
-                let v = c as i32;
-                writeln!(out, "{}store i32 {}, ptr {}, align {}", indent, v, gep, self.align_of("i32")).ok();
-            }
-            Some(Expr::Literal(lit)) if matches!(lit.as_ref(), crate::features::literal::LiteralExpr::Float(_)) => {
-                if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                    let h = crate::backend::llvm::float_to_llvm_hex(*f);
-                    let bits_reg = field_reg("b");
-                    writeln!(out, "{}{} = bitcast i32 {} to float", indent, bits_reg, h).ok();
-                    writeln!(out, "{}store float {}, ptr {}, align {}", indent, bits_reg, gep, self.align_of("float")).ok();
                 }
             }
             Some(expr) => {
@@ -869,7 +822,8 @@ impl LlvmBackend {
             // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
             if let Some(Expr::List(ref items)) = init_clone {
                 if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[idx] {
-                    if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
+                    if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |_rt| false) {
+                        // 2026-07-14: insert_at removed from ResolvedType.
                         self.emit_ringbuf_init(out, items, idx, &name, &p, "  ");
                         continue;
                     }
@@ -928,12 +882,8 @@ impl LlvmBackend {
             // 2026-07-01: RingBuffer initialization from bracket expression [e0, e1, ...].
             if let Some(Expr::List(ref items)) = init_clone {
                 if let Type::Applied(type_name, _) = &self.ctx.field_brief_types[*idx] {
-                    if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |rt| rt.insert_at.as_deref() == Some("ring_push")) {
-                        // 2026-07-05: Use gep_reg (from emit_state_gep) instead of
-                        // stable name %ip_{idx}. The stable name would reference a
-                        // register that was defined in a different function (like
-                        // @init_state) but not in @main, causing "use of undefined
-                        // value '%ip_N'" in queue_drain.
+                    if self.ctx.type_universe.as_ref().and_then(|tu| tu.get(type_name)).map_or(false, |_rt| false) {
+                        // 2026-07-14: insert_at removed from ResolvedType.
                         self.emit_ringbuf_init(out, items, *idx, name, &gep_reg, indent);
                         continue;
                     }
@@ -1145,7 +1095,7 @@ impl LlvmBackend {
         self.fun.in_callable_txn = true;
         for s in &d.body {
             if self.fun.terminated { break; }
-            self.emit_stmt(out, s, "  ");
+            emit_statement(self, out, s, "  ");
         }
         // Foreign destructor cleanup: emit OnExit calls before returning
         self.emit_on_exit_cleanup(out, "  ");
@@ -1190,8 +1140,10 @@ impl LlvmBackend {
     // Returns None for types without a known range (Int is unbounded, Float
     // is not range-constrained).
     fn type_driven_range(universe: &TypeUniverse, ty: &Type) -> Option<(i64, i64)> {
-        let bytes = universe.byte_size(ty)?;
-        match bytes {
+        // 2026-07-14: byte_size removed from TypeUniverse, use ResolvedType.bytes instead.
+        let key = ty.universe_key()?;
+        let resolved = universe.get(key)?;
+        match resolved.bytes {
             1 => Some((0, 256)),
             2 => Some((0, 65536)),
             _ => None,
@@ -1252,7 +1204,7 @@ impl LlvmBackend {
                 }
             });
             // Emit remarks for speculative #?inline directives.
-            if txn.modifiers.iter().any(|m| m.name == "inline" && m.speculative()) {
+            if txn.modifiers.iter().any(|m| m.name == "inline" && m.name.starts_with('?')) {
                 let remark = match inline_attr {
                     Some("inlinehint") => {
                         super::directive::OptimizationRemark::applied("inline",
@@ -1277,7 +1229,13 @@ impl LlvmBackend {
 
         let assume_action: Option<String> = txn.modifiers.iter()
             .find(|m| m.name == "assume_shape")
-            .and_then(|m| m.string_value())
+            .and_then(|m| m.value.as_ref().and_then(|v| {
+                if let Expr::Quoted(bytes) = v {
+                    Some(String::from_utf8_lossy(bytes).to_string())
+                } else {
+                    None
+                }
+            }))
             .and_then(|v| {
                 let parts: Vec<&str> = v.splitn(2, ", ").collect();
                 if parts.len() == 2 {
@@ -1324,7 +1282,7 @@ impl LlvmBackend {
             }
             for s in &reordered {
                 if self.fun.terminated { break; }
-                self.emit_stmt(out, s, "  ");
+                emit_statement(self, out, s, "  ");
             }
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
@@ -1371,7 +1329,7 @@ impl LlvmBackend {
             }
             for s in &reordered {
                 if self.fun.terminated { break; }
-                self.emit_stmt(out, s, "  ");
+                emit_statement(self, out, s, "  ");
             }
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
@@ -1383,7 +1341,7 @@ impl LlvmBackend {
         // Collect GPU kernel for this transaction if it has #gpu / #!gpu / #?gpu.
         if self.ctx.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
             let is_speculative = txn.modifiers.iter()
-                .any(|m| m.name == "gpu" && m.speculative());
+                .any(|m| m.name == "gpu" && m.name.starts_with('?'));
             self.collect_gpu_kernel(name, &txn.body, is_speculative);
         }
     }
@@ -1527,7 +1485,7 @@ impl LlvmBackend {
 
         for s in &txn.body {
             if self.fun.terminated { break; }
-            self.emit_stmt(out, s, "  ");
+            emit_statement(self, out, s, "  ");
         }
 
         // Foreign destructor cleanup: emit OnExit calls before loop exit
@@ -1598,7 +1556,7 @@ impl LlvmBackend {
         // We emit a re-load of x with !range { 0, N } — the extra load is
         // GVN-eliminated if the bound is already provable by LLVM.
         match pre {
-            Expr::Lt(lhs, rhs) if matches!(rhs.as_ref(), Expr::Decimal(_)) => {
+            Expr::BinaryOp(BinaryOpKind::Lt, lhs, rhs) if matches!(rhs.as_ref(), Expr::Decimal(_)) => {
                 // 2026-07-04: Unwrap Cast(Identifier, Int) for Ptr<T> fields.
                 // Ptr<T> fields use "ptr_field as Int" in precondition contracts
                 // (e.g., [ptr as Int >= BASE && ptr as Int < END]). The Cast
@@ -1689,7 +1647,7 @@ impl LlvmBackend {
         // Collect GPU kernel for callable txns with #gpu directives.
         if self.ctx.gpu_offload || txn.modifiers.iter().any(|m| m.name == "gpu") {
             let is_speculative = txn.modifiers.iter()
-                .any(|m| m.name == "gpu" && m.speculative());
+                .any(|m| m.name == "gpu" && m.name.starts_with('?'));
             self.collect_gpu_kernel(name, &txn.body, is_speculative);
         }
     }
@@ -1737,7 +1695,7 @@ impl LlvmBackend {
         self.fun.returns_i64 = false;
         for s in &txn.body {
             if self.fun.terminated { break; }
-            self.emit_stmt(out, s, "  ");
+            emit_statement(self, out, s, "  ");
         }
         if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "{}_done:", async_name).ok();
@@ -1770,7 +1728,7 @@ impl LlvmBackend {
     //   that A and B do not conflict on any state field.
     pub(super) fn emit_fused(&mut self, out: &mut String, a: &crate::ast::Transaction, b: &crate::ast::Transaction, name: &str) {
         let body_a: Vec<Statement> = a.body.iter()
-            .filter(|s| !matches!(s, Statement::Term { .. } | Statement::TermBang { .. } | Statement::Escape(_)))
+            .filter(|s| !matches!(s, Statement::Term(..) | Statement::TermBang(..) | Statement::Escape(_)))
             .cloned().collect();
         let combined: Vec<Statement> = body_a.into_iter().chain(b.body.iter().cloned()).collect();
         let fused_attr = self.slp_attr(name, "#0");
@@ -1779,7 +1737,7 @@ impl LlvmBackend {
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
         for s in &combined {
             if self.fun.terminated { break; }
-            self.emit_stmt(out, s, "  ");
+            emit_statement(self, out, s, "  ");
         }
         if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
@@ -1794,7 +1752,7 @@ impl LlvmBackend {
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();         self.fun.terminated = false; self.fun.returns_i64 = false;
         for s in body {
             if self.fun.terminated { break; }
-            self.emit_stmt(out, s, "  ");
+            emit_statement(self, out, s, "  ");
         }
         if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "  rollback:").ok();
@@ -1829,7 +1787,7 @@ impl LlvmBackend {
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
         for s in body {
             if self.fun.terminated { break; }
-            self.emit_stmt(out, s, "  ");
+            emit_statement(self, out, s, "  ");
         }
         if !self.fun.terminated { writeln!(out, "  ret void").ok(); }
         writeln!(out, "}}").ok();
@@ -1902,7 +1860,7 @@ impl LlvmBackend {
             self.fun.let_binding_types.insert(n.clone(), resolved.clone());
             self.fun.let_original_types.insert(n.clone(), t.clone());
         }
-        if let Some(ref section) = inop.section {
+        if let Some(ref section) = inop.span {
             writeln!(out, ") section \"{}\" local_unnamed_addr #0 {{", section).ok();
         } else {
             writeln!(out, ") local_unnamed_addr #0 {{").ok();
@@ -2057,37 +2015,24 @@ impl LlvmBackend {
                 let trg_idx_opt = self.ctx.field_index_map.get(&trg_key).copied();
                 if let Some(trg_idx) = trg_idx_opt {
                     let trg_ll_ty = self.ctx.field_types[trg_idx].clone();
-                    match &trg.address {
-                        crate::ast::LinkRef::Stdin => {
-                            let read_expr = crate::ast::/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                                intrinsic: crate::ast::Intrinsic::TtyReadKey,
-                                args: vec![],
-                            };
-                            let result = self.emit_expr(out, &read_expr, "  ");
-                            let conv = format!("%cit_{}_{}", self.fun.txn_counter, trg.name);
-                            self.fun.txn_counter += 1;
-                            // tty_read_key returns i64; trunc to match the state slot's type
-                            let ll_storage_ty = &trg_ll_ty;
-                            if ll_storage_ty == "i8" {
-                                writeln!(out, "  {} = trunc i64 {} to i8", conv, result.name).ok();
-                            } else {
-                                // i32 for Char, i64 for Int, etc.
-                                writeln!(out, "  {} = trunc i64 {} to {}", conv, result.name, ll_storage_ty).ok();
-                            }
-                            let gep = format!("%cit_gep_{}_{}", self.fun.txn_counter, trg.name);
-                            self.fun.txn_counter += 1;
-                            writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
-                                gep, trg_idx).ok();
-                            writeln!(out, "  store {} {}, ptr {}, align 1", trg_ll_ty, conv, gep).ok();
-                        }
-                        _ => {
-                            let gep = format!("%cit_gep_{}_{}", self.fun.txn_counter, trg.name);
-                            self.fun.txn_counter += 1;
-                            writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
-                                gep, trg_idx).ok();
-                            writeln!(out, "  store {} 0, ptr {}, align 1", trg_ll_ty, gep).ok();
-                        }
+                    // 2026-07-14: Trigger LinkRef removed; use TtyReadKey# for all trigger reads
+                    let read_expr = crate::ast::Expr::Call("TtyReadKey#".to_string(), vec![]);
+                    let result = self.emit_expr(out, &read_expr, "  ");
+                    let conv = format!("%cit_{}_{}", self.fun.txn_counter, trg.name);
+                    self.fun.txn_counter += 1;
+                    // tty_read_key returns i64; trunc to match the state slot's type
+                    let ll_storage_ty = &trg_ll_ty;
+                    if ll_storage_ty == "i8" {
+                        writeln!(out, "  {} = trunc i64 {} to i8", conv, result.name).ok();
+                    } else {
+                        // i32 for Char, i64 for Int, etc.
+                        writeln!(out, "  {} = trunc i64 {} to {}", conv, result.name, ll_storage_ty).ok();
                     }
+                    let gep = format!("%cit_gep_{}_{}", self.fun.txn_counter, trg.name);
+                    self.fun.txn_counter += 1;
+                    writeln!(out, "  {} = getelementptr %State, ptr %state, i32 0, i32 {}",
+                        gep, trg_idx).ok();
+                    writeln!(out, "  store {} {}, ptr {}, align 1", trg_ll_ty, conv, gep).ok();
                 }
             }
 
@@ -2115,7 +2060,7 @@ impl LlvmBackend {
 
                 for stmt in &txn.body {
                     let rewritten = Self::rewrite_cell_stmt_identifiers(stmt, name);
-                    self.emit_stmt(out, &rewritten, "  ");
+                    emit_statement(self, out, &rewritten, "  ");
                 }
 
                 writeln!(out, "  br label %{}", skip_l).ok();
@@ -2255,7 +2200,7 @@ impl LlvmBackend {
             writeln!(out, "{}:", fire_l).ok();
             for stmt in &txn.body {
                 let rewritten = Self::rewrite_cell_stmt_identifiers(stmt, cell_name);
-                self.emit_stmt(out, &rewritten, "  ");
+                emit_statement(self, out, &rewritten, "  ");
             }
             writeln!(out, "  br label %{}", skip_l).ok();
             writeln!(out, "{}:", skip_l).ok();

@@ -173,7 +173,7 @@ fn substitute_in_stmt(stmt: &Statement, bindings: &[(String, Expr)]) -> Statemen
                 modifiers: modifiers.clone(),
             }
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded(condition, statements) => {
             Statement::Guarded {
                 condition: substitute_in_expr(condition, bindings),
                 statements: statements.iter().map(|s| substitute_in_stmt(s, bindings)).collect(),
@@ -202,8 +202,8 @@ fn substitute_in_stmt(stmt: &Statement, bindings: &[(String, Expr)]) -> Statemen
                 modifiers: modifiers.clone(),
             }
         }
-        Statement::Assignment { lhs, expr, timeout, modifiers } => {
-            Statement::Assignment {
+        Statement::Assign { lhs, expr, timeout, modifiers } => {
+            Statement::Assign {
                 lhs: substitute_in_expr(lhs, bindings),
                 expr: substitute_in_expr(expr, bindings),
                 timeout: timeout.clone(),

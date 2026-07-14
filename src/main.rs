@@ -70,7 +70,7 @@ fn run_check(args: &[String]) -> Result<(), String> {
 
 fn run_derive(args: &[String]) -> Result<(), String> {
     let file_path = args.first().ok_or("missing file argument")?;
-    crate::derive::handle_derive_command(file_path)
+    brief_compiler::derive::handle_derive_command(file_path)
 }
 
 fn run_init(name: Option<&str>) -> Result<(), String> {

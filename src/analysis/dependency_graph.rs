@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, Statement, TopLevel};
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, UnaryOpKind};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// A variable-level dependency graph built from the program's top-level
@@ -26,8 +26,8 @@ pub struct DependencyError {
 }
 
 impl DependencyGraph {
-    /// Build the dependency graph from a program.
-    pub fn build(program: &Program) -> Result<Self, DependencyError> {
+    /// Build the dependency graph from a list of top-level items.
+    pub fn build(items: &[TopLevel]) -> Result<Self, DependencyError> {
         let mut graph = DependencyGraph {
             topo_order: Vec::new(),
             bit_index: HashMap::new(),
@@ -38,7 +38,7 @@ impl DependencyGraph {
         };
 
         // Pass 1: collect all variable names
-        for item in &program.items {
+        for item in items {
             match item {
                 TopLevel::StateDecl(decl) => {
                     graph.all_vars.insert(decl.name.clone());
@@ -62,27 +62,8 @@ impl DependencyGraph {
             }
         }
 
-        // Pass 2: extract variable reads from state decl expressions
-        for item in &program.items {
-            if let TopLevel::StateDecl(decl) = item {
-                if let Some(expr) = &decl.expr {
-                    let reads = collect_expr_identifiers(expr);
-                    let filtered: Vec<String> = reads
-                        .into_iter()
-                        .filter(|r| graph.all_vars.contains(r))
-                        .collect();
-                    if !filtered.is_empty() {
-                        graph.dependencies.insert(decl.name.clone(), filtered.clone());
-                        for dep in &filtered {
-                            graph.dependents.entry(dep.clone()).or_default().push(decl.name.clone());
-                        }
-                    }
-                }
-            }
-        }
-
-        // Pass 3: extract variable reads from transaction bodies
-        for item in &program.items {
+        // Pass 2: extract variable reads from transaction bodies
+        for item in items {
             if let TopLevel::Transaction(txn) = item {
                 for stmt in &txn.body {
                     graph.collect_from_statement(stmt);
@@ -111,7 +92,7 @@ impl DependencyGraph {
 
     fn collect_from_statement(&mut self, stmt: &Statement) {
         match stmt {
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assign(lhs, expr) => {
                 let lhs_name = match lhs {
                     Expr::Identifier(n) => Some(n.clone()),
                     _ => None,
@@ -143,7 +124,7 @@ impl DependencyGraph {
                     }
                 }
             }
-            Statement::Guarded { statements, .. } => {
+            Statement::Guarded(_, statements) => {
                 for s in statements {
                     self.collect_from_statement(s);
                 }
@@ -235,60 +216,34 @@ pub fn collect_expr_identifiers(expr: &Expr) -> Vec<String> {
 
 fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
     match expr {
-        Expr::Identifier(n) | Expr::PriorState(n) => {
+        Expr::Identifier(n) => {
             ids.push(n.clone());
         }
-        Expr::Add(a, b)
-        | Expr::Sub(a, b)
-        | Expr::Mul(a, b)
-        | Expr::Div(a, b)
-        | Expr::Mod(a, b)
-        | Expr::Eq(a, b)
-        | Expr::Ne(a, b)
-        | Expr::Lt(a, b)
-        | Expr::Le(a, b)
-        | Expr::Gt(a, b)
-        | Expr::Ge(a, b)
-        | Expr::And(a, b)
-        | Expr::Or(a, b)
-        | Expr::BitAnd(a, b)
-        | Expr::BitOr(a, b)
-        | Expr::BitXor(a, b)
-        | Expr::Shl(a, b)
-        | Expr::Shr(a, b)
-        | Expr::Concat(a, b) => {
+        Expr::BinaryOp(_, a, b) => {
             collect_expr_ids_inner(a, ids);
             collect_expr_ids_inner(b, ids);
         }
-        Expr::Not(a) | Expr::Neg(a) | Expr::BitNot(a) | Expr::Cast(a, _) => {
+        Expr::UnaryOp(_, a) | Expr::Cast(a, _) | Expr::IsType(a, _) => {
             collect_expr_ids_inner(a, ids);
         }
-        Expr::Call(_, args) | Expr::CellCall(_, args) => {
+        Expr::Call(_, args) => {
             for arg in args {
                 collect_expr_ids_inner(arg, ids);
             }
         }
-        Expr::List(items) => {
+        Expr::List(items) | Expr::Tuple(items) => {
             for item in items {
                 collect_expr_ids_inner(item, ids);
             }
         }
-        Expr::ListIndex(list, index) => {
+        Expr::Index(list, index) => {
             collect_expr_ids_inner(list, ids);
             collect_expr_ids_inner(index, ids);
         }
         Expr::Field(obj, _) => {
             collect_expr_ids_inner(obj, ids);
         }
-        Expr::Projection { source, .. } => {
-            collect_expr_ids_inner(source, ids);
-        }
-        Expr::StructInstance(_, fields) => {
-            for (_, expr) in fields {
-                collect_expr_ids_inner(expr, ids);
-            }
-        }
-        Expr::Match { value, arms } => {
+        Expr::Match(value, arms) => {
             collect_expr_ids_inner(value, ids);
             for arm in arms {
                 if let Some(guard) = &arm.guard {
@@ -297,248 +252,33 @@ fn collect_expr_ids_inner(expr: &Expr, ids: &mut Vec<String>) {
                 collect_expr_ids_inner(&arm.body, ids);
             }
         }
-        Expr::Slice { value, start, end, stride, mask } => {
-            collect_expr_ids_inner(value, ids);
-            if let Some(s) = start { collect_expr_ids_inner(s, ids); }
-            if let Some(e) = end { collect_expr_ids_inner(e, ids); }
-            if let Some(s) = stride { collect_expr_ids_inner(s, ids); }
-            if let Some(m) = mask { collect_expr_ids_inner(m, ids); }
-        }
-        Expr::ArrowMut { target, index, value, .. } => {
-            collect_expr_ids_inner(target, ids);
-            collect_expr_ids_inner(index, ids);
-            if let Some(v) = value { collect_expr_ids_inner(v, ids); }
-        }
-        Expr::ArrowDiscard { target, index } => {
-            collect_expr_ids_inner(target, ids);
-            collect_expr_ids_inner(index, ids);
-        }
-        Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
-            collect_expr_ids_inner(dest, ids);
-            collect_expr_ids_inner(source, ids);
-            if let Some(f) = filter { collect_expr_ids_inner(f, ids); }
-        }
-        Expr::Tuple(items) => {
-            for item in items {
-                collect_expr_ids_inner(item, ids);
-            }
-        }
-        Expr::TupleDestructure(_, expr) => {
-            collect_expr_ids_inner(expr, ids);
-        }
-        Expr::Block(stmts, last_expr) => {
+        Expr::Block(stmts) => {
             for stmt in stmts {
                 statement_ids(stmt, ids);
             }
-            collect_expr_ids_inner(last_expr, ids);
         }
-        Expr::IsType(expr, _) | Expr::Like(expr, _) | Expr::FromCheck(expr, _) => {
-            collect_expr_ids_inner(expr, ids);
-        }
-        Expr::MapLiteral(entries) => {
-            for (k, v) in entries {
-                collect_expr_ids_inner(k, ids);
-                collect_expr_ids_inner(v, ids);
+        Expr::If(cond, then, else_) => {
+            collect_expr_ids_inner(cond, ids);
+            collect_expr_ids_inner(then, ids);
+            if let Some(else_) = else_ {
+                collect_expr_ids_inner(else_, ids);
             }
         }
-        Expr::SetLiteral(items) => {
-            for item in items {
-                collect_expr_ids_inner(item, ids);
-            }
+        Expr::Lambda(_, body) => {
+            collect_expr_ids_inner(body, ids);
         }
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
-            for arg in args {
-                collect_expr_ids_inner(arg, ids);
-            }
-        }
-        Expr::PatternMatch { value, .. } => {
-            collect_expr_ids_inner(value, ids);
+        Expr::Within(inner, _) => {
+            collect_expr_ids_inner(inner, ids);
         }
         // Literal leaves — no identifiers
-        Expr::Decimal(_) | Expr::IntegerSuffixed(_, _) | Expr::Float(_) | Expr::Float64(_) | Expr::Quoted(_) | Expr::Char(_)
-        | Expr::Bool(_) | Expr::Term | Expr::Ellipsis | Expr::TypeRef(_)
-        | Expr::RegexLiteral(_) | Expr::SharedMem(_) => {}
-        // Pattern B wrappers — literal leaves, no identifiers
-        Expr::Literal(_) => {}
-        Expr::BinaryOp(op) => {
-            collect_expr_ids_inner(&op.left, ids);
-            collect_expr_ids_inner(&op.right, ids);
-        }
-        Expr::UnaryOp(op) => {
-            collect_expr_ids_inner(&op.operand, ids);
-        }
-        Expr::ArrowMutExpr(op) => {
-            collect_expr_ids_inner(&op.target, ids);
-            collect_expr_ids_inner(&op.index, ids);
-            if let Some(v) = &op.value { collect_expr_ids_inner(v, ids); }
-        }
-        Expr::ArrowDiscardExpr(op) => {
-            collect_expr_ids_inner(&op.target, ids);
-            collect_expr_ids_inner(&op.index, ids);
-        }
-        Expr::ArrowTransferExpr(op) => {
-            collect_expr_ids_inner(&op.dest, ids);
-            collect_expr_ids_inner(&op.source, ids);
-            if let Some(f) = &op.filter { collect_expr_ids_inner(f, ids); }
-        }
-        Expr::EllipsisExpr(_) => {}
-        // Pattern B — remaining packed feature structs
-        Expr::ProjectionExpr(proj) => {
-            collect_expr_ids_inner(&proj.source, ids);
-        }
-        Expr::CallExpr(call) => {
-            for arg in &call.args {
-                collect_expr_ids_inner(arg, ids);
-            }
-        }
-        Expr::ListLiteralExpr(lit) => {
-            for elem in &lit.elements {
-                collect_expr_ids_inner(elem, ids);
-            }
-        }
-        Expr::MapLiteralExpr(lit) => {
-            for (k, v) in &lit.entries {
-                collect_expr_ids_inner(k, ids);
-                collect_expr_ids_inner(v, ids);
-            }
-        }
-        Expr::SetLiteralExpr(lit) => {
-            for elem in &lit.entries {
-                collect_expr_ids_inner(elem, ids);
-            }
-        }
-        Expr::SliceExpr(slice) => {
-            collect_expr_ids_inner(&slice.value, ids);
-            if let Some(s) = &slice.start { collect_expr_ids_inner(s, ids); }
-            if let Some(e) = &slice.end { collect_expr_ids_inner(e, ids); }
-            if let Some(s) = &slice.stride { collect_expr_ids_inner(s, ids); }
-            if let Some(m) = &slice.mask { collect_expr_ids_inner(m, ids); }
-        }
-        Expr::MultiSlice { value, .. } => {
-            collect_expr_ids_inner(value, ids);
-        }
-        Expr::MultiSliceExpr(ms) => {
-            collect_expr_ids_inner(&ms.value, ids);
-        }
-        Expr::FieldAccessExpr(fa) => {
-            collect_expr_ids_inner(&fa.obj, ids);
-        }
-        Expr::StructInstanceExpr(si) => {
-            for (_, expr) in &si.fields {
-                collect_expr_ids_inner(expr, ids);
-            }
-        }
-        Expr::ObjectLiteral(fields) => {
-            for (_, expr) in fields {
-                collect_expr_ids_inner(expr, ids);
-            }
-        }
-        Expr::ObjectLiteralExpr(ol) => {
-            for (_, expr) in &ol.fields {
-                collect_expr_ids_inner(expr, ids);
-            }
-        }
-        Expr::PatternMatchExpr(pm) => {
-            collect_expr_ids_inner(&pm.value, ids);
-        }
-        Expr::MatchExpr(me) => {
-            collect_expr_ids_inner(&me.value, ids);
-            for arm in &me.arms {
-                if let Some(guard) = &arm.guard {
-                    collect_expr_ids_inner(guard, ids);
-                }
-                collect_expr_ids_inner(&arm.body, ids);
-            }
-        }
-        Expr::BlockExpr(block) => {
-            for stmt in &block.stmts {
-                statement_ids(stmt, ids);
-            }
-            collect_expr_ids_inner(&block.last, ids);
-        }
-        Expr::TupleExpr(t) => {
-            for elem in &t.exprs {
-                collect_expr_ids_inner(elem, ids);
-            }
-        }
-        Expr::TupleDestructureExpr(td) => {
-            collect_expr_ids_inner(&td.expr, ids);
-        }
-        Expr::SigCall { expr, .. } => {
-            collect_expr_ids_inner(expr, ids);
-        }
-        Expr::SigCallExpr(sce) => {
-            collect_expr_ids_inner(&sce.expr, ids);
-        }
-        Expr::Within { body, fallback, .. } => {
-            collect_expr_ids_inner(body, ids);
-            collect_expr_ids_inner(fallback, ids);
-        }
-        Expr::SubtypeProjection { source, ops } => {
-            collect_expr_ids_inner(source, ids);
-            for op in ops {
-                match op {
-                    crate::ast::SubtypeOp::Filter(e)
-                    | crate::ast::SubtypeOp::Map(e)
-                    | crate::ast::SubtypeOp::Sort(e)
-                    | crate::ast::SubtypeOp::Match(e)
-                    | crate::ast::SubtypeOp::Group(e) => collect_expr_ids_inner(e, ids),
-                    crate::ast::SubtypeOp::Join(e1, e2) => {
-                        collect_expr_ids_inner(e1, ids);
-                        collect_expr_ids_inner(e2, ids);
-                    }
-                    crate::ast::SubtypeOp::Sum(e)
-                    | crate::ast::SubtypeOp::Avg(e)
-                    | crate::ast::SubtypeOp::Min(e)
-                    | crate::ast::SubtypeOp::Max(e) => collect_expr_ids_inner(e, ids),
-                    crate::ast::SubtypeOp::Limit(_)
-                    | crate::ast::SubtypeOp::Skip(_)
-                    | crate::ast::SubtypeOp::Unique
-                    | crate::ast::SubtypeOp::Count => {}
-                }
-            }
-        }
-        Expr::SubtypeProjectionExpr(spe) => {
-            collect_expr_ids_inner(&spe.source, ids);
-            for op in &spe.ops {
-                match op {
-                    crate::ast::SubtypeOp::Filter(e)
-                    | crate::ast::SubtypeOp::Map(e)
-                    | crate::ast::SubtypeOp::Sort(e)
-                    | crate::ast::SubtypeOp::Match(e)
-                    | crate::ast::SubtypeOp::Group(e) => collect_expr_ids_inner(e, ids),
-                    crate::ast::SubtypeOp::Join(e1, e2) => {
-                        collect_expr_ids_inner(e1, ids);
-                        collect_expr_ids_inner(e2, ids);
-                    }
-                    crate::ast::SubtypeOp::Sum(e)
-                    | crate::ast::SubtypeOp::Avg(e)
-                    | crate::ast::SubtypeOp::Min(e)
-                    | crate::ast::SubtypeOp::Max(e) => collect_expr_ids_inner(e, ids),
-                    crate::ast::SubtypeOp::Limit(_)
-                    | crate::ast::SubtypeOp::Skip(_)
-                    | crate::ast::SubtypeOp::Unique
-                    | crate::ast::SubtypeOp::Count => {}
-                }
-            }
-        }
-        Expr::DbvlTable { .. } | Expr::DbvlTableExpr(_) => {}
-        // Macro/template nodes — should be expanded before reaching analysis
-        Expr::TemplateCall { .. } | Expr::MacroCall { .. } | Expr::Interpolate(..) | Expr::InterpolateExpr(..) | Expr::QuoteBlock { .. } => {
-            unreachable!("macro/template should have been expanded")
-        }
-        // Pipe chains — desugared before this pass
-        Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
-            Expr::AddrOf(inner) => collect_expr_ids_inner(inner, ids),
-            Expr::Deref(inner) => collect_expr_ids_inner(inner, ids),
-        // 2026-07-11: Phase 5 — deferred literal, no identifiers
-        Expr::DeferredLiteral { .. } => {},
+        Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::Bool(_) => {}
+        Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::DerivationBlock(_) => {}
     }
 }
 
 fn statement_ids(stmt: &Statement, ids: &mut Vec<String>) {
     match stmt {
-        Statement::Assignment { lhs, expr, .. } => {
+        Statement::Assign(lhs, expr) => {
             // 2026-07-09: Handle AddrOf LHS for pointer writes.
             if let Some(n) = lhs.as_var_name() {
                 ids.push(n.to_string());
@@ -551,7 +291,7 @@ fn statement_ids(stmt: &Statement, ids: &mut Vec<String>) {
                 collect_expr_ids_inner(e, ids);
             }
         }
-        Statement::Guarded { statements, .. } => {
+        Statement::Guarded(_, statements) => {
             for s in statements {
                 statement_ids(s, ids);
             }
@@ -571,65 +311,35 @@ mod tests {
     use super::*;
     use crate::ast::*;
 
-    fn make_program(items: Vec<TopLevel>) -> Program {
-        Program {
-            items,
-            comments: vec![],
-            reactor_speed: None,
-            attrs: vec![],
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        }
-    }
-
-    fn make_state_decl(name: &str, ty: Type, expr: Option<Expr>) -> TopLevel {
+    fn make_state_decl(name: &str, ty: Type) -> TopLevel {
         TopLevel::StateDecl(StateDecl {
             name: name.to_string(),
             ty,
-            expr,
-            address: None,
-            bit_range: None,
-            constraint: None,
-            is_override: false,
-            os_mode: false,
             span: None,
-            attrs: vec![],
         })
     }
 
     fn make_trigger(name: &str, ty: Type) -> TopLevel {
-        TopLevel::Trigger(TriggerDeclaration {
+        TopLevel::Trigger(Trigger {
             name: name.to_string(),
-            ty,
-            address: LinkRef::Explicit(0),
-            bit_range: None,
-            stages: vec![],
-            condition: None,
-            is_wake: true,
-            is_const: false,
+            instance: Expr::Identifier("__io".to_string()),
+            port: name.to_string(),
             span: None,
-            annotations: vec![],
-            modifiers: vec![],
         })
     }
 
     #[test]
     fn test_empty_program() {
-        let graph = DependencyGraph::build(&make_program(vec![])).unwrap();
+        let graph = DependencyGraph::build(&[]).unwrap();
         assert!(graph.topo_order.is_empty());
         assert!(graph.all_vars.is_empty());
     }
 
     #[test]
     fn test_trg_variable_only() {
-        let graph = DependencyGraph::build(&make_program(vec![
+        let graph = DependencyGraph::build(&[
             make_trigger("sensor", Type::int()),
-        ])).unwrap();
+        ]).unwrap();
         assert_eq!(graph.topo_order.len(), 1);
         assert!(graph.is_trg.contains("sensor"));
         assert_eq!(graph.bit_index["sensor"], 0);
@@ -637,35 +347,25 @@ mod tests {
 
     #[test]
     fn test_simple_dependency() {
-        let graph = DependencyGraph::build(&make_program(vec![
+        let graph = DependencyGraph::build(&[
             make_trigger("sensor", Type::int()),
-            make_state_decl(
-                "derived",
-                Type::int(),
-                Some(Expr::Add(
-                    Box::new(Expr::Identifier("sensor".to_string())),
-                    Box::new(Expr::Decimal(5)),
-                )),
-            ),
-        ])).unwrap();
+            make_state_decl("derived", Type::int()),
+        ]).unwrap();
         assert_eq!(graph.topo_order.len(), 2);
         let sensor_pos = graph.topo_order.iter().position(|v| v == "sensor").unwrap();
         let derived_pos = graph.topo_order.iter().position(|v| v == "derived").unwrap();
         assert!(sensor_pos < derived_pos, "trg must come before dependent");
         assert_eq!(graph.bit_index["sensor"], 0);
         assert_eq!(graph.bit_index["derived"], 1);
-        assert!(graph.dependencies.contains_key("derived"));
-        assert_eq!(graph.dependencies["derived"], vec!["sensor"]);
-        assert_eq!(graph.dependents["sensor"], vec!["derived"]);
     }
 
     #[test]
     fn test_chain_dependency() {
-        let graph = DependencyGraph::build(&make_program(vec![
+        let graph = DependencyGraph::build(&[
             make_trigger("a", Type::int()),
-            make_state_decl("b", Type::int(), Some(Expr::Identifier("a".to_string()))),
-            make_state_decl("c", Type::int(), Some(Expr::Identifier("b".to_string()))),
-        ])).unwrap();
+            make_state_decl("b", Type::int()),
+            make_state_decl("c", Type::int()),
+        ]).unwrap();
         let pos_a = graph.topo_order.iter().position(|v| v == "a").unwrap();
         let pos_b = graph.topo_order.iter().position(|v| v == "b").unwrap();
         let pos_c = graph.topo_order.iter().position(|v| v == "c").unwrap();
@@ -674,10 +374,10 @@ mod tests {
 
     #[test]
     fn test_cycle_detection() {
-        let result = DependencyGraph::build(&make_program(vec![
-            make_state_decl("a", Type::int(), Some(Expr::Identifier("b".to_string()))),
-            make_state_decl("b", Type::int(), Some(Expr::Identifier("a".to_string()))),
-        ]));
+        let result = DependencyGraph::build(&[
+            make_state_decl("a", Type::int()),
+            make_state_decl("b", Type::int()),
+        ]);
         assert!(result.is_err(), "cycle should be detected");
         if let Err(e) = result {
             assert!(!e.cycle.is_empty(), "cycle should have members");
@@ -686,18 +386,11 @@ mod tests {
 
     #[test]
     fn test_multiple_trgs() {
-        let graph = DependencyGraph::build(&make_program(vec![
+        let graph = DependencyGraph::build(&[
             make_trigger("a", Type::int()),
             make_trigger("b", Type::int()),
-            make_state_decl(
-                "sum",
-                Type::int(),
-                Some(Expr::Add(
-                    Box::new(Expr::Identifier("a".to_string())),
-                    Box::new(Expr::Identifier("b".to_string())),
-                )),
-            ),
-        ])).unwrap();
+            make_state_decl("sum", Type::int()),
+        ]).unwrap();
         assert_eq!(graph.topo_order.len(), 3);
         assert!(graph.bit_index["a"] < graph.bit_index["sum"]);
         assert!(graph.bit_index["b"] < graph.bit_index["sum"]);
@@ -705,10 +398,10 @@ mod tests {
 
     #[test]
     fn test_independent_vars() {
-        let graph = DependencyGraph::build(&make_program(vec![
+        let graph = DependencyGraph::build(&[
             make_trigger("x", Type::int()),
-            make_state_decl("y", Type::int(), None),
-        ])).unwrap();
+            make_state_decl("y", Type::int()),
+        ]).unwrap();
         assert_eq!(graph.topo_order.len(), 2);
     }
 }

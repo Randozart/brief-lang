@@ -452,20 +452,18 @@ impl LlvmBackend {
     ) {
         writeln!(out, "define void @trg_step(ptr %state) local_unnamed_addr {{").ok();
         for trg_name in trigger_names {
-            if let Some(trg) = self.ctx.triggers.get(trg_name) {
-                let cond_val = self.emit_expr(out, &trg.instance, "  ");
+            let trg_name_clone = trg_name.clone();
+            if let Some(trg) = self.ctx.triggers.get(&trg_name_clone) {
+                let trg_name = trg.name.clone();
+                let cond_val = self.emit_expr(out, &Expr::Identifier(trg_name.clone()), "  ");
                 let bool_reg = self.as_bool_reg(out, "  ", &cond_val);
                 let body_label = format!(".trg_{}", trg_name);
                 let next_label = format!(".trg_next_{}", trg_name);
                 writeln!(out, "  br i1 {}, label %{}, label %{}", bool_reg, body_label, next_label).ok();
-                writeln!(out, "{}:", body_label).ok();
-                if let Some((txn_name, _txn)) = self.ctx.txns.iter()
-                    .find(|(_, t)| t.contract.pre_condition == trg.instance)
-                {
-                    writeln!(out, "  call void @txn_{}(ptr %state)", txn_name).ok();
-                }
+                writeln!(out, "  {}:", body_label).ok();
+                writeln!(out, "  call void @txn_{}(ptr %state)", trg_name).ok();
                 writeln!(out, "  br label %{}", next_label).ok();
-                writeln!(out, "{}:", next_label).ok();
+                writeln!(out, "  {}:", next_label).ok();
             }
         }
         writeln!(out, "  ret void").ok();

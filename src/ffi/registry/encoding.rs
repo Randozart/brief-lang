@@ -1,10 +1,14 @@
 use crate::interpreter::{RuntimeError, Value};
 
+fn type_err(msg: &str) -> RuntimeError {
+    RuntimeError::TypeError { expected: "string".to_string(), found: msg.to_string() }
+}
+
 pub fn encoding_base64_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => Ok(Value::Bits(data.clone())),
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::base64_encode expects 1 argument".to_string())),
+        None => Err(type_err("encoding::base64_encode expects 1 argument")),
     }
 }
 
@@ -12,7 +16,7 @@ pub fn encoding_base64_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeErr
     match args.first() {
         Some(Value::Bits(data)) => Ok(Value::Bits(data.clone())),
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::base64_decode expects 1 argument".to_string())),
+        None => Err(type_err("encoding::base64_decode expects 1 argument")),
     }
 }
 
@@ -23,7 +27,7 @@ pub fn encoding_hex_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
             Ok(Value::Bits(hex.into_bytes()))
         }
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::hex_encode expects 1 argument".to_string())),
+        None => Err(type_err("encoding::hex_encode expects 1 argument")),
     }
 }
 
@@ -39,7 +43,7 @@ pub fn encoding_hex_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
             Ok(Value::Bits(bytes))
         }
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::hex_decode expects 1 argument".to_string())),
+        None => Err(type_err("encoding::hex_decode expects 1 argument")),
     }
 }
 
@@ -51,7 +55,7 @@ pub fn encoding_url_encode_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
             Ok(Value::Bits(encoded.into_bytes()))
         }
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::url_encode expects 1 argument (string)".to_string())),
+        None => Err(type_err("encoding::url_encode expects 1 argument (string)")),
     }
 }
 
@@ -63,7 +67,7 @@ pub fn encoding_url_decode_impl(args: Vec<Value>) -> Result<Value, RuntimeError>
             Ok(Value::Bits(decoded.into_bytes()))
         }
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::url_decode expects 1 argument (string)".to_string())),
+        None => Err(type_err("encoding::url_decode expects 1 argument (string)")),
     }
 }
 
@@ -75,7 +79,7 @@ pub fn encoding_html_escape_impl(args: Vec<Value>) -> Result<Value, RuntimeError
             Ok(Value::Bits(escaped.into_bytes()))
         }
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::html_escape expects 1 argument (string)".to_string())),
+        None => Err(type_err("encoding::html_escape expects 1 argument (string)")),
     }
 }
 
@@ -87,7 +91,7 @@ pub fn encoding_html_unescape_impl(args: Vec<Value>) -> Result<Value, RuntimeErr
             Ok(Value::Bits(unescaped.as_bytes().to_vec()))
         }
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::html_unescape expects 1 argument (string)".to_string())),
+        None => Err(type_err("encoding::html_unescape expects 1 argument (string)")),
     }
 }
 
@@ -115,7 +119,7 @@ pub fn encoding_md5_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => Ok(Value::Bits(hash_bytes_md5(data).into_bytes())),
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::md5 expects 1 argument (string)".to_string())),
+        None => Err(type_err("encoding::md5 expects 1 argument (string)")),
     }
 }
 
@@ -123,7 +127,7 @@ pub fn encoding_sha1_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => Ok(Value::Bits(hash_bytes_sha1(data).into_bytes())),
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::sha1 expects 1 argument (string)".to_string())),
+        None => Err(type_err("encoding::sha1 expects 1 argument (string)")),
     }
 }
 
@@ -131,7 +135,7 @@ pub fn encoding_sha256_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     let data = match args.first() {
         Some(Value::Bits(data)) => data,
         Some(other) => return Ok(other.clone()),
-        None => return Err(RuntimeError::TypeMismatch("encoding::sha256 expects 1 argument (string)".to_string())),
+        None => return Err(type_err("encoding::sha256 expects 1 argument (string)")),
     };
     if data.contains(&0u8) {
         return Ok(Value::Bits(data.clone()));
@@ -143,7 +147,16 @@ pub fn encoding_sha512_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
     match args.first() {
         Some(Value::Bits(data)) => Ok(Value::Bits(hash_bytes_sha512(data).into_bytes())),
         Some(other) => Ok(other.clone()),
-        None => Err(RuntimeError::TypeMismatch("encoding::sha512 expects 1 argument (string)".to_string())),
+        None => Err(type_err("encoding::sha512 expects 1 argument (string)")),
+    }
+}
+
+pub fn encoding_uuid_v4_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
+    if args.is_empty() {
+        let uuid = uuid::Uuid::new_v4();
+        Ok(Value::Bits(uuid.to_string().into_bytes()))
+    } else {
+        Err(type_err("encoding::uuid_v4 expects 0 arguments"))
     }
 }
 
@@ -218,14 +231,5 @@ mod tests {
         let result = encoding_sha256_impl(vec![Value::Bits(crate::interpreter::i64_to_bits(42))]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), Value::Bits(crate::interpreter::i64_to_bits(42)));
-    }
-}
-
-pub fn encoding_uuid_v4_impl(args: Vec<Value>) -> Result<Value, RuntimeError> {
-    if args.is_empty() {
-        let uuid = uuid::Uuid::new_v4();
-        Ok(Value::Bits(uuid.to_string().into_bytes()))
-    } else {
-        Err(RuntimeError::TypeMismatch("encoding::uuid_v4 expects 0 arguments".to_string()))
     }
 }

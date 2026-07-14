@@ -12,8 +12,8 @@ use crate::type_universe::TypeUniverse;
 
 /// Inject destructor calls into all definitions and transactions.
 /// 2026-07-11: Phase 8E — lifecycle management.
-pub fn inject_drop_calls(program: &mut ast::Program, universe: &TypeUniverse) {
-    for item in &mut program.items {
+pub fn inject_drop_calls(program: &mut Vec<ast::TopLevel>, universe: &TypeUniverse) {
+    for item in program.iter_mut() {
         match item {
             ast::TopLevel::Definition(defn) => {
                 inject_drop_calls_in_body(&mut defn.body, universe);
@@ -53,7 +53,7 @@ fn inject_drop_calls_in_body(body: &mut Vec<ast::Statement>, universe: &TypeUniv
 /// 2026-07-11: Phase 8E.
 fn extract_binding_name(stmt: &ast::Statement) -> Option<String> {
     match stmt {
-        ast::Statement::Assignment { lhs, .. } => match lhs {
+        ast::Statement::Assign(lhs, ast::Expr::Decimal(0)) => match lhs {
             ast::Expr::Identifier(name) => Some(name.clone()),
             _ => None,
         },
@@ -71,7 +71,7 @@ fn has_op_drop(type_name: &str, universe: &TypeUniverse) -> bool {
         Some(rt) => rt,
         None => return false,
     };
-    rt.get_property_str("op Drop").is_some()
+    rt.properties.contains_key("op Drop")
 }
 
 #[cfg(test)]
@@ -83,11 +83,7 @@ mod tests {
     fn test_inject_drop_no_drop_type() {
         let universe = TypeUniverse::new();
         let mut body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".into()),
-                expr: Expr::Decimal(42),
-                timeout: None, modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(42)),
         ];
         let len_before = body.len();
         inject_drop_calls_in_body(&mut body, &universe);

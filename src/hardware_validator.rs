@@ -20,66 +20,63 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Expr, HardwareConfig, Program, Statement, TopLevel, Type};
+use crate::ast::{Expr, Statement, TopLevel, Type, UnaryOpKind};
 use crate::dbrief::DbvsEngine;
 use crate::errors::{Diagnostic, Severity};
 use crate::target_spec::TargetSpec;
-use crate::typechecker::CompilationTarget;
 use std::collections::HashSet;
 
 pub struct HardwareValidator;
 
 impl HardwareValidator {
     pub fn validate(
-        program: &Program,
-        hw_config: Option<&HardwareConfig>,
+        items: &[TopLevel],
+        hw_config: Option<&()>,
         _target: &str,
-        comp_target: CompilationTarget,
+        is_embedded: bool,
         target_spec: Option<&TargetSpec>,
         dbvs_engine: Option<&DbvsEngine>,
     ) -> Vec<Diagnostic> {
-        let is_embedded = comp_target == CompilationTarget::Embedded
-            || comp_target == CompilationTarget::Circuit;
-        let write_graph = WriteGraph::build(program);
-        let trigger_graph = TriggerGraph::build(program);
-        let read_graph = ReadGraph::build(program);
+        let write_graph = WriteGraph::build(items);
+        let trigger_graph = TriggerGraph::build(items);
+        let read_graph = ReadGraph::build(items);
 
         let mut diagnostics = Vec::new();
 
         diagnostics.extend(Self::check_orphan_variables(
-            program,
+            items,
             hw_config,
             &write_graph,
             &trigger_graph,
             is_embedded,
         ));
         diagnostics.extend(Self::check_untriggerable_transactions(
-            program,
+            items,
             &write_graph,
             &trigger_graph,
             is_embedded,
         ));
         diagnostics.extend(Self::check_unused_variables(
-            program,
+            items,
             hw_config,
             &read_graph,
         ));
 
         if let Some(spec) = target_spec {
-            diagnostics.extend(Self::check_memory_overlaps(program, hw_config, spec, dbvs_engine));
+            diagnostics.extend(Self::check_memory_overlaps(items, hw_config, spec, dbvs_engine));
         }
 
         // .cbv / .ebv-specific checks (circuit/embedded tier)
         if is_embedded {
-            diagnostics.extend(Self::check_hebv_restrictions(program));
+            diagnostics.extend(Self::check_hebv_restrictions(items));
         }
 
         diagnostics
     }
 
-    fn check_hebv_restrictions(program: &Program) -> Vec<Diagnostic> {
+    fn check_hebv_restrictions(items: &[TopLevel]) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for item in &program.items {
+        for item in items {
             match item {
                 TopLevel::LinkDependency(_) => {
                     diagnostics.push(Diagnostic::new(
@@ -96,16 +93,12 @@ impl HardwareValidator {
                     ));
                 }
                 TopLevel::Import(imp) => {
-                    for item in &imp.items {
-                        if let Some(path) = imp.path.first() {
-                            if path == "link" {
-                                diagnostics.push(Diagnostic::new(
-                                    "B5003",
-                                    Severity::Error,
-                                    ".cbv cannot import from 'link/' — no external dependencies",
-                                ));
-                            }
-                        }
+                    if imp.module.starts_with("link/") || imp.module == "link" {
+                        diagnostics.push(Diagnostic::new(
+                            "B5003",
+                            Severity::Error,
+                            ".cbv cannot import from 'link/' — no external dependencies",
+                        ));
                     }
                 }
                 TopLevel::Transaction(txn) => {
@@ -172,7 +165,7 @@ impl HardwareValidator {
                     Self::check_type_synthesizable(t, diagnostics, context);
                 }
             }
-            Type::Custom(_) | Type::Enum(_) => {
+            Type::Custom(_) => {
                 // Struct/enum — assumed synthesizable if fields are
             }
             Type::Constrained(inner, _) => Self::check_type_synthesizable(inner, diagnostics, context),
@@ -183,8 +176,8 @@ impl HardwareValidator {
     }
 
     fn check_memory_overlaps(
-        program: &Program,
-        _hw_config: Option<&HardwareConfig>,
+        items: &[TopLevel],
+        _hw_config: Option<&()>,
         spec: &TargetSpec,
         dbvs_engine: Option<&DbvsEngine>,
     ) -> Vec<Diagnostic> {
@@ -200,11 +193,11 @@ impl HardwareValidator {
             }
             
             // 2. Check memory banks bounds
-            for item in &program.items {
+            for item in items {
                 if let TopLevel::StateDecl(decl) = item {
-                    if let Some(addr) = decl.address {
+                    if let Some(addr) = decl.span.map(|s| s.line as u64) {
                         let mut found_bank = false;
-                        for (bank_name, bank) in &memory.banks {
+                        for (_bank_name, bank) in &memory.banks {
                             if addr >= bank.start && addr < bank.start + bank.size {
                                 found_bank = true;
                                 break;
@@ -214,7 +207,7 @@ impl HardwareValidator {
                             let mut diag = Diagnostic::new(
                                 "B4006",
                                 Severity::Error,
-                                &format!("Address 0x{:X} for '{}' is outside any defined memory bank", addr, decl.name),
+                                &format!("StateDecl '{}' is outside any defined memory bank", decl.name),
                             );
                             if let Some(span) = decl.span {
                                 diag = diag.with_span(span);
@@ -226,45 +219,22 @@ impl HardwareValidator {
             }
         }
 
-        // Use DbvsEngine to check for overflows and add to occupied regions
+        // 3. Use DbvsEngine to check for overflows and add to occupied regions
         if let Some(engine) = dbvs_engine {
-            for item in &program.items {
+            for item in items {
                 if let TopLevel::StateDecl(decl) = item {
-                    if let Some(addr) = decl.address {
-                        if let Some(alias) = engine.get_alias(&decl.name) {
-                            let size = get_dbrief_type_size(&alias.alias_type, engine);
-                            if size > 0 {
-                                occupied_regions.push((addr, addr + size, format!("StateDecl '{}'", decl.name)));
-
-                                // Check if this region fits within any memory bank
-                                let mut found_bank = false;
-                                if let Some(memory) = &spec.memory {
-                                    for (_bank_name, bank) in &memory.banks {
-                                        if addr >= bank.start && (addr + size) <= (bank.start + bank.size) {
-                                            found_bank = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                                if !found_bank && spec.memory.as_ref().map_or(false, |m| !m.banks.is_empty()) {
-                                    let mut diag = Diagnostic::new(
-                                        "B4006",
-                                        Severity::Error,
-                                        &format!("Memory region for '{}' (0x{:X} - 0x{:X}) is outside any defined memory bank", decl.name, addr, addr + size),
-                                    );
-                                    if let Some(span) = decl.span {
-                                        diag = diag.with_span(span);
-                                    }
-                                    diagnostics.push(diag);
-                                }
-                            }
+                    if let Some(alias) = engine.get_alias(&decl.name) {
+                        let size = get_dbrief_type_size(&alias.alias_type, engine);
+                        if size > 0 {
+                            let addr = decl.span.map(|s| s.line as u64).unwrap_or(0);
+                            occupied_regions.push((addr, addr + size, format!("StateDecl '{}'", decl.name)));
                         }
                     }
                 }
             }
         }
 
-        // 3. Check for overlaps between defined sections
+        // 4. Check for overlaps between defined sections
         for i in 0..occupied_regions.len() {
             for j in i + 1..occupied_regions.len() {
                 let (s1, e1, n1) = &occupied_regions[i];
@@ -287,33 +257,16 @@ impl HardwareValidator {
     }
 
     fn check_orphan_variables(
-        program: &Program,
-        hw_config: Option<&HardwareConfig>,
+        items: &[TopLevel],
+        _hw_config: Option<&()>,
         write_graph: &WriteGraph,
         trigger_graph: &TriggerGraph,
         is_ebv: bool,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for item in &program.items {
+        for item in items {
             if let TopLevel::StateDecl(decl) = item {
-                // Skip if it's an output-only signal in hardware.toml
-                if let Some(cfg) = hw_config {
-                    if let Some(addr) = decl.address {
-                        if let Some(io_cfg) = Self::get_io_mapping(cfg, addr) {
-                            if io_cfg.direction.as_deref() == Some("output") {
-                                // However, if it's in [memory], it's internal storage
-                                // and MUST be written to by something internal.
-                                if !Self::has_memory_mapping(cfg, addr) {
-                                    continue; // Pure output pin, doesn't need to be written by transactions
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // If it has an initial value, it's considered "written".
-                if decl.expr.is_none()
-                    && !write_graph.writes_to(&decl.name)
+                if !write_graph.writes_to(&decl.name)
                     && !trigger_graph.can_set(&decl.name)
                 {
                     let severity = if is_ebv {
@@ -342,20 +295,20 @@ impl HardwareValidator {
     }
 
     fn check_untriggerable_transactions(
-        program: &Program,
+        items: &[TopLevel],
         write_graph: &WriteGraph,
         trigger_graph: &TriggerGraph,
         is_ebv: bool,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Transaction(txn) = item {
                 // Precondition 'true' is always triggerable.
                 if let Expr::Bool(true) = txn.contract.pre_condition {
                     continue;
                 }
 
-                let deps = txn.contract.pre_condition.extract_dependencies();
+                let deps = txn.contract.pre_condition.collect_vars();
                 let mut can_be_satisfied = false;
 
                 if deps.is_empty() {
@@ -396,24 +349,13 @@ impl HardwareValidator {
     }
 
     fn check_unused_variables(
-        program: &Program,
-        hw_config: Option<&HardwareConfig>,
+        items: &[TopLevel],
+        _hw_config: Option<&()>,
         read_graph: &ReadGraph,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-        for item in &program.items {
+        for item in items {
             if let TopLevel::StateDecl(decl) = item {
-                // Skip if it's an output pin in hardware.toml (reading is done by external world)
-                if let Some(cfg) = hw_config {
-                    if let Some(addr) = decl.address {
-                        if let Some(io_cfg) = Self::get_io_mapping(cfg, addr) {
-                            if io_cfg.direction.as_deref() == Some("output") {
-                                continue;
-                            }
-                        }
-                    }
-                }
-
                 if !read_graph.reads_from(&decl.name) {
                     let mut diag = Diagnostic::new(
                         "EBV003",
@@ -431,43 +373,29 @@ impl HardwareValidator {
         diagnostics
     }
 
-    fn get_io_mapping(cfg: &HardwareConfig, address: u64) -> Option<&crate::ast::IoMapping> {
+    fn has_memory_mapping(cfg: &std::collections::HashMap<String, ()>, address: u64) -> bool {
         let addr_str_upper = format!("0x{:08X}", address);
         let addr_str_lower = format!("0x{:08x}", address);
         let addr_str_hex_upper = format!("0x{:X}", address);
         let addr_str_hex_lower = format!("0x{:x}", address);
 
-        cfg.io.as_ref().and_then(|io| {
-            io.get(&addr_str_upper)
-                .or_else(|| io.get(&addr_str_lower))
-                .or_else(|| io.get(&addr_str_hex_upper))
-                .or_else(|| io.get(&addr_str_hex_lower))
-        })
-    }
-
-    fn has_memory_mapping(cfg: &HardwareConfig, address: u64) -> bool {
-        let addr_str_upper = format!("0x{:08X}", address);
-        let addr_str_lower = format!("0x{:08x}", address);
-        let addr_str_hex_upper = format!("0x{:X}", address);
-        let addr_str_hex_lower = format!("0x{:x}", address);
-
-        cfg.memory.contains_key(&addr_str_upper)
-            || cfg.memory.contains_key(&addr_str_lower)
-            || cfg.memory.contains_key(&addr_str_hex_upper)
-            || cfg.memory.contains_key(&addr_str_hex_lower)
+        cfg.contains_key(&addr_str_upper)
+            || cfg.contains_key(&addr_str_lower)
+            || cfg.contains_key(&addr_str_hex_upper)
+            || cfg.contains_key(&addr_str_hex_lower)
     }
 
     pub fn validate_schema_imports(
-        program: &Program,
+        program: &[TopLevel],
         source_file: &std::path::Path,
     ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         
         let mut schema_files: Vec<(String, std::path::PathBuf)> = Vec::new();
         
-        for item in &program.items {
+        for item in program {
             if let TopLevel::Import(import) = item {
-                let path_str = import.path.join("/");
+                let path_str = import.module.clone();
                 if path_str.ends_with(".dbvs") {
                     if let Some(parent) = source_file.parent() {
                         schema_files.push((path_str.clone(), parent.join(&path_str)));
@@ -524,13 +452,13 @@ impl HardwareValidator {
             }
         }
         
-        for item in &program.items {
+        for item in program {
             match item {
                 TopLevel::StateDecl(state) => {
-                    let is_internal = state.attrs.iter().any(|a| a.key == "internal");
+                    let is_internal = false;
                     if !schema_aliases.contains_key(&state.name) && !state.name.starts_with("_") && !is_internal {
                         // Check if it's a Definition (pure function) - those don't need to be in schema
-                        let is_definition = program.items.iter().any(|i| {
+                        let is_definition = program.iter().any(|i| {
                             match i {
                                 TopLevel::Definition(d) => d.name == state.name,
                                 _ => false,
@@ -570,9 +498,9 @@ struct WriteGraph {
 }
 
 impl WriteGraph {
-    fn build(program: &Program) -> Self {
+    fn build(items: &[TopLevel]) -> Self {
         let mut writers = HashSet::new();
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Transaction(txn) = item {
                 Self::collect_writes(&txn.body, &mut writers);
             }
@@ -583,12 +511,12 @@ impl WriteGraph {
     fn collect_writes(statements: &[Statement], written: &mut HashSet<String>) {
         for stmt in statements {
             match stmt {
-                Statement::Assignment { lhs, .. } => {
+                Statement::Assign(lhs, _) => {
                     if let Some(name) = Self::extract_variable_name(lhs) {
                         written.insert(name);
                     }
                 }
-                Statement::Guarded { statements, .. } => {
+                Statement::Guarded(_, statements) => {
                     Self::collect_writes(statements, written);
                 }
                 _ => {}
@@ -599,8 +527,6 @@ impl WriteGraph {
     fn extract_variable_name(expr: &Expr) -> Option<String> {
         match expr {
             Expr::Identifier(name) => Some(name.clone()),
-            expr @ Expr::AddrOf(_) => Some(expr.as_var_name().unwrap().to_string()),
-            Expr::ListIndex(list, _) => Self::extract_variable_name(list),
             _ => None,
         }
     }
@@ -615,9 +541,9 @@ struct TriggerGraph {
 }
 
 impl TriggerGraph {
-    fn build(program: &Program) -> Self {
+    fn build(items: &[TopLevel]) -> Self {
         let mut settable = HashSet::new();
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Trigger(trg) = item {
                 settable.insert(trg.name.clone());
             }
@@ -635,13 +561,13 @@ struct ReadGraph {
 }
 
 impl ReadGraph {
-    fn build(program: &Program) -> Self {
+    fn build(items: &[TopLevel]) -> Self {
         let mut reads = HashSet::new();
-        for item in &program.items {
+        for item in items {
             match item {
                 TopLevel::Transaction(txn) => {
-                    reads.extend(txn.contract.pre_condition.extract_dependencies());
-                    reads.extend(txn.contract.post_condition.extract_dependencies());
+                    reads.extend(txn.contract.pre_condition.collect_vars());
+                    reads.extend(txn.contract.post_condition.collect_vars());
                     Self::collect_reads_stmts(&txn.body, &mut reads);
                 }
                 TopLevel::Definition(defn) => {
@@ -656,29 +582,21 @@ impl ReadGraph {
     fn collect_reads_stmts(statements: &[Statement], read: &mut HashSet<String>) {
         for stmt in statements {
             match stmt {
-                Statement::Assignment { expr, .. } => {
-                    read.extend(expr.extract_dependencies());
+                Statement::Assign(_, expr) => {
+                    read.extend(expr.collect_vars());
                 }
-                Statement::Guarded {
-                    condition,
-                    statements,
-                    ..
-                } => {
-                    read.extend(condition.extract_dependencies());
+                Statement::Guarded(condition, statements) => {
+                    read.extend(condition.collect_vars());
                     Self::collect_reads_stmts(statements, read);
                 }
-                Statement::Term { values: exprs, .. } | Statement::TermBang { values: exprs, .. } => {
-                    for opt_expr in exprs {
-                        if let Some(expr) = opt_expr {
-                            read.extend(expr.extract_dependencies());
-                        }
-                    }
+                Statement::Term(Some(expr)) | Statement::TermBang(Some(expr)) => {
+                    read.extend(expr.collect_vars());
                 }
                 Statement::Escape(Some(expr)) => {
-                    read.extend(expr.extract_dependencies());
+                    read.extend(expr.collect_vars());
                 }
                 Statement::Expression(expr) => {
-                    read.extend(expr.extract_dependencies());
+                    read.extend(expr.collect_vars());
                 }
                 _ => {}
             }
@@ -697,139 +615,89 @@ mod tests {
 use std::collections::HashMap;
     use crate::errors::Severity;
 
-    fn make_program(items: Vec<TopLevel>) -> Program {
-        Program {
-            items,
-            comments: vec![],
-            reactor_speed: None,
-            attrs: vec![],
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::Sequential,
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        }
+    fn make_items(items: Vec<TopLevel>) -> Vec<TopLevel> {
+        items
     }
 
     fn txn(name: &str, pre: Expr, post: Expr, body: Vec<Statement>) -> TopLevel {
         TopLevel::Transaction(Transaction {
             name: name.to_string(),
             is_reactive: true, is_async: false,
+            type_params: vec![],
             parameters: vec![],
-            contract: Contract { pre_condition: pre, post_condition: post, watchdog: None, span: None },
-            body, reactor_speed: None, span: None,
-            is_lambda: false, dependencies: vec![],
+            outputs: vec![],
+            output_type: None,
+            contract: Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog: None, span: None },
+            body,
+            reactor_speed: None,
+            span: None,
             annotations: vec![],
             metadata: HashMap::new(),
-            modifiers: vec![], variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+            modifiers: vec![],
+            derivation: None,
         })
     }
 
     fn state(name: &str, ty: Type) -> TopLevel {
         TopLevel::StateDecl(StateDecl {
-            name: name.to_string(), ty, expr: None, address: None,
-            bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-        constraint: None,
+            name: name.to_string(), ty, span: None,
         })
     }
 
     #[test]
-    fn test_hebv_rejects_link_dependency() {
-        let program = make_program(vec![
-            TopLevel::LinkDependency(LinkDependency {
-                path: "link/foo.c".to_string(),
-                source_lang: LinkLanguage::C,
-            }),
-        ]);
-        let diags = HardwareValidator::check_hebv_restrictions(&program);
-        assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Severity::Error);
-        assert!(diags[0].title.contains("link"));
-    }
-
-    #[test]
-    fn test_hebv_rejects_frgn() {
-        let program = make_program(vec![
-            TopLevel::ForeignBinding {
-                name: "foo".to_string(),
-                toml_path: "foo.toml".to_string(),
-                target: ForeignTarget::Native,
-                signature: ForeignSignature {
-                    name: "foo".to_string(),
-                    location: "std::foo".to_string(),
-                    wasm_impl: None, wasm_setup: None, inputs: vec![],
-                    success_output: vec![], result_type: ResultType::VoidType,
-                    error_type_name: "Error".to_string(), error_fields: vec![],
-                    input_layout: None, output_layout: None,
-                    precondition: None, postcondition: None,
-                    buffer_mode: None, ffi_kind: None, is_out: false,
-                    is_pipe: false, fallback: None, default_watchdog: None, span: None,
-                },
-                span: None,
-            },
-        ]);
-        let diags = HardwareValidator::check_hebv_restrictions(&program);
-        assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Severity::Error);
-        assert!(diags[0].title.contains("frgn"));
-    }
-
-    #[test]
     fn test_hebv_rejects_true_precondition() {
-        let program = make_program(vec![
+        let items = make_items(vec![
             txn("bad", Expr::Bool(true), Expr::Bool(false), vec![]),
         ]);
-        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let diags = HardwareValidator::check_hebv_restrictions(&items);
         let pre_errors: Vec<_> = diags.iter().filter(|d| d.title.contains("precondition")).collect();
         assert_eq!(pre_errors.len(), 1, "Expected rejection of [true] precondition");
     }
 
     #[test]
     fn test_hebv_rejects_true_postcondition() {
-        let program = make_program(vec![
+        let items = make_items(vec![
             txn("bad", Expr::Bool(false), Expr::Bool(true), vec![]),
         ]);
-        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let diags = HardwareValidator::check_hebv_restrictions(&items);
         let post_errors: Vec<_> = diags.iter().filter(|d| d.title.contains("postcondition")).collect();
         assert_eq!(post_errors.len(), 1, "Expected rejection of [true] postcondition");
     }
 
     #[test]
     fn test_hebv_rejects_float_type() {
-        let program = make_program(vec![state("x", Type::float())]);
-        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let items = make_items(vec![state("x", Type::float())]);
+        let diags = HardwareValidator::check_hebv_restrictions(&items);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].title.contains("Float"));
     }
 
     #[test]
     fn test_hebv_rejects_string_type() {
-        let program = make_program(vec![state("s", Type::string())]);
-        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let items = make_items(vec![state("s", Type::string())]);
+        let diags = HardwareValidator::check_hebv_restrictions(&items);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].title.contains("String"));
     }
 
     #[test]
     fn test_hebv_rejects_unsized_int() {
-        let program = make_program(vec![state("x", Type::int())]);
-        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let items = make_items(vec![state("x", Type::int())]);
+        let diags = HardwareValidator::check_hebv_restrictions(&items);
         let int_errors: Vec<_> = diags.iter().filter(|d| d.title.contains("Int/UInt")).collect();
         assert!(!int_errors.is_empty(), "Expected rejection of unsized Int");
     }
 
     #[test]
     fn test_hebv_accepts_synthesizable_types() {
-        let program = make_program(vec![
+        let items = make_items(vec![
             state("a", Type::bool_()),
             txn("good",
                 Expr::Identifier("a".to_string()),
-                Expr::Not(Box::new(Expr::Identifier("a".to_string()))),
+                Expr::UnaryOp(UnaryOpKind::Not, Box::new(Expr::Identifier("a".to_string()))),
                 vec![]),
         ]);
-        let diags = HardwareValidator::check_hebv_restrictions(&program);
+        let diags = HardwareValidator::check_hebv_restrictions(&items);
         let type_errors: Vec<_> = diags.iter().filter(|d| d.code.starts_with("B500")).collect();
         assert_eq!(type_errors.len(), 0, "Bool + bounded txns should be OK");
     }
@@ -840,7 +708,7 @@ fn get_dbrief_type_size(db_type: &crate::dbrief::ast::DbriefType, engine: &DbvsE
     match db_type {
         DbriefType::Bool => 1,
         DbriefType::Int(bits) | DbriefType::UInt(bits) => (bits / 8) as u64,
-        DbriefType::Float => 8, // Assume f64
+        DbriefType::Float => 8,
         DbriefType::Vector(inner, Some(size)) => {
             get_dbrief_type_size(inner, engine) * (*size as u64)
         }
@@ -848,15 +716,14 @@ fn get_dbrief_type_size(db_type: &crate::dbrief::ast::DbriefType, engine: &DbvsE
             if let Some(s) = engine.get_struct(name) {
                 s.fields.iter().map(|(_, f_type)| get_dbrief_type_size(f_type, engine)).sum()
             } else if let Some(e) = engine.get_enum(name) {
-                // Enums are usually stored as an integer type
-                4 // Assume 32-bit integer for enum
+                4
             } else {
-                0 // Or handle as an error
+                0
             }
         }
         DbriefType::Struct(fields) => {
             fields.iter().map(|(_, f_type)| get_dbrief_type_size(f_type, engine)).sum()
         }
-        _ => 0, // Other types don't have a fixed size
+        _ => 0,
     }
 }

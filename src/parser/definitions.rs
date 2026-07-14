@@ -104,6 +104,8 @@ impl<'a> Parser<'a> {
             is_async,
             type_params: vec![],
             parameters,
+            output_type: None,
+            outputs: Vec::new(),
             contract,
             body,
             metadata: std::collections::HashMap::new(),

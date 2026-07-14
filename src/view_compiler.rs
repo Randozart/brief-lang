@@ -807,7 +807,7 @@ fn find_closing_quote(s: &str, quote_char: char) -> Option<usize> {
 /// Returns list of verification errors.
 pub fn verify_srbv(
     bindings: &[Binding],
-    program: &ast::Program,
+    program: &[ast::TopLevel],
 ) -> Vec<String> {
     let mut errors = Vec::new();
 
@@ -815,7 +815,7 @@ pub fn verify_srbv(
     let mut state_vars: HashSet<String> = HashSet::new();
     let mut txn_contracts: HashMap<String, &Contract> = HashMap::new();
 
-    for item in &program.items {
+    for item in program {
         match item {
             TopLevel::StateDecl(state) => {
                 state_vars.insert(state.name.clone());

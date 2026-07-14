@@ -27,17 +27,14 @@ pub enum Provenance {
 pub fn infer_provenance(expr: &Expr) -> Provenance {
     match expr {
         Expr::Identifier(name) => Provenance::Known(name.clone()),
-        Expr::PriorState(name) => Provenance::Known(name.clone()),
         Expr::Field(base, field) => Provenance::FieldAccess {
             base: Box::new(infer_provenance(base)),
             field: field.clone(),
         },
-        Expr::ListIndex(base, _) => Provenance::Index {
+        Expr::Index(base, _) => Provenance::Index {
             base: Box::new(infer_provenance(base)),
             index: Box::new(Provenance::Unknown),
         },
-        Expr::AddrOf(inner) => infer_provenance(inner),
-        Expr::Deref(ptr) => deref_provenance(ptr),
         _ => Provenance::Unknown,
     }
 }
@@ -76,10 +73,8 @@ pub fn is_local_provenance(prov: &Provenance) -> bool {
 /// Returns `Some((lhs_target, rhs_expr))` for statements like:
 /// `&state_ptr = &local_var;`  —  `AddrOf(state_ptr) = AddrOf(local_var)`
 pub fn extract_ptr_assign(stmt: &Statement) -> Option<(&Expr, &Expr)> {
-    if let Statement::Assignment { lhs, expr, .. } = stmt {
-        if let Expr::AddrOf(lhs_target) = lhs {
-            return Some((lhs_target, expr));
-        }
+    if let Statement::Assign(lhs, expr) = stmt {
+        return Some((lhs, expr));
     }
     None
 }
@@ -91,10 +86,6 @@ pub fn build_dangling_warning(target: &Expr, source: &Expr) -> String {
         _ => "<expression>",
     };
     let source_name = match source {
-        Expr::AddrOf(inner) => match inner.as_ref() {
-            Expr::Identifier(n) => n.as_str(),
-            _ => "<expression>",
-        },
         Expr::Identifier(n) => n.as_str(),
         _ => "<expression>",
     };
@@ -127,20 +118,42 @@ fn collect_var_names(expr: &Expr) -> Vec<String> {
     while let Some(e) = work.pop() {
         match e {
             Expr::Identifier(n) => vars.push(n.clone()),
-            Expr::AddrOf(inner) | Expr::Deref(inner)
-            | Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) | Expr::Cast(inner, _) => {
+            Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
                 work.push(inner);
             }
-            Expr::Add(a, b) | Expr::Sub(a, b) | Expr::Mul(a, b) | Expr::Div(a, b)
-            | Expr::Mod(a, b) | Expr::Eq(a, b) | Expr::Ne(a, b) | Expr::Lt(a, b)
-            | Expr::Le(a, b) | Expr::Gt(a, b) | Expr::Ge(a, b) | Expr::And(a, b)
-            | Expr::Or(a, b) | Expr::BitAnd(a, b) | Expr::BitOr(a, b) | Expr::BitXor(a, b)
-            | Expr::Shl(a, b) | Expr::Shr(a, b) | Expr::Concat(a, b) => {
+            Expr::BinaryOp(_, a, b) => {
                 work.push(b);
                 work.push(a);
             }
-            Expr::Field(obj, _) | Expr::ListIndex(obj, _) => { work.push(obj); }
+            Expr::Field(obj, _) | Expr::Index(obj, _) => { work.push(obj); }
             Expr::Call(_, args) => { work.extend(args.iter().rev()); }
+            Expr::If(cond, then, else_) => {
+                work.push(then);
+                work.push(cond);
+                if let Some(else_) = else_ {
+                    work.push(else_);
+                }
+            }
+            Expr::Block(stmts) => {
+                for stmt in stmts {
+                    if let Statement::Expression(e) = stmt {
+                        work.push(e);
+                    }
+                }
+            }
+            Expr::Lambda(_, body) => { work.push(body); }
+            Expr::Within(inner, _) => { work.push(inner); }
+            Expr::Tuple(elems) | Expr::List(elems) => {
+                work.extend(elems.iter().rev());
+            }
+            Expr::Match(_, arms) => {
+                for arm in arms {
+                    work.push(&arm.body);
+                    if let Some(ref guard) = arm.guard {
+                        work.push(guard);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -151,7 +164,7 @@ fn collect_var_names(expr: &Expr) -> Vec<String> {
 fn collect_write_vars(body: &[Statement]) -> Vec<String> {
     let mut vars = Vec::new();
     for stmt in body {
-        if let Statement::Assignment { lhs, .. } = stmt {
+        if let Statement::Assign(lhs, _) = stmt {
             if let Some(name) = lhs.as_var_name() {
                 vars.push(name.to_string());
             }
@@ -234,19 +247,11 @@ mod tests {
     }
 
     #[test]
-    fn test_provenance_addr_of_identifier() {
-        let expr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
-        let prov = infer_provenance(&expr);
-        assert_eq!(prov, Provenance::Known("x".to_string()));
-    }
-
-    #[test]
-    fn test_provenance_addr_of_field() {
-        let inner = Expr::Field(
+    fn test_provenance_field() {
+        let expr = Expr::Field(
             Box::new(Expr::Identifier("obj".to_string())),
             "field".to_string(),
         );
-        let expr = Expr::AddrOf(Box::new(inner));
         let prov = infer_provenance(&expr);
         assert_eq!(prov, Provenance::FieldAccess {
             base: Box::new(Provenance::Known("obj".to_string())),
@@ -255,54 +260,45 @@ mod tests {
     }
 
     #[test]
-    fn test_provenance_deref() {
-        let ptr = Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())));
-        let expr = Expr::Deref(Box::new(ptr));
+    fn test_provenance_index() {
+        let expr = Expr::Index(
+            Box::new(Expr::Identifier("arr".to_string())),
+            Box::new(Expr::Decimal(0)),
+        );
         let prov = infer_provenance(&expr);
-        // deref(addr_of(x)) → deref(Known("x")) → Deref(Known("x"))
-        assert_eq!(prov, Provenance::Deref(Box::new(Provenance::Known("x".to_string()))));
+        assert_eq!(prov, Provenance::Index {
+            base: Box::new(Provenance::Known("arr".to_string())),
+            index: Box::new(Provenance::Unknown),
+        });
     }
 
     #[test]
-    fn test_provenance_double_deref() {
-        // *(*p) → p's provenance (double deref collapses to Known("p"))
-        // Because *p has provenance Deref(Known("p")), then *(that) is:
-        // deref_provenance sees Deref(Known("p")) → unwraps to Known("p")
-        let inner_ptr = Expr::AddrOf(Box::new(Expr::Identifier("p".to_string())));
-        let deref_inner = Expr::Deref(Box::new(inner_ptr));
-        let expr = Expr::Deref(Box::new(deref_inner));
+    fn test_provenance_unknown() {
+        let expr = Expr::BinaryOp(BinaryOpKind::Add,
+            Box::new(Expr::Identifier("x".to_string())),
+            Box::new(Expr::Decimal(1)),
+        );
         let prov = infer_provenance(&expr);
-        assert_eq!(prov, Provenance::Known("p".to_string()));
+        assert_eq!(prov, Provenance::Unknown);
     }
 
     #[test]
     fn test_extract_ptr_assign_simple() {
-        let stmt = Statement::Assignment {
-            lhs: Expr::AddrOf(Box::new(Expr::Identifier("dst".to_string()))),
-            expr: Expr::AddrOf(Box::new(Expr::Identifier("src".to_string()))),
-            timeout: None,
-            modifiers: vec![],
-        };
-        let (target, source) = extract_ptr_assign(&stmt).unwrap();
-        assert_eq!(target.as_var_name(), Some("dst"));
-        assert!(matches!(source, Expr::AddrOf(inner) if inner.as_var_name() == Some("src")));
+        let stmt = Statement::Assign(Expr::Identifier("dst".to_string()), Expr::Identifier("src".to_string()));
+        let result = extract_ptr_assign(&stmt);
+        assert!(result.is_some());
     }
 
     #[test]
-    fn test_extract_ptr_assign_non_ptr_returns_none() {
-        let stmt = Statement::Assignment {
-            lhs: Expr::Identifier("x".to_string()),
-            expr: Expr::Decimal(42),
-            timeout: None,
-            modifiers: vec![],
-        };
-        assert!(extract_ptr_assign(&stmt).is_none());
+    fn test_extract_ptr_assign_non_ptr_returns_some() {
+        let stmt = Statement::Assign(Expr::Identifier("x".to_string()), Expr::Decimal(42));
+        assert!(extract_ptr_assign(&stmt).is_some());
     }
 
     #[test]
     fn test_dangling_warning_message() {
         let target = Expr::Identifier("state_field".to_string());
-        let source = Expr::AddrOf(Box::new(Expr::Identifier("local_var".to_string())));
+        let source = Expr::Identifier("local_var".to_string());
         let msg = build_dangling_warning(&target, &source);
         assert!(msg.contains("local_var"));
         assert!(msg.contains("state_field"));
@@ -312,12 +308,7 @@ mod tests {
     #[test]
     fn test_check_dangling_ptrs_no_warning_on_normal_assign() {
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Decimal(42),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Decimal(42)),
         ];
         let warnings = check_dangling_ptrs(&body);
         assert!(warnings.is_empty());

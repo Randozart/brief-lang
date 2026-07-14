@@ -6,7 +6,7 @@
 use crate::ast::Type;
 use crate::errors::Span;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     // ── Literals ────────────────────────────────────────────────
     Quoted(Vec<u8>), // "..." raw bytes
@@ -83,14 +83,14 @@ pub enum UnaryOpKind {
     BitNot,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchArm {
     pub pattern: Pattern,
     pub guard: Option<Expr>,
     pub body: Box<Expr>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Pattern {
     Wildcard,
     Literal(Expr),
@@ -102,14 +102,14 @@ pub enum Pattern {
 
 /// A derivation block attached to a definition or transaction via `:=`.
 /// Contains input-output examples for inductive synthesis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DerivationExample {
     pub inputs: Vec<Expr>,
     pub output: Box<Expr>,
     pub span: Span,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DerivationBlock {
     pub examples: Vec<DerivationExample>,
     pub synthesized: Option<Box<Expr>>,
@@ -123,6 +123,42 @@ impl Expr {
             Some(name.as_str())
         } else {
             None
+        }
+    }
+
+    /// Collect all variable (Identifier) names referenced in this expression tree.
+    pub fn collect_vars(&self) -> Vec<String> {
+        let mut vars = Vec::new();
+        self.collect_vars_into(&mut vars);
+        vars
+    }
+
+    fn collect_vars_into(&self, acc: &mut Vec<String>) {
+        match self {
+            Expr::Identifier(name) => acc.push(name.clone()),
+            Expr::BinaryOp(_, l, r) => { l.collect_vars_into(acc); r.collect_vars_into(acc); }
+            Expr::UnaryOp(_, e) => e.collect_vars_into(acc),
+            Expr::Field(e, _) => e.collect_vars_into(acc),
+            Expr::Index(l, r) => { l.collect_vars_into(acc); r.collect_vars_into(acc); }
+            Expr::Call(_, args) => { for a in args { a.collect_vars_into(acc); } }
+            Expr::Block(_stmts) => {}
+            Expr::If(c, t, e) => {
+                c.collect_vars_into(acc);
+                t.collect_vars_into(acc);
+                if let Some(e) = e { e.collect_vars_into(acc); }
+            }
+            Expr::Match(e, arms) => {
+                e.collect_vars_into(acc);
+                for arm in arms { arm.body.collect_vars_into(acc); if let Some(g) = &arm.guard { g.collect_vars_into(acc); } }
+            }
+            Expr::Tuple(items) => { for i in items { i.collect_vars_into(acc); } }
+            Expr::List(items) => { for i in items { i.collect_vars_into(acc); } }
+            Expr::Lambda(_, body) => body.collect_vars_into(acc),
+            Expr::Cast(e, _) => e.collect_vars_into(acc),
+            Expr::IsType(e, _) => e.collect_vars_into(acc),
+            Expr::Within(l, r) => { l.collect_vars_into(acc); r.collect_vars_into(acc); }
+            Expr::DerivationBlock(d) => { for ex in &d.examples { for inp in &ex.inputs { inp.collect_vars_into(acc); } } }
+            _ => {}
         }
     }
 }

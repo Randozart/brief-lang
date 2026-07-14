@@ -167,7 +167,7 @@ pub struct CellDef {
 
 // ── Statement ──────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     /// let name: Type = expr;
     Let {
@@ -239,6 +239,17 @@ impl OutputType {
     pub fn single(ty: Type) -> Self {
         OutputType::Single(ty)
     }
+
+    pub fn all_types(&self) -> Vec<Type> {
+        match self {
+            OutputType::Single(ty) => vec![ty.clone()],
+            OutputType::Union(types) | OutputType::Tuple(types) => {
+                types.iter().flat_map(|t| t.all_types()).collect()
+            }
+            OutputType::Array(inner) => inner.all_types(),
+            OutputType::Named(_, inner) => inner.all_types(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -301,10 +312,28 @@ pub struct Trigger {
     pub span: Option<Span>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Annotation {
     pub name: String,
     pub value: Option<Expr>,
+}
+
+impl Annotation {
+    /// Check if this annotation is speculative (#? prefix).
+    pub fn speculative(&self) -> bool {
+        self.name.starts_with('?')
+    }
+
+    /// Extract the string value from the annotation's value field.
+    pub fn string_value(&self) -> Option<String> {
+        self.value.as_ref().and_then(|v| {
+            if let Expr::Quoted(bytes) = v {
+                Some(String::from_utf8_lossy(bytes).to_string())
+            } else {
+                None
+            }
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -404,6 +433,8 @@ impl ForeignBinding {
             postcondition: None,
             buffer_mode: None,
             default_watchdog: None,
+            wasm_impl: None,
+            wasm_setup: None,
             span: None,
         }
     }

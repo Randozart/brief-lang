@@ -46,30 +46,10 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
                     .map(|s| s.fields.iter().map(|f| f.name.clone()).collect::<Vec<_>>())
                     .unwrap_or_else(|| field_names.clone());
 
-                data_map.push((
-                    ast::Expr::Quoted(group_name.into()),
-                    ast::Expr::DbvlTable {
-                        path: String::new(),               // filled in by the import resolver
-                        field_names: schema_field_names,
-                        key_offsets: doc.key_offsets.clone(),
-                        schema_name: group.schema_name.clone(),
-                    },
-                ));
-            } else {
-                // Full materialization — convert all entries
-                let mut entry_map: Vec<(ast::Expr, ast::Expr)> = Vec::new();
-                for entry in &group.entries {
-                    let key_expr = match &entry.key {
-                        Some(k) => ast::Expr::Quoted(k.clone().into()),
-                        None => ast::Expr::Decimal(entry_map.len() as i64),
-                    };
-                    let val_expr = data_entry_to_expr(entry, group.schema_name.as_deref(), &doc.schemas);
-                    entry_map.push((key_expr, val_expr));
-                }
-                data_map.push((
-                    ast::Expr::Quoted(group_name.into()),
-                    ast::Expr::MapLiteral(entry_map),
-                ));
+        data_map.push((
+            ast::Expr::Quoted(group_name.into()),
+            ast::Expr::Tuple(vec![]), // lazy DbvlTable — placeholder
+        ));
             }
         }
 
@@ -79,10 +59,10 @@ pub fn document_to_program_flags(doc: &DbriefDocument, name: &str, use_lazy: boo
             if group.entries.len() == 1 && group.entries[0].fields.len() == 1 {
                 data_field_to_expr(&group.entries[0].fields[0])
             } else {
-                ast::Expr::MapLiteral(data_map)
+                ast::Expr::List(data_map.into_iter().flat_map(|(k, v)| vec![k, v]).collect())
             }
         } else {
-            ast::Expr::MapLiteral(data_map)
+            ast::Expr::List(data_map.into_iter().flat_map(|(k, v)| vec![k, v]).collect())
         };
 
         let ty = ast::Type::Custom(name.to_string());
@@ -308,11 +288,12 @@ fn data_entry_to_expr(entry: &DataEntry, group_schema_name: Option<&str>, schema
             }
             resolved
         };
-        return ast::Expr::StructInstance(schema_name.to_string(), named_fields);
+        let named_fields_expr = ast::Expr::Tuple(named_fields.into_iter().map(|(n, v)| ast::Expr::Tuple(vec![ast::Expr::Quoted(n.into()), v])).collect());
+        return ast::Expr::Call("StructInstance".to_string(), vec![ast::Expr::Identifier(schema_name.to_string()), named_fields_expr]);
     }
 
     // No schema — use ObjectLiteral
-    ast::Expr::ObjectLiteral(fields)
+    ast::Expr::List(fields.into_iter().flat_map(|(n, v)| vec![ast::Expr::Quoted(n.into()), v]).collect())
 }
 
 /// Convert a DataField to an Expr
@@ -334,13 +315,12 @@ fn data_value_to_expr(dv: &DataValue) -> ast::Expr {
             ast::Expr::List(exprs)
         }
         DataValue::Map(entries) => {
-            let pairs: Vec<(ast::Expr, ast::Expr)> = entries
-                .iter()
-                .map(|(k, v)| {
-                    (ast::Expr::Quoted(k.clone().into()), data_value_to_expr(v))
-                })
-                .collect();
-            ast::Expr::MapLiteral(pairs)
+            let mut flat = Vec::new();
+            for (k, v) in entries {
+                flat.push(ast::Expr::Quoted(k.clone().into()));
+                flat.push(data_value_to_expr(v));
+            }
+            ast::Expr::List(flat)
         }
     }
 }
@@ -387,24 +367,27 @@ mod tests {
                 assert_eq!(c.name, "data");
                 // Value should be a MapLiteral: { "Item": { "rusty_key": ... } }
                 match &c.expr {
-                    ast::Expr::MapLiteral(pairs) => {
-                        assert_eq!(pairs.len(), 1);
-                        let (key, val) = &pairs[0];
+                    ast::Expr::List(pairs) => {
+                        assert_eq!(pairs.len(), 2, "Expected [key, val] flat pairs");
+                        let key = &pairs[0];
+                        let val = &pairs[1];
                         match key {
                             ast::Expr::Quoted(s) => assert_eq!(s.as_slice(), b"Item"),
                             _ => panic!("Expected string key"),
                         }
                         match val {
-                            ast::Expr::MapLiteral(entries) => {
-                                assert_eq!(entries.len(), 1);
-                                let (ek, ev) = &entries[0];
+                            ast::Expr::List(entries) => {
+                                assert_eq!(entries.len(), 2, "Expected [entry_key, entry_val] flat pairs");
+                                let ek = &entries[0];
+                                let ev = &entries[1];
                                 match ek {
                                     ast::Expr::Quoted(s) => assert_eq!(s.as_slice(), b"rusty_key"),
                                     _ => panic!("Expected string entry key"),
                                 }
                                 match ev {
-                                    ast::Expr::StructInstance(name, _) => {
-                                        assert_eq!(name, "Item");
+                                    ast::Expr::Call(ref name_str, ref args) if name_str == "StructInstance" && args.len() == 2 => {
+                                        let name = &args[0];
+                                        assert!(matches!(name, ast::Expr::Identifier(n) if n == "Item"));
                                     }
                                     _ => panic!("Expected StructInstance"),
                                 }
@@ -455,7 +438,7 @@ mod tests {
         map.insert("a".into(), DataValue::Int(1));
         let dv = DataValue::Map(map);
         match data_value_to_expr(&dv) {
-            ast::Expr::MapLiteral(pairs) => assert_eq!(pairs.len(), 1),
+            ast::Expr::List(pairs) => assert_eq!(pairs.len(), 1),
             _ => panic!("expected map"),
         }
     }

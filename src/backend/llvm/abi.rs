@@ -1,3 +1,4 @@
+use std::fmt::Write;
 // ── LLVM ABI Marshaling ───────────────────────────────────────────────
 // 2026-07-12: Phase 2.7/4 — Marshaling between C calling convention
 // and Brief internal types (Bool zext/trunc, String ptr extract, etc.).

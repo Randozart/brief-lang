@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, CString};
 use libloading::{Library, Symbol};
-use crate::interpreter::{Value, RuntimeError};
+use crate::errors::RuntimeError;
+use crate::interpreter::{f64_to_bits, i64_to_bits, Value};
 
 /// Type of a parameter or return value in a frgn declaration
 #[derive(Debug, Clone, PartialEq)]
@@ -72,11 +73,11 @@ pub fn call_foreign_by_name(
         let val = if i < args.len() { &args[i] } else { &Value::Void };
         match param_type {
             FrgnType::Int => {
-                let n = match val { Value::Bits(b) => crate::interpreter::bits_to_i64(val).unwrap_or(0), _ => 0 };
+                let n = val.as_i64().unwrap_or(0);
                 c_ints.push(n);
             }
             FrgnType::Float => {
-                let f = match val { Value::Bits(b) if b.len() >= 8 => crate::interpreter::bits_to_f64(val).unwrap_or(0.0), _ => 0.0 };
+                let f = val.as_f64().unwrap_or(0.0);
                 c_doubles.push(f);
             }
             FrgnType::Bool => {
@@ -102,7 +103,7 @@ pub fn call_foreign_by_name(
         // 0 args, void return
         (0, FrgnType::Void) => {
             let f: Symbol<unsafe extern "C" fn()> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
             unsafe { f() };
             Ok(Value::Void)
         }
@@ -110,10 +111,10 @@ pub fn call_foreign_by_name(
         // 0 args, Int/Bool/Char return
         (0, FrgnType::Int | FrgnType::Bool | FrgnType::Char) => {
             let f: Symbol<unsafe extern "C" fn() -> i64> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
             let raw = unsafe { f() };
             Ok(match ret {
-                FrgnType::Int => Value::Bits(crate::interpreter::i64_to_bits(raw)),
+                FrgnType::Int => i64_to_bits(raw),
                 FrgnType::Bool => Value::Bits(vec![if raw != 0 { 1u8 } else { 0u8 }]),
                 FrgnType::Char => Value::Bits((raw as u32).to_le_bytes().to_vec()),
                 _ => unreachable!(),
@@ -123,14 +124,14 @@ pub fn call_foreign_by_name(
         // 0 args, Float return
         (0, FrgnType::Float) => {
             let f: Symbol<unsafe extern "C" fn() -> f64> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
-            Ok(Value::Bits(crate::interpreter::f64_to_bits(unsafe { f() })))
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
+            Ok(f64_to_bits(unsafe { f() }))
         }
 
         // 0 args, String return
         (0, FrgnType::String) => {
             let f: Symbol<unsafe extern "C" fn() -> *const libc::c_char> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
             let ptr = unsafe { f() };
             if ptr.is_null() {
                 Ok(Value::Bits(Vec::new()))
@@ -142,10 +143,10 @@ pub fn call_foreign_by_name(
         // 1 arg Int → Int/Bool/Char
         (1, FrgnType::Int | FrgnType::Bool | FrgnType::Char) if c_ints.len() == 1 => {
             let f: Symbol<unsafe extern "C" fn(i64) -> i64> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
             let raw = unsafe { f(c_ints[0]) };
             Ok(match ret {
-                FrgnType::Int => Value::Bits(crate::interpreter::i64_to_bits(raw)),
+                FrgnType::Int => i64_to_bits(raw),
                 FrgnType::Bool => Value::Bits(vec![if raw != 0 { 1u8 } else { 0u8 }]),
                 FrgnType::Char => Value::Bits((raw as u32).to_le_bytes().to_vec()),
                 _ => unreachable!(),
@@ -155,22 +156,22 @@ pub fn call_foreign_by_name(
         // 1 arg Float → Float
         (1, FrgnType::Float) if c_doubles.len() == 1 => {
             let f: Symbol<unsafe extern "C" fn(f64) -> f64> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
-            Ok(Value::Bits(crate::interpreter::f64_to_bits(unsafe { f(c_doubles[0]) })))
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
+            Ok(f64_to_bits(unsafe { f(c_doubles[0]) }))
         }
 
         // 1 arg String → Int (strlen etc)
         (1, FrgnType::Int) if c_strings.len() == 1 => {
             let f: Symbol<unsafe extern "C" fn(*const libc::c_char) -> i64> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
             let ptr = c_strings[0].as_ptr();
-            Ok(Value::Bits(crate::interpreter::i64_to_bits(unsafe { f(ptr) })))
+            Ok(i64_to_bits(unsafe { f(ptr) }))
         }
 
         // 1 arg Void
         (1, FrgnType::Void) if c_ints.len() == 1 => {
             let f: Symbol<unsafe extern "C" fn(i64)> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
             unsafe { f(c_ints[0]) };
             Ok(Value::Void)
         }
@@ -178,16 +179,16 @@ pub fn call_foreign_by_name(
         // 2 args (Int, Int) → Int/Bool
         (2, FrgnType::Int | FrgnType::Bool) if c_ints.len() >= 2 => {
             let f: Symbol<unsafe extern "C" fn(i64, i64) -> i64> = unsafe { lib.get(name_bytes) }
-                .map_err(|e| RuntimeError::TypeMismatch(format!("'{}' not found: {}", name, e)))?;
+                .map_err(|e| RuntimeError::HeapError(format!("'{}' not found: {}", name, e)))?;
             let raw = unsafe { f(c_ints[0], c_ints[1]) };
             Ok(match ret {
-                FrgnType::Int => Value::Bits(crate::interpreter::i64_to_bits(raw)),
+                FrgnType::Int => i64_to_bits(raw),
                 FrgnType::Bool => Value::Bits(vec![if raw != 0 { 1u8 } else { 0u8 }]),
                 _ => unreachable!(),
             })
         }
 
-        _ => Err(RuntimeError::TypeMismatch(
+        _ => Err(RuntimeError::HeapError(
             format!("Unsupported FFI signature for '{}' ({} args, {:?} ret)",
                 name, params.len(), ret)
         )),
@@ -215,13 +216,13 @@ impl FrgnRegistry {
 
     pub fn call(&mut self, name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
         let decl = self.declarations.get(name)
-            .ok_or_else(|| RuntimeError::TypeMismatch(
+            .ok_or_else(|| RuntimeError::HeapError(
                 format!("Unknown foreign function: '{}'. Is it declared with frgn?", name)
             ))?;
 
         if !self.libraries.contains_key(&decl.lib) {
             let lib = unsafe { Library::new(&decl.lib) }
-                .map_err(|e| RuntimeError::TypeMismatch(
+                .map_err(|e| RuntimeError::HeapError(
                     format!("Failed to load '{}' for '{}': {}", decl.lib, name, e)
                 ))?;
             self.libraries.insert(decl.lib.clone(), lib);
@@ -259,11 +260,11 @@ mod tests {
 
     #[test]
     fn test_wrap_ok_creates_result_enum() {
-        let result = wrap_ok(&FrgnType::Int, Value::Bits(crate::interpreter::i64_to_bits(42)));
+        let result = wrap_ok(&FrgnType::Int, i64_to_bits(42));
         match result {
             Value::Enum(_, variant, fields) => {
                 assert_eq!(variant, "Ok");
-                assert_eq!(fields.get("value"), Some(&Value::Bits(crate::interpreter::i64_to_bits(42))));
+                assert_eq!(fields.get("value"), Some(&i64_to_bits(42)));
             }
             _ => panic!("Expected Enum(Result, Ok, ...)"),
         }

@@ -5,7 +5,7 @@
 // uses `wasmtime` (feature-gated with "plugins").
 
 use super::{Plugin, PluginAction, PluginHook};
-use crate::ast::Program;
+use crate::ast::TopLevel;
 use crate::type_universe::TypeUniverse;
 use std::path::Path;
 
@@ -80,7 +80,7 @@ impl Plugin for ValidationPlugin {
     fn on_hook(
         &self,
         _hook: PluginHook,
-        _program: &mut Program,
+        _program: &mut Vec<TopLevel>,
         _universe: &TypeUniverse,
     ) -> PluginAction {
         PluginAction::Continue
@@ -164,7 +164,7 @@ mod tests {
 
     impl Plugin for AbortOnTypeCheck {
         fn name(&self) -> &str { "test:abort_on_typecheck" }
-        fn on_hook(&self, hook: PluginHook, _program: &mut Program, _universe: &TypeUniverse) -> PluginAction {
+        fn on_hook(&self, hook: PluginHook, _program: &mut Vec<TopLevel>, _universe: &TypeUniverse) -> PluginAction {
             if matches!(hook, PluginHook::AfterTypeCheck) {
                 PluginAction::Abort("type check failed (test)".into())
             } else {

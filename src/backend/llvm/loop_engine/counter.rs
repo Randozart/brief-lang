@@ -188,7 +188,7 @@ impl LlvmBackend {
     ///
     /// 2026-07-13: Extracted into a single function with max 2-level
     /// nesting. Loop setup, body, and latch are delegated to helpers.
-    pub(super) fn emit_countable_main(
+    pub(crate) fn emit_countable_main(
         &mut self,
         out: &mut String,
         txn_name: &str,
@@ -414,23 +414,4 @@ impl LlvmBackend {
         }
     }
 
-    /// Emit hoisted post-loop print statements.
-    /// These are deferred prints (e.g. `term! -> PrintInt#(result)`)
-    /// that execute after the loop exits.
-    fn emit_hoisted_post_loop_prints(
-        &mut self,
-        out: &mut String,
-        hoisted: &[Vec<Statement>],
-    ) {
-        for block in hoisted {
-            for stmt in block {
-                if let Statement::TermBang(Some(e)) = stmt {
-                    self.emit_expr(out, e, "  ");
-                }
-                if let Statement::Term(Some(e)) = stmt {
-                    self.emit_expr(out, e, "  ");
-                }
-            }
-        }
-    }
 }

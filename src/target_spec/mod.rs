@@ -299,7 +299,7 @@ pub struct EntryPointConfig {
 
 impl TargetSpec {
     /// Validate program against this spec's validation rules
-    pub fn validate_program(&self, _program: &crate::ast::Program) -> Result<(), Vec<String>> {
+    pub fn validate_program(&self, _program: &[crate::ast::TopLevel]) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
         
         // Check for blocked types in [codegen.validation]

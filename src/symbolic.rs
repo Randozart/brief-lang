@@ -29,8 +29,7 @@
 /// - Enumerates execution paths through guard blocks
 ///
 /// Coverage: ~90% of real Brief contracts
-use crate::ast::{Expr, Statement};
-use crate::features::literal::LiteralExpr;
+use crate::ast::{BinaryOpKind, Expr, Statement, UnaryOpKind};
 use std::collections::HashMap;
 
 /// Symbolic representation of a value
@@ -113,9 +112,8 @@ impl SymbolicState {
         if taken {
             self.path_constraints.push(condition.clone());
         } else {
-            // Guard not taken; add negation
             self.path_constraints
-                .push(Expr::Not(Box::new(condition.clone())));
+                .push(Expr::UnaryOp(UnaryOpKind::Not, Box::new(condition.clone())));
         }
     }
 
@@ -130,20 +128,10 @@ impl SymbolicState {
 pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
     match expr {
         // Literal values
-        Expr::Literal(lit) => match lit.as_ref() {
-            LiteralExpr::Integer(n) => SymbolicValue::Literal(*n, "int".to_string()),
-            LiteralExpr::Float(_) => SymbolicValue::Unknown,
-            LiteralExpr::Bool(b) => SymbolicValue::bool_literal(*b),
-            LiteralExpr::Char(c) => SymbolicValue::Literal(*c as i64, "char".to_string()),
-            LiteralExpr::String(_) => SymbolicValue::Unknown,
-            LiteralExpr::Term => SymbolicValue::Unknown,
-        },
         Expr::Decimal(n) => SymbolicValue::Literal(*n, "int".to_string()),
-        Expr::IntegerSuffixed(n, _) => SymbolicValue::Literal(*n, "int".to_string()),
-        Expr::Float(_) | Expr::Float64(_) => SymbolicValue::Unknown, // Float support via Unknown
+        Expr::Float(_) => SymbolicValue::Unknown,
         Expr::Bool(b) => SymbolicValue::bool_literal(*b),
-        Expr::Char(c) => SymbolicValue::Literal(*c as i64, "char".to_string()),  // NEW: Char as int
-        Expr::Quoted(_) => SymbolicValue::Unknown, // Strings not trackable at this level
+        Expr::Quoted(_) => SymbolicValue::Unknown,
 
         // Variable references
         Expr::Identifier(name) => {
@@ -154,14 +142,8 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             }
         }
 
-        // Prior state reference
-        Expr::PriorState(name) => SymbolicValue::Previous(name.clone()),
-
-        // Owned references (assignments)
-        expr @ Expr::AddrOf(_) => SymbolicValue::Previous(expr.as_var_name().unwrap().to_string()),
-
         // Binary operations
-        Expr::Add(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Add, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
 
@@ -172,7 +154,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             }
         }
 
-        Expr::Sub(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Sub, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
 
@@ -183,7 +165,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             }
         }
 
-        Expr::Mul(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Mul, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
 
@@ -194,7 +176,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             }
         }
 
-        Expr::Div(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Div, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
 
@@ -205,7 +187,7 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             }
         }
 
-        Expr::Mod(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Mod, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
 
@@ -216,72 +198,78 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
             }
         }
 
-        Expr::BitAnd(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::BitAnd, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             SymbolicValue::Binary("&".to_string(), Box::new(left_sym), Box::new(right_sym))
         }
 
-        Expr::BitOr(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::BitOr, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             SymbolicValue::Binary("|".to_string(), Box::new(left_sym), Box::new(right_sym))
         }
 
-        Expr::BitXor(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::BitXor, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             SymbolicValue::Binary("^".to_string(), Box::new(left_sym), Box::new(right_sym))
         }
-        Expr::Shl(left, right) => {
+
+        Expr::BinaryOp(BinaryOpKind::Shl, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             SymbolicValue::Binary("<<".to_string(), Box::new(left_sym), Box::new(right_sym))
         }
-        Expr::Shr(left, right) => {
+
+        Expr::BinaryOp(BinaryOpKind::Shr, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             SymbolicValue::Binary(">>".to_string(), Box::new(left_sym), Box::new(right_sym))
         }
 
+        Expr::BinaryOp(BinaryOpKind::Concat, left, right) => {
+            let left_sym = eval_symbolic(left, state);
+            let right_sym = eval_symbolic(right, state);
+            SymbolicValue::Binary("++".to_string(), Box::new(left_sym), Box::new(right_sym))
+        }
+
         // Function calls - can't track
-        Expr::Call(_, _) | Expr::CellCall(_, _) => SymbolicValue::Unknown,
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { .. } => SymbolicValue::Unknown,
+        Expr::Call(_, _) => SymbolicValue::Unknown,
 
-        // Other complex expressions
-        Expr::Neg(_) | Expr::Not(_) | Expr::BitNot(_) => SymbolicValue::Unknown,
+        // Unary operations
+        Expr::UnaryOp(UnaryOpKind::Neg, _)
+        | Expr::UnaryOp(UnaryOpKind::Not, _)
+        | Expr::UnaryOp(UnaryOpKind::BitNot, _) => SymbolicValue::Unknown,
+
+        // Compound and complex expressions
         Expr::List(_)
-        | Expr::ListIndex(_, _)
-        | Expr::Projection { .. }
+        | Expr::Index(_, _)
         | Expr::Field(_, _)
-        | Expr::StructInstance(_, _) => SymbolicValue::Unknown,
-        Expr::ObjectLiteral(_) => SymbolicValue::Unknown,
+        | Expr::Tuple(_)
+        | Expr::If(_, _, _)
+        | Expr::Match(_, _)
+        | Expr::Block(_)
+        | Expr::Lambda(_, _) => SymbolicValue::Unknown,
 
-        // Comparison operators don't produce symbolic values (they're boolean expressions)
-        Expr::Eq(_, _)
-        | Expr::Ne(_, _)
-        | Expr::Lt(_, _)
-        | Expr::Le(_, _)
-        | Expr::Gt(_, _)
-        | Expr::Ge(_, _)
-        | Expr::And(_, _)
-        | Expr::Or(_, _) => SymbolicValue::Unknown,
-        Expr::PatternMatch { value, .. } => {
-            let _ = eval_symbolic(value, state);
-            SymbolicValue::Unknown
-        }
-        Expr::IsType(_, _) | Expr::FromCheck(_, _) | Expr::Like(_, _)
-        | Expr::Term | Expr::Slice { .. } | Expr::MultiSlice { .. } | Expr::Block(_, _) | Expr::TupleDestructure(_, _) | Expr::Tuple(_) | Expr::Concat(_, _) | Expr::Cast(_, _) | Expr::Match { .. } | Expr::BinaryOp(_) | Expr::UnaryOp(_) | Expr::ProjectionExpr(_) | Expr::CallExpr(_) | Expr::ListLiteralExpr(_) | Expr::MapLiteralExpr(_) | Expr::SetLiteralExpr(_) | Expr::SliceExpr(_) | Expr::MultiSliceExpr(_) | Expr::FieldAccessExpr(_) | Expr::StructInstanceExpr(_) | Expr::ObjectLiteralExpr(_) | Expr::TupleExpr(_) | Expr::TupleDestructureExpr(_) | Expr::EllipsisExpr(_) | Expr::ArrowMutExpr(_) | Expr::ArrowDiscardExpr(_) | Expr::ArrowTransferExpr(_) | Expr::PatternMatchExpr(_) | Expr::MatchExpr(_) | Expr::BlockExpr(_) | Expr::SigCallExpr(_) | Expr::SubtypeProjectionExpr(_) | Expr::DbvlTableExpr(_) | Expr::TypeRef(_) | Expr::RegexLiteral(_)
-        | Expr::TemplateCall { .. } | Expr::MacroCall { .. } | Expr::Interpolate(_) | Expr::InterpolateExpr(_) | Expr::QuoteBlock { .. } | Expr::Within { .. } => SymbolicValue::Unknown,
-        Expr::ArrowMut { .. } | Expr::ArrowDiscard { .. } | Expr::ArrowTransfer { .. } | Expr::MapLiteral(_) | Expr::SetLiteral(_) | Expr::SigCall { .. } | Expr::SubtypeProjection { .. } | Expr::DbvlTable { .. } => SymbolicValue::Unknown,
-            Expr::Ellipsis => SymbolicValue::Unknown,
-            Expr::SharedMem(_) => SymbolicValue::Unknown,
-            // Pipe chains — desugared before this pass
-            Expr::PipeChain(_) => unreachable!("PipeChain should have been desugared"),
-        Expr::AddrOf(_) | Expr::Deref(_) => SymbolicValue::Unknown,
-        // 2026-07-11: Phase 5 — deferred literal cannot be symbolically evaluated
-        Expr::DeferredLiteral { .. } => SymbolicValue::Unknown,
-        }
+        // Comparison operators don't produce symbolic values (boolean expressions)
+        Expr::BinaryOp(BinaryOpKind::Eq, _, _)
+        | Expr::BinaryOp(BinaryOpKind::Neq, _, _)
+        | Expr::BinaryOp(BinaryOpKind::Lt, _, _)
+        | Expr::BinaryOp(BinaryOpKind::Le, _, _)
+        | Expr::BinaryOp(BinaryOpKind::Gt, _, _)
+        | Expr::BinaryOp(BinaryOpKind::Ge, _, _)
+        | Expr::BinaryOp(BinaryOpKind::And, _, _)
+        | Expr::BinaryOp(BinaryOpKind::Or, _, _) => SymbolicValue::Unknown,
+
+        // Type-level operations
+        Expr::Cast(_, _) | Expr::IsType(_, _) | Expr::Within(_, _) => SymbolicValue::Unknown,
+
+        // Derivation and metadata
+        Expr::DerivationBlock(_)
+        | Expr::PropertyGet(_)
+        | Expr::FormattingAnnotation(_) => SymbolicValue::Unknown,
+    }
 }
 
 /// Try to simplify a binary operation on symbolic values
@@ -319,67 +307,56 @@ fn simplify_binary(op: &str, left: &SymbolicValue, right: &SymbolicValue) -> Opt
 /// Check if a postcondition is satisfied given symbolic state
 pub fn satisfies_postcondition(post: &Expr, state: &SymbolicState) -> bool {
     match post {
-        // Equality check
-        Expr::Eq(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Eq, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             symbolic_equals(&left_sym, &right_sym)
         }
 
-        // Inequality
-        Expr::Ne(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Neq, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             !symbolic_equals(&left_sym, &right_sym)
         }
 
-        // Less than (with basic numeric reasoning)
-        Expr::Lt(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Lt, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             symbolic_less_than(&left_sym, &right_sym)
         }
 
-        // Less than or equal
-        Expr::Le(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Le, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             symbolic_less_than(&left_sym, &right_sym) || symbolic_equals(&left_sym, &right_sym)
         }
 
-        // Greater than
-        Expr::Gt(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Gt, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             symbolic_less_than(&right_sym, &left_sym)
         }
 
-        // Greater than or equal
-        Expr::Ge(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Ge, left, right) => {
             let left_sym = eval_symbolic(left, state);
             let right_sym = eval_symbolic(right, state);
             symbolic_less_than(&right_sym, &left_sym) || symbolic_equals(&left_sym, &right_sym)
         }
 
-        // Conjunction (AND)
-        Expr::And(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::And, left, right) => {
             satisfies_postcondition(left, state) && satisfies_postcondition(right, state)
         }
 
-        // Disjunction (OR)
-        Expr::Or(left, right) => {
+        Expr::BinaryOp(BinaryOpKind::Or, left, right) => {
             satisfies_postcondition(left, state) || satisfies_postcondition(right, state)
         }
 
-        // Boolean literal
         Expr::Bool(b) => *b,
 
-        // Negation
-        Expr::Not(expr) => !satisfies_postcondition(expr, state),
+        Expr::UnaryOp(UnaryOpKind::Not, expr) => !satisfies_postcondition(expr, state),
 
-        Expr::IsType(_, _) | Expr::FromCheck(_, _) | Expr::Like(_, _) => false,
+        Expr::IsType(_, _) => false,
 
-        // Unknown expressions - conservative (fail)
         _ => false,
     }
 }
@@ -427,11 +404,7 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
 
         for mut state in paths {
             match stmt {
-                Statement::Guarded {
-                    condition,
-                    statements,
-                    ..
-                } => {
+                Statement::Guarded(condition, statements) => {
                     // Path 1: Guard taken - execute the statements
                     let mut true_state = state.clone();
                     true_state.add_constraint(condition, true);
@@ -448,8 +421,7 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
                     new_paths.push(false_state);
                 }
 
-                Statement::Term { .. } | Statement::TermBang { .. } | Statement::Escape(_) => {
-                    // Termination: path ends here
+                Statement::Term(..) | Statement::TermBang(..) | Statement::Escape(_) | Statement::Return(..) => {
                     new_paths.push(state);
                 }
 
@@ -470,12 +442,7 @@ pub fn enumerate_paths(body: &[Statement]) -> Vec<SymbolicState> {
 /// Execute a single statement on a symbolic state
 fn execute_statement(stmt: &Statement, state: &mut SymbolicState) {
     match stmt {
-        Statement::Assignment {
-            lhs,
-            expr,
-            timeout: _,
-            modifiers: _,
-        } => {
+        Statement::Assign(lhs, expr) => {
             if let Expr::Identifier(name) = lhs {
                 state.assign(name, expr);
             }
@@ -487,9 +454,7 @@ fn execute_statement(stmt: &Statement, state: &mut SymbolicState) {
             }
         }
 
-        _ => {
-            // Other statements don't affect symbolic state
-        }
+        _ => {}
     }
 }
 
@@ -570,7 +535,8 @@ mod tests {
         let mut state = SymbolicState::empty();
         state.assign("x", &Expr::Decimal(5));
 
-        let postcond = Expr::Eq(
+        let postcond = Expr::BinaryOp(
+            BinaryOpKind::Eq,
             Box::new(Expr::Identifier("x".to_string())),
             Box::new(Expr::Decimal(5)),
         );
@@ -583,7 +549,8 @@ mod tests {
         let mut state = SymbolicState::empty();
         state.assign("x", &Expr::Decimal(5));
 
-        let postcond = Expr::Eq(
+        let postcond = Expr::BinaryOp(
+            BinaryOpKind::Eq,
             Box::new(Expr::Identifier("x".to_string())),
             Box::new(Expr::Decimal(3)),
         );
@@ -597,12 +564,15 @@ mod tests {
         state.assign("x", &Expr::Decimal(5));
         state.assign("y", &Expr::Decimal(10));
 
-        let postcond = Expr::And(
-            Box::new(Expr::Eq(
+        let postcond = Expr::BinaryOp(
+            BinaryOpKind::And,
+            Box::new(Expr::BinaryOp(
+                BinaryOpKind::Eq,
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Decimal(5)),
             )),
-            Box::new(Expr::Eq(
+            Box::new(Expr::BinaryOp(
+                BinaryOpKind::Eq,
                 Box::new(Expr::Identifier("y".to_string())),
                 Box::new(Expr::Decimal(10)),
             )),
@@ -616,12 +586,15 @@ mod tests {
         let mut state = SymbolicState::empty();
         state.assign("x", &Expr::Decimal(5));
 
-        let postcond = Expr::Or(
-            Box::new(Expr::Eq(
+        let postcond = Expr::BinaryOp(
+            BinaryOpKind::Or,
+            Box::new(Expr::BinaryOp(
+                BinaryOpKind::Eq,
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Decimal(5)),
             )),
-            Box::new(Expr::Eq(
+            Box::new(Expr::BinaryOp(
+                BinaryOpKind::Eq,
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Decimal(3)),
             )),
@@ -634,12 +607,11 @@ mod tests {
 #[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
-    use crate::features::literal::LiteralExpr;
 
     #[kani::proof]
     fn verify_eval_symbolic_literal_integer() {
         let state = SymbolicState::empty();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let expr = Expr::Decimal(42);
         let result = eval_symbolic(&expr, &state);
         assert!(matches!(result, SymbolicValue::Literal(42, _)));
     }
@@ -647,7 +619,7 @@ mod kani_full_tests {
     #[kani::proof]
     fn verify_eval_symbolic_literal_bool_true() {
         let state = SymbolicState::empty();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let expr = Expr::Bool(true);
         let result = eval_symbolic(&expr, &state);
         assert!(result.is_definitely_true());
     }
@@ -655,31 +627,15 @@ mod kani_full_tests {
     #[kani::proof]
     fn verify_eval_symbolic_literal_bool_false() {
         let state = SymbolicState::empty();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(false)));
+        let expr = Expr::Bool(false);
         let result = eval_symbolic(&expr, &state);
         assert!(result.is_definitely_false());
     }
 
     #[kani::proof]
-    fn verify_eval_symbolic_literal_char() {
-        let state = SymbolicState::empty();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
-        let result = eval_symbolic(&expr, &state);
-        assert!(matches!(result, SymbolicValue::Literal(65, _)));
-    }
-
-    #[kani::proof]
-    fn verify_eval_symbolic_literal_term_is_unknown() {
-        let state = SymbolicState::empty();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
-        let result = eval_symbolic(&expr, &state);
-        assert!(matches!(result, SymbolicValue::Unknown));
-    }
-
-    #[kani::proof]
     fn verify_eval_symbolic_literal_float_is_unknown() {
         let state = SymbolicState::empty();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Float(1.0)));
+        let expr = Expr::Float(1.0);
         let result = eval_symbolic(&expr, &state);
         assert!(matches!(result, SymbolicValue::Unknown));
     }
@@ -687,7 +643,7 @@ mod kani_full_tests {
     #[kani::proof]
     fn verify_eval_symbolic_literal_string_is_unknown() {
         let state = SymbolicState::empty();
-        let expr = Expr::Literal(Box::new(LiteralExpr::String("x".to_string())));
+        let expr = Expr::Quoted("x".into());
         let result = eval_symbolic(&expr, &state);
         assert!(matches!(result, SymbolicValue::Unknown));
     }

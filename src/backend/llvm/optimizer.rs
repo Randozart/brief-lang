@@ -31,7 +31,8 @@
 //
 // Zero behavioral changes — pure code reorganization.
 
-use crate::ast::{DispatchMode, Expr, Program, Transaction};
+use crate::ast::{BinaryOpKind, Expr, TopLevel, Transaction};
+use crate::backend::llvm::DispatchMode;
 use crate::backend::AnalysisResults;
 use std::collections::{HashMap, HashSet};
 
@@ -52,7 +53,7 @@ impl LlvmBackend {
     /// self.is_lightweight_async, self.async_txn_names.
     pub fn select_optimization_strategy(
         &mut self,
-        program: &Program,
+        program: &[TopLevel],
         analysis: &AnalysisResults,
         txns: &[(String, &Transaction)],
     ) -> OptimizationStrategy {
@@ -78,64 +79,60 @@ impl LlvmBackend {
     ///   The cross-read-write check only runs when preconditions share
     ///   identifiers — if A and B read different fields, there is no
     ///   cross-path regardless of writes.
-    fn select_dispatch_mode(program: &Program, txns: &[(String, &Transaction)]) -> DispatchMode {
-        if program.dispatch_mode == DispatchMode::Sequential {
-            let reactive: Vec<&Transaction> = txns
-                .iter()
-                .filter(|(_, t)| t.is_reactive)
-                .map(|(_, t)| *t)
-                .collect();
-            let mut cf = true;
-            for i in 0..reactive.len() {
-                for j in (i + 1)..reactive.len() {
-                    let a = reactive[i];
-                    let b = reactive[j];
-                    let a_writes: HashSet<String> =
-                        crate::backend::collect_assigned_identifiers(&a.body)
-                            .into_iter()
-                            .collect();
-                    let b_writes: HashSet<String> =
-                        crate::backend::collect_assigned_identifiers(&b.body)
-                            .into_iter()
-                            .collect();
-                    let a_reads = crate::backend::collect_read_identifiers(&a.body);
-                    let b_reads = crate::backend::collect_read_identifiers(&b.body);
-                    if !a_writes.is_disjoint(&b_writes) {
+    fn select_dispatch_mode(program: &[TopLevel], txns: &[(String, &Transaction)]) -> DispatchMode {
+        let reactive: Vec<&Transaction> = txns
+            .iter()
+            .filter(|(_, t)| t.is_reactive)
+            .map(|(_, t)| *t)
+            .collect();
+        let mut cf = true;
+        for i in 0..reactive.len() {
+            for j in (i + 1)..reactive.len() {
+                let a = reactive[i];
+                let b = reactive[j];
+                let a_writes: HashSet<String> =
+                    crate::backend::collect_assigned_identifiers(&a.body)
+                        .into_iter()
+                        .collect();
+                let b_writes: HashSet<String> =
+                    crate::backend::collect_assigned_identifiers(&b.body)
+                        .into_iter()
+                        .collect();
+                let a_reads = crate::backend::collect_read_identifiers(&a.body);
+                let b_reads = crate::backend::collect_read_identifiers(&b.body);
+                if !a_writes.is_disjoint(&b_writes) {
+                    cf = false;
+                    break;
+                }
+                let mut a_pre_ids = HashSet::new();
+                crate::backend::collect_expr_identifiers(
+                    &a.contract.pre_condition,
+                    &mut a_pre_ids,
+                );
+                let mut b_pre_ids = HashSet::new();
+                crate::backend::collect_expr_identifiers(
+                    &b.contract.pre_condition,
+                    &mut b_pre_ids,
+                );
+                if !a_pre_ids.is_disjoint(&b_pre_ids) {
+                    if !a_writes.is_disjoint(&b_reads) {
                         cf = false;
                         break;
                     }
-                    let mut a_pre_ids = HashSet::new();
-                    crate::backend::collect_expr_identifiers(
-                        &a.contract.pre_condition,
-                        &mut a_pre_ids,
-                    );
-                    let mut b_pre_ids = HashSet::new();
-                    crate::backend::collect_expr_identifiers(
-                        &b.contract.pre_condition,
-                        &mut b_pre_ids,
-                    );
-                    if !a_pre_ids.is_disjoint(&b_pre_ids) {
-                        if !a_writes.is_disjoint(&b_reads) {
-                            cf = false;
-                            break;
-                        }
-                        if !b_writes.is_disjoint(&a_reads) {
-                            cf = false;
-                            break;
-                        }
+                    if !b_writes.is_disjoint(&a_reads) {
+                        cf = false;
+                        break;
                     }
                 }
-                if !cf {
-                    break;
-                }
             }
-            if cf {
-                DispatchMode::Parallel
-            } else {
-                program.dispatch_mode
+            if !cf {
+                break;
             }
+        }
+        if cf {
+            DispatchMode::Parallel
         } else {
-            program.dispatch_mode
+            DispatchMode::Sequential
         }
     }
 
@@ -347,11 +344,11 @@ impl LlvmBackend {
 fn is_trigger_gated(pre: &Expr, trigger_names: &HashSet<&str>) -> bool {
     match pre {
         Expr::Identifier(name) => trigger_names.contains(name.as_str()),
-        Expr::Eq(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Eq, l, r) => {
             matches!(l.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
                 || matches!(r.as_ref(), Expr::Identifier(name) if trigger_names.contains(name.as_str()))
         }
-        Expr::And(l, r) => is_trigger_gated(l, trigger_names) || is_trigger_gated(r, trigger_names),
+        Expr::BinaryOp(BinaryOpKind::And, l, r) => is_trigger_gated(l.as_ref(), trigger_names) || is_trigger_gated(r.as_ref(), trigger_names),
         _ => false,
     }
 }
@@ -369,7 +366,7 @@ fn is_trigger_gated(pre: &Expr, trigger_names: &HashSet<&str>) -> bool {
 fn extract_trigger_keys(pre: &Expr, trigger_names: &HashSet<&str>) -> Option<Vec<i64>> {
     let mut keys = Vec::new();
     match pre {
-        Expr::Eq(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Eq, l, r) => {
             let (ident, val) = if let (Expr::Identifier(name), Expr::Decimal(n)) =
                 (l.as_ref(), r.as_ref())
             {
@@ -385,11 +382,11 @@ fn extract_trigger_keys(pre: &Expr, trigger_names: &HashSet<&str>) -> Option<Vec
                 return None;
             }
         }
-        Expr::Or(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Or, l, r) => {
             keys.extend(extract_trigger_keys(l, trigger_names)?);
             keys.extend(extract_trigger_keys(r, trigger_names)?);
         }
-        Expr::And(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::And, l, r) => {
             if let Some(k) = extract_trigger_keys(l, trigger_names) {
                 keys.extend(k);
             } else if let Some(k) = extract_trigger_keys(r, trigger_names) {

@@ -19,7 +19,7 @@ pub fn byte_size_of(v: &Value) -> i64 {
 /// Evaluate the Bytes projection: total byte size of the value.
 pub fn eval_bytes_projection(source_val: &Value) -> Result<Value, RuntimeError> {
     let n = byte_size_of(source_val);
-    Ok(Value::Bits(i64_to_bits(n)))
+    Ok(i64_to_bits(n))
 }
 
 /// Evaluate the Size projection: element count for collections, byte count for Bits.
@@ -32,12 +32,12 @@ pub fn eval_size_projection(source_val: &Value) -> Result<Value, RuntimeError> {
         Value::HashSet(s) => s.len() as i64,
         _ => return Err(RuntimeError::TypeMismatch("Size projection requires collection".into())),
     };
-    Ok(Value::Bits(i64_to_bits(n)))
+    Ok(i64_to_bits(n))
 }
 
 /// Evaluate the Ptr projection: return zero (no pointer semantics in interpreter).
 pub fn eval_ptr_projection(_source_val: &Value) -> Result<Value, RuntimeError> {
-    Ok(Value::Bits(i64_to_bits(0)))
+    Ok(i64_to_bits(0))
 }
 
 /// Evaluate the IsEmpty projection: check if collection is empty.
@@ -59,7 +59,7 @@ pub fn eval_width_projection(source_val: &Value) -> Result<Value, RuntimeError> 
         Value::Bits(b) if b.len() == 1 => 1,
         _ => 64,
     };
-    Ok(Value::Bits(i64_to_bits(w)))
+    Ok(i64_to_bits(w))
 }
 
 /// Evaluate the BitRange projection: extract a range of bits from an integer.
@@ -80,7 +80,7 @@ pub fn eval_bitrange_projection(source_val: &Value, br: &BitRange) -> Result<Val
         let mask = (1u64 << width) - 1;
         (shifted & mask) as i64
     };
-    Ok(Value::Bits(i64_to_bits(result)))
+    Ok(i64_to_bits(result))
 }
 
 /// Fast-path for well-known UserDefinedWithArg operator projections (Add, Sub, Eq, etc.).
@@ -110,9 +110,9 @@ pub fn eval_user_projection_fast_path(
 
 fn eval_int_op(l: i64, r: i64, name: &str) -> Result<Value, RuntimeError> {
     match name {
-        "Add" => Ok(Value::Bits(i64_to_bits(l + r))),
-        "Sub" => Ok(Value::Bits(i64_to_bits(l - r))),
-        "Mul" => Ok(Value::Bits(i64_to_bits(l * r))),
+        "Add" => Ok(i64_to_bits(l + r)),
+        "Sub" => Ok(i64_to_bits(l - r)),
+        "Mul" => Ok(i64_to_bits(l * r)),
         "Div" => eval_int_div(l, r),
         "Mod" => eval_int_mod(l, r),
         "Eq" => Ok(Value::Bits(vec![if l == r { 1u8 } else { 0u8 }])),
@@ -121,11 +121,11 @@ fn eval_int_op(l: i64, r: i64, name: &str) -> Result<Value, RuntimeError> {
         "Le" => Ok(Value::Bits(vec![if l <= r { 1u8 } else { 0u8 }])),
         "Gt" => Ok(Value::Bits(vec![if l > r { 1u8 } else { 0u8 }])),
         "Ge" => Ok(Value::Bits(vec![if l >= r { 1u8 } else { 0u8 }])),
-        "BitAnd" => Ok(Value::Bits(i64_to_bits(l & r))),
-        "BitOr" => Ok(Value::Bits(i64_to_bits(l | r))),
-        "BitXor" => Ok(Value::Bits(i64_to_bits(l ^ r))),
-        "Shl" => Ok(Value::Bits(i64_to_bits(l << r))),
-        "Shr" => Ok(Value::Bits(i64_to_bits(l >> r))),
+        "BitAnd" => Ok(i64_to_bits(l & r)),
+        "BitOr" => Ok(i64_to_bits(l | r)),
+        "BitXor" => Ok(i64_to_bits(l ^ r)),
+        "Shl" => Ok(i64_to_bits(l << r)),
+        "Shr" => Ok(i64_to_bits(l >> r)),
         "And" => Ok(Value::Bits(vec![if l != 0 && r != 0 { 1u8 } else { 0u8 }])),
         "Or" => Ok(Value::Bits(vec![if l != 0 || r != 0 { 1u8 } else { 0u8 }])),
         _ => Err(RuntimeError::UnsupportedProjection(format!("projection '{}' not applicable to Int", name))),
@@ -134,20 +134,20 @@ fn eval_int_op(l: i64, r: i64, name: &str) -> Result<Value, RuntimeError> {
 
 fn eval_int_div(l: i64, r: i64) -> Result<Value, RuntimeError> {
     if r == 0 { Err(RuntimeError::DivisionByZero) }
-    else { Ok(Value::Bits(i64_to_bits(l / r))) }
+    else { Ok(i64_to_bits(l / r)) }
 }
 
 fn eval_int_mod(l: i64, r: i64) -> Result<Value, RuntimeError> {
     if r == 0 { Err(RuntimeError::DivisionByZero) }
-    else { Ok(Value::Bits(i64_to_bits(l % r))) }
+    else { Ok(i64_to_bits(l % r)) }
 }
 
 fn eval_float_op(l: f64, r: f64, name: &str) -> Result<Value, RuntimeError> {
     match name {
-        "Add" => Ok(Value::Bits(f64_to_bits(l + r))),
-        "Sub" => Ok(Value::Bits(f64_to_bits(l - r))),
-        "Mul" => Ok(Value::Bits(f64_to_bits(l * r))),
-        "Div" => Ok(Value::Bits(f64_to_bits(l / r))),
+        "Add" => Ok(f64_to_bits(l + r)),
+        "Sub" => Ok(f64_to_bits(l - r)),
+        "Mul" => Ok(f64_to_bits(l * r)),
+        "Div" => Ok(f64_to_bits(l / r)),
         "Eq" => Ok(Value::Bits(vec![if (l - r).abs() < f64::EPSILON { 1u8 } else { 0u8 }])),
         "Ne" => Ok(Value::Bits(vec![if (l - r).abs() >= f64::EPSILON { 1u8 } else { 0u8 }])),
         "Lt" => Ok(Value::Bits(vec![if l < r { 1u8 } else { 0u8 }])),

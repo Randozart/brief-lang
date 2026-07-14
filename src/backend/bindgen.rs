@@ -65,7 +65,7 @@ fn emit_c_header(universe: &TypeUniverse, exports: &[ExportDecl]) -> String {
 
     // Struct definitions for all resolved types
     out.push_str("// ── Type Layouts ──\n");
-    for name in &universe.resolution_order {
+    for name in universe.types.keys() {
         let Some(rt) = universe.types.get(name) else { continue };
         emit_c_struct(&mut out, name, rt);
     }
@@ -91,35 +91,8 @@ fn emit_c_struct(out: &mut String, name: &str, rt: &ResolvedType) {
     out.push_str(&format!("typedef struct {{"));
     // If the type has a simple byte layout, emit a byte array
     // For types with user-defined projections, emit as opaque struct
-    if rt.projections.is_empty() {
-        out.push_str(&format!("\n    uint8_t _data[{}];", rt.bytes));
-    } else {
-        // Emit each projection as a named field if it maps to a fixed offset
-        for (proj_name, binding) in &rt.projections {
-            // Simple integer projections become fields
-            emit_c_projection_field(out, proj_name, binding, rt);
-        }
-        // Pad to full size
-        out.push_str(&format!("\n    uint8_t _pad[{}];", rt.bytes));
-    }
+    out.push_str(&format!("\n    uint8_t _data[{}];", rt.bytes));
     out.push_str(&format!("\n}} {};\n\n", name));
-}
-
-/// Emit a C field for a user-defined projection if it has a known bit range.
-fn emit_c_projection_field(out: &mut String, _name: &str, binding: &crate::ast::TypeBinding, _rt: &ResolvedType) {
-    // If the binding value is a Cast expression indicating a type, emit it
-    match binding.value.as_ref() {
-        crate::ast::Expr::Decimal(_) => {
-            // For simple integer defaults, skip (they're metadata, not fields)
-        }
-        _ => {
-            // For other projections, emit as comment documenting the field name
-            out.push_str(&format!("\n    // field: {}", binding.name));
-            if !binding.params.is_empty() {
-                out.push_str(&format!("({})", binding.params.join(", ")));
-            }
-        }
-    }
 }
 
 /// Emit a C function declaration for an exported Brief function.
@@ -211,7 +184,7 @@ fn emit_rust_bindings(universe: &TypeUniverse, exports: &[ExportDecl]) -> String
 
     // Struct definitions
     out.push_str("// ── Type Layouts ──\n");
-    for name in &universe.resolution_order {
+    for name in universe.types.keys() {
         let Some(rt) = universe.types.get(name) else { continue };
         emit_rust_struct(&mut out, name, rt);
     }
@@ -236,23 +209,7 @@ fn emit_rust_struct(out: &mut String, name: &str, rt: &ResolvedType) {
         return;
     }
     out.push_str(&format!("#[repr(C)]\npub struct {} {{\n", name));
-    if rt.projections.is_empty() {
-        out.push_str(&format!("    _data: [u8; {}],\n", rt.bytes));
-    } else {
-        for (proj_name, binding) in &rt.projections {
-            match binding.value.as_ref() {
-                crate::ast::Expr::Decimal(_) => {} // metadata skip
-                _ => {
-                    out.push_str(&format!("    // field: {}", proj_name));
-                    if !binding.params.is_empty() {
-                        out.push_str(&format!("({})", binding.params.join(", ")));
-                    }
-                    out.push_str("\n");
-                }
-            }
-        }
-        out.push_str(&format!("    _pad: [u8; {}],\n", rt.bytes));
-    }
+    out.push_str(&format!("    _data: [u8; {}],\n", rt.bytes));
     out.push_str("}\n\n");
 }
 
@@ -315,7 +272,7 @@ fn emit_python_stubs(universe: &TypeUniverse, exports: &[ExportDecl]) -> String 
 
     // Struct definitions
     out.push_str("# ── Type Layouts ──\n");
-    for name in &universe.resolution_order {
+    for name in universe.types.keys() {
         let Some(rt) = universe.types.get(name) else { continue };
         emit_py_class(&mut out, name, rt);
     }

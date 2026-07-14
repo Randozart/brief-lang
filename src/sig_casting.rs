@@ -24,16 +24,16 @@
 ///
 /// Allows creating sigs that project specific output types from multi-output functions
 /// Example: defn returns Bool | Error, sig projects only Bool
-use crate::ast::{Definition, OutputType, ResultType, Signature, Type};
+use crate::ast::{Definition, OutputType, Signature, Type};
 
 /// Verify that a sig's projection is achievable by the definition
 pub fn verify_sig_projection(sig: &Signature, defn: &Definition) -> Result<(), String> {
     // Extract what types the sig requests
-    let sig_types = match &sig.result_type {
-        ResultType::Projection(types) => types.clone(),
-        ResultType::TrueAssertion => vec![],
-        ResultType::VoidType => vec![],
-    };
+    let sig_types: Vec<Type> = sig.outputs.clone();
+        
+        
+        
+    ;
 
     // If defn has OutputType, check if all sig types are in defn's outputs
     if let Some(ref output_type) = defn.output_type {

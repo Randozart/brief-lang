@@ -275,7 +275,7 @@ fn arb_assignment(max_depth: usize) -> impl Strategy<Value = Statement> {
         arb_identifier().prop_map(|name| Expr::Identifier(name)),
         arb_expr(max_depth),
     ).prop_map(|(lhs, expr)| {
-        Statement::Assignment {
+        Statement::Assign {
             lhs,
             expr,
             timeout: None,
@@ -598,14 +598,14 @@ mod tests {
 
     fn measure_expr_depth(expr: &Expr) -> usize {
         match expr {
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
-            | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
-            | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r)
+            Expr::BinaryOp(BinaryOpKind::Add, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Sub, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Mul, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Div, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Mod, Box::new(l), Box::new(r))
+            | Expr::BinaryOp(BinaryOpKind::Eq, Box::new(l), Box::new(r)) | Expr::Ne(l, r) | Expr::BinaryOp(BinaryOpKind::Lt, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Le, Box::new(l), Box::new(r))
+            | Expr::BinaryOp(BinaryOpKind::Gt, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Ge, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::And, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Or, Box::new(l), Box::new(r))
             | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
             | Expr::Shl(l, r) | Expr::Shr(l, r) => {
                 1 + measure_expr_depth(l).max(measure_expr_depth(r))
             }
-            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => 1 + measure_expr_depth(e),
+            Expr::UnaryOp(UnaryOpKind::Not, Box::new(e)) | Expr::UnaryOp(UnaryOpKind::Neg, Box::new(e)) | Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(e)) => 1 + measure_expr_depth(e),
             Expr::Call(_, args) => {
                 1 + args.iter().map(measure_expr_depth).max().unwrap_or(0)
             }
@@ -625,10 +625,10 @@ mod tests {
             // Verify we get different statement types
             let is_valid = matches!(
                 &stmt,
-                Statement::Assignment { .. }
+                Statement::Assign(_, _)
                     | Statement::Let { .. }
-                    | Statement::Guarded { .. }
-                    | Statement::Term { .. } | Statement::TermBang { .. }
+                    | Statement::Guarded(_, _)
+                    | Statement::Term(None) | Statement::TermBang(None)
                     | Statement::Escape(_)
                     | Statement::Expression(_)
             );

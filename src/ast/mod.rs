@@ -11,7 +11,7 @@
 
 mod display;
 mod expr;
-mod top;
+pub mod top;
 mod types;
 
 pub use display::*;

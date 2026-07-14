@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, TopLevel};
+use crate::ast::{BinaryOpKind, Expr, TopLevel};
 use std::collections::HashMap;
 
 /// Parameter range analysis for transaction parameters.
@@ -41,9 +41,9 @@ impl ParameterRanges {
     }
 
     /// Analyze a program to infer parameter ranges from preconditions
-    pub fn analyze(&mut self, program: &Program) {
+    pub fn analyze(&mut self, program: &[TopLevel]) {
         self.ranges.clear();
-        for item in &program.items {
+        for item in program {
             if let TopLevel::Transaction(txn) = item {
                 let mut param_ranges = HashMap::new();
 
@@ -73,20 +73,20 @@ impl ParameterRanges {
         ranges: &mut HashMap<String, Range>,
     ) {
         match expr {
-            Expr::And(l, r) => {
+            Expr::BinaryOp(BinaryOpKind::And, l, r) => {
                 self.extract_bounds_from_expr(l, ranges);
                 self.extract_bounds_from_expr(r, ranges);
             }
-            Expr::Gt(l, r) => {
+            Expr::BinaryOp(BinaryOpKind::Gt, l, r) => {
                 self.apply_comparison(l, r, ranges, true, false);
             }
-            Expr::Ge(l, r) => {
+            Expr::BinaryOp(BinaryOpKind::Ge, l, r) => {
                 self.apply_comparison(l, r, ranges, true, true);
             }
-            Expr::Lt(l, r) => {
+            Expr::BinaryOp(BinaryOpKind::Lt, l, r) => {
                 self.apply_comparison(l, r, ranges, false, false);
             }
-            Expr::Le(l, r) => {
+            Expr::BinaryOp(BinaryOpKind::Le, l, r) => {
                 self.apply_comparison(l, r, ranges, false, true);
             }
             _ => {}
@@ -290,7 +290,7 @@ mod tests {
             items: vec![make_txn_with_precondition(
                 "f",
                 &["x"],
-                Expr::Gt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0))),
+                Expr::BinaryOp(BinaryOpKind::Gt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0))),
             )],
             comments: vec![],
             reactor_speed: None,
@@ -316,7 +316,7 @@ mod tests {
             items: vec![make_txn_with_precondition(
                 "f",
                 &["x"],
-                Expr::Le(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(10))),
+                Expr::BinaryOp(BinaryOpKind::Le, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(10))),
             )],
             comments: vec![],
             reactor_speed: None,
@@ -342,9 +342,9 @@ mod tests {
             items: vec![make_txn_with_precondition(
                 "f",
                 &["x"],
-                Expr::And(
-                    Box::new(Expr::Gt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0)))),
-                    Box::new(Expr::Lt(Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100)))),
+                Expr::BinaryOp(BinaryOpKind::And, 
+                    Box::new(Expr::BinaryOp(BinaryOpKind::Gt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(0)))),
+                    Box::new(Expr::BinaryOp(BinaryOpKind::Lt, Box::new(Expr::Identifier("x".to_string())), Box::new(Expr::Decimal(100)))),
                 ),
             )],
             comments: vec![],

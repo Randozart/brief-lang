@@ -5,8 +5,7 @@
 // %State chunks into scalars for alias analysis and vectorization.
 
 use crate::ast::{Expr, Statement, Type};
-use crate::backend::llvm::TypedRegister;
-use crate::backend::llvm::helpers::LlvmBackend;
+use crate::backend::llvm::{LlvmBackend, TypedRegister};
 use std::fmt::Write;
 
 pub(crate) const MAX_FIELDS_PER_ALLLOCA: usize = 15;
@@ -31,7 +30,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Assign(lhs, rhs) => {
             let val = backend.emit_expr(out, rhs, indent);
             if let Expr::Identifier(name) = lhs {
-                if let Some(reg) = backend.get_local(name) {
+                if let Some(reg) = backend.fun.let_bindings.get(name) {
                     writeln!(out, "{}store i64 {}, ptr {}", indent, val.name, reg).ok();
                 }
             }
@@ -59,12 +58,12 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let then_lbl = format!("guard.then{}", backend.fun.gen_reg());
             let end_lbl = format!("guard.end{}", backend.fun.gen_reg());
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_reg.name, then_lbl, end_lbl).ok();
-            writeln!(out, "{}:", indent, then_lbl).ok();
+            writeln!(out, "{}{}:", indent, then_lbl).ok();
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);
             }
             writeln!(out, "{}br label %{}", indent, end_lbl).ok();
-            writeln!(out, "{}:", indent, end_lbl).ok();
+            writeln!(out, "{}{}:", indent, end_lbl).ok();
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::If(cond, then, else_) => {
@@ -73,17 +72,17 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             let else_lbl = format!("if.else{}", backend.fun.gen_reg());
             let end_lbl = format!("if.end{}", backend.fun.gen_reg());
             writeln!(out, "{}br i1 {}, label %{}, label %{}", indent, cond_reg.name, then_lbl, else_lbl).ok();
-            writeln!(out, "{}:", indent, then_lbl).ok();
+            writeln!(out, "{}{}:", indent, then_lbl).ok();
             for stmt in then {
                 emit_statement(backend, out, stmt, indent);
             }
             writeln!(out, "{}br label %{}", indent, end_lbl).ok();
-            writeln!(out, "{}:", indent, else_lbl).ok();
+            writeln!(out, "{}{}:", indent, else_lbl).ok();
             for stmt in else_ {
                 emit_statement(backend, out, stmt, indent);
             }
             writeln!(out, "{}br label %{}", indent, end_lbl).ok();
-            writeln!(out, "{}:", indent, end_lbl).ok();
+            writeln!(out, "{}{}:", indent, end_lbl).ok();
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
         }
         Statement::Block(stmts) => {

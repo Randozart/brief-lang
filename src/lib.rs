@@ -52,6 +52,7 @@ pub mod linkage;
 pub mod lsp;
 pub mod manifest;
 pub mod memory_spec;
+pub mod parser;
 pub mod normalize_types;
 pub mod plugin;
 pub mod proof_engine;

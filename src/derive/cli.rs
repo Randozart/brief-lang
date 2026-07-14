@@ -31,7 +31,7 @@ pub fn handle_derive_command(file_path: &str) -> Result<(), String> {
 
 /// Lex a Brief source file into tokens.
 fn lex_source(source: &str) -> Result<Vec<crate::lexer::Token>, String> {
-    let lexer = crate::lexer::Token::lexer(source);
+    let lexer = { use logos::Logos; crate::lexer::Token::lexer(source) };
     let tokens: Result<Vec<_>, _> = lexer.collect();
     tokens.map_err(|_| "lex error".to_string())
 }

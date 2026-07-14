@@ -382,6 +382,7 @@ impl fmt::Display for TopLevel {
             TopLevel::Trigger(trg) => {
                 write!(f, "trg {} @ {}.{};", trg.name, trg.instance, trg.port)
             }
+            _ => write!(f, "<definition>"),
         }
     }
 }

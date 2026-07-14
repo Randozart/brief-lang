@@ -2,21 +2,9 @@ use std::collections::HashMap;
 use super::*;
 use crate::ast::*;
 
-fn empty_program() -> Program {
-        Program {
-            items: vec![],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        }
-    }
+fn empty_program() -> Vec<TopLevel> {
+    vec![]
+}
 
     #[test]
     fn test_llvm_generates_module() {
@@ -29,32 +17,13 @@ fn empty_program() -> Program {
     #[test]
     fn test_llvm_generates_state_type() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "counter".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: vec![],
-                    constraint: None,
                 }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("%State"));
         assert!(output.contains("i64"));
@@ -64,19 +33,11 @@ fn empty_program() -> Program {
     #[test]
     fn test_llvm_generates_transaction() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: vec![],
-                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "increment".to_string(),
@@ -88,44 +49,19 @@ fn empty_program() -> Program {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("count".to_string()),
-                            expr: Expr::Add(
-                                Box::new(Expr::Identifier("count".to_string())),
-                                Box::new(Expr::Decimal(1)),
-                            ),
-                            timeout: None,
-                            modifiers: vec![],
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Assign(Expr::Identifier("count".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1)) ), modifiers: vec![],,
+                        Statement::Term(None),
                     ],
                     is_async: false,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("@increment("));
     }
@@ -133,19 +69,11 @@ fn empty_program() -> Program {
     #[test]
     fn test_llvm_has_noalias() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: vec![],
-                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "increment".to_string(),
@@ -156,34 +84,17 @@ fn empty_program() -> Program {
                         span: None,
                         watchdog: None,
                     },
-                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+                    body: vec![Statement::Term(None)],
                     is_async: false,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("noalias"), "Transaction should have noalias");
         assert!(output.contains("nocapture"), "Transaction should have nocapture");
@@ -211,25 +122,14 @@ fn empty_program() -> Program {
                 watchdog: None,
             },
             body: vec![
-                Statement::Assignment {
-                    lhs: Expr::Identifier("count".to_string()),
-                    expr: Expr::Decimal(1),
-                    timeout: None,
-                    modifiers: vec![],
-                },
-                Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                Statement::Assign(Expr::Identifier("count".to_string(), Expr::Decimal(1), modifiers: vec![],,
+                Statement::Term(None),
             ],
             is_async: false,
             is_reactive: true,
-            reactor_speed: None,
             span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers,
-            variant_bodies: vec![],
             outputs: Vec::new(),
             output_type: None,
             derivation: None,
@@ -240,36 +140,17 @@ fn empty_program() -> Program {
         TopLevel::StateDecl(StateDecl {
             name: "count".to_string(),
             ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None,
-            bit_range: None,
-            is_override: false,
-            os_mode: false,
             span: None,
-            attrs: vec![],
-            constraint: None,
         })
     }
 
     #[test]
     fn test_inline_directive_emits_alwaysinline() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 make_txn("inline_txn", vec![Annotation { name: "inline".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory , diagnostic: false }]),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("alwaysinline"), "#inline should emit alwaysinline");
     }
@@ -277,22 +158,10 @@ fn empty_program() -> Program {
     #[test]
     fn test_speculative_inline_emits_inlinehint() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 make_txn("hinted_txn", vec![Annotation { name: "inline".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Speculative , diagnostic: false }]),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("inlinehint"), "#?inline should emit inlinehint");
     }
@@ -303,22 +172,10 @@ fn empty_program() -> Program {
         // (unless the txn is cycle-free, which it is for a single-txn program).
         // A cycle-free txn emits alwaysinline by default.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 make_txn("plain_txn", vec![]),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // Cycle-free reactive txn always gets alwaysinline by default.
         assert!(output.contains("alwaysinline"), "cycle-free txn should have alwaysinline by default");
@@ -336,27 +193,13 @@ fn empty_program() -> Program {
                 watchdog: None,
             },
             body: vec![
-                Statement::Assignment {
-                    lhs: Expr::Identifier("count".to_string()),
-                    expr: Expr::Add(
-                        Box::new(Expr::Identifier("count".to_string())),
-                        Box::new(Expr::Decimal(1)),
-                    ),
-                    timeout: None,
-                    modifiers: vec![],
-                },
+                Statement::Assign(Expr::Identifier("count".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1)) ), modifiers: vec![],,
             ],
             is_async: false,
             is_reactive: true,
-            reactor_speed: None,
             span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers,
-            variant_bodies: vec![],
             outputs: Vec::new(),
             output_type: None,
             derivation: None,
@@ -366,22 +209,10 @@ fn empty_program() -> Program {
     #[test]
     fn test_gpu_directive_collects_spirv_kernel() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 make_gpu_txn("gpu_test", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory , diagnostic: false }]),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let _output = backend.generate(&program);
         assert!(backend.spirv_kernels.len() >= 1,
             "gpu txn should produce at least one SPIR-V kernel");
@@ -390,22 +221,10 @@ fn empty_program() -> Program {
     #[test]
     fn test_gpu_directive_embeds_spirv_blob_in_output() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 make_gpu_txn("embed_test", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory , diagnostic: false }]),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("GPU Kernel Blobs") || backend.spirv_kernels.len() >= 1,
             "gpu txn output should contain SPIR-V blob section");
@@ -414,22 +233,10 @@ fn empty_program() -> Program {
     #[test]
     fn test_gpu_offload_flag_collects_kernels() {
         let mut backend = LlvmBackend::new().with_gpu_offload(true);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 make_gpu_txn("offload_test", vec![]),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let _output = backend.generate(&program);
         assert!(backend.spirv_kernels.len() >= 1,
             "--gpu-offload should collect kernels for all txns");
@@ -438,8 +245,7 @@ fn empty_program() -> Program {
     #[test]
     fn test_gpu_intrinsic_get_global_id_cpu() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 TopLevel::Transaction(Transaction {
                     name: "gtid_cpu".to_string(),
@@ -451,43 +257,18 @@ fn empty_program() -> Program {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("count".to_string()),
-                            expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                                intrinsic: Intrinsic::GetGlobalId,
-                                args: vec![Expr::Decimal(0)],
-                            },
-                            timeout: None,
-                            modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("count".to_string(), Expr::Call("".to_string(), vec![]), modifiers: vec![],,
                     ],
                     is_async: false,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: Vec::new(),
                     output_type: None,
                     derivation: None,
                 }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @__get_global_id"),
             "CPU IR should call __get_global_id for get_global_id# intrinsic");
@@ -496,8 +277,7 @@ fn empty_program() -> Program {
     #[test]
     fn test_gpu_intrinsic_barrier_cpu() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 TopLevel::Transaction(Transaction {
                     name: "bar_cpu".to_string(),
@@ -509,38 +289,17 @@ fn empty_program() -> Program {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                            intrinsic: Intrinsic::SubGroupBarrier,
-                            args: vec![],
-                        }),
-                    ],
+                        Statement::Expression( Expr::Call("".to_string(), vec![]), ],
                     is_async: false,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: Vec::new(),
                     output_type: None,
                     derivation: None,
                 }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call void @__barrier__"),
             "CPU IR should call __barrier__ for barrier# intrinsic");
@@ -555,22 +314,10 @@ fn empty_program() -> Program {
         // A GPU txn with a simple integer add should produce SPIR-V IR
         // with the correct kernel signature and body.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 make_gpu_txn("e2e_add", vec![Annotation { name: "gpu".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Advisory , diagnostic: false }]),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let _output = backend.generate(&program);
         assert!(backend.spirv_kernels.len() >= 1,
             "e2e: GPU txn should produce at least one SPIR-V kernel");
@@ -583,23 +330,11 @@ fn empty_program() -> Program {
     fn test_gpu_e2e_invocation_count() {
         // When --gpu-offload is set, all eligible txns produce kernels
         let mut backend = LlvmBackend::new().with_gpu_offload(true);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 state_count(),
                 make_gpu_txn("k1", vec![]),
                 make_gpu_txn("k2", vec![]),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let _output = backend.generate(&program);
         assert!(backend.spirv_kernels.len() == 2,
             "e2e: two txns with --gpu-offload should produce 2 kernels");
@@ -608,32 +343,21 @@ fn empty_program() -> Program {
     #[test]
     fn test_llvm_event_model_lowering() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Trigger(TriggerDeclaration {
                     name: "io_pending".to_string(),
                     ty: Type::bool_(),
-                    address: LinkRef::Linked("__io_pending".to_string()),
-                    bit_range: None,
-                    stages: vec![],
+                    address: LinkRef::Linked("__io_pending".to_string(), stages: vec![],
                     condition: None,
                     is_wake: false,
                     is_const: false,
-                    annotations: vec![],
                     modifiers: vec![],
                     span: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "event_count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: vec![],
-                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "pump".to_string(),
@@ -644,18 +368,12 @@ fn empty_program() -> Program {
                         span: None,
                         watchdog: None,
                     },
-                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+                    body: vec![Statement::Term(None)],
                     is_async: false,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
@@ -669,34 +387,17 @@ fn empty_program() -> Program {
                         span: None,
                         watchdog: None,
                     },
-                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
+                    body: vec![Statement::Term(None)],
                     is_async: false,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
 
         // @ link trigger emits external global
@@ -732,28 +433,18 @@ fn empty_program() -> Program {
     #[test]
     fn test_unification_payload_discriminant() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Enum(EnumDefinition {
                     name: "Option".to_string(),
-                    type_params: vec![],
                     variants: vec![
-                        EnumVariant::Unit("None".to_string()),
-                        EnumVariant::Tuple("Some".to_string(), vec![Type::int()]),
+                        EnumVariant::Unit("None".to_string(), EnumVariant::Tuple("Some".to_string(), vec![Type::int()]),
                     ],
                     span: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: vec![],
-                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
@@ -771,35 +462,18 @@ fn empty_program() -> Program {
                             fields: vec![],
                             expr: Expr::Decimal(1),
                         },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
                     is_async: false,
                     is_reactive: false,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // None is the first variant → discriminant 0
         assert!(output.contains("i64 0, label"),
@@ -809,62 +483,35 @@ fn empty_program() -> Program {
     #[test]
     fn test_no_range_lower_bound_defaults_to_i64_min() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: vec![],
-                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
                     parameters: vec![],
                     contract: Contract {
-                        pre_condition: Expr::Lt(
-                            Box::new(Expr::Identifier("x".to_string())),
-                            Box::new(Expr::Decimal(100)),
-                        ),
+                        pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, 
+                            Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(100), ),
                         post_condition: Expr::Bool(true),
                         span: None,
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
                     is_async: false,
                     is_reactive: false,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // Lower bound should be i64::MIN = -9223372036854775808
         assert!(output.contains("-9223372036854775808"),
@@ -874,95 +521,44 @@ fn empty_program() -> Program {
     #[test]
     fn test_binop_no_nuw_nsw() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: vec![],
-                    constraint: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
                     name: "y".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: vec![],
-                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
                     parameters: vec![],
                     contract: Contract {
-                        pre_condition: Expr::And(
+                        pre_condition: Expr::BinaryOp(BinaryOpKind::And, 
                             Box::new(Expr::And(
-                                Box::new(                Expr::Ge(
-                                    Box::new(Expr::Identifier("x".to_string())),
-                                    Box::new(Expr::Decimal(0)),
-                                )),
-                                Box::new(Expr::Lt(
-                                    Box::new(Expr::Identifier("x".to_string())),
-                                    Box::new(Expr::Decimal(10)),
-                                )),
-                            )),
-                            Box::new(Expr::Lt(
-                                Box::new(Expr::Identifier("y".to_string())),
-                                Box::new(Expr::Decimal(10)),
-                            )),
-                        ),
+                                Box::new(                Expr::BinaryOp(BinaryOpKind::Ge, Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(0), ), Box::new(Expr::BinaryOp(BinaryOpKind::Lt, 
+                                    Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(10), ), ), Box::new(Expr::BinaryOp(BinaryOpKind::Lt, 
+                                Box::new(Expr::Identifier("y".to_string()), Box::new(Expr::Decimal(10), ), ),
                         post_condition: Expr::Bool(true),
                         span: None,
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".to_string()))),
-                            expr: Expr::Add(
-                                Box::new(Expr::Identifier("x".to_string())),
-                                Box::new(Expr::Identifier("y".to_string())),
-                            ),
-                            timeout: None,
-                            modifiers: vec![],
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Assign(Expr::AddrOf(Box::new(Expr::Identifier("x".to_string())), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Identifier("y".to_string())) ), modifiers: vec![],,
+                        Statement::Term(None),
                     ],
                     is_async: false,
                     is_reactive: false,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // Must NOT emit nuw nsw — we removed manual emission
         assert!(!output.contains("nuw nsw"),
@@ -971,19 +567,15 @@ fn empty_program() -> Program {
 
     // ── Phase 5: Wake trigger and blocking wait tests ────────────────
 
-    fn make_wake_trg_program(trg_name: &str, sym: &str, ty: Type, is_wake: bool) -> Program {
-        Program {
-            items: vec![
+    fn make_wake_trg_program(trg_name: &str, sym: &str, ty: Type, is_wake: bool) -> Vec<TopLevel> {
+        vec![
                 TopLevel::Trigger(TriggerDeclaration {
                     name: trg_name.to_string(),
                     ty,
-                    address: LinkRef::Linked(sym.to_string()),
-                    bit_range: None,
-                    stages: vec![],
+                    address: LinkRef::Linked(sym.to_string(), stages: vec![],
                     condition: None,
                     is_wake,
                     is_const: false,
-                    annotations: vec![],
                     modifiers: vec![],
                     span: None,
                 }),
@@ -991,41 +583,23 @@ fn empty_program() -> Program {
                     name: "t".to_string(),
                     parameters: vec![],
                     contract: Contract {
-                        pre_condition: Expr::Identifier(trg_name.to_string()),
-                        post_condition: Expr::Bool(true),
+                        pre_condition: Expr::Identifier(trg_name.to_string(), post_condition: Expr::Bool(true),
                         span: None,
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
                     is_async: false,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
-            ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        }
+             ]
     }
 
     #[test]
@@ -1056,13 +630,10 @@ fn empty_program() -> Program {
         p1.items.insert(1, TopLevel::Trigger(TriggerDeclaration {
             name: "stdin".to_string(),
             ty: Type::bool_(),
-            address: LinkRef::Linked("__stdin_ready".to_string()),
-            bit_range: None,
-            stages: vec![],
+            address: LinkRef::Linked("__stdin_ready".to_string(), stages: vec![],
             condition: None,
             is_wake: true,
             is_const: false,
-            annotations: vec![],
             modifiers: vec![],
             span: None,
         }));
@@ -1130,46 +701,29 @@ fn empty_program() -> Program {
     #[test]
     fn test_wake_non_link_trigger_no_metadata() {
         // MMIO triggers with #wake should not appear in metadata (parse-time error, but belt-and-suspenders)
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Trigger(TriggerDeclaration {
                     name: "mmio".to_string(),
                     ty: Type::bool_(),
                     address: LinkRef::Explicit(0x4000),
-                    bit_range: None,
                     stages: vec![],
                     condition: None,
                     is_wake: true,
                     is_const: false,
                     span: None,
-                    annotations: vec![],
-                    modifiers: vec![],
-                }),
+                    modifiers: vec![]),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
                     parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), span: None, watchdog: None },
-                    body: vec![Statement::Term { values: vec![], modifiers: vec![], swan_song: None }],
-                    is_async: false, is_reactive: true, reactor_speed: None, span: None,
-                    is_lambda: false, dependencies: vec![], modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    body: vec![Statement::Term(None)],
+                    is_async: false, is_reactive: true, reactor_speed: None, span: None, modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = LlvmBackend::new().generate(&program);
         // MMIO triggers with is_wake → metadata only includes LinkRef::Linked symbols, not Explicit
         assert!(!output.contains("@llvm.wake_triggers"),
@@ -1181,17 +735,11 @@ fn empty_program() -> Program {
     #[test]
     fn test_local_float_binding() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(),
                     ty: Type::float(),
-                    expr: Some(Expr::Float(1.5)),
-                    address: None, bit_range: None,
-                    is_override: false, os_mode: false,
-                    span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(Expr::Float(1.5), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
                     parameters: vec![],
@@ -1201,36 +749,17 @@ fn empty_program() -> Program {
                         span: None, watchdog: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("x".to_string()),
-                            expr: Expr::Float(2.0),
-                            timeout: None, modifiers: vec![],
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Assign(Expr::Identifier("x".to_string(), Expr::Float(2.0), Statement::Term(None),
                     ],
                     is_async: false, is_reactive: false,
                     reactor_speed: None, span: None,
-                    is_lambda: false, dependencies: vec![],
  modifiers: vec![],
-                    annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // 2026-06-17: Float literal emits bitcast i32 directly (native float).
         // When stored to a state field, the float is boxed to i64 via
@@ -1246,17 +775,11 @@ fn empty_program() -> Program {
         // emit_inline_init_stores stored i8* null for all Expr::Quoted(...),
         // causing SIGSEGV on first read of any string field.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(),
                     ty: Type::string(),
-                    expr: Some(Expr::Quoted("hello".into())),
-                    address: None, bit_range: None,
-                    is_override: false, os_mode: false,
-                    span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(Expr::Quoted("hello".into()), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
                     parameters: vec![],
@@ -1270,36 +793,18 @@ fn empty_program() -> Program {
                         Statement::Let {
                             name: "_".to_string(),
                             ty: None,
-                            expr: Some(Expr::Identifier("s".to_string())),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                            expr: Some(Expr::Identifier("s".to_string()), address_expr: None, modifiers: vec![],,
+                        Statement::Term(None),
                     ],
                     is_async: false, is_reactive: false,
                     reactor_speed: None, span: None,
-                    is_lambda: false, dependencies: vec![],
  modifiers: vec![],
-                    annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![],
                     outputs: Vec::new(),
                     output_type: None,
                     derivation: None,
                 }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // The string literal "hello" should be stored as a bitcast of @str.0 to ptr,
         // not as i8* null.
@@ -1313,18 +818,15 @@ fn empty_program() -> Program {
     fn test_const_trg_write_emits_error() {
         // Writing to a const trigger should emit an error comment
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Trigger(TriggerDeclaration {
                     name: "locked".to_string(),
                     ty: Type::bool_(),
                     address: LinkRef::Explicit(0x1000),
-                    bit_range: None,
                     stages: vec![],
                     condition: None,
                     is_wake: true,
                     is_const: true,
-                    annotations: vec![],
                     modifiers: vec![],
                     span: None,
                 }),
@@ -1337,37 +839,18 @@ fn empty_program() -> Program {
                         span: None, watchdog: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("locked".to_string()),
-                            expr: Expr::Bool(true),
-                            timeout: None,
-                            modifiers: vec![],
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Assign(Expr::Identifier("locked".to_string(), Expr::Bool(true), modifiers: vec![],,
+                        Statement::Term(None),
                     ],
                     is_async: false, is_reactive: false,
                     reactor_speed: None, span: None,
-                    is_lambda: false, dependencies: vec![],
  modifiers: vec![],
-                    annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![],
                     outputs: Vec::new(),
                     output_type: None,
                     derivation: None,
                 }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("cannot write to const trigger 'locked'"),
             "Assign to const trigger should emit error comment. Got:\n{}", &output[..output.len().min(2000)]);
@@ -1379,29 +862,12 @@ fn empty_program() -> Program {
         // not 0x400 (FD_CLOEXEC). Wrong constants cause timerfd/signalfd to fail.
         // Checked via the generated LLVM IR for a simple trigger program.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None,
-                    is_override: false, os_mode: false,
-                    span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    span: None),
             ],
-            comments: vec![],
-            reactor_speed: Some(60),
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // No assert here — constants are not directly visible in IR.
         // This test exists as a placeholder to catch accidental regressions.
@@ -1414,17 +880,11 @@ fn empty_program() -> Program {
     #[test]
     fn test_float_binary_add() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(),
                     ty: Type::float(),
-                    expr: Some(Expr::Float(1.0)),
-                    address: None, bit_range: None,
-                    is_override: false, os_mode: false,
-                    span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(Expr::Float(1.0), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
                     parameters: vec![],
@@ -1434,39 +894,17 @@ fn empty_program() -> Program {
                         span: None, watchdog: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("x".to_string()),
-                            expr: Expr::Add(
-                                Box::new(Expr::Identifier("x".to_string())),
-                                Box::new(Expr::Float(2.0)),
-                            ),
-                            timeout: None, modifiers: vec![],
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Assign(Expr::Identifier("x".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Float(2.0)) ), Statement::Term(None),
                     ],
                     is_async: false, is_reactive: false,
                     reactor_speed: None, span: None,
-                    is_lambda: false, dependencies: vec![],
  modifiers: vec![],
-                    annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("fadd fast float"),
             "Float binary add should emit fadd fast float");
@@ -1501,7 +939,7 @@ fn empty_program() -> Program {
         trigger: Option<(&str, Type)>,
         consts: &[(&str, i64)],
         states: &[(&str, i64)],
-    ) -> Program {
+    ) -> Vec<TopLevel> {
         let mut items: Vec<TopLevel> = Vec::new();
         for (name, val) in consts {
             items.push(TopLevel::Constant(Constant {
@@ -1509,30 +947,20 @@ fn empty_program() -> Program {
                 ty: Type::int(),
                 expr: Expr::Decimal(*val),
             }));
-        }
         for (name, val) in states {
             items.push(TopLevel::StateDecl(StateDecl {
                 name: name.to_string(),
                 ty: Type::int(),
-                expr: Some(Expr::Decimal(*val)),
-                address: None, bit_range: None, is_override: false,
-                os_mode: false, span: None, attrs: vec![],
-                constraint: None,
-            }));
-        }
+                expr: Some(Expr::Decimal(*val), span: None),);
         if let Some((trg_name, trg_ty)) = trigger {
             items.push(TopLevel::Trigger(TriggerDeclaration {
                 name: trg_name.to_string(), ty: trg_ty,
-                address: LinkRef::Explicit(0), bit_range: None,
-                annotations: vec![],
+                address: LinkRef::Explicit(0),
                 stages: vec![], condition: None, is_wake: true, is_const: false, modifiers: vec![], span: None,
             }));
-        }
         for (txn_name, body) in txns {
-            let pre = Expr::Lt(
-                Box::new(Expr::Identifier("count".to_string())),
-                Box::new(Expr::Identifier("total".to_string())),
-            );
+            let pre = Expr::BinaryOp(BinaryOpKind::Lt, 
+                Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Identifier("total".to_string()), );
             items.push(TopLevel::Transaction(Transaction {
                 name: txn_name.to_string(), parameters: vec![],
                 contract: Contract {
@@ -1541,23 +969,16 @@ fn empty_program() -> Program {
                     span: None, watchdog: None,
                 },
                 body, is_async: false, is_reactive: true, reactor_speed: None,
-                span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                annotations: vec![],
+                span: None,
+ modifiers: vec![],
                 metadata: HashMap::new(),
                           outputs: Vec::new(),
              output_type: None,
             derivation: None,
          }));
-        }
         Program {
-            items, comments: vec![], reactor_speed: None, attrs: Vec::new(),
+            items, comments: vec![], reactor_speed: None,
             ffi: None, strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
         }
     }
 
@@ -1568,11 +989,9 @@ fn empty_program() -> Program {
     fn test_report_shows_ranking() {
         let program = make_chain_program(
             vec![("t1", vec![
-                Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
-                Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                Statement::Assign(ident_s("x"), ident_s("sensor"), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
             ])],
-            Some(("sensor", Type::bool_())),
-            &[("total", 100)], &[("count", 0), ("x", 0)],
+            Some(("sensor", Type::bool_()), &[("total", 100)], &[("count", 0), ("x", 0)],
         );
         let mut backend = LlvmBackend::new()
             .with_optimize_budget(256).with_optimize_report(true);
@@ -1587,11 +1006,9 @@ fn empty_program() -> Program {
     fn test_report_shows_budget() {
         let program = make_chain_program(
             vec![("t1", vec![
-                Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
-                Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                Statement::Assign(ident_s("x"), ident_s("sensor"), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
             ])],
-            Some(("sensor", Type::bool_())),
-            &[("total", 100)], &[("count", 0), ("x", 0)],
+            Some(("sensor", Type::bool_()), &[("total", 100)], &[("count", 0), ("x", 0)],
         );
         let mut backend = LlvmBackend::new()
             .with_optimize_budget(10).with_optimize_report(true);
@@ -1606,11 +1023,9 @@ fn empty_program() -> Program {
     fn test_report_shows_size() {
         let program = make_chain_program(
             vec![("t1", vec![
-                Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
-                Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                Statement::Assign(ident_s("x"), ident_s("sensor"), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
             ])],
-            Some(("sensor", Type::bool_())),
-            &[("total", 100)], &[("count", 0), ("x", 0)],
+            Some(("sensor", Type::bool_()), &[("total", 100)], &[("count", 0), ("x", 0)],
         );
         let mut backend = LlvmBackend::new()
             .with_optimize_budget(256).with_optimize_report(true)
@@ -1627,16 +1042,14 @@ fn empty_program() -> Program {
         let program = make_chain_program(
             vec![
                 ("step_a", vec![
-                    Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assign(ident_s("x"), ident_s("sensor"), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
                 ("step_b", vec![
-                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::Add(Box::new(ident_s("x")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("x"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
             ],
-            Some(("sensor", Type::bool_())),
-            &[("total", 100)],
+            Some(("sensor", Type::bool_()), &[("total", 100)],
             &[("count", 0), ("x", 0), ("y", 0)],
         );
         let mut backend = LlvmBackend::new()
@@ -1654,16 +1067,14 @@ fn empty_program() -> Program {
         let program = make_chain_program(
             vec![
                 ("step_a", vec![
-                    Statement::Assignment { lhs: ident_s("x"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assign(ident_s("x"), ident_s("sensor"), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
                 ("step_b", vec![
-                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::Add(Box::new(ident_s("x")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("x"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
             ],
-            Some(("sensor", Type::bool_())),
-            &[("total", 100)],
+            Some(("sensor", Type::bool_()), &[("total", 100)],
             &[("count", 0), ("x", 0), ("y", 0)],
         );
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
@@ -1680,17 +1091,14 @@ fn empty_program() -> Program {
         let program = make_chain_program(
             vec![
                 ("step_a", vec![
-                    Statement::Assignment { lhs: ident_s("_trig"), expr: ident_s("sensor"), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("internal"), expr: int_s(42), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assign(ident_s("_trig"), ident_s("sensor"), Statement::Assign(ident_s("internal"), int_s(42), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
                 ("step_b", vec![
-                    Statement::Assignment { lhs: ident_s("result"), expr: Expr::Add(Box::new(ident_s("internal")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("result"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("internal"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
             ],
-            Some(("sensor", Type::bool_())),
-            &[("total", 100)],
+            Some(("sensor", Type::bool_()), &[("total", 100)],
             &[("count", 0), ("internal", 0), ("result", 0), ("_trig", 0)],
         );
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
@@ -1703,12 +1111,11 @@ fn empty_program() -> Program {
         let program = make_chain_program(
             vec![
                 ("step_a", vec![
-                    Statement::Assignment { lhs: ident_s("x"), expr: int_s(42), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assign(ident_s("x"), int_s(42), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
                 ("step_b", vec![
-                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::Add(Box::new(ident_s("x")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("x"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
             ],
             None,
@@ -1731,12 +1138,11 @@ fn empty_program() -> Program {
         let program = make_chain_program(
             vec![
                 ("step_a", vec![
-                    Statement::Assignment { lhs: ident_s("x"), expr: int_s(42), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assign(ident_s("x"), int_s(42), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
                 ("step_b", vec![
-                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::Add(Box::new(ident_s("x")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
-                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("y"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("x"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
+                    Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
                 ]),
             ],
             None,
@@ -1756,8 +1162,7 @@ fn empty_program() -> Program {
     fn test_iir_filter_folded_path_regression() {
         let program = make_chain_program(
             vec![("process", vec![
-                Statement::Assignment { lhs: ident_s("x"), expr: int_s(42), timeout: None, modifiers: vec![] },
-                Statement::Assignment { lhs: ident_s("count"), expr: Expr::Add(Box::new(ident_s("count")), Box::new(int_s(1))), timeout: None, modifiers: vec![] },
+                Statement::Assign(ident_s("x"), int_s(42), Statement::Assignment { lhs: ident_s("count"), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("count"), Box::new(int_s(1)), timeout: None, modifiers: vec![] },
             ])],
             None,
             &[("total", 50000000)],
@@ -1783,25 +1188,16 @@ fn empty_program() -> Program {
         assert!(store_in_main, "store must be in main, not in process");
     }
 
-    fn make_async_pair_program() -> Program {
-        Program {
-            items: vec![
+    fn make_async_pair_program() -> Vec<TopLevel> {
+        vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "a".to_string(),
                     ty: Type::int(),
-                    expr: Some(int_s(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(int_s(0), span: None),
                 TopLevel::StateDecl(StateDecl {
                     name: "b".to_string(),
                     ty: Type::int(),
-                    expr: Some(int_s(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(int_s(0), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "inc_a".to_string(),
                     parameters: vec![],
@@ -1812,25 +1208,14 @@ fn empty_program() -> Program {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".to_string()))),
-                            expr: Expr::Add(Box::new(ident_s("a")), Box::new(int_s(1))),
-                            timeout: None,
-                            modifiers: vec![],
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Assign(Expr::AddrOf(Box::new(Expr::Identifier("a".to_string())), Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("a"), Box::new(int_s(1))), modifiers: vec![],,
+                        Statement::Term(None),
                     ],
                     is_async: true,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
@@ -1845,40 +1230,19 @@ fn empty_program() -> Program {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".to_string()))),
-                            expr: Expr::Add(Box::new(ident_s("b")), Box::new(int_s(1))),
-                            timeout: None,
-                            modifiers: vec![],
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Assign(Expr::AddrOf(Box::new(Expr::Identifier("b".to_string())), Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("b"), Box::new(int_s(1))), modifiers: vec![],,
+                        Statement::Term(None),
                     ],
                     is_async: true,
                     is_reactive: true,
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                                  outputs: Vec::new(),
                  output_type: None,
                  derivation: None,
              }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
         }
     }
 
@@ -1928,17 +1292,13 @@ fn empty_program() -> Program {
 
     // ── Exit condition tests ──────────────────────────────────
 
-    fn make_exit_program(exit_expr: Option<Expr>, trg_ty: Type, is_wake: bool) -> Program {
+    fn make_exit_program(exit_expr: Option<Expr>, trg_ty: Type, is_wake: bool) -> Vec<TopLevel> {
         let trg_name = "io_pending";
         let mut items = vec![
             TopLevel::StateDecl(StateDecl {
                 name: "ops".to_string(),
                 ty: Type::int(),
-                expr: Some(int_s(0)),
-                address: None, bit_range: None, is_override: false,
-                os_mode: false, span: None, attrs: vec![],
-                constraint: None,
-            }),
+                expr: Some(int_s(0), span: None),
         ];
         items.push(TopLevel::Constant(Constant {
             name: "N".to_string(),
@@ -1948,18 +1308,12 @@ fn empty_program() -> Program {
         items.push(TopLevel::Trigger(TriggerDeclaration {
             name: trg_name.to_string(),
             ty: trg_ty,
-            address: LinkRef::Linked("__io_pending".to_string()),
-            bit_range: None, stages: vec![], condition: None,
-            annotations: vec![],
+            address: LinkRef::Linked("__io_pending".to_string(), stages: vec![], condition: None,
             is_wake, is_const: false, modifiers: vec![], span: None,
         }));
-        let pre = Expr::And(
-            Box::new(Expr::Identifier(trg_name.to_string())),
-            Box::new(Expr::Lt(
-                Box::new(Expr::Identifier("ops".to_string())),
-                Box::new(Expr::Identifier("N".to_string())),
-            )),
-        );
+        let pre = Expr::BinaryOp(BinaryOpKind::And, 
+            Box::new(Expr::Identifier(trg_name.to_string()), Box::new(Expr::BinaryOp(BinaryOpKind::Lt, 
+                Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), ), );
         items.push(TopLevel::Transaction(Transaction {
             name: "work".to_string(),
             parameters: vec![],
@@ -1969,17 +1323,11 @@ fn empty_program() -> Program {
                 span: None, watchdog: None,
             },
             body: vec![
-                Statement::Assignment {
-                    lhs: Expr::AddrOf(Box::new(Expr::Identifier("ops".to_string()))),
-                    expr: Expr::Add(Box::new(ident_s("ops")), Box::new(int_s(1))),
-                    timeout: None, modifiers: vec![],
-                },
-                Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                Statement::Assign(Expr::AddrOf(Box::new(Expr::Identifier("ops".to_string())), Expr::BinaryOp(BinaryOpKind::Add, Box::new(ident_s("ops"), Box::new(int_s(1))), Statement::Term(None),
             ],
             is_async: false, is_reactive: true, reactor_speed: None,
-            span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-            annotations: vec![],
+            span: None,
+ modifiers: vec![],
             metadata: HashMap::new(),
                  outputs: Vec::new(),
          output_type: None,
@@ -1989,21 +1337,14 @@ fn empty_program() -> Program {
             items,
             comments: vec![], reactor_speed: None, attrs: vec![],
             ffi: None, strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: exit_expr.map(Box::new),
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
         }
     }
 
     #[test]
     fn test_exit_pragma_in_wake_main() {
         // #!exit ops == N; with Int trigger (standard reactor path)
-        let exit_cond = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("N".to_string())),
-        );
+        let exit_cond = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), );
         let program = make_exit_program(Some(exit_cond), Type::int(), true);
         let output = LlvmBackend::new().generate(&program);
         // Exit check should appear before __rt_wait
@@ -2022,10 +1363,8 @@ fn empty_program() -> Program {
     #[test]
     fn test_exit_pragma_without_wake_no_change() {
         // #!exit ops == N; with Int trigger but is_wake=false → no __rt_wait
-        let exit_cond = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("N".to_string())),
-        );
+        let exit_cond = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), );
         let program = make_exit_program(Some(exit_cond), Type::int(), false);
         let output = LlvmBackend::new().generate(&program);
         // Exit check still emitted, but no wait label
@@ -2055,10 +1394,8 @@ fn empty_program() -> Program {
     fn test_exit_in_enum_main() {
         // Bool trigger → enum dispatch path, no wake → one-shot.
         // Uniform-body detection skips the switch when all case arms are identical.
-        let exit_cond = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("N".to_string())),
-        );
+        let exit_cond = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), );
         let program = make_exit_program(Some(exit_cond), Type::bool_(), false);
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
         // One-shot enum dispatch: no tick loop, no exit check needed
@@ -2074,10 +1411,8 @@ fn empty_program() -> Program {
     fn test_exit_in_enum_hybrid_wake() {
         // Bool trigger with is_wake → hybrid path (enum + wake).
         // Uniform-body detection skips the switch when all case arms are identical.
-        let exit_cond = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("N".to_string())),
-        );
+        let exit_cond = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), );
         let program = make_exit_program(Some(exit_cond), Type::bool_(), true);
         let output = LlvmBackend::new().with_optimize_budget(256).generate(&program);
         assert!(!output.contains("switch i64"),
@@ -2101,10 +1436,8 @@ fn empty_program() -> Program {
         backend.ctx.field_index_map.insert("ops".to_string(), 0);
         backend.ctx.constants.insert("N".to_string(), (Type::int(), Expr::Decimal(100)));
 
-        let expr = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("N".to_string())),
-        );
+        let expr = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), );
         let errors = backend.check_exit_condition_idents(&expr);
         assert!(errors.is_empty(),
             "No errors for known identifiers: {:?}", errors);
@@ -2117,10 +1450,8 @@ fn empty_program() -> Program {
         backend.ctx.field_index_map.insert("ops".to_string(), 0);
         backend.ctx.constants.insert("N".to_string(), (Type::int(), Expr::Decimal(100)));
 
-        let expr = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("bogus_var".to_string())),
-        );
+        let expr = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("bogus_var".to_string()), );
         let errors = backend.check_exit_condition_idents(&expr);
         assert!(!errors.is_empty(),
             "Should report error for unknown identifier");
@@ -2131,10 +1462,8 @@ fn empty_program() -> Program {
     #[test]
     fn test_one_shot_exit_warning_enum() {
         // Bool trigger without wake → enum dispatch → one-shot → warning
-        let exit_cond = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("N".to_string())),
-        );
+        let exit_cond = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), );
         let program = make_exit_program(Some(exit_cond), Type::bool_(), false);
         let mut backend = LlvmBackend::new().with_optimize_budget(256);
         let _output = backend.generate(&program);
@@ -2148,10 +1477,8 @@ fn empty_program() -> Program {
     #[test]
     fn test_no_one_shot_warning_in_wake_main() {
         // Int trigger with wake → standard reactor → checks exit → no warning
-        let exit_cond = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("N".to_string())),
-        );
+        let exit_cond = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), );
         let program = make_exit_program(Some(exit_cond), Type::int(), true);
         let mut backend = LlvmBackend::new();
         let _output = backend.generate(&program);
@@ -2179,10 +1506,8 @@ fn empty_program() -> Program {
     #[test]
     fn test_no_no_exit_path_warning_when_exit_present() {
         // Wake program WITH #!exit should NOT warn about missing exit path
-        let exit_cond = Expr::Eq(
-            Box::new(Expr::Identifier("ops".to_string())),
-            Box::new(Expr::Identifier("N".to_string())),
-        );
+        let exit_cond = Expr::BinaryOp(BinaryOpKind::Eq, 
+            Box::new(Expr::Identifier("ops".to_string()), Box::new(Expr::Identifier("N".to_string()), );
         let program = make_exit_program(Some(exit_cond), Type::int(), true);
         let mut backend = LlvmBackend::new();
         let _output = backend.generate(&program);
@@ -2259,47 +1584,25 @@ fn empty_program() -> Program {
 
     // ── SLP Hazard Detection Tests ────────────────────────────
 
-    fn make_slp_float_program(n_floats: usize, cross_body: Vec<Statement>, precondition: Option<Expr>) -> Program {
+    fn make_slp_float_program(n_floats: usize, cross_body: Vec<Statement>, precondition: Option<Expr>) -> Vec<TopLevel> {
         let mut items: Vec<TopLevel> = Vec::new();
         // Add n float fields: f0..f{n-1} = 0.0
         for i in 0..n_floats {
             items.push(TopLevel::StateDecl(StateDecl {
                 name: format!("f{}", i),
                 ty: Type::float(),
-                expr: Some(Expr::Float(0.0)),
-                address: None,
-                bit_range: None,
-                is_override: false,
-                os_mode: false,
-                span: None,
-                attrs: vec![],
-                constraint: None,
+                expr: Some(Expr::Float(0.0), span: None,
             }));
-        }
         // Add counter field so bounded_pre can work
         items.push(TopLevel::StateDecl(StateDecl {
             name: "count".to_string(),
             ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None,
-            bit_range: None,
-            is_override: false,
-            os_mode: false,
             span: None,
-            attrs: vec![],
-            constraint: None,
         }));
         items.push(TopLevel::StateDecl(StateDecl {
             name: "total".to_string(),
             ty: Type::int(),
-            expr: Some(Expr::Decimal(100)),
-            address: None,
-            bit_range: None,
-            is_override: false,
-            os_mode: false,
             span: None,
-            attrs: vec![],
-            constraint: None,
         }));
         items.push(TopLevel::Transaction(Transaction {
             name: "tick".to_string(),
@@ -2307,37 +1610,19 @@ fn empty_program() -> Program {
             is_reactive: true,
             parameters: vec![],
             contract: Contract {
-                pre_condition: precondition.unwrap_or(Expr::Bool(true)),
-                post_condition: Expr::Identifier("count".to_string()),
-                watchdog: None,
+                pre_condition: precondition.unwrap_or(Expr::Bool(true), post_condition: Expr::Identifier("count".to_string(), watchdog: None,
                 span: None,
             },
             body: cross_body,
-            reactor_speed: None,
             span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
                  outputs: Vec::new(),
          output_type: None,
             derivation: None,
      }));
         Program {
             items,
-            comments: vec![],
-            reactor_speed: None,
-            attrs: vec![],
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::Sequential,
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
         }
     }
 
@@ -2349,25 +1634,16 @@ fn empty_program() -> Program {
             let b = ((i * 3) + 1) % n_floats;
             let c = ((i * 3) + 2) % n_floats;
             stmts.push(Statement::Assignment {
-                lhs: Expr::Identifier(format!("f{}", a)),
-                expr: Expr::Mul(
-                    Box::new(Expr::Identifier(format!("f{}", b))),
-                    Box::new(Expr::Identifier(format!("f{}", c))),
-                ),
+                lhs: Expr::Identifier(format!("f{}", a), expr: Expr::BinaryOp(BinaryOpKind::Mul, 
+                    Box::new(Expr::Identifier(format!("f{}", b)), Box::new(Expr::Identifier(format!("f{}", c)), ),
                 timeout: None,
-                modifiers: vec![],
-            });
-        }
+                modifiers: vec![]),
         // Increment counter so bounded_pre can fire
         stmts.push(Statement::Assignment {
-            lhs: Expr::Identifier("count".to_string()),
-            expr: Expr::Add(
-                Box::new(Expr::Identifier("count".to_string())),
-                Box::new(Expr::Decimal(1)),
-            ),
+            lhs: Expr::Identifier("count".to_string(), expr: Expr::BinaryOp(BinaryOpKind::Add, 
+                Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1), ),
             timeout: None,
-            modifiers: vec![],
-        });
+            modifiers: vec![]),
         stmts
     }
 
@@ -2410,24 +1686,15 @@ fn empty_program() -> Program {
         let mut body: Vec<Statement> = Vec::new();
         for i in 0..12 {
             body.push(Statement::Assignment {
-                lhs: Expr::Identifier(format!("f{}", i)),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier(format!("f{}", i))),
-                    Box::new(Expr::Float(1.0)),
-                ),
+                lhs: Expr::Identifier(format!("f{}", i), expr: Expr::BinaryOp(BinaryOpKind::Add, 
+                    Box::new(Expr::Identifier(format!("f{}", i)), Box::new(Expr::Float(1.0), ),
                 timeout: None,
-                modifiers: vec![],
-            });
-        }
+                modifiers: vec![]),
         body.push(Statement::Assignment {
-            lhs: Expr::Identifier("count".to_string()),
-            expr: Expr::Add(
-                Box::new(Expr::Identifier("count".to_string())),
-                Box::new(Expr::Decimal(1)),
-            ),
+            lhs: Expr::Identifier("count".to_string(), expr: Expr::BinaryOp(BinaryOpKind::Add, 
+                Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1), ),
             timeout: None,
-            modifiers: vec![],
-        });
+            modifiers: vec![]),
         let program = make_slp_float_program(12, body, None);
         let mut backend = LlvmBackend::new();
         let output = backend.generate(&program);
@@ -2449,11 +1716,9 @@ fn empty_program() -> Program {
                 capabilities: vec!["neon".to_string()],
                 import_ffi: None,
             }),
-            ffi: None,
             codegen: None,
             memory: None,
             bottlenecks: None,
-        };
         backend = backend.with_spec(spec);
         let output = backend.generate(&program);
         assert!(!output.contains("disable-slp-vectorize"),
@@ -2474,11 +1739,9 @@ let spec = crate::target_spec::TargetSpec {
                     capabilities: vec!["avx2".to_string()],
                     import_ffi: None,
                 }),
-                ffi: None,
                 codegen: None,
                 memory: None,
                 bottlenecks: None,
-        };
         backend = backend.with_spec(spec);
         let output = backend.generate(&program);
         // 32 cross-ops on 12 fields → peak 28 ≥ 16 → spills on AVX2 → disable
@@ -2502,23 +1765,14 @@ let spec = crate::target_spec::TargetSpec {
         let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
         aliases.insert("count".to_string(), crate::dbrief::DbriefType::UInt(64));
         let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: Vec::new(),
-                    constraint: None,
                 }),
             ],
             ..empty_program()
-        };
         let _output = backend.generate(&program);
         let warnings = backend.warnings();
         let has_unsigned_warning = warnings.iter().any(|w| w.contains("unsigned") && w.contains("count"));
@@ -2530,25 +1784,16 @@ let spec = crate::target_spec::TargetSpec {
     fn test_schema_vector_rejected() {
         let mut aliases: HashMap<String, crate::dbrief::DbriefType> = HashMap::new();
         aliases.insert("buf".to_string(), crate::dbrief::DbriefType::Vector(
-            Box::new(crate::dbrief::DbriefType::UInt(8)), Some(256)));
+            Box::new(crate::dbrief::DbriefType::UInt(8), Some(256)));
         let mut backend = LlvmBackend::new().with_schema_aliases(aliases);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "buf".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: Vec::new(),
-                    constraint: None,
                 }),
             ],
             ..empty_program()
-        };
         let _output = backend.generate(&program);
         let warnings = backend.warnings();
         let has_vector_warning = warnings.iter().any(|w| w.contains("Vector") && w.contains("buf"));
@@ -2559,23 +1804,14 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_no_schema_import_no_validation() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "count".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: Vec::new(),
-                    constraint: None,
                 }),
             ],
             ..empty_program()
-        };
         let _output = backend.generate(&program);
         assert!(backend.warnings().is_empty(),
             "No schema import should produce no warnings");
@@ -2601,23 +1837,14 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new()
             .with_schema_aliases(aliases)
             .with_mmio_addresses(mmio);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "led_0".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: Vec::new(),
-                    constraint: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("inttoptr i64 1073741824"),
             "led_0 with schema import should be MMIO (inttoptr). Got: {}", output);
@@ -2635,45 +1862,30 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new()
             .with_schema_aliases(aliases)
             .with_mmio_addresses(mmio);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "led_0".to_string(),
                     ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None,
-                    bit_range: None,
-                    is_override: false,
-                    os_mode: false,
                     span: None,
-                    attrs: Vec::new(),
-                    constraint: None,
                 }),
                 TopLevel::Transaction(Transaction {
                     name: "t".to_string(),
                     parameters: vec![],
-                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                    body: vec![
+                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![
                         Statement::Let {
                             name: "_".to_string(),
                             ty: None,
-                            expr: Some(Expr::Identifier("led_0".to_string())),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                            expr: Some(Expr::Identifier("led_0".to_string()), address_expr: None, modifiers: vec![],,
+                        Statement::Term(None),
                     ],
                     is_async: false, is_reactive: false, reactor_speed: None,
-                    span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    span: None,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(!output.contains("inttoptr i64 1073741824"),
             "led_0 NOT in schema should NOT be MMIO (no inttoptr for 0x40000000). Got: {}", output);
@@ -2686,11 +1898,9 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_struct_type_registered() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
-                    type_params: vec![],
                     parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
@@ -2700,11 +1910,9 @@ let spec = crate::target_spec::TargetSpec {
                     view_html: None,
                     span: None,
                     modifiers: vec![],
-                    variants: vec![],
-                }),
+                    variants: vec![]),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("ModuleID"), "Output should be valid IR");
         assert!(backend.ctx.struct_types.contains_key("Point"),
@@ -2714,17 +1922,13 @@ let spec = crate::target_spec::TargetSpec {
 
     #[test]
     fn test_type_with_slots_populates_struct_types() {
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::TypeDef(Box::new(TypeDef {
                     name: "MyBuffer".to_string(),
-                    type_params: vec![],
-                    bit_range: None,
-                    base: Box::new(Expr::TypeRef("Bits".into())),
-                    body: TypeDefBody {
+                    base: Box::new(Expr::TypeRef("Bits".into()), body: TypeDefBody {
                         slots: vec![
                             TypeSlot { name: "ptr".into(), ty: Type::Applied("Ptr".into(), vec![Type::Custom("UInt8".into())]), span: None },
-                            TypeSlot { name: "len".into(), ty: Type::Custom("Int".into()), span: None },
+                            TypeSlot { name: "len".into(), ty: Type::Custom("Int".into(), span: None },
                         ],
                         metadata: HashMap::new(),
                         projections: vec![],
@@ -2733,10 +1937,8 @@ let spec = crate::target_spec::TargetSpec {
                         span: None,
                     },
                     span: None,
-                })),
-            ],
+                }), ],
             ..empty_program()
-        };
         let tu = crate::type_universe::TypeUniverse::build(&program);
         let mut backend = LlvmBackend::new().with_type_universe(tu);
         let output = backend.generate(&program);
@@ -2748,11 +1950,9 @@ let spec = crate::target_spec::TargetSpec {
 
     #[test]
     fn test_struct_auto_registered_in_type_universe() {
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
-                    type_params: vec![],
                     parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
@@ -2762,11 +1962,9 @@ let spec = crate::target_spec::TargetSpec {
                     view_html: None,
                     span: None,
                     modifiers: vec![],
-                    variants: vec![],
-                }),
+                    variants: vec![]),
             ],
             ..empty_program()
-        };
         let tu = crate::type_universe::TypeUniverse::build(&program);
         let mut backend = LlvmBackend::new().with_type_universe(tu);
         let _output = backend.generate(&program);
@@ -2779,15 +1977,12 @@ let spec = crate::target_spec::TargetSpec {
             assert_eq!(rt.base, "Bits");
         } else {
             panic!("TypeUniverse should exist after generate");
-        }
     }
 
-    fn make_point_program(body: Vec<Statement>) -> Program {
-        Program {
-            items: vec![
+    fn make_point_program(body: Vec<Statement>) -> Vec<TopLevel> {
+        vec![
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
-                    type_params: vec![],
                     parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
@@ -2797,16 +1992,10 @@ let spec = crate::target_spec::TargetSpec {
                     view_html: None,
                     span: None,
                     modifiers: vec![],
-                    variants: vec![],
-                }),
+                    variants: vec![]),
                 TopLevel::StateDecl(StateDecl {
                     name: "pt".to_string(),
-                    ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "main".to_string(),
                     is_reactive: false,
@@ -2817,11 +2006,9 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None, span: None,
                     },
                     body,
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![],
+                    reactor_speed: None, span: None,
                     is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -2838,15 +2025,8 @@ let spec = crate::target_spec::TargetSpec {
         let body = vec![
             Statement::Let {
                 name: "p".to_string(),
-                ty: Some(Type::Custom("Point".to_string())),
-                expr: Some(Expr::StructInstance("Point".to_string(), vec![
-                    ("x".to_string(), Expr::Decimal(10)),
-                    ("y".to_string(), Expr::Decimal(20)),
-                ])),
-                address: None, address_expr: None, bit_range: None,
-                is_override: false, modifiers: vec![],
-                constraint: None,
-            },
+                ty: Some(Type::Custom("Point".to_string()), expr: Some(Expr::StructInstance("Point".to_string(), vec![
+                    ("x".to_string(), Expr::Decimal(10), ("y".to_string(), Expr::Decimal(20), ]), address_expr: None, modifiers: vec![],,
         ];
         let output = backend.generate(&make_point_program(body));
         assert!(output.contains("alloca i64, i64 2"),
@@ -2865,24 +2045,9 @@ let spec = crate::target_spec::TargetSpec {
         let body = vec![
             Statement::Let {
                 name: "p".to_string(),
-                ty: Some(Type::Custom("Point".to_string())),
-                expr: Some(Expr::StructInstance("Point".to_string(), vec![
-                    ("x".to_string(), Expr::Decimal(10)),
-                    ("y".to_string(), Expr::Decimal(20)),
-                ])),
-                address: None, address_expr: None, bit_range: None,
-                is_override: false, modifiers: vec![],
-                constraint: None,
-            },
-            Statement::Assignment {
-                lhs: Expr::Identifier("pt".to_string()),
-                expr: Expr::Field(
-                    Box::new(Expr::Identifier("p".to_string())),
-                    "y".to_string(),
-                ),
-                timeout: None, modifiers: vec![],
-            },
-        ];
+                ty: Some(Type::Custom("Point".to_string()), expr: Some(Expr::StructInstance("Point".to_string(), vec![
+                    ("x".to_string(), Expr::Decimal(10), ("y".to_string(), Expr::Decimal(20), ]), address_expr: None, modifiers: vec![],,
+            Statement::Assign(Expr::Identifier("pt".to_string(), Expr::Field( Box::new(Expr::Identifier("p".to_string())) "y".to_string() ), ];
         let output = backend.generate(&make_point_program(body));
         assert!(output.contains("getelementptr i64, ptr"),
             "FieldAccess should emit GEP. Got: {}", output);
@@ -2895,35 +2060,19 @@ let spec = crate::target_spec::TargetSpec {
         fn empty_contract() -> Contract {
             Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None }
         }
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "raw".to_string(),
-                    ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "bad".to_string(),
                     is_reactive: false, parameters: vec![],
                     contract: empty_contract(),
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("raw".to_string()),
-                            expr: Expr::Field(
-                                Box::new(Expr::Identifier("raw".to_string())),
-                                "nonexistent".to_string(),
-                            ),
-                            timeout: None, modifiers: vec![],
-                        },
-                    ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![],
+                        Statement::Assign(Expr::Identifier("raw".to_string(), Expr::Field( Box::new(Expr::Identifier("raw".to_string())) "nonexistent".to_string() ), ],
+                    reactor_speed: None, span: None,
                     is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -2931,7 +2080,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         backend.generate(&program);
     }
 
@@ -2942,22 +2090,18 @@ let spec = crate::target_spec::TargetSpec {
         // Phase 1: Verify that declare_struct_types() emits
         // %Point = type { i64, i64 } in the generated LLVM IR.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
-                    type_params: vec![],
                     parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
                         StructField { name: "y".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
                     ],
                     transactions: vec![],
-                    view_html: None, span: None, modifiers: vec![], variants: vec![],
-                }),
+                    view_html: None, span: None, modifiers: vec![], variants: vec![]),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("%Point = type { i64, i64 }"),
             "Struct type declaration should appear in IR.\nGot:\n{}", output);
@@ -2968,25 +2112,21 @@ let spec = crate::target_spec::TargetSpec {
         // Phase 1: Verify that export defn with struct-typed param uses
         // "ptr" in the LLVM function signature instead of "i64".
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
-                    type_params: vec![],
                     parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
                         StructField { name: "y".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
                     ],
                     transactions: vec![],
-                    view_html: None, span: None, modifiers: vec![], variants: vec![],
-                }),
+                    view_html: None, span: None, modifiers: vec![], variants: vec![]),
                 TopLevel::Definition(Definition {
                     name: "process".to_string(),
-                    type_params: vec![],
                     parameters: vec![("p".to_string(), Type::Custom("Point".to_string()))],
                     outputs: vec![Type::bool_()],
-                    output_type: None, output_names: vec![],
+                    output_type: None,
                     contract: Contract {
                         pre_condition: Expr::Bool(true),
                         post_condition: Expr::Bool(true),
@@ -2995,17 +2135,13 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None },
                     ],
-                    is_lambda: false,
                     // Bare #export (no explicit name) — no wrapper emitted, inner keeps own name.
                     modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Mandatory , diagnostic: false }],
-                    annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![],
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // The inner definition should have ptr for the struct param
         assert!(output.contains("define i64 @process(ptr noalias nocapture align 8 %state, ptr %arg0"),
@@ -3016,25 +2152,21 @@ let spec = crate::target_spec::TargetSpec {
     fn test_struct_param_ptrtoint_at_entry() {
         // Phase 1: Verify that ptrtoint is emitted for struct params at entry.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
-                    type_params: vec![],
                     parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
                         StructField { name: "y".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
                     ],
                     transactions: vec![],
-                    view_html: None, span: None, modifiers: vec![], variants: vec![],
-                }),
+                    view_html: None, span: None, modifiers: vec![], variants: vec![]),
                 TopLevel::Definition(Definition {
                     name: "process".to_string(),
-                    type_params: vec![],
                     parameters: vec![("p".to_string(), Type::Custom("Point".to_string()))],
                     outputs: vec![Type::bool_()],
-                    output_type: None, output_names: vec![],
+                    output_type: None,
                     contract: Contract {
                         pre_condition: Expr::Bool(true),
                         post_condition: Expr::Bool(true),
@@ -3043,16 +2175,12 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None },
                     ],
-                    is_lambda: false,
                     modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Bool(true), mode: AnnotationMode::Mandatory , diagnostic: false }],
-                    annotations: vec![],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![],
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("ptrtoint ptr %arg0 to i64"),
             "Struct param should have ptrtoint at entry.\nGot:\n{}", output);
@@ -3063,25 +2191,21 @@ let spec = crate::target_spec::TargetSpec {
         // Phase 1: Verify that field access on a struct param works
         // (ptrtoint → inttoptr → GEP → load path, eliminated by optimizer).
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Struct(StructDefinition {
                     name: "Point".to_string(),
-                    type_params: vec![],
                     parent: None,
                     fields: vec![
                         StructField { name: "x".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
                         StructField { name: "y".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public },
                     ],
                     transactions: vec![],
-                    view_html: None, span: None, modifiers: vec![], variants: vec![],
-                }),
+                    view_html: None, span: None, modifiers: vec![], variants: vec![]),
                 TopLevel::Definition(Definition {
                     name: "get_x".to_string(),
-                    type_params: vec![],
                     parameters: vec![("p".to_string(), Type::Custom("Point".to_string()))],
                     outputs: vec![Type::int()],
-                    output_type: None, output_names: vec![],
+                    output_type: None,
                     contract: Contract {
                         pre_condition: Expr::Bool(true),
                         post_condition: Expr::Bool(true),
@@ -3089,20 +2213,15 @@ let spec = crate::target_spec::TargetSpec {
                     },
                     body: vec![
                         Statement::Term { values: vec![Some(Expr::Field(
-                            Box::new(Expr::Identifier("p".to_string())),
-                            "x".to_string(),
+                            Box::new(Expr::Identifier("p".to_string()), "x".to_string(),
                         ))], modifiers: vec![], swan_song: None },
                     ],
-                    is_lambda: false,
-                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Quoted("get_x".into()), mode: AnnotationMode::Mandatory , diagnostic: false }],
-                    annotations: vec![],
+                    modifiers: vec![Annotation { name: "export".to_string(), value: Expr::Quoted("get_x".into(), mode: AnnotationMode::Mandatory , diagnostic: false }],
                     metadata: HashMap::new(),
-                    variant_bodies: vec![],
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // The field access should emit inttoptr + GEP (even though the optimizer
         // will eliminate the ptrtoint→inttoptr round-trip; this tests that the
@@ -3118,19 +2237,15 @@ let spec = crate::target_spec::TargetSpec {
     fn test_struct_type_declaration_empty_struct() {
         // Phase 1: Empty struct emits %Empty = type {}
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Struct(StructDefinition {
                     name: "Empty".to_string(),
-                    type_params: vec![],
                     parent: None,
                     fields: vec![],
                     transactions: vec![],
-                    view_html: None, span: None, modifiers: vec![], variants: vec![],
-                }),
+                    view_html: None, span: None, modifiers: vec![], variants: vec![]),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("%Empty = type {}"),
             "Empty struct should emit %Empty = type {{}}.\nGot:\n{}", output);
@@ -3140,21 +2255,17 @@ let spec = crate::target_spec::TargetSpec {
     fn test_struct_type_declaration_sorted_order() {
         // Phase 1: Struct declarations should be sorted by name.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Struct(StructDefinition {
-                    name: "Zebra".to_string(), type_params: vec![], parent: None,
+                    name: "Zebra".to_string(), parent: None,
                     fields: vec![StructField { name: "s".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public }],
-                    transactions: vec![], view_html: None, span: None, modifiers: vec![], variants: vec![],
-                }),
+                    transactions: vec![], view_html: None, span: None, modifiers: vec![], variants: vec![]),
                 TopLevel::Struct(StructDefinition {
-                    name: "Alpha".to_string(), type_params: vec![], parent: None,
+                    name: "Alpha".to_string(), parent: None,
                     fields: vec![StructField { name: "s".to_string(), ty: Type::int(), default: None, visibility: Visibility::Public }],
-                    transactions: vec![], view_html: None, span: None, modifiers: vec![], variants: vec![],
-                }),
+                    transactions: vec![], view_html: None, span: None, modifiers: vec![], variants: vec![]),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         let alpha_pos = output.find("%Alpha = type { i64 }").unwrap();
         let zebra_pos = output.find("%Zebra = type { i64 }").unwrap();
@@ -3168,16 +2279,10 @@ let spec = crate::target_spec::TargetSpec {
         fn empty_contract() -> Contract {
             Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None }
         }
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "obj".to_string(),
-                    ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "make_obj".to_string(),
                     is_reactive: false, parameters: vec![],
@@ -3187,19 +2292,11 @@ let spec = crate::target_spec::TargetSpec {
                             name: "o".to_string(),
                             ty: None,
                             expr: Some(Expr::ObjectLiteral(vec![
-                                ("name".to_string(), Expr::Quoted("test".into())),
-                                ("value".to_string(), Expr::Decimal(42)),
-                            ])),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                                ("name".to_string(), Expr::Quoted("test".into()), ("value".to_string(), Expr::Decimal(42), ]), address_expr: None, modifiers: vec![],,
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![],
+                    reactor_speed: None, span: None,
                     is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3207,7 +2304,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("alloca i64, i64 2"),
             "ObjectLiteral should alloca for fields. Got: {}", output);
@@ -3220,20 +2316,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_enum_type_registered_and_variant_disc() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Enum(EnumDefinition {
                     name: "Option".to_string(),
-                    type_params: vec![],
                     variants: vec![
-                        EnumVariant::Unit("None".to_string()),
-                        EnumVariant::Tuple("Some".to_string(), vec![Type::int()]),
+                        EnumVariant::Unit("None".to_string(), EnumVariant::Tuple("Some".to_string(), vec![Type::int()]),
                     ],
                     span: None,
                 }),
             ],
             ..empty_program()
-        };
         let _ = backend.generate(&program);
         assert!(backend.ctx.enum_types.contains_key("Option"));
         assert!(backend.ctx.variant_disc.contains_key("None"));
@@ -3246,24 +2338,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_enum_constructor_uses_registered_discriminant() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Enum(EnumDefinition {
                     name: "Result".to_string(),
-                    type_params: vec![],
                     variants: vec![
-                        EnumVariant::Unit("Err".to_string()),
-                        EnumVariant::Tuple("Ok".to_string(), vec![Type::int()]),
+                        EnumVariant::Unit("Err".to_string(), EnumVariant::Tuple("Ok".to_string(), vec![Type::int()]),
                     ],
                     span: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
-                    name: "r".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "r".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "wrap".to_string(), is_reactive: false,
                     parameters: vec![],
@@ -3275,17 +2359,11 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "x".to_string(), ty: None,
-                            expr: Some(Expr::Call("Ok".to_string(), vec![Expr::Decimal(42)])),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            expr: Some(Expr::Call("Ok".to_string(), vec![Expr::Decimal(42)]), address_expr: None, modifiers: vec![],,
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![],
+                    reactor_speed: None, span: None,
                     is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3293,7 +2371,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("store i64 1"), "Ok should have disc 1. Got: {}", output);
         assert!(output.contains("store i64 %t"), "Ok should store payload register. Got: {}", output);
@@ -3302,25 +2379,15 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_pattern_match_uses_registered_discriminant() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Enum(EnumDefinition {
                     name: "Status".to_string(),
-                    type_params: vec![],
                     variants: vec![
-                        EnumVariant::Unit("Off".to_string()),
-                        EnumVariant::Unit("On".to_string()),
-                        EnumVariant::Unit("Error".to_string()),
-                    ],
+                        EnumVariant::Unit("Off".to_string(), EnumVariant::Unit("On".to_string(), EnumVariant::Unit("Error".to_string(), ],
                     span: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
-                    name: "check".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "check".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "test".to_string(), is_reactive: false,
                     parameters: vec![],
@@ -3332,28 +2399,16 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "s".to_string(), ty: None,
-                            expr: Some(Expr::Call("Error".to_string(), vec![])),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            expr: Some(Expr::Call("Error".to_string(), vec![]), address_expr: None, modifiers: vec![],,
                         Statement::Let {
                             name: "matched".to_string(), ty: None,
                             expr: Some(Expr::PatternMatch {
-                                value: Box::new(Expr::Identifier("s".to_string())),
-                                variant: "Error".to_string(),
-                                fields: vec![],
-                            }),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                                value: Box::new(Expr::Identifier("s".to_string()), variant: "Error".to_string(),
+                                fields: vec![]), address_expr: None, modifiers: vec![],,
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![],
+                    reactor_speed: None, span: None,
                     is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3361,7 +2416,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("icmp eq i64"), "PatternMatch should compare discriminant. Got: {}", output);
     }
@@ -3369,24 +2423,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_match_arm_field_binding() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Enum(EnumDefinition {
                     name: "Option".to_string(),
-                    type_params: vec![],
                     variants: vec![
-                        EnumVariant::Unit("None".to_string()),
-                        EnumVariant::Tuple("Some".to_string(), vec![Type::int()]),
+                        EnumVariant::Unit("None".to_string(), EnumVariant::Tuple("Some".to_string(), vec![Type::int()]),
                     ],
                     span: None,
                 }),
                 TopLevel::StateDecl(StateDecl {
-                    name: "inner".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "inner".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "unwrap".to_string(), is_reactive: false,
                     parameters: vec![],
@@ -3396,34 +2442,11 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None, span: None,
                     },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("inner".to_string()),
-                            expr: Expr::Match {
-                                value: Box::new(Expr::Call("Some".to_string(), vec![Expr::Decimal(7)])),
-                                arms: vec![
-                                        MatchArm {
-                                            pattern: MatchPattern::Variant {
-                                                name: "Some".to_string(),
-                                                fields: vec![Pattern::Var("val".to_string())],
-                                            },
-                                        guard: None,
-                                        body: Box::new(Expr::Identifier("val".to_string())),
-                                    },
-                                    MatchArm {
-                                        pattern: MatchPattern::Wildcard,
-                                        guard: None,
-                                        body: Box::new(Expr::Decimal(-1)),
-                                    },
-                                ],
-                            },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("inner".to_string(), Expr::Match { value: Box::new(Expr::Call("Some".to_string(), vec![Expr::Decimal(7)])) arms: vec![ MatchArm { pattern: MatchPattern::Variant { name: "Some".to_string() fields: vec![Pattern::Var("val".to_string())] guard: None body: Box::new(Expr::Identifier("val".to_string())) } MatchArm { pattern: MatchPattern::Wildcard guard: None body: Box::new(Expr::Decimal(-1)) } ]),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![],
+                    reactor_speed: None, span: None,
                     is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3431,7 +2454,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("switch i64"), "Match should emit switch. Got: {}", output);
         assert!(output.contains("getelementptr i64, ptr"), "Field binding should GEP. Got: {}", output);
@@ -3440,20 +2462,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_enum_multi_variant_discriminants() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Enum(EnumDefinition {
                     name: "Tree".to_string(),
-                    type_params: vec![],
                     variants: vec![
-                        EnumVariant::Unit("Leaf".to_string()),
-                        EnumVariant::Tuple("Node".to_string(), vec![Type::int(), Type::int()]),
+                        EnumVariant::Unit("Leaf".to_string(), EnumVariant::Tuple("Node".to_string(), vec![Type::int(), Type::int()]),
                     ],
                     span: None,
                 }),
             ],
             ..empty_program()
-        };
         let _ = backend.generate(&program);
         assert_eq!(backend.ctx.variant_disc.get("Leaf").map(|(_, d, _)| *d), Some(0));
         assert_eq!(backend.ctx.variant_disc.get("Node").map(|(_, d, _)| *d), Some(1));
@@ -3465,28 +2483,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_list_literal_2slot_header() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "lst".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "lst".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "mklist".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("lst".to_string()),
-                            expr: Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)]),
-                            timeout: None, modifiers: vec![],
-                        },
-                    ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                        Statement::Assign(Expr::Identifier("lst".to_string(), Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20)]), ],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3494,7 +2500,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // 2026-06-29: Non-empty lists use malloc (not alloca) — see docs/plans/2026-06-29-list-allocation-fix.md
         // 2-slot header means 4 slots: [data_ptr, len, elem0, elem1] = 32 bytes
@@ -3509,28 +2514,16 @@ let spec = crate::target_spec::TargetSpec {
         // 2026-06-29: Empty list [] must use the global rodata sentinel, not alloca or malloc.
         // See docs/plans/2026-06-29-list-allocation-fix.md.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "e".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "e".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "mkempty".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("e".to_string()),
-                            expr: Expr::List(vec![]),
-                            timeout: None, modifiers: vec![],
-                        },
-                    ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                        Statement::Assign(Expr::Identifier("e".to_string(), Expr::List(vec![]), ],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3538,7 +2531,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("@ll_empty_list"), "Empty list should reference global sentinel. Got: {}", output);
         assert!(!output.contains("alloca i64, i64 2"), "Empty list should NOT alloca 2 slots. Got: {}", output);
@@ -3551,28 +2543,16 @@ let spec = crate::target_spec::TargetSpec {
         // 2026-06-29: Non-empty list [1, 2, 3] must use malloc, not alloca.
         // See docs/plans/2026-06-29-list-allocation-fix.md.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "v".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "mklist".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("v".to_string()),
-                            expr: Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]),
-                            timeout: None, modifiers: vec![],
-                        },
-                    ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                        Statement::Assign(Expr::Identifier("v".to_string(), Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]), ],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3580,7 +2560,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // 3 elements + 2 header slots = 5 slots × 8 = 40 bytes
         assert!(output.contains("call ptr @malloc(i64 40)"), "3-elem list = 40 bytes (5 slots × 8). Got: {}", output);
@@ -3595,31 +2574,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_list_index_uses_2slot_header() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "elem".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "elem".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "idx".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("elem".to_string()),
-                            expr: Expr::ListIndex(
-                                Box::new(Expr::List(vec![Expr::Decimal(99)])),
-                                Box::new(Expr::Decimal(0)),
-                            ),
-                            timeout: None, modifiers: vec![],
-                        },
-                    ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                        Statement::Assign(Expr::Identifier("elem".to_string(), Expr::ListIndex( Box::new(Expr::List(vec![Expr::Decimal(99)])) Box::new(Expr::Decimal(0)) ), ],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3627,7 +2591,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // ListIndex must load data_ptr from slot 0 before GEP
         assert!(output.contains("load i64, ptr"), "Should load data_ptr. Got: {}", output);
@@ -3637,28 +2600,17 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_list_len_loads_length() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "len".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "len".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "chk_len".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("len".to_string()),
-                            expr: Expr::Projection { source: Box::new(Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2)])), target: ProjectionTarget::Size },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("len".to_string(), Expr::Projection { source: Box::new(Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2)]), target: ProjectionTarget::Size }),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3666,7 +2618,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Size projection must load length from slot 1, NOT return constant 0
         assert!(output.contains("load i64, ptr"), "Size projection should load from memory. Got: {}", output);
@@ -3675,34 +2626,17 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_slice_emits_copy_loop() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "sliced".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "sliced".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "slice_op".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("sliced".to_string()),
-                            expr: Expr::Slice {
-                                value: Box::new(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)])),
-                                start: Some(Box::new(Expr::Decimal(1))),
-                                end: Some(Box::new(Expr::Decimal(3))),
-                                stride: None,
-                                mask: None,
-                            },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("sliced".to_string(), Expr::Slice { value: Box::new(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)])) start: Some(Box::new(Expr::Decimal(1))) end: Some(Box::new(Expr::Decimal(3))) stride: None mask: None }),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3710,7 +2644,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Slice should emit a counted loop (phi + icmp + br)
         assert!(output.contains("phi i64"), "Slice should emit a phi. Got: {}", output);
@@ -3721,31 +2654,17 @@ let spec = crate::target_spec::TargetSpec {
     fn test_multislice_index_delegates() {
         let mut backend = LlvmBackend::new();
         let mkv: Vec<Expr> = (0..5).map(|i| Expr::Decimal(i)).collect();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "v".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "m".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("v".to_string()),
-                            expr: Expr::MultiSlice {
-                                value: Box::new(Expr::List(mkv)),
-                                ops: vec![BracketOp::Coord(SliceCoordinate::Index(Box::new(Expr::Decimal(2))))],
-                            },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("v".to_string(), Expr::MultiSlice { value: Box::new(Expr::List(mkv)) ops: vec![BracketOp::Coord(SliceCoordinate::Index(Box::new(Expr::Decimal(2))))]),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3753,7 +2672,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // MultiSlice with single Index should load data_ptr and GEP
         assert!(output.contains("getelementptr i64, ptr"), "Should GEP. Got: {}", output);
@@ -3764,28 +2682,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_tuple_emits_2slot_header() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "t".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "t".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "mktup".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("t".to_string()),
-                            expr: Expr::Tuple(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]),
-                            timeout: None, modifiers: vec![],
-                        },
-                    ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                        Statement::Assign(Expr::Identifier("t".to_string(), Expr::Tuple(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3)]), ],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3793,7 +2699,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // 2026-06-29: Tuple uses malloc instead of alloca — see docs/plans/2026-06-29-list-allocation-fix.md
         assert!(output.contains("call ptr @malloc(i64 40)"), "3-elem tuple = 40 bytes (5 slots × 8). Got: {}", output);
@@ -3803,14 +2708,9 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_tuple_destructure_binds_variables() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "val".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "val".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "destr".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
@@ -3819,22 +2719,10 @@ let spec = crate::target_spec::TargetSpec {
                             name: "$a_b".to_string(), ty: None,
                             expr: Some(Expr::TupleDestructure(
                                 vec!["a".to_string(), "b".to_string()],
-                                Box::new(Expr::Tuple(vec![Expr::Decimal(5), Expr::Decimal(6)])),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("val".to_string()),
-                            expr: Expr::Identifier("b".to_string()),
-                            timeout: None, modifiers: vec![],
-                        },
-                    ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                                Box::new(Expr::Tuple(vec![Expr::Decimal(5), Expr::Decimal(6)]), ), address_expr: None, modifiers: vec![],,
+                        Statement::Assign(Expr::Identifier("val".to_string(), Expr::Identifier("b".to_string()), ],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3842,7 +2730,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("%tdr"), "Should bind destructured vars. Got: {}", output);
     }
@@ -3850,29 +2737,17 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_list_index_assign_non_ssa() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "xs".to_string(), ty: Type::int(),
-                    expr: Some(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)])),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(Expr::List(vec![Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30)]), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "update".to_string(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::ListIndex(Box::new(Expr::Identifier("xs".to_string())), Box::new(Expr::Decimal(1))),
-                            expr: Expr::Decimal(99),
-                            timeout: None, modifiers: vec![],
-                        },
-                    ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                        Statement::Assign(Expr::ListIndex(Box::new(Expr::Identifier("xs".to_string()), Box::new(Expr::Decimal(1)), Expr::Decimal(99), ],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                                  outputs: Vec::new(),
                  output_type: None,
@@ -3880,7 +2755,6 @@ let spec = crate::target_spec::TargetSpec {
              }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("inttoptr i64"), "Should inttoptr list ptr. Output:\n{}", output);
         // store into list element: store i64 %t..., i64* %lep...
@@ -3890,32 +2764,22 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_slice_full_range_emitted() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "xs".into(), ty: Type::int(),
-                    expr: Some(Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3), Expr::Decimal(4), Expr::Decimal(5)])),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(Expr::List(vec![Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3), Expr::Decimal(4), Expr::Decimal(5)]), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "slice".into(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("xs".into()),
-                            expr: Expr::Slice { value: Box::new(Expr::Identifier("xs".into())), start: Some(Box::new(Expr::Decimal(1))), end: Some(Box::new(Expr::Decimal(3))), stride: None, mask: None },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("xs".into(), Expr::Slice { value: Box::new(Expr::Identifier("xs".into()), start: Some(Box::new(Expr::Decimal(1)), end: Some(Box::new(Expr::Decimal(3)), stride: None, mask: None }),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false, dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![], outputs: Vec::new(), output_type: None, derivation: None,
                     metadata: HashMap::new(),
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Slice with start/end should emit a copy loop
         assert!(output.contains("phi") || output.contains("icmp"), "Slice should produce loop. Output:\n{}", output);
@@ -3924,43 +2788,26 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_slice_with_stride_emits_step_loop() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "xs".into(), ty: Type::int(),
                     expr: Some(Expr::List(vec![
                         Expr::Decimal(10), Expr::Decimal(20), Expr::Decimal(30),
                         Expr::Decimal(40), Expr::Decimal(50),
-                    ])),
-                    address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    ]), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "slice_stride".into(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("xs".into()),
-                            expr: Expr::Slice {
-                                value: Box::new(Expr::Identifier("xs".into())),
-                                start: Some(Box::new(Expr::Decimal(0))),
-                                end: Some(Box::new(Expr::Decimal(5))),
-                                stride: Some(Box::new(Expr::Decimal(2))),
-                                mask: None,
-                            },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("xs".into(), Expr::Slice { value: Box::new(Expr::Identifier("xs".into())) start: Some(Box::new(Expr::Decimal(0))) end: Some(Box::new(Expr::Decimal(5))) stride: Some(Box::new(Expr::Decimal(2))) mask: None }),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Stride 2 should produce ceil(5/2)=3 copied elements (indices 0,2,4)
         assert!(output.contains("udiv"), "Strided slice should emit udiv for ceil division. Output:\n{}", output);
@@ -3970,44 +2817,23 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_slice_with_mask_emits_filter() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "x".into(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    name: "x".into(), ty: Type::int(),
+                    span: None),
                 TopLevel::Transaction(Transaction {
                     name: "slice_mask".into(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("x".into()),
-                            expr: Expr::Slice {
-                                value: Box::new(Expr::List(vec![
-                                    Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3),
-                                ])),
-                                start: Some(Box::new(Expr::Decimal(0))),
-                                end: Some(Box::new(Expr::Decimal(3))),
-                                stride: None,
-                                mask: Some(Box::new(Expr::Gt(
-                                    Box::new(Expr::Identifier("_".into())),
-                                    Box::new(Expr::Decimal(1)),
-                                ))),
-                            },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("x".into(), Expr::Slice { value: Box::new(Expr::List(vec![ Expr::Decimal(1), Expr::Decimal(2), Expr::Decimal(3) ])) start: Some(Box::new(Expr::Decimal(0))) end: Some(Box::new(Expr::Decimal(3))) stride: None mask: Some(Box::new(Expr::BinaryOp(BinaryOpKind::Gt Box::new(Expr::Identifier("_".into()), Box::new(Expr::Decimal(1)) ))) }),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Mask should emit @llvm.trap() or icmp/br for mask evaluation
         assert!(output.contains("icmp") || output.contains("br i1"),
@@ -4018,39 +2844,23 @@ let spec = crate::target_spec::TargetSpec {
     fn test_multislice_range_emits_copy_loop() {
         let mut backend = LlvmBackend::new();
         let mkv: Vec<Expr> = (0..5).map(|i| Expr::Decimal(i)).collect();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    name: "v".into(), ty: Type::int(),
+                    span: None),
                 TopLevel::Transaction(Transaction {
                     name: "mr".into(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("v".into()),
-                            expr: Expr::MultiSlice {
-                                value: Box::new(Expr::List(mkv)),
-                                ops: vec![BracketOp::Coord(SliceCoordinate::Range {
-                                    start: Some(Box::new(Expr::Decimal(1))),
-                                    end: Some(Box::new(Expr::Decimal(4))),
-                                })],
-                            },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("v".into(), Expr::MultiSlice { value: Box::new(Expr::List(mkv)) ops: vec![BracketOp::Coord(SliceCoordinate::Range { start: Some(Box::new(Expr::Decimal(1))) end: Some(Box::new(Expr::Decimal(4))) })]),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Range should emit a copy loop (phi + icmp)
         assert!(output.contains("phi i64"), "MultiSlice Range should emit phi. Output:\n{}", output);
@@ -4061,36 +2871,23 @@ let spec = crate::target_spec::TargetSpec {
     fn test_multislice_stride_emits_step_loop() {
         let mut backend = LlvmBackend::new();
         let mkv: Vec<Expr> = (0..6).map(|i| Expr::Decimal(i)).collect();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    name: "v".into(), ty: Type::int(),
+                    span: None),
                 TopLevel::Transaction(Transaction {
                     name: "ms".into(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("v".into()),
-                            expr: Expr::MultiSlice {
-                                value: Box::new(Expr::List(mkv)),
-                                ops: vec![BracketOp::Stride(Box::new(Expr::Decimal(2)))],
-                            },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("v".into(), Expr::MultiSlice { value: Box::new(Expr::List(mkv)) ops: vec![BracketOp::Stride(Box::new(Expr::Decimal(2)))]),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Stride should emit a step loop with phi + add + icmp
         assert!(output.contains("phi i64"), "MultiSlice Stride should emit phi. Output:\n{}", output);
@@ -4101,39 +2898,23 @@ let spec = crate::target_spec::TargetSpec {
     fn test_multislice_mask_emits_filter_loop() {
         let mut backend = LlvmBackend::new();
         let mkv: Vec<Expr> = (0..4).map(|i| Expr::Decimal(i)).collect();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "v".into(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    name: "v".into(), ty: Type::int(),
+                    span: None),
                 TopLevel::Transaction(Transaction {
                     name: "mm".into(), is_reactive: false, parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("v".into()),
-                            expr: Expr::MultiSlice {
-                                value: Box::new(Expr::List(mkv)),
-                                ops: vec![BracketOp::Mask(Box::new(Expr::Gt(
-                                    Box::new(Expr::Identifier("_".into())),
-                                    Box::new(Expr::Decimal(1)),
-                                )))],
-                            },
-                            timeout: None, modifiers: vec![],
-                        },
+                        Statement::Assign(Expr::Identifier("v".into(), Expr::MultiSlice { value: Box::new(Expr::List(mkv)) ops: vec![BracketOp::Mask(Box::new(Expr::BinaryOp(BinaryOpKind::Gt Box::new(Expr::Identifier("_".into()), Box::new(Expr::Decimal(1)) )))]),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], is_async: false,
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None, is_async: false,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(), output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Mask should emit a filter loop with br i1 branching on mask eval
         assert!(output.contains("phi i64"), "MultiSlice Mask should emit phi. Output:\n{}", output);
@@ -4143,17 +2924,11 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_map_literal_emitted() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "m".into(), ty: Type::Custom("Map".into()),
-                    expr: Some(Expr::MapLiteral(vec![(Expr::Quoted("a".into()), Expr::Decimal(1))])),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "m".into(), ty: Type::Custom("Map".into(), expr: Some(Expr::MapLiteral(vec![(Expr::Quoted("a".into(), Expr::Decimal(1))]), span: None),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // MapLiteral falls through to stub — should not crash
         assert!(!output.is_empty());
@@ -4162,17 +2937,11 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_set_literal_emitted() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "s".into(), ty: Type::Custom("Set".into()),
-                    expr: Some(Expr::SetLiteral(vec![Expr::Decimal(1), Expr::Decimal(2)])),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "s".into(), ty: Type::Custom("Set".into(), expr: Some(Expr::SetLiteral(vec![Expr::Decimal(1), Expr::Decimal(2)]), span: None),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(!output.is_empty());
     }
@@ -4180,17 +2949,12 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_projection_keys_stub() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "k".into(), ty: Type::int(),
-                    expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into())), target: ProjectionTarget::Keys }),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(Expr::Call("Keys#".to_string(), vec![Expr::Identifier("m".to_string())]), span: None),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(!output.is_empty());
     }
@@ -4198,17 +2962,12 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_projection_contains_stub() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "c".into(), ty: Type::bool_(),
-                    expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into())), target: ProjectionTarget::Contains(Box::new(Expr::Quoted("k".into()))) }),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    expr: Some(Expr::Projection { source: Box::new(Expr::Identifier("m".into()), target: ProjectionTarget::Contains(Box::new(Expr::Quoted("k".into()))) }), span: None),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(!output.is_empty());
     }
@@ -4220,7 +2979,7 @@ let spec = crate::target_spec::TargetSpec {
     fn make_let_check_program(
         body: Vec<Statement>,
         type_defs: Vec<TopLevel>,
-    ) -> Program {
+    ) -> Vec<TopLevel> {
         let mut items: Vec<TopLevel> = type_defs;
         items.push(TopLevel::Transaction(Transaction {
             name: "main".into(),
@@ -4229,15 +2988,9 @@ let spec = crate::target_spec::TargetSpec {
             parameters: vec![],
             contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
             body,
-            reactor_speed: None,
             span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             outputs: vec![],
             output_type: None,
             derivation: None,
@@ -4245,9 +2998,8 @@ let spec = crate::target_spec::TargetSpec {
         Program { items, ..empty_program() }
     }
 
-    fn make_intrinsic_program(intrinsic: Expr) -> Program {
-        Program {
-            items: vec![
+    fn make_intrinsic_program(intrinsic: Expr) -> Vec<TopLevel> {
+        vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4257,23 +3009,12 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::int()),
-                            expr: Some(intrinsic),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            ty: Some(Type::int(), expr: Some(intrinsic), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
                     derivation: None,
@@ -4287,10 +3028,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_intrinsic_sqrt_emits_llvm_sqrt() {
         let mut backend = LlvmBackend::new();
         let program = make_intrinsic_program(
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::Sqrt,
-                args: vec![Expr::Float(9.0)],
-            }
+             Expr::Call("".to_string(), vec![])
         );
         let output = backend.generate(&program);
         assert!(output.contains("call float @llvm.sqrt.f32"),
@@ -4301,10 +3039,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_intrinsic_abs_emits_llvm_abs() {
         let mut backend = LlvmBackend::new();
         let program = make_intrinsic_program(
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::Abs,
-                args: vec![Expr::Decimal(-42)],
-            }
+             Expr::Call("".to_string(), vec![])
         );
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @llvm.abs.i64"),
@@ -4315,10 +3050,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_intrinsic_ctpop_emits_llvm_ctpop() {
         let mut backend = LlvmBackend::new();
         let program = make_intrinsic_program(
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::Ctpop,
-                args: vec![Expr::Decimal(255)],
-            }
+             Expr::Call("".to_string(), vec![])
         );
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @llvm.ctpop.i64"),
@@ -4329,10 +3061,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_intrinsic_ctlz_emits_llvm_ctlz() {
         let mut backend = LlvmBackend::new();
         let program = make_intrinsic_program(
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::Ctlz,
-                args: vec![Expr::Decimal(1)],
-            }
+             Expr::Call("".to_string(), vec![])
         );
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @llvm.ctlz.i64"),
@@ -4343,10 +3072,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_intrinsic_cttz_emits_llvm_cttz() {
         let mut backend = LlvmBackend::new();
         let program = make_intrinsic_program(
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::Cttz,
-                args: vec![Expr::Decimal(8)],
-            }
+             Expr::Call("".to_string(), vec![])
         );
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @llvm.cttz.i64"),
@@ -4357,10 +3083,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_intrinsic_bitreverse_emits_llvm_bitreverse() {
         let mut backend = LlvmBackend::new();
         let program = make_intrinsic_program(
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::Bitreverse,
-                args: vec![Expr::Decimal(1)],
-            }
+             Expr::Call("".to_string(), vec![])
         );
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @llvm.bitreverse.i64"),
@@ -4371,8 +3094,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_intrinsic_fabs_emits_llvm_fabs() {
         let mut backend = LlvmBackend::new();
         // fabs returns float, so we use a float result slot
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4382,33 +3104,18 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::float()),
-                            expr: Some(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                                intrinsic: Intrinsic::Fabs,
-                                args: vec![Expr::Float(-3.5)],
-                            }),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            ty: Some(Type::float(), expr: Some( Expr::Call("".to_string(), vec![]), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call float @llvm.fabs.f32"),
             "fabs# should emit call to llvm.fabs.f32. Got:\n{}", output);
@@ -4417,8 +3124,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_intrinsic_floor_emits_llvm_floor() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4428,33 +3134,18 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::float()),
-                            expr: Some(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                                intrinsic: Intrinsic::Floor,
-                                args: vec![Expr::Float(3.8)],
-                            }),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            ty: Some(Type::float(), expr: Some( Expr::Call("".to_string(), vec![]), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call float @llvm.floor.f32"),
             "floor# should emit call to llvm.floor.f32. Got:\n{}", output);
@@ -4463,8 +3154,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_intrinsic_ceil_emits_llvm_ceil() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4474,33 +3164,18 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::float()),
-                            expr: Some(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                                intrinsic: Intrinsic::Ceil,
-                                args: vec![Expr::Float(3.2)],
-                            }),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            ty: Some(Type::float(), expr: Some( Expr::Call("".to_string(), vec![]), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call float @llvm.ceil.f32"),
             "ceil# should emit call to llvm.ceil.f32. Got:\n{}", output);
@@ -4509,8 +3184,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_emit_is_type() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4520,43 +3194,28 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::bool_()),
-                            expr: Some(Expr::IsType(
-                                Box::new(Expr::Decimal(42)),
-                                crate::ast::IsTarget::Type(Type::int()),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            ty: Some(Type::bool_(), expr: Some(Expr::IsType(
+                                Box::new(Expr::Decimal(42), crate::ast::IsTarget::Type(Type::int(), ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
-        assert!(output.contains("add i64 0, 1 ; is type"),
+        assert!(output.contains("add i64 0, 1; is type"),
             "IsType should emit add i64 0, 1. Got:\n{}", output);
     }
 
     #[test]
     fn test_emit_from_check() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4566,68 +3225,44 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::bool_()),
-                            expr: Some(Expr::FromCheck(
-                                Box::new(Expr::Decimal(42)),
-                                Type::int(),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            ty: Some(Type::bool_(), expr: Some(Expr::FromCheck(
+                                Box::new(Expr::Decimal(42), Type::int(),
+                            ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
-        assert!(output.contains("add i64 0, 1 ; from"),
+        assert!(output.contains("add i64 0, 1; from"),
             "FromCheck should emit add i64 0, 1. Got:\n{}", output);
     }
 
     #[test]
     fn test_emit_like_int() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: true,
                     parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
                         Statement::Let {
-                            name: "r".into(), ty: Some(Type::bool_()),
-                            expr: Some(Expr::Like(
-                                Box::new(Expr::Decimal(42)),
-                                Box::new(Expr::Decimal(1)),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                            name: "r".into(), ty: Some(Type::bool_(), expr: Some(Expr::Like(
+                                Box::new(Expr::Decimal(42), Box::new(Expr::Decimal(1), ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Like(42, 1) constant-folds to false → xor i1 true, true
         assert!(output.contains("xor i1 true, true") || output.contains("add i64 0, 0"),
@@ -4637,14 +3272,10 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_emit_like_int_equal() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "x".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)), address: None,
-                    bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    span: None),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4654,33 +3285,19 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::bool_()),
-                            expr: Some(Expr::Like(
-                                Box::new(Expr::Identifier("x".to_string())),
-                                Box::new(Expr::Decimal(42)),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![],
-                            constraint: None,
-                        },
+                            ty: Some(Type::bool_(), expr: Some(Expr::Like(
+                                Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(42), ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None,
                     span: None,
-                    is_lambda: false,
-                    dependencies: vec![],
-
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     outputs: vec![],
                     output_type: None,
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Like(x, 42): x is 0, so 0 != 42 → xor i1 true, true → false
         assert!(!output.contains("add i64 0, 1") || output.contains("and i1 true, true"),
@@ -4690,8 +3307,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_emit_cast_int_to_string() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4701,25 +3317,16 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::string()),
-                            expr: Some(Expr::Cast(
-                                Box::new(Expr::Decimal(42)),
-                                Type::string(),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                            ty: Some(Type::string(), expr: Some(Expr::Cast(
+                                Box::new(Expr::Decimal(42), Type::string(),
+                            ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @__int_to_str__(i64"),
             "Cast Int -> String should call __int_to_str__. Got:\n{}", output);
@@ -4728,8 +3335,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_emit_cast_string_to_int() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4739,25 +3345,16 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::int()),
-                            expr: Some(Expr::Cast(
-                                Box::new(Expr::Quoted("42".into())),
-                                Type::int(),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                            ty: Some(Type::int(), expr: Some(Expr::Cast(
+                                Box::new(Expr::Quoted("42".into()), Type::int(),
+                            ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call i64 @__str_to_int"),
             "Cast String -> Int should call __str_to_int. Got:\n{}", output);
@@ -4766,8 +3363,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_emit_cast_char_to_string() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4777,25 +3373,16 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::string()),
-                            expr: Some(Expr::Cast(
-                                Box::new(Expr::Char('A')),
-                                Type::string(),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                            ty: Some(Type::string(), expr: Some(Expr::Cast(
+                                Box::new(Expr::Char('A'), Type::string(),
+                            ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call ptr @malloc(i64 24)"),
             "Cast Char -> String should allocate cap/len/data struct. Got:\n{}", output);
@@ -4806,8 +3393,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_emit_cast_int_to_float() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(),
                     is_async: false,
@@ -4817,25 +3403,16 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "r".into(),
-                            ty: Some(Type::float()),
-                            expr: Some(Expr::Cast(
-                                Box::new(Expr::Decimal(42)),
-                                Type::float(),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                            ty: Some(Type::float(), expr: Some(Expr::Cast(
+                                Box::new(Expr::Decimal(42), Type::float(),
+                            ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("sitofp"),
             "Cast Int -> Float should emit sitofp. Got:\n{}", output);
@@ -4847,14 +3424,10 @@ let spec = crate::target_spec::TargetSpec {
     fn test_boxing_bool_field_guard() {
         // Bool assignment inside a guarded block storing to an i8 state field.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "flag".to_string(), ty: Type::bool_(),
-                    expr: Some(Expr::Bool(false)), address: None,
-                    bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::Bool(false), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
                     parameters: vec![],
@@ -4863,25 +3436,16 @@ let spec = crate::target_spec::TargetSpec {
                         Statement::Guarded {
                             condition: Expr::Bool(true),
                             statements: vec![
-                                Statement::Assignment {
-                                    lhs: Expr::Identifier("flag".to_string()),
-                                    expr: Expr::Bool(true),
-                                    timeout: None, modifiers: vec![],
-                                },
-                            ],
+                                Statement::Assign(Expr::Identifier("flag".to_string(), Expr::Bool(true), ],
                             metadata: HashMap::new(),
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("zext i1"),
             "Bool field store should zext i1 to i64. Got:\n{}", output);
@@ -4891,32 +3455,25 @@ let spec = crate::target_spec::TargetSpec {
     fn test_boxing_bool_param_guard() {
         // Callable txn with Bool param used in a guard condition.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "check".into(), is_async: false, is_reactive: false,
                     parameters: vec![("p".to_string(), Type::bool_())],
-                    output_type: Some(OutputType::Single(Type::int())),
-                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    output_type: Some(OutputType::Single(Type::int()), contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
                         Statement::Guarded {
-                            condition: Expr::Identifier("p".to_string()),
-                            statements: vec![
+                            condition: Expr::Identifier("p".to_string(), statements: vec![
                                 Statement::Term { values: vec![Some(Expr::Decimal(1))], modifiers: vec![], swan_song: None },
                             ],
                             metadata: HashMap::new(),
                         },
                         Statement::Term { values: vec![Some(Expr::Decimal(0))], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // The callable txn function @check should trunc the boxed bool param to i1.
         // Search in the output for the function definition containing @check.
@@ -4932,8 +3489,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_boxing_bool_in_tuple() {
         // Tuple literal containing Bool. Must zext i1 to i64 before storing.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
                     parameters: vec![],
@@ -4944,21 +3500,14 @@ let spec = crate::target_spec::TargetSpec {
                             expr: Some(Expr::Tuple(vec![
                                 Expr::Bool(true),
                                 Expr::Decimal(42),
-                            ])),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                            ]), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("zext i1"),
             "Bool in tuple should zext i1 to i64. Got:\n{}", output);
@@ -4968,14 +3517,10 @@ let spec = crate::target_spec::TargetSpec {
     fn test_boxing_string_field_load() {
         // String state field load → must box via ptrtoint.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(), ty: Type::string(),
-                    expr: Some(Expr::Quoted("hello".into())), address: None,
-                    bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::Quoted("hello".into()), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
                     parameters: vec![],
@@ -4983,21 +3528,14 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "x".into(), ty: None,
-                            expr: Some(Expr::Identifier("s".to_string())),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                            expr: Some(Expr::Identifier("s".to_string()), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("ptrtoint ptr"),
             "String field should ptrtoint ptr to i64. Got:\n{}", output);
@@ -5007,14 +3545,10 @@ let spec = crate::target_spec::TargetSpec {
     fn test_boxing_char_literal() {
         // Char literal returns Type::int() (already boxed to i64 via zext i32).
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "ch".to_string(), ty: Type::char_(),
-                    expr: Some(Expr::Char('A')), address: None,
-                    bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::Char('A'), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: true,
                     parameters: vec![],
@@ -5022,21 +3556,14 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Let {
                             name: "c".into(), ty: None,
-                            expr: Some(Expr::Identifier("ch".to_string())),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                            expr: Some(Expr::Identifier("ch".to_string()), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // The init_state function stores the default char value, using zext i32 to i64.
         assert!(output.contains("zext i32") && output.contains("to i64"),
@@ -5047,32 +3574,24 @@ let spec = crate::target_spec::TargetSpec {
     fn test_boxing_callable_txn_bool_ret() {
         // Callable txn (has params) returning Bool — boxes i1 to i64 for result slot.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Transaction(Transaction {
                     name: "check".into(), is_async: false, is_reactive: false,
                     parameters: vec![("x".to_string(), Type::int())],
-                    output_type: Some(OutputType::Single(Type::bool_())),
-                    contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
+                    output_type: Some(OutputType::Single(Type::bool_()), contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
                         Statement::Term {
-                            values: vec![Some(Expr::Lt(
-                                Box::new(Expr::Identifier("x".to_string())),
-                                Box::new(Expr::Decimal(10)),
-                            ))],
+                            values: vec![Some(Expr::BinaryOp(BinaryOpKind::Lt, 
+                                Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(10), ))],
                             modifiers: vec![],
                             swan_song: None,
                         },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("zext i1"),
             "Bool return should zext i1 to i64. Got:\n{}", output);
@@ -5082,27 +3601,18 @@ let spec = crate::target_spec::TargetSpec {
     fn test_boxing_bool_and_guard() {
         // Guard with `&&` between comparison (i1) and Bool var (i64).
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "flag".to_string(), ty: Type::bool_(),
-                    expr: Some(Expr::Bool(true)), address: None,
-                    bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::Bool(true), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
                     parameters: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
                         Statement::Guarded {
-                            condition: Expr::And(
-                                Box::new(Expr::Ne(
-                                    Box::new(Expr::Identifier("flag".to_string())),
-                                    Box::new(Expr::Bool(false)),
-                                )),
-                                Box::new(Expr::Bool(true)),
-                            ),
+                            condition: Expr::BinaryOp(BinaryOpKind::And, 
+                                Box::new(Expr::BinaryOp(BinaryOpKind::Neq, Box::new(Expr::Identifier("flag".to_string()), Box::new(Expr::Bool(false), ), Box::new(Expr::Bool(true), ),
                             statements: vec![
                                 Statement::Term { values: vec![Some(Expr::Decimal(1))], modifiers: vec![], swan_song: None },
                             ],
@@ -5110,15 +3620,11 @@ let spec = crate::target_spec::TargetSpec {
                         },
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("and i1"),
             "Guard && should produce and i1. Got:\n{}", output);
@@ -5127,14 +3633,10 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_arrow_push_emits_malloc_and_memcpy() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "list".to_string(), ty: Type::int(),
-                    expr: Some(Expr::List(vec![])),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::List(vec![]), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "push".into(), is_async: false, is_reactive: true,
                     parameters: vec![],
@@ -5146,44 +3648,33 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Expression(Expr::ArrowMut {
                             dir: ArrowDir::Push,
-                             consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
-                            index: Box::new(Expr::Term),
-                            value: Some(Box::new(Expr::Decimal(42))),
-                        }),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                             consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string()))), index: Box::new(Expr::Term),
+                            value: Some(Box::new(Expr::Decimal(42)), }),
+                        Statement::Term(None),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
-        assert!(output.contains("add i64 0, 0 ; push void")
+        assert!(output.contains("add i64 0, 0; push void")
             || (output.contains("call noalias ptr @malloc")
                 && output.contains("llvm.memcpy.p0i8.p0i8.i64")
                 && output.contains("!tbaa !1"))
             || (output.contains("load ptr, ptr")
                 && output.contains("getelementptr i8")
                 && output.contains("llvm.memcpy.p0i8.p0i8.i64")
-                && output.contains("!tbaa !1")),
-            "Arrow push should emit malloc+memcpy or arena bump+memcpy with TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
+                && output.contains("!tbaa !1"), "Arrow push should emit malloc+memcpy or arena bump+memcpy with TBAA. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
     }
 
     #[test]
     fn test_arrow_pop_emits_element_load_and_alloc() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "list".to_string(), ty: Type::int(),
-                    expr: Some(Expr::List(vec![])),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::List(vec![]), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "pop_main".into(), is_async: false, is_reactive: true,
                     parameters: vec![],
@@ -5195,21 +3686,16 @@ let spec = crate::target_spec::TargetSpec {
                     body: vec![
                         Statement::Expression(Expr::ArrowMut {
                             dir: ArrowDir::Pop,
-                             consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
-                            index: Box::new(Expr::Term),
+                             consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string()))), index: Box::new(Expr::Term),
                             value: None,
                         }),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!((output.contains("call noalias ptr @malloc") || output.contains("load ptr, ptr"))
             && output.contains("!tbaa !1"),
@@ -5219,14 +3705,10 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_arrow_discard_emits_malloc_and_memcpy() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "list".to_string(), ty: Type::int(),
-                    expr: Some(Expr::List(vec![])),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::List(vec![]), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "discard".into(), is_async: false, is_reactive: true,
                     parameters: vec![],
@@ -5237,20 +3719,15 @@ let spec = crate::target_spec::TargetSpec {
                     },
                     body: vec![
                         Statement::Expression(Expr::ArrowDiscard {
-                            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string())))),
-                            index: Box::new(Expr::Term),
+                            target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("list".to_string()))), index: Box::new(Expr::Term),
                         }),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!((output.contains("call noalias ptr @malloc") || output.contains("load ptr, ptr"))
             && output.contains("llvm.memcpy.p0i8.p0i8.i64"),
@@ -5260,20 +3737,13 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_arrow_transfer_emits_combined_alloc() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "dest".to_string(), ty: Type::int(),
-                    expr: Some(Expr::List(vec![])),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::List(vec![]), span: None),
                 TopLevel::StateDecl(StateDecl {
                     name: "src".to_string(), ty: Type::int(),
-                    expr: Some(Expr::List(vec![])),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::List(vec![]), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "transfer".into(), is_async: false, is_reactive: true,
                     parameters: vec![],
@@ -5283,21 +3753,15 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None, span: None,
                     },
                     body: vec![
-                        Statement::Expression(Expr::ArrowTransfer { consume: true, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string())))),
-                            source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string())))),
-                            filter: None,
+                        Statement::Expression(Expr::ArrowTransfer { consume: true, dest: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("dest".to_string()))), source: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("src".to_string()))), filter: None,
                         }),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("call noalias ptr @malloc") || output.contains("load ptr, ptr"),
             "Arrow transfer should emit malloc or arena bump for combined buffer. Got:\n{}", &output[..std::cmp::min(3000, output.len())]);
@@ -5308,25 +3772,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_llvm_pipe_frgn_declares_function() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::ForeignBinding {
                     name: "get_value".to_string(),
-                    toml_path: String::new(),
                     target: ForeignTarget::Native,
                     signature: ForeignSignature {
                         name: "get_value".to_string(),
                         location: String::new(),
                         wasm_impl: None, wasm_setup: None,
                         inputs: vec![],
-                        success_output: vec![("result".into(), Type::string())],
                         result_type: ResultType::Projection(vec![Type::string()]),
-                        error_type_name: String::new(), error_fields: vec![],
-                        input_layout: None, output_layout: None,
-                        precondition: None, postcondition: None,
-                        buffer_mode: None, ffi_kind: None, is_out: false,
-                        is_pipe: true,
-                        fallback: Some(Expr::Quoted("default".into())),
                         default_watchdog: None,
                         span: None,
                     },
@@ -5334,11 +3789,9 @@ let spec = crate::target_spec::TargetSpec {
                 },
                 TopLevel::Definition(Definition {
                     name: "main".to_string(),
-                    type_params: vec![],
                     parameters: vec![],
                     outputs: vec![],
                     output_type: None,
-                    output_names: vec![],
                     contract: Contract {
                         pre_condition: Expr::Bool(true),
                         post_condition: Expr::Bool(true),
@@ -5346,19 +3799,14 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Expression(Expr::Call("get_value".into(), vec![])),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Expression(Expr::Call("get_value".into(), vec![]), Statement::Term(None),
                     ],
-                    is_lambda: false,
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Should declare the frgn function
         assert!(output.contains("declare i64 @get_value()"),
@@ -5368,25 +3816,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_llvm_pipe_frgn_string_sentinel_check() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::ForeignBinding {
                     name: "get_str".to_string(),
-                    toml_path: String::new(),
                     target: ForeignTarget::Native,
                     signature: ForeignSignature {
                         name: "get_str".to_string(),
                         location: String::new(),
                         wasm_impl: None, wasm_setup: None,
                         inputs: vec![],
-                        success_output: vec![("result".into(), Type::string())],
                         result_type: ResultType::Projection(vec![Type::string()]),
-                        error_type_name: String::new(), error_fields: vec![],
-                        input_layout: None, output_layout: None,
-                        precondition: None, postcondition: None,
-                        buffer_mode: None, ffi_kind: None, is_out: false,
-                        is_pipe: true,
-                        fallback: Some(Expr::Quoted("fallback".into())),
                         default_watchdog: None,
                         span: None,
                     },
@@ -5394,11 +3833,9 @@ let spec = crate::target_spec::TargetSpec {
                 },
                 TopLevel::Definition(Definition {
                     name: "main".to_string(),
-                    type_params: vec![],
                     parameters: vec![],
                     outputs: vec![],
                     output_type: None,
-                    output_names: vec![],
                     contract: Contract {
                         pre_condition: Expr::Bool(true),
                         post_condition: Expr::Bool(true),
@@ -5406,19 +3843,14 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Expression(Expr::Call("get_str".into(), vec![])),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Expression(Expr::Call("get_str".into(), vec![]), Statement::Term(None),
                     ],
-                    is_lambda: false,
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // The pipe frgn for String should have a null-pointer check
         assert!(output.contains("icmp eq ptr"),
@@ -5431,25 +3863,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_llvm_pipe_frgn_float_sentinel_check() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::ForeignBinding {
                     name: "get_float".to_string(),
-                    toml_path: String::new(),
                     target: ForeignTarget::Native,
                     signature: ForeignSignature {
                         name: "get_float".to_string(),
                         location: String::new(),
                         wasm_impl: None, wasm_setup: None,
                         inputs: vec![],
-                        success_output: vec![("result".into(), Type::float())],
                         result_type: ResultType::Projection(vec![Type::float()]),
-                        error_type_name: String::new(), error_fields: vec![],
-                        input_layout: None, output_layout: None,
-                        precondition: None, postcondition: None,
-                        buffer_mode: None, ffi_kind: None, is_out: false,
-                        is_pipe: true,
-                        fallback: Some(Expr::Float(0.0)),
                         default_watchdog: None,
                         span: None,
                     },
@@ -5457,11 +3880,9 @@ let spec = crate::target_spec::TargetSpec {
                 },
                 TopLevel::Definition(Definition {
                     name: "main".to_string(),
-                    type_params: vec![],
                     parameters: vec![],
                     outputs: vec![],
                     output_type: None,
-                    output_names: vec![],
                     contract: Contract {
                         pre_condition: Expr::Bool(true),
                         post_condition: Expr::Bool(true),
@@ -5469,19 +3890,14 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Expression(Expr::Call("get_float".into(), vec![])),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Expression(Expr::Call("get_float".into(), vec![]), Statement::Term(None),
                     ],
-                    is_lambda: false,
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // The pipe frgn for Float should have a NaN check
         assert!(output.contains("fcmp uno"),
@@ -5491,25 +3907,16 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_llvm_pipe_frgn_int_no_sentinel() {
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::ForeignBinding {
                     name: "get_int".to_string(),
-                    toml_path: String::new(),
                     target: ForeignTarget::Native,
                     signature: ForeignSignature {
                         name: "get_int".to_string(),
                         location: String::new(),
                         wasm_impl: None, wasm_setup: None,
                         inputs: vec![],
-                        success_output: vec![("result".into(), Type::int())],
                         result_type: ResultType::Projection(vec![Type::int()]),
-                        error_type_name: String::new(), error_fields: vec![],
-                        input_layout: None, output_layout: None,
-                        precondition: None, postcondition: None,
-                        buffer_mode: None, ffi_kind: None, is_out: false,
-                        is_pipe: true,
-                        fallback: Some(Expr::Decimal(0)),
                         default_watchdog: None,
                         span: None,
                     },
@@ -5517,11 +3924,9 @@ let spec = crate::target_spec::TargetSpec {
                 },
                 TopLevel::Definition(Definition {
                     name: "main".to_string(),
-                    type_params: vec![],
                     parameters: vec![],
                     outputs: vec![],
                     output_type: None,
-                    output_names: vec![],
                     contract: Contract {
                         pre_condition: Expr::Bool(true),
                         post_condition: Expr::Bool(true),
@@ -5529,19 +3934,14 @@ let spec = crate::target_spec::TargetSpec {
                         watchdog: None,
                     },
                     body: vec![
-                        Statement::Expression(Expr::Call("get_int".into(), vec![])),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Expression(Expr::Call("get_int".into(), vec![]), Statement::Term(None),
                     ],
-                    is_lambda: false,
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Int returns should NOT have icmp eq ptr (no null check for ints)
         assert!(!output.contains("pipe_null"),
@@ -5571,17 +3971,12 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_embedded_rejects_string_state() {
         let mut backend = LlvmBackend::new().with_embedded_mode(true);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "buf".to_string(), ty: Type::string(),
-                    expr: Some(Expr::Quoted("".into())),
-                    address: None, bit_range: None, constraint: None,
-                    is_override: false, os_mode: false, span: None, attrs: vec![],
-                }),
+                    expr: Some(Expr::Quoted("".into()), span: None),
             ],
             ..empty_program()
-        };
         backend.check_embedded_restrictions(&program);
         let has_error = backend.warnings().iter().any(|w| w.contains("TargetError") && w.contains("String"));
         assert!(has_error, "Embedded mode should reject String state. Warnings: {:?}", backend.warnings());
@@ -5590,32 +3985,25 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_embedded_rejects_thread_intrinsic() {
         let mut backend = LlvmBackend::new().with_embedded_mode(true);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Definition(Definition {
                     name: "spawn".to_string(),
-                    type_params: vec![],
                     parameters: vec![],
                     outputs: vec![],
                     output_type: None,
-                    output_names: vec![],
                     contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), watchdog: None, span: None },
                     body: vec![
                         Statement::Expression(
-                            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: Intrinsic::ThreadCreate, args: vec![Expr::Decimal(0)] },
+                             Expr::Call("".to_string(), vec![]),
                         ),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
-                    is_lambda: false,
-                    annotations: vec![],
                     metadata: HashMap::new(),
                     modifiers: vec![],
-                    variant_bodies: vec![],
                     derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         backend.check_embedded_restrictions(&program);
         let has_error = backend.warnings().iter().any(|w| w.contains("TargetError") && w.contains("ThreadCreate"));
         assert!(has_error, "Embedded mode should reject ThreadCreate. Warnings: {:?}", backend.warnings());
@@ -5624,17 +4012,11 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_embedded_accepts_int_state() {
         let mut backend = LlvmBackend::new().with_embedded_mode(true);
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "counter".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, constraint: None,
-                    is_override: false, os_mode: false, span: None, attrs: vec![],
-                }),
+                    name: "counter".to_string(), ty: Type::int(), span: None),
             ],
             ..empty_program()
-        };
         backend.check_embedded_restrictions(&program);
         let has_error = backend.warnings().iter().any(|w| w.contains("TargetError"));
         assert!(!has_error, "Embedded mode should accept Int state. Warnings: {:?}", backend.warnings());
@@ -5657,7 +4039,6 @@ let spec = crate::target_spec::TargetSpec {
         let stmt = Statement::Await {
             expr: Expr::Call("compute".to_string(), vec![Expr::Decimal(42)]),
             modifiers: vec![],
-        };
         // emit_stmt will try to emit the call — in a minimal context it produces LLVM IR
         backend.emit_stmt(&mut out, &stmt, "");
         // Should at least reference the called function
@@ -5671,9 +4052,7 @@ let spec = crate::target_spec::TargetSpec {
         let inner = Statement::Expression(Expr::Call("work".to_string(), vec![]));
         let stmt = Statement::AsyncAwait {
             body: Box::new(inner),
-            lhs: Some("result".to_string()),
-            modifiers: vec![],
-        };
+            lhs: Some("result".to_string(), modifiers: vec![],
         backend.emit_stmt(&mut out, &stmt, "");
         // Should increment pending count
         assert_eq!(backend.pending_async_await_count, 1, "AsyncAwait should increment pending count");
@@ -5685,7 +4064,7 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         backend.pending_async_await_count = 2;
         let mut out = String::new();
-        let stmt = Statement::Term { values: vec![], modifiers: vec![], swan_song: None };
+        let stmt = Statement::Term(None);
         backend.emit_stmt(&mut out, &stmt, "");
         assert!(out.contains("__barrier_wait__"), "Term should emit barrier when pending > 0. Got:\n{}", out);
     }
@@ -5695,7 +4074,7 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         backend.pending_async_await_count = 0;
         let mut out = String::new();
-        let stmt = Statement::Term { values: vec![], modifiers: vec![], swan_song: None };
+        let stmt = Statement::Term(None);
         backend.emit_stmt(&mut out, &stmt, "");
         assert!(!out.contains("__barrier_wait__"), "Term should not emit barrier when pending == 0. Got:\n{}", out);
     }
@@ -5708,14 +4087,10 @@ let spec = crate::target_spec::TargetSpec {
         // Use a state field + string constant so precomputation cannot fold.
         // Without a runtime operand, the optimizer folds the concat at compile time.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
                     name: "s".to_string(), ty: Type::string(),
-                    expr: Some(Expr::Quoted("x".into())),
-                    address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    expr: Some(Expr::Quoted("x".into()), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "main".into(), is_async: false, is_reactive: false,
                     parameters: vec![],
@@ -5728,23 +4103,14 @@ let spec = crate::target_spec::TargetSpec {
                             name: "x".into(), ty: None,
                             expr: Some(Expr::Concat(
                                 // State field read = runtime-determined, cannot fold
-                                Box::new(Expr::Identifier("s".to_string())),
-                                Box::new(Expr::Quoted("world".into())),
-                            )),
-                            address: None, address_expr: None, bit_range: None,
-                            is_override: false, modifiers: vec![], constraint: None,
-                        },
+                                Box::new(Expr::Identifier("s".to_string()), Box::new(Expr::Quoted("world".into()), ), address_expr: None, modifiers: vec![],,
                         Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false,
-                    dependencies: vec![], modifiers: vec![],
-                    annotations: vec![],
-                    metadata: HashMap::new(),
-                    variant_bodies: vec![], outputs: vec![], output_type: None, derivation: None,
+                    reactor_speed: None, span: None, modifiers: vec![],
+                    metadata: HashMap::new(), outputs: vec![], output_type: None, derivation: None,
                 }),
             ],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         // Dump output for debugging if assertions fail
         let has_concat = output.contains("= and i64") && output.contains("-4");
@@ -5764,7 +4130,6 @@ let spec = crate::target_spec::TargetSpec {
             if line.contains("cam") && line.contains("and i64") {
                 assert!(!line.contains("-2"),
                     "Old -2 mask must not be used in concat header read. Line: {}", line);
-            }
         }
     }
 
@@ -5774,15 +4139,7 @@ let spec = crate::target_spec::TargetSpec {
         let body = vec![
             Statement::Let {
                 name: "x".to_string(),
-                ty: Some(Type::int()),
-                expr: Some(Expr::Decimal(-5)),
-                address: None, address_expr: None, bit_range: None,
-                is_override: false, modifiers: vec![],
-                constraint: Some(Box::new(Expr::Gt(
-                    Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Decimal(0)),
-                ))),
-            },
+                ty: Some(Type::int(), expr: Some(Expr::Decimal(-5), address_expr: None, modifiers: vec![]), Box::new(Expr::Decimal(0), )), },
             Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
         ];
         let output = backend.generate(&make_let_check_program(body, vec![]));
@@ -5799,39 +4156,26 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let td = TypeDef {
             name: "Positive".to_string(),
-            type_params: vec![],
-            bit_range: None,
-            base: Box::new(Expr::TypeRef("Int".into())),
-            body: TypeDefBody {
+            base: Box::new(Expr::TypeRef("Int".into()), body: TypeDefBody {
                 slots: vec![],
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![],
                 operators: vec![],
-            constraints: vec![Expr::Gt(
-                    Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Decimal(0)),
-                )],
+            constraints: vec![Expr::BinaryOp(BinaryOpKind::Gt, 
+                    Box::new(Expr::Identifier("_".to_string()), Box::new(Expr::Decimal(0), )],
                 span: None,
             },
             span: None,
-        };
         // Build TypeUniverse so the backend can look up guards
-        let tu_program = Program {
-            items: vec![TopLevel::TypeDef(Box::new(td))],
+        let tu_program = vec![TopLevel::TypeDef(Box::new(td))],
             ..empty_program()
-        };
         let tu = crate::type_universe::TypeUniverse::build(&tu_program);
         backend = LlvmBackend::new().with_type_universe(tu);
         let body = vec![
             Statement::Let {
                 name: "x".to_string(),
-                ty: Some(Type::Custom("Positive".to_string())),
-                expr: Some(Expr::Decimal(-5)),
-                address: None, address_expr: None, bit_range: None,
-                is_override: false, modifiers: vec![],
-                constraint: None,
-            },
+                ty: Some(Type::Custom("Positive".to_string()), expr: Some(Expr::Decimal(-5), address_expr: None, modifiers: vec![],,
             Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
         ];
         let output = backend.generate(&make_let_check_program(body, vec![]));
@@ -5847,15 +4191,7 @@ let spec = crate::target_spec::TargetSpec {
         let body = vec![
             Statement::Let {
                 name: "x".to_string(),
-                ty: Some(Type::int()),
-                expr: Some(Expr::Decimal(5)),
-                address: None, address_expr: None, bit_range: None,
-                is_override: false, modifiers: vec![],
-                constraint: Some(Box::new(Expr::Gt(
-                    Box::new(Expr::Identifier("_".to_string())),
-                    Box::new(Expr::Decimal(0)),
-                ))),
-            },
+                ty: Some(Type::int(), address_expr: None, modifiers: vec![]), Box::new(Expr::Decimal(0), )), },
             Statement::Term { values: vec![None], modifiers: vec![], swan_song: None },
         ];
         let output = backend.generate(&make_let_check_program(body, vec![]));
@@ -5871,44 +4207,32 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         // Construct a defn whose body calls fence#(0) via IntrinsicCall
         let mut body = Vec::new();
-        body.push(Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-            intrinsic: Intrinsic::Fence,
-            args: vec![Expr::Decimal(0)],
-        }));
+        body.push(Statement::Expression( Expr::Call("".to_string(), vec![])));
         body.push(Statement::Term { values: vec![Some(Expr::Decimal(0))], modifiers: vec![], swan_song: None });
         let defn = TopLevel::Definition(Definition {
             name: "main".to_string(),
-            type_params: vec![],
             parameters: vec![],
             outputs: vec![Type::int()],
-            output_type: Some(OutputType::Single(Type::int())),
-            output_names: vec![],
-            contract: Contract {
+            output_type: Some(OutputType::Single(Type::int()), contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
                 span: None,
                 watchdog: None,
             },
             body,
-            is_lambda: false,
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
         });
-        let program = Program {
-            items: vec![defn],
+        let program = vec![defn],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // Should contain undef instead of add i64 0, 0 for the void intrinsic
         assert!(output.contains("add i64 undef, 0"),
             "Fence should emit add i64 undef, not add i64 0, 0.\nGot:\n{}", output);
-        assert!(!output.contains("add i64 0, 0 ; fence"),
+        assert!(!output.contains("add i64 0, 0; fence"),
             "Fence should not emit the old add i64 0, 0 pattern.\nGot:\n{}", output);
     }
 
@@ -5916,41 +4240,29 @@ let spec = crate::target_spec::TargetSpec {
     fn test_void_intrinsic_halt_uses_undef() {
         let mut backend = LlvmBackend::new();
         let mut body = Vec::new();
-        body.push(Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-            intrinsic: Intrinsic::Halt,
-            args: vec![],
-        }));
+        body.push(Statement::Expression( Expr::Call("".to_string(), vec![])));
         body.push(Statement::Term { values: vec![Some(Expr::Decimal(0))], modifiers: vec![], swan_song: None });
         let defn = TopLevel::Definition(Definition {
             name: "main".to_string(),
-            type_params: vec![],
             parameters: vec![],
             outputs: vec![Type::int()],
-            output_type: Some(OutputType::Single(Type::int())),
-            output_names: vec![],
-            contract: Contract {
+            output_type: Some(OutputType::Single(Type::int()), contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
                 span: None,
                 watchdog: None,
             },
             body,
-            is_lambda: false,
-            annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
         });
-        let program = Program {
-            items: vec![defn],
+        let program = vec![defn],
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
-        assert!(output.contains("add i64 undef, 0 ; halt is void"),
+        assert!(output.contains("add i64 undef, 0; halt is void"),
             "Halt should emit add i64 undef.\nGot:\n{}", output);
     }
 
@@ -5958,16 +4270,12 @@ let spec = crate::target_spec::TargetSpec {
     fn test_inop_declaration_emission() {
         let inop = TopLevel::Inop(InopDeclaration {
             name: "sadd".into(),
-            type_params: vec![],
-            params: vec![("a".into(), Type::int()), ("b".into(), Type::int())],
+            params: vec![("a".into(), Type::int(), ("b".into(), Type::int())],
             outputs: vec![Type::int()],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            llvm_body: vec!["%res = add i64 %a, %b;".into(), "term %res;".into()],
-            fallback: None,
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true), llvm_body: vec!["%res = add i64 %a, %b;".into(), "term %res;".into()],
             has_side_effects: false,
             has_state_access: false,
             section: None,
-            llvm_body_spans: vec![],
             span: None,
         });
         let program = Program { items: vec![inop], ..empty_program() };
@@ -5990,22 +4298,15 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let inop = TopLevel::Inop(InopDeclaration {
             name: "init_hook".to_string(),
-            type_params: vec![],
             params: vec![],
             outputs: vec![Type::int()],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            llvm_body: vec!["%r = add i64 0, 42".into(), "term %r;".into()],
-            fallback: None,
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true), llvm_body: vec!["%r = add i64 0, 42".into(), "term %r;".into()],
             has_side_effects: false,
             has_state_access: false,
-            section: Some(".init_array".into()),
-            llvm_body_spans: vec![],
-            span: None,
+            section: Some(".init_array".into(), span: None,
         });
-        let program = Program {
-            items: vec![inop],
+        let program = vec![inop],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("section \".init_array\""),
             "inop with #section should emit LLVM section attribute.\nGot:\n{}", output);
@@ -6016,22 +4317,16 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let inop = TopLevel::Inop(InopDeclaration {
             name: "write_buf".to_string(),
-            type_params: vec![],
             params: vec![("val".to_string(), Type::int())],
             outputs: vec![Type::bool_()],
-            contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-            llvm_body: vec!["term %val;".to_string()],
-            fallback: None,
+            contract: Contract::new(Expr::Bool(true), Expr::Bool(true), llvm_body: vec!["term %val;".to_string()],
             has_side_effects: true,
             has_state_access: false,
             section: None,
-            llvm_body_spans: vec![],
             span: None,
         });
-        let program = Program {
-            items: vec![inop],
+        let program = vec![inop],
             ..empty_program()
-        };
         let output = backend.generate(&program);
         assert!(output.contains("define internal i64 @write_buf"),
             "inop should be named write_buf.\nGot:\n{}", output);
@@ -6045,29 +4340,21 @@ let spec = crate::target_spec::TargetSpec {
         // Verify that projection usage triggers cache slot appending to %State.
         // Create a state field "x" with a transaction that applies projections.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "x".into(), ty: Type::int(), expr: None,
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "x".into(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "t".into(),
                     parameters: vec![],
-                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                    body: vec![
+                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![
                         Statement::Expression(Expr::Projection {
-                            source: Box::new(Expr::Identifier("x".into())),
-                            target: ProjectionTarget::Size,
+                            source: Box::new(Expr::Identifier("x".into()), target: ProjectionTarget::Size,
                         }),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
                     is_async: false, is_reactive: false, reactor_speed: None,
-                    span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    span: None,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(), output_type: None, derivation: None,
                 }),
@@ -6075,14 +4362,11 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // With single-lens usage, no cache slots should be appended.
         // %State should still be just `{ i64 }`
         assert!(!output.contains("cache"), "single-lens → no cache slots in %State: {}", output);
-        assert!(backend.ctx.field_modes.is_empty() || backend.ctx.field_modes.values().all(|m| matches!(m, crate::analysis::FieldMode::Always)),
-            "single-lens → all fields Always");
+        assert!(backend.ctx.field_modes.is_empty() || backend.ctx.field_modes.values().all(|m| matches!(m, crate::analysis::FieldMode::Always), "single-lens → all fields Always");
         assert!(backend.ctx.cache_slots.is_empty(), "single-lens → no cache slots");
     }
 
@@ -6090,34 +4374,25 @@ let spec = crate::target_spec::TargetSpec {
     fn test_cached_projection_hot_dual_path() {
         // Verify that dual-lens projection usage generates cache-aware Hot Dual IR.
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "x".into(), ty: Type::int(), expr: None,
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "x".into(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "t".into(),
                     parameters: vec![],
-                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                    body: vec![
+                    contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![
                         // Apply two different projections to create dual-lens usage
                         Statement::Expression(Expr::Projection {
-                            source: Box::new(Expr::Identifier("x".into())),
-                            target: ProjectionTarget::Size,
+                            source: Box::new(Expr::Identifier("x".into()), target: ProjectionTarget::Size,
                         }),
                         Statement::Expression(Expr::Projection {
-                            source: Box::new(Expr::Identifier("x".into())),
-                            target: ProjectionTarget::Ptr,
+                            source: Box::new(Expr::Identifier("x".into()), target: ProjectionTarget::Ptr,
                         }),
-                        Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+                        Statement::Term(None),
                     ],
                     is_async: false, is_reactive: false, reactor_speed: None,
-                    span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    span: None,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(), output_type: None, derivation: None,
                 }),
@@ -6125,8 +4400,6 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // With dual-lens usage, cache slots should be appended and cache IR emitted.
         assert!(backend.ctx.cache_slots.contains_key("x"),
@@ -6151,26 +4424,20 @@ let spec = crate::target_spec::TargetSpec {
             routes: vec![
                 MeldRouteDef {
                     accessor: "Ptr".into(),
-                    dest_expr: Expr::Identifier("Ptr".into()),
-                },
+                    dest_expr: Expr::Identifier("Ptr".into(), },
                 MeldRouteDef {
                     accessor: "Size".into(),
-                    dest_expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                        intrinsic: crate::ast::Intrinsic::Strlen,
-                        args: vec![Expr::Identifier("Ptr".into())],
-                    },
+                    dest_expr:  Expr::Call("".to_string(), vec![]),
                 },
             ],
             span: None,
-        };
         let mut universe = crate::type_universe::TypeUniverse::new();
         universe.melds.insert(
-            ("CString".into(), "String".into()),
-            meld_decl,
+            ("CString".into(), "String".into(), meld_decl,
         );
         backend.ctx.type_universe = Some(universe);
 
-        // Test 1: Identity route "Ptr" → emits add i64 0, <src> ; ptr
+        // Test 1: Identity route "Ptr" → emits add i64 0, <src>; ptr
         let mut out = String::new();
         let src_val = TypedRegister { name: "%x".into(), ty: Type::Custom("CString".into()) };
         let result = backend.try_meld_projection(&mut out, &src_val, "Ptr", "  ");
@@ -6192,31 +4459,15 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_resolve_bild_type_alias() {
         // Build a TypeUniverse with a type alias: type MyInt <: Int {}
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::TypeDef(Box::new(TypeDef {
                     name: "MyInt".into(),
-                    type_params: vec![],
-                    base: Box::new(Expr::Identifier("Int".into())),
-                    bit_range: None,
-                    body: TypeDefBody { slots: vec![],
+                    base: Box::new(Expr::Identifier("Int".into()), body: TypeDefBody { slots: vec![],
                 metadata: HashMap::new(),
                 projections: vec![],
                 bindings: vec![], operators: vec![], constraints: vec![], span: None },
                     span: None,
-                })),
-            ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: vec![],
-            ffi: None,
-            strict_mode: crate::ast::StrictMode::Off,
-            dispatch_mode: crate::ast::DispatchMode::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
+                }), ],
         let tu = crate::type_universe::TypeUniverse::build(&program);
         let mut backend = LlvmBackend::new();
         backend = backend.with_type_universe(tu);
@@ -6232,8 +4483,7 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_resolve_bild_type_meld() {
         // Build a TypeUniverse with a meld: meld Meters <:> Float {}
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::Meld(MeldDeclaration {
                     name_a: "Meters".into(),
                     name_b: "Float".into(),
@@ -6241,17 +4491,6 @@ let spec = crate::target_spec::TargetSpec {
                     span: None,
                 }),
             ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: vec![],
-            ffi: None,
-            strict_mode: crate::ast::StrictMode::Off,
-            dispatch_mode: crate::ast::DispatchMode::default(),
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let tu = crate::type_universe::TypeUniverse::build(&program);
         let mut backend = LlvmBackend::new();
         backend = backend.with_type_universe(tu);
@@ -6263,10 +4502,10 @@ let spec = crate::target_spec::TargetSpec {
     #[test]
     fn test_resolve_bild_type_primitive_unchanged() {
         let mut backend = LlvmBackend::new();
-        assert_eq!(backend.resolve_bild_type(&Type::int()), Type::int());
-        assert_eq!(backend.resolve_bild_type(&Type::float()), Type::float());
-        assert_eq!(backend.resolve_bild_type(&Type::bool_()), Type::bool_());
-        assert_eq!(backend.resolve_bild_type(&Type::string()), Type::string());
+        assert_eq!(backend.resolve_bild_type(&Type::int(), Type::int());
+        assert_eq!(backend.resolve_bild_type(&Type::float(), Type::float());
+        assert_eq!(backend.resolve_bild_type(&Type::bool_(), Type::bool_());
+        assert_eq!(backend.resolve_bild_type(&Type::string(), Type::string());
     }
 
     #[test]
@@ -6274,42 +4513,32 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let cell_def = CellDef {
             is_persistent: false,
-            name: "adder".to_string(), type_params: vec![],
+            name: "adder".to_string(),
             parameters: vec![("x".to_string(), Type::int())],
-            output_type: Some(OutputType::Named("result".to_string(), Box::new(OutputType::Single(Type::int())))),
-            fields: vec![
-                StructField { name: "result".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
+            output_type: Some(OutputType::Named("result".to_string(), Box::new(OutputType::Single(Type::int()))), fields: vec![
+                StructField { name: "result".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "compute".to_string(), is_async: false, is_reactive: true,
-                parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                body: vec![
-                    Statement::Assignment { lhs: Expr::Identifier("result".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("result".to_string())), Box::new(Expr::Identifier("x".to_string()))), timeout: None, modifiers: vec![] },
+                parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("result".to_string(), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("result".to_string()), Box::new(Expr::Identifier("x".to_string())), timeout: None, modifiers: vec![] },
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
-                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                annotations: vec![],
+                reactor_speed: None, span: None,
+ modifiers: vec![],
                 metadata: HashMap::new(),
                 outputs: vec![Type::int()], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
-        };
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "dummy".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None,
-                    attrs: vec![], constraint: None,
+                    name: "dummy".to_string(), ty: Type::int(), span: None,
                 }),
-                TopLevel::Cell(Box::new(cell_def)),
-                TopLevel::Transaction(Transaction {
+                TopLevel::Cell(Box::new(cell_def), TopLevel::Transaction(Transaction {
                     name: "main".to_string(), is_async: false, is_reactive: true,
-                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                    body: vec![Statement::Term { values: vec![], swan_song: None, modifiers: vec![] }],
-                    reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![Statement::Term { values: vec![], swan_song: None, modifiers: vec![] }],
+                    reactor_speed: None, span: None,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: vec![], output_type: None, derivation: None,
                 }),
@@ -6317,8 +4546,6 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // Cell fields should appear as prefixed state fields
         assert!(output.contains("%State = type {"), "module should have %State type");
@@ -6330,45 +4557,35 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let cell_def = CellDef {
             is_persistent: false,
-            name: "add_one".to_string(), type_params: vec![],
+            name: "add_one".to_string(),
             parameters: vec![("x".to_string(), Type::int())],
-            output_type: Some(OutputType::Named("result".to_string(), Box::new(OutputType::Single(Type::int())))),
-            fields: vec![
-                StructField { name: "result".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
+            output_type: Some(OutputType::Named("result".to_string(), Box::new(OutputType::Single(Type::int()))), fields: vec![
+                StructField { name: "result".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "compute".to_string(), is_async: false, is_reactive: true,
-                parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                body: vec![
-                    Statement::Assignment { lhs: Expr::Identifier("result".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("result".to_string())), Box::new(Expr::Identifier("x".to_string()))), timeout: None, modifiers: vec![] },
+                parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("result".to_string(), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("result".to_string()), Box::new(Expr::Identifier("x".to_string())), timeout: None, modifiers: vec![] },
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
-                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                annotations: vec![],
+                reactor_speed: None, span: None,
+ modifiers: vec![],
                 metadata: HashMap::new(),
                 outputs: vec![Type::int()], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
-        };
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "result".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None,
-                    attrs: vec![], constraint: None,
+                    name: "result".to_string(), ty: Type::int(), span: None,
                 }),
-                TopLevel::Cell(Box::new(cell_def)),
-                TopLevel::Transaction(Transaction {
+                TopLevel::Cell(Box::new(cell_def), TopLevel::Transaction(Transaction {
                     name: "main".to_string(), is_async: false, is_reactive: true,
-                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                    body: vec![
-                        Statement::Let { name: "r".to_string(), ty: Some(Type::int()), expr: Some(Expr::CellCall(Box::new(Expr::Identifier("add_one".to_string())), vec![Expr::Decimal(41)])), address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![
+                        Statement::Let { name: "r".to_string(), ty: Some(Type::int(), expr: Some(Expr::Call("add_one".to_string(), vec![Expr::Decimal(41)]), address_expr: None, modifiers: vec![] },
                         Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: vec![], output_type: None, derivation: None,
                 }),
@@ -6376,8 +4593,6 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // Should emit convergence loop header
         assert!(output.contains(".celloop"), "should emit convergence loop header");
@@ -6394,43 +4609,33 @@ let spec = crate::target_spec::TargetSpec {
         let mut backend = LlvmBackend::new();
         let cell_def = CellDef {
             is_persistent: true,
-            name: "persistent_counter".to_string(), type_params: vec![],
+            name: "persistent_counter".to_string(),
             parameters: vec![],
-            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int())))),
-            fields: vec![
-                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0)), visibility: Visibility::Private },
+            output_type: Some(OutputType::Named("val".to_string(), Box::new(OutputType::Single(Type::int()))), fields: vec![
+                StructField { name: "val".to_string(), ty: Type::int(), default: Some(Expr::Decimal(0), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "tick".to_string(), is_async: false, is_reactive: true,
                 parameters: vec![],
-                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                body: vec![
-                    Statement::Assignment { lhs: Expr::Identifier("val".to_string()), expr: Expr::Add(Box::new(Expr::Identifier("val".to_string())), Box::new(Expr::Decimal(1))), timeout: None, modifiers: vec![] },
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![
+                    Statement::Assignment { lhs: Expr::Identifier("val".to_string(), expr: Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("val".to_string()), Box::new(Expr::Decimal(1)), timeout: None, modifiers: vec![] },
                     Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                 ],
-                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                annotations: vec![],
+                reactor_speed: None, span: None,
+ modifiers: vec![],
                 metadata: HashMap::new(),
                 outputs: vec![Type::int()], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
-        };
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "dummy".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None,
-                    attrs: vec![], constraint: None,
+                    name: "dummy".to_string(), ty: Type::int(), span: None,
                 }),
-                TopLevel::Cell(Box::new(cell_def)),
-                TopLevel::Transaction(Transaction {
+                TopLevel::Cell(Box::new(cell_def), TopLevel::Transaction(Transaction {
                     name: "main".to_string(), is_async: false, is_reactive: true,
-                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                    body: vec![Statement::Term { values: vec![], swan_song: None, modifiers: vec![] }],
-                    reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![Statement::Term { values: vec![], swan_song: None, modifiers: vec![] }],
+                    reactor_speed: None, span: None,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: vec![], output_type: None, derivation: None,
                 }),
@@ -6438,61 +4643,46 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("@cell_persistent_ticks"), "should emit persistent tick function");
         assert!(output.contains("@cell_persistent_ticks("), "should define the tick function");
         assert!(output.contains("persistent_counter$val"), "cell field should be in State");
     }
 
-
     #[test]
     fn test_llvm_cell_multi_output_returns_first_port() {
         let mut backend = LlvmBackend::new();
         let cell_def = CellDef {
             is_persistent: false,
-            name: "pair".to_string(), type_params: vec![],
+            name: "pair".to_string(),
             parameters: vec![],
             output_type: Some(OutputType::Tuple(vec![
-                OutputType::Named("a".to_string(), Box::new(OutputType::Single(Type::int()))),
-                OutputType::Named("b".to_string(), Box::new(OutputType::Single(Type::int()))),
-            ])),
-            fields: vec![
-                StructField { name: "a".to_string(), ty: Type::int(), default: Some(Expr::Decimal(1)), visibility: Visibility::Private },
-                StructField { name: "b".to_string(), ty: Type::int(), default: Some(Expr::Decimal(2)), visibility: Visibility::Private },
+                OutputType::Named("a".to_string(), Box::new(OutputType::Single(Type::int())), OutputType::Named("b".to_string(), Box::new(OutputType::Single(Type::int())), ]), fields: vec![
+                StructField { name: "a".to_string(), ty: Type::int(), default: Some(Expr::Decimal(1), visibility: Visibility::Private },
+                StructField { name: "b".to_string(), ty: Type::int(), default: Some(Expr::Decimal(2), visibility: Visibility::Private },
             ],
             transactions: vec![Transaction {
                 name: "compute".to_string(), is_async: false, is_reactive: true,
                 parameters: vec![],
-                contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                body: vec![Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] }],
-                reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                annotations: vec![],
+                contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] }],
+                reactor_speed: None, span: None,
+ modifiers: vec![],
                 metadata: HashMap::new(),
                 outputs: vec![], output_type: None, derivation: None,
             }],
             definitions: vec![], internal_triggers: vec![], span: None, modifiers: vec![],
-        };
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "result".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false, span: None,
-                    attrs: vec![], constraint: None,
+                    name: "result".to_string(), ty: Type::int(), span: None,
                 }),
-                TopLevel::Cell(Box::new(cell_def)),
-                TopLevel::Transaction(Transaction {
+                TopLevel::Cell(Box::new(cell_def), TopLevel::Transaction(Transaction {
                     name: "main".to_string(), is_async: false, is_reactive: true,
-                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
-                    body: vec![
-                        Statement::Let { name: "r".to_string(), ty: Some(Type::int()), expr: Some(Expr::CellCall(Box::new(Expr::Identifier("pair".to_string())), vec![])), address: None, address_expr: None, bit_range: None, constraint: None, is_override: false, modifiers: vec![] },
+                    parameters: vec![], contract: Contract::new(Expr::Bool(true), Expr::Bool(true), body: vec![
+                        Statement::Let { name: "r".to_string(), ty: Some(Type::int(), expr: Some(Expr::Call("pair".to_string(), vec![]), address_expr: None, modifiers: vec![] },
                         Statement::Term { values: vec![None], swan_song: None, modifiers: vec![] },
                     ],
-                    reactor_speed: None, span: None, is_lambda: false, dependencies: vec![],
- modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    reactor_speed: None, span: None,
+ modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: vec![], output_type: None, derivation: None,
                 }),
@@ -6500,8 +4690,6 @@ let spec = crate::target_spec::TargetSpec {
             comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
             strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         assert!(output.contains("pair$a"), "first output field in State");
         assert!(output.contains("pair$b"), "second output field in State");
@@ -6520,7 +4708,6 @@ let spec = crate::target_spec::TargetSpec {
         for item in &program.items {
             if let TopLevel::Definition(defn) = item {
                 i.definitions.insert(defn.name.clone(), defn.clone());
-            }
         }
         let result = i.call_defn("demo", &[]).unwrap();
         assert_eq!(result, crate::interpreter::Value::Bits(vec![1u8]));
@@ -6540,11 +4727,9 @@ let spec = crate::target_spec::TargetSpec {
         for item in &program.items {
             if let TopLevel::Definition(defn) = item {
                 i.definitions.insert(defn.name.clone(), defn.clone());
-            }
             if let TopLevel::Constant(c) = item {
                 if let Ok(val) = i.eval_expr(&c.expr) {
                     i.state.insert(c.name.clone(), val);
-                }
             }
         }
         // Verify demo function exists
@@ -6561,7 +4746,6 @@ let spec = crate::target_spec::TargetSpec {
         for item in &program.items {
             if let TopLevel::Definition(defn) = item {
                 i.definitions.insert(defn.name.clone(), defn.clone());
-            }
         }
         // Verify the program parses with the expected structure
         let def_count = program.items.iter().filter(|item| {
@@ -6583,11 +4767,9 @@ let spec = crate::target_spec::TargetSpec {
         for item in &program.items {
             if let TopLevel::Definition(defn) = item {
                 i.definitions.insert(defn.name.clone(), defn.clone());
-            }
             if let TopLevel::Constant(c) = item {
                 if let Ok(val) = i.eval_expr(&c.expr) {
                     i.state.insert(c.name.clone(), val);
-                }
             }
         }
         // Create a skip list via interpreter
@@ -6599,11 +4781,8 @@ let spec = crate::target_spec::TargetSpec {
         let push = |i: &mut crate::interpreter::Interpreter, val: i64| {
             i.eval_expr(&Expr::ArrowMut {
                 dir: ArrowDir::Push,
-                 consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into())))),
-                index: Box::new(Expr::Term),
-                value: Some(Box::new(Expr::Decimal(val))),
-            }).unwrap();
-        };
+                 consume: false, target: Box::new(Expr::AddrOf(Box::new(Expr::Identifier("s".into()))), index: Box::new(Expr::Term),
+                value: Some(Box::new(Expr::Decimal(val)), }).unwrap();
         push(&mut i, 42);
         push(&mut i, 17);
         let list = i.state.get("s").unwrap();
@@ -6612,7 +4791,6 @@ let spec = crate::target_spec::TargetSpec {
                 assert_eq!(vals.len(), 2);
                 assert_eq!(vals[0], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)));
                 assert_eq!(vals[1], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(17)));
-            }
             _ => panic!("SkipList should be a List value"),
         }
     }
@@ -6627,12 +4805,10 @@ let spec = crate::target_spec::TargetSpec {
         for item in &program.items {
             if let TopLevel::Definition(defn) = item {
                 i.definitions.insert(defn.name.clone(), defn.clone());
-            }
         }
         // Direct call to sl_insert inop fallback
         let list_val = crate::interpreter::Value::List(vec![
-            crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(10)),
-            crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(20))
+            crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(10), crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(20))
         ]);
         // Test the fallback's basic append behavior by building it manually
         // (call_custom_fn evaluates `list + [val]` which requires type-level
@@ -6640,12 +4816,11 @@ let spec = crate::target_spec::TargetSpec {
         let mut new_vals = match &list_val {
             crate::interpreter::Value::List(v) => v.clone(),
             _ => unreachable!(),
-        };
         new_vals.push(crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)));
         assert_eq!(new_vals.len(), 3);
         assert_eq!(new_vals[0], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(10)));
         assert_eq!(new_vals[1], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(20)));
-        assert_eq!(new_vals[2], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42)), "append should work");
+        assert_eq!(new_vals[2], crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(42), "append should work");
     }
 
     #[test]
@@ -6693,56 +4868,27 @@ let spec = crate::target_spec::TargetSpec {
                     expr: Expr::Decimal(100),
                 }),
                 TopLevel::StateDecl(StateDecl {
-                    name: "count".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "count".to_string(), ty: Type::int(), span: None),
                 TopLevel::StateDecl(StateDecl {
-                    name: "x".to_string(), ty: Type::int(),
-                    expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false,
-                    os_mode: false, span: None, attrs: vec![],
-                    constraint: None,
-                }),
+                    name: "x".to_string(), ty: Type::int(), span: None),
                 TopLevel::Transaction(Transaction {
                     name: "compute".to_string(), parameters: vec![],
                     contract: Contract {
-                        pre_condition: Expr::Lt(
-                            Box::new(Expr::Identifier("count".to_string())),
-                            Box::new(Expr::Identifier("total".to_string())),
-                        ),
+                        pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, 
+                            Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Identifier("total".to_string()), ),
                         post_condition: Expr::Bool(true),
                         span: None, watchdog: None,
                     },
                     body: vec![
                         // count increment first so detect_increments sees it
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("count".to_string()),
-                            expr: Expr::Add(
-                                Box::new(Expr::Identifier("count".to_string())),
-                                Box::new(Expr::Decimal(1)),
-                            ),
-                            timeout: None, modifiers: vec![],
-                        },
-                        // non-pure field write: makes the body non-pure
-                        Statement::Assignment {
-                            lhs: Expr::Identifier("x".to_string()),
-                            expr: Expr::Add(
-                                Box::new(Expr::Identifier("x".to_string())),
-                                Box::new(Expr::Decimal(1)),
-                            ),
-                            timeout: None, modifiers: vec![],
-                        },
-                        Statement::Term {
+                        Statement::Assign(Expr::Identifier("count".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1)) ), // non-pure field write: makes the body non-pure
+                        Statement::Assign(Expr::Identifier("x".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(1)) ), Statement::Term {
                             values: vec![], modifiers: vec![], swan_song: None,
                         },
                     ],
                     is_async: false, is_reactive: true, reactor_speed: None,
-                    span: None, is_lambda: false, dependencies: vec![],
-                    modifiers: vec![], variant_bodies: vec![],
-                    annotations: vec![],
+                    span: None,
+                    modifiers: vec![],
                     metadata: HashMap::new(),
                     outputs: Vec::new(),
                     output_type: None,
@@ -6751,21 +4897,7 @@ let spec = crate::target_spec::TargetSpec {
             ];
             Program {
                 items,
-                comments: vec![],
-                reactor_speed: None,
-                attrs: Vec::new(),
-                ffi: None,
-                strict_mode: StrictMode::Off,
-                dispatch_mode: Default::default(),
-                exit_condition: Some(Box::new(Expr::Eq(
-                    Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Decimal(100)),
-                ))),
-                out_pragmas: vec!["x".to_string()],
-                default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-            }
-        };
+                    Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(100), )), }
         let output = LlvmBackend::new().generate(&program);
         // Should emit main function
         assert!(output.contains("@main"),
@@ -6819,7 +4951,7 @@ let spec = crate::target_spec::TargetSpec {
     fn test_state_alias_scope() {
         let mut backend = LlvmBackend::new();
         let output = backend.generate(&empty_program());
-        assert!(output.contains("!99 = distinct !{} ; StateAliasScope"),
+        assert!(output.contains("!99 = distinct !{}; StateAliasScope"),
             "!99 should be the StateAliasScope node");
     }
 
@@ -6842,24 +4974,17 @@ let spec = crate::target_spec::TargetSpec {
         // !invariant.load is emitted by the A005c dispatch path which requires
         // the full analysis pipeline (not available in unit test setup).
         let mut backend = LlvmBackend::new();
-        let program = Program {
-            items: vec![
+        let program = vec![
                 TopLevel::StateDecl(StateDecl {
-                    name: "count".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(0)),
-                    address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    name: "count".to_string(), ty: Type::int(),
+                    span: None),
                 TopLevel::StateDecl(StateDecl {
-                    name: "ro".to_string(), ty: Type::int(), expr: Some(Expr::Decimal(100)),
-                    address: None, bit_range: None, is_override: false, os_mode: false,
-                    span: None, attrs: vec![], constraint: None,
-                }),
+                    name: "ro".to_string(), ty: Type::int(),
+                    span: None),
             ],
-            comments: vec![], reactor_speed: None, attrs: Vec::new(),
+            comments: vec![], reactor_speed: None,
             ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(),
             exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = backend.generate(&program);
         // Just check no panic and basic structure is valid
         assert!(output.contains("%State"),
@@ -6881,72 +5006,35 @@ let spec = crate::target_spec::TargetSpec {
         for i in 0..4 {
             items.push(TopLevel::StateDecl(StateDecl {
                 name: format!("vx{}", i), ty: Type::float(),
-                expr: Some(Expr::Float(0.0)),
-                address: None, bit_range: None, is_override: false,
-                os_mode: false, span: None, attrs: vec![],
-                constraint: None,
-            }));
-        }
+                expr: Some(Expr::Float(0.0), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "count".to_string(), ty: Type::int(), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(100)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "total".to_string(), ty: Type::int(), span: None),);
         // Body: increment count and add 1.0 to each float field
         let mut body: Vec<Statement> = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("count".to_string()),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None, modifiers: vec![],
-            },
-        ];
+            Statement::Assign(Expr::Identifier("count".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1)) ), ];
         for i in 0..4 {
             body.push(Statement::Assignment {
-                lhs: Expr::Identifier(format!("vx{}", i)),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier(format!("vx{}", i))),
-                    Box::new(Expr::Float(1.0)),
-                ),
-                timeout: None, modifiers: vec![],
-            });
-        }
+                lhs: Expr::Identifier(format!("vx{}", i), expr: Expr::BinaryOp(BinaryOpKind::Add, 
+                    Box::new(Expr::Identifier(format!("vx{}", i)), Box::new(Expr::Float(1.0), ),
+                timeout: None, modifiers: vec![]),
         items.push(TopLevel::Transaction(Transaction {
             name: "tick".to_string(), parameters: vec![],
             contract: Contract {
-                pre_condition: Expr::Lt(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Identifier("total".to_string())),
-                ),
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, 
+                    Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Identifier("total".to_string()), ),
                 post_condition: Expr::Bool(true),
                 span: None, watchdog: None,
             },
             body,
-            reactor_speed: None, span: None, is_lambda: false,
-            dependencies: vec![], is_async: false, is_reactive: true,
-            annotations: vec![], modifiers: vec![],
-            metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
+            reactor_speed: None, span: None, is_async: false, is_reactive: true, modifiers: vec![],
+            metadata: HashMap::new(), outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
             ffi: None, strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![],
-            default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = LlvmBackend::new().generate(&program);
         // Precomputed programs have a simple main with no loop.  Detect by
         // checking for the pre_phi: label (present in loop-based programs).
@@ -6958,7 +5046,6 @@ let spec = crate::target_spec::TargetSpec {
             let count_phi_vx = output.matches("%phi_vx").count();
             assert!(count_phi_vx >= 1,
                 "Vector phi for vx group should be present. Output: {}", output);
-        }
     }
 
     #[test]
@@ -6969,75 +5056,34 @@ let spec = crate::target_spec::TargetSpec {
         // 2 field program (count + x), both written every iteration
         let mut items: Vec<TopLevel> = Vec::new();
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "count".to_string(), ty: Type::int(), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "x".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "x".to_string(), ty: Type::int(), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(100)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "total".to_string(), ty: Type::int(), span: None),);
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("count".to_string()),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None, modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("x".to_string())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None, modifiers: vec![],
-            },
-        ];
+            Statement::Assign(Expr::Identifier("count".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1)) ), Statement::Assign(Expr::Identifier("x".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(1)) ), ];
         items.push(TopLevel::Transaction(Transaction {
             name: "compute".to_string(), parameters: vec![],
             contract: Contract {
-                pre_condition: Expr::Lt(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Identifier("total".to_string())),
-                ),
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, 
+                    Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Identifier("total".to_string()), ),
                 post_condition: Expr::Bool(true),
                 span: None, watchdog: None,
             },
             body,
-            reactor_speed: None, span: None, is_lambda: false,
-            dependencies: vec![], is_async: false, is_reactive: true,
-            annotations: vec![], modifiers: vec![],
-            metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
+            reactor_speed: None, span: None, is_async: false, is_reactive: true, modifiers: vec![],
+            metadata: HashMap::new(), outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
             ffi: None, strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![],
-            default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = LlvmBackend::new().generate(&program);
         let is_loop_based = output.contains("pre_phi:");
         if is_loop_based {
             assert!(output.contains("%slot_"),
                 "A005a should use %slot_ alloca (2 fields, density=1.0). Output: {}", output);
-        }
     }
 
     #[test]
@@ -7049,71 +5095,34 @@ let spec = crate::target_spec::TargetSpec {
         for i in 0..9 {
             items.push(TopLevel::StateDecl(StateDecl {
                 name: format!("f{}", i), ty: Type::float(),
-                expr: Some(Expr::Float(0.0)),
-                address: None, bit_range: None, is_override: false,
-                os_mode: false, span: None, attrs: vec![],
-                constraint: None,
-            }));
-        }
+                expr: Some(Expr::Float(0.0), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "count".to_string(), ty: Type::int(), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(100)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "total".to_string(), ty: Type::int(), span: None),);
         let mut body: Vec<Statement> = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("count".to_string()),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None, modifiers: vec![],
-            },
-        ];
+            Statement::Assign(Expr::Identifier("count".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1)) ), ];
         for i in 0..9 {
             body.push(Statement::Assignment {
-                lhs: Expr::Identifier(format!("f{}", i)),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier(format!("f{}", i))),
-                    Box::new(Expr::Float(1.0)),
-                ),
-                timeout: None, modifiers: vec![],
-            });
-        }
+                lhs: Expr::Identifier(format!("f{}", i), expr: Expr::BinaryOp(BinaryOpKind::Add, 
+                    Box::new(Expr::Identifier(format!("f{}", i)), Box::new(Expr::Float(1.0), ),
+                timeout: None, modifiers: vec![]),
         items.push(TopLevel::Transaction(Transaction {
             name: "tick".to_string(), parameters: vec![],
             contract: Contract {
-                pre_condition: Expr::Lt(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Identifier("total".to_string())),
-                ),
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, 
+                    Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Identifier("total".to_string()), ),
                 post_condition: Expr::Bool(true),
                 span: None, watchdog: None,
             },
             body,
-            reactor_speed: None, span: None, is_lambda: false,
-            dependencies: vec![], is_async: false, is_reactive: true,
-            annotations: vec![], modifiers: vec![],
-            metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
+            reactor_speed: None, span: None, is_async: false, is_reactive: true, modifiers: vec![],
+            metadata: HashMap::new(), outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
             ffi: None, strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![],
-            default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = LlvmBackend::new().generate(&program);
         let is_loop_based = output.contains("pre_phi:");
         if is_loop_based {
@@ -7121,7 +5130,6 @@ let spec = crate::target_spec::TargetSpec {
                 "A005c should NOT use %slot_ alloca (10 fields). Output: {}", output);
             assert!(output.contains("phi i64"),
                 "A005c should have phi i64 for counter. Output: {}", output);
-        }
     }
 
     #[test]
@@ -7134,83 +5142,39 @@ let spec = crate::target_spec::TargetSpec {
         // 12 rotation fields p0..p11 + count + total
         for i in 0..12 {
             items.push(TopLevel::StateDecl(StateDecl {
-                name: format!("p{}", i), ty: Type::int(),
-                expr: Some(Expr::Decimal(0)),
-                address: None, bit_range: None, is_override: false,
-                os_mode: false, span: None, attrs: vec![],
-                constraint: None,
-            }));
-        }
+                name: format!("p{}", i), ty: Type::int(), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "count".to_string(), ty: Type::int(), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(100)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "total".to_string(), ty: Type::int(), span: None),);
         // Build rotation: let saved = p0; &p0 = p1; ... &p11 = saved;
         // First create the saved let binding
         let mut body: Vec<Statement> = vec![
             Statement::Let {
-                name: "saved".to_string(), ty: Some(Type::int()),
-                expr: Some(Expr::Identifier("p0".to_string())),
-                address: None, address_expr: None, bit_range: None,
-                constraint: None, is_override: false, modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::Identifier("count".to_string()),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None, modifiers: vec![],
-            },
-        ];
+                name: "saved".to_string(), ty: Some(Type::int(), expr: Some(Expr::Identifier("p0".to_string()), address_expr: None, modifiers: vec![],,
+            Statement::Assign(Expr::Identifier("count".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1)) ), ];
         for i in 0..11 {
             body.push(Statement::Assignment {
-                lhs: Expr::Identifier(format!("p{}", i)),
-                expr: Expr::Identifier(format!("p{}", i + 1)),
-                timeout: None, modifiers: vec![],
-            });
-        }
+                lhs: Expr::Identifier(format!("p{}", i), expr: Expr::Identifier(format!("p{}", i + 1), timeout: None, modifiers: vec![]),
         // &p11 = saved (the saved let binding wraps the cycle)
         body.push(Statement::Assignment {
-            lhs: Expr::Identifier("p11".to_string()),
-            expr: Expr::Identifier("saved".to_string()),
-            timeout: None, modifiers: vec![],
-        });
+            lhs: Expr::Identifier("p11".to_string(), expr: Expr::Identifier("saved".to_string(), timeout: None, modifiers: vec![]),
         items.push(TopLevel::Transaction(Transaction {
             name: "rotate".to_string(), parameters: vec![],
             contract: Contract {
-                pre_condition: Expr::Lt(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Identifier("total".to_string())),
-                ),
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, 
+                    Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Identifier("total".to_string()), ),
                 post_condition: Expr::Bool(true),
                 span: None, watchdog: None,
             },
             body,
-            reactor_speed: None, span: None, is_lambda: false,
-            dependencies: vec![], is_async: false, is_reactive: true,
-            annotations: vec![], modifiers: vec![],
-            metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
+            reactor_speed: None, span: None, is_async: false, is_reactive: true, modifiers: vec![],
+            metadata: HashMap::new(), outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
             ffi: None, strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![],
-            default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = LlvmBackend::new().generate(&program);
         // Rotation decomposition should emit GEP reload instructions in the
         // latch (prefixed with "be_r" or "be_" from emit_state_gep in the latch).
@@ -7233,105 +5197,56 @@ let spec = crate::target_spec::TargetSpec {
         // survive filter_dead_assignments.
         let mut items: Vec<TopLevel> = Vec::new();
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "count".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "count".to_string(), ty: Type::int(), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "x".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(0)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "x".to_string(), ty: Type::int(), span: None),);
         items.push(TopLevel::StateDecl(StateDecl {
-            name: "total".to_string(), ty: Type::int(),
-            expr: Some(Expr::Decimal(10)),
-            address: None, bit_range: None, is_override: false,
-            os_mode: false, span: None, attrs: vec![],
-            constraint: None,
-        }));
+            name: "total".to_string(), ty: Type::int(), span: None),);
         let body = vec![
             // Counter increment MUST be present in filtered body
-            Statement::Assignment {
-                lhs: Expr::Identifier("count".to_string()),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None, modifiers: vec![],
-            },
-            // Periodic guard: [count % 2 == 0] { &x = x + 1; }
+            Statement::Assign(Expr::Identifier("count".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(1)) ), // Periodic guard: [count % 2 == 0] { &x = x + 1; }
             // This guard condition references 'count', which should keep
             // the counter increment live.
             Statement::Guarded {
-                condition: Expr::Eq(
-                    Box::new(Expr::Mod(
-                        Box::new(Expr::Identifier("count".to_string())),
-                        Box::new(Expr::Decimal(2)),
-                    )),
-                    Box::new(Expr::Decimal(0)),
-                ),
+                condition: Expr::BinaryOp(BinaryOpKind::Eq, 
+                    Box::new(Expr::BinaryOp(BinaryOpKind::Mod, Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Decimal(2), ), Box::new(Expr::Decimal(0), ),
                 statements: vec![
-                    Statement::Assignment {
-                        lhs: Expr::Identifier("x".to_string()),
-                        expr: Expr::Add(
-                            Box::new(Expr::Identifier("x".to_string())),
-                            Box::new(Expr::Decimal(1)),
-                        ),
-                        timeout: None, modifiers: vec![],
-                    },
-                ],
+                    Statement::Assign(Expr::Identifier("x".to_string(), Expr::BinaryOp(BinaryOpKind::Add Box::new(Expr::Identifier("x".to_string()), Box::new(Expr::Decimal(1)) ), ],
                 metadata: HashMap::new(),
             },
             // Terminating guard: [count == total] { term; }
             Statement::Guarded {
-                condition: Expr::Eq(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Identifier("total".to_string())),
-                ),
+                condition: Expr::BinaryOp(BinaryOpKind::Eq, 
+                    Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Identifier("total".to_string()), ),
                 statements: vec![
                     Statement::Term {
                         values: vec![],
                         swan_song: None,
-                        modifiers: vec![],
-                    },
+                        modifiers: vec![],,
                 ],
                 metadata: HashMap::new(),
             },
             Statement::Term {
                 values: vec![],
                 swan_song: None,
-                modifiers: vec![],
-            },
+                modifiers: vec![],,
         ];
         items.push(TopLevel::Transaction(Transaction {
             name: "compute".to_string(), parameters: vec![],
             contract: Contract {
-                pre_condition: Expr::Lt(
-                    Box::new(Expr::Identifier("count".to_string())),
-                    Box::new(Expr::Identifier("total".to_string())),
-                ),
+                pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, 
+                    Box::new(Expr::Identifier("count".to_string()), Box::new(Expr::Identifier("total".to_string()), ),
                 post_condition: Expr::Bool(true),
                 span: None, watchdog: None,
             },
             body,
-            reactor_speed: None, span: None, is_lambda: false,
-            dependencies: vec![], is_async: false, is_reactive: true,
-            annotations: vec![], modifiers: vec![],
-            metadata: HashMap::new(),
-            variant_bodies: vec![], outputs: Vec::new(), output_type: None, derivation: None,
+            reactor_speed: None, span: None, is_async: false, is_reactive: true, modifiers: vec![],
+            metadata: HashMap::new(), outputs: Vec::new(), output_type: None, derivation: None,
         }));
         let program = Program {
             items, comments: vec![], reactor_speed: None, attrs: vec![],
             ffi: None, strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::Sequential,
             exit_condition: None, out_pragmas: vec![],
-            default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
         let output = LlvmBackend::new().generate(&program);
         let is_loop_based = output.contains("pre_phi:");
         if is_loop_based {
@@ -7339,7 +5254,6 @@ let spec = crate::target_spec::TargetSpec {
                 "Counter should have phi/backedge (liveness preserved). Output: {}", output);
             assert!(output.contains("add i64"),
                 "Counter increment should produce add i64 in body. Output: {}", output);
-        }
     }
 
     #[test]

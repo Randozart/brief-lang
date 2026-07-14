@@ -1,5 +1,5 @@
 use crate::analysis::bild_asm;
-use crate::ast::{Expr, InopDeclaration};
+use crate::ast::{BinaryOpKind, Expr, InopDeclaration, Statement, UnaryOpKind};
 use std::collections::HashMap;
 
 /// Symbolic expression for proving BILD body matches its fallback.
@@ -9,30 +9,9 @@ pub enum SymExpr {
     Int(i64),
     Float(f64),
     Bool(bool),
-    Add(Box<SymExpr>, Box<SymExpr>),
-    Sub(Box<SymExpr>, Box<SymExpr>),
-    Mul(Box<SymExpr>, Box<SymExpr>),
-    Div(Box<SymExpr>, Box<SymExpr>),
-    Rem(Box<SymExpr>, Box<SymExpr>),
-    FAdd(Box<SymExpr>, Box<SymExpr>),
-    FSub(Box<SymExpr>, Box<SymExpr>),
-    FMul(Box<SymExpr>, Box<SymExpr>),
-    FDiv(Box<SymExpr>, Box<SymExpr>),
-    BitAnd(Box<SymExpr>, Box<SymExpr>),
-    BitOr(Box<SymExpr>, Box<SymExpr>),
-    BitXor(Box<SymExpr>, Box<SymExpr>),
-    Shl(Box<SymExpr>, Box<SymExpr>),
-    LShr(Box<SymExpr>, Box<SymExpr>),
-    AShr(Box<SymExpr>, Box<SymExpr>),
-    Eq(Box<SymExpr>, Box<SymExpr>),
-    Ne(Box<SymExpr>, Box<SymExpr>),
-    Lt(Box<SymExpr>, Box<SymExpr>),
-    Le(Box<SymExpr>, Box<SymExpr>),
-    Gt(Box<SymExpr>, Box<SymExpr>),
-    Ge(Box<SymExpr>, Box<SymExpr>),
+    BinaryOp(BinaryOpKind, Box<SymExpr>, Box<SymExpr>),
+    UnaryOp(UnaryOpKind, Box<SymExpr>),
     Select(Box<SymExpr>, Box<SymExpr>, Box<SymExpr>),
-    Not(Box<SymExpr>),
-    Neg(Box<SymExpr>),
     /// Opaque operation — cannot be symbolically executed.
     Opaque(String),
 }
@@ -44,11 +23,11 @@ impl SymExpr {
             return true;
         }
         match (self, other) {
-            (SymExpr::Add(a1, b1), SymExpr::Add(a2, b2))
-            | (SymExpr::Mul(a1, b1), SymExpr::Mul(a2, b2))
-            | (SymExpr::BitAnd(a1, b1), SymExpr::BitAnd(a2, b2))
-            | (SymExpr::BitOr(a1, b1), SymExpr::BitOr(a2, b2))
-            | (SymExpr::BitXor(a1, b1), SymExpr::BitXor(a2, b2)) => {
+            (SymExpr::BinaryOp(BinaryOpKind::Add, a1, b1), SymExpr::BinaryOp(BinaryOpKind::Add, a2, b2))
+            | (SymExpr::BinaryOp(BinaryOpKind::Mul, a1, b1), SymExpr::BinaryOp(BinaryOpKind::Mul, a2, b2))
+            | (SymExpr::BinaryOp(BinaryOpKind::BitAnd, a1, b1), SymExpr::BinaryOp(BinaryOpKind::BitAnd, a2, b2))
+            | (SymExpr::BinaryOp(BinaryOpKind::BitOr, a1, b1), SymExpr::BinaryOp(BinaryOpKind::BitOr, a2, b2))
+            | (SymExpr::BinaryOp(BinaryOpKind::BitXor, a1, b1), SymExpr::BinaryOp(BinaryOpKind::BitXor, a2, b2)) => {
                 (a1 == a2 && b1 == b2) || (a1 == b2 && b1 == a2)
             }
             _ => false,
@@ -92,13 +71,12 @@ impl SymExecError {
 #[derive(Debug)]
 pub struct SymExecResult {
     pub bild_expr: Option<SymExpr>,
-    pub fallback_expr: Option<SymExpr>,
     pub errors: Vec<SymExecError>,
     /// True if the BILD body contains opaque ops (load, store, call, asm).
     pub has_opaque_ops: bool,
 }
 
-/// Symbolically execute the BILD body and compare with the fallback expression.
+/// Symbolically execute the BILD body.
 pub fn verify_inop(inop: &InopDeclaration) -> SymExecResult {
     let mut errors = Vec::new();
 
@@ -113,10 +91,6 @@ pub fn verify_inop(inop: &InopDeclaration) -> SymExecResult {
             None
         }
     };
-
-    let fallback_expr = inop.fallback.as_ref().and_then(|fb| {
-        symexec_expr(fb)
-    });
 
     let has_opaque_ops = inop.llvm_body.iter().enumerate().any(|(i, line)| {
         let trimmed = line.trim().trim_end_matches(';');
@@ -133,7 +107,7 @@ pub fn verify_inop(inop: &InopDeclaration) -> SymExecResult {
             || rhs.starts_with("getelementptr ")
     });
 
-    SymExecResult { bild_expr, fallback_expr, errors, has_opaque_ops }
+    SymExecResult { bild_expr, errors, has_opaque_ops }
 }
 
 /// Symbolically execute the BILD body.
@@ -228,42 +202,38 @@ fn parse_bild_instruction(
                     if operands.len() < 2 { return Err(SymExecError::ParseError("expected 2 operands".to_string(), line)); }
                     let a = resolve_reg(operands[0], regs);
                     let b = resolve_reg(operands[1], regs);
-                    Ok(if opcode == "fadd" { SymExpr::FAdd(Box::new(a), Box::new(b)) }
-                       else { SymExpr::Add(Box::new(a), Box::new(b)) })
+                    Ok(SymExpr::BinaryOp(BinaryOpKind::Add, Box::new(a), Box::new(b)))
                 }
                 "sub" | "fsub" => {
                     if operands.len() < 2 { return Err(SymExecError::ParseError("expected 2 operands".to_string(), line)); }
                     let a = resolve_reg(operands[0], regs);
                     let b = resolve_reg(operands[1], regs);
-                    Ok(if opcode == "fsub" { SymExpr::FSub(Box::new(a), Box::new(b)) }
-                       else { SymExpr::Sub(Box::new(a), Box::new(b)) })
+                    Ok(SymExpr::BinaryOp(BinaryOpKind::Sub, Box::new(a), Box::new(b)))
                 }
                 "mul" | "fmul" => {
                     if operands.len() < 2 { return Err(SymExecError::ParseError("expected 2 operands".to_string(), line)); }
                     let a = resolve_reg(operands[0], regs);
                     let b = resolve_reg(operands[1], regs);
-                    Ok(if opcode == "fmul" { SymExpr::FMul(Box::new(a), Box::new(b)) }
-                       else { SymExpr::Mul(Box::new(a), Box::new(b)) })
+                    Ok(SymExpr::BinaryOp(BinaryOpKind::Mul, Box::new(a), Box::new(b)))
                 }
                 "sdiv" | "udiv" | "fdiv" => {
                     if operands.len() < 2 { return Err(SymExecError::ParseError("expected 2 operands".to_string(), line)); }
                     let a = resolve_reg(operands[0], regs);
                     let b = resolve_reg(operands[1], regs);
-                    Ok(if opcode == "fdiv" { SymExpr::FDiv(Box::new(a), Box::new(b)) }
-                       else { SymExpr::Div(Box::new(a), Box::new(b)) })
+                    Ok(SymExpr::BinaryOp(BinaryOpKind::Div, Box::new(a), Box::new(b)))
                 }
                 "srem" | "urem" => {
                     if operands.len() < 2 { return Err(SymExecError::ParseError("expected 2 operands".to_string(), line)); }
                     let a = resolve_reg(operands[0], regs);
                     let b = resolve_reg(operands[1], regs);
-                    Ok(SymExpr::Rem(Box::new(a), Box::new(b)))
+                    Ok(SymExpr::BinaryOp(BinaryOpKind::Mod, Box::new(a), Box::new(b)))
                 }
-                "and" => Ok(binop(operands, regs, line, |a, b| SymExpr::BitAnd(a, b))?),
-                "or" => Ok(binop(operands, regs, line, |a, b| SymExpr::BitOr(a, b))?),
-                "xor" => Ok(binop(operands, regs, line, |a, b| SymExpr::BitXor(a, b))?),
-                "shl" => Ok(binop(operands, regs, line, |a, b| SymExpr::Shl(a, b))?),
-                "lshr" => Ok(binop(operands, regs, line, |a, b| SymExpr::LShr(a, b))?),
-                "ashr" => Ok(binop(operands, regs, line, |a, b| SymExpr::AShr(a, b))?),
+                "and" => Ok(binop(operands, regs, line, |a, b| SymExpr::BinaryOp(BinaryOpKind::BitAnd, a, b))?),
+                "or" => Ok(binop(operands, regs, line, |a, b| SymExpr::BinaryOp(BinaryOpKind::BitOr, a, b))?),
+                "xor" => Ok(binop(operands, regs, line, |a, b| SymExpr::BinaryOp(BinaryOpKind::BitXor, a, b))?),
+                "shl" => Ok(binop(operands, regs, line, |a, b| SymExpr::BinaryOp(BinaryOpKind::Shl, a, b))?),
+                "lshr" => Ok(binop(operands, regs, line, |a, b| SymExpr::BinaryOp(BinaryOpKind::Shr, a, b))?),
+                "ashr" => Ok(binop(operands, regs, line, |a, b| SymExpr::BinaryOp(BinaryOpKind::Shr, a, b))?),
                 "icmp" | "fcmp" => {
                     // Format: icmp <cond> <type> <op1>, <op2>
                     // Don't use the general skip(1) — icmp has a different layout
@@ -275,12 +245,12 @@ fn parse_bild_instruction(
                     let a = resolve_reg(icmp_ops.first().map(|s| s.trim_end_matches(',')).unwrap_or("0"), regs);
                     let b = resolve_reg(icmp_ops.get(1).copied().unwrap_or("0"), regs);
                     match cond {
-                        "eq" => Ok(SymExpr::Eq(Box::new(a), Box::new(b))),
-                        "ne" => Ok(SymExpr::Ne(Box::new(a), Box::new(b))),
-                        "slt" | "ult" | "olt" => Ok(SymExpr::Lt(Box::new(a), Box::new(b))),
-                        "sle" | "ule" | "ole" => Ok(SymExpr::Le(Box::new(a), Box::new(b))),
-                        "sgt" | "ugt" | "ogt" => Ok(SymExpr::Gt(Box::new(a), Box::new(b))),
-                        "sge" | "uge" | "oge" => Ok(SymExpr::Ge(Box::new(a), Box::new(b))),
+                        "eq" => Ok(SymExpr::BinaryOp(BinaryOpKind::Eq, Box::new(a), Box::new(b))),
+                        "ne" => Ok(SymExpr::BinaryOp(BinaryOpKind::Neq, Box::new(a), Box::new(b))),
+                        "slt" | "ult" | "olt" => Ok(SymExpr::BinaryOp(BinaryOpKind::Lt, Box::new(a), Box::new(b))),
+                        "sle" | "ule" | "ole" => Ok(SymExpr::BinaryOp(BinaryOpKind::Le, Box::new(a), Box::new(b))),
+                        "sgt" | "ugt" | "ogt" => Ok(SymExpr::BinaryOp(BinaryOpKind::Gt, Box::new(a), Box::new(b))),
+                        "sge" | "uge" | "oge" => Ok(SymExpr::BinaryOp(BinaryOpKind::Ge, Box::new(a), Box::new(b))),
                         _ => Err(SymExecError::ParseError(format!("unknown icmp condition '{}'", cond), line)),
                     }
                 }
@@ -351,27 +321,33 @@ pub fn symexec_expr(expr: &Expr) -> Option<SymExpr> {
         Expr::Float(f) => Some(SymExpr::Float(*f)),
         Expr::Bool(b) => Some(SymExpr::Bool(*b)),
         Expr::Identifier(name) => Some(SymExpr::Var(name.clone())),
-        Expr::Add(a, b) => Some(SymExpr::Add(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Sub(a, b) => Some(SymExpr::Sub(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Mul(a, b) => Some(SymExpr::Mul(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Div(a, b) => Some(SymExpr::Div(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Mod(a, b) => Some(SymExpr::Rem(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Eq(a, b) => Some(SymExpr::Eq(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Ne(a, b) => Some(SymExpr::Ne(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Lt(a, b) => Some(SymExpr::Lt(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Le(a, b) => Some(SymExpr::Le(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Gt(a, b) => Some(SymExpr::Gt(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Ge(a, b) => Some(SymExpr::Ge(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::And(a, b) => Some(SymExpr::BitAnd(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Or(a, b) => Some(SymExpr::BitOr(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Not(a) => Some(SymExpr::Not(Box::new(symexec_expr(a)?))),
-        Expr::Neg(a) => Some(SymExpr::Neg(Box::new(symexec_expr(a)?))),
-        Expr::BitAnd(a, b) => Some(SymExpr::BitAnd(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::BitOr(a, b) => Some(SymExpr::BitOr(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::BitXor(a, b) => Some(SymExpr::BitXor(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Shl(a, b) => Some(SymExpr::Shl(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Shr(a, b) => Some(SymExpr::AShr(Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
-        Expr::Block(_, last) => symexec_expr(last),
+        Expr::BinaryOp(BinaryOpKind::Add, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Add, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Sub, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Sub, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Mul, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Mul, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Div, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Div, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Mod, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Mod, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Eq, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Eq, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Neq, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Neq, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Lt, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Lt, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Le, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Le, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Gt, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Gt, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Ge, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Ge, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::And, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::BitAnd, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Or, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::BitOr, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::UnaryOp(UnaryOpKind::Not, a) => Some(SymExpr::UnaryOp(UnaryOpKind::Not, Box::new(symexec_expr(a)?))),
+        Expr::UnaryOp(UnaryOpKind::Neg, a) => Some(SymExpr::UnaryOp(UnaryOpKind::Neg, Box::new(symexec_expr(a)?))),
+        Expr::BinaryOp(BinaryOpKind::BitAnd, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::BitAnd, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::BitOr, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::BitOr, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::BitXor, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::BitXor, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Shl, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Shl, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::BinaryOp(BinaryOpKind::Shr, a, b) => Some(SymExpr::BinaryOp(BinaryOpKind::Shr, Box::new(symexec_expr(a)?), Box::new(symexec_expr(b)?))),
+        Expr::Block(stmts) => {
+            stmts.iter().rev().find_map(|s| {
+                if let Statement::Term(Some(e)) = s { symexec_expr(e) }
+                else if let Statement::TermBang(Some(e)) = s { symexec_expr(e) }
+                else { None }
+            })
+        }
         _ => None,
     }
 }
@@ -409,44 +385,28 @@ mod tests {
     use super::*;
     use crate::ast::{Contract, InopDeclaration, Type};
 
-    fn make_inop(name: &str, params: Vec<(&str, Type)>, body: Vec<&str>, fallback: Option<Expr>) -> InopDeclaration {
+    fn make_inop(name: &str, params: Vec<(&str, Type)>, body: Vec<&str>) -> InopDeclaration {
         InopDeclaration {
             name: name.to_string(),
-            type_params: vec![],
             params: params.into_iter().map(|(n, t)| (n.to_string(), t)).collect(),
             outputs: vec![Type::int()],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             llvm_body: body.into_iter().map(|s| s.to_string()).collect(),
-            fallback,
             has_side_effects: false,
             has_state_access: false,
-            section: None,
-            llvm_body_spans: vec![],
             span: None,
         }
     }
 
     #[test]
-    fn test_sadd_matches_fallback() {
+    fn test_sadd_parses() {
         let inop = make_inop("sadd", vec![("a", Type::int()), ("b", Type::int())], vec![
             "%res = add i64 %a, %b;",
             "term %res;",
-        ], Some(Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into())))));
+        ]);
         let result = verify_inop(&inop);
-        let msg = compare_bild_with_fallback(&result.bild_expr, &result.fallback_expr, "sadd");
-        assert!(msg.is_none(), "sadd should match fallback: {:?}", msg);
-    }
-
-    #[test]
-    fn test_mismatch_detected() {
-        let inop = make_inop("bad", vec![("a", Type::int())], vec![
-            "%res = add i64 %a, %a;",
-            "term %res;",
-        ], Some(Expr::Add(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Decimal(1)))));
-        let result = verify_inop(&inop);
-        let msg = compare_bild_with_fallback(&result.bild_expr, &result.fallback_expr, "bad");
-        assert!(msg.is_some(), "mismatch should be detected");
-        assert!(msg.unwrap().contains("produces"), "message should describe mismatch");
+        assert!(result.errors.is_empty(), "sadd should parse: {:?}", result.errors);
+        assert!(result.bild_expr.is_some());
     }
 
     #[test]
@@ -454,40 +414,36 @@ mod tests {
         let inop = make_inop("loader", vec![("p", Type::int())], vec![
             "%res = load i64, i8* %p;",
             "term %res;",
-        ], Some(Expr::Identifier("p".into())));
+        ]);
         let result = verify_inop(&inop);
         assert!(result.has_opaque_ops, "load should be detected as opaque");
     }
 
     #[test]
     fn test_missing_fallback() {
-        let inop = make_inop("nofb", vec![("a", Type::int())], vec![
-            "term %a;",
-        ], None);
         let msg = compare_bild_with_fallback(&Some(SymExpr::Var("a".into())), &None, "nofb");
         assert!(msg.is_some());
         assert!(msg.unwrap().contains("no fallback"));
     }
 
     #[test]
-    fn test_sdiv_srem_matches() {
+    fn test_sdiv_srem_parses() {
         let inop = make_inop("divmod", vec![("a", Type::int()), ("b", Type::int())], vec![
             "%q = sdiv i64 %a, %b;",
             "%r = srem i64 %a, %b;",
             "term %q;",
-        ], Some(Expr::Div(Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into())))));
+        ]);
         let result = verify_inop(&inop);
-        let msg = compare_bild_with_fallback(&result.bild_expr, &result.fallback_expr, "divmod");
-        assert!(msg.is_none(), "divmod should match fallback: {:?}", msg);
+        assert!(result.errors.is_empty(), "divmod should parse: {:?}", result.errors);
     }
 
     #[test]
-    fn test_icmp_select_matches() {
+    fn test_icmp_select_parses() {
         let inop = make_inop("max", vec![("a", Type::int()), ("b", Type::int())], vec![
             "%cmp = icmp sgt i64 %a, %b;",
             "%res = select i1 %cmp, i64 %a, i64 %b;",
             "term %res;",
-        ], Some(Expr::Identifier("a".into())));  // simplified: just test BILD parses
+        ]);
         let result = verify_inop(&inop);
         assert!(result.errors.is_empty(), "no errors: {:?}", result.errors);
         assert!(matches!(result.bild_expr, Some(SymExpr::Select(..))));

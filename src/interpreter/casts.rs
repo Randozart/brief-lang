@@ -26,7 +26,7 @@ pub fn eval_cast(val: Value, target: &Type) -> Result<Value, RuntimeError> {
             Ok(Value::Bits(bytes))
         }
         Type::Custom(name) if name == "String" => {
-            let s = bits_to_string(val);
+            let s = bits_to_string(&val);
             Ok(Value::Bits(s.into_bytes()))
         }
         Type::Custom(name) if name == "Char" => {

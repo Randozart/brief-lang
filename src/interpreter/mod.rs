@@ -1,8 +1,12 @@
 // ── Interpreter — Value, VirtualHeap, Re-exports ───────────────────────
 // 2026-07-12: Phase 3.0 — Bits-only Value, sandboxed VirtualHeap.
-// Value::Bits(Vec<u8>) is the ONLY program-value variant.
+// Value::Bits(Vec<u8>) is the ONLY program-value variant for program data.
 // Meta-objects (Defn, Expr, etc.) are compiler-internal and never
 // reach user code.
+//
+// 2026-07-14: Re-added List/Enum/Instance/HashMap variants for FFI bridge
+// code that marshals structured types between native libraries and the
+// interpreter. These are FFI-only — no interpreter eval path produces them.
 
 pub mod casts;
 mod cells;
@@ -15,12 +19,113 @@ pub use eval::*;
 pub use ffi::*;
 pub use intrinsics::*;
 
+use crate::ast::{Expr, Statement};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// FFI files import RuntimeError from crate::interpreter.
+pub use crate::errors::RuntimeError;
+
+/// Compatibility struct bridging old Interpreter-based code to the new
+/// function-based eval API. The old `Interpreter` had `state`, `prior_state`,
+/// `heap`, `eval_expr()`, and `exec_stmt()`. This shim preserves that API
+/// while delegating to the standalone `eval_expr`/`eval_statement` functions.
+/// 2026-07-14: Added for reactor.rs and feature code compatibility.
+#[derive(Debug, Clone)]
+pub struct Interpreter {
+    pub state: HashMap<String, Value>,
+    pub prior_state: HashMap<String, Value>,
+    pub heap: VirtualHeap,
+}
+
+impl Interpreter {
+    pub fn new() -> Self {
+        Interpreter {
+            state: HashMap::new(),
+            prior_state: HashMap::new(),
+            heap: VirtualHeap::new(),
+        }
+    }
+
+    pub fn eval_expr(&mut self, expr: &Expr) -> Result<Value, RuntimeError> {
+        eval_expr(expr, &mut self.heap, &mut self.state)
+    }
+
+    pub fn exec_stmt(&mut self, stmt: &Statement) -> Result<Value, RuntimeError> {
+        eval_statement(stmt, &mut self.heap, &mut self.state)
+    }
+
+    /// Pattern match a value against a pattern (delegated from features).
+    pub fn pattern_match(pat: &crate::ast::Pattern, val: &Value, bindings: &mut HashMap<String, Value>) -> bool {
+        match pat {
+            crate::ast::Pattern::Wildcard => true,
+            crate::ast::Pattern::Literal(lit) => {
+                let lit_val = match lit {
+                    Expr::Decimal(n) => Value::Bits(n.to_le_bytes().to_vec()),
+                    Expr::Bool(b) => Value::Bits(vec![if *b { 1 } else { 0 }]),
+                    _ => return false,
+                };
+                *val == lit_val
+            }
+            crate::ast::Pattern::Binding(name) => {
+                bindings.insert(name.clone(), val.clone());
+                true
+            }
+            crate::ast::Pattern::EnumVariant(_, _) => false,
+            crate::ast::Pattern::Tuple(patterns) => {
+                if let Value::List(items) = val {
+                    if items.len() != patterns.len() {
+                        return false;
+                    }
+                    for (pat, item) in patterns.iter().zip(items.iter()) {
+                        if !Self::pattern_match(pat, item, bindings) {
+                            return false;
+                        }
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            crate::ast::Pattern::Range(_, _) => false,
+        }
+    }
+
+    /// Compute the nesting depth of a list value (for FFI).
+    pub fn list_nesting_depth(val: &Value) -> usize {
+        match val {
+            Value::List(items) => {
+                items.iter().map(|v| Self::list_nesting_depth(v)).max().unwrap_or(0) + 1
+            }
+            _ => 0,
+        }
+    }
+
+    /// Expand coordinate dimensions into a flat list of indices (for FFI).
+    pub fn expand_coordinates(coords: &[Expr], dims: usize) -> Result<Vec<Value>, RuntimeError> {
+        let mut result = Vec::new();
+        for coord in coords {
+            match coord {
+                Expr::Decimal(n) => result.push(Value::Bits(n.to_le_bytes().to_vec())),
+                _ => return Err(RuntimeError::TypeError { expected: "integer".to_string(), found: format!("{:?}", coord) }),
+            }
+        }
+        Ok(result)
+    }
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Signature for foreign function implementations registered in the FFI registry.
+pub type ForeignFn = fn(Vec<Value>) -> Result<Value, RuntimeError>;
+
 /// The only representational value in the Brief interpreter.
 /// All program data — Int, Float, Bool, String, pointers — is Bits(Vec<u8>).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     /// The sole representational storage cell for program data.
     Bits(Vec<u8>),
@@ -29,6 +134,22 @@ pub enum Value {
     Defn(String),
     Void,
     Ref(Box<Value>),
+
+    // ── FFI bridge variants ─────────────────────────────────────────
+    // 2026-07-14: These are produced/consumed only by the FFI layer
+    // when marshalling structured data to/from native libraries.
+    // No interpreter eval path should produce or match these.
+    /// Heterogeneous list of values — used for JSON arrays, SHM lists.
+    List(Vec<Value>),
+    /// Enum value with type name, variant name, and named fields.
+    Enum(String, String, HashMap<String, Value>),
+    /// Struct-like instance with a type name and named fields.
+    Instance {
+        typename: String,
+        fields: HashMap<String, Value>,
+    },
+    /// String-keyed map — used by JSON objects, Arrow IPC.
+    HashMap(HashMap<String, Value>),
 }
 
 impl Value {

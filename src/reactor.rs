@@ -20,8 +20,8 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Contract, Expr, Program, Statement, TopLevel, TriggerDeclaration};
-use crate::interpreter::{Interpreter, Value};
+use crate::ast::{Contract, Expr, Statement, TopLevel, Transaction, Trigger};
+use crate::interpreter::{Interpreter, RuntimeError, Value};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -40,7 +40,7 @@ pub struct Reactor {
     pub transactions: Vec<ReactiveTransaction>,
     pub dirty_preconditions: HashSet<usize>,
     pub dependency_map: HashMap<String, HashSet<usize>>,
-    pub triggers: HashMap<String, TriggerDeclaration>,
+    pub triggers: HashMap<String, Trigger>,
     last_fired: Vec<Instant>,
 }
 
@@ -55,27 +55,20 @@ impl Reactor {
         }
     }
 
-    pub fn build_from_program(&mut self, program: &Program) {
-        for item in &program.items {
+    pub fn build_from_program(&mut self, items: &[TopLevel]) {
+        for item in items {
             match item {
                 TopLevel::Transaction(txn) if txn.is_reactive => {
-                    let deps: HashSet<String> = txn.dependencies.iter().cloned().collect();
                     let rtxn = ReactiveTransaction {
                         name: txn.name.clone(),
                         contract: txn.contract.clone(),
                         body: txn.body.clone(),
                         is_async: txn.is_async,
-                        reactor_speed: txn.reactor_speed,
-                        dependencies: deps.clone(),
+                        reactor_speed: None,
+                        dependencies: HashSet::new(),
                     };
                     self.transactions.push(rtxn);
                     let txn_idx = self.transactions.len() - 1;
-                    for var in deps {
-                        self.dependency_map
-                            .entry(var)
-                            .or_insert_with(HashSet::new)
-                            .insert(txn_idx);
-                    }
                     self.dirty_preconditions.insert(txn_idx);
                 }
                 TopLevel::Trigger(trg) => {
@@ -120,7 +113,7 @@ impl Reactor {
     /// Recursively check if a statement contains a guarded escape that would fire
     fn contains_escape_guard(&self, stmt: &Statement, interp: &mut Interpreter) -> bool {
         match stmt {
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 // Check if this guard's condition is currently true
                 if let Ok(cond_val) = interp.eval_expr(condition) {
                     if cond_val == Value::Bits(vec![1u8]) {
@@ -174,7 +167,7 @@ impl Reactor {
                             for stmt in &txn.body {
                                 if let Err(e) = interp.exec_stmt(stmt) {
                                     match e {
-                                        crate::interpreter::RuntimeError::Escaped => {
+                                        crate::interpreter::RuntimeError::ContractViolation(ref msg) if msg == "escape" => {
                                             interp.state = interp.prior_state.clone();
                                         }
                                         _ => {
@@ -284,7 +277,7 @@ impl Reactor {
         stmt: &Statement,
     ) -> Result<StmtResult, crate::interpreter::RuntimeError> {
         match stmt {
-            Statement::Assignment { .. } => {
+            Statement::Assign(_, _) => {
                 interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
             }
@@ -302,28 +295,19 @@ impl Reactor {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } => {
-                if let Some(first) = outputs.first() {
-                    if let Some(expr) = first {
-                        let value = interp.eval_expr(expr)?;
-                        if value == Value::Bits(vec![1u8]) {
-                            Ok(StmtResult::TermSuccess)
-                        } else {
-                            Ok(StmtResult::TermFailed)
-                        }
-                    } else {
-                        Ok(StmtResult::TermSuccess)
-                    }
-                } else {
+            Statement::Term(Some(expr)) | Statement::TermBang(Some(expr)) => {
+                let value = interp.eval_expr(expr)?;
+                if value == Value::Bits(vec![1u8]) {
                     Ok(StmtResult::TermSuccess)
+                } else {
+                    Ok(StmtResult::TermFailed)
                 }
             }
+            Statement::Term(None) | Statement::TermBang(None) => {
+                Ok(StmtResult::TermSuccess)
+            }
             Statement::Escape(_) => Ok(StmtResult::Escaped),
-            Statement::Guarded {
-                condition,
-                statements,
-                ..
-            } => {
+            Statement::Guarded(condition, statements) => {
                 let cond_val = interp.eval_expr(condition)?;
                 if cond_val == Value::Bits(vec![1u8]) {
                     for stmt in statements {
@@ -338,7 +322,7 @@ impl Reactor {
                     Ok(StmtResult::Continue)
                 }
             }
-            Statement::Unification { .. } => Ok(StmtResult::Continue),
+            Statement::Assign(Expr::Bool(true), Expr::Bool(true)) => Ok(StmtResult::Continue),
             Statement::SyncBlock { .. } => {
                 interp.exec_stmt(stmt)?;
                 Ok(StmtResult::Continue)
@@ -355,25 +339,45 @@ impl Reactor {
                 }
                 Ok(StmtResult::Continue)
             }
-            Statement::Oracle { body, handler, .. } => {
+            Statement::Block(body) => {
                 for stmt in body {
                     interp.exec_stmt(stmt)?;
                 }
                 Ok(StmtResult::Continue)
             }
-            Statement::Await { expr, .. } => {
+            Statement::Expression(expr) => {
                 interp.eval_expr(expr)?;
                 Ok(StmtResult::Continue)
             }
-            Statement::Async { body, .. } => {
-                interp.exec_stmt(body)?;
-                Ok(StmtResult::Continue)
-            }
-            Statement::AsyncAwait { body, .. } => {
-                interp.exec_stmt(body)?;
-                Ok(StmtResult::Continue)
-            }
             Statement::TrgBinding { .. } => {
+                Ok(StmtResult::Continue)
+            }
+            Statement::Return(val) => {
+                if let Some(expr) = val {
+                    interp.eval_expr(expr)?;
+                }
+                Ok(StmtResult::Continue)
+            }
+            Statement::If(cond, then, else_) => {
+                let cv = interp.eval_expr(cond)?;
+                if cv == Value::Bits(vec![1u8]) {
+                    for stmt in then {
+                        let result = self.execute_statement(interp, stmt)?;
+                        if !matches!(result, StmtResult::Continue) {
+                            return Ok(result);
+                        }
+                    }
+                } else {
+                    for stmt in else_ {
+                        let result = self.execute_statement(interp, stmt)?;
+                        if !matches!(result, StmtResult::Continue) {
+                            return Ok(result);
+                        }
+                    }
+                }
+                Ok(StmtResult::Continue)
+            }
+            Statement::MetadataAssignment(_, _) => {
                 Ok(StmtResult::Continue)
             }
         }
@@ -388,11 +392,11 @@ enum StmtResult {
 }
 
 pub fn run_reactor(
-    program: &Program,
+    items: &[TopLevel],
     interp: &mut Interpreter,
-) -> Result<(), crate::interpreter::RuntimeError> {
+) -> Result<(), RuntimeError> {
     let mut reactor = Reactor::new();
-    reactor.build_from_program(program);
+    reactor.build_from_program(items);
 
     loop {
         reactor.clear_dirty();
@@ -420,11 +424,11 @@ pub fn run_reactor(
 /// This is used when any transaction has `is_async = true` or
 /// `reactor_speed` is set. Exits on RuntimeError.
 pub fn run_reactor_continuous(
-    program: &Program,
+    items: &[TopLevel],
     interp: &mut Interpreter,
-) -> Result<(), crate::interpreter::RuntimeError> {
+) -> Result<(), RuntimeError> {
     let mut reactor = Reactor::new();
-    reactor.build_from_program(program);
+    reactor.build_from_program(items);
 
     loop {
         // (1) Responsive: convergence until quiescence
@@ -444,7 +448,7 @@ pub fn run_reactor_continuous(
 mod tests {
     use super::*;
     use crate::ast::*;
-    use crate::interpreter::{Interpreter, Value};
+    use crate::interpreter::{Interpreter, RuntimeError, Value};
 
     fn make_rct_txn(name: &str, pre: Expr, post: Expr, body: Vec<Statement>) -> TopLevel {
         TopLevel::Transaction(Transaction {
@@ -571,7 +575,7 @@ mod tests {
     #[test]
     fn test_run_executes_txn() {
         let body = vec![
-            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Decimal(42), timeout: None, modifiers: vec![] },
+            Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(42)),
             Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
         ];
         let txn = make_rct_txn("set_x",
@@ -588,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_run_skips_txn_pre_false() {
-        let body = vec![Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Decimal(99), timeout: None, modifiers: vec![] }];
+        let body = vec![Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(99))];
         let txn = make_rct_txn("skip", Expr::Bool(false), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
         interp.state.insert("x".into(), Value::Bits(crate::interpreter::i64_to_bits(0)));
@@ -616,8 +620,8 @@ mod tests {
     #[test]
     fn test_run_escape_triggers_rollback() {
         let body = vec![
-            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Decimal(10), timeout: None, modifiers: vec![] },
-            Statement::Guarded { condition: Expr::Bool(true), statements: vec![Statement::Escape(None)], metadata: HashMap::new() },
+            Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(10)),
+            Statement::Guarded(Expr::Bool(true), vec![Statement::Escape(None)]),
         ];
         let txn = make_rct_txn("rollback", Expr::Bool(true), Expr::Bool(true), body);
         let mut interp = Interpreter::new();
@@ -683,7 +687,7 @@ mod tests {
     #[test]
     fn test_fire_due_async_txns_fires_on_first_call() {
         let body = vec![
-            Statement::Assignment { lhs: Expr::Identifier("x".into()), expr: Expr::Decimal(99), timeout: None, modifiers: vec![] },
+            Statement::Assign(Expr::Identifier("x".into()), Expr::Decimal(99)),
             Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
         ];
         let txn = Transaction {

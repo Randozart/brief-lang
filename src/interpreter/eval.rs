@@ -15,7 +15,7 @@ use std::collections::HashMap;
 pub fn eval_expr(
     expr: &Expr,
     heap: &mut VirtualHeap,
-    bindings: &HashMap<String, Value>,
+    bindings: &mut HashMap<String, Value>,
 ) -> Result<Value, RuntimeError> {
     match expr {
         // ── Literals ────────────────────────────────────────────
@@ -107,7 +107,7 @@ fn eval_call(
     name: &str,
     args: &[Expr],
     heap: &mut VirtualHeap,
-    bindings: &HashMap<String, Value>,
+    bindings: &mut HashMap<String, Value>,
 ) -> Result<Value, RuntimeError> {
     let evaluated: Vec<Value> = args
         .iter()
@@ -131,7 +131,7 @@ fn eval_binary_op(
     lhs: &Expr,
     rhs: &Expr,
     heap: &mut VirtualHeap,
-    bindings: &HashMap<String, Value>,
+    bindings: &mut HashMap<String, Value>,
 ) -> Result<Value, RuntimeError> {
     let lv = eval_expr(lhs, heap, bindings)?;
     let rv = eval_expr(rhs, heap, bindings)?;
@@ -192,7 +192,7 @@ fn eval_unary_op(
     kind: &UnaryOpKind,
     expr: &Expr,
     heap: &mut VirtualHeap,
-    bindings: &HashMap<String, Value>,
+    bindings: &mut HashMap<String, Value>,
 ) -> Result<Value, RuntimeError> {
     let val = eval_expr(expr, heap, bindings)?;
     match kind {
@@ -215,7 +215,7 @@ fn eval_unary_op(
 fn eval_block(
     stmts: &[Statement],
     heap: &mut VirtualHeap,
-    bindings: &HashMap<String, Value>,
+    bindings: &mut HashMap<String, Value>,
 ) -> Result<Value, RuntimeError> {
     let mut result = Value::Void;
     for stmt in stmts {
@@ -230,7 +230,7 @@ fn eval_if(
     then: &Expr,
     else_: &Option<Box<Expr>>,
     heap: &mut VirtualHeap,
-    bindings: &HashMap<String, Value>,
+    bindings: &mut HashMap<String, Value>,
 ) -> Result<Value, RuntimeError> {
     let cv = eval_expr(cond, heap, bindings)?;
     if cv.is_true() {

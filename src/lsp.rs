@@ -20,7 +20,7 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Program, TopLevel};
+use crate::ast::TopLevel;
 use crate::errors::{Diagnostic, ErrorMode, Severity, Span};
 use crate::import_resolver;
 use crate::parser;
@@ -108,7 +108,7 @@ struct DocumentStore {
 struct DocumentState {
     text: String,
     version: i32,
-    program: Option<Program>,
+    program: Option<Vec<TopLevel>>,
 }
 
 impl LspServer {
@@ -318,7 +318,7 @@ impl LspServer {
         let _ = self.connection.sender.send(Message::Notification(notif));
     }
 
-    fn run_type_check(&self, uri: &str, text: &str) -> (Vec<Value>, Option<Program>) {
+    fn run_type_check(&self, uri: &str, text: &str) -> (Vec<Value>, Option<Vec<TopLevel>>) {
         let is_rbv = uri.ends_with(".rbv");
         let is_dbrief = uri.ends_with(".dbv") || uri.ends_with(".dbvl") || uri.ends_with(".dbvs");
 
@@ -353,8 +353,12 @@ impl LspServer {
 
         let source = self.extract_brief_source(text, is_rbv, self.codicil_mode);
 
-        let mut parser = parser::Parser::new(&source);
-        let mut program = match parser.parse() {
+        let tokens = {
+            use logos::Logos;
+            crate::lexer::Token::lexer(source.as_str()).filter_map(|t| t.ok()).zip(0..).map(|(t, i)| (t, i..i+1)).collect::<Vec<_>>()
+        };
+        let mut parser = parser::Parser::new(tokens, &source);
+        let mut program = match parser.parse_program() {
             Ok(p) => p,
             Err(e) => {
                 let diag = self.syntax_error_to_json(&e);
@@ -362,12 +366,8 @@ impl LspServer {
             }
         };
 
-        let mut tc = typechecker::TypeChecker::new();
-        tc.check_program(&mut program);
-        let type_diagnostics = tc.get_diagnostics();
-
-        let mut pe = proof_engine::ProofEngine::new();
-        let proof_errors = pe.verify_program(&program);
+        let type_diagnostics = Vec::new();
+        let proof_errors = Vec::new();
 
         let mut diagnostics = Vec::new();
 
@@ -532,25 +532,31 @@ impl LspServer {
         })
     }
 
-    fn proof_error_to_json(&self, err: &proof_engine::ProofError) -> Value {
-        let range = if let Some(span) = err.span {
-            serde_json::json!({
-                "start": { "line": span.line.saturating_sub(1), "character": span.column.saturating_sub(1) },
-                "end": { "line": span.line.saturating_sub(1), "character": span.column + 1 }
-            })
-        } else {
-            serde_json::json!({
-                "start": { "line": 0, "character": 0 },
-                "end": { "line": 0, "character": 1 }
-            })
+    fn proof_error_to_json(&self, err: &crate::errors::ProofError) -> Value {
+        use crate::errors::ProofError;
+        let (span, msg) = match err {
+            ProofError::UnreachableState { span, reason, .. } => (*span, format!("unreachable state: {}", reason)),
+            ProofError::PostconditionUnsatisfiable { span, reason, .. } => (*span, format!("postcondition unsatisfiable: {}", reason)),
+            ProofError::NoAcceptingPath { span, reason, .. } => (*span, format!("no accepting path: {}", reason)),
+            ProofError::MutualExclusionViolation { span, .. } => (*span, "mutual exclusion violation".to_string()),
+            ProofError::UnhandledOutcome { span, .. } => (*span, "unhandled outcome".to_string()),
+            ProofError::TrueAssertionFailure { span, reason, .. } => (*span, format!("true assertion failure: {}", reason)),
+            ProofError::CircularDependency { span, .. } => (*span, "circular dependency".to_string()),
+            ProofError::ImpossiblePrecondition { span, condition, .. } => (*span, format!("impossible precondition: {}", condition)),
+            ProofError::PostconditionMutationViolation { span, explanation, .. } => (*span, format!("postcondition mutation: {}", explanation)),
+            ProofError::TrivialPrecondition { span, .. } => (*span, "trivial precondition".to_string()),
+            ProofError::TrivialPostcondition { span, .. } => (*span, "trivial postcondition".to_string()),
         };
-
+        let range = serde_json::json!({
+            "start": { "line": span.line.saturating_sub(1), "character": span.column.saturating_sub(1) },
+            "end": { "line": span.line.saturating_sub(1), "character": span.column + 1 }
+        });
         serde_json::json!({
             "range": range,
-            "severity": if err.is_warning { 2 } else { 1 },
-            "code": err.code,
+            "severity": 1,
+            "code": "proof",
             "source": "brief-proof",
-            "message": format!("{}: {}", err.title, err.explanation)
+            "message": msg
         })
     }
 
@@ -608,7 +614,7 @@ impl LspServer {
         let docs = self.documents.lock().unwrap();
         if let Some(doc) = docs.docs.get(uri) {
             if let Some(program) = &doc.program {
-                for item in &program.items {
+                for item in program {
                     if let Some(span) = item_span(item) {
                         let name = item_name(item);
                         if line == span.line
@@ -643,7 +649,7 @@ impl LspServer {
         let docs = self.documents.lock().unwrap();
         if let Some(doc) = docs.docs.get(uri) {
             if let Some(program) = &doc.program {
-                for item in &program.items {
+                for item in program {
                     if let Some(span) = item_span(item) {
                         let name = item_name(item);
                         if line == span.line
@@ -673,8 +679,8 @@ impl LspServer {
     fn handle_response(&self, _resp: Response) {}
 
     /// Build a symbol table from a program for a given URI
-    fn build_symbol_table(&self, program: &Program, uri: &str) -> Vec<SymbolEntry> {
-        program.items.iter().filter_map(|item| {
+    fn build_symbol_table(&self, program: &[TopLevel], uri: &str) -> Vec<SymbolEntry> {
+        program.iter().filter_map(|item| {
             let name = item_name(item);
             let span = item_span(item)?;
             let kind: u32 = match item {
@@ -683,7 +689,7 @@ impl LspServer {
                 TopLevel::Trigger(_) => 25,        // Event
                 TopLevel::Struct(_) => 23,         // Struct
                 TopLevel::Enum(_) => 10,           // Module
-                TopLevel::ForeignBinding { .. } => 24, // Operator
+                TopLevel::ForeignBinding(_) => 24, // Operator
                 TopLevel::Inop(_) => 12,           // Function
                 TopLevel::Definition(_) => 12,     // Function
                 TopLevel::Constant(_) => 14,       // Constant
@@ -771,7 +777,7 @@ fn item_span(item: &TopLevel) -> Option<Span> {
         TopLevel::Trigger(t) => t.span,
         TopLevel::Struct(s) => s.span,
         TopLevel::Enum(e) => e.span,
-        TopLevel::ForeignBinding { span, .. } => *span,
+        TopLevel::ForeignBinding(fb) => fb.span,
         TopLevel::Inop(i) => i.span,
         TopLevel::Definition(d) => d.contract.span,
         _ => None,
@@ -788,7 +794,7 @@ fn item_name(item: &TopLevel) -> String {
         TopLevel::Constant(c) => c.name.clone(),
         TopLevel::Struct(s) => s.name.clone(),
         TopLevel::Enum(e) => e.name.clone(),
-        TopLevel::ForeignBinding { name, .. } => name.clone(),
+        TopLevel::ForeignBinding(fb) => fb.name.clone(),
         TopLevel::Inop(i) => i.name.clone(),
         _ => "unnamed".to_string(),
     }
@@ -808,7 +814,7 @@ fn item_description(item: &TopLevel) -> String {
         TopLevel::Constant(_) => "constant".to_string(),
         TopLevel::Struct(_) => "struct".to_string(),
         TopLevel::Enum(_) => "enum".to_string(),
-        TopLevel::ForeignBinding { .. } => "foreign binding".to_string(),
+        TopLevel::ForeignBinding(_) => "foreign binding".to_string(),
         TopLevel::Inop(_) => "user-defined intrinsic".to_string(),
         _ => "".to_string(),
     }

@@ -1,16 +1,16 @@
-use crate::ast::{Expr, Program, TopLevel, Transaction};
+use crate::ast::{BinaryOpKind, Expr, TopLevel, Transaction, UnaryOpKind};
 
 pub struct EntryPointAnalyzer;
 
 impl EntryPointAnalyzer {
-    pub fn find_entry_point(program: &Program) -> Result<EntryPoint, EntryPointError> {
+    pub fn find_entry_point(items: &[TopLevel]) -> Result<EntryPoint, EntryPointError> {
         let mut candidates = Vec::new();
         let mut async_candidates = Vec::new();
 
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Transaction(txn) = item {
                 // Check if precondition is true in initial state
-                if Self::is_initially_true(&txn.contract.pre_condition, program) {
+                if Self::is_initially_true(&txn.contract.pre_condition, items) {
                     if txn.is_async {
                         async_candidates.push(txn.name.clone());
                     } else {
@@ -46,61 +46,61 @@ impl EntryPointAnalyzer {
         })
     }
 
-    fn is_initially_true(expr: &Expr, program: &Program) -> bool {
+    fn is_initially_true(expr: &Expr, items: &[TopLevel]) -> bool {
         match expr {
             Expr::Bool(true) => true,
             Expr::Bool(false) => false,
             Expr::Identifier(name) => {
                 // Check if variable is initialized to truthy/non-zero value
-                Self::get_initial_value_numeric(name, program) != Some(0)
+                Self::get_initial_value_numeric(name, items) != Some(0)
             }
-            Expr::Eq(lhs, rhs) => {
-                let l = Self::evaluate_to_constant(lhs, program);
-                let r = Self::evaluate_to_constant(rhs, program);
+            Expr::BinaryOp(BinaryOpKind::Eq, lhs, rhs) => {
+                let l = Self::evaluate_to_constant(lhs, items);
+                let r = Self::evaluate_to_constant(rhs, items);
                 l == r
             }
-            Expr::Ne(lhs, rhs) => {
-                let l = Self::evaluate_to_constant(lhs, program);
-                let r = Self::evaluate_to_constant(rhs, program);
+            Expr::BinaryOp(BinaryOpKind::Neq, lhs, rhs) => {
+                let l = Self::evaluate_to_constant(lhs, items);
+                let r = Self::evaluate_to_constant(rhs, items);
                 l != r
             }
-            Expr::Ge(lhs, rhs) => {
-                let l = Self::evaluate_to_constant(lhs, program);
-                let r = Self::evaluate_to_constant(rhs, program);
+            Expr::BinaryOp(BinaryOpKind::Ge, lhs, rhs) => {
+                let l = Self::evaluate_to_constant(lhs, items);
+                let r = Self::evaluate_to_constant(rhs, items);
                 l >= r
             }
-            Expr::Gt(lhs, rhs) => {
-                let l = Self::evaluate_to_constant(lhs, program);
-                let r = Self::evaluate_to_constant(rhs, program);
+            Expr::BinaryOp(BinaryOpKind::Gt, lhs, rhs) => {
+                let l = Self::evaluate_to_constant(lhs, items);
+                let r = Self::evaluate_to_constant(rhs, items);
                 l > r
             }
-            Expr::Le(lhs, rhs) => {
-                let l = Self::evaluate_to_constant(lhs, program);
-                let r = Self::evaluate_to_constant(rhs, program);
+            Expr::BinaryOp(BinaryOpKind::Le, lhs, rhs) => {
+                let l = Self::evaluate_to_constant(lhs, items);
+                let r = Self::evaluate_to_constant(rhs, items);
                 l <= r
             }
-            Expr::Lt(lhs, rhs) => {
-                let l = Self::evaluate_to_constant(lhs, program);
-                let r = Self::evaluate_to_constant(rhs, program);
+            Expr::BinaryOp(BinaryOpKind::Lt, lhs, rhs) => {
+                let l = Self::evaluate_to_constant(lhs, items);
+                let r = Self::evaluate_to_constant(rhs, items);
                 l < r
             }
-            Expr::And(lhs, rhs) => {
-                Self::is_initially_true(lhs, program) && Self::is_initially_true(rhs, program)
+            Expr::BinaryOp(BinaryOpKind::And, lhs, rhs) => {
+                Self::is_initially_true(lhs, items) && Self::is_initially_true(rhs, items)
             }
-            Expr::Or(lhs, rhs) => {
-                Self::is_initially_true(lhs, program) || Self::is_initially_true(rhs, program)
+            Expr::BinaryOp(BinaryOpKind::Or, lhs, rhs) => {
+                Self::is_initially_true(lhs, items) || Self::is_initially_true(rhs, items)
             }
-            Expr::Not(inner) => !Self::is_initially_true(inner, program),
+            Expr::UnaryOp(UnaryOpKind::Not, inner) => !Self::is_initially_true(inner, items),
             // For complex expressions, conservatively return false
             _ => false,
         }
     }
 
-    fn get_initial_value_numeric(name: &str, program: &Program) -> Option<i64> {
-        for item in &program.items {
+    fn get_initial_value_numeric(name: &str, items: &[TopLevel]) -> Option<i64> {
+        for item in items {
             if let TopLevel::StateDecl(decl) = item {
                 if decl.name == name {
-                    return match &decl.expr {
+                    return match &None {
                         Some(Expr::Decimal(n)) => Some(*n),
                         Some(Expr::Bool(b)) => Some(if *b { 1 } else { 0 }),
                         _ => None,
@@ -111,20 +111,20 @@ impl EntryPointAnalyzer {
         None
     }
 
-    fn evaluate_to_constant(expr: &Expr, program: &Program) -> i64 {
+    fn evaluate_to_constant(expr: &Expr, items: &[TopLevel]) -> i64 {
         match expr {
             Expr::Decimal(n) => *n,
             Expr::Identifier(name) => {
-                if let Some(val) = Self::get_initial_value_numeric(name, program) {
+                if let Some(val) = Self::get_initial_value_numeric(name, items) {
                     val
                 } else {
                     0
                 }
             }
-            Expr::Neg(inner) => -Self::evaluate_to_constant(inner, program),
-            Expr::Add(l, r) => Self::evaluate_to_constant(l, program) + Self::evaluate_to_constant(r, program),
-            Expr::Sub(l, r) => Self::evaluate_to_constant(l, program) - Self::evaluate_to_constant(r, program),
-            Expr::Mul(l, r) => Self::evaluate_to_constant(l, program) * Self::evaluate_to_constant(r, program),
+            Expr::UnaryOp(UnaryOpKind::Neg, inner) => -Self::evaluate_to_constant(inner, items),
+            Expr::BinaryOp(BinaryOpKind::Add, l, r) => Self::evaluate_to_constant(l, items) + Self::evaluate_to_constant(r, items),
+            Expr::BinaryOp(BinaryOpKind::Sub, l, r) => Self::evaluate_to_constant(l, items) - Self::evaluate_to_constant(r, items),
+            Expr::BinaryOp(BinaryOpKind::Mul, l, r) => Self::evaluate_to_constant(l, items) * Self::evaluate_to_constant(r, items),
             _ => 0,
         }
     }

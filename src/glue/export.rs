@@ -23,7 +23,7 @@
 //   Path B (Meld) — for managed runtimes (Python, Node). C ABI transport
 //     + meld projections for zero-copy data access.
 
-use crate::ast::{Annotation, OutputType, Program, ResultType, TopLevel};
+use crate::ast::{Annotation, OutputType, TopLevel};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::fs;
@@ -90,14 +90,14 @@ pub struct AdapterEntry {
     pub c_type_map: HashMap<String, String>,
 }
 
-/// Extract bridge information from a parsed Program.
+/// Extract bridge information from a parsed program.
 /// Walks the AST to find #export pragmas, frgn declarations, and meld routes.
-pub fn extract_bridge_info(program: &Program, name: &str) -> BridgeInfo {
+pub fn extract_bridge_info(items: &[TopLevel], name: &str) -> BridgeInfo {
     BridgeInfo {
         name: name.to_string(),
-        exports: extract_exports(program),
-        frgns: extract_frgns(program),
-        melds: extract_melds(program),
+        exports: extract_exports(items),
+        frgns: extract_frgns(items),
+        melds: extract_melds(items),
     }
 }
 
@@ -105,9 +105,9 @@ fn has_export_modifier(modifiers: &[Annotation]) -> bool {
     modifiers.iter().any(|m| m.name == "export")
 }
 
-fn extract_exports(program: &Program) -> Vec<ExportDecl> {
+fn extract_exports(items: &[TopLevel]) -> Vec<ExportDecl> {
     let mut exports = Vec::new();
-    for item in &program.items {
+    for item in items {
         if let TopLevel::Definition(defn) = item {
             if !has_export_modifier(&defn.modifiers) {
                 continue;
@@ -135,11 +135,11 @@ fn extract_exports(program: &Program) -> Vec<ExportDecl> {
     exports
 }
 
-fn extract_frgns(program: &Program) -> Vec<FrgnDecl> {
+fn extract_frgns(items: &[TopLevel]) -> Vec<FrgnDecl> {
     let mut frgns = Vec::new();
-    for item in &program.items {
+    for item in items {
         if let TopLevel::Signature(sig) = item {
-            let return_type = format_result_type(&sig.result_type);
+            let return_type = format_result_type(&sig.outputs);
             frgns.push(FrgnDecl {
                 name: sig.name.clone(),
                 params: sig.params.iter()
@@ -153,15 +153,15 @@ fn extract_frgns(program: &Program) -> Vec<FrgnDecl> {
     frgns
 }
 
-fn extract_melds(program: &Program) -> Vec<MeldDecl> {
+fn extract_melds(items: &[TopLevel]) -> Vec<MeldDecl> {
     let mut melds = Vec::new();
-    for item in &program.items {
+    for item in items {
         if let TopLevel::Meld(meld) = item {
-            for route in &meld.routes {
+            for (key, _val) in &meld.bindings {
                 melds.push(MeldDecl {
-                    from_type: meld.name_a.clone(),
-                    to_type: meld.name_b.clone(),
-                    route: route.accessor.clone(),
+                    from_type: meld.target.clone(),
+                    to_type: meld.name.clone(),
+                    route: key.clone(),
                 });
             }
         }
@@ -193,19 +193,17 @@ fn format_output_type(ot: &OutputType) -> String {
             let parts: Vec<String> = types.iter().map(|t| format_output_type(t)).collect();
             parts.join("|")
         }
-        OutputType::Array(ty) => format!("{}[]", format_type(ty)),
+        OutputType::Array(ty) => format!("{}[]", format_output_type(ty)),
         OutputType::Named(name, inner) => format!("{}:{}", name, format_output_type(inner)),
     }
 }
 
-fn format_result_type(rt: &ResultType) -> String {
-    match rt {
-        ResultType::Projection(types) => {
-            let parts: Vec<String> = types.iter().map(|t| format_type(t)).collect();
-            parts.join("|")
-        }
-        ResultType::TrueAssertion => "Bool".to_string(),
-        ResultType::VoidType => "Void".to_string(),
+fn format_result_type(outputs: &[crate::ast::Type]) -> String {
+    if outputs.is_empty() {
+        "Void".to_string()
+    } else {
+        let parts: Vec<String> = outputs.iter().map(|t| format_type(t)).collect();
+        parts.join("|")
     }
 }
 
@@ -321,7 +319,7 @@ pub fn find_adapter(language: &str, dbvl_path: &Path) -> Result<AdapterEntry, St
 /// direct bridge-exports.dbvl output. The foreign build system reads
 /// this .dbvl to generate bindings — no adapter .bv macros needed.
 pub fn run_export(
-    program: &Program,
+    program: &[TopLevel],
     bridge_name: &str,
     language: &str,
     out_dir: &Path,

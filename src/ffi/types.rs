@@ -125,19 +125,13 @@ impl FfiValue {
                 FfiValue::Variant(name.clone(), variant.clone(), ffi_fields)
             }
             crate::interpreter::Value::Void => FfiValue::Void,
-            crate::interpreter::Value::DbvlTable(t) => {
-                let mut meta = std::collections::HashMap::new();
-                meta.insert("__lazy".to_string(), FfiValue::Data(t.path.to_string().into()));
-                meta.insert("entries".to_string(), FfiValue::Int(t.key_offsets.len() as i64));
-                FfiValue::Struct("DbvlTable".to_string(), meta)
-            }
             _ => FfiValue::Void,
         }
     }
 
     pub fn to_interpreter_value(&self) -> crate::interpreter::Value {
         match self {
-            FfiValue::Int(i) => crate::interpreter::Value::Bits(crate::interpreter::i64_to_bits(*i)),
+            FfiValue::Int(i) => crate::interpreter::i64_to_bits(*i),
             FfiValue::Bool(b) => crate::interpreter::Value::Bits(vec![if *b { 1u8 } else { 0u8 }]),
             FfiValue::Data(d) => crate::interpreter::Value::Bits(d.clone()),
             FfiValue::List(l) => crate::interpreter::Value::List(
@@ -160,7 +154,7 @@ impl FfiValue {
                 }
                 crate::interpreter::Value::Enum(name.clone(), variant.clone(), int_fields)
             }
-            FfiValue::Float(f) => crate::interpreter::Value::Bits(crate::interpreter::f64_to_bits(*f)),
+            FfiValue::Float(f) => crate::interpreter::f64_to_bits(*f),
             FfiValue::String(s) => crate::interpreter::Value::Bits(s.to_string().into()),
             FfiValue::Void => crate::interpreter::Value::Void,
         }

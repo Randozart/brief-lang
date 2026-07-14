@@ -1,5 +1,16 @@
-use crate::ast::{HardwareConfig, MemoryMapping};
-use std::collections::BTreeMap;
+use crate::ast::{TopLevel, Type};
+use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+pub struct MemoryMapping {
+    pub mem_type: String,
+    pub element_bits: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct HardwareConfig {
+    pub memory: std::collections::BTreeMap<String, MemoryMapping>,
+}
 
 pub struct StructGenerator;
 

@@ -21,7 +21,6 @@
 // or embeds the Work.
 
 use crate::ast::*;
-use crate::features::literal::LiteralExpr;
 use std::collections::{HashMap, HashSet};
 
 pub struct Annotator {
@@ -35,12 +34,17 @@ impl Annotator {
         }
     }
 
-    pub fn analyze(&mut self, program: &Program) {
-        for item in &program.items {
+    pub fn analyze(&mut self, items: &[TopLevel]) {
+        for item in items {
             if let TopLevel::Definition(defn) = item {
                 let mut calls = Vec::new();
                 self.collect_calls_from_body(&defn.body, &mut calls);
                 self.call_paths.insert(defn.name.clone(), calls);
+            }
+            if let TopLevel::Transaction(txn) = item {
+                let mut calls = Vec::new();
+                self.collect_calls_from_body(&txn.body, &mut calls);
+                self.call_paths.insert(txn.name.clone(), calls);
             }
         }
     }
@@ -49,39 +53,55 @@ impl Annotator {
         for stmt in body {
             match stmt {
                 Statement::Expression(expr) => self.collect_calls_from_expr(expr, calls),
-                Statement::Assignment { expr, lhs, .. } => {
-                    self.collect_calls_from_expr(expr, calls);
+                Statement::Assign(lhs, expr) => {
                     self.collect_calls_from_expr(lhs, calls);
+                    self.collect_calls_from_expr(expr, calls);
                 }
-                Statement::Guarded {
-                    condition,
-                    statements,
-                    ..
-                } => {
+                Statement::Guarded(condition, statements) => {
                     self.collect_calls_from_expr(condition, calls);
                     self.collect_calls_from_body(statements, calls);
                 }
-            Statement::Term { values: outputs, swan_song, .. } => {
-                for out in outputs {
-                    if let Some(expr) = out {
-                        self.collect_calls_from_expr(expr, calls);
+                Statement::Term(val) => {
+                    if let Some(v) = val {
+                        self.collect_calls_from_expr(v, calls);
                     }
                 }
-                if let Some(swan) = swan_song {
-                    self.collect_calls_from_body(&[swan.as_ref().clone()], calls);
-                }
-            }
-            Statement::TermBang { values: outputs, swan_song, .. } => {
-                for out in outputs {
-                    if let Some(expr) = out {
-                        self.collect_calls_from_expr(expr, calls);
+                Statement::TermBang(val) => {
+                    if let Some(v) = val {
+                        self.collect_calls_from_expr(v, calls);
                     }
                 }
-                if let Some(swan) = swan_song {
-                    self.collect_calls_from_body(&[swan.as_ref().clone()], calls);
+                Statement::Escape(val) => {
+                    if let Some(v) = val {
+                        self.collect_calls_from_expr(v, calls);
+                    }
                 }
-            }
-                _ => {}
+                Statement::Return(val) => {
+                    if let Some(v) = val {
+                        self.collect_calls_from_expr(v, calls);
+                    }
+                }
+                Statement::Let { expr, .. } => {
+                    if let Some(v) = expr {
+                        self.collect_calls_from_expr(v, calls);
+                    }
+                }
+                Statement::If(cond, then, else_) => {
+                    self.collect_calls_from_expr(cond, calls);
+                    self.collect_calls_from_body(then, calls);
+                    self.collect_calls_from_body(else_, calls);
+                }
+                Statement::Block(stmts) => {
+                    self.collect_calls_from_body(stmts, calls);
+                }
+                Statement::Foreach { list, body, .. } => {
+                    self.collect_calls_from_expr(list, calls);
+                    self.collect_calls_from_body(body, calls);
+                }
+                Statement::InlineAsm { .. }
+                | Statement::MetadataAssignment(..)
+                | Statement::SyncBlock(..)
+                | Statement::TrgBinding { .. } => {}
             }
         }
     }
@@ -94,58 +114,75 @@ impl Annotator {
                     self.collect_calls_from_expr(arg, calls);
                 }
             }
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
-                for arg in args {
-                    self.collect_calls_from_expr(arg, calls);
-                }
-            }
-            Expr::Add(l, r)
-            | Expr::Sub(l, r)
-            | Expr::Mul(l, r)
-            | Expr::Div(l, r)
-            | Expr::Eq(l, r)
-            | Expr::Ne(l, r)
-            | Expr::Lt(l, r)
-            | Expr::Le(l, r)
-            | Expr::Gt(l, r)
-            | Expr::Ge(l, r)
-            | Expr::Or(l, r)
-            | Expr::And(l, r)
-            | Expr::BitAnd(l, r)
-            | Expr::BitOr(l, r)
-            | Expr::BitXor(l, r) => {
+            Expr::BinaryOp(_, l, r) => {
                 self.collect_calls_from_expr(l, calls);
                 self.collect_calls_from_expr(r, calls);
             }
-            Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => self.collect_calls_from_expr(e, calls),
+            Expr::UnaryOp(_, e) => self.collect_calls_from_expr(e, calls),
             Expr::List(elems) => {
                 for e in elems {
                     self.collect_calls_from_expr(e, calls);
                 }
             }
-            Expr::ListIndex(list, index) => {
+            Expr::Index(list, index) => {
                 self.collect_calls_from_expr(list, calls);
                 self.collect_calls_from_expr(index, calls);
             }
-            Expr::Projection { source: list, .. } => self.collect_calls_from_expr(list, calls),
             Expr::Field(obj, _) => self.collect_calls_from_expr(obj, calls),
-            Expr::StructInstance(_, fields) => {
-                for (_, v) in fields {
-                    self.collect_calls_from_expr(v, calls);
+            Expr::Tuple(elems) => {
+                for e in elems {
+                    self.collect_calls_from_expr(e, calls);
                 }
             }
-            Expr::ObjectLiteral(fields) => {
-                for (_, v) in fields {
-                    self.collect_calls_from_expr(v, calls);
+            Expr::If(cond, then, else_) => {
+                self.collect_calls_from_expr(cond, calls);
+                self.collect_calls_from_expr(then, calls);
+                if let Some(el) = else_ {
+                    self.collect_calls_from_expr(el, calls);
                 }
             }
-            _ => {}
+            Expr::Match(expr, arms) => {
+                self.collect_calls_from_expr(expr, calls);
+                for arm in arms {
+                    self.collect_calls_from_expr(&arm.body, calls);
+                    if let Some(g) = &arm.guard {
+                        self.collect_calls_from_expr(g, calls);
+                    }
+                }
+            }
+            Expr::Block(stmts) => {
+                self.collect_calls_from_body(stmts, calls);
+            }
+            Expr::Lambda(_, body) => {
+                self.collect_calls_from_expr(body, calls);
+            }
+            Expr::Cast(expr, _) => self.collect_calls_from_expr(expr, calls),
+            Expr::IsType(expr, _) => self.collect_calls_from_expr(expr, calls),
+            Expr::Within(expr, scope) => {
+                self.collect_calls_from_expr(expr, calls);
+                self.collect_calls_from_expr(scope, calls);
+            }
+            Expr::DerivationBlock(block) => {
+                for ex in &block.examples {
+                    for input in &ex.inputs {
+                        self.collect_calls_from_expr(input, calls);
+                    }
+                    self.collect_calls_from_expr(&ex.output, calls);
+                }
+            }
+            Expr::PropertyGet(..)
+            | Expr::FormattingAnnotation(..)
+            | Expr::Quoted(..)
+            | Expr::Decimal(..)
+            | Expr::Bool(..)
+            | Expr::Float(..)
+            | Expr::Identifier(..) => {}
         }
     }
 
-    pub fn annotate_program(&self, program: &Program) -> String {
+    pub fn annotate_program(&self, items: &[TopLevel]) -> String {
         let mut output = String::new();
-        for item in &program.items {
+        for item in items {
             match item {
                 TopLevel::Definition(defn) => output.push_str(&self.format_definition(defn)),
                 TopLevel::Transaction(txn) => output.push_str(&self.format_transaction(txn)),
@@ -168,11 +205,15 @@ impl Annotator {
             Type::Custom(__t) if __t == "String" => "String".to_string(),
             Type::Custom(__t) if __t == "Bool" => "Bool".to_string(),
             Type::Custom(__t) if __t == "Data" => "Data".to_string(),
+            Type::Custom(__t) if __t == "UInt" => "UInt".to_string(),
+            Type::Custom(__t) if __t == "UInt8" => "UInt8".to_string(),
+            Type::Custom(__t) if __t == "UInt16" => "UInt16".to_string(),
+            Type::Custom(__t) if __t == "UInt32" => "UInt32".to_string(),
+            Type::Custom(__t) if __t == "Char" => "Char".to_string(),
             Type::Void => "Void".to_string(),
             Type::Bits(width) => format!("Bits<{}>", width),
             Type::Width(n) => format!("Width({})", n),
             Type::Custom(name) => name.clone(),
-            Type::Sig(name) => format!("sig {}", name),
             Type::TypeVar(name) => name.clone(),
             Type::Union(types) => types
                 .iter()
@@ -206,25 +247,20 @@ impl Annotator {
                         .join(", ")
                 )
             }
-            Type::Enum(name) => name.clone(),
-            Type::Custom(__t) if __t == "UInt" => "UInt".to_string(),
-            Type::Custom(__t) if __t == "UInt8" => "UInt8".to_string(),
-            Type::Custom(__t) if __t == "UInt16" => "UInt16".to_string(),
-            Type::Custom(__t) if __t == "UInt32" => "UInt32".to_string(),
-            Type::Custom(__t) if __t == "Char" => "Char".to_string(),
-            // Note: HashMap, HashSet, StringBuilder, Stack, Queue, Option
-            // are regular structs/enums defined in stdlib, handled via
-            // Custom/Applied/Enum variants below.
             Type::Vector(inner, dims) => {
                 let dims_str: Vec<String> = dims.iter().map(|d| match d {
-                    crate::ast::Dimension::Anonymous(s) => format!("{}", s),
-                    crate::ast::Dimension::Named(n, s) => format!("{}:{}", n, s),
+                    Dimension::Anonymous(s) => format!("{}", s),
+                    Dimension::Named(n, s) => format!("{}:{}", n, s),
                 }).collect();
                 format!("Vector<{}, {}>", self.type_to_string(inner), dims_str.join(", "))
             }
             Type::Constrained(inner, _) => self.type_to_string(inner),
-            // 2026-07-03: Layout-constrained pointer — show as Ptr<Bits @/0..N>
             Type::LayoutPtr(lc) => format!("Ptr<Bits @/0..{}>", lc.bytes * 8 - 1),
+            Type::Ptr(inner) => format!("Ptr<{}>", self.type_to_string(inner)),
+            Type::Function(params, ret) => {
+                let params_str: Vec<String> = params.iter().map(|t| self.type_to_string(t)).collect();
+                format!("({}) -> {}", params_str.join(", "), self.type_to_string(ret))
+            }
         }
     }
 
@@ -279,15 +315,15 @@ impl Annotator {
 
     fn format_signature(&self, sig: &Signature) -> String {
         let inputs: Vec<String> = sig
-            .input_types()
+            .params
+            .iter()
+            .map(|(_, t)| self.type_to_string(t))
+            .collect();
+        let results: Vec<String> = sig
+            .outputs
             .iter()
             .map(|t| self.type_to_string(t))
             .collect();
-        let results: Vec<String> = match &sig.result_type {
-            ResultType::Projection(types) => types.iter().map(|t| self.type_to_string(t)).collect(),
-            ResultType::TrueAssertion => vec!["true".to_string()],
-            ResultType::VoidType => vec!["void".to_string()],
-        };
 
         format!(
             "sig {}: ({}) -> ({});\n",
@@ -298,22 +334,10 @@ impl Annotator {
     }
 
     fn format_state_decl(&self, decl: &StateDecl) -> String {
-        let init = if let Some(e) = &decl.expr {
-            format!(" = {}", self.format_expr(e))
-        } else {
-            String::new()
-        };
-        let addr = if let Some(a) = decl.address {
-            format!(" @ 0x{:x}", a)
-        } else {
-            String::new()
-        };
         format!(
-            "let {}: {}{}{};\n",
+            "let {}: {};\n",
             decl.name,
             self.type_to_string(&decl.ty),
-            addr,
-            init
         )
     }
 
@@ -329,32 +353,15 @@ impl Annotator {
         let spaces = " ".repeat(indent);
         match stmt {
             Statement::Expression(expr) => format!("{}{};\n", spaces, self.format_expr(expr)),
-            Statement::Assignment { lhs, expr, timeout, .. } => {
-                let timeout_str = if let Some((expr, unit)) = timeout {
-                    let unit_str = match unit {
-                        TimeUnit::Cycles => "cycles",
-                        TimeUnit::Ms => "ms",
-                        TimeUnit::Seconds => "s",
-                        TimeUnit::Minutes => "min",
-                        TimeUnit::Nanoseconds => "ns",
-                    };
-                    format!(" within {} {}", self.format_expr(expr), unit_str)
-                } else {
-                    String::new()
-                };
+            Statement::Assign(lhs, expr) => {
                 format!(
-                    "{}{} = {}{};\n",
+                    "{}{} = {};\n",
                     spaces,
                     self.format_expr(lhs),
                     self.format_expr(expr),
-                    timeout_str
                 )
             }
-            Statement::Guarded {
-                condition,
-                statements,
-                ..
-            } => {
+            Statement::Guarded(condition, statements) => {
                 let mut output = format!("{}[{}] {{\n", spaces, self.format_expr(condition));
                 for s in statements {
                     output.push_str(&self.format_statement(s, indent + 2));
@@ -362,54 +369,98 @@ impl Annotator {
                 output.push_str(&format!("{}}}\n", spaces));
                 output
             }
-            Statement::Term { values: outputs, swan_song, .. } => {
-                let outputs_str: Vec<String> = outputs
-                    .iter()
-                    .map(|o| o.as_ref().map(|e| self.format_expr(e)).unwrap_or_default())
-                    .collect();
-                let swan_str = swan_song.as_ref().map(|s| format!(" -> {}", self.format_statement(s, 0).trim())).unwrap_or_default();
-                format!("{}term {}{};\n", spaces, outputs_str.join(", "), swan_str)
+            Statement::Term(val) => {
+                let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
+                format!("{}term {};\n", spaces, val_str)
             }
-            Statement::TermBang { values: outputs, swan_song, .. } => {
-                let outputs_str: Vec<String> = outputs
-                    .iter()
-                    .map(|o| o.as_ref().map(|e| self.format_expr(e)).unwrap_or_default())
-                    .collect();
-                let swan_str = swan_song.as_ref().map(|s| format!(" -> {}", self.format_statement(s, 0).trim())).unwrap_or_default();
-                format!("{}term! {}{};\n", spaces, outputs_str.join(", "), swan_str)
+            Statement::TermBang(val) => {
+                let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
+                format!("{}term! {};\n", spaces, val_str)
             }
-            Statement::Escape(expr) => {
-                let val = expr
+            Statement::Return(val) => {
+                let val_str = val.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
+                format!("{}return {};\n", spaces, val_str)
+            }
+            Statement::Escape(val) => {
+                let val_str = val
                     .as_ref()
                     .map(|e| format!(" {}", self.format_expr(e)))
                     .unwrap_or_default();
-                format!("{}escape{};\n", spaces, val)
+                format!("{}escape{};\n", spaces, val_str)
             }
-            _ => String::new(),
+            Statement::Let { name, ty, expr, .. } => {
+                if let Some(t) = ty {
+                    if let Some(e) = expr {
+                        format!("{}let {}: {} = {};\n", spaces, name, self.type_to_string(t), self.format_expr(e))
+                    } else {
+                        format!("{}let {}: {};\n", spaces, name, self.type_to_string(t))
+                    }
+                } else if let Some(e) = expr {
+                    format!("{}let {} = {};\n", spaces, name, self.format_expr(e))
+                } else {
+                    format!("{}let {};\n", spaces, name)
+                }
+            }
+            Statement::If(cond, then, else_) => {
+                let mut output = format!("{}if {} {{\n", spaces, self.format_expr(cond));
+                for s in then {
+                    output.push_str(&self.format_statement(s, indent + 2));
+                }
+                if !else_.is_empty() {
+                    output.push_str(&format!("{}}} else {{\n", spaces));
+                    for s in else_ {
+                        output.push_str(&self.format_statement(s, indent + 2));
+                    }
+                    output.push_str(&format!("{}}}\n", spaces));
+                } else {
+                    output.push_str(&format!("{}}}\n", spaces));
+                }
+                output
+            }
+            Statement::Block(stmts) => {
+                let mut output = format!("{} {{\n", spaces);
+                for s in stmts {
+                    output.push_str(&self.format_statement(s, indent + 2));
+                }
+                output.push_str(&format!("{}}}\n", spaces));
+                output
+            }
+            Statement::Foreach { item, list, body } => {
+                let mut output = format!("{}foreach({} in {}) {{\n", spaces, item, self.format_expr(list));
+                for s in body {
+                    output.push_str(&self.format_statement(s, indent + 2));
+                }
+                output.push_str(&format!("{}}}\n", spaces));
+                output
+            }
+            Statement::SyncBlock(body) => {
+                let mut output = format!("{}sync {{\n", spaces);
+                for s in body {
+                    output.push_str(&self.format_statement(s, indent + 2));
+                }
+                output.push_str(&format!("{}}}\n", spaces));
+                output
+            }
+            Statement::MetadataAssignment(key, val) => {
+                format!("{}{} <~ {:?};\n", spaces, key, val)
+            }
+            Statement::TrgBinding { name, instance, port } => {
+                format!("{}trg {} @ {}.{};\n", spaces, name, self.format_expr(instance), port)
+            }
+            Statement::InlineAsm { asm_string, .. } => {
+                format!("{}asm \"{}\";\n", spaces, asm_string)
+            }
         }
     }
 
     fn format_expr(&self, expr: &Expr) -> String {
         match expr {
-            // Pattern B: destructure feature struct
-            Expr::Literal(lit) => match lit.as_ref() {
-                LiteralExpr::Integer(n) => n.to_string(),
-                LiteralExpr::Float(f) => f.to_string(),
-                LiteralExpr::String(s) => format!("\"{}\"", s),
-                LiteralExpr::Char(c) => format!("'{}'", c),
-                LiteralExpr::Bool(b) => b.to_string(),
-                LiteralExpr::Term => "term".to_string(),
-            },
             Expr::Decimal(n) => n.to_string(),
             Expr::Float(f) => f.to_string(),
             Expr::Quoted(s) => format!("\"{}\"", String::from_utf8_lossy(s)),
-            Expr::Char(c) => format!("'{}'", c),  // NEW
             Expr::Bool(true) => "true".to_string(),
             Expr::Bool(false) => "false".to_string(),
-            Expr::Term => "term".to_string(),
             Expr::Identifier(n) => n.clone(),
-            expr @ Expr::AddrOf(_) => format!("&{}", expr.as_var_name().unwrap()),
-            Expr::PriorState(n) => format!("@{}", n),
             Expr::Call(name, args) => {
                 let args_str = args
                     .iter()
@@ -418,41 +469,38 @@ impl Annotator {
                     .join(", ");
                 format!("{}({})", name, args_str)
             }
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
-                let args_str = args
-                    .iter()
-                    .map(|a| self.format_expr(a))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let name = match intrinsic {
-                    Intrinsic::UserDefined(n) => n.as_str(),
-                    _ => intrinsic.name(),
+            Expr::BinaryOp(kind, l, r) => {
+                let op_str = match kind {
+                    BinaryOpKind::Add => " + ",
+                    BinaryOpKind::Sub => " - ",
+                    BinaryOpKind::Mul => " * ",
+                    BinaryOpKind::Div => " / ",
+                    BinaryOpKind::Mod => " % ",
+                    BinaryOpKind::Eq => " == ",
+                    BinaryOpKind::Neq => " != ",
+                    BinaryOpKind::Lt => " < ",
+                    BinaryOpKind::Le => " <= ",
+                    BinaryOpKind::Gt => " > ",
+                    BinaryOpKind::Ge => " >= ",
+                    BinaryOpKind::And => " && ",
+                    BinaryOpKind::Or => " || ",
+                    BinaryOpKind::BitAnd => " & ",
+                    BinaryOpKind::BitOr => " | ",
+                    BinaryOpKind::BitXor => " ^ ",
+                    BinaryOpKind::Shl => " << ",
+                    BinaryOpKind::Shr => " >> ",
+                    BinaryOpKind::Concat => " ++ ",
                 };
-                format!("{}#({})", name, args_str)
+                format!("({}{}{})", self.format_expr(l), op_str, self.format_expr(r))
             }
-            Expr::Add(l, r) => format!("({} + {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Sub(l, r) => format!("({} - {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Mul(l, r) => format!("({} * {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Div(l, r) => format!("({} / {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Mod(l, r) => format!("({} % {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Eq(l, r) => format!("({} == {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Ne(l, r) => format!("({} != {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Lt(l, r) => format!("({} < {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Le(l, r) => format!("({} <= {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Gt(l, r) => format!("({} > {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Ge(l, r) => format!("({} >= {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Concat(l, r) => format!("({} ++ {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Cast(expr, ty) => format!("({} as {})", self.format_expr(expr), self.type_to_string(ty)),
-            Expr::Or(l, r) => format!("({} || {})", self.format_expr(l), self.format_expr(r)),
-            Expr::And(l, r) => format!("({} && {})", self.format_expr(l), self.format_expr(r)),
-            Expr::BitAnd(l, r) => format!("({} & {})", self.format_expr(l), self.format_expr(r)),
-            Expr::BitOr(l, r) => format!("({} | {})", self.format_expr(l), self.format_expr(r)),
-            Expr::BitXor(l, r) => format!("({} ^ {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Shl(l, r) => format!("({} << {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Shr(l, r) => format!("({} >> {})", self.format_expr(l), self.format_expr(r)),
-            Expr::Not(e) => format!("!{}", self.format_expr(e)),
-            Expr::Neg(e) => format!("-{}", self.format_expr(e)),
-            Expr::BitNot(e) => format!("~{}", self.format_expr(e)),
+            Expr::UnaryOp(kind, e) => {
+                let op_str = match kind {
+                    UnaryOpKind::Neg => "-",
+                    UnaryOpKind::Not => "!",
+                    UnaryOpKind::BitNot => "~",
+                };
+                format!("{}{}", op_str, self.format_expr(e))
+            }
             Expr::List(elements) => {
                 let elements_str = elements
                     .iter()
@@ -461,176 +509,53 @@ impl Annotator {
                     .join(", ");
                 format!("[{}]", elements_str)
             }
-            Expr::ListIndex(list, index) => {
-                format!("{}[{}]", self.format_expr(list), self.format_expr(index))
-            }
-            Expr::Projection { source, target } => {
-                format!("{} :> {:?}", self.format_expr(source), target)
-            }
             Expr::Field(obj, field) => {
                 format!("{}.{}", self.format_expr(obj), field)
             }
-            Expr::StructInstance(typename, fields) => {
-                let fields_str = fields
-                    .iter()
-                    .map(|(f, v)| format!("{}: {}", f, self.format_expr(v)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{} {{{}}}", typename, fields_str)
-            }
-            Expr::ObjectLiteral(fields) => {
-                let fields_str = fields
-                    .iter()
-                    .map(|(n, v)| format!("{}: {}", n, self.format_expr(v)))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("{{{}}}", fields_str)
-            }
-            Expr::PatternMatch {
-                value,
-                variant,
-                fields,
-            } => {
-                format!(
-                    "{} {}({})",
-                    self.format_expr(value),
-                    variant,
-                    fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ")
-                )
-            }
-            Expr::Slice {
-                value,
-                start,
-                end,
-                stride: _,
-                mask: _,
-            } => {
-                format!(
-                    "{}[{}:{}]",
-                    self.format_expr(value),
-                    start
-                        .as_ref()
-                        .map(|e| self.format_expr(e))
-                        .unwrap_or_default(),
-                    end.as_ref()
-                        .map(|e| self.format_expr(e))
-                        .unwrap_or_default()
-                )
-            }
-            Expr::Block(stmts, expr) => {
-                let stmts_str = stmts.iter().map(|s| format!("  {:?}", s)).collect::<Vec<_>>().join(";\n");
-                format!("{{\n{}\n  {}\n}}", stmts_str, self.format_expr(expr))
-            }
-            Expr::TupleDestructure(names, expr) => {
-                format!("({}) = {}", names.join(", "), self.format_expr(expr))
+            Expr::Index(list, index) => {
+                format!("{}[{}]", self.format_expr(list), self.format_expr(index))
             }
             Expr::Tuple(exprs) => {
                 let exprs_str = exprs.iter().map(|e| self.format_expr(e)).collect::<Vec<_>>().join(", ");
                 format!("({})", exprs_str)
             }
-            Expr::MultiSlice { value, ops } => {
-                let ops_str: Vec<String> = ops.iter().map(|op| match op {
-                    BracketOp::Coord(c) => self.format_slice_coordinate(c),
-                    BracketOp::Mask(m) => format!("; {}", self.format_expr(m)),
-                    BracketOp::Stride(s) => format!("::{}", self.format_expr(s)),
+            Expr::If(cond, then, else_) => {
+                let else_str = else_.as_ref().map(|e| format!(" else {}", self.format_expr(e))).unwrap_or_default();
+                format!("(if {} then {}{})", self.format_expr(cond), self.format_expr(then), else_str)
+            }
+            Expr::Match(expr, arms) => {
+                let arms_str: Vec<String> = arms.iter().map(|arm| {
+                    format!("{} => {}", arm.pattern, self.format_expr(&arm.body))
                 }).collect();
-                format!("{}[{}]", self.format_expr(value), ops_str.join(", "))
+                format!("(match {} {{ {} }})", self.format_expr(expr), arms_str.join(", "))
             }
-            Expr::Match { value, arms } => {
-                let arms_str = arms.iter().map(|arm| {
-                    let pat = match &arm.pattern {
-                        MatchPattern::Wildcard => "_".to_string(),
-                        MatchPattern::Literal(pat) => format!("{}", pat),
-                        MatchPattern::Variant { name, fields } => {
-                            if fields.is_empty() { name.clone() }
-                            else { format!("{}({})", name, fields.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ")) }
-                        }
-                    };
-                    let guard_str = arm.guard.as_ref()
-                        .map(|g| format!(" if {}", self.format_expr(g)))
-                        .unwrap_or_default();
-                    format!("{}{}=> {}", pat, guard_str, self.format_expr(&arm.body))
-                }).collect::<Vec<_>>().join(", ");
-                format!("match {} {{ {} }}", self.format_expr(value), arms_str)
+            Expr::Block(stmts) => {
+                let body_str: String = stmts.iter().map(|s| self.format_statement(s, 0)).collect();
+                format!("{{ {} }}", body_str.trim())
             }
-            Expr::ArrowMut { target, index, value, .. } => {
-                let t = self.format_expr(target);
-                let i = self.format_expr(index);
-                let vs = value.as_ref().map(|v| self.format_expr(v)).unwrap_or_default();
-                let idx_str = if matches!(index.as_ref(), Expr::Term) { String::new() } else { format!("[{}]", i) };
-                format!("{}{} <- {}", t, idx_str, vs)
+            Expr::Lambda(params, body) => {
+                let params_str = params.join(", ");
+                format!("({}) => {}", params_str, self.format_expr(body))
             }
-            Expr::ArrowDiscard { target, index } => {
-                let t = self.format_expr(target);
-                let i = self.format_expr(index);
-                let idx_str = if matches!(index.as_ref(), Expr::Term) { String::new() } else { format!("[{}]", i) };
-                format!("<- {}{}", t, idx_str)
+            Expr::Cast(expr, ty) => format!("({} as {})", self.format_expr(expr), self.type_to_string(ty)),
+            Expr::IsType(expr, ty) => format!("({} is {})", self.format_expr(expr), self.type_to_string(ty)),
+            Expr::Within(expr, scope) => format!("({} within {})", self.format_expr(expr), self.format_expr(scope)),
+            Expr::DerivationBlock(block) => {
+                let examples_str: Vec<String> = block.examples.iter().map(|ex| {
+                    let inputs_str: Vec<String> = ex.inputs.iter().map(|i| self.format_expr(i)).collect();
+                    format!("{} -> {}", inputs_str.join(", "), self.format_expr(&ex.output))
+                }).collect();
+                format!(":= {{ {} }}", examples_str.join("; "))
             }
-            Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
-                let d = self.format_expr(dest);
-                let s = self.format_expr(source);
-                if let Some(f) = filter {
-                    format!("{} <- {}[; {}]", d, s, self.format_expr(f))
-                } else {
-                    format!("{} <- {}", d, s)
-                }
-            }
-            Expr::SigCall { modifier, expr } => {
-                let tag = match modifier {
-                    crate::ast::SigModifier::Out => "#out".to_string(),
-                    crate::ast::SigModifier::Inline => "#inline".to_string(),
-                    crate::ast::SigModifier::Export(name) => {
-                        match name {
-                            Some(n) => format!("#export(\"{}\")", n),
-                            None => "#export".to_string(),
-                        }
-                    }
-                };
-                format!("sig {} {}", tag, self.format_expr(expr))
-            }
-            Expr::Ellipsis => "...".to_string(),
-            Expr::MapLiteral(entries) => {
-                let pairs: Vec<String> = entries.iter()
-                    .map(|(k, v)| format!("{}: {}", self.format_expr(k), self.format_expr(v)))
-                    .collect();
-                format!("{{{}}}", pairs.join(", "))
-            }
-            Expr::SetLiteral(entries) => {
-                let elems: Vec<String> = entries.iter().map(|e| self.format_expr(e)).collect();
-                format!("{{{}}}", elems.join(", "))
-            }
-            Expr::DbvlTable { path, key_offsets, .. } => {
-                format!("DbvlTable({}, {} entries)", path, key_offsets.len())
-            }
-            Expr::SubtypeProjection { source, .. } => {
-                format!("<: {}", self.format_expr(source))
-            }
-            _ => String::new(),
-        }
-    }
-
-    fn format_slice_coordinate(&self, coord: &crate::ast::SliceCoordinate) -> String {
-        match coord {
-            crate::ast::SliceCoordinate::Index(expr) => self.format_expr(expr),
-            crate::ast::SliceCoordinate::Range { start, end } => {
-                let start_str = start.as_ref().map(|s| self.format_expr(s)).unwrap_or_default();
-                let end_str = end.as_ref().map(|e| self.format_expr(e)).unwrap_or_default();
-                format!("{}..{}", start_str, end_str)
-            }
-            crate::ast::SliceCoordinate::Named { name, coord } => {
-                format!("{}:{}", name, self.format_slice_coordinate(coord))
-            }
-            crate::ast::SliceCoordinate::AtDimension { dimension, coord } => {
-                format!("@{}:{}", dimension, self.format_slice_coordinate(coord))
-            }
-            crate::ast::SliceCoordinate::Ellipsis => "...".to_string(),
+            Expr::PropertyGet(name) => format!("property '{}'", name),
+            Expr::FormattingAnnotation(f) => format!("formatting <~ {}", f.name()),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-use crate::ast::*;
+    use crate::ast::*;
     use super::*;
 
     fn make_defn(name: &str, body: Vec<Statement>) -> TopLevel {
@@ -640,15 +565,13 @@ use crate::ast::*;
             parameters: vec![],
             outputs: vec![],
             output_type: None,
-            output_names: vec![],
             contract: Contract::new(Expr::Bool(true), Expr::Bool(true)),
             body,
-            is_lambda: false,
-            annotations: vec![],
             metadata: HashMap::new(),
-            modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
+            modifiers: vec![],
+            annotations: vec![],
+            span: None,
         })
     }
 
@@ -659,17 +582,17 @@ use crate::ast::*;
     #[test]
     fn test_analyze_empty_program() {
         let mut ann = Annotator::new();
-        let prog = Program { items: vec![], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
-        ann.analyze(&prog);
+        let items: Vec<TopLevel> = vec![];
+        ann.analyze(&items);
         assert!(ann.call_paths.is_empty());
     }
 
     #[test]
     fn test_analyze_definition_no_calls() {
         let mut ann = Annotator::new();
-        let stmts = vec![Statement::Term { values: vec![Some(Expr::Decimal(42))], swan_song: None, modifiers: vec![] }];
-        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
-        ann.analyze(&prog);
+        let stmts = vec![Statement::Term(Some(Expr::Decimal(42)))];
+        let items = vec![make_defn("foo", stmts)];
+        ann.analyze(&items);
         assert_eq!(ann.call_paths.get("foo").map(|v| v.len()).unwrap_or(0), 0);
     }
 
@@ -677,8 +600,8 @@ use crate::ast::*;
     fn test_analyze_definition_with_call() {
         let mut ann = Annotator::new();
         let stmts = vec![Statement::Expression(make_call_expr("bar"))];
-        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
-        ann.analyze(&prog);
+        let items = vec![make_defn("foo", stmts)];
+        ann.analyze(&items);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["bar".to_string()]);
     }
@@ -689,8 +612,8 @@ use crate::ast::*;
         let inner = make_call_expr("inner");
         let outer = Expr::Call("outer".to_string(), vec![inner]);
         let stmts = vec![Statement::Expression(outer)];
-        let prog = Program { items: vec![make_defn("foo", stmts)], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
-        ann.analyze(&prog);
+        let items = vec![make_defn("foo", stmts)];
+        ann.analyze(&items);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["outer".to_string(), "inner".to_string()]);
     }
@@ -698,13 +621,12 @@ use crate::ast::*;
     #[test]
     fn test_analyze_guarded_call() {
         let mut ann = Annotator::new();
-        let guarded = Statement::Guarded {
-            condition: Expr::Bool(true),
-            statements: vec![Statement::Expression(make_call_expr("inside_guard"))],
-            metadata: HashMap::new(),
-        };
-        let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
-        ann.analyze(&prog);
+        let guarded = Statement::Guarded(
+            Expr::Bool(true),
+            vec![Statement::Expression(make_call_expr("inside_guard"))],
+        );
+        let items = vec![make_defn("foo", vec![guarded])];
+        ann.analyze(&items);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["inside_guard".to_string()]);
     }
@@ -712,18 +634,15 @@ use crate::ast::*;
     #[test]
     fn test_analyze_guarded_assignment_call() {
         let mut ann = Annotator::new();
-        let guarded = Statement::Guarded {
-            condition: Expr::Bool(true),
-            statements: vec![Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: make_call_expr("calc"),
-                timeout: None,
-                modifiers: vec![],
-            }],
-            metadata: HashMap::new(),
-        };
-        let prog = Program { items: vec![make_defn("foo", vec![guarded])], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None, strict_mode: StrictMode::Off, dispatch_mode: Default::default(), exit_condition: None, out_pragmas: vec![], watchdog_defaults: (None, None), default_sig_modifier: None };
-        ann.analyze(&prog);
+        let guarded = Statement::Guarded(
+            Expr::Bool(true),
+            vec![Statement::Assign(
+                Expr::Identifier("x".to_string()),
+                make_call_expr("calc"),
+            )],
+        );
+        let items = vec![make_defn("foo", vec![guarded])];
+        ann.analyze(&items);
         let calls = ann.call_paths.get("foo").unwrap();
         assert_eq!(calls, &vec!["calc".to_string()]);
     }
@@ -732,12 +651,11 @@ use crate::ast::*;
 #[cfg(all(feature = "kani", feature = "kani_full"))]
 mod kani_full_tests {
     use super::*;
-    use crate::features::literal::LiteralExpr;
 
     #[kani::proof]
     fn verify_annotator_format_expr_literal_integer() {
         let ann = Annotator::new();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Integer(42)));
+        let expr = Expr::Decimal(42);
         let result = ann.format_expr(&expr);
         assert_eq!(result, "42");
     }
@@ -745,7 +663,7 @@ mod kani_full_tests {
     #[kani::proof]
     fn verify_annotator_format_expr_literal_bool() {
         let ann = Annotator::new();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Bool(true)));
+        let expr = Expr::Bool(true);
         let result = ann.format_expr(&expr);
         assert_eq!(result, "true");
     }
@@ -753,7 +671,7 @@ mod kani_full_tests {
     #[kani::proof]
     fn verify_annotator_format_expr_literal_float() {
         let ann = Annotator::new();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Float(3.14)));
+        let expr = Expr::Float(3.14);
         let result = ann.format_expr(&expr);
         assert!(!result.is_empty());
     }
@@ -761,24 +679,8 @@ mod kani_full_tests {
     #[kani::proof]
     fn verify_annotator_format_expr_literal_string() {
         let ann = Annotator::new();
-        let expr = Expr::Literal(Box::new(LiteralExpr::String("hello".to_string())));
+        let expr = Expr::Quoted("hello".into());
         let result = ann.format_expr(&expr);
         assert_eq!(result, "\"hello\"");
-    }
-
-    #[kani::proof]
-    fn verify_annotator_format_expr_literal_char() {
-        let ann = Annotator::new();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Char('A')));
-        let result = ann.format_expr(&expr);
-        assert_eq!(result, "'A'");
-    }
-
-    #[kani::proof]
-    fn verify_annotator_format_expr_literal_term() {
-        let ann = Annotator::new();
-        let expr = Expr::Literal(Box::new(LiteralExpr::Term));
-        let result = ann.format_expr(&expr);
-        assert_eq!(result, "term");
     }
 }

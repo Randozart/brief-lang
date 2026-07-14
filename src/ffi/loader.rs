@@ -221,23 +221,21 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
 
         let binding = ForeignBinding {
             name,
-            description,
             location,
             target,
-            mapper,
-            path,
             wasm_impl,
             wasm_setup: wasm_setup.clone(),
             inputs,
             success_output,
             error_type,
             error_fields,
-            input_layout,
-            output_layout,
+            input_layout: None,
+            output_layout: None,
             precondition,
             postcondition,
             buffer_mode,
             default_watchdog: None,
+            span: None,
         };
 
         bindings.push(binding);

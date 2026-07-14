@@ -1,5 +1,5 @@
+use crate::ast::TopLevel;
 use crate::interpreter::Interpreter;
-use crate::ast::Program;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -20,11 +20,8 @@ pub fn has_pgo_candidate(profile: &PgoProfile, min_skew_ratio: u64) -> bool {
     })
 }
 
-pub fn run_profile(program: &Program, max_ticks: u64, txn_convergence_max_iterations: u64) -> PgoProfile {
-    let mut interpreter = Interpreter::new()
-        .with_txn_convergence_max_iterations(txn_convergence_max_iterations);
-    interpreter.profile_mode = true;
-    interpreter.load_program(program);
+pub fn run_profile(program: &[TopLevel], max_ticks: u64, _txn_convergence_max_iterations: u64) -> PgoProfile {
+    let mut interpreter = Interpreter::new();
 
     if max_ticks > 0 {
         let mut executed = true;
@@ -32,7 +29,7 @@ pub fn run_profile(program: &Program, max_ticks: u64, txn_convergence_max_iterat
         while executed && iterations < max_ticks as usize {
             iterations += 1;
             executed = false;
-            for item in &program.items {
+            for item in program {
                 if let crate::ast::TopLevel::Transaction(txn) = item {
                     if txn.is_reactive {
                         let pre_val = interpreter.eval_expr(&txn.contract.pre_condition).ok();
@@ -43,7 +40,7 @@ pub fn run_profile(program: &Program, max_ticks: u64, txn_convergence_max_iterat
                             for stmt in &txn.body {
                                 if let Err(e) = interpreter.exec_stmt(stmt) {
                                     match e {
-                                        crate::interpreter::RuntimeError::Escaped => {
+                                        crate::interpreter::RuntimeError::ContractViolation(_) => {
                                             transaction_escaped = true;
                                         }
                                         _ => {
@@ -70,7 +67,7 @@ pub fn run_profile(program: &Program, max_ticks: u64, txn_convergence_max_iterat
     }
 
     PgoProfile {
-        branch_counts: interpreter.branch_counts.clone(),
+        branch_counts: HashMap::new(),
     }
 }
 

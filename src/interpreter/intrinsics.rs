@@ -113,10 +113,10 @@ pub fn execute_intrinsic(
             let src = arg_as_i64(args, 1)?;
             let n = arg_as_i64(args, 2)? as usize;
             let data = heap
-                .read(src, n)
+                .read(src as u64, n)
                 .ok_or_else(|| RuntimeError::HeapError("memcpy source read failed".into()))?;
             let data_vec = data.to_vec();
-            heap.write(dst, &data_vec)
+            heap.write(dst as u64, &data_vec)
                 .map_err(|_| RuntimeError::HeapError("memcpy dest write failed".into()))?;
             Ok(Value::Void)
         }

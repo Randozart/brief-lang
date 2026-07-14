@@ -119,8 +119,8 @@ fn count_operations(body: &[Statement]) -> u64 {
 
 fn count_stmt_ops(stmt: &Statement) -> u64 {
     match stmt {
-        Statement::Assignment { expr, .. } => count_expr_ops(expr),
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Assign(_, expr) => count_expr_ops(expr),
+        Statement::Guarded(condition, statements) => {
             count_expr_ops(condition) + count_operations(statements)
         }
         _ => 0,
@@ -129,31 +129,25 @@ fn count_stmt_ops(stmt: &Statement) -> u64 {
 
 fn count_expr_ops(expr: &Expr) -> u64 {
     match expr {
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Add, l, r) | Expr::BinaryOp(BinaryOpKind::Sub, l, r) | Expr::BinaryOp(BinaryOpKind::Mul, l, r) | Expr::BinaryOp(BinaryOpKind::Div, l, r) | Expr::BinaryOp(BinaryOpKind::Mod, l, r) => {
             1 + count_expr_ops(l) + count_expr_ops(r)
         }
-        Expr::And(l, r) | Expr::Or(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r)
-        | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::And, l, r) | Expr::BinaryOp(BinaryOpKind::Or, l, r) | Expr::BinaryOp(BinaryOpKind::Eq, l, r) | Expr::BinaryOp(BinaryOpKind::Neq, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Lt, l, r) | Expr::BinaryOp(BinaryOpKind::Le, l, r) | Expr::BinaryOp(BinaryOpKind::Gt, l, r) | Expr::BinaryOp(BinaryOpKind::Ge, l, r) => {
             1 + count_expr_ops(l) + count_expr_ops(r)
         }
-        Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::BitAnd, l, r) | Expr::BinaryOp(BinaryOpKind::BitOr, l, r) | Expr::BinaryOp(BinaryOpKind::BitXor, l, r) => {
             1 + count_expr_ops(l) + count_expr_ops(r)
         }
-        Expr::Shl(l, r) | Expr::Shr(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Shl, l, r) | Expr::BinaryOp(BinaryOpKind::Shr, l, r) => {
             1 + count_expr_ops(l) + count_expr_ops(r)
         }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+        Expr::UnaryOp(UnaryOpKind::Not, e) | Expr::UnaryOp(UnaryOpKind::Neg, e) | Expr::UnaryOp(UnaryOpKind::BitNot, e) => {
             1 + count_expr_ops(e)
         }
-        // Intrinsic calls — count float math ops as 1 each, recurse into args
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
-            let intrinsic_op = if matches!(intrinsic,
-                Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
-                | Intrinsic::Sqrt | Intrinsic::Fabs
-                | Intrinsic::Ceil | Intrinsic::Floor
-            ) { 1 } else { 0 };
-            let args_ops: u64 = args.iter().map(|a| count_expr_ops(a)).sum();
-            intrinsic_op + args_ops
+        // Calls — recurse into args
+        Expr::Call(_, args) => {
+            args.iter().map(|a| count_expr_ops(a)).sum()
         }
         _ => 0,
     }
@@ -171,13 +165,13 @@ fn count_bytes_transferred(body: &[Statement]) -> u64 {
 
 fn collect_field_refs(stmt: &Statement, fields: &mut Vec<String>) {
     match stmt {
-        Statement::Assignment { lhs, expr, .. } => {
+        Statement::Assign(lhs, expr) => {
             if let Expr::Identifier(f) = lhs {
                 if !fields.contains(f) { fields.push(f.clone()); }
             }
             collect_expr_field_refs(expr, fields);
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded(condition, statements) => {
             collect_expr_field_refs(condition, fields);
             for s in statements {
                 collect_field_refs(s, fields);
@@ -192,15 +186,15 @@ fn collect_expr_field_refs(expr: &Expr, fields: &mut Vec<String>) {
         Expr::Identifier(name) => {
             if !fields.contains(name) { fields.push(name.clone()); }
         }
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
-        | Expr::And(l, r) | Expr::Or(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r)
-        | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
-        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Add, l, r) | Expr::BinaryOp(BinaryOpKind::Sub, l, r) | Expr::BinaryOp(BinaryOpKind::Mul, l, r) | Expr::BinaryOp(BinaryOpKind::Div, l, r)
+        | Expr::BinaryOp(BinaryOpKind::And, l, r) | Expr::BinaryOp(BinaryOpKind::Or, l, r) | Expr::BinaryOp(BinaryOpKind::Eq, l, r) | Expr::BinaryOp(BinaryOpKind::Neq, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Lt, l, r) | Expr::BinaryOp(BinaryOpKind::Le, l, r) | Expr::BinaryOp(BinaryOpKind::Gt, l, r) | Expr::BinaryOp(BinaryOpKind::Ge, l, r)
+        | Expr::BinaryOp(BinaryOpKind::BitAnd, l, r) | Expr::BinaryOp(BinaryOpKind::BitOr, l, r) | Expr::BinaryOp(BinaryOpKind::BitXor, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Shl, l, r) | Expr::BinaryOp(BinaryOpKind::Shr, l, r) => {
             collect_expr_field_refs(l, fields);
             collect_expr_field_refs(r, fields);
         }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+        Expr::UnaryOp(UnaryOpKind::Not, e) | Expr::UnaryOp(UnaryOpKind::Neg, e) | Expr::UnaryOp(UnaryOpKind::BitNot, e) => {
             collect_expr_field_refs(e, fields);
         }
         _ => {}
@@ -212,18 +206,13 @@ mod tests {
     use super::*;
 
     fn assign(lhs: &str, expr: Expr) -> Statement {
-        Statement::Assignment {
-            lhs: Expr::Identifier(lhs.to_string()),
-            expr,
-            timeout: None,
-            modifiers: vec![],
-        }
+        Statement::Assign(Expr::Identifier(lhs.to_string()), expr)
     }
 
     #[test]
     fn test_simple_add_is_low_intensity() {
         // data = data + 1 → 1 add op, 1 field read + 1 write = 16 bytes
-        let body = vec![assign("x", Expr::Add(
+        let body = vec![assign("x", Expr::BinaryOp(BinaryOpKind::Add, 
             Box::new(Expr::Identifier("x".to_string())),
             Box::new(Expr::Decimal(1)),
         ))];
@@ -235,12 +224,12 @@ mod tests {
     #[test]
     fn test_heavy_math_is_high_intensity() {
         // x = x * y + z / w — 3 ops on 4 fields
-        let body = vec![assign("x", Expr::Add(
-            Box::new(Expr::Mul(
+        let body = vec![assign("x", Expr::BinaryOp(BinaryOpKind::Add, 
+            Box::new(Expr::BinaryOp(BinaryOpKind::Mul, 
                 Box::new(Expr::Identifier("x".to_string())),
                 Box::new(Expr::Identifier("y".to_string())),
             )),
-            Box::new(Expr::Div(
+            Box::new(Expr::BinaryOp(BinaryOpKind::Div, 
                 Box::new(Expr::Identifier("z".to_string())),
                 Box::new(Expr::Identifier("w".to_string())),
             )),
@@ -254,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_large_n_recommends_gpu() {
-        let body = vec![assign("x", Expr::Add(
+        let body = vec![assign("x", Expr::BinaryOp(BinaryOpKind::Add, 
             Box::new(Expr::Identifier("x".to_string())),
             Box::new(Expr::Decimal(1)),
         ))];
@@ -275,7 +264,7 @@ mod tests {
 
     #[test]
     fn test_crossover_point_monotonic() {
-        let body = vec![assign("x", Expr::Add(
+        let body = vec![assign("x", Expr::BinaryOp(BinaryOpKind::Add, 
             Box::new(Expr::Identifier("x".to_string())),
             Box::new(Expr::Decimal(1)),
         ))];

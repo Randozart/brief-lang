@@ -24,13 +24,13 @@
 ///
 /// Enables compile-time verification that functions always return Bool = true.
 /// Example: sig always_succeeds: String -> true; asserts the function always succeeds.
-use crate::ast::{Definition, Expr, ResultType, Signature, Statement, Type};
+use crate::ast::{BinaryOpKind, Definition, Expr, ResultType, Signature, Statement, Type};
 use std::collections::HashMap;
 
 /// Verify that a sig's `-> true` assertion is valid
 pub fn verify_true_assertion(sig: &Signature, defn: &Definition) -> Result<(), String> {
     // Check that sig has TrueAssertion result type
-    if !matches!(sig.result_type, ResultType::TrueAssertion) {
+    if !matches!(ResultType::Projection(sig.outputs.clone()), ResultType::TrueAssertion) {
         return Ok(()); // Not an assertion, nothing to verify
     }
 
@@ -69,7 +69,7 @@ fn check_all_paths(
 
     for stmt in body {
         match stmt {
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assign(lhs, expr) => {
                 // Track assignments
                 if let Expr::Identifier(name) = lhs {
                     vars.insert(name.clone(), expr.clone());
@@ -78,11 +78,7 @@ fn check_all_paths(
                 }
             }
 
-            Statement::Guarded {
-                condition,
-                statements,
-                ..
-            } => {
+            Statement::Guarded(condition, statements) => {
                 // Check TRUE branch: guarded statements must independently produce true
                 let mut branch_vars = vars.clone();
                 branch_vars.insert(
@@ -117,21 +113,20 @@ fn check_all_paths(
                 );
             }
 
-            Statement::Term { values: outputs, .. } | Statement::TermBang { values: outputs, .. } => {
+            Statement::Term(Some(expr)) | Statement::TermBang(Some(expr)) => {
                 found_term = true;
                 // Check if this term produces true
-                if let Some(Some(expr)) = outputs.first() {
-                    if is_provably_true(expr, &vars) {
-                        found_true_path = true;
-                    } else {
-                        return Err(format!(
-                            "Termination expression is not provably true in definition '{}'",
-                            defn.name
-                        ));
-                    }
+                if is_provably_true(expr, &vars) {
+                    found_true_path = true;
                 } else {
-                    return Err("Term has no output expression".to_string());
+                    return Err(format!(
+                        "Termination expression is not provably true in definition '{}'",
+                        defn.name
+                    ));
                 }
+            }
+            Statement::Term(None) | Statement::TermBang(None) => {
+                return Err("Term has no output expression".to_string());
             }
 
             _ => {}
@@ -162,7 +157,7 @@ fn is_provably_true(expr: &Expr, vars: &HashMap<String, Expr>) -> bool {
             }
         }
 
-        Expr::PriorState(name) => {
+        Expr::Identifier(name) if name.starts_with('@') => {
             // Check prior state value
             let prior_name = format!("@{}", name);
             match vars.get(&prior_name) {
@@ -181,11 +176,12 @@ fn extract_vars_from_expr(expr: &Expr, vars: &mut HashMap<String, Expr>) {
         Expr::Identifier(name) => {
             vars.entry(name.clone()).or_insert(Expr::Bool(false));
         }
-        Expr::PriorState(name) => {
+        Expr::Identifier(name) if name.starts_with('@') => {
             let prior_name = format!("@{}", name);
             vars.entry(prior_name).or_insert(Expr::Bool(false));
         }
-        Expr::And(l, r) | Expr::Or(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::And, l, r) | Expr::BinaryOp(BinaryOpKind::Or, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Eq, l, r) | Expr::BinaryOp(BinaryOpKind::Neq, l, r) => {
             extract_vars_from_expr(l, vars);
             extract_vars_from_expr(r, vars);
         }
@@ -215,19 +211,17 @@ mod tests {
             parameters: vec![],
             outputs: vec![Type::bool_()],
             output_type: None,
-            output_names: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                is_entry: false,
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Bool(true))], modifiers: vec![], swan_song: None }],
-            is_lambda: false,
+            body: vec![Statement::Term(Some(Expr::Bool(true)))],
             annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
         };
 
@@ -251,19 +245,17 @@ mod tests {
             parameters: vec![],
             outputs: vec![Type::bool_()],
             output_type: None,
-            output_names: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                is_entry: false,
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![], swan_song: None }],
-            is_lambda: false,
+            body: vec![Statement::Term(Some(Expr::Bool(false)))],
             annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
         };
 
@@ -287,27 +279,20 @@ mod tests {
             parameters: vec![("x".to_string(), Type::bool_())],
             outputs: vec![Type::bool_()],
             output_type: None,
-            output_names: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                is_entry: false,
                 watchdog: None,
                 span: None,
             },
             body: vec![
-                Statement::Assignment {
-                    lhs: Expr::Identifier("result".to_string()),
-                    expr: Expr::Bool(true),
-                    timeout: None,
-                    modifiers: vec![],
-                },
-                Statement::Term { values: vec![Some(Expr::Identifier("result".to_string()))], modifiers: vec![], swan_song: None },
+                Statement::Assign(Expr::Identifier("result".to_string()), Expr::Bool(true)),
+                Statement::Term(Some(Expr::Identifier("result".to_string()))),
             ],
-            is_lambda: false,
             annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
         };
 
@@ -331,21 +316,19 @@ mod tests {
             parameters: vec![],
             outputs: vec![Type::string()],
             output_type: None,
-            output_names: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                is_entry: false,
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Quoted(
+            body: vec![Statement::Term(Some(Expr::Quoted(
                 "not bool".into(),
-            ))], modifiers: vec![], swan_song: None }],
-            is_lambda: false,
+            )))],
             annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
         };
 
@@ -369,19 +352,17 @@ mod tests {
             parameters: vec![],
             outputs: vec![Type::bool_()],
             output_type: None,
-            output_names: vec![],
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
+                is_entry: false,
                 watchdog: None,
                 span: None,
             },
-            body: vec![Statement::Term { values: vec![Some(Expr::Bool(false))], modifiers: vec![], swan_song: None }],
-            is_lambda: false,
+            body: vec![Statement::Term(Some(Expr::Bool(false)))],
             annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
             derivation: None,
         };
 

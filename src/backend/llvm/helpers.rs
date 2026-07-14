@@ -13,7 +13,8 @@
 //   `pub(super)`  — visible to parent `llvm` module + children
 //   (private)     — visible only within this file
 
-use crate::ast::OutputType;
+use crate::ast::{BinaryOpKind, Expr, OutputType, Statement, Type};
+use crate::backend::llvm::emit_stmt::emit_statement;
 use crate::backend::llvm::*;
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -22,8 +23,17 @@ use std::fmt::Write;
 /// system (preferred) with hardcoded legacy fallback for types without
 /// a universe entry (e.g. during bootstrap).
 fn type_is(universe: &Option<crate::type_universe::TypeUniverse>, ty: &Type, name: &str) -> bool {
-    universe.as_ref().map_or(false, |u| u.type_is(ty, name))
-        || *ty == Type::Custom(name.to_string())
+    if *ty == Type::Custom(name.to_string()) {
+        return true;
+    }
+    if let Some(u) = universe {
+        if let Some(key) = ty.universe_key() {
+            if u.contains(key) {
+                return name == key || u.get(key).map_or(false, |rt| rt.name == name);
+            }
+        }
+    }
+    false
 }
 
 impl LlvmBackend {
@@ -250,7 +260,7 @@ impl LlvmBackend {
 
     /// Emit a single store for a precomputed field value.
     fn emit_precomputed_store(out: &mut String, gp: &str, ty: &str, val: &i64) {
-        match ty.as_str() {
+        match ty.as_ref() {
             "float" => {
                 let bits = *val as i32 as u32;
                 writeln!(out, "  store float bitcast (i32 {} to float), ptr {}, align 4", bits, gp).ok();
@@ -603,7 +613,7 @@ impl LlvmBackend {
     /// for >32, and `"i64"` for Boxed or unknown types.
     fn operator_llvm_type(&self, ty: &Type) -> &'static str {
         if let Some(ref universe) = self.ctx.type_universe {
-            if let Some(rt) = universe.get_by_type(ty) {
+            if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
                 if rt.llvm_type == "float" {
                     return "float";
                 } else if rt.llvm_type == "double" {
@@ -987,7 +997,7 @@ impl LlvmBackend {
         let b = self.emit_expr(out, r, indent);
         let a_is_native = self.is_native_float(&a.ty);
         let b_is_native = self.is_native_float(&b.ty);
-        let dedup_key = self.build_dedup_key(dedup_op(a_is_native, b_is_native, int_op, float_op), &a, &b);
+        let dedup_key = self.build_dedup_key(Self::dedup_op(a_is_native, b_is_native, int_op, float_op), &a, &b);
         if let Some(cached) = self.check_dedup_cache(&dedup_key) {
             let result_ty = a.ty.clone();
             return TypedRegister { name: cached, ty: result_ty };
@@ -999,7 +1009,7 @@ impl LlvmBackend {
         if a_is_native || b_is_native {
             return self.emit_mixed_binop(out, indent, &a, &b, int_op, &dedup_key, ptr_ty);
         }
-        if a.ty.is_integral() && a.ty == b.ty {
+        if !self.is_native_float(&a.ty) && a.ty == b.ty {
             return self.emit_fixed_width_binop(out, indent, &a, &b, int_op, &dedup_key);
         }
         self.emit_boxed_fallback_binop(out, indent, &a, &b, int_op, &dedup_key, ptr_ty)
@@ -1036,7 +1046,7 @@ impl LlvmBackend {
     /// Check if a type is a native float (float/double) via the universe.
     fn is_native_float(&self, ty: &Type) -> bool {
         self.ctx.type_universe.as_ref()
-            .and_then(|u| u.get_by_type(ty))
+            .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
             .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
             .unwrap_or_else(|| {
                 type_is(&self.ctx.type_universe, ty, "Float")
@@ -1045,7 +1055,7 @@ impl LlvmBackend {
     }
 
     /// Choose the dedup opcode based on float vs int.
-    fn dedup_op(a_is_native: bool, b_is_native: bool, int_op: &str, float_op: &str) -> &str {
+    fn dedup_op<'a>(a_is_native: bool, b_is_native: bool, int_op: &'a str, float_op: &'a str) -> &'a str {
         if a_is_native || b_is_native { float_op } else { int_op }
     }
 
@@ -1091,7 +1101,7 @@ impl LlvmBackend {
         let fr = self.fun.next_reg_with_prefix("bfr");
         writeln!(out, "{}{} = {} fast {} {}, {}", indent, fr, float_op, llvm_ty, fa, fb).ok();
         self.fun.reg_float_cache.insert(fr.clone(), fr.clone());
-        if let Some(ref key) = dedup_key {
+        if let Some(key) = dedup_key {
             self.fun.expr_dedup_cache.insert(key.clone(), fr.clone());
         }
         TypedRegister { name: fr, ty: a.ty.clone() }
@@ -1112,7 +1122,7 @@ impl LlvmBackend {
         let a_i64 = self.adapt_to_i64(out, indent, a);
         let b_i64 = self.adapt_to_i64(out, indent, b);
         writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
-        if let Some(ref key) = dedup_key {
+        if let Some(key) = dedup_key {
             self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
         }
         TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::int()) }
@@ -1131,7 +1141,7 @@ impl LlvmBackend {
         let v = self.fun.next_reg_with_prefix("t");
         let llvm_ty_str = self.llvm_type(&a.ty).to_string();
         writeln!(out, "{}{} = {} {} {}, {}", indent, v, int_op, llvm_ty_str, a.name, b.name).ok();
-        if let Some(ref key) = dedup_key {
+        if let Some(key) = dedup_key {
             self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
         }
         TypedRegister { name: v, ty: a.ty.clone() }
@@ -1152,7 +1162,7 @@ impl LlvmBackend {
         let a_i64 = self.adapt_to_i64(out, indent, a);
         let b_i64 = self.adapt_to_i64(out, indent, b);
         writeln!(out, "{}{} = {} i64 {}, {}", indent, v, int_op, a_i64, b_i64).ok();
-        if let Some(ref key) = dedup_key {
+        if let Some(key) = dedup_key {
             self.fun.expr_dedup_cache.insert(key.clone(), v.clone());
         }
         TypedRegister { name: v, ty: ptr_ty.unwrap_or(Type::int()) }
@@ -1176,7 +1186,7 @@ impl LlvmBackend {
     ) -> TypedRegister {
         let v = self.fun.next_reg();
         let is_native = self.ctx.type_universe.as_ref()
-            .and_then(|u| u.get_by_type(&a.ty))
+            .and_then(|u| a.ty.universe_key().and_then(|k| u.get(k)))
             .map(|r| r.llvm_type == "float" || r.llvm_type == "double")
             .unwrap_or(false);
         let (op_a, op_b) = if is_native {
@@ -1304,7 +1314,7 @@ impl LlvmBackend {
             "ole" => "sle",
             "ogt" => "sgt",
             "oge" => "sge",
-            _ => cond,
+            _ => "eq",
         }
     }
 
@@ -1487,14 +1497,16 @@ impl LlvmBackend {
             Type::Custom(n) => n.clone(),
             _ => return None,
         };
-        let universe = self.ctx.type_universe.as_ref()?;
-        // Find meld by scanning for any entry involving custom_name
-        let meld_entry = universe.melds.iter().find(|((a, b), _decl)| {
-            a == &custom_name || b == &custom_name
-        });
-        let ((name_a, name_b), meld_decl) = meld_entry?;
-        let partner = if *name_a == custom_name { name_b.clone() } else { name_a.clone() };
-        let route = meld_decl.routes.iter().find(|r| r.accessor == target_name)?;
+        let (partner, route) = {
+            let universe = self.ctx.type_universe.as_ref()?;
+            let meld_entry = universe.melds.iter().find(|((a, b), _decl)| {
+                a.as_str() == custom_name || b.as_str() == custom_name
+            });
+            let ((name_a, name_b), meld_decl) = meld_entry?;
+            let partner: String = if name_a.as_str() == custom_name { name_b.clone() } else { name_a.clone() };
+            let route = meld_decl.routes.iter().find(|r| r.accessor == target_name)?;
+            (partner, route.clone())
+        };
         let result = self.emit_route_expression(out, &route.dest_expr, src_val, &partner, indent);
         if let Some(ref reg) = result {
             self.mark_chimera(&reg.name, &partner);
@@ -1575,7 +1587,10 @@ impl LlvmBackend {
         if !self.is_chimera(&val.name) {
             return val.clone();
         }
-        let Some(backing) = self.chimera_backing(&val.name) else { return val.clone(); };
+        let backing: String = match self.chimera_backing(&val.name) {
+            Some(b) => b.to_string(),
+            None => return val.clone(),
+        };
         let target_name = match target_ty {
             Some(Type::Custom(n)) => n.clone(),
             _ => return val.clone(),
@@ -1583,10 +1598,14 @@ impl LlvmBackend {
         if backing == target_name {
             return val.clone();
         }
-        let Some(universe) = self.ctx.type_universe.as_ref() else { return val.clone(); };
-        let Some(meld_decl) = universe.find_meld(&backing, &target_name) else { return val.clone(); };
-        let Some(target_fields) = self.ctx.struct_types.get(&target_name) else { return val.clone(); };
-        let field_results = self.derive_fields_via_meld(out, val, &backing, &meld_decl.routes, target_fields, indent);
+        let (routes, target_fields) = {
+            let Some(universe) = self.ctx.type_universe.as_ref() else { return val.clone(); };
+            let Some(meld_decl) = universe.find_meld(&backing, &target_name) else { return val.clone(); };
+            let Some(target_fields) = self.ctx.struct_types.get(&target_name) else { return val.clone(); };
+            (meld_decl.routes.clone(), target_fields.clone())
+        };
+        let field_results = self.derive_fields_via_meld(out, val, &backing, &routes, &target_fields, indent);
+
         if field_results.is_empty() {
             return val.clone();
         }
@@ -1787,5 +1806,82 @@ impl LlvmBackend {
         };
         writeln!(out, "{}{} = {} i64 {}, {}", indent, v, i_op, a.name, b.name).ok();
         Some(TypedRegister { name: v.to_string(), ty: cast_ty.clone() })
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Section 9: Utility Methods (added 2026-07-14 for AST compat)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// Box a typed register to i64 for uniform state storage.
+    /// Handles Float(double)→bitcast→i64, Bool(i8)→zext→i64,
+    /// String/Data(i8*)→ptrtoint→i64. Int is already i64 (identity).
+    pub(crate) fn adapt_to_i64(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
+        match &reg.ty {
+            Type::Custom(t) if t == "Float" || t == "Float64" => {
+                let tr = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast double {} to i64", indent, tr, reg.name).ok();
+                tr
+            }
+            Type::Custom(t) if t == "Bool" => {
+                let tr = self.fun.gen_reg();
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, tr, reg.name).ok();
+                tr
+            }
+            Type::Custom(t) if t == "String" || t == "Data" => {
+                let tr = self.fun.gen_reg();
+                writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tr, reg.name).ok();
+                tr
+            }
+            _ => reg.name.clone(),
+        }
+    }
+
+    /// Emit a getelementptr for a state field and return the GEP register name.
+    /// `prefix` is used to make register names unique within a function.
+    pub(crate) fn emit_state_gep(&mut self, out: &mut String, indent: &str, _prefix: &str, state_ptr: &str, idx: usize) -> String {
+        let r = self.fun.gen_reg();
+        writeln!(out, "{}{} = getelementptr inbounds %State, ptr {}, i32 0, i32 {}", indent, r, state_ptr, idx).ok();
+        r
+    }
+
+    /// Ensure the value register has the expected LLVM type, inserting
+    /// trunc/zext/bitcast as needed. Returns the possibly-converted register name.
+    pub(crate) fn ensure_typed_value(&mut self, out: &mut String, indent: &str, expected_llvm_ty: &str, val: &str, brief_ty: Option<Type>, _universe: Option<&crate::type_universe::TypeUniverse>) -> String {
+        let Some(ref bt) = brief_ty else { return val.to_string(); };
+        let actual_ty = self.llvm_type(bt);
+        if actual_ty == expected_llvm_ty {
+            return val.to_string();
+        }
+        let actual_ty_clone = actual_ty.to_string();
+        match (actual_ty.as_ref(), expected_llvm_ty) {
+            ("double", "i64") | ("float", "i64") => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast {} {} to i64", indent, r, actual_ty_clone, val).ok();
+                r
+            }
+            ("i64", "double") => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast i64 {} to double", indent, r, val).ok();
+                r
+            }
+            ("i64", "float") => {
+                let tr = self.fun.gen_reg();
+                writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, val).ok();
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast i32 {} to float", indent, r, tr).ok();
+                r
+            }
+            ("i8", "i64") => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = zext i8 {} to i64", indent, r, val).ok();
+                r
+            }
+            ("i32", "i64") => {
+                let r = self.fun.gen_reg();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, r, val).ok();
+                r
+            }
+            _ => val.to_string(),
+        }
     }
 }

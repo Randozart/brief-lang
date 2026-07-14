@@ -13,7 +13,7 @@
 // `frgn "symbol_name"`. This ensures the GLUE pipeline never generates
 // redundant frgn declarations for operations the compiler already knows about.
 
-use crate::ast::Intrinsic;
+
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -33,6 +33,22 @@ pub struct LinkResult {
     pub functions: Vec<ForeignFunction>,
 }
 
+/// Check if a symbol name matches a known intrinsic.
+/// Returns the intrinsic name (with # suffix) if recognized.
+fn get_intrinsic_name(sym: &str) -> Option<String> {
+    let known = [
+        "AddI64", "SubI64", "MulI64", "DivI64", "Sqrt", "PrintInt",
+        "PrintFloat", "PrintStr", "GetEnvInt", "Malloc", "Memcpy",
+        "Memset", "Free", "Exit",
+    ];
+    let upper = sym.to_uppercase();
+    if known.iter().any(|k| k.to_uppercase() == upper || *k == sym) {
+        Some(format!("{}#", sym))
+    } else {
+        None
+    }
+}
+
 /// Analyze a foreign library and extract function symbols.
 /// Uses `nm` to read the symbol table, then cross-references each symbol
 /// against the compiler's known intrinsics.
@@ -48,24 +64,13 @@ pub fn analyze_library(lib_path: &Path) -> Result<LinkResult, String> {
     let functions: Vec<ForeignFunction> = symbols.iter()
         .map(|sym| {
             let clean_sym = strip_underscore_prefix(sym);
-            // Cross-reference against Intrinsic enum
-            // Check both the raw symbol and common name variants
-            let intrinsic = Intrinsic::from_name(clean_sym)
-                .or_else(|| {
-                    // Try stripping common prefixes/suffixes
-                    let variants = [
-                        clean_sym,
-                        clean_sym.strip_prefix("__").unwrap_or(clean_sym),
-                        clean_sym.strip_prefix("brief_").unwrap_or(clean_sym),
-                    ];
-                    variants.iter().find_map(|v| Intrinsic::from_name(v))
-                });
+            let intrinsic_name = get_intrinsic_name(clean_sym);
 
             ForeignFunction {
                 name: clean_sym.to_string(),
                 symbol: sym.clone(),
-                is_intrinsic: intrinsic.is_some(),
-                intrinsic_name: intrinsic.map(|i| i.name().to_string()),
+                is_intrinsic: intrinsic_name.is_some(),
+                intrinsic_name,
             }
         })
         .collect();

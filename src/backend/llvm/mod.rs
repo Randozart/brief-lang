@@ -206,7 +206,7 @@ fn remap_stmt_identifiers(s: &mut Statement, map: &HashMap<String, String>) {
             remap_expr_into(e, map);
         }
         Statement::TermBang(Some(ss)) => {
-            remap_stmt_identifiers(ss, map);
+            remap_expr_into(ss, map);
         }
         Statement::Guarded(condition, statements) => {
             remap_expr_into(condition, map);
@@ -325,7 +325,7 @@ fn collect_strings_tl(tl: &TopLevel, seen: &mut std::collections::HashSet<String
             for _ in &c.fields { }
             for txn in &c.transactions { for s in &txn.body { collect_strings_stmt(s, seen, out); } }
             for d in &c.definitions { for s in &d.body { collect_strings_stmt(s, seen, out); } }
-            for trg in &c.internal_triggers { collect_strings_expr(&trg.instance, seen, out); }
+            for trg in &c.internal_triggers { collect_strings_expr(&Expr::Identifier(trg.name.clone()), seen, out); }
         }
         _ => {}
     }
@@ -680,6 +680,12 @@ pub struct EmbeddedConfig {
     pub interrupts: Vec<InterruptEntry>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchMode {
+    Sequential,
+    Parallel,
+}
+
 #[derive(Debug, Clone)]
 pub struct MemoryRegion {
     pub name: String,
@@ -916,7 +922,7 @@ impl LlvmBackend {
         // Determine N for cost model: prefer PGO-derived bound, fall back to 0 (runtime).
         let pgo_bound = if self.ctx.pgo_profile.is_some() {
             let max_count = self.ctx.pgo_profile.as_ref().unwrap().branch_counts.values()
-                .map(|(t, f)| *t.max(f)).max().unwrap_or(0);
+                .map(|&(t, f)| t.max(f)).max().unwrap_or(0);
             if max_count > 0 { Some(max_count) } else { None }
         } else { None };
         let cost_n = pgo_bound.unwrap_or(0);
@@ -1449,11 +1455,11 @@ impl LlvmBackend {
                         self.ctx.defn_return_types.insert(t.name.clone(), t.outputs.clone());
                     }
                 }
-                TopLevel::Trigger(t) => {
-                    // 2026-07-13: Convert new AST Trigger to TriggerDeclaration for
-                    // backend compat. TriggerDeclaration has extra fields the backend expects.
+                TopLevel::Trigger(trg) => {
+                    // 2026-07-13: Convert new AST Trigger to TriggerDeclaration.
+                    // The new Trigger struct has name/instance/port/span fields.
                     let trg_decl = crate::ast::TriggerDeclaration {
-                        name: t.name.clone(),
+                        name: trg.name.clone(),
                         ty: crate::ast::Type::string(),
                         address: crate::ast::LinkRef::Explicit(0),
                         bit_range: None,
@@ -1461,12 +1467,12 @@ impl LlvmBackend {
                         condition: None,
                         is_wake: false,
                         is_const: false,
-                        span: t.span.clone(),
+                        span: trg.span.clone(),
                         annotations: vec![],
                         modifiers: vec![],
                     };
-                    self.ctx.triggers.insert(t.name.clone(), trg_decl);
-                    self.ctx.trigger_names.push(t.name.clone());
+                    self.ctx.triggers.insert(trg.name.clone(), trg_decl);
+                    self.ctx.trigger_names.push(trg.name.clone());
                 }
                 TopLevel::Definition(d) => {
                     let tys: Vec<Type> = d.parameters.iter().map(|(_, t)| t.clone()).collect();
@@ -1474,7 +1480,16 @@ impl LlvmBackend {
                     self.ctx.defn_return_types.insert(d.name.clone(), d.outputs.clone());
                 }
                 TopLevel::ForeignBinding(fb) => {
-                    self.ctx.frgn_map.insert(fb.name.clone(), fb.signature.clone());
+                    let sig = crate::ast::ForeignSignature {
+                        name: fb.name.clone(),
+                        location: fb.location.clone(),
+                        inputs: fb.inputs.clone(),
+                        result_type: crate::ast::ResultType::Projection(fb.success_output.iter().map(|(_, t)| t.clone()).collect()),
+                        wasm_impl: fb.wasm_impl.clone(),
+                        wasm_setup: fb.wasm_setup.clone(),
+                        span: fb.span,
+                    };
+                    self.ctx.frgn_map.insert(fb.name.clone(), sig);
                 }
                 TopLevel::Inop(inop) => {
                     self.ctx.inop_decls.insert(inop.name.clone(), inop.clone());
@@ -1512,7 +1527,7 @@ impl LlvmBackend {
                     if let Expr::Identifier(cell_name) = instance {
                         let resolved_port = if port.is_empty() {
                             // Auto-detect single output port: use the first named output
-                            if let Some(cell_def) = self.ctx.cell_defs.get(&cell_name) {
+                            if let Some(cell_def) = self.ctx.cell_defs.get(cell_name.as_str()) {
                                 "line".to_string() // Console's first output port
                             } else { String::new() }
                         } else { port.clone() };
@@ -1848,29 +1863,11 @@ impl LlvmBackend {
                 _ => "i64",
             };
             let key = match expr {
-                // 2026-06-29: Float64 uses f64-to-i64 bitcast; Float uses f32-to-i32 bitcast
-                Expr::Float64(f) => format!("{}:bitcast(i64 {} to double)", llvm_ty, float64_to_llvm_hex(*f)),
-                Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
-                Expr::Literal(lit) => match lit.as_ref() {
-                    crate::features::literal::LiteralExpr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(*f)),
-                    crate::features::literal::LiteralExpr::Integer(n) => format!("{}:{}", llvm_ty, n),
-                    crate::features::literal::LiteralExpr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
-                    crate::features::literal::LiteralExpr::String(_) => format!("{}:null", llvm_ty),
-                    crate::features::literal::LiteralExpr::Char(_) | crate::features::literal::LiteralExpr::Term => format!("{}:{}", llvm_ty, name),
-                },
+                Expr::Float(f) => format!("{}:bitcast(i64 {} to double)", llvm_ty, float64_to_llvm_hex(*f)),
                 Expr::Decimal(n) => format!("{}:{}", llvm_ty, n),
-                Expr::IntegerSuffixed(n, _) => format!("{}:{}", llvm_ty, n),
                 Expr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
-                Expr::Neg(inner) => match inner.as_ref() {
-                    Expr::Float64(f) => format!("{}:bitcast(i64 {} to double)", llvm_ty, float64_to_llvm_hex(-*f)),
-                    Expr::Float(f) => format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f)),
-                    Expr::Literal(lit) => {
-                        if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                            format!("{}:bitcast(i32 {} to float)", llvm_ty, float_to_llvm_hex(-*f))
-                        } else {
-                            format!("{}:neg:{}", llvm_ty, name)
-                        }
-                    }
+                Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match inner.as_ref() {
+                    Expr::Float(f) => format!("{}:bitcast(i64 {} to double)", llvm_ty, float64_to_llvm_hex(-*f)),
                     Expr::Decimal(n) => format!("{}:-{}", llvm_ty, n),
                     _ => format!("{}:neg:{}", llvm_ty, name),
                 },
@@ -1912,29 +1909,11 @@ impl LlvmBackend {
                 _ => "i64",
             };
             let val_str = match expr {
-                Expr::Float64(f) => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(*f)),
-                Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
-                Expr::Literal(lit) => match lit.as_ref() {
-                    crate::features::literal::LiteralExpr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(*f)),
-                    crate::features::literal::LiteralExpr::Integer(n) => n.to_string(),
-                    crate::features::literal::LiteralExpr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
-                    crate::features::literal::LiteralExpr::String(_) => "null".to_string(),
-                    crate::features::literal::LiteralExpr::Char(c) => format!("{}", *c as i64),
-                    crate::features::literal::LiteralExpr::Term => "0".to_string(),
-                },
+                Expr::Float(f) => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(*f)),
                 Expr::Decimal(n) => n.to_string(),
-                Expr::IntegerSuffixed(n, _) => n.to_string(),
                 Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
-                Expr::Neg(inner) => match inner.as_ref() {
-                    Expr::Float64(f) => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(-*f)),
-                    Expr::Float(f) => format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f)),
-                    Expr::Literal(lit) => {
-                        if let crate::features::literal::LiteralExpr::Float(f) = lit.as_ref() {
-                            format!("bitcast (i32 {} to float)", float_to_llvm_hex(-*f))
-                        } else {
-                            if *ty == Type::float() { "0.0".to_string() } else { "0".to_string() }
-                        }
-                    }
+                Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match inner.as_ref() {
+                    Expr::Float(f) => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(-*f)),
                     Expr::Decimal(n) => format!("-{}", n),
                     _ => if *ty == Type::float() { "0.0".to_string() } else { "0".to_string() },
                 },
@@ -1989,14 +1968,14 @@ impl LlvmBackend {
         let mut range_meta: Vec<String> = Vec::new();
 
         // Definitions
-        for item in &items {
+        for item in items {
             if let TopLevel::Definition(d) = item {
                 self.emit_definition(&mut out, d);
                 writeln!(out).ok();
             }
         }
         // User-defined inop# intrinsics
-        for item in &items {
+        for item in items {
             if let TopLevel::Inop(inop) = item {
                 self.emit_inop(&mut out, inop);
                 writeln!(out).ok();
@@ -2138,7 +2117,8 @@ impl LlvmBackend {
                         if let Some(ref bp) = node.bounded_pre {
                             if let Some(ref inc) = node.increments {
                                 if bp.var == inc.var {
-                                    checks.push(Expr::Ge(
+                                    checks.push(Expr::BinaryOp(
+                                        crate::ast::BinaryOpKind::Ge,
                                         Box::new(Expr::Identifier(bp.var.clone())),
                                         Box::new(Expr::Identifier(bp.bound_var.clone())),
                                     ));
@@ -2149,7 +2129,7 @@ impl LlvmBackend {
                 }
                 if !checks.is_empty() {
                     let combined = checks.into_iter()
-                        .reduce(|a, b| Expr::And(Box::new(a), Box::new(b)))
+                        .reduce(|a, b| Expr::BinaryOp(crate::ast::BinaryOpKind::And, Box::new(a), Box::new(b)))
                         .unwrap();
                     self.ctx.exit_condition = Some(Box::new(combined));
                     self.ctx.has_natural_exit = true;
@@ -2186,7 +2166,7 @@ impl LlvmBackend {
         let active_writes: usize = txns.first().map_or(0, |(_, txn)| {
             let mut seen = std::collections::HashSet::new();
             for stmt in &txn.body {
-                if let Statement::Assignment { lhs, .. } = stmt {
+                if let Statement::Assign(lhs, _) = stmt {
                     if let Some(name) = lhs.as_var_name() {
                         seen.insert(name.to_string());
                     }
@@ -2219,9 +2199,10 @@ impl LlvmBackend {
                         // If a swan song exists, the body is treated as non-pure.
                         let has_swan_song = txns[0].1.body.iter().any(|s| {
                             match s {
-                                Statement::Term { swan_song, .. } | Statement::TermBang { swan_song, .. } => swan_song.is_some(),
-                                Statement::Guarded { statements, .. } => {
-                                    statements.iter().any(|gs| matches!(gs, Statement::TermBang { swan_song, .. } if swan_song.is_some()))
+                                Statement::Term(Some(_)) | Statement::TermBang(Some(_)) => true,
+                Statement::Term(None) | Statement::TermBang(None) => false,
+                                Statement::Guarded(Expr::Bool(true), statements) => {
+                                    statements.iter().any(|gs| matches!(gs, Statement::TermBang(Some(_))))
                                 }
                                 _ => false,
                             }
@@ -3081,15 +3062,9 @@ impl LlvmBackend {
 
     fn is_ptr_expr(&self, expr: &Expr) -> bool {
         match expr {
-            Expr::Projection { target, .. } => matches!(target, ProjectionTarget::Ptr),
+            Expr::Field(_, target) => target == "Ptr",
             Expr::Identifier(name) => {
                 self.fun.let_binding_types.get(name)
-                    .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr")
-                        || matches!(t, Type::LayoutPtr(_)))
-                    .unwrap_or(false)
-            }
-            expr @ Expr::AddrOf(_) => { let name = expr.as_var_name().unwrap().to_string();
-                self.fun.let_binding_types.get(&name)
                     .map(|t| matches!(t, Type::Applied(n, _) if n == "Ptr")
                         || matches!(t, Type::LayoutPtr(_)))
                     .unwrap_or(false)
@@ -3139,14 +3114,14 @@ impl LlvmBackend {
             self.ctx.mmio_fields.clear();
             self.ctx.mmio_initializers.clear();
         }
-        for item in &items {
+        for item in items {
             if let TopLevel::StateDecl(s) = item {
-                if let Some(addr) = s.address {
-                    self.ctx.mmio_fields.insert(s.name.clone(), addr);
-                    self.ctx.mmio_initializers.insert(s.name.clone(), s.expr.clone());
-                } else if self.ctx.mmio_prepopulated && self.ctx.mmio_fields.contains_key(&s.name) {
+                let addr = 0u64;
+                self.ctx.mmio_fields.insert(s.name.clone(), addr);
+                self.ctx.mmio_initializers.insert(s.name.clone(), None);
+                if self.ctx.mmio_prepopulated && self.ctx.mmio_fields.contains_key(&s.name) {
                     if self.ctx.schema_aliases.is_empty() || self.ctx.schema_aliases.contains_key(&s.name) {
-                        self.ctx.mmio_initializers.insert(s.name.clone(), s.expr.clone());
+                        self.ctx.mmio_initializers.insert(s.name.clone(), None);
                     } else {
                         // Not in any imported schema — remove from mmio_fields to prevent
                         // accidental MMIO routing in reads/writes.
@@ -3154,21 +3129,21 @@ impl LlvmBackend {
                         self.ctx.field_index_map
                             .insert(s.name.clone(), self.ctx.field_types.len());
                         self.push_field_type(&s.ty);
-                        self.ctx.field_initializers.insert(s.name.clone(), s.expr.clone());
+                        self.ctx.field_initializers.insert(s.name.clone(), None);
                     }
                 } else {
                     self.ctx.field_index_map
                         .insert(s.name.clone(), self.ctx.field_types.len());
                     self.push_field_type(&s.ty);
-                    self.ctx.field_initializers.insert(s.name.clone(), s.expr.clone());
+                    self.ctx.field_initializers.insert(s.name.clone(), None);
                     if let Some(tu) = &self.ctx.type_universe {
                         let type_name = match &s.ty {
                             crate::ast::Type::Custom(n) => n.as_str(),
                             crate::ast::Type::Applied(n, _) => n.as_str(),
                             _ => "",
                         };
-                        if tu.get(type_name).and_then(|rt| rt.insert_at.as_ref())
-                            .map_or(false, |strat| strat == "ring_push")
+                        if tu.get(type_name).and_then(|rt| rt.properties.get("insert_at"))
+                            .map_or(false, |strat| *strat == crate::ast::PropertyValue::String("ring_push".to_string()))
                         {
                             let data_idx = self.ctx.field_types.len();
                             self.ctx.field_index_map.insert(format!("{}_data", s.name), data_idx);
@@ -3197,13 +3172,12 @@ impl LlvmBackend {
                         }
                     }
                 }
-            } else if let TopLevel::Trigger(t) = item {
-                // Triggers get a slot in the state struct so the event loop
-                // can store their values and emit_expr can load them.
+            } else if let TopLevel::Trigger(trg) = item {
+                // 2026-07-14: Trigger.ty removed - use string as default type.
                 self.ctx.field_index_map
-                    .insert(t.name.clone(), self.ctx.field_types.len());
-                self.push_field_type(&t.ty);
-                self.ctx.field_initializers.insert(t.name.clone(), None);
+                    .insert(trg.name.clone(), self.ctx.field_types.len());
+                self.push_field_type(&Type::string());
+                self.ctx.field_initializers.insert(trg.name.clone(), None);
             } else if let TopLevel::TriggerBinding { name, ty, .. } = item {
                 // Trigger bindings (trg name: Type @ Console!) get a state slot
                 // like regular triggers, so emit_expr can load their value.
@@ -3238,7 +3212,7 @@ impl LlvmBackend {
                         // Also register in %State for cell_persistent_ticks access
                         self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
                         self.push_field_type(&field.ty);
-                        self.ctx.field_initializers.insert(prefixed, field.default.clone());
+                        self.ctx.field_initializers.insert(prefixed, None);
                     }
                     for (param_name, param_ty) in &c.parameters {
                         let prefixed = format!("cell${}${}", c.name, param_name);
@@ -3250,17 +3224,18 @@ impl LlvmBackend {
                         self.ctx.field_initializers.insert(prefixed, None);
                     }
                     // Register internal trigger fields in %State and %CellState.*
+                    // 2026-07-14: Trigger.ty removed - use string as default type.
                     for trg in &c.internal_triggers {
                         let prefixed = format!("cell${}${}", c.name, trg.name);
                         cs_imap.insert(prefixed.clone(), cs_tys.len());
-                        cs_tys.push(self.llvm_type(&trg.ty).to_string());
+                        cs_tys.push(self.llvm_type(&Type::string()).to_string());
                         self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
-                        self.push_field_type(&trg.ty);
+                        self.push_field_type(&Type::string());
                         self.ctx.field_initializers.insert(prefixed, None);
                     }
                     self.ctx.cell_state_types.insert(c.name.clone(), (cs_imap, cs_tys));
-                    // Only add to cell_thread_names if any transaction has @Hz
-                    let has_thread_speed = c.transactions.iter().any(|t| t.reactor_speed.is_some());
+                    // 2026-07-14: reactor_speed removed from Transaction. Thread speed not available.
+                    let has_thread_speed = false;
                     if has_thread_speed {
                         self.cell_thread_names.push(c.name.clone());
                     }
@@ -3270,7 +3245,7 @@ impl LlvmBackend {
                         let prefixed = format!("cell${}${}", c.name, field.name);
                         self.ctx.field_index_map.insert(prefixed.clone(), self.ctx.field_types.len());
                         self.push_field_type(&field.ty);
-                        self.ctx.field_initializers.insert(prefixed, field.default.clone());
+                        self.ctx.field_initializers.insert(prefixed, None);
                     }
                     for (param_name, param_ty) in &c.parameters {
                         let prefixed = format!("cell${}${}", c.name, param_name);
@@ -3431,7 +3406,7 @@ impl LlvmBackend {
 
     /// Scan the program for cell-to-cell wires from TrgBinding statements.
     fn scan_cell_wires(&mut self, items: &[TopLevel]) {
-        for item in &items {
+        for item in items {
             self.scan_item_for_wires(item);
         }
     }

@@ -16,7 +16,7 @@
 //   2. Avoid LLVM having to push independent ops through alias analysis
 //   3. Keep the emitted IR readable for debugging
 
-use crate::ast::{Expr, Statement};
+use crate::ast::{BinaryOpKind, Expr, Statement, UnaryOpKind};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Reorder body statements to maximize instruction-level parallelism.
@@ -39,7 +39,7 @@ pub(crate) fn reorder_body_statements(body: &[Statement]) -> (Vec<Statement>, bo
     let mut terms: Vec<Statement> = Vec::new();
     let mut non_terms: Vec<Statement> = Vec::new();
     for s in body {
-        if matches!(s, Statement::Term { .. } | Statement::TermBang { .. }) {
+        if matches!(s, Statement::Term(..) | Statement::TermBang(..)) {
             terms.push(s.clone());
         } else {
             non_terms.push(s.clone());
@@ -69,17 +69,11 @@ fn rw_set_of(stmt: &Statement) -> ReadWriteSet {
     let mut reads = HashSet::new();
     let mut writes = HashSet::new();
     match stmt {
-        Statement::Assignment { lhs, expr, .. } => {
-            // lhs is the write target
+        Statement::Assign(lhs, expr) => {
             collect_write_target(lhs, &mut writes);
-            // expr is read
             collect_reads_from_expr(expr, &mut reads);
         }
-        Statement::Guarded {
-            condition,
-            statements,
-            ..
-        } => {
+        Statement::Guarded(condition, statements) => {
             collect_reads_from_expr(condition, &mut reads);
             for s in statements {
                 let inner = rw_set_of(s);
@@ -104,37 +98,13 @@ fn rw_set_of(stmt: &Statement) -> ReadWriteSet {
                 writes.extend(inner.writes);
             }
         }
-        Statement::Term {
-            values, swan_song, ..
-        }
-        | Statement::TermBang {
-            values, swan_song, ..
-        } => {
-            for v in values {
-                if let Some(e) = v {
-                    collect_reads_from_expr(e, &mut reads);
-                }
-            }
-            if let Some(ss) = swan_song {
-                let inner = rw_set_of(ss);
-                reads.extend(inner.reads);
-                writes.extend(inner.writes);
+        Statement::Term(opt_expr) | Statement::TermBang(opt_expr) => {
+            if let Some(e) = opt_expr {
+                collect_reads_from_expr(e, &mut reads);
             }
         }
-        Statement::SyncBlock { body } => {
+        Statement::SyncBlock(body) => {
             for s in body {
-                let inner = rw_set_of(s);
-                reads.extend(inner.reads);
-                writes.extend(inner.writes);
-            }
-        }
-        Statement::Oracle { body, handler, .. } => {
-            for s in body {
-                let inner = rw_set_of(s);
-                reads.extend(inner.reads);
-                writes.extend(inner.writes);
-            }
-            for s in handler {
                 let inner = rw_set_of(s);
                 reads.extend(inner.reads);
                 writes.extend(inner.writes);
@@ -151,8 +121,7 @@ fn collect_write_target(expr: &Expr, writes: &mut HashSet<String>) {
         Expr::Identifier(name) => {
             writes.insert(name.clone());
         }
-        Expr::ListIndex(target, _) => collect_write_target(target, writes),
-        Expr::Projection { source, .. } => collect_write_target(source, writes),
+        Expr::Index(target, _) => collect_write_target(target, writes),
         _ => {}
     }
 }
@@ -163,40 +132,17 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
         Expr::Identifier(name) => {
             reads.insert(name.clone());
         }
-        Expr::Add(l, r)
-        | Expr::Sub(l, r)
-        | Expr::Mul(l, r)
-        | Expr::Div(l, r)
-        | Expr::Eq(l, r)
-        | Expr::Ne(l, r)
-        | Expr::Lt(l, r)
-        | Expr::Le(l, r)
-        | Expr::Gt(l, r)
-        | Expr::Ge(l, r)
-        | Expr::And(l, r)
-        | Expr::Or(l, r) => {
+        Expr::BinaryOp(_, l, r) => {
             collect_reads_from_expr(l, reads);
             collect_reads_from_expr(r, reads);
         }
-        Expr::Not(e) | Expr::Neg(e) => collect_reads_from_expr(e, reads),
-        Expr::PriorState(_) => {}
-        Expr::BinaryOp(bop) => {
-            collect_reads_from_expr(&bop.left, reads);
-            collect_reads_from_expr(&bop.right, reads);
-        }
-        Expr::UnaryOp(op) => collect_reads_from_expr(&op.operand, reads),
+        Expr::UnaryOp(_, e) => collect_reads_from_expr(e, reads),
         Expr::Call(_, args) => {
             for a in args {
                 collect_reads_from_expr(a, reads);
             }
         }
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
-            for a in args {
-                collect_reads_from_expr(a, reads);
-            }
-        }
-        Expr::Projection { source, .. } => collect_reads_from_expr(source, reads),
-        Expr::ListIndex(list, idx) => {
+        Expr::Index(list, idx) => {
             collect_reads_from_expr(list, reads);
             collect_reads_from_expr(idx, reads);
         }
@@ -207,56 +153,20 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
         }
         Expr::Cast(inner, _) => collect_reads_from_expr(inner, reads),
         Expr::Field(obj, _) => collect_reads_from_expr(obj, reads),
-        Expr::Block(_, body) => collect_reads_from_expr(body, reads),
-        Expr::MapLiteral(entries) => {
-            for (k, v) in entries {
-                collect_reads_from_expr(k, reads);
-                collect_reads_from_expr(v, reads);
+        Expr::Block(stmts) => {
+            for s in stmts {
+                if let Statement::Expression(e) = s {
+                    collect_reads_from_expr(e, reads);
+                }
             }
         }
-        Expr::Match { value, arms } => {
+        Expr::Match(value, arms) => {
             collect_reads_from_expr(value, reads);
             for arm in arms {
                 collect_reads_from_expr(&arm.body, reads);
             }
         }
-        Expr::Slice {
-            value,
-            start,
-            end,
-            stride,
-            mask,
-        } => {
-            collect_reads_from_expr(value, reads);
-            if let Some(s) = start {
-                collect_reads_from_expr(s, reads);
-            }
-            if let Some(e) = end {
-                collect_reads_from_expr(e, reads);
-            }
-            if let Some(s) = stride {
-                collect_reads_from_expr(s, reads);
-            }
-            if let Some(m) = mask {
-                collect_reads_from_expr(m, reads);
-            }
-        }
         Expr::Tuple(items) => {
-            for item in items {
-                collect_reads_from_expr(item, reads);
-            }
-        }
-        Expr::StructInstance(_, fields) => {
-            for (_name, val) in fields {
-                collect_reads_from_expr(val, reads);
-            }
-        }
-        Expr::ObjectLiteral(fields) => {
-            for (_name, val) in fields {
-                collect_reads_from_expr(val, reads);
-            }
-        }
-        Expr::SetLiteral(items) => {
             for item in items {
                 collect_reads_from_expr(item, reads);
             }
@@ -267,20 +177,6 @@ fn collect_reads_from_expr(expr: &Expr, reads: &mut HashSet<String>) {
 
 /// Build a dependency graph: stmt i must come before stmt j if j reads
 /// what i writes, or j writes what i writes (WAW), or j writes what i reads (WAR).
-///
-/// Why only forward edges (i < j): edges are only added from earlier
-/// statements to later ones. This guarantees the graph is acyclic by
-/// construction — Kahn's algorithm in topological_sort can never detect
-/// a cycle from reorder_body_statements input. Cycles can still arise
-/// from manually constructed graphs in tests or if this function is
-/// called on unsorted input.
-///
-/// Why three edge types:
-///   RAW (i writes, j reads)  — classic true dependency, must preserve
-///   WAW (both write)         — output dependency, must preserve for
-///                              deterministic final value
-///   WAR (i reads, j writes)  — anti-dependency, must preserve to avoid
-///                              reading a pre-emptively updated value
 fn build_dependency_graph(sets: &[ReadWriteSet]) -> HashMap<usize, HashSet<usize>> {
     let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
     for i in 0..sets.len() {
@@ -309,19 +205,7 @@ fn build_dependency_graph(sets: &[ReadWriteSet]) -> HashMap<usize, HashSet<usize
 }
 
 /// Kahn's topological sort — emits independent statements grouped together
-/// for maximum ILP. Returns (sorted_statements, has_cycle).
-///
-/// Why Kahn's over DFS-based topological sort: Kahn's emits statements
-/// as soon as all their dependencies are satisfied, which naturally groups
-/// independent statements together (they all become ready at the same time
-/// and are popped consecutively). DFS post-order produces a reverse
-/// topo-sort that doesn't have this grouping property.
-///
-/// Cycle fallback: if Kahn's leaves some statements unscheduled (should
-/// not happen from build_dependency_graph but can from manual input),
-/// the unscheduled statements are appended in original order. This is a
-/// correctness fallback — the schedule is valid (all known dependencies
-/// are satisfied) but may miss some transitive edges.
+/// for maximum ILP.
 fn topological_sort(
     body: &[Statement],
     deps: &HashMap<usize, HashSet<usize>>,
@@ -349,8 +233,6 @@ fn topological_sort(
         }
     }
     let has_cycle = scheduled.len() < n;
-    // If cycle detected (some statements not scheduled), append unscheduled
-    // in original order as fallback.
     if has_cycle {
         for (i, s) in body.iter().enumerate() {
             if !scheduled.contains(&i) {
@@ -370,24 +252,14 @@ mod tests {
     fn test_reorder_independent_assignments() {
         // x = a + b; y = c + d; — independent, order preserved
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("a".into())),
-                    Box::new(Expr::Identifier("b".into())),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("c".into())),
-                    Box::new(Expr::Identifier("d".into())),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(
+                Expr::Identifier("x".into()),
+                Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into()))),
+            ),
+            Statement::Assign(
+                Expr::Identifier("y".into()),
+                Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("c".into())), Box::new(Expr::Identifier("d".into()))),
+            ),
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 2);
@@ -398,30 +270,20 @@ mod tests {
     fn test_reorder_dependent_assignments() {
         // x = a + b; y = x + 1; — y depends on x, must come after
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("a".into())),
-                    Box::new(Expr::Identifier("b".into())),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("x".into())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(
+                Expr::Identifier("x".into()),
+                Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("a".into())), Box::new(Expr::Identifier("b".into()))),
+            ),
+            Statement::Assign(
+                Expr::Identifier("y".into()),
+                Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("x".into())), Box::new(Expr::Decimal(1))),
+            ),
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 2);
         // y must come after x
-        let x_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("x")));
-        let y_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("y")));
+        let x_pos = reordered.iter().position(|s| matches!(s, Statement::Assign(Expr::Identifier(name), _) if name == "x"));
+        let y_pos = reordered.iter().position(|s| matches!(s, Statement::Assign(Expr::Identifier(name), _) if name == "y"));
         assert!(x_pos < y_pos, "dependent statement must come after");
     }
 
@@ -429,37 +291,25 @@ mod tests {
     fn test_reorder_chain() {
         // a = 1; b = a + 1; c = b + 1; — chain, must preserve order
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("a".into()))),
-                expr: Expr::Decimal(1),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("b".into()))),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("a".into())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("c".into()))),
-                expr: Expr::Add(
-                    Box::new(Expr::Identifier("b".into())),
-                    Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(
+                Expr::Identifier("a".into()),
+                Expr::Decimal(1),
+            ),
+            Statement::Assign(
+                Expr::Identifier("b".into()),
+                Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("a".into())), Box::new(Expr::Decimal(1))),
+            ),
+            Statement::Assign(
+                Expr::Identifier("c".into()),
+                Expr::BinaryOp(BinaryOpKind::Add, Box::new(Expr::Identifier("b".into())), Box::new(Expr::Decimal(1))),
+            ),
         ];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 3);
         assert!(!has_cycle);
-        let a_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("a")));
-        let b_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("b")));
-        let c_pos = reordered.iter().position(|s| matches!(s, Statement::Assignment { lhs: Expr::AddrOf(inner), .. } if inner.as_var_name() == Some("c")));
+        let a_pos = reordered.iter().position(|s| matches!(s, Statement::Assign(Expr::Identifier(name), _) if name == "a"));
+        let b_pos = reordered.iter().position(|s| matches!(s, Statement::Assign(Expr::Identifier(name), _) if name == "b"));
+        let c_pos = reordered.iter().position(|s| matches!(s, Statement::Assign(Expr::Identifier(name), _) if name == "c"));
         assert!(
             a_pos < b_pos && b_pos < c_pos,
             "chain order must be preserved"
@@ -468,29 +318,21 @@ mod tests {
 
     #[test]
     fn test_topological_sort_cycle_detected() {
-        // 2026-06-19: Verify cycle detection in the internal topological_sort.
-        // reorder_body_statements cannot produce cycles (edges are always forward),
-        // so test topological_sort directly with a manually constructed cycle graph.
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
-                expr: Expr::Decimal(1),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::AddrOf(Box::new(Expr::Identifier("y".into()))),
-                expr: Expr::Decimal(2),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(
+                Expr::Identifier("x".into()),
+                Expr::Decimal(1),
+            ),
+            Statement::Assign(
+                Expr::Identifier("y".into()),
+                Expr::Decimal(2),
+            ),
         ];
         let mut deps: HashMap<usize, HashSet<usize>> = HashMap::new();
         deps.insert(0, HashSet::from([1]));
         deps.insert(1, HashSet::from([0]));
         let (reordered, has_cycle) = topological_sort(&body, &deps);
         assert!(has_cycle, "Cycle in dependency graph should be detected");
-        // Fallback: all statements appear in original order
         assert_eq!(
             reordered.len(),
             2,
@@ -501,12 +343,10 @@ mod tests {
     #[test]
     fn test_reorder_short_body_no_reordering() {
         // 2026-06-19: Bodies with < 3 statements are returned as-is.
-        let body = vec![Statement::Assignment {
-            lhs: Expr::AddrOf(Box::new(Expr::Identifier("x".into()))),
-            expr: Expr::Decimal(1),
-            timeout: None,
-            modifiers: vec![],
-        }];
+        let body = vec![Statement::Assign(
+            Expr::Identifier("x".into()),
+            Expr::Decimal(1),
+        )];
         let (reordered, has_cycle) = reorder_body_statements(&body);
         assert_eq!(reordered.len(), 1);
         assert!(!has_cycle);

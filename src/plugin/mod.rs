@@ -13,7 +13,8 @@
 
 pub mod loader;
 
-use crate::ast::Program;
+
+use crate::ast::TopLevel;
 use crate::type_universe::TypeUniverse;
 
 /// Hook points in the compilation pipeline where plugins can run.
@@ -52,7 +53,7 @@ pub trait Plugin: std::fmt::Debug {
     fn on_hook(
         &self,
         _hook: PluginHook,
-        _program: &mut Program,
+        _program: &mut Vec<TopLevel>,
         _universe: &TypeUniverse,
     ) -> PluginAction {
         PluginAction::Continue
@@ -83,7 +84,7 @@ impl PluginManager {
     pub fn run_hooks(
         &self,
         hook: PluginHook,
-        program: &mut Program,
+        program: &mut Vec<TopLevel>,
         universe: &TypeUniverse,
     ) -> PluginAction {
         for plugin in &self.plugins {

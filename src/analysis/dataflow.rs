@@ -1,8 +1,8 @@
-use crate::ast::{BracketOp, Expr, Program, SliceCoordinate, Statement, TopLevel, Transaction};
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, UnaryOpKind};
 use std::collections::{HashMap, HashSet};
 
 pub struct DataflowAnalyzer<'a> {
-    program: &'a Program,
+    items: &'a [TopLevel],
 }
 
 #[derive(Debug, Clone)]
@@ -19,8 +19,8 @@ pub enum DataflowError {
 }
 
 impl<'a> DataflowAnalyzer<'a> {
-    pub fn new(program: &'a Program) -> Self {
-        DataflowAnalyzer { program }
+    pub fn new(items: &'a [TopLevel]) -> Self {
+        DataflowAnalyzer { items }
     }
 
     pub fn analyze(&self) -> Vec<DataflowError> {
@@ -30,7 +30,7 @@ impl<'a> DataflowAnalyzer<'a> {
         let mut txn_writes: HashMap<String, HashSet<String>> = HashMap::new();
         let mut txn_preconditions: HashMap<String, Expr> = HashMap::new();
 
-        for item in &self.program.items {
+        for item in self.items {
             if let TopLevel::Transaction(txn) = item {
                 let reads = self.extract_reads(&txn.contract.pre_condition);
                 let writes = self.extract_writes(&txn.body);
@@ -92,71 +92,27 @@ impl<'a> DataflowAnalyzer<'a> {
     fn extract_ids_recursive(&self, expr: &Expr, ids: &mut HashSet<String>) {
         match expr {
             Expr::Identifier(name) => { ids.insert(name.clone()); }
-            expr @ Expr::AddrOf(_) => { ids.insert(expr.as_var_name().unwrap().to_string()); }
-            Expr::PriorState(name) => { ids.insert(name.clone()); }
-            Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::Char(_)
-            | Expr::Bool(_) | Expr::Term | Expr::Literal(_)
-            | Expr::BinaryOp(_) | Expr::UnaryOp(_) => {}
-            Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
-            | Expr::Mod(l, r) | Expr::Shl(l, r) | Expr::Shr(l, r) | Expr::Concat(l, r) => {
+            Expr::Decimal(_) | Expr::Float(_) | Expr::Quoted(_) | Expr::Bool(_) => {}
+            Expr::BinaryOp(_, l, r) => {
                 self.extract_ids_recursive(l, ids);
                 self.extract_ids_recursive(r, ids);
             }
-            Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r)
-            | Expr::Gt(l, r) | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r)
-            | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r) => {
-                self.extract_ids_recursive(l, ids);
-                self.extract_ids_recursive(r, ids);
-            }
-            Expr::Not(inner) | Expr::Neg(inner) | Expr::BitNot(inner) => {
+            Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
                 self.extract_ids_recursive(inner, ids);
             }
-            Expr::Cast(inner, _) | Expr::Projection { source: inner, .. } => {
-                self.extract_ids_recursive(inner, ids);
-            }
-            Expr::Call(_, args) | Expr::List(args) | Expr::Tuple(args) => {
+            Expr::Call(_, args) | Expr::Tuple(args) | Expr::List(args) => {
                 for arg in args {
                     self.extract_ids_recursive(arg, ids);
                 }
             }
-            /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: _, args } => {
-                for arg in args {
-                    self.extract_ids_recursive(arg, ids);
-                }
-            }
-            Expr::ListIndex(list, idx) => {
+            Expr::Index(list, idx) => {
                 self.extract_ids_recursive(list, ids);
                 self.extract_ids_recursive(idx, ids);
             }
             Expr::Field(obj, _) => {
                 self.extract_ids_recursive(obj, ids);
             }
-            Expr::StructInstance(_, fields) | Expr::ObjectLiteral(fields) => {
-                for (_, field_expr) in fields {
-                    self.extract_ids_recursive(field_expr, ids);
-                }
-            }
-            Expr::Slice { value, start, end, stride, mask } => {
-                self.extract_ids_recursive(value, ids);
-                if let Some(s) = start { self.extract_ids_recursive(s, ids); }
-                if let Some(e) = end { self.extract_ids_recursive(e, ids); }
-                if let Some(st) = stride { self.extract_ids_recursive(st, ids); }
-                if let Some(m) = mask { self.extract_ids_recursive(m, ids); }
-            }
-            Expr::MultiSlice { value, ops } => {
-                self.extract_ids_recursive(value, ids);
-                for op in ops {
-                    match op {
-                        BracketOp::Coord(c) => self.extract_ids_from_slice_coord(c, ids),
-                        BracketOp::Mask(m) => self.extract_ids_recursive(m, ids),
-                        BracketOp::Stride(s) => self.extract_ids_recursive(s, ids),
-                    }
-                }
-            }
-            Expr::PatternMatch { value, .. } => {
-                self.extract_ids_recursive(value, ids);
-            }
-            Expr::Match { value, arms } => {
+            Expr::Match(value, arms) => {
                 self.extract_ids_recursive(value, ids);
                 for arm in arms {
                     self.extract_ids_recursive(&arm.body, ids);
@@ -165,89 +121,38 @@ impl<'a> DataflowAnalyzer<'a> {
                     }
                 }
             }
-            Expr::Block(stmts, expr) => {
+            Expr::If(cond, then, else_) => {
+                self.extract_ids_recursive(cond, ids);
+                self.extract_ids_recursive(then, ids);
+                if let Some(else_) = else_ {
+                    self.extract_ids_recursive(else_, ids);
+                }
+            }
+            Expr::Lambda(_, body) => {
+                self.extract_ids_recursive(body, ids);
+            }
+            Expr::Within(inner, _) => {
+                self.extract_ids_recursive(inner, ids);
+            }
+            Expr::Block(stmts) => {
                 for stmt in stmts {
                     self.extract_ids_from_statement(stmt, ids);
                 }
-                self.extract_ids_recursive(expr, ids);
             }
-            Expr::TupleDestructure(_, inner) => {
-                self.extract_ids_recursive(inner, ids);
-            }
-            Expr::ArrowMut { target, index, value, .. } => {
-                self.extract_ids_recursive(target, ids);
-                self.extract_ids_recursive(index, ids);
-                if let Some(v) = value {
-                    self.extract_ids_recursive(v, ids);
-                }
-            }
-            Expr::ArrowDiscard { target, index } => {
-                self.extract_ids_recursive(target, ids);
-                self.extract_ids_recursive(index, ids);
-            }
-            Expr::ArrowTransfer { dest, source, filter, consume: _ } => {
-                self.extract_ids_recursive(dest, ids);
-                self.extract_ids_recursive(source, ids);
-                if let Some(f) = filter {
-                    self.extract_ids_recursive(f, ids);
-                }
-            }
-            Expr::SigCall { expr, .. } => {
-                self.extract_ids_recursive(expr, ids);
-            }
-            Expr::Ellipsis => {}
-            Expr::MapLiteral(entries) => {
-                for (k, v) in entries {
-                    self.extract_ids_recursive(k, ids);
-                    self.extract_ids_recursive(v, ids);
-                }
-            }
-            Expr::SetLiteral(entries) => {
-                for e in entries {
-                    self.extract_ids_recursive(e, ids);
-                }
-            }
-            Expr::DbvlTable { .. } => {}
-            Expr::SubtypeProjection { source, .. } => {
-                self.extract_ids_recursive(source, ids);
-            }
-            _ => {}
-        }
-    }
-
-    fn extract_ids_from_slice_coord(&self, coord: &SliceCoordinate, ids: &mut HashSet<String>) {
-        match coord {
-            SliceCoordinate::Index(expr) => {
-                self.extract_ids_recursive(expr, ids);
-            }
-            SliceCoordinate::Range { start, end } => {
-                if let Some(s) = start { self.extract_ids_recursive(s, ids); }
-                if let Some(e) = end { self.extract_ids_recursive(e, ids); }
-            }
-            SliceCoordinate::Named { coord, .. } => {
-                self.extract_ids_from_slice_coord(coord, ids);
-            }
-            SliceCoordinate::AtDimension { coord, .. } => {
-                self.extract_ids_from_slice_coord(coord, ids);
-            }
-            SliceCoordinate::Ellipsis => {}
+            Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) | Expr::DerivationBlock(_) => {}
         }
     }
 
     fn extract_ids_from_statement(&self, stmt: &Statement, ids: &mut HashSet<String>) {
         match stmt {
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assign(lhs, expr) => {
                 self.extract_ids_recursive(lhs, ids);
                 self.extract_ids_recursive(expr, ids);
             }
-            Statement::Let { expr, address_expr, .. } => {
+            Statement::Let { expr, .. } => {
                 if let Some(e) = expr { self.extract_ids_recursive(e, ids); }
-                if let Some(a) = address_expr { self.extract_ids_recursive(a, ids); }
             }
-            Statement::Unification { expr, .. } => {
-                self.extract_ids_recursive(expr, ids);
-            }
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 self.extract_ids_recursive(condition, ids);
                 for s in statements {
                     self.extract_ids_from_statement(s, ids);
@@ -256,51 +161,48 @@ impl<'a> DataflowAnalyzer<'a> {
             Statement::Expression(expr) => {
                 self.extract_ids_recursive(expr, ids);
             }
-            Statement::Term { values, swan_song, .. } => {
-                for v in values.iter().flatten() {
-                    self.extract_ids_recursive(v, ids);
-                }
-                if let Some(swan) = swan_song {
-                    self.extract_ids_from_statement(swan, ids);
+            Statement::Term(Some(e)) => {
+                self.extract_ids_recursive(e, ids);
+            }
+            Statement::TermBang(Some(e)) => {
+                self.extract_ids_recursive(e, ids);
+            }
+            Statement::Term(None) | Statement::TermBang(None) => {}
+            Statement::Escape(Some(e)) => {
+                self.extract_ids_recursive(e, ids);
+            }
+            Statement::Escape(None) => {}
+            Statement::SyncBlock(body) => {
+                for s in body {
+                    self.extract_ids_from_statement(s, ids);
                 }
             }
-            Statement::TermBang { values, swan_song, .. } => {
-                for v in values.iter().flatten() {
-                    self.extract_ids_recursive(v, ids);
+            Statement::Return(Some(e)) => {
+                self.extract_ids_recursive(e, ids);
+            }
+            Statement::Return(None) => {}
+            Statement::If(cond, then, else_) => {
+                self.extract_ids_recursive(cond, ids);
+                for s in then {
+                    self.extract_ids_from_statement(s, ids);
                 }
-                if let Some(swan) = swan_song {
-                    self.extract_ids_from_statement(swan, ids);
+                for s in else_ {
+                    self.extract_ids_from_statement(s, ids);
                 }
             }
-            Statement::Escape(expr) => {
-                if let Some(e) = expr { self.extract_ids_recursive(e, ids); }
-            }
-            Statement::SyncBlock { .. } => {}
-            Statement::InlineAsm { .. } => {}
             Statement::Foreach { list, body, .. } => {
                 self.extract_ids_recursive(list, ids);
                 for s in body {
                     self.extract_ids_from_statement(s, ids);
                 }
             }
-            Statement::Oracle { body, handler, .. } => {
+            Statement::Block(body) => {
                 for s in body {
                     self.extract_ids_from_statement(s, ids);
                 }
-                for s in handler {
-                    self.extract_ids_from_statement(s, ids);
-                }
             }
-            Statement::Await { expr, .. } => {
-                self.extract_ids_recursive(expr, ids);
-            }
-            Statement::Async { body, .. } => {
-                self.extract_ids_from_statement(body, ids);
-            }
-            Statement::AsyncAwait { body, .. } => {
-                self.extract_ids_from_statement(body, ids);
-            }
-            Statement::TrgBinding { .. } => {}
+            Statement::InlineAsm { .. } | Statement::TrgBinding { .. }
+            | Statement::MetadataAssignment(..) => {}
         }
     }
 
@@ -308,12 +210,12 @@ impl<'a> DataflowAnalyzer<'a> {
         let mut writes = HashSet::new();
         for stmt in body {
             match stmt {
-                Statement::Assignment { lhs, .. } => {
-                    if let Expr::Identifier(name) = lhs {
-                        writes.insert(name.clone());
-                    }
+            Statement::Assign(lhs, _) => {
+                if let Expr::Identifier(name) = lhs {
+                    writes.insert(name.clone());
                 }
-                Statement::Guarded { statements, .. } => {
+            }
+            Statement::Guarded(_, statements) => {
                     writes.extend(self.extract_writes(statements));
                 }
                 _ => {}
@@ -323,14 +225,9 @@ impl<'a> DataflowAnalyzer<'a> {
     }
 
     fn get_initial_value(&self, name: &str) -> Option<i64> {
-        for item in &self.program.items {
+        for item in self.items {
             if let TopLevel::StateDecl(decl) = item {
                 if decl.name == name {
-                    if let Some(expr) = &decl.expr {
-                        if let Expr::Decimal(n) = expr {
-                            return Some(*n);
-                        }
-                    }
                     return Some(0);
                 }
             }
@@ -342,7 +239,7 @@ impl<'a> DataflowAnalyzer<'a> {
         match expr {
             Expr::Bool(true) => true,
             Expr::Identifier(_) => true,
-            Expr::Eq(l, r) => {
+            Expr::BinaryOp(BinaryOpKind::Eq, l, r) => {
                 let lv = self.eval_to_int(l);
                 let rv = self.eval_to_int(r);
                 lv == rv
@@ -360,7 +257,7 @@ impl<'a> DataflowAnalyzer<'a> {
 
     fn find_weight_load_transactions(&self) -> Vec<String> {
         let mut txns = Vec::new();
-        for item in &self.program.items {
+        for item in self.items {
             if let TopLevel::Transaction(txn) = item {
                 let writes = self.extract_writes(&txn.body);
                 if writes.iter().any(|w|
@@ -377,7 +274,7 @@ impl<'a> DataflowAnalyzer<'a> {
 
     fn find_compute_transactions(&self) -> Vec<String> {
         let mut txns = Vec::new();
-        for item in &self.program.items {
+        for item in self.items {
             if let TopLevel::Transaction(txn) = item {
                 let body_str = format!("{:?}", txn.body);
                 if body_str.contains("acc") ||
@@ -396,14 +293,14 @@ impl<'a> DataflowAnalyzer<'a> {
 pub struct TransactionProtocolVerifier;
 
 impl TransactionProtocolVerifier {
-    pub fn verify(program: &Program) -> Vec<ProtocolError> {
+    pub fn verify(items: &[TopLevel]) -> Vec<ProtocolError> {
         let mut errors = Vec::new();
         let mut required_sequence: HashMap<String, Vec<String>> = HashMap::new();
 
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Transaction(txn) = item {
                 let mut required = Vec::new();
-                if let Expr::Eq(lhs, rhs) = &txn.contract.pre_condition {
+                if let Expr::BinaryOp(BinaryOpKind::Eq, lhs, rhs) = &txn.contract.pre_condition {
                     if let Expr::Identifier(name) = lhs.as_ref() {
                         if let Expr::Decimal(val) = rhs.as_ref() {
                             required.push(format!("{}={}", name, val));
@@ -456,41 +353,22 @@ mod tests {
 mod kani_full_tests {
     use super::*;
 
-    fn empty_program() -> Program {
-        Program {
-            items: vec![], comments: vec![], reactor_speed: None, attrs: vec![], ffi: None,
-            strict_mode: crate::ast::StrictMode::Off, dispatch_mode: Default::default(),
-            exit_condition: None, out_pragmas: vec![], default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        }
-    }
-
     #[kani::proof]
-    fn verify_extract_ids_recursive_literal_leaf() {
-        let prog = empty_program();
-        let analyzer = DataflowAnalyzer::new(&prog);
+    fn verify_extract_ids_recursive_decimal_leaf() {
+        let items: Vec<TopLevel> = vec![];
+        let analyzer = DataflowAnalyzer::new(&items);
         let mut ids = HashSet::new();
-        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Integer(42)));
+        let expr = Expr::Decimal(42);
         analyzer.extract_ids_recursive(&expr, &mut ids);
         assert!(ids.is_empty());
     }
 
     #[kani::proof]
-    fn verify_extract_ids_recursive_literal_term() {
-        let prog = empty_program();
-        let analyzer = DataflowAnalyzer::new(&prog);
+    fn verify_extract_ids_recursive_bool() {
+        let items: Vec<TopLevel> = vec![];
+        let analyzer = DataflowAnalyzer::new(&items);
         let mut ids = HashSet::new();
-        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Term));
-        analyzer.extract_ids_recursive(&expr, &mut ids);
-        assert!(ids.is_empty());
-    }
-
-    #[kani::proof]
-    fn verify_extract_ids_recursive_literal_bool() {
-        let prog = empty_program();
-        let analyzer = DataflowAnalyzer::new(&prog);
-        let mut ids = HashSet::new();
-        let expr = Expr::Literal(Box::new(crate::features::literal::LiteralExpr::Bool(true)));
+        let expr = Expr::Bool(true);
         analyzer.extract_ids_recursive(&expr, &mut ids);
         assert!(ids.is_empty());
     }

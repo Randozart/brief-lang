@@ -1,10 +1,10 @@
-use crate::ast::{Expr, Program, Statement, TopLevel, Transaction};
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Transaction};
 use std::collections::{HashMap, HashSet};
 
 pub struct ProtocolVerifier;
 
 impl ProtocolVerifier {
-    pub fn verify(program: &Program) -> Vec<ProtocolError> {
+    pub fn verify(items: &[TopLevel]) -> Vec<ProtocolError> {
         let mut errors = Vec::new();
 
         // Build transaction dependency graph
@@ -12,7 +12,7 @@ impl ProtocolVerifier {
         let mut txn_writes: HashMap<String, HashSet<String>> = HashMap::new();
         let mut all_preconditions: HashMap<String, Expr> = HashMap::new();
 
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Transaction(txn) = item {
                 let prereqs = Self::extract_prerequisites(&txn.contract.pre_condition);
                 txn_prerequisites.insert(txn.name.clone(), prereqs);
@@ -55,7 +55,7 @@ impl ProtocolVerifier {
         let mut has_control_handshake = false;
         let mut has_write_en = false;
 
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Transaction(txn) = item {
                 let body_str = format!("{:?}", txn.body);
                 if body_str.contains("write_en") || body_str.contains("write_en") {
@@ -85,7 +85,7 @@ impl ProtocolVerifier {
 
     fn extract_prerecs_recursive(expr: &Expr, prereqs: &mut Vec<Prerequisite>) {
         match expr {
-            Expr::Eq(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::Eq, lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
                     if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
@@ -96,7 +96,7 @@ impl ProtocolVerifier {
                     }
                 }
             }
-            Expr::Ne(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::Neq, lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
                     if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
@@ -107,7 +107,7 @@ impl ProtocolVerifier {
                     }
                 }
             }
-            Expr::Ge(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::Ge, lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
                     if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
@@ -118,7 +118,7 @@ impl ProtocolVerifier {
                     }
                 }
             }
-            Expr::Gt(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::Gt, lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
                     if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
@@ -129,7 +129,7 @@ impl ProtocolVerifier {
                     }
                 }
             }
-            Expr::Le(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::Le, lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
                     if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
@@ -140,7 +140,7 @@ impl ProtocolVerifier {
                     }
                 }
             }
-            Expr::Lt(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::Lt, lhs, rhs) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
                     if let Expr::Decimal(val) = rhs.as_ref() {
                         prereqs.push(Prerequisite {
@@ -151,11 +151,11 @@ impl ProtocolVerifier {
                     }
                 }
             }
-            Expr::And(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::And, lhs, rhs) => {
                 Self::extract_prerecs_recursive(lhs, prereqs);
                 Self::extract_prerecs_recursive(rhs, prereqs);
             }
-            Expr::Or(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::Or, lhs, rhs) => {
                 Self::extract_prerecs_recursive(lhs, prereqs);
                 Self::extract_prerecs_recursive(rhs, prereqs);
             }
@@ -171,13 +171,13 @@ impl ProtocolVerifier {
 
     fn extract_writes_recursive(expr: &Expr, writes: &mut HashSet<String>) {
         match expr {
-            Expr::Eq(lhs, _) | Expr::Ge(lhs, _) | Expr::Gt(lhs, _)
-            | Expr::Le(lhs, _) | Expr::Lt(lhs, _) | Expr::Ne(lhs, _) => {
+            Expr::BinaryOp(BinaryOpKind::Eq, lhs, _) | Expr::BinaryOp(BinaryOpKind::Ge, lhs, _) | Expr::BinaryOp(BinaryOpKind::Gt, lhs, _)
+            | Expr::BinaryOp(BinaryOpKind::Le, lhs, _) | Expr::BinaryOp(BinaryOpKind::Lt, lhs, _) | Expr::BinaryOp(BinaryOpKind::Neq, lhs, _) => {
                 if let Expr::Identifier(name) = lhs.as_ref() {
                     writes.insert(name.clone());
                 }
             }
-            Expr::And(lhs, rhs) | Expr::Or(lhs, rhs) => {
+            Expr::BinaryOp(BinaryOpKind::And, lhs, rhs) | Expr::BinaryOp(BinaryOpKind::Or, lhs, rhs) => {
                 Self::extract_writes_recursive(lhs, writes);
                 Self::extract_writes_recursive(rhs, writes);
             }
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_prerequisite_extraction() {
-        let expr = Expr::Eq(
+        let expr = Expr::BinaryOp(BinaryOpKind::Eq, 
             Box::new(Expr::Identifier("control".to_string())),
             Box::new(Expr::Decimal(1)),
         );

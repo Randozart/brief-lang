@@ -1,4 +1,4 @@
-use crate::ast::{Contract, Expr, Program, Statement, TopLevel, WatchdogSpec};
+use crate::ast::{BinaryOpKind, Contract, Expr, Statement, TopLevel, UnaryOpKind, WatchdogSpec};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -34,9 +34,8 @@ impl std::fmt::Display for WatchdogError {
 
 pub type WatchdogResult = Vec<WatchdogError>;
 
-pub fn analyze(program: &Program) -> WatchdogResult {
-    let trigger_names: HashSet<String> = program
-        .items
+pub fn analyze(items: &[TopLevel]) -> WatchdogResult {
+    let trigger_names: HashSet<String> = items
         .iter()
         .filter_map(|item| {
             if let TopLevel::Trigger(trg) = item {
@@ -49,7 +48,7 @@ pub fn analyze(program: &Program) -> WatchdogResult {
 
     let mut errors = Vec::new();
 
-    for item in &program.items {
+    for item in items {
         if let TopLevel::Transaction(txn) = item {
             if let Some(ref watchdog) = txn.contract.watchdog {
                 if is_trigger_watchdog(watchdog) {
@@ -62,13 +61,13 @@ pub fn analyze(program: &Program) -> WatchdogResult {
                             continue;
                         }
 
-                        let handlers = find_handlers(program, trg);
+                        let handlers = find_handlers(items, trg);
                         if handlers.is_empty() {
                             errors.push(WatchdogError::NoHandler(txn_name.clone(), trg.clone()));
                             continue;
                         }
 
-                        let handler_writes = collect_handler_writes(program, &handlers);
+                        let handler_writes = collect_handler_writes(items, &handlers);
                         let pre_vars = extract_variables(&txn.contract.pre_condition);
 
                         let intersecting: Vec<String> = handler_writes
@@ -78,7 +77,7 @@ pub fn analyze(program: &Program) -> WatchdogResult {
 
                         if intersecting.is_empty() {
                             if !watchdog.is_required {
-                                if txn.contract.pre_condition != Expr::Bool(true) {
+                                if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                                     let has_convergence = check_convergent_loop(&txn.contract);
                                     if has_convergence {
                                         continue;
@@ -101,13 +100,13 @@ pub fn analyze(program: &Program) -> WatchdogResult {
                         }
 
                         for var in &intersecting {
-                            let falsifies = check_falsifies(program, &handlers, &txn.contract, var);
+                            let falsifies = check_falsifies(items, &handlers, &txn.contract, var);
                             if !falsifies {
                                 errors.push(WatchdogError::HandlerDoesNotFalsify(txn_name.clone(), trg.clone(), var.clone()));
                                 continue;
                             }
 
-                            let restores = check_restores(program, &handlers, &txn.contract, var);
+                            let restores = check_restores(items, &handlers, &txn.contract, var);
                             if restores {
                                 errors.push(WatchdogError::HandlerRestoresPrecondition(txn_name.clone(), trg.clone(), var.clone()));
                             }
@@ -122,19 +121,19 @@ pub fn analyze(program: &Program) -> WatchdogResult {
 }
 
 fn is_trigger_watchdog(watchdog: &WatchdogSpec) -> bool {
-    matches!(&watchdog.condition, Expr::PriorState(_))
+    matches!(&watchdog.condition, Expr::Identifier(_))
 }
 
 fn extract_trigger_name(watchdog: &WatchdogSpec) -> Option<String> {
-    if let Expr::PriorState(name) = &watchdog.condition {
+    if let Expr::Identifier(name) = &watchdog.condition {
         return Some(name.clone());
     }
     None
 }
 
-fn find_handlers(program: &Program, trigger_name: &str) -> Vec<String> {
+fn find_handlers(items: &[TopLevel], trigger_name: &str) -> Vec<String> {
     let mut handlers = Vec::new();
-    for item in &program.items {
+    for item in items {
         if let TopLevel::Transaction(txn) = item {
             if contains_trigger_in_guard(&txn.contract.pre_condition, trigger_name) {
                 handlers.push(txn.name.clone());
@@ -146,8 +145,8 @@ fn find_handlers(program: &Program, trigger_name: &str) -> Vec<String> {
 
 fn contains_trigger_in_guard(expr: &Expr, trigger_name: &str) -> bool {
     match expr {
-        Expr::PriorState(name) => name == trigger_name,
-        Expr::And(left, right) | Expr::Or(left, right) => {
+        Expr::Identifier(name) => name == trigger_name,
+        Expr::BinaryOp(BinaryOpKind::And, left, right) | Expr::BinaryOp(BinaryOpKind::Or, left, right) => {
             contains_trigger_in_guard(left, trigger_name)
                 || contains_trigger_in_guard(right, trigger_name)
         }
@@ -155,11 +154,11 @@ fn contains_trigger_in_guard(expr: &Expr, trigger_name: &str) -> bool {
     }
 }
 
-fn collect_handler_writes(program: &Program, handler_names: &[String]) -> HashSet<String> {
+fn collect_handler_writes(items: &[TopLevel], handler_names: &[String]) -> HashSet<String> {
     let handler_set: HashSet<String> = handler_names.iter().cloned().collect();
     let mut writes = HashSet::new();
 
-    for item in &program.items {
+    for item in items {
         if let TopLevel::Transaction(txn) = item {
             if handler_set.contains(&txn.name) {
                 collect_writes_from_body(&txn.body, &mut writes);
@@ -172,15 +171,15 @@ fn collect_handler_writes(program: &Program, handler_names: &[String]) -> HashSe
 fn collect_writes_from_body(body: &[Statement], writes: &mut HashSet<String>) {
     for stmt in body {
         match stmt {
-            Statement::Assignment { lhs, .. } => {
+            Statement::Assign(lhs, _) => {
                 if let Expr::Identifier(name) = lhs {
                     writes.insert(name.clone());
                 }
             }
-            Statement::Guarded { statements, .. } => {
+            Statement::Guarded(_, statements) => {
                 collect_writes_from_body(statements, writes);
             }
-            Statement::SyncBlock { body: inner } => {
+            Statement::SyncBlock(inner) => {
                 collect_writes_from_body(inner, writes);
             }
             _ => {}
@@ -199,35 +198,11 @@ fn collect_vars(expr: &Expr, vars: &mut HashSet<String>) {
         Expr::Identifier(name) => {
             vars.insert(name.clone());
         }
-        Expr::PriorState(name) => {
-            vars.insert(name.clone());
-        }
-        expr @ Expr::AddrOf(_) => {
-            let name = expr.as_var_name().unwrap().to_string();
-            vars.insert(name);
-        }
-        Expr::Add(l, r)
-        | Expr::Sub(l, r)
-        | Expr::Mul(l, r)
-        | Expr::Div(l, r)
-        | Expr::Mod(l, r)
-        | Expr::Eq(l, r)
-        | Expr::Ne(l, r)
-        | Expr::Lt(l, r)
-        | Expr::Le(l, r)
-        | Expr::Gt(l, r)
-        | Expr::Ge(l, r)
-        | Expr::And(l, r)
-        | Expr::Or(l, r)
-        | Expr::BitAnd(l, r)
-        | Expr::BitOr(l, r)
-        | Expr::BitXor(l, r)
-        | Expr::Shl(l, r)
-        | Expr::Shr(l, r) => {
+        Expr::BinaryOp(_, l, r) => {
             collect_vars(l, vars);
             collect_vars(r, vars);
         }
-        Expr::Neg(inner) | Expr::Not(inner) | Expr::BitNot(inner) => {
+        Expr::UnaryOp(_, inner) | Expr::Cast(inner, _) | Expr::IsType(inner, _) => {
             collect_vars(inner, vars);
         }
         Expr::Call(_, args) => {
@@ -235,31 +210,54 @@ fn collect_vars(expr: &Expr, vars: &mut HashSet<String>) {
                 collect_vars(arg, vars);
             }
         }
-        Expr::Projection { source, .. } => collect_vars(source, vars),
-        Expr::List(elems) => {
+        Expr::Field(obj, _) => {
+            collect_vars(obj, vars);
+        }
+        Expr::Tuple(elems) | Expr::List(elems) => {
             for elem in elems {
                 collect_vars(elem, vars);
             }
         }
-        Expr::MapLiteral(entries) => {
-            for (k, v) in entries {
-                collect_vars(k, vars);
-                collect_vars(v, vars);
+        Expr::Index(list, idx) => {
+            collect_vars(list, vars);
+            collect_vars(idx, vars);
+        }
+        Expr::If(cond, then, else_) => {
+            collect_vars(cond, vars);
+            collect_vars(then, vars);
+            if let Some(else_) = else_ {
+                collect_vars(else_, vars);
             }
         }
-        Expr::SetLiteral(entries) => {
-            for e in entries {
-                collect_vars(e, vars);
+        Expr::Match(_, arms) => {
+            for arm in arms {
+                if let Some(ref guard) = arm.guard {
+                    collect_vars(guard, vars);
+                }
+                collect_vars(&arm.body, vars);
             }
+        }
+        Expr::Block(stmts) => {
+            for stmt in stmts {
+                if let Statement::Expression(e) = stmt {
+                    collect_vars(e, vars);
+                }
+            }
+        }
+        Expr::Lambda(_, body) => {
+            collect_vars(body, vars);
+        }
+        Expr::Within(inner, _) => {
+            collect_vars(inner, vars);
         }
         _ => {}
     }
 }
 
-fn check_falsifies(program: &Program, handler_names: &[String], contract: &Contract, var: &str) -> bool {
+fn check_falsifies(items: &[TopLevel], handler_names: &[String], contract: &Contract, var: &str) -> bool {
     let handler_set: HashSet<String> = handler_names.iter().cloned().collect();
 
-    for item in &program.items {
+    for item in items {
         if let TopLevel::Transaction(txn) = item {
             if handler_set.contains(&txn.name) {
                 if check_falsifies_in_body(&txn.body, contract, var) {
@@ -274,11 +272,11 @@ fn check_falsifies(program: &Program, handler_names: &[String], contract: &Contr
 fn check_falsifies_in_body(body: &[Statement], contract: &Contract, var: &str) -> bool {
     for stmt in body {
         match stmt {
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assign(lhs, expr) => {
                 if let Expr::Identifier(name) = lhs {
                     if name == var {
                         match &contract.pre_condition {
-                            Expr::Eq(_, _) | Expr::Ne(_, _) => {
+                            Expr::BinaryOp(BinaryOpKind::Eq, _, _) | Expr::BinaryOp(BinaryOpKind::Neq, _, _) => {
                                 if evaluate_literal(expr).is_some() {
                                     return true;
                                 }
@@ -288,7 +286,7 @@ fn check_falsifies_in_body(body: &[Statement], contract: &Contract, var: &str) -
                                     return true;
                                 }
                             }
-                            Expr::Not(inner) => {
+                            Expr::UnaryOp(UnaryOpKind::Not, inner) => {
                                 if let Expr::Identifier(ident) = inner.as_ref() {
                                     if ident == var {
                                         if let Expr::Bool(true) = expr {
@@ -302,12 +300,12 @@ fn check_falsifies_in_body(body: &[Statement], contract: &Contract, var: &str) -
                     }
                 }
             }
-            Statement::Guarded { statements, .. } => {
+            Statement::Guarded(_, statements) => {
                 if check_falsifies_in_body(statements, contract, var) {
                     return true;
                 }
             }
-            Statement::SyncBlock { body: inner } => {
+            Statement::SyncBlock(inner) => {
                 if check_falsifies_in_body(inner, contract, var) {
                     return true;
                 }
@@ -318,10 +316,10 @@ fn check_falsifies_in_body(body: &[Statement], contract: &Contract, var: &str) -
     false
 }
 
-fn check_restores(program: &Program, handler_names: &[String], contract: &Contract, var: &str) -> bool {
+fn check_restores(items: &[TopLevel], handler_names: &[String], contract: &Contract, var: &str) -> bool {
     let handler_set: HashSet<String> = handler_names.iter().cloned().collect();
 
-    for item in &program.items {
+    for item in items {
         if let TopLevel::Transaction(txn) = item {
             if handler_set.contains(&txn.name) {
                 if check_restores_in_body(&txn.body, contract, var) {
@@ -338,7 +336,7 @@ fn check_restores_in_body(body: &[Statement], contract: &Contract, var: &str) ->
 
     for stmt in body {
         match stmt {
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assign(lhs, expr) => {
                 if let Expr::Identifier(name) = lhs {
                     if name == var {
                         if !found_falsify {
@@ -367,12 +365,12 @@ fn check_restores_in_body(body: &[Statement], contract: &Contract, var: &str) ->
                     }
                 }
             }
-            Statement::Guarded { statements, .. } => {
+            Statement::Guarded(_, statements) => {
                 if check_restores_in_body(statements, contract, var) {
                     return true;
                 }
             }
-            Statement::SyncBlock { body: inner } => {
+            Statement::SyncBlock(inner) => {
                 if check_restores_in_body(inner, contract, var) {
                     return true;
                 }
@@ -387,15 +385,15 @@ fn evaluate_literal(expr: &Expr) -> Option<bool> {
     match expr {
         Expr::Bool(b) => Some(*b),
         Expr::Decimal(n) => Some(*n != 0),
-        Expr::Not(inner) => evaluate_literal(inner).map(|v| !v),
+        Expr::UnaryOp(UnaryOpKind::Not, inner) => evaluate_literal(inner).map(|v| !v),
         _ => None,
     }
 }
 
 fn check_convergent_loop(contract: &Contract) -> bool {
     match (&contract.pre_condition, &contract.post_condition) {
-        (Expr::Lt(_, _) | Expr::Le(_, _) | Expr::Gt(_, _) | Expr::Ge(_, _) | Expr::Ne(_, _), 
-         Expr::Eq(_, _)) => true,
+        (Expr::BinaryOp(BinaryOpKind::Lt, _, _) | Expr::BinaryOp(BinaryOpKind::Le, _, _) | Expr::BinaryOp(BinaryOpKind::Gt, _, _) | Expr::BinaryOp(BinaryOpKind::Ge, _, _) | Expr::BinaryOp(BinaryOpKind::Neq, _, _), 
+         Expr::BinaryOp(BinaryOpKind::Eq, _, _)) => true,
         _ => false,
     }
 }
@@ -405,35 +403,16 @@ mod tests {
     use super::*;
     use crate::ast::*;
 
-        fn make_program(items: Vec<TopLevel>) -> Program {
-        Program {
-            items,
-            comments: vec![],
-            reactor_speed: None,
-            attrs: vec![],
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: DispatchMode::Sequential,
-            exit_condition: None,
-            out_pragmas: vec![],
-            default_sig_modifier: None,
-                watchdog_defaults: (None, None),
-        }
+    fn make_program(items: Vec<TopLevel>) -> Vec<TopLevel> {
+        items
     }
 
     fn make_trigger(name: &str) -> TopLevel {
-        TopLevel::Trigger(TriggerDeclaration {
+        TopLevel::Trigger(Trigger {
             name: name.to_string(),
-            ty: Type::bool_(),
-            address: LinkRef::Explicit(0x4000_0000),
-            bit_range: None,
-            stages: vec![],
-            condition: None,
-            is_wake: true,
-            is_const: false,
+            instance: Expr::Identifier("__io".to_string()),
+            port: name.to_string(),
             span: None,
-            annotations: vec![],
-            modifiers: vec![],
         })
     }
 
@@ -442,31 +421,21 @@ mod tests {
             name: name.to_string(),
             is_reactive: true,
             is_async: false,
+            type_params: vec![],
             parameters: vec![],
+            output_type: None,
+            outputs: vec![],
             contract: Contract { pre_condition: pre, post_condition: post, watchdog, span: None },
             body,
-            reactor_speed: None,
-            span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
-            annotations: vec![],
             metadata: HashMap::new(),
-            modifiers: vec![],
-            variant_bodies: vec![],
-            outputs: vec![],
-            output_type: None,
             derivation: None,
+            modifiers: vec![],
+            span: None,
         })
     }
 
     fn assign(name: &str, expr: Expr) -> Statement {
-        Statement::Assignment {
-            lhs: Expr::Identifier(name.to_string()),
-            expr,
-            timeout: None,
-            modifiers: vec![],
-        }
+        Statement::Assign(Expr::Identifier(name.to_string()), expr)
     }
 
     fn watchdog_spec(trigger: &str, is_required: bool) -> WatchdogSpec {
@@ -476,7 +445,7 @@ mod tests {
             cycles_bound: None,
             seconds_bound: None,
             is_proven: false,
-            condition: Expr::PriorState(trigger.to_string()),
+            condition: Expr::Identifier(trigger.to_string()),
             is_required,
         }
     }
@@ -508,7 +477,7 @@ mod tests {
     fn test_handler_writes_no_conflict() {
         let program = make_program(vec![
             make_trigger("btn"),
-            make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
+            make_txn("handler", Expr::Identifier("btn".to_string()), Expr::Bool(true),
                 None, vec![assign("unrelated", Expr::Decimal(42))]),
             make_txn("main", Expr::Identifier("ready".to_string()), Expr::Bool(true),
                 Some(watchdog_spec("btn", true)), vec![]),
@@ -522,7 +491,7 @@ mod tests {
     fn test_handler_does_not_falsify() {
         let program = make_program(vec![
             make_trigger("btn"),
-            make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
+            make_txn("handler", Expr::Identifier("btn".to_string()), Expr::Bool(true),
                 None, vec![assign("ready", Expr::Bool(true))]),
             make_txn("main", Expr::Identifier("ready".to_string()), Expr::Bool(true),
                 Some(watchdog_spec("btn", true)), vec![]),
@@ -536,7 +505,7 @@ mod tests {
     fn test_handler_falsifies_ok() {
         let program = make_program(vec![
             make_trigger("btn"),
-            make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
+            make_txn("handler", Expr::Identifier("btn".to_string()), Expr::Bool(true),
                 None, vec![assign("ready", Expr::Bool(false))]),
             make_txn("main", Expr::Identifier("ready".to_string()), Expr::Bool(true),
                 Some(watchdog_spec("btn", true)), vec![]),
@@ -549,7 +518,7 @@ mod tests {
     fn test_handler_restores_precondition() {
         let program = make_program(vec![
             make_trigger("btn"),
-            make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
+            make_txn("handler", Expr::Identifier("btn".to_string()), Expr::Bool(true),
                 None, vec![
                     assign("ready", Expr::Bool(false)),
                     assign("ready", Expr::Bool(true)),
@@ -566,12 +535,12 @@ mod tests {
     fn test_convergent_loop_skips_optional() {
         let program = make_program(vec![
             make_trigger("btn"),
-            make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
+            make_txn("handler", Expr::Identifier("btn".to_string()), Expr::Bool(true),
                 None, vec![assign("unrelated", Expr::Decimal(1))]),
-            make_txn("main", Expr::Lt(
+            make_txn("main", Expr::BinaryOp(BinaryOpKind::Lt, 
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(10)),
-            ), Expr::Eq(
+            ), Expr::BinaryOp(BinaryOpKind::Eq, 
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(10)),
             ), Some(watchdog_spec("btn", false)), vec![]),
@@ -584,12 +553,12 @@ mod tests {
     fn test_required_watchdog_on_convergent_loop() {
         let program = make_program(vec![
             make_trigger("btn"),
-            make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
+            make_txn("handler", Expr::Identifier("btn".to_string()), Expr::Bool(true),
                 None, vec![assign("unrelated", Expr::Decimal(1))]),
-            make_txn("main", Expr::Lt(
+            make_txn("main", Expr::BinaryOp(BinaryOpKind::Lt, 
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(10)),
-            ), Expr::Eq(
+            ), Expr::BinaryOp(BinaryOpKind::Eq, 
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(10)),
             ), Some(watchdog_spec("btn", true)), vec![]),
@@ -628,16 +597,16 @@ mod tests {
 
     #[test]
     fn test_contains_trigger_in_guard() {
-        let guard = Expr::And(
-            Box::new(Expr::PriorState("btn".to_string())),
+        let guard = Expr::BinaryOp(BinaryOpKind::And, 
+            Box::new(Expr::Identifier("btn".to_string())),
             Box::new(Expr::Identifier("ready".to_string())),
         );
         assert!(contains_trigger_in_guard(&guard, "btn"));
         assert!(!contains_trigger_in_guard(&guard, "other"));
 
-        let guard_or = Expr::Or(
-            Box::new(Expr::PriorState("a".to_string())),
-            Box::new(Expr::PriorState("b".to_string())),
+        let guard_or = Expr::BinaryOp(BinaryOpKind::Or, 
+            Box::new(Expr::Identifier("a".to_string())),
+            Box::new(Expr::Identifier("b".to_string())),
         );
         assert!(contains_trigger_in_guard(&guard_or, "a"));
         assert!(contains_trigger_in_guard(&guard_or, "b"));
@@ -650,18 +619,18 @@ mod tests {
         assert_eq!(evaluate_literal(&Expr::Bool(false)), Some(false));
         assert_eq!(evaluate_literal(&Expr::Decimal(0)), Some(false));
         assert_eq!(evaluate_literal(&Expr::Decimal(1)), Some(true));
-        assert_eq!(evaluate_literal(&Expr::Not(Box::new(Expr::Bool(true)))), Some(false));
+        assert_eq!(evaluate_literal(&Expr::UnaryOp(UnaryOpKind::Not, Box::new(Expr::Bool(true)))), Some(false));
         assert_eq!(evaluate_literal(&Expr::Identifier("x".to_string())), None);
     }
 
     #[test]
     fn test_check_convergent_loop() {
         let contract = Contract {
-            pre_condition: Expr::Lt(
+            pre_condition: Expr::BinaryOp(BinaryOpKind::Lt, 
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(10)),
             ),
-            post_condition: Expr::Eq(
+            post_condition: Expr::BinaryOp(BinaryOpKind::Eq, 
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(10)),
             ),
@@ -681,9 +650,9 @@ mod tests {
 
     #[test]
     fn test_collect_vars_from_precondition() {
-        let pre = Expr::And(
+        let pre = Expr::BinaryOp(BinaryOpKind::And, 
             Box::new(Expr::Identifier("a".to_string())),
-            Box::new(Expr::Gt(
+            Box::new(Expr::BinaryOp(BinaryOpKind::Gt, 
                 Box::new(Expr::Identifier("b".to_string())),
                 Box::new(Expr::Decimal(0)),
             )),
@@ -698,13 +667,12 @@ mod tests {
     fn test_collect_handler_writes_guarded() {
         let program = make_program(vec![
             make_trigger("btn"),
-            make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
+            make_txn("handler", Expr::Identifier("btn".to_string()), Expr::Bool(true),
                 None, vec![
-                    Statement::Guarded {
-                        condition: Expr::PriorState("btn".to_string()),
-                        statements: vec![assign("ready", Expr::Bool(false))],
-                        metadata: HashMap::new(),
-                    },
+                    Statement::Guarded(
+                        Expr::Identifier("btn".to_string()),
+                        vec![assign("ready", Expr::Bool(false))],
+                    ),
                 ]),
             make_txn("main", Expr::Identifier("ready".to_string()), Expr::Bool(true),
                 Some(watchdog_spec("btn", true)), vec![]),
@@ -717,9 +685,9 @@ mod tests {
     fn test_precondition_not_var_not_handled_as_conflict() {
         let program = make_program(vec![
             make_trigger("btn"),
-            make_txn("handler", Expr::PriorState("btn".to_string()), Expr::Bool(true),
+            make_txn("handler", Expr::Identifier("btn".to_string()), Expr::Bool(true),
                 None, vec![assign("counter", Expr::Decimal(0))]),
-            make_txn("main", Expr::Eq(
+            make_txn("main", Expr::BinaryOp(BinaryOpKind::Eq, 
                 Box::new(Expr::Identifier("counter".to_string())),
                 Box::new(Expr::Decimal(0)),
             ), Expr::Bool(true),
@@ -739,7 +707,7 @@ mod tests {
                     is_proven: false,
                     retries: 0,
                     fallback: None,
-                    condition: Expr::Identifier("timeout".to_string()), is_required: true,
+                    condition: Expr::Bool(true), is_required: true,
                 }),
                 vec![]),
         ]);
@@ -750,10 +718,10 @@ mod tests {
     #[test]
     fn test_handler_natural_death_without_watchdog() {
         let program = make_program(vec![
-            make_txn("main", Expr::Lt(
+            make_txn("main", Expr::BinaryOp(BinaryOpKind::Lt, 
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(5)),
-            ), Expr::Eq(
+            ), Expr::BinaryOp(BinaryOpKind::Eq, 
                 Box::new(Expr::Identifier("i".to_string())),
                 Box::new(Expr::Decimal(5)),
             ), None, vec![]),

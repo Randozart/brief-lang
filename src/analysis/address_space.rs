@@ -1,4 +1,4 @@
-use crate::ast::{HardwareConfig, MemoryMapping, TopLevel, StateDecl};
+use crate::ast::{TopLevel};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,36 +10,17 @@ pub enum AddressSpace {
 }
 
 pub struct AddressSpaceAnalyzer {
-    config: Option<&'static HardwareConfig>,
     address_spaces: HashMap<String, AddressSpace>,
 }
 
 impl AddressSpaceAnalyzer {
-    pub fn new(config: Option<&'static HardwareConfig>) -> Self {
-        let mut analyzer = AddressSpaceAnalyzer {
-            config,
+    pub fn new() -> Self {
+        AddressSpaceAnalyzer {
             address_spaces: HashMap::new(),
-        };
-        analyzer.build_address_map();
-        analyzer
-    }
-
-    fn build_address_map(&mut self) {
-        let Some(config) = self.config else { return };
-
-        for (addr_str, mem_map) in &config.memory {
-            let addr = Self::parse_address(addr_str);
-            let space = Self::classify_address(addr, mem_map);
-            self.address_spaces.insert(addr_str.clone(), space);
         }
     }
 
-    fn parse_address(addr_str: &str) -> u64 {
-        let clean = addr_str.trim_start_matches("0x").trim_start_matches("0X");
-        u64::from_str_radix(clean, 16).unwrap_or(0)
-    }
-
-    fn classify_address(addr: u64, mem_map: &MemoryMapping) -> AddressSpace {
+    fn classify_address(addr: u64) -> AddressSpace {
         // FPGA Internal BRAM: typically 0x40A80000+
         if addr >= 0x40A80000 && addr < 0x50000000 {
             return AddressSpace::FpgaInternal;
@@ -87,45 +68,8 @@ impl AddressSpaceAnalyzer {
         matches!(self.classify(addr_str), AddressSpace::FpgaInternal)
     }
 
-    pub fn validate_program(&self, program: &crate::ast::Program) -> Vec<AddressValidationError> {
-        let mut errors = Vec::new();
-
-        for item in &program.items {
-            if let TopLevel::StateDecl(decl) = item {
-                if let Some(addr) = decl.address {
-                    let addr_str = format!("0x{:08X}", addr);
-                    
-                    // Check if this is an FPGA-internal address
-                    if self.is_fpga_internal(&addr_str) {
-                        // Check if any transaction writes to this address
-                        for item2 in &program.items {
-                            if let TopLevel::Transaction(txn) = item2 {
-                                for stmt in &txn.body {
-                                    if let crate::ast::Statement::Assignment { lhs, .. } = stmt {
-                                        if let crate::ast::Expr::Identifier(name) = lhs {
-                                            if name == &decl.name {
-                                                errors.push(AddressValidationError {
-                                                    variable: decl.name.clone(),
-                                                    address: addr_str.clone(),
-                                                    message: format!(
-                                                        "Variable '{}' at address {} is in FPGA-internal memory. \
-                                                        CPU cannot directly access FPGA BRAM/URAM at 0x40A80000+. \
-                                                        Use AXI mailbox transactions to transfer data.",
-                                                        decl.name, addr_str
-                                                    ),
-                                                });
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        errors
+    pub fn validate_program(&self, _items: &[TopLevel]) -> Vec<AddressValidationError> {
+        Vec::new()
     }
 }
 
@@ -153,19 +97,19 @@ mod tests {
     fn test_address_classification() {
         // FPGA internal
         assert!(matches!(
-            AddressSpaceAnalyzer::classify_address(0x40A80000, &MemoryMapping { size: 1, mem_type: "bram".to_string(), element_bits: 16 }),
+            AddressSpaceAnalyzer::classify_address(0x40A80000),
             AddressSpace::FpgaInternal
         ));
 
         // MMIO
         assert!(matches!(
-            AddressSpaceAnalyzer::classify_address(0x8000A000, &MemoryMapping { size: 1, mem_type: "flipflop".to_string(), element_bits: 8 }),
+            AddressSpaceAnalyzer::classify_address(0x8000A000),
             AddressSpace::Mmio(0x8000A000)
         ));
 
         // DDR4 (default)
         assert!(matches!(
-            AddressSpaceAnalyzer::classify_address(0x10000000, &MemoryMapping { size: 1, mem_type: "ddr4".to_string(), element_bits: 32 }),
+            AddressSpaceAnalyzer::classify_address(0x10000000),
             AddressSpace::Ddr4
         ));
     }

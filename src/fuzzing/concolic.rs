@@ -64,7 +64,7 @@ fn collect_constraints_recursive(
 ) {
     for stmt in stmts {
         match stmt {
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 let involves_trigger = expr_involves_trigger(condition);
                 constraints.push(PathConstraintInfo {
                     condition: condition.clone(),
@@ -96,17 +96,17 @@ fn expr_involves_trigger(expr: &Expr) -> bool {
         }
         Expr::PriorState(name) => is_trigger_like_name(name),
         expr @ Expr::AddrOf(_) => expr.as_var_name().map_or(false, is_trigger_like_name),
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r)
-        | Expr::Mod(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r)
-        | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
-        | Expr::And(l, r) | Expr::Or(l, r)
+        Expr::BinaryOp(BinaryOpKind::Add, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Sub, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Mul, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Div, Box::new(l), Box::new(r))
+        | Expr::BinaryOp(BinaryOpKind::Mod, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Eq, Box::new(l), Box::new(r)) | Expr::Ne(l, r)
+        | Expr::BinaryOp(BinaryOpKind::Lt, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Le, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Gt, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Ge, Box::new(l), Box::new(r))
+        | Expr::BinaryOp(BinaryOpKind::And, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Or, Box::new(l), Box::new(r))
         | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
         | Expr::Shl(l, r) | Expr::Shr(l, r) => {
             expr_involves_trigger(l) || expr_involves_trigger(r)
         }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => expr_involves_trigger(e),
+        Expr::UnaryOp(UnaryOpKind::Not, Box::new(e)) | Expr::UnaryOp(UnaryOpKind::Neg, Box::new(e)) | Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(e)) => expr_involves_trigger(e),
         Expr::Call(_, args) => args.iter().any(expr_involves_trigger),
-        Expr::ListIndex(list, idx) => {
+        Expr::Index(list, idx) => {
             expr_involves_trigger(list) || expr_involves_trigger(idx)
         }
         _ => false,
@@ -137,27 +137,27 @@ pub fn generate_concrete_values(
     let mut assignments = Vec::new();
     
     match &constraint.condition {
-        Expr::Eq(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Eq, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
-        Expr::Gt(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Gt, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val + 1));
             }
         }
-        Expr::Lt(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Lt, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val.saturating_sub(1)));
             }
         }
-        Expr::Ge(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Ge, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
-        Expr::Le(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Le, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
@@ -167,7 +167,7 @@ pub fn generate_concrete_values(
                 assignments.push((var.clone(), val + 1));
             }
         }
-        Expr::And(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::And, Box::new(l), Box::new(r)) => {
             // Both must be true
             let mut l_assignments = generate_concrete_for_expr(l, state);
             let mut r_assignments = generate_concrete_for_expr(r, state);
@@ -191,27 +191,27 @@ fn generate_concrete_for_expr(expr: &Expr, _state: &SymbolicState) -> Vec<(Strin
 
 fn extract_integer_comparisons(expr: &Expr, assignments: &mut Vec<(String, i64)>) {
     match expr {
-        Expr::Eq(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Eq, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
-        Expr::Gt(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Gt, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val + 1));
             }
         }
-        Expr::Lt(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Lt, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), val.saturating_sub(1)));
             }
         }
-        Expr::Ge(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Ge, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
         }
-        Expr::Le(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Le, Box::new(l), Box::new(r)) => {
             if let (Expr::Identifier(var), Expr::Decimal(val)) = (&**l, &**r) {
                 assignments.push((var.clone(), *val));
             }
@@ -221,7 +221,7 @@ fn extract_integer_comparisons(expr: &Expr, assignments: &mut Vec<(String, i64)>
                 assignments.push((var.clone(), val + 1));
             }
         }
-        Expr::And(l, r) | Expr::Or(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::And, Box::new(l), Box::new(r)) | Expr::BinaryOp(BinaryOpKind::Or, Box::new(l), Box::new(r)) => {
             extract_integer_comparisons(l, assignments);
             extract_integer_comparisons(r, assignments);
         }
@@ -268,10 +268,10 @@ pub fn generate_concolic_test_cases(txn: &Transaction) -> Vec<Vec<(String, i64)>
 }
 
 /// Run concolic analysis on a program and return test cases
-pub fn run_concolic_analysis(program: &Program) -> Vec<TransactionTestCases> {
+pub fn run_concolic_analysis(program: &[TopLevel]) -> Vec<TransactionTestCases> {
     let mut results = Vec::new();
     
-    for item in &program.items {
+    for item in &items {
         if let TopLevel::Transaction(txn) = item {
             let test_cases = generate_concolic_test_cases(txn);
             let constraints = extract_path_constraints(txn);
@@ -322,7 +322,7 @@ mod tests {
         let mut parser = Parser::new(code);
         let program = parser.parse().expect("Failed to parse");
         
-        if let TopLevel::Transaction(txn) = &program.items[1] {
+        if let TopLevel::Transaction(txn) = &items[1] {
             let constraints = extract_path_constraints(txn);
             assert_eq!(constraints.len(), 2, "Should find 2 guard constraints");
             
@@ -352,7 +352,7 @@ mod tests {
         let mut parser = Parser::new(code);
         let program = parser.parse().expect("Failed to parse");
         
-        if let TopLevel::Transaction(txn) = &program.items[2] {
+        if let TopLevel::Transaction(txn) = &items[2] {
             let constraints = extract_path_constraints(txn);
             assert_eq!(constraints.len(), 1, "Should find 1 guard constraint");
             
@@ -383,7 +383,7 @@ mod tests {
         let mut parser = Parser::new(code);
         let program = parser.parse().expect("Failed to parse");
         
-        if let TopLevel::Transaction(txn) = &program.items[2] {
+        if let TopLevel::Transaction(txn) = &items[2] {
             let constraints = extract_path_constraints(txn);
             let pre_evaluable = filter_pre_evaluable_constraints(&constraints);
             
@@ -449,7 +449,7 @@ mod tests {
         let mut parser = Parser::new(code);
         let program = parser.parse().expect("Failed to parse");
         
-        if let TopLevel::Transaction(txn) = &program.items[1] {
+        if let TopLevel::Transaction(txn) = &items[1] {
             let test_cases = generate_concolic_test_cases(txn);
             
             // Should have test cases for amount > 10, amount <= 10, and default

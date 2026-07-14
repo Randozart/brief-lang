@@ -66,22 +66,16 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
 
     for stmt in body {
         match stmt {
-            Statement::TermBang { .. } => {
+            Statement::TermBang(_) => {
                 reasons.push("GPU kernel contains term! — unsupported".to_string());
             }
-            Statement::Term { swan_song, .. } => {
+            Statement::Term(swan_song) => {
                 // term is allowed in GPU kernels (no-op convergence signal).
                 // Check the swan song for GPU eligibility if present.
                 if let Some(swan) = swan_song {
-                    let inner = check_eligibility(&[swan.as_ref().clone()]);
-                    reasons.extend(inner.reasons);
+                    collect_unsafe_ffi(swan, &mut reasons);
+                    collect_touched_fields(swan, &mut touched_fields);
                 }
-            }
-            Statement::Escape { .. } => {
-                reasons.push("GPU kernel contains escape — unsupported".to_string());
-            }
-            Statement::Unification { .. } => {
-                reasons.push("GPU kernel contains unification — unsupported".to_string());
             }
             Statement::Expression(expr) => {
                 collect_unsafe_ffi(expr, &mut reasons);
@@ -91,7 +85,7 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
                 collect_unsafe_ffi(e, &mut reasons);
                 collect_touched_fields(e, &mut touched_fields);
             }
-            Statement::Assignment { lhs, expr, .. } => {
+            Statement::Assign(lhs, expr) => {
                 if let Expr::Identifier(field) = lhs {
                     if !write_fields.contains(field) {
                         write_fields.push(field.clone());
@@ -103,7 +97,7 @@ pub fn check_eligibility(body: &[Statement]) -> GpuEligibility {
                 collect_unsafe_ffi(expr, &mut reasons);
                 collect_touched_fields(expr, &mut touched_fields);
             }
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 collect_unsafe_ffi(condition, &mut reasons);
                 collect_touched_fields(condition, &mut touched_fields);
                 let inner = check_eligibility(statements);
@@ -138,32 +132,29 @@ fn collect_touched_fields(expr: &Expr, fields: &mut Vec<String>) {
                 fields.push(name.clone());
             }
         }
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
-        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
-        | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r)
-        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+        Expr::BinaryOp(_, l, r) => {
             collect_touched_fields(l, fields);
             collect_touched_fields(r, fields);
         }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
+        Expr::UnaryOp(_, e) | Expr::Cast(e, _) => {
             collect_touched_fields(e, fields);
         }
-        Expr::Call(_, args) | /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } => {
+        Expr::Call(_, args) => {
             for arg in args {
                 collect_touched_fields(arg, fields);
             }
         }
-        Expr::List(items) | Expr::SetLiteral(items) => {
+        Expr::List(items) | Expr::Tuple(items) => {
             for item in items {
                 collect_touched_fields(item, fields);
             }
         }
-        Expr::MapLiteral(pairs) => {
-            for (k, v) in pairs {
-                collect_touched_fields(k, fields);
-                collect_touched_fields(v, fields);
-            }
+        Expr::Field(obj, _) => {
+            collect_touched_fields(obj, fields);
+        }
+        Expr::Index(obj, idx) => {
+            collect_touched_fields(obj, fields);
+            collect_touched_fields(idx, fields);
         }
         _ => {}
     }
@@ -177,75 +168,117 @@ fn collect_touched_fields(expr: &Expr, fields: &mut Vec<String>) {
 /// is always allowed (it is GPU-native).
 fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
     match expr {
-        Expr::Call(name, _) => {
-            reasons.push(format!("GPU kernel contains FFI call '{}' — unsupported", name));
-        }
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
-            if !is_gpu_safe_intrinsic(intrinsic) {
-                reasons.push(format!("GPU kernel contains unsafe intrinsic '{:?}'", intrinsic));
+        Expr::Call(name, args) => {
+            if name.ends_with('#') {
+                if !is_gpu_safe_intrinsic(name) {
+                    reasons.push(format!("GPU kernel contains unsafe intrinsic '{}'", name));
+                }
+            } else {
+                reasons.push(format!("GPU kernel contains FFI call '{}' — unsupported", name));
             }
             for arg in args {
                 collect_unsafe_ffi(arg, reasons);
             }
         }
         // Binary ops — recurse into both operands
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
-        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
-        | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r)
-        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+        Expr::BinaryOp(_, l, r) => {
             collect_unsafe_ffi(l, reasons);
             collect_unsafe_ffi(r, reasons);
         }
         // Unary ops — recurse into operand
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+        Expr::UnaryOp(_, e) => {
             collect_unsafe_ffi(e, reasons);
         }
         // Collection literals — recurse into elements
-        Expr::List(items) | Expr::SetLiteral(items) => {
+        Expr::List(items) | Expr::Tuple(items) => {
             for item in items {
                 collect_unsafe_ffi(item, reasons);
             }
         }
-        Expr::MapLiteral(pairs) => {
-            for (k, v) in pairs {
-                collect_unsafe_ffi(k, reasons);
-                collect_unsafe_ffi(v, reasons);
-            }
-        }
-        // List index — recurse into value and index
-        Expr::ListIndex(v, i) => {
+        // Index — recurse into value and index
+        Expr::Index(v, i) => {
             collect_unsafe_ffi(v, reasons);
             collect_unsafe_ffi(i, reasons);
         }
-        // Slice — recurse into value and optional bounds
-        Expr::Slice { value, start, end, stride, mask } => {
-            collect_unsafe_ffi(value, reasons);
-            for opt in [start, end, stride, mask].into_iter().flatten() {
-                collect_unsafe_ffi(opt, reasons);
-            }
-        }
-        // Concat / Cast / Projection — recurse into operands
-        Expr::Concat(l, r) => {
-            collect_unsafe_ffi(l, reasons);
-            collect_unsafe_ffi(r, reasons);
-        }
+        // Cast / Field — recurse into operands
         Expr::Cast(e, _) => collect_unsafe_ffi(e, reasons),
-        Expr::Projection { source, .. } => collect_unsafe_ffi(source, reasons),
-        // Field access — recurse into the struct expression
         Expr::Field(obj, _) => {
             collect_unsafe_ffi(obj, reasons);
         }
+        // Block / If — recurse into contained expressions/statements
+        Expr::Block(stmts) => {
+            for stmt in stmts {
+                collect_unsafe_ffi_stmt(stmt, reasons);
+            }
+        }
+        Expr::If(cond, then, else_opt) => {
+            collect_unsafe_ffi(cond, reasons);
+            collect_unsafe_ffi(then, reasons);
+            if let Some(else_expr) = else_opt {
+                collect_unsafe_ffi(else_expr, reasons);
+            }
+        }
         // Terminals — no sub-expressions
-        Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_) | Expr::Char(_)
-        | Expr::Quoted(_) | Expr::Term | Expr::Identifier(_)
-        | Expr::AddrOf(_) | Expr::PriorState(_)
-        | Expr::Ellipsis | Expr::TypeRef(_) => {}
-        // Shared memory — always allowed in GPU kernels
-        Expr::SharedMem(_) => {}
+        Expr::Decimal(_) | Expr::Float(_) | Expr::Bool(_)
+        | Expr::Quoted(_) | Expr::Identifier(_) => {}
         // Catch-all for remaining expression types — conservatively reject
         _ => {
             reasons.push("GPU kernel contains unsupported expression type".to_string());
+        }
+    }
+}
+
+/// Helper to walk statements when recursing from expression tree (Expr::Block).
+fn collect_unsafe_ffi_stmt(stmt: &Statement, reasons: &mut Vec<String>) {
+    match stmt {
+        Statement::Expression(expr) => collect_unsafe_ffi(expr, reasons),
+        Statement::Assign(lhs, expr) => {
+            collect_unsafe_ffi(lhs, reasons);
+            collect_unsafe_ffi(expr, reasons);
+        }
+        Statement::Let { expr: Some(e), .. } => collect_unsafe_ffi(e, reasons),
+        Statement::Let { expr: None, .. } => {}
+        Statement::Guarded(cond, stmts) => {
+            collect_unsafe_ffi(cond, reasons);
+            for s in stmts {
+                collect_unsafe_ffi_stmt(s, reasons);
+            }
+        }
+        Statement::Block(stmts) => {
+            for s in stmts {
+                collect_unsafe_ffi_stmt(s, reasons);
+            }
+        }
+        Statement::If(cond, then_body, else_body) => {
+            collect_unsafe_ffi(cond, reasons);
+            for s in then_body {
+                collect_unsafe_ffi_stmt(s, reasons);
+            }
+            for s in else_body {
+                collect_unsafe_ffi_stmt(s, reasons);
+            }
+        }
+        Statement::Term(Some(expr))
+        | Statement::TermBang(Some(expr))
+        | Statement::Return(Some(expr))
+        | Statement::Escape(Some(expr)) => collect_unsafe_ffi(expr, reasons),
+        Statement::Term(None) | Statement::TermBang(None) | Statement::Return(None) | Statement::Escape(None) => {}
+        Statement::SyncBlock(stmts) => {
+            for s in stmts {
+                collect_unsafe_ffi_stmt(s, reasons);
+            }
+        }
+        Statement::Foreach { list, body, .. } => {
+            collect_unsafe_ffi(list, reasons);
+            for s in body {
+                collect_unsafe_ffi_stmt(s, reasons);
+            }
+        }
+        Statement::TrgBinding { instance, .. } => {
+            collect_unsafe_ffi(instance, reasons);
+        }
+        Statement::InlineAsm { .. } | Statement::MetadataAssignment(..) => {
+            // No expression recursion needed
         }
     }
 }
@@ -255,15 +288,15 @@ fn collect_unsafe_ffi(expr: &Expr, reasons: &mut Vec<String>) {
 /// Well-known math intrinsics (sin, cos, pow, sqrt, fabs) map directly to
 /// SPIR-V / GPU instructions. GPU query intrinsics (get_global_id, barrier)
 /// are added alongside their Intrinsic enum entries.
-fn is_gpu_safe_intrinsic(intrinsic: &Intrinsic) -> bool {
-    matches!(intrinsic,
-        Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
-        | Intrinsic::Sqrt | Intrinsic::Fabs
-        | Intrinsic::Ceil | Intrinsic::Floor
-        | Intrinsic::GetGlobalId | Intrinsic::GetLocalId
-        | Intrinsic::GetGroupId | Intrinsic::GetNumGroups
-        | Intrinsic::SubGroupBarrier
-        | Intrinsic::PrintInt | Intrinsic::PutChar | Intrinsic::PrintFloat
+fn is_gpu_safe_intrinsic(name: &str) -> bool {
+    matches!(name,
+        "Sin#" | "Cos#" | "Pow#"
+        | "Sqrt#" | "Fabs#"
+        | "Ceil#" | "Floor#"
+        | "GetGlobalId#" | "GetLocalId#"
+        | "GetGroupId#" | "GetNumGroups#"
+        | "SubGroupBarrier#"
+        | "PrintInt#" | "PutChar#" | "PrintFloat#"
     )
 }
 
@@ -292,7 +325,7 @@ pub fn extract_kernel(
     };
 
     for stmt in &kernel.body {
-        if let Statement::Assignment { lhs, .. } = stmt {
+        if let Statement::Assign(lhs, _) = stmt {
             if let Expr::Identifier(field) = lhs {
                 if !kernel.write_fields.contains(field) {
                     kernel.write_fields.push(field.clone());
@@ -316,13 +349,13 @@ fn collect_all_fields(body: &[Statement]) -> Vec<String> {
 
 fn collect_stmt_fields(stmt: &Statement, fields: &mut Vec<String>) {
     match stmt {
-        Statement::Assignment { lhs, expr, .. } => {
+        Statement::Assign(lhs, expr) => {
             if let Expr::Identifier(f) = lhs {
                 if !fields.contains(f) { fields.push(f.clone()); }
             }
             collect_expr_fields(expr, fields);
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded(condition, statements) => {
             collect_expr_fields(condition, fields);
             for s in statements {
                 collect_stmt_fields(s, fields);
@@ -337,15 +370,11 @@ fn collect_expr_fields(expr: &Expr, fields: &mut Vec<String>) {
         Expr::Identifier(name) => {
             if !fields.contains(name) { fields.push(name.clone()); }
         }
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
-        | Expr::And(l, r) | Expr::Or(l, r) | Expr::Eq(l, r) | Expr::Ne(l, r)
-        | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
-        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
+        Expr::BinaryOp(_, l, r) => {
             collect_expr_fields(l, fields);
             collect_expr_fields(r, fields);
         }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+        Expr::UnaryOp(_, e) => {
             collect_expr_fields(e, fields);
         }
         _ => {}
@@ -418,15 +447,6 @@ pub fn emit_spirv_module(kernel: &GpuKernel) -> String {
     ir.push_str("declare float @llvm.floor.f32(float) #0\n");
     ir.push_str("\n");
 
-    // Emit shared memory globals (addrspace(3)) for any SharedMem expressions
-    let shared_mem_sizes = collect_shared_mem_sizes(&kernel.body);
-    for (i, size) in shared_mem_sizes.iter().enumerate() {
-        ir.push_str(&format!("@shared_buf_{} = internal unnamed_addr addrspace(3) global [{} x i64] zeroinitializer\n", i, size));
-    }
-    if !shared_mem_sizes.is_empty() {
-        ir.push_str("\n");
-    }
-
     let has_print = has_print_intrinsics(&kernel.body);
 
     if has_print {
@@ -482,19 +502,17 @@ fn is_float_context(expr: &Expr, field_types: &HashMap<String, String>) -> bool 
     match expr {
         Expr::Float(_) => true,
         Expr::Identifier(name) => field_types.get(name).map(|t| t == "float").unwrap_or(false),
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) => {
+        Expr::BinaryOp(kind, l, r) if matches!(kind,
+            BinaryOpKind::Add | BinaryOpKind::Sub | BinaryOpKind::Mul | BinaryOpKind::Div
+            | BinaryOpKind::Lt | BinaryOpKind::Le | BinaryOpKind::Gt | BinaryOpKind::Ge
+            | BinaryOpKind::Eq | BinaryOpKind::Neq
+        ) => {
             is_float_context(l, field_types) || is_float_context(r, field_types)
         }
-        Expr::Neg(e) => is_float_context(e, field_types),
-        Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
-        | Expr::Eq(l, r) | Expr::Ne(l, r) => {
-            is_float_context(l, field_types) || is_float_context(r, field_types)
-        }
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => matches!(intrinsic,
-            Intrinsic::Sin | Intrinsic::Cos | Intrinsic::Pow
-            | Intrinsic::Sqrt | Intrinsic::Fabs
-            | Intrinsic::Ceil | Intrinsic::Floor
-            | Intrinsic::PrintFloat
+        Expr::UnaryOp(UnaryOpKind::Neg, e) => is_float_context(e, field_types),
+        Expr::Call(name, _) if name.ends_with('#') => matches!(name.as_str(),
+            "Sin#" | "Cos#" | "Pow#" | "Sqrt#" | "Fabs#"
+            | "Ceil#" | "Floor#" | "PrintFloat#"
         ),
         _ => false,
     }
@@ -510,66 +528,19 @@ fn float_to_spirv_hex(val: f64) -> String {
     format!("{}", bits)
 }
 
-/// Scan through statements and collect all SharedMem sizes for addrspace(3) globals.
-fn collect_shared_mem_sizes(body: &[Statement]) -> Vec<usize> {
-    let mut sizes = Vec::new();
-    for stmt in body {
-        match stmt {
-            Statement::Assignment { expr, .. } => {
-                collect_shared_mem_sizes_expr(expr, &mut sizes);
-            }
-            Statement::Guarded { condition, statements, .. } => {
-                collect_shared_mem_sizes_expr(condition, &mut sizes);
-                sizes.extend(collect_shared_mem_sizes(statements));
-            }
-            Statement::Let { expr: Some(e), .. } => {
-                collect_shared_mem_sizes_expr(e, &mut sizes);
-            }
-            Statement::Expression(e) => {
-                collect_shared_mem_sizes_expr(e, &mut sizes);
-            }
-            _ => {}
-        }
-    }
-    sizes
-}
 
-fn collect_shared_mem_sizes_expr(expr: &Expr, sizes: &mut Vec<usize>) {
-    match expr {
-        Expr::SharedMem(n) => sizes.push(*n),
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
-        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
-        | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r)
-        | Expr::BitAnd(l, r) | Expr::BitOr(l, r) | Expr::BitXor(l, r)
-        | Expr::Shl(l, r) | Expr::Shr(l, r) => {
-            collect_shared_mem_sizes_expr(l, sizes);
-            collect_shared_mem_sizes_expr(r, sizes);
-        }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) | Expr::Cast(e, _) => {
-            collect_shared_mem_sizes_expr(e, sizes);
-        }
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { args, .. } | Expr::Call(_, args) => {
-            for arg in args {
-                collect_shared_mem_sizes_expr(arg, sizes);
-            }
-        }
-        _ => {}
-    }
-}
 
 /// Scan the kernel body for print I/O intrinsics (print_int#, print_float#,
 /// put_char#). When present, a print buffer parameter is added to the kernel.
 fn has_print_intrinsics(body: &[Statement]) -> bool {
     for stmt in body {
         match stmt {
-            Statement::Assignment { expr, .. }
-            | Statement::Let { expr: Some(expr), .. }
-            | Statement::Expression(expr) => {
+            Statement::Assign(_, expr) | Statement::Let { expr: Some(expr), .. } | Statement::Expression(expr) => {
                 if has_print_intrinsics_expr(expr) {
                     return true;
                 }
             }
-            Statement::Guarded { condition, statements, .. } => {
+            Statement::Guarded(condition, statements) => {
                 if has_print_intrinsics_expr(condition) { return true; }
                 if has_print_intrinsics(statements) { return true; }
             }
@@ -581,15 +552,13 @@ fn has_print_intrinsics(body: &[Statement]) -> bool {
 
 fn has_print_intrinsics_expr(expr: &Expr) -> bool {
     match expr {
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, .. } => matches!(intrinsic,
-            Intrinsic::PrintInt | Intrinsic::PrintFloat | Intrinsic::PutChar
+        Expr::Call(name, _) => matches!(name.as_str(),
+            "PrintInt#" | "PrintFloat#" | "PutChar#"
         ),
-        Expr::Add(l, r) | Expr::Sub(l, r) | Expr::Mul(l, r) | Expr::Div(l, r) | Expr::Mod(l, r)
-        | Expr::Eq(l, r) | Expr::Ne(l, r) | Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r)
-        | Expr::Ge(l, r) | Expr::And(l, r) | Expr::Or(l, r) => {
+        Expr::BinaryOp(_, l, r) => {
             has_print_intrinsics_expr(l) || has_print_intrinsics_expr(r)
         }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => has_print_intrinsics_expr(e),
+        Expr::UnaryOp(_, e) => has_print_intrinsics_expr(e),
         _ => false,
     }
 }
@@ -654,7 +623,7 @@ fn emit_spirv_stmt(
     write_fields: &[String],
 ) {
     match stmt {
-        Statement::Assignment { lhs, expr, .. } => {
+        Statement::Assign(lhs, expr) => {
             let lhs_name = if let Expr::Identifier(f) = lhs { f.clone() } else { return };
 
             let val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
@@ -672,7 +641,7 @@ fn emit_spirv_stmt(
                 ir.push_str(&format!("{}store i64 {}, i8* {}, align 8\n", indent, val, gep));
             }
         }
-        Statement::Guarded { condition, statements, .. } => {
+        Statement::Guarded(condition, statements) => {
             let cond = emit_spirv_expr(condition, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let then_l = format!(".L{}", { let l = *label_counter; *label_counter += 1; l });
             let merge_l = format!(".L{}", { let l = *label_counter; *label_counter += 1; l });
@@ -695,25 +664,15 @@ fn emit_spirv_stmt(
             // let with no initializer — no-op in SPIR-V kernel context
         }
         Statement::Expression(expr) => {
-            match expr {
-                /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic: Intrinsic::SubGroupBarrier, args } => {
-                    let dim = if args.is_empty() {
-                        "0".to_string()
-                    } else {
-                        emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields)
-                    };
-                    ir.push_str(&format!("{}call void @_Z8barrierj(i32 {})\n", indent, dim));
-                }
-                _ => {
-                    let _val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
-                }
-            }
+            let _val = emit_spirv_expr(expr, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
         }
         // Term — convergence signal (no-op in SPIR-V). Execute swan song if present.
-        Statement::Term { swan_song, .. } => {
-            if let Some(swan) = swan_song {
-                emit_spirv_stmt(swan, ir, indent, field_offsets, loaded_regs, label_counter, field_types, write_fields);
-            }
+        Statement::Term(Some(swan)) => {
+            // 2026-07-13: swan song is an expression, not a statement
+            let _val = emit_spirv_expr(swan, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
+        }
+        Statement::Term(None) => {
+            // no-op convergence signal
         }
         _ => {}
     }
@@ -749,28 +708,28 @@ fn emit_spirv_expr(
             ensure_field_loaded(name, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
         }
         // Float arithmetic
-        Expr::Add(lhs, rhs) if is_float_context(expr, field_types) => {
+        Expr::BinaryOp(BinaryOpKind::Add, lhs, rhs) if is_float_context(expr, field_types) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fadd{}", ir.len());
             ir.push_str(&format!("{}{} = fadd float {}, {}\n", indent, reg, l, r));
             reg
         }
-        Expr::Sub(lhs, rhs) if is_float_context(expr, field_types) => {
+        Expr::BinaryOp(BinaryOpKind::Sub, lhs, rhs) if is_float_context(expr, field_types) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fsub{}", ir.len());
             ir.push_str(&format!("{}{} = fsub float {}, {}\n", indent, reg, l, r));
             reg
         }
-        Expr::Mul(lhs, rhs) if is_float_context(expr, field_types) => {
+        Expr::BinaryOp(BinaryOpKind::Mul, lhs, rhs) if is_float_context(expr, field_types) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fmul{}", ir.len());
             ir.push_str(&format!("{}{} = fmul float {}, {}\n", indent, reg, l, r));
             reg
         }
-        Expr::Div(lhs, rhs) if is_float_context(expr, field_types) => {
+        Expr::BinaryOp(BinaryOpKind::Div, lhs, rhs) if is_float_context(expr, field_types) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fdiv{}", ir.len());
@@ -778,35 +737,35 @@ fn emit_spirv_expr(
             reg
         }
         // Integer arithmetic
-        Expr::Add(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Add, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%add{}", ir.len());
             ir.push_str(&format!("{}{} = add i64 {}, {}\n", indent, reg, l, r));
             reg
         }
-        Expr::Sub(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Sub, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%sub{}", ir.len());
             ir.push_str(&format!("{}{} = sub i64 {}, {}\n", indent, reg, l, r));
             reg
         }
-        Expr::Mul(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Mul, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%mul{}", ir.len());
             ir.push_str(&format!("{}{} = mul i64 {}, {}\n", indent, reg, l, r));
             reg
         }
-        Expr::Div(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Div, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%div{}", ir.len());
             ir.push_str(&format!("{}{} = sdiv i64 {}, {}\n", indent, reg, l, r));
             reg
         }
-        Expr::Mod(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Mod, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%rem{}", ir.len());
@@ -814,22 +773,23 @@ fn emit_spirv_expr(
             reg
         }
         // Float comparisons
-        cmp @ (Expr::Lt(_, _) | Expr::Le(_, _) | Expr::Gt(_, _) | Expr::Ge(_, _)
-             | Expr::Eq(_, _) | Expr::Ne(_, _)) if is_float_context(expr, field_types) => {
+        cmp @ (Expr::BinaryOp(BinaryOpKind::Lt, _, _) | Expr::BinaryOp(BinaryOpKind::Le, _, _)
+             | Expr::BinaryOp(BinaryOpKind::Gt, _, _) | Expr::BinaryOp(BinaryOpKind::Ge, _, _)
+             | Expr::BinaryOp(BinaryOpKind::Eq, _, _) | Expr::BinaryOp(BinaryOpKind::Neq, _, _))
+             if is_float_context(expr, field_types) => {
             let (l, r) = match cmp {
-                Expr::Lt(l, r) | Expr::Le(l, r) | Expr::Gt(l, r) | Expr::Ge(l, r)
-                | Expr::Eq(l, r) | Expr::Ne(l, r) => (l, r),
+                Expr::BinaryOp(_, l, r) => (l, r),
                 _ => unreachable!(),
             };
             let lv = emit_spirv_expr(l, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let rv = emit_spirv_expr(r, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let cond = match cmp {
-                Expr::Lt(_, _) => "olt",
-                Expr::Le(_, _) => "ole",
-                Expr::Gt(_, _) => "ogt",
-                Expr::Ge(_, _) => "oge",
-                Expr::Eq(_, _) => "oeq",
-                Expr::Ne(_, _) => "one",
+                Expr::BinaryOp(BinaryOpKind::Lt, _, _) => "olt",
+                Expr::BinaryOp(BinaryOpKind::Le, _, _) => "ole",
+                Expr::BinaryOp(BinaryOpKind::Gt, _, _) => "ogt",
+                Expr::BinaryOp(BinaryOpKind::Ge, _, _) => "oge",
+                Expr::BinaryOp(BinaryOpKind::Eq, _, _) => "oeq",
+                Expr::BinaryOp(BinaryOpKind::Neq, _, _) => "one",
                 _ => unreachable!(),
             };
             let reg = format!("%fcmp{}", ir.len());
@@ -839,7 +799,7 @@ fn emit_spirv_expr(
             ext
         }
         // Integer comparisons
-        Expr::Lt(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Lt, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
@@ -848,7 +808,7 @@ fn emit_spirv_expr(
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
         }
-        Expr::Le(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Le, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
@@ -857,7 +817,7 @@ fn emit_spirv_expr(
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
         }
-        Expr::Gt(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Gt, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
@@ -866,7 +826,7 @@ fn emit_spirv_expr(
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
         }
-        Expr::Ge(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Ge, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
@@ -875,7 +835,7 @@ fn emit_spirv_expr(
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
         }
-        Expr::Eq(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Eq, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
@@ -884,7 +844,7 @@ fn emit_spirv_expr(
             ir.push_str(&format!("{}{} = zext i1 {} to i64\n", indent, ext, reg));
             ext
         }
-        Expr::Ne(lhs, rhs) => {
+        Expr::BinaryOp(BinaryOpKind::Neq, lhs, rhs) => {
             let l = emit_spirv_expr(lhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let r = emit_spirv_expr(rhs, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cmp{}", ir.len());
@@ -894,33 +854,22 @@ fn emit_spirv_expr(
             ext
         }
         // Float negation
-        Expr::Neg(e) if is_float_context(expr, field_types) => {
+        Expr::UnaryOp(UnaryOpKind::Neg, e) if is_float_context(expr, field_types) => {
             let v = emit_spirv_expr(e, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fneg{}", ir.len());
             ir.push_str(&format!("{}{} = fneg float {}\n", indent, reg, v));
             reg
         }
         // Int negation
-        Expr::Neg(e) => {
+        Expr::UnaryOp(UnaryOpKind::Neg, e) => {
             let v = emit_spirv_expr(e, ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%neg{}", ir.len());
             ir.push_str(&format!("{}{} = sub i64 0, {}\n", indent, reg, v));
             reg
         }
-        // GPU shared memory: emit addrspace(3) global and return i8* pointer
-        Expr::SharedMem(n) => {
-            let sh_idx = loaded_regs.len();
-            let gv_name = format!("@shared_buf_{}", sh_idx);
-            ir.push_str(&format!("{}; shared memory: {} x i64\n", indent, n));
-            ir.push_str(&format!("{}%sh_base = addrspacecast [{} x i64] addrspace(3)* {} to ptr\n",
-                indent, n, gv_name));
-            let reg = format!("%sh_ptr{}", sh_idx);
-            ir.push_str(&format!("{}{} = ptrtoint ptr %sh_base to i64\n", indent, reg));
-            reg
-        }
         // GPU intrinsics
-        /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) { intrinsic, args } => {
-            emit_spirv_intrinsic(intrinsic, args, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
+        Expr::Call(name, args) => {
+            emit_spirv_intrinsic(name, args, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
         }
         _ => {
             ir.push_str(&format!("{}; error: unsupported expression in GPU kernel\n", indent));
@@ -949,7 +898,7 @@ fn emit_spirv_expr(
 /// Math intrinsics map to `@llvm.*.f32` calls (native SPIR-V).
 /// SubGroupBarrier as an expression returns 1 (true — barrier succeeded).
 fn emit_spirv_intrinsic(
-    intrinsic: &Intrinsic,
+    name: &str,
     args: &[Expr],
     ir: &mut String,
     indent: &str,
@@ -958,19 +907,19 @@ fn emit_spirv_intrinsic(
     field_types: &HashMap<String, String>,
     write_fields: &[String],
 ) -> String {
-    match intrinsic {
-        Intrinsic::GetGlobalId | Intrinsic::GetLocalId
-        | Intrinsic::GetGroupId | Intrinsic::GetNumGroups => {
+    match name {
+        "GetGlobalId#" | "GetLocalId#"
+        | "GetGroupId#" | "GetNumGroups#" => {
             let dim = if let Some(first) = args.first() {
                 emit_spirv_expr(first, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
             } else {
                 "0".to_string()
             };
-            let (fn_name, ret_ty) = match intrinsic {
-                Intrinsic::GetGlobalId => ("_Z13get_global_idj", "i64"),
-                Intrinsic::GetLocalId => ("_Z12get_local_idj", "i64"),
-                Intrinsic::GetGroupId => ("_Z12get_group_idj", "i64"),
-                Intrinsic::GetNumGroups => ("_Z16get_num_groupsj", "i64"),
+            let (fn_name, ret_ty) = match name {
+                "GetGlobalId#" => ("_Z13get_global_idj", "i64"),
+                "GetLocalId#" => ("_Z12get_local_idj", "i64"),
+                "GetGroupId#" => ("_Z12get_group_idj", "i64"),
+                "GetNumGroups#" => ("_Z16get_num_groupsj", "i64"),
                 _ => unreachable!(),
             };
             let reg = format!("%tid{}", ir.len());
@@ -978,7 +927,7 @@ fn emit_spirv_intrinsic(
                 indent, reg, ret_ty, fn_name, dim));
             reg
         }
-        Intrinsic::SubGroupBarrier => {
+        "SubGroupBarrier#" => {
             let dim = if let Some(first) = args.first() {
                 emit_spirv_expr(first, ir, indent, field_offsets, loaded_regs, field_types, write_fields)
             } else {
@@ -988,44 +937,44 @@ fn emit_spirv_intrinsic(
             "1".to_string()
         }
         // Math intrinsics: emit @llvm.*.f32 calls native to SPIR-V.
-        Intrinsic::Sin => {
+        "Sin#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%sin{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.sin.f32(float {})\n", indent, reg, v));
             reg
         }
-        Intrinsic::Cos => {
+        "Cos#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%cos{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.cos.f32(float {})\n", indent, reg, v));
             reg
         }
-        Intrinsic::Pow => {
+        "Pow#" => {
             let a = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let b = emit_spirv_expr(&args[1], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%pow{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.pow.f32(float {}, float {})\n", indent, reg, a, b));
             reg
         }
-        Intrinsic::Sqrt => {
+        "Sqrt#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%sqrt{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.sqrt.f32(float {})\n", indent, reg, v));
             reg
         }
-        Intrinsic::Fabs => {
+        "Fabs#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%fabs{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.fabs.f32(float {})\n", indent, reg, v));
             reg
         }
-        Intrinsic::Ceil => {
+        "Ceil#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%ceil{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.ceil.f32(float {})\n", indent, reg, v));
             reg
         }
-        Intrinsic::Floor => {
+        "Floor#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%floor{}", ir.len());
             ir.push_str(&format!("{}{} = call float @llvm.floor.f32(float {})\n", indent, reg, v));
@@ -1034,13 +983,13 @@ fn emit_spirv_intrinsic(
         // GPU I/O intrinsics — write to print buffer, host drains after dispatch.
         // These use %base_print, which is emitted in emit_spirv_module only when
         // has_print_intrinsics() returns true (guaranteed by the caller).
-        Intrinsic::PrintInt => {
+        "PrintInt#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%pr{}", ir.len());
             ir.push_str(&format!("{}store i64 {}, i8* %base_print, align 8\n", indent, v));
             reg
         }
-        Intrinsic::PrintFloat => {
+        "PrintFloat#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let bc = format!("%prbc{}", ir.len());
             let reg = format!("%pr{}", ir.len());
@@ -1048,7 +997,7 @@ fn emit_spirv_intrinsic(
             ir.push_str(&format!("{}store float {}, float* {}, align 4\n", indent, v, bc));
             reg
         }
-        Intrinsic::PutChar => {
+        "PutChar#" => {
             let v = emit_spirv_expr(&args[0], ir, indent, field_offsets, loaded_regs, field_types, write_fields);
             let reg = format!("%pr{}", ir.len());
             ir.push_str(&format!("{}store i8 {}, i8* %base_print, align 1\n", indent, v));
@@ -1149,15 +1098,13 @@ mod tests {
     #[test]
     fn test_check_eligibility_pure_loop_is_eligible() {
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("data".to_string()),
-                expr: Expr::Add(
+            Statement::Assign(
+                Expr::Identifier("data".to_string()),
+                Expr::BinaryOp(BinaryOpKind::Add, 
                     Box::new(Expr::Identifier("data".to_string())),
                     Box::new(Expr::Decimal(1)),
                 ),
-                timeout: None,
-                modifiers: vec![],
-            },
+            ),
         ];
         let result = check_eligibility(&body);
         assert!(result.eligible, "Pure loop should be GPU-eligible");
@@ -1176,7 +1123,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_term_is_eligible() {
         let body = vec![
-            Statement::Term { values: vec![], modifiers: vec![], swan_song: None },
+            Statement::Term(None),
         ];
         let result = check_eligibility(&body);
         assert!(result.eligible, "term statement should be GPU-eligible (no-op in SPIR-V)");
@@ -1185,7 +1132,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_termbang_is_ineligible() {
         let body = vec![
-            Statement::TermBang { values: vec![], swan_song: None, modifiers: vec![] },
+            Statement::TermBang(None),
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "term! statement should be ineligible");
@@ -1201,12 +1148,10 @@ mod tests {
     #[test]
     fn test_extract_kernel_tracks_write_fields() {
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("out".to_string()),
-                expr: Expr::Decimal(42),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(
+                Expr::Identifier("out".to_string()),
+                Expr::Decimal(42),
+            ),
         ];
         let kernel = extract_kernel("write_test", &body, Expr::Decimal(10), &[], HashMap::new());
         assert!(kernel.write_fields.contains(&"out".to_string()));
@@ -1225,12 +1170,10 @@ mod tests {
     #[test]
     fn test_emit_spirv_module_emits_assignment() {
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Decimal(42),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(
+                Expr::Identifier("x".to_string()),
+                Expr::Decimal(42),
+            ),
         ];
         let kernel = extract_kernel("assign_test", &body, Expr::Decimal(10), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1241,15 +1184,13 @@ mod tests {
     #[test]
     fn test_emit_spirv_module_emits_arithmetic() {
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Add(
+            Statement::Assign(
+                Expr::Identifier("x".to_string()),
+                Expr::BinaryOp(BinaryOpKind::Add, 
                     Box::new(Expr::Identifier("x".to_string())),
                     Box::new(Expr::Decimal(1)),
                 ),
-                timeout: None,
-                modifiers: vec![],
-            },
+            ),
         ];
         let kernel = extract_kernel("arith_test", &body, Expr::Decimal(10), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1261,15 +1202,13 @@ mod tests {
     fn test_emit_spirv_module_loads_correct_field() {
         // x = y + 1 — should load y, NOT reuse x's value
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Add(
+            Statement::Assign(
+                Expr::Identifier("x".to_string()),
+                Expr::BinaryOp(BinaryOpKind::Add, 
                     Box::new(Expr::Identifier("y".to_string())),
                     Box::new(Expr::Decimal(1)),
                 ),
-                timeout: None,
-                modifiers: vec![],
-            },
+            ),
         ];
         let kernel = extract_kernel("cross_field", &body, Expr::Decimal(10), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1293,15 +1232,10 @@ mod tests {
     fn test_check_eligibility_math_intrinsic_allowed() {
         // sin#(x_float) inside an expression should be allowed
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                    intrinsic: Intrinsic::Sin,
-                    args: vec![Expr::Identifier("x".to_string())],
-                },
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(
+                Expr::Identifier("r".to_string()),
+                Expr::Call("Sin#".to_string(), vec![Expr::Identifier("x".to_string())]),
+            ),
         ];
         let result = check_eligibility(&body);
         assert!(result.eligible, "math intrinsic sin# should be GPU-eligible");
@@ -1312,10 +1246,7 @@ mod tests {
     fn test_check_eligibility_unsafe_intrinsic_blocked() {
         // ReadFile# has side effects and no SPIR-V mapping — should be blocked
         let body = vec![
-            Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::UserDefined("read_file".to_string()),
-                args: vec![Expr::Quoted("test".into())],
-            }),
+            Statement::Expression(Expr::Call("read_file".to_string(), vec![Expr::Quoted("test".into())])),
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "unsafe intrinsic should be ineligible");
@@ -1327,12 +1258,7 @@ mod tests {
     fn test_check_eligibility_ffi_in_assignment_blocked() {
         // FFI call inside assignment RHS should be caught
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Call("read_file".to_string(), vec![Expr::Quoted("foo.txt".into())]),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("read_file".to_string(), vec![Expr::Quoted("foo.txt".into())])),
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "FFI in assignment RHS should be ineligible");
@@ -1344,16 +1270,12 @@ mod tests {
     fn test_check_eligibility_unsafe_intrinsic_in_guard_blocked() {
         // Unsafe intrinsic inside a guarded statement should be caught via recursion
         let body = vec![
-            Statement::Guarded {
-                condition: Expr::Bool(true),
-                statements: vec![
-                    Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                        intrinsic: Intrinsic::UserDefined("read_file".to_string()),
-                        args: vec![Expr::Quoted("test".into())],
-                    }),
+            Statement::Guarded(
+                Expr::Bool(true),
+                vec![
+                    Statement::Expression(Expr::Call("read_file".to_string(), vec![Expr::Quoted("test".into())])),
                 ],
-                metadata: HashMap::new(),
-            },
+            ),
         ];
         let result = check_eligibility(&body);
         assert!(!result.eligible, "unsafe intrinsic in guard should be ineligible");
@@ -1364,15 +1286,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_get_global_id() {
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                    intrinsic: Intrinsic::GetGlobalId,
-                    args: vec![Expr::Decimal(0)],
-                },
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)])),
         ];
         let kernel = extract_kernel("gtid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1383,15 +1297,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_get_local_id() {
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                    intrinsic: Intrinsic::GetLocalId,
-                    args: vec![Expr::Decimal(1)],
-                },
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetLocalId#".to_string(), vec![Expr::Decimal(1)])),
         ];
         let kernel = extract_kernel("ltid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1402,15 +1308,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_get_group_id() {
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                    intrinsic: Intrinsic::GetGroupId,
-                    args: vec![Expr::Decimal(0)],
-                },
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("GetGroupId#".to_string(), vec![Expr::Decimal(0)])),
         ];
         let kernel = extract_kernel("grid_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1421,10 +1319,7 @@ mod tests {
     #[test]
     fn test_emit_spirv_barrier() {
         let body = vec![
-            Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::SubGroupBarrier,
-                args: vec![],
-            }),
+            Statement::Expression(Expr::Call("SubGroupBarrier#".to_string(), vec![])),
         ];
         let kernel = extract_kernel("bar_test", &body, Expr::Decimal(100), &[], HashMap::new());
         let ir = emit_spirv_module(&kernel);
@@ -1452,10 +1347,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_gpu_intrinsic_allowed() {
         let body = vec![
-            Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::GetGlobalId,
-                args: vec![Expr::Decimal(0)],
-            }),
+            Statement::Expression(Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)])),
         ];
         let result = check_eligibility(&body);
         assert!(result.eligible, "get_global_id should be GPU-eligible");
@@ -1464,10 +1356,7 @@ mod tests {
     #[test]
     fn test_check_eligibility_barrier_allowed() {
         let body = vec![
-            Statement::Expression(/* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                intrinsic: Intrinsic::SubGroupBarrier,
-                args: vec![],
-            }),
+            Statement::Expression(Expr::Call("SubGroupBarrier#".to_string(), vec![])),
         ];
         let result = check_eligibility(&body);
         assert!(result.eligible, "barrier should be GPU-eligible");
@@ -1492,15 +1381,10 @@ mod tests {
         ft.insert("x".to_string(), "float".to_string());
         ft.insert("y".to_string(), "float".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Add(
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::BinaryOp(BinaryOpKind::Add, 
                     Box::new(Expr::Identifier("y".to_string())),
                     Box::new(Expr::Float(3.14)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+                )),
         ];
         let kernel = extract_kernel("float_add", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1517,21 +1401,16 @@ mod tests {
         ft.insert("y".to_string(), "float".to_string());
         ft.insert("z".to_string(), "float".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("z".to_string()),
-                expr: Expr::Div(
-                    Box::new(Expr::Mul(
+            Statement::Assign(Expr::Identifier("z".to_string()), Expr::BinaryOp(BinaryOpKind::Div, 
+                    Box::new(Expr::BinaryOp(BinaryOpKind::Mul, 
                         Box::new(Expr::Identifier("x".to_string())),
                         Box::new(Expr::Identifier("y".to_string())),
                     )),
-                    Box::new(Expr::Sub(
+                    Box::new(Expr::BinaryOp(BinaryOpKind::Sub, 
                         Box::new(Expr::Identifier("x".to_string())),
                         Box::new(Expr::Float(1.0)),
                     )),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+                )),
         ];
         let kernel = extract_kernel("float_ops", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1546,12 +1425,7 @@ mod tests {
         ft.insert("x".to_string(), "float".to_string());
         ft.insert("y".to_string(), "float".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("y".to_string()),
-                expr: Expr::Neg(Box::new(Expr::Identifier("x".to_string()))),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("y".to_string()), Expr::UnaryOp(UnaryOpKind::Neg, Box::new(Expr::Identifier("x".to_string())))),
         ];
         let kernel = extract_kernel("fneg", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1566,15 +1440,10 @@ mod tests {
         ft.insert("y".to_string(), "float".to_string());
         ft.insert("r".to_string(), "i64".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::Lt(
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::BinaryOp(BinaryOpKind::Lt, 
                     Box::new(Expr::Identifier("x".to_string())),
                     Box::new(Expr::Identifier("y".to_string())),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+                )),
         ];
         let kernel = extract_kernel("float_cmp", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1588,15 +1457,7 @@ mod tests {
         ft.insert("x".to_string(), "float".to_string());
         ft.insert("r".to_string(), "float".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                    intrinsic: Intrinsic::Sin,
-                    args: vec![Expr::Identifier("x".to_string())],
-                },
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Call("Sin#".to_string(), vec![Expr::Identifier("x".to_string())])),
         ];
         let kernel = extract_kernel("sin_test", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1611,24 +1472,14 @@ mod tests {
         ft.insert("z".to_string(), "i64".to_string());
         ft.insert("w".to_string(), "float".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: Expr::Add(
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::BinaryOp(BinaryOpKind::Add, 
                     Box::new(Expr::Identifier("x".to_string())),
                     Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::Identifier("y".to_string()),
-                expr: Expr::Mul(
+                )),
+            Statement::Assign(Expr::Identifier("y".to_string()), Expr::BinaryOp(BinaryOpKind::Mul, 
                     Box::new(Expr::Identifier("y".to_string())),
                     Box::new(Expr::Float(2.0)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+                )),
         ];
         let kernel = extract_kernel("mixed_int_float", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1646,33 +1497,18 @@ mod tests {
         ft.insert("s".to_string(), "i64".to_string());
         ft.insert("t".to_string(), "i64".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::Lt(
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::BinaryOp(BinaryOpKind::Lt, 
                     Box::new(Expr::Identifier("x".to_string())),
                     Box::new(Expr::Identifier("y".to_string())),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::Identifier("s".to_string()),
-                expr: Expr::Gt(
+                )),
+            Statement::Assign(Expr::Identifier("s".to_string()), Expr::BinaryOp(BinaryOpKind::Gt, 
                     Box::new(Expr::Identifier("x".to_string())),
                     Box::new(Expr::Identifier("y".to_string())),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::Identifier("t".to_string()),
-                expr: Expr::Eq(
+                )),
+            Statement::Assign(Expr::Identifier("t".to_string()), Expr::BinaryOp(BinaryOpKind::Eq, 
                     Box::new(Expr::Identifier("x".to_string())),
                     Box::new(Expr::Decimal(42)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+                )),
         ];
         let kernel = extract_kernel("int_cmp", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1687,24 +1523,14 @@ mod tests {
         ft.insert("q".to_string(), "i64".to_string());
         ft.insert("r".to_string(), "i64".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("q".to_string()),
-                expr: Expr::Div(
+            Statement::Assign(Expr::Identifier("q".to_string()), Expr::BinaryOp(BinaryOpKind::Div, 
                     Box::new(Expr::Identifier("q".to_string())),
                     Box::new(Expr::Decimal(3)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::Mod(
+                )),
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::BinaryOp(BinaryOpKind::Mod, 
                     Box::new(Expr::Identifier("r".to_string())),
                     Box::new(Expr::Decimal(7)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+                )),
         ];
         let kernel = extract_kernel("div_mod", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1717,12 +1543,7 @@ mod tests {
         let mut ft = HashMap::new();
         ft.insert("r".to_string(), "float".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("r".to_string()),
-                expr: Expr::Float(3.14159),
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("r".to_string()), Expr::Float(3.14159)),
         ];
         let kernel = extract_kernel("float_lit", &body, Expr::Decimal(10), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1739,15 +1560,10 @@ mod tests {
         ft.insert("x".to_string(), "i64".to_string());
         ft.insert("y".to_string(), "i64".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("y".to_string()),
-                expr: Expr::Add(
+            Statement::Assign(Expr::Identifier("y".to_string()), Expr::BinaryOp(BinaryOpKind::Add, 
                     Box::new(Expr::Identifier("x".to_string())),
                     Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+                )),
         ];
         let kernel = extract_kernel("multi_buf", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1765,15 +1581,10 @@ mod tests {
         ft.insert("x".to_string(), "i64".to_string());
         ft.insert("y".to_string(), "i64".to_string());
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("y".to_string()),
-                expr: Expr::Add(
+            Statement::Assign(Expr::Identifier("y".to_string()), Expr::BinaryOp(BinaryOpKind::Add, 
                     Box::new(Expr::Identifier("x".to_string())),
                     Box::new(Expr::Decimal(1)),
-                ),
-                timeout: None,
-                modifiers: vec![],
-            },
+                )),
         ];
         let kernel = extract_kernel("rw_test", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1785,69 +1596,6 @@ mod tests {
             "write field y should store value");
     }
 
-    // ── Shared memory (Phase 5) ────────────────────────────
-
-    #[test]
-    fn test_emit_spirv_shared_memory_global() {
-        let body = vec![
-            Statement::Let {
-                name: "buf".to_string(),
-                ty: None,
-                expr: Some(Expr::SharedMem(256)),
-                address: None,
-                address_expr: None,
-                bit_range: None,
-                constraint: None,
-                is_override: false,
-                modifiers: vec![],
-            },
-        ];
-        let kernel = extract_kernel("shmem_test", &body, Expr::Decimal(10), &[], HashMap::new());
-        let ir = emit_spirv_module(&kernel);
-        assert!(ir.contains("addrspace(3)"), "should declare addrspace(3) global");
-        assert!(ir.contains("[256 x i64]"), "should declare [256 x i64] array");
-        assert!(ir.contains("@shared_buf_0"), "should use shared_buf_0 name");
-    }
-
-    #[test]
-    fn test_emit_spirv_shared_memory_addrspace_cast() {
-        let body = vec![
-            Statement::Let {
-                name: "buf".to_string(),
-                ty: None,
-                expr: Some(Expr::SharedMem(64)),
-                address: None,
-                address_expr: None,
-                bit_range: None,
-                constraint: None,
-                is_override: false,
-                modifiers: vec![],
-            },
-        ];
-        let kernel = extract_kernel("shmem_cast", &body, Expr::Decimal(10), &[], HashMap::new());
-        let ir = emit_spirv_module(&kernel);
-        assert!(ir.contains("addrspacecast"), "should emit addrspacecast");
-        assert!(ir.contains("ptrtoint"), "should convert to i64 pointer");
-    }
-
-    #[test]
-    fn test_collect_shared_mem_sizes_multiple() {
-        let body = vec![
-            Statement::Let {
-                name: "a".to_string(), ty: None, expr: Some(Expr::SharedMem(128)),
-                address: None, address_expr: None, bit_range: None,
-                constraint: None, is_override: false, modifiers: vec![],
-            },
-            Statement::Let {
-                name: "b".to_string(), ty: None, expr: Some(Expr::SharedMem(32)),
-                address: None, address_expr: None, bit_range: None,
-                constraint: None, is_override: false, modifiers: vec![],
-            },
-        ];
-        let sizes = collect_shared_mem_sizes(&body);
-        assert_eq!(sizes, vec![128, 32], "should collect both shared memory sizes");
-    }
-
     // ── Multi-dimensional grid (Phase 6) ───────────────────
 
     #[test]
@@ -1857,24 +1605,8 @@ mod tests {
         ft.insert("y".to_string(), "i64".to_string());
         // Kernel using both get_global_id(0) and get_global_id(1)
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                    intrinsic: Intrinsic::GetGlobalId,
-                    args: vec![Expr::Decimal(0)],
-                },
-                timeout: None,
-                modifiers: vec![],
-            },
-            Statement::Assignment {
-                lhs: Expr::Identifier("y".to_string()),
-                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                    intrinsic: Intrinsic::GetGlobalId,
-                    args: vec![Expr::Decimal(1)],
-                },
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)])),
+            Statement::Assign(Expr::Identifier("y".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(1)])),
         ];
         let kernel = extract_kernel("grid2d", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);
@@ -1890,15 +1622,7 @@ mod tests {
         ft.insert("x".to_string(), "i64".to_string());
         // Kernel using only get_global_id(0)
         let body = vec![
-            Statement::Assignment {
-                lhs: Expr::Identifier("x".to_string()),
-                expr: /* OLD: IntrinsicCall */ Expr::Call("".to_string(), vec![]) {
-                    intrinsic: Intrinsic::GetGlobalId,
-                    args: vec![Expr::Decimal(0)],
-                },
-                timeout: None,
-                modifiers: vec![],
-            },
+            Statement::Assign(Expr::Identifier("x".to_string()), Expr::Call("GetGlobalId#".to_string(), vec![Expr::Decimal(0)])),
         ];
         let kernel = extract_kernel("grid1d", &body, Expr::Decimal(100), &[], ft);
         let ir = emit_spirv_module(&kernel);

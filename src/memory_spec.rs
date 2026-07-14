@@ -17,7 +17,7 @@
 //! Collects all variable/register/address allocations during compilation
 //! and outputs a JSON/TOML spec for foreign language consumption.
 
-use crate::ast::*;
+use crate::ast::{BitRange, Expr, LinkRef, StateDecl, TopLevel, Transaction, Trigger, Type};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -76,8 +76,8 @@ impl MemorySpec {
     }
 
     /// Collect allocations from a parsed Brief program
-    pub fn collect_from_program(&mut self, program: &Program) {
-        for item in &program.items {
+    pub fn collect_from_program(&mut self, items: &[TopLevel]) {
+        for item in items {
             match item {
                 TopLevel::StateDecl(decl) => {
                     self.add_state_decl(decl);
@@ -95,57 +95,43 @@ impl MemorySpec {
 
     fn add_state_decl(&mut self, decl: &StateDecl) {
         let type_name = format_type(&decl.ty);
-        let address = decl.address.map(|a| format!("0x{:X}", a));
-        let bit_range = decl.bit_range.as_ref().map(|br| format_bit_range(br));
-
         let size = estimate_type_size(&decl.ty);
 
         self.allocations.insert(
             decl.name.clone(),
             Allocation {
                 type_name,
-                address,
+                address: None,
                 size_bytes: size,
-                bit_range,
+                bit_range: None,
                 stage: None,
                 is_trigger: false,
             },
         );
     }
 
-    fn add_trigger_decl(&mut self, trg: &TriggerDeclaration) {
-        let type_name = format!("trg {}", format_type(&trg.ty));
-        let address = match &trg.address {
-            LinkRef::Explicit(addr) => Some(format!("0x{:X}", addr)),
-            LinkRef::Linked(name) => Some(format!("link:{}", name)),
-            _ => None,
-        };
-        let bit_range = trg.bit_range.as_ref().map(|br| format_bit_range(br));
-        let size = estimate_type_size(&trg.ty);
+    fn add_trigger_decl(&mut self, trg: &Trigger) {
+        let type_name = "trg".to_string();
+        let size = 8usize;
 
         self.allocations.insert(
             trg.name.clone(),
             Allocation {
                 type_name,
-                address: address.clone(),
+                address: None,
                 size_bytes: size,
-                bit_range,
-                stage: if !trg.stages.is_empty() {
-                    Some(trg.stages.join(","))
-                } else {
-                    None
-                },
+                bit_range: None,
+                stage: None,
                 is_trigger: true,
             },
         );
 
-        // Also add to triggers map with binding info
         self.triggers.insert(
             trg.name.clone(),
             TriggerInfo {
                 trigger_type: "hardware".to_string(),
-                binding: address.clone(),
-                mode: trg.condition.as_ref().map(|_| "conditional".to_string()),
+                binding: None,
+                mode: None,
             },
         );
     }
@@ -201,7 +187,6 @@ fn format_type(ty: &Type) -> String {
             let inner: Vec<_> = args.iter().map(format_type).collect();
             format!("{}<{}>", name, inner.join(", "))
         }
-        Type::Sig(name) => format!("sig:{}", name),
         Type::Vector(elem, dims) => {
             let total_size: usize = dims.iter().map(|d| match d {
                 crate::ast::Dimension::Anonymous(s) => *s,
@@ -209,12 +194,16 @@ fn format_type(ty: &Type) -> String {
             }).product();
             format!("Vec<{}; {}>", format_type(elem), total_size)
         }
-        Type::Enum(name) => format!("enum:{}", name),
         Type::Constrained(inner, bit_range) => {
             format!("{}@/{}", format_type(inner), format_bit_range(bit_range))
         }
         // 2026-07-03: Layout-constrained pointer — show canonical form
         Type::LayoutPtr(lc) => format!("Ptr<Bits @/0..{}>", lc.bytes * 8 - 1),
+        Type::Ptr(inner) => format!("Ptr<{}>", format_type(inner)),
+        Type::Function(params, ret) => {
+            let inner: Vec<_> = params.iter().map(format_type).collect();
+            format!("({}) -> {}", inner.join(", "), format_type(ret))
+        },
     }
 }
 
@@ -245,7 +234,6 @@ fn estimate_type_size(ty: &Type) -> usize {
         Type::TypeVar(_) => 8,
         Type::Generic(_, _) => 8,
         Type::Applied(_, _) => 8,
-        Type::Sig(_) => 8,
         Type::Vector(elem, dims) => {
             let total_size: usize = dims.iter().map(|d| match d {
                 crate::ast::Dimension::Anonymous(s) => *s,
@@ -253,12 +241,13 @@ fn estimate_type_size(ty: &Type) -> usize {
             }).product();
             estimate_type_size(elem) * total_size
         }
-        Type::Enum(_) => 8,
         Type::Constrained(_, BitRange::Single(_)) => 1,
         Type::Constrained(_, BitRange::Any(n)) => (*n + 7) / 8,
         Type::Constrained(_, BitRange::Range(start, end)) => (end - start + 1 + 7) / 8,
         // 2026-07-03: Layout-constrained pointer — value is always pointer-width (8 bytes on x86_64)
         Type::LayoutPtr(_) | Type::Bits(_) | Type::Width(_) => 8,
+        Type::Ptr(_) => 8,
+        Type::Function(_, _) => 8,
     }
 }
 

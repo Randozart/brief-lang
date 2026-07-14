@@ -1,4 +1,4 @@
-use crate::ast::{Expr, Program, Statement, TopLevel};
+use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, UnaryOpKind};
 use std::collections::{HashMap, HashSet};
 
 /// Call graph for transaction-to-transaction calls.
@@ -25,13 +25,13 @@ impl CallGraph {
         }
     }
 
-    /// Build call graph from a Program, analyzing all transactions
-    pub fn build_from_program(&mut self, program: &Program) {
+    /// Build call graph from top-level items, analyzing all transactions
+    pub fn build_from_program(&mut self, items: &[TopLevel]) {
         self.graph.clear();
         self.txn_names.clear();
         self.cycles.clear();
 
-        for item in &program.items {
+        for item in items {
             if let TopLevel::Transaction(txn) = item {
                 self.txn_names.insert(txn.name.clone());
                 let called = extract_called_transactions(&txn.body);
@@ -89,7 +89,7 @@ pub fn extract_called_transactions(body: &[Statement]) -> Vec<String> {
     let mut called = Vec::new();
     for stmt in body {
         match stmt {
-            Statement::Assignment { expr, .. } => {
+            Statement::Assign(_, expr) => {
                 collect_call_names(expr, &mut called);
             }
             Statement::Let { expr, .. } => {
@@ -100,7 +100,7 @@ pub fn extract_called_transactions(body: &[Statement]) -> Vec<String> {
             Statement::Expression(e) => {
                 collect_call_names(e, &mut called);
             }
-            Statement::Guarded { statements, .. } => {
+            Statement::Guarded(_, statements) => {
                 called.extend(extract_called_transactions(statements));
             }
             _ => {}
@@ -118,28 +118,28 @@ pub fn collect_call_names(expr: &Expr, called: &mut Vec<String>) {
                 collect_call_names(arg, called);
             }
         }
-        Expr::Add(l, r)
-        | Expr::Sub(l, r)
-        | Expr::Mul(l, r)
-        | Expr::Div(l, r)
-        | Expr::Mod(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Add, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Sub, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Mul, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Div, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Mod, l, r) => {
             collect_call_names(l, called);
             collect_call_names(r, called);
         }
-        Expr::Eq(l, r)
-        | Expr::Ne(l, r)
-        | Expr::Lt(l, r)
-        | Expr::Le(l, r)
-        | Expr::Gt(l, r)
-        | Expr::Ge(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::Eq, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Neq, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Lt, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Le, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Gt, l, r)
+        | Expr::BinaryOp(BinaryOpKind::Ge, l, r) => {
             collect_call_names(l, called);
             collect_call_names(r, called);
         }
-        Expr::And(l, r) | Expr::Or(l, r) => {
+        Expr::BinaryOp(BinaryOpKind::And, l, r) | Expr::BinaryOp(BinaryOpKind::Or, l, r) => {
             collect_call_names(l, called);
             collect_call_names(r, called);
         }
-        Expr::Not(e) | Expr::Neg(e) | Expr::BitNot(e) => {
+        Expr::UnaryOp(UnaryOpKind::Not, e) | Expr::UnaryOp(UnaryOpKind::Neg, e) | Expr::UnaryOp(UnaryOpKind::BitNot, e) => {
             collect_call_names(e, called);
         }
         Expr::Field(e, _) => {
@@ -207,25 +207,23 @@ mod tests {
             contract: Contract {
                 pre_condition: Expr::Bool(true),
                 post_condition: Expr::Bool(true),
-                span: None,
+                is_entry: false,
                 watchdog: None,
+                span: None,
             },
             is_async: false,
             is_reactive: false,
+            type_params: vec![],
             parameters: vec![],
+            outputs: vec![],
+            output_type: None,
             reactor_speed: None,
             span: None,
-            is_lambda: false,
-            dependencies: vec![],
-
             annotations: vec![],
             metadata: HashMap::new(),
             modifiers: vec![],
-            variant_bodies: vec![],
-                 outputs: Vec::new(),
-         output_type: None,
             derivation: None,
-     })
+        })
     }
 
     fn make_call(name: &str) -> Expr {
@@ -233,180 +231,76 @@ mod tests {
     }
 
     fn make_guarded(stmts: Vec<Statement>) -> Statement {
-        Statement::Guarded {
-            condition: Expr::Bool(true),
-            statements: stmts,
-            metadata: HashMap::new(),
-        }
-    }
-
-    fn make_program(items: Vec<TopLevel>) -> Program {
-        Program {
-            items,
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        }
+        Statement::Guarded(Expr::Bool(true), stmts)
     }
 
     #[test]
     fn test_empty_graph_is_acyclic() {
-        let program = Program {
-            items: vec![],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let items: Vec<TopLevel> = vec![];
         let mut cg = CallGraph::new();
-        cg.build_from_program(&program);
+        cg.build_from_program(&items);
         assert!(!cg.has_cycle());
     }
 
     #[test]
     fn test_single_txn_no_calls_is_acyclic() {
-        let program = Program {
-            items: vec![make_txn("a", vec![])],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let items = vec![make_txn("a", vec![])];
         let mut cg = CallGraph::new();
-        cg.build_from_program(&program);
+        cg.build_from_program(&items);
         assert!(!cg.has_cycle());
     }
 
     #[test]
     fn test_direct_cycle() {
-        let program = Program {
-            items: vec![make_txn("a", vec![Statement::Expression(make_call("a"))])],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let items = vec![make_txn("a", vec![Statement::Expression(make_call("a"))])];
         let mut cg = CallGraph::new();
-        cg.build_from_program(&program);
+        cg.build_from_program(&items);
         assert!(cg.has_cycle());
     }
 
     #[test]
     fn test_indirect_cycle() {
-        let program = Program {
-            items: vec![
-                make_txn("a", vec![Statement::Expression(make_call("b"))]),
-                make_txn("b", vec![Statement::Expression(make_call("c"))]),
-                make_txn("c", vec![Statement::Expression(make_call("a"))]),
-            ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let items = vec![
+            make_txn("a", vec![Statement::Expression(make_call("b"))]),
+            make_txn("b", vec![Statement::Expression(make_call("c"))]),
+            make_txn("c", vec![Statement::Expression(make_call("a"))]),
+        ];
         let mut cg = CallGraph::new();
-        cg.build_from_program(&program);
+        cg.build_from_program(&items);
         assert!(cg.has_cycle());
     }
 
     #[test]
     fn test_acyclic_chain() {
-        let program = Program {
-            items: vec![
-                make_txn("a", vec![Statement::Expression(make_call("b"))]),
-                make_txn("b", vec![Statement::Expression(make_call("c"))]),
-                make_txn("c", vec![]),
-            ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let items = vec![
+            make_txn("a", vec![Statement::Expression(make_call("b"))]),
+            make_txn("b", vec![Statement::Expression(make_call("c"))]),
+            make_txn("c", vec![]),
+        ];
         let mut cg = CallGraph::new();
-        cg.build_from_program(&program);
+        cg.build_from_program(&items);
         assert!(!cg.has_cycle());
     }
 
     #[test]
     fn test_cycle_within_guard() {
-        let program = Program {
-            items: vec![
-                make_txn("a", vec![make_guarded(vec![Statement::Expression(make_call("a"))])]),
-            ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let items = vec![
+            make_txn("a", vec![make_guarded(vec![Statement::Expression(make_call("a"))])]),
+        ];
         let mut cg = CallGraph::new();
-        cg.build_from_program(&program);
+        cg.build_from_program(&items);
         assert!(cg.has_cycle());
     }
 
     #[test]
     fn test_node_count_and_edges() {
-        let program = Program {
-            items: vec![
-                make_txn("a", vec![Statement::Expression(make_call("b"))]),
-                make_txn("b", vec![Statement::Expression(make_call("c"))]),
-                make_txn("c", vec![]),
-            ],
-            comments: vec![],
-            reactor_speed: None,
-            attrs: Vec::new(),
-            ffi: None,
-            strict_mode: StrictMode::Off,
-            dispatch_mode: Default::default(),
-            exit_condition: None,
-        out_pragmas: vec![],
-        default_sig_modifier: None,
-            watchdog_defaults: (None, None),
-        };
+        let items = vec![
+            make_txn("a", vec![Statement::Expression(make_call("b"))]),
+            make_txn("b", vec![Statement::Expression(make_call("c"))]),
+            make_txn("c", vec![]),
+        ];
         let mut cg = CallGraph::new();
-        cg.build_from_program(&program);
+        cg.build_from_program(&items);
         assert_eq!(cg.node_count(), 3);
         assert_eq!(cg.edge_count(), 2);
     }
