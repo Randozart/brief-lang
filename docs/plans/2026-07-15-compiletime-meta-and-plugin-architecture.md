@@ -810,6 +810,104 @@ match type_property(return_type, "listen") {
 }
 ```
 
+### Dynamic Trigger Targets: `@ *ptr`
+
+#### Motivation
+
+Static triggers (`trg x @ fixed_instance.#port`) are resolved at compile
+time — the target entity is known and checked before the binary is linked.
+But many systems need to bind handlers to entities that aren't known until
+runtime: a USB device on a hot-swappable bus, a virtual device registered
+by another component, or a memory-mapped peripheral whose address is read
+from a device tree.
+
+Brief's contract system must extend to these cases without sacrificing
+safety. The solution is a **two-phase safety model**: the compile-time
+type parameter on `AddressOf#` guarantees shape, a runtime init guard
+guarantees the entity exists and matches.
+
+#### The Pattern
+
+`AddressOf#<T>(id)` returns `Ptr<T>` — a typed pointer carrying the
+entity's declared shape `T`. Applying `.#field` scopes the pointer type
+to a specific port:
+
+```brief
+let uart_rx: Ptr<UartRxPort> = AddressOf#<UartRxPort>("sys:uart/rx").#rx;
+trg x @ *uart_rx;
+```
+
+`*uart_rx` dereferences the pointer. The backend resolves the target at
+**init time** instead of compile time. Since `UartRxPort` was type-checked
+when `AddressOf#` resolved, the trigger binding is statically type-safe.
+
+When the pointer type already describes the full port (no field projection
+needed):
+
+```brief
+trg x @ *AddressOf#<UartRxPort>("sys:uart/rx");
+```
+
+Here `UartRxPort` carries the complete port shape. No `.#field` is needed
+because the type already describes exactly what trigger to set up.
+
+#### Safety Model
+
+| Check | When | What happens on failure |
+|-------|------|------------------------|
+| `T` matches expected port shape | Compile (type resolution) | Type error — rejected |
+| Target entity exists at runtime address | Init time | Warning with `--warn-unresolved-trg` |
+| Entity shape matches `T` | Init time | Error with `--error-unresolved-trg` (warning by default) |
+
+The compile-time contract (`T`) guarantees shape correctness. The runtime
+check guarantees the entity exists and matches. Two-phase safety mirrors
+Brief's overall contract philosophy: contracts are verified, never assumed.
+
+#### Example: Hot-swappable Input Device
+
+```brief
+type GamepadInput <: InputPort {
+    // fields: button_a, button_b, dpad_x, dpad_y
+};
+
+txn handle_input [has_device][has_device] {
+    let device: Ptr<GamepadInput> = AddressOf#<GamepadInput>("usb:gamepad");
+    [*device != null] {
+        trg x @ *device;
+        term;
+    };
+    [*device == null] {
+        term; // no device — skip
+    };
+};
+```
+
+#### Usage in Inline `$` calls (non-trg, just address)
+
+`AddressOf#` is usable anywhere, not only in trigger bindings:
+
+```brief
+let counter_addr: Ptr<Int> = AddressOf#<Int>("sys:sysclock_ticks");
+let ticks: Int = *counter_addr;  // read via deref
+```
+
+The difference from trigger bindings is the `listen <~` metadata: when
+used in `trg @ *addr.#port`, the backend sets up a listener. When used
+inline (no `trg`), it's just an address dereference.
+
+#### Implementation Steps (Phase 5 additions)
+
+| Step | Task | Files | Tests needed |
+|------|------|-------|-------------|
+| 5j | Add `Expr::Deref(Box<Expr>)` variant to AST | `src/ast/expr.rs` | Parser parses `*expr` |
+| 5k | Parse `*expr` in trigger instance position | `src/parser/definitions.rs` | `trg x @ *ptr` parses |
+| 5l | Type-checker: verify deref target is `Ptr<T>`, extract `T` | `src/typechecker/` | Type error on non-Ptr deref |
+| 5m | LLVM codegen: emit init-time table lookup + listener registration | `src/backend/llvm/emit_expr.rs` | `@ *ptr` emits different IR than `@ fixed.#port` |
+| 5n | CIRCT codegen: init-time entity resolution | `src/backend/circt.rs` | Correct MLIR for dynamic trigger |
+| 5o | Webstack codegen: JS init-time binding | `src/backend/webstack.rs` | Dynamic `addEventListener` etc |
+| 5p | Post-stage plugin: inject runtime validation guard | `plugins/post/validate-trg.bv` | Warning emitted for missing entities |
+| 5q | CLI flags: `--warn-unresolved-trg`, `--error-unresolved-trg` | `src/main.rs` | Flags control runtime behavior |
+
 ---
 
 ## What Gets Scrapped
@@ -1256,6 +1354,14 @@ pub fn compile_source(file_path, source, opts) -> Result<(), String> {
 | 5g | Add Webstack backend emission for `AddressOf#` | `src/backend/webstack.rs` | Correct JS emitted |
 | 5h | Add listening strategy validation per backend | Each backend's normalizer | Invalid strategy = compile error |
 | 5i | Remove `LinkRef::Stdin`/`Timer`/`Signal` | `src/ast/top.rs` | `TriggerDeclaration` uses `Expr` entirely |
+| 5j | Add `Expr::Deref(Box<Expr>)` variant to AST | `src/ast/expr.rs` | Parser parses `*expr` |
+| 5k | Parse `*expr` in trigger instance position | `src/parser/definitions.rs` | `trg x @ *ptr` parses |
+| 5l | Type-checker: verify deref target is `Ptr<T>`, extract `T` | `src/typechecker/` | Type error on non-Ptr deref |
+| 5m | LLVM codegen: emit init-time table lookup + listener registration | `src/backend/llvm/emit_expr.rs` | Dynamic trigger IR differs from static |
+| 5n | CIRCT codegen: init-time entity resolution | `src/backend/circt.rs` | Correct MLIR for dynamic trigger |
+| 5o | Webstack codegen: JS init-time binding | `src/backend/webstack.rs` | Dynamic `addEventListener` etc |
+| 5p | Post-stage plugin: inject runtime validation guard | `plugins/post/validate-trg.bv` | Warning emitted for missing entities |
+| 5q | CLI flags: `--warn-unresolved-trg`, `--error-unresolved-trg` | `src/main.rs` | Flags control runtime behavior |
 
 ### Phase 6: `.bvir` Pattern Compiler
 
@@ -1302,6 +1408,8 @@ pub fn compile_source(file_path, source, opts) -> Result<(), String> {
 | `docs/examples/stage/mid-example.bv` | `$(Mid)` usage example |
 | `docs/examples/stage/post-example.bv` | `$(Post)` usage example |
 | `docs/examples/stage/back-example.bv` | `$(Back)` usage example |
+| `plugins/post/validate-trg.bv` | Post-stage guard: warns on unresolved dynamic triggers |
+| `src/plugin/intrinsics.rs` | Stage-agnostic `$` intrinsic dispatch (`InsertRegistryImport$`, `EmitWarning$`, `EmitError$`, etc.) |
 
 ### Modified Files
 
@@ -1322,7 +1430,8 @@ pub fn compile_source(file_path, source, opts) -> Result<(), String> {
 | `src/backend/llvm/emit_toplevel.rs` | Remove header emission, add `$(Back)` hook point |
 | `src/backend/circt.rs` | Add `AddressOf#` emission, `$(Back)` hook |
 | `src/backend/webstack.rs` | Add `AddressOf#` emission, `$(Back)` hook |
-| `src/main.rs` | Replace `--no-stdlib` with `--disable-plugin`, add `register` subcommand |
+| `src/ast/expr.rs` | Add `Expr::Deref(Box<Expr>)` for `*ptr` dereference expressions |
+| `src/main.rs` | Replace `--no-stdlib` with `--disable-plugin`, add `register` subcommand, add `--warn-unresolved-trg` / `--error-unresolved-trg` |
 | `src/backend/llvm/context.rs` | Remove `target_triple`/`data_layout` fields (now config-driven) |
 | `AGENTS.md` | Add "Plan Directives" section (already done in this commit) |
 
