@@ -1808,6 +1808,7 @@ impl LlvmBackend {
         // argument → UB → entire body is dead → knucleotide prints nothing.
         writeln!(out, "@stdout = external dso_local global ptr").ok();
         writeln!(out, "declare i32 @fprintf(ptr, ptr, ...) #1").ok();
+        writeln!(out, "declare i32 @printf(ptr, ...) #1").ok();
         writeln!(out, "declare i32 @fputc(i32, ptr) #1").ok();
         writeln!(out, "declare i32 @fflush(ptr) #1").ok();
         writeln!(out, "declare ptr @getenv(ptr) #1").ok();

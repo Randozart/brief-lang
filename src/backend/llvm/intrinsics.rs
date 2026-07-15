@@ -167,7 +167,9 @@ fn emit_get_env(
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let name_reg = emit_arg(backend, out, &args[0], indent);
-    writeln!(out, "{}{} = call i64 @getenv_as_i64(ptr {})", indent, v, name_reg).ok();
+    let env_ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, name_reg).ok();
+    writeln!(out, "{}{} = call i64 @atol(ptr {})", indent, v, env_ptr).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 

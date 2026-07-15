@@ -1,4 +1,4 @@
-// Biquad IIR Filter Cascade — DSP benchmark for the LLVM backend
+// Biquad IIR Filter Cascade - DSP benchmark for the LLVM backend
 //
 // Tests:
 //   - Float arithmetic pipeline (fmul, fadd, fsub)
@@ -19,26 +19,26 @@
 //   perf stat ./benchmarks/iir_filter
 //   perf stat ./benchmarks/iir_filter_c
 
-// Coefficients — compile-time constants, emitted as @name = constant float
+// Coefficients - compile-time constants, emitted as @name = constant float
 const b0: Float = 0.003916126444;
 const b1: Float = 0.007832252889;
 const b2: Float = 0.003916126444;
 const a1: Float = -1.815341082700;
 const a2: Float = 0.831005589300;
 
-// Impulse input — constant for impulse response
+// Impulse input - constant for impulse response
 const input: Float = 1.0;
 
-// Loop bound — constant, inlined into the while comparison
+// Loop bound - constant, inlined into the while comparison
 const total: Int = 50000000;
 
-// Delay-line state (feedback path) — mutates every tick
+// Delay-line state (feedback path) - mutates every tick
 let x1: Float = 0.0;
 let x2: Float = 0.0;
 let y1: Float = 0.0;
 let y2: Float = 0.0;
 
-// Loop counter — mutates every tick
+// Loop counter - mutates every tick
 let count: Int = 0;
 
 // Convergence contract: the reactor fires while count < total and must
