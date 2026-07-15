@@ -1,23 +1,30 @@
 # Extension → backend routing.
 # Compiled into the binary via include_str!.
 # --backend CLI flag overrides.
+# plugins: list of system plugin names to enable for this extension.
+#          Defaults to ["prelude"] if not specified.
 
 [".bv"]
 backend = "llvm"
 defaults = ["--budget", "256"]
+plugins = ["prelude"]
 
 [".ebv"]
 backend = "llvm"
 defaults = ["--optimize-size", "--budget", "0"]
+plugins = ["prelude"]
 
 [".cbv"]
 backend = "circt"
 defaults = []
+plugins = ["prelude-core"]
 
 [".rbv"]
 backend = "webstack"
 defaults = ["--target", "wasm"]
+plugins = []
 
 [".abv"]
 backend = "gpu"
 defaults = ["--gpu-offload"]
+plugins = ["prelude"]

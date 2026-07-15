@@ -1,66 +1,204 @@
-// ── Phase 7: Plugin Loader ────────────────────────────────────────
+// ── Plugin Loader — Stage Block Plugin & System Discovery ───────────
 //
-// 2026-07-11: Native (.so) and WASM (.wasm) plugin loaders.
-// Native loading uses the existing `libloading` crate. WASM loading
-// uses `wasmtime` (feature-gated with "plugins").
+// 2026-07-15: Phase 2 — Provides StageBlockPlugin (wraps $(Stage) blocks
+// into Plugin trait) and discover_system_plugins() which scans
+// plugins/{front,mid,post,back}/ directories for .bv files and extracts
+// their $(Stage) blocks.
+//
+// Native (.so) and WASM (.wasm) loaders from Phase 7 (2026-07-11) are
+// retained but will be replaced by the stage-based architecture in
+// Phase 5.
 
-use super::{Plugin, PluginAction, PluginHook};
-use crate::ast::TopLevel;
+use super::{Plugin, PluginManager};
+use crate::ast::{StageBlock, StageKind, TopLevel};
+use crate::parser::Parser;
+use crate::target::TargetConfig;
 use crate::type_universe::TypeUniverse;
 use std::path::Path;
 
-/// Load a plugin from a file path. Supports:
-/// - `.so` / `.dylib` / `.dll` — native plugins via libloading
-/// - `.wasm` — WASM plugins (requires `plugins` feature)
-/// 2026-07-11: Phase 7.
-pub fn load_plugin(path: &Path) -> Result<Box<dyn Plugin>, String> {
-    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-    match ext {
-        "so" | "dylib" | "dll" => load_native_plugin(path),
-        "wasm" => load_wasm_plugin(path),
-        _ => Err(format!("Unsupported plugin extension: .{}", ext)),
-    }
+// ── StageBlockPlugin ──────────────────────────────────────────────────
+
+/// Wraps a parsed $(Stage) block into a Plugin.
+///
+/// The plugin runs at the stage specified by the block. Its body is a
+/// sequence of statements that may call compiler-known $ intrinsics
+/// (e.g., InsertRegistryImport$). The $ intrinsics are evaluated when
+/// the plugin's on_ast / on_ir method is called.
+///
+/// 2026-07-15: Phase 2 — StageBlockPlugin wraps parsed AST blocks.
+/// Phase 3 will implement the $ intrinsic dispatch.
+#[derive(Debug)]
+pub struct StageBlockPlugin {
+    name: String,
+    stage: StageKind,
+    priority: u32,
+    body: Vec<crate::ast::Statement>,
 }
 
-/// Load a native shared library (.so / .dylib / .dll) as a plugin.
-/// The library must export a `brief_plugin_create` function.
-/// 2026-07-11: Phase 7.
-fn load_native_plugin(path: &Path) -> Result<Box<dyn Plugin>, String> {
-    // Safety: libloading requires unsafe for FFI. The plugin MUST export
-    // a `brief_plugin_create` function with the correct signature.
-    unsafe {
-        let lib = libloading::Library::new(path)
-            .map_err(|e| format!("Failed to load native plugin '{}': {}", path.display(), e))?;
-        let create: libloading::Symbol<unsafe extern "C" fn() -> *mut dyn Plugin> = lib
-            .get(b"brief_plugin_create")
-            .map_err(|e| format!("Plugin '{}' missing brief_plugin_create: {}", path.display(), e))?;
-        let plugin_ptr = create();
-        if plugin_ptr.is_null() {
-            return Err(format!("Plugin '{}': brief_plugin_create returned null", path.display()));
+impl StageBlockPlugin {
+    pub fn new(name: String, block: StageBlock) -> Self {
+        StageBlockPlugin {
+            name,
+            stage: block.stage,
+            priority: block.priority,
+            body: block.body,
         }
-        let plugin = Box::from_raw(plugin_ptr);
-        // Leak the library reference so it stays loaded for the plugin's lifetime.
-        std::mem::forget(lib);
-        Ok(plugin)
+    }
+
+    /// Evaluate the block's body statements.
+    /// Currently a no-op — Phase 3 will dispatch $ intrinsics.
+    /// 2026-07-15: Phase 2 — Placeholder; Phase 3 adds $ intrinsic dispatch.
+    fn evaluate_body(&self) -> Result<(), String> {
+        if !self.body.is_empty() {
+            // Phase 3: interpret $ calls in the body
+        }
+        Ok(())
     }
 }
 
-/// Load a WASM module as a plugin using wasmtime.
-/// For now, returns an error indicating WASM plugins are not yet supported.
-/// 2026-07-11: Phase 7 — stub; real implementation requires wasmtime feature.
-fn load_wasm_plugin(path: &Path) -> Result<Box<dyn Plugin>, String> {
-    // Phase 7.4: WASM plugin loading via wasmtime.
-    // For now, return a helpful error.
-    Err(format!(
-        "WASM plugin '{}' requires the 'plugins' feature (wasmtime runtime). \
-         Compile with --features plugins to enable WASM plugin support.",
-        path.display()
-    ))
+impl Plugin for StageBlockPlugin {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn stages(&self) -> Vec<StageKind> {
+        vec![self.stage]
+    }
+
+    fn on_ast(
+        &self,
+        _program: &mut Vec<TopLevel>,
+        _universe: &mut TypeUniverse,
+    ) -> Result<(), String> {
+        self.evaluate_body()
+    }
+
+    fn on_ir(&self, _ir: &mut String) -> Result<(), String> {
+        self.evaluate_body()
+    }
 }
+
+// ── System Plugin Discovery ───────────────────────────────────────────
+
+/// Stage directory names under the plugins/ root.
+const STAGE_DIRS: &[(&str, StageKind)] = &[
+    ("front", StageKind::Front),
+    ("mid", StageKind::Mid),
+    ("post", StageKind::Post),
+    ("back", StageKind::Back),
+];
+
+/// Discover system plugins from the compiler's plugins/ directory.
+///
+/// Scans `plugins/{front,mid,post,back}/` for `.bv` files, parses each,
+/// extracts all `$(Stage)` blocks, and wraps each as a `StageBlockPlugin`
+/// registered into the provided `PluginManager`.
+///
+/// 2026-07-15: Phase 2 — System plugins ship with the compiler. Each
+/// `.bv` file in the stage directories can contain one or more $(Stage)
+/// blocks. The plugin name is derived from the filename and a block
+/// index to ensure uniqueness.
+pub fn discover_system_plugins(mgr: &mut PluginManager) {
+    let base = Path::new("plugins");
+    for (dir_name, stage) in STAGE_DIRS {
+        let dir = base.join(dir_name);
+        if !dir.is_dir() {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("bv") {
+                continue;
+            }
+            let source = match std::fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            // Parse the file to extract $(Stage) blocks.
+            // We create a temporary parse context — if parsing fails,
+            // skip the file with a warning.
+            let tokens = match crate::lexer::tokenize(&source) {
+                Ok(t) => t,
+                Err(_) => {
+                    eprintln!("warning: system plugin '{}' failed to tokenize, skipping", path.display());
+                    continue;
+                }
+            };
+            let mut parser = Parser::new(tokens, &source);
+            let items = match parser.parse_program() {
+                Ok(items) => items,
+                Err(e) => {
+                    eprintln!("warning: system plugin '{}' parse error: {}, skipping", path.display(), e);
+                    continue;
+                }
+            };
+
+            // Extract StageBlock top-levels and register each.
+            let file_stem = path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let mut block_idx = 0u32;
+            for item in &items {
+                if let TopLevel::StageBlock(block) = item {
+                    let plugin_name = format!("sys:{}:{}", file_stem, block_idx);
+                    let plugin = StageBlockPlugin::new(
+                        plugin_name,
+                        block.clone(),
+                    );
+                    mgr.register_with_priority(
+                        Box::new(plugin),
+                        block.priority,
+                    );
+                    block_idx += 1;
+                }
+            }
+        }
+    }
+}
+
+// ── Inline Plugin Extraction ──────────────────────────────────────────
+
+/// Extract inline $(Stage) blocks from a parsed program and register
+/// them as plugins on the manager.
+///
+/// Inline blocks are those written directly in user source files. They
+/// are removed from the program AST after extraction so they do not
+/// reach codegen.
+///
+/// 2026-07-15: Phase 2 — Inline $(Stage) blocks become StageBlockPlugin
+/// instances. The block is removed from the AST after registration.
+pub fn extract_inline_stage_blocks(
+    program: &mut Vec<TopLevel>,
+    mgr: &mut PluginManager,
+) {
+    let mut blocks: Vec<(usize, StageBlock)> = Vec::new();
+    for (i, item) in program.iter().enumerate() {
+        if let TopLevel::StageBlock(block) = item {
+            blocks.push((i, block.clone()));
+        }
+    }
+
+    // Extract in reverse order to preserve indices during removal.
+    let mut block_idx = 0u32;
+    for (i, block) in blocks.into_iter().rev() {
+        let plugin_name = format!("inline:{}", block_idx);
+        let plugin = StageBlockPlugin::new(plugin_name, block);
+        mgr.register_with_priority(Box::new(plugin), 200);
+        program.remove(i);
+        block_idx += 1;
+    }
+}
+
+// ── ValidationPlugin (kept from Phase 7) ──────────────────────────────
 
 /// A simple validations plugin that checks program invariants.
-/// Used as a built-in example and for testing.
-/// 2026-07-11: Phase 7.
+/// Retained as a built-in example and for testing.
+/// 2026-07-11: Phase 7. 2026-07-15: Adapted to new Plugin trait.
 #[derive(Debug)]
 pub struct ValidationPlugin {
     name: String,
@@ -77,117 +215,161 @@ impl Plugin for ValidationPlugin {
         &self.name
     }
 
-    fn on_hook(
-        &self,
-        _hook: PluginHook,
-        _program: &mut Vec<TopLevel>,
-        _universe: &mut TypeUniverse,
-    ) -> PluginAction {
-        PluginAction::Continue
+    fn stages(&self) -> Vec<StageKind> {
+        vec![StageKind::Front, StageKind::Mid, StageKind::Post, StageKind::Back]
     }
 }
 
+// ── Tests ─────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
-    use super::super::{PluginManager, Plugin};
     use super::*;
-    use crate::ast::TopLevel;
-
-    fn empty_program() -> Vec<TopLevel> {
-        vec![]
-    }
+    use crate::ast::Statement;
 
     #[test]
-    fn test_validation_plugin_noop() {
+    fn test_validation_plugin_name() {
         let plugin = ValidationPlugin::new();
         assert_eq!(plugin.name(), "builtin:validation");
     }
 
     #[test]
-    fn test_plugin_manager_empty() {
-        let mgr = PluginManager::new();
+    fn test_stage_block_plugin_creation() {
+        let block = StageBlock {
+            stage: StageKind::Front,
+            priority: 100,
+            body: vec![],
+            span: None,
+        };
+        let plugin = StageBlockPlugin::new("test:block".to_string(), block);
+        assert_eq!(plugin.name(), "test:block");
+        assert!(plugin.stages().contains(&StageKind::Front));
+    }
+
+    #[test]
+    fn test_stage_block_plugin_on_ast_ok() {
+        let block = StageBlock {
+            stage: StageKind::Mid,
+            priority: 50,
+            body: vec![],
+            span: None,
+        };
+        let plugin = StageBlockPlugin::new("test:midblock".to_string(), block);
+        let mut program = vec![];
+        let mut universe = TypeUniverse::new();
+        assert!(plugin.on_ast(&mut program, &mut universe).is_ok());
+    }
+
+    #[test]
+    fn test_stage_block_plugin_on_ir_ok() {
+        let block = StageBlock {
+            stage: StageKind::Post,
+            priority: 0,
+            body: vec![],
+            span: None,
+        };
+        let plugin = StageBlockPlugin::new("test:postblock".to_string(), block);
+        let mut ir = "define i32 @main() { ret i32 0 }".to_string();
+        assert!(plugin.on_ir(&mut ir).is_ok());
+    }
+
+    #[test]
+    fn test_extract_inline_stage_blocks_empty() {
+        let mut program: Vec<TopLevel> = vec![];
+        let mut mgr = PluginManager::new();
+        extract_inline_stage_blocks(&mut program, &mut mgr);
         assert!(mgr.is_empty());
-        assert_eq!(mgr.len(), 0);
     }
 
     #[test]
-    fn test_plugin_manager_register_and_hook() {
+    fn test_extract_inline_stage_blocks_removes_from_ast() {
+        use crate::ast::Statement;
+        let block = StageBlock {
+            stage: StageKind::Front,
+            priority: 100,
+            body: vec![],
+            span: None,
+        };
+        let mut program = vec![TopLevel::StageBlock(block)];
         let mut mgr = PluginManager::new();
+        extract_inline_stage_blocks(&mut program, &mut mgr);
+        assert!(program.is_empty(), "StageBlock should be removed from AST");
+        assert_eq!(mgr.len(), 1, "StageBlock should be registered as plugin");
+    }
+
+    #[test]
+    fn test_discover_system_plugins_no_dir() {
+        // No plugins/ directory exists yet — should not panic.
+        let mut mgr = PluginManager::new();
+        discover_system_plugins(&mut mgr);
+        // Just check no crash. Plugins may or may not be found.
+    }
+
+    #[test]
+    fn test_filter_for_extension_prelude() {
+        let mut mgr = PluginManager::new();
+        let prelude = StageBlockPlugin::new(
+            "prelude".to_string(),
+            StageBlock {
+                stage: StageKind::Front,
+                priority: 0,
+                body: vec![],
+                span: None,
+            },
+        );
+        mgr.register(Box::new(prelude));
         mgr.register(Box::new(ValidationPlugin::new()));
-        assert_eq!(mgr.len(), 1);
+
+        let config = TargetConfig::load();
+        mgr.filter_for_extension(".bv", &config);
+
+        let names = mgr.enabled_names(None);
+        // .bv in config has plugins = ["prelude"]
+        assert!(names.contains(&"prelude".to_string()));
+        // builtin:validation is NOT in .bv's plugin list, so should be excluded
+        assert!(!names.contains(&"builtin:validation".to_string()));
     }
 
     #[test]
-    fn test_plugin_manager_run_hooks_continue() {
+    fn test_filter_for_extension_cbv() {
         let mut mgr = PluginManager::new();
+        let prelude_core = StageBlockPlugin::new(
+            "prelude-core".to_string(),
+            StageBlock {
+                stage: StageKind::Front,
+                priority: 0,
+                body: vec![],
+                span: None,
+            },
+        );
+        mgr.register(Box::new(prelude_core));
         mgr.register(Box::new(ValidationPlugin::new()));
-        let mut program = empty_program();
-        let mut universe = TypeUniverse::new();
-        let result = mgr.run_hooks(PluginHook::AfterParse, &mut program, &mut universe);
-        assert!(matches!(result, PluginAction::Continue));
+
+        let config = TargetConfig::load();
+        mgr.filter_for_extension(".cbv", &config);
+
+        let names = mgr.enabled_names(None);
+        assert!(names.contains(&"prelude-core".to_string()));
+        assert!(!names.contains(&"builtin:validation".to_string()));
     }
 
     #[test]
-    fn test_plugin_manager_all_hooks_continue() {
+    fn test_missing_extension_defaults_to_prelude() {
         let mut mgr = PluginManager::new();
-        mgr.register(Box::new(ValidationPlugin::new()));
-        let mut program = empty_program();
-        let mut universe = TypeUniverse::new();
-        for hook in &[PluginHook::AfterParse, PluginHook::AfterResolve,
-            PluginHook::BeforeCodegen] {
-            let result = mgr.run_hooks(*hook, &mut program, &mut universe);
-            assert!(matches!(result, PluginAction::Continue));
-        }
-    }
-
-    #[test]
-    fn test_load_plugin_unsupported_extension() {
-        let result = load_plugin(Path::new("plugin.txt"));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_plugin_manager_aborts_at_hook() {
-        let mut mgr = PluginManager::new();
-        mgr.register(Box::new(ValidationPlugin::new()));
-        let mut program = empty_program();
-        let mut universe = TypeUniverse::new();
-        for hook in &[PluginHook::AfterParse, PluginHook::AfterResolve,
-                      PluginHook::BeforeCodegen, PluginHook::AfterCodegen] {
-            let result = mgr.run_hooks(*hook, &mut program, &mut universe);
-            assert!(matches!(result, PluginAction::Continue), "hook {:?} failed", hook);
-        }
-    }
-
-    /// A test plugin that aborts on AfterTypeCheck.
-    #[derive(Debug)]
-    struct AbortOnTypeCheck;
-
-    impl Plugin for AbortOnTypeCheck {
-        fn name(&self) -> &str { "test:abort_on_typecheck" }
-        fn on_hook(&self, hook: PluginHook, _program: &mut Vec<TopLevel>, _universe: &mut TypeUniverse) -> PluginAction {
-            if matches!(hook, PluginHook::AfterResolve) {
-                PluginAction::Abort("type check failed (test)".into())
-            } else {
-                PluginAction::Continue
-            }
-        }
-    }
-
-    #[test]
-    fn test_plugin_aborts_at_hook() {
-        let mut mgr = PluginManager::new();
-        mgr.register(Box::new(AbortOnTypeCheck));
-        let mut program = empty_program();
-        let mut universe = TypeUniverse::new();
-        let result = mgr.run_hooks(PluginHook::AfterResolve, &mut program, &mut universe);
-        // AfterResolve is the aborter hook
-        assert!(matches!(result, PluginAction::Abort(_)));
-        // Should not abort at BeforeCodegen (only aborts at AfterResolve)
-        let result = mgr.run_hooks(PluginHook::BeforeCodegen, &mut program, &mut universe);
-        assert!(matches!(result, PluginAction::Continue));
-        // Run all hooks: the one that hits AfterResolve should abort
-        let result = mgr.run_hooks(PluginHook::AfterResolve, &mut program, &mut universe);
-        assert!(matches!(result, PluginAction::Abort(_)));
+        let p = StageBlockPlugin::new(
+            "prelude".to_string(),
+            StageBlock {
+                stage: StageKind::Front,
+                priority: 0,
+                body: vec![],
+                span: None,
+            },
+        );
+        mgr.register(Box::new(p));
+        let config = TargetConfig::load();
+        // .xhv doesn't exist in config — should default to ["prelude"]
+        mgr.filter_for_extension(".xhv", &config);
+        let names = mgr.enabled_names(None);
+        assert!(names.contains(&"prelude".to_string()));
     }
 }

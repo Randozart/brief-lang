@@ -1054,3 +1054,17 @@ mod tests {
         assert_eq!(lexer.next(), None);
     }
 }
+
+/// Convenience: tokenize a source string into (Token, Range) pairs.
+/// Returns Ok(tokens) on success, Err on lex failure.
+/// 2026-07-15: Phase 2 — Added for system plugin discovery (plugin loader)
+/// and other programmatic use outside the compile pipeline.
+pub fn tokenize(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, String> {
+    let lexer = Token::lexer(source);
+    let mut tokens = Vec::new();
+    for result in lexer {
+        let token = result.map_err(|_| "lex error".to_string())?;
+        tokens.push((token, 0..0));
+    }
+    Ok(tokens)
+}

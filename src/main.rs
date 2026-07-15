@@ -55,7 +55,9 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --backend <name>  Select backend: llvm, circt, webstack, gpu", name);
     eprintln!("  {} build <file.bv> --no-std          Disable stdlib auto-import", name);
     eprintln!("  {} build <file.bv> --stdlib-path <p>   Set stdlib search path", name);
-    eprintln!("  {} build <file.bv> --emit-bvir    Write .bvir IR files", name);
+    eprintln!("  {} build <file.bv> --emit-bvir      Write .bvir IR files", name);
+    eprintln!("  {} build <file.bv> --disable-plugin <name>  Disable a plugin by name", name);
+    eprintln!("  {} build <file.bv> --enable-plugin <name>   Enable only specific plugins", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
@@ -85,6 +87,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut backend_override: Option<String> = None;
     let mut no_stdlib = false;
     let mut stdlib_path: Option<String> = None;
+    let mut disable_plugins = Vec::new();
+    let mut enable_plugins = Vec::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -122,6 +126,14 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             let val = args.get(i + 1).ok_or("--stdlib-path requires a path argument")?;
             stdlib_path = Some(val.clone());
             i += 2;
+        } else if arg == "--disable-plugin" {
+            let name = args.get(i + 1).ok_or("--disable-plugin requires a plugin name argument")?;
+            disable_plugins.push(name.clone());
+            i += 2;
+        } else if arg == "--enable-plugin" {
+            let name = args.get(i + 1).ok_or("--enable-plugin requires a plugin name argument")?;
+            enable_plugins.push(name.clone());
+            i += 2;
         } else if arg.starts_with('-') {
             return Err(format!("unknown flag: {}", arg));
         } else if file_path.is_some() {
@@ -158,6 +170,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         backend,
         no_stdlib,
         stdlib_path,
+        disable_plugins,
+        enable_plugins,
     })
 }
 

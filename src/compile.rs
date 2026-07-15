@@ -4,15 +4,21 @@
 // 2026-07-14: Wire real LlvmBackend instead of stub codegen.
 //             Add binary compilation via clang. Add --out / --optimize-budget flags.
 // 2026-07-14: Plugin path — serialize to BVIR, run external plugins, deserialize.
+// 2026-07-15: Phase 2 — Wire per-stage plugin dispatch into pipeline.
+//             Front: on_ast after parse, Mid: on_ast after typecheck,
+//             Post/Back: on_ir after codegen. Per-extension plugin selection
+//             from config/targets.toml. System plugin discovery from
+//             plugins/{front,mid,post,back}/.
 
 use std::path::Path;
 use std::process::Command;
 
 use brief_compiler::backend::llvm::LlvmBackend;
 use brief_compiler::lexer::Token;
+use brief_compiler::plugin::loader::{discover_system_plugins, extract_inline_stage_blocks};
 use brief_compiler::plugin::runner::run_plugin_chain;
 use brief_compiler::plugin::PluginManager;
-use brief_compiler::target::{BackendKind, TargetConfig};
+use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
 use brief_compiler::type_universe::TypeUniverse;
 
 /// Options parsed from the `brief-compiler build` CLI flags.
@@ -30,40 +36,52 @@ pub struct BuildOptions {
     pub no_stdlib: bool,
     /// Override stdlib search path.
     pub stdlib_path: Option<String>,
+    /// Plugin names to disable (CLI --disable-plugin).
+    pub disable_plugins: Vec<String>,
+    /// Plugin names to enable exclusively (CLI --enable-plugin).
+    pub enable_plugins: Vec<String>,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
-    let (mut items, mut universe) = parse_and_check(file_path, source, opts)?;
+    // ── Front stage: source transformation ────────────────────────────
+    let mut source = source.to_string();
+    let mut pm = build_plugin_manager(file_path, opts);
+    pm.run_front_source(&mut source)?;
 
-    // Plugin path: serialize to BVIR, run plugins, deserialize.
-    let has_plugins = !opts.plugin_paths.is_empty();
-    if has_plugins || opts.emit_bvir {
-        let bvir_before = brief_compiler::bvir::to_bvir(&items, &universe);
-        if opts.emit_bvir {
-            let path = format!("{}.bvir.before", file_path.strip_suffix(".bv").unwrap_or(file_path));
-            std::fs::write(&path, &bvir_before)
-                .map_err(|e| format!("cannot write '{}': {}", path, e))?;
-        }
+    // ── Parse ─────────────────────────────────────────────────────────
+    let tokens = lex(&source)?;
+    let mut items = parse(file_path, &tokens, &source)?;
 
-        let bvir_after = if has_plugins {
-            run_plugin_chain(&bvir_before, &opts.plugin_paths)?
-        } else {
-            bvir_before.clone()
-        };
+    // Extract inline $(Stage) blocks from the AST — they are plugins,
+    // not runtime code.
+    extract_inline_stage_blocks(&mut items, &mut pm);
 
-        if opts.emit_bvir {
-            let path = format!("{}.bvir.after", file_path.strip_suffix(".bv").unwrap_or(file_path));
-            std::fs::write(&path, &bvir_after)
-                .map_err(|e| format!("cannot write '{}': {}", path, e))?;
-        }
-
-        let (restored_items, restored_universe) = brief_compiler::bvir::from_bvir(&bvir_after)?;
-        items = restored_items;
-        universe = restored_universe;
+    // ── Front stage: AST transformation (before import resolution) ────
+    {
+        let mut front_universe = TypeUniverse::new();
+        pm.run_front_ast(&mut items, &mut front_universe)?;
     }
 
-    // Normalizer pass — annotate AST for the selected backend
+    // ── Import resolution ─────────────────────────────────────────────
+    let mut resolver = brief_compiler::import_resolver::ImportResolver::new()
+        .with_use_stdlib(!opts.no_stdlib);
+    if let Some(ref stdlib_path) = opts.stdlib_path {
+        resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
+    }
+    items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
+
+    // ── Type check ────────────────────────────────────────────────────
+    let mut universe = TypeUniverse::new();
+    check_types(&items, &universe)?;
+
+    // ── Mid stage: AST transformation (after type check) ──────────────
+    pm.run_mid_ast(&mut items, &mut universe)?;
+
+    // ── BVIR plugin chain (external plugins) ──────────────────────────
+    run_bvir_plugin_chain(&mut items, &mut universe, opts)?;
+
+    // ── Normalizer pass ───────────────────────────────────────────────
     match opts.backend {
         BackendKind::Llvm | BackendKind::Gpu => {
             brief_compiler::backend::llvm::normalizer::normalize(&mut items, &mut universe)?;
@@ -76,52 +94,14 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         }
     }
 
-    let mut output = String::new();
-    let ext = match opts.backend {
-        BackendKind::Llvm => {
-            let mut b = LlvmBackend::new()
-                .with_optimize_budget(opts.optimize_budget)
-                .with_type_universe(universe);
-            if opts.gpu_offload {
-                b = b.with_gpu_offload(true);
-            }
-            output = b.generate(&items, None);
+    // ── Code generation ───────────────────────────────────────────────
+    let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts)?;
 
-            // AfterCodegen plugin hook
-            if has_plugins {
-                let pm = PluginManager::new();
-                let action = pm.run_ir_hooks(&mut output);
-                if let brief_compiler::plugin::PluginAction::Abort(msg) = action {
-                    return Err(msg);
-                }
-            }
-            ".ll"
-        }
-        BackendKind::Circt => {
-            let mut b = brief_compiler::backend::circt::CirctBackend::new();
-            output = b.generate(&items);
-            ".mlir"
-        }
-        BackendKind::Webstack => {
-            let result = brief_compiler::backend::webstack::WebstackGenerator::new()
-                .generate(&items, &[], "program");
-            output = result.ts_code;
-            ".ts"
-        }
-        BackendKind::Gpu => {
-            let mut b = LlvmBackend::new()
-                .with_optimize_budget(opts.optimize_budget)
-                .with_type_universe(universe)
-                .with_gpu_offload(true);
-            output = b.generate(&items, None);
-            ".ll"
-        }
-    };
-
+    // ── Write output ──────────────────────────────────────────────────
     let out_path = determine_out_path(file_path, opts.out_dir.as_deref())?;
     let out_path = out_path.replace(".ll", ext);
 
-    std::fs::write(&out_path, &output)
+    std::fs::write(&out_path, &codegen_output)
         .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
     println!("wrote {}", out_path);
 
@@ -148,9 +128,127 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         backend: BackendKind::Llvm,
         no_stdlib: false,
         stdlib_path: None,
+        disable_plugins: vec![],
+        enable_plugins: vec![],
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
+    Ok(())
+}
+
+/// Build the plugin manager for a given file and opts.
+/// 2026-07-15: Phase 2 — Discovers system plugins, applies per-extension
+/// filtering, and applies CLI overrides. The caller then runs stages at
+/// the appropriate pipeline points.
+fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
+    let mut pm = PluginManager::new();
+
+    // Discover system plugins from plugins/{front,mid,post,back}/
+    discover_system_plugins(&mut pm);
+
+    // Apply per-extension filtering from config/targets.toml
+    let ext = get_extension(file_path);
+    let config = TargetConfig::load();
+    pm.filter_for_extension(&ext, &config);
+
+    // Apply CLI overrides
+    if !opts.enable_plugins.is_empty() {
+        pm = pm.with_enabled_only(opts.enable_plugins.clone());
+    }
+    if !opts.disable_plugins.is_empty() {
+        pm = pm.with_disabled(opts.disable_plugins.clone());
+    }
+
+    pm
+}
+
+/// Code generation: dispatch to the selected backend, run Post/Back
+/// plugin IR stages, and return (output_text, extension).
+/// 2026-07-15: Phase 2 — Extracted from compile_source for flat flow.
+fn codegen(
+    items: &[brief_compiler::ast::TopLevel],
+    universe: &mut TypeUniverse,
+    pm: &PluginManager,
+    opts: &BuildOptions,
+) -> Result<(String, &'static str), String> {
+    let mut output;
+    let ext: &str = match opts.backend {
+        BackendKind::Llvm => {
+            let mut b = LlvmBackend::new()
+                .with_optimize_budget(opts.optimize_budget)
+                .with_type_universe(universe.clone());
+            if opts.gpu_offload {
+                b = b.with_gpu_offload(true);
+            }
+            output = b.generate(items, None);
+            ".ll"
+        }
+        BackendKind::Circt => {
+            let mut b = brief_compiler::backend::circt::CirctBackend::new();
+            output = b.generate(items);
+            ".mlir"
+        }
+        BackendKind::Webstack => {
+            let result = brief_compiler::backend::webstack::WebstackGenerator::new()
+                .generate(items, &[], "program");
+            output = result.ts_code;
+            ".ts"
+        }
+        BackendKind::Gpu => {
+            let mut b = LlvmBackend::new()
+                .with_optimize_budget(opts.optimize_budget)
+                .with_type_universe(universe.clone())
+                .with_gpu_offload(true);
+            output = b.generate(items, None);
+            ".ll"
+        }
+    };
+
+    // Post stage: validate or modify IR after codegen
+    pm.run_post_ir(&mut output)?;
+
+    // Back stage: final validation before writing
+    pm.run_back_ir(&mut output)?;
+
+    Ok((output, ext))
+}
+
+// Legacy: external BVIR plugin path for backwards compatibility.
+// Used when --plugin or --emit-bvir is passed.
+// 2026-07-15: Phase 2 — Retained for external plugin chain support.
+fn run_bvir_plugin_chain(
+    items: &mut Vec<brief_compiler::ast::TopLevel>,
+    universe: &mut TypeUniverse,
+    opts: &BuildOptions,
+) -> Result<(), String> {
+    let has_plugins = !opts.plugin_paths.is_empty();
+    if !has_plugins && !opts.emit_bvir {
+        return Ok(());
+    }
+
+    let file_path = &opts.file_path;
+    let bvir_before = brief_compiler::bvir::to_bvir(items, universe);
+    if opts.emit_bvir {
+        let path = format!("{}.bvir.before", file_path.strip_suffix(".bv").unwrap_or(file_path));
+        std::fs::write(&path, &bvir_before)
+            .map_err(|e| format!("cannot write '{}': {}", path, e))?;
+    }
+
+    let bvir_after = if has_plugins {
+        run_plugin_chain(&bvir_before, &opts.plugin_paths)?
+    } else {
+        bvir_before.clone()
+    };
+
+    if opts.emit_bvir {
+        let path = format!("{}.bvir.after", file_path.strip_suffix(".bv").unwrap_or(file_path));
+        std::fs::write(&path, &bvir_after)
+            .map_err(|e| format!("cannot write '{}': {}", path, e))?;
+    }
+
+    let (restored_items, restored_universe) = brief_compiler::bvir::from_bvir(&bvir_after)?;
+    *items = restored_items;
+    *universe = restored_universe;
     Ok(())
 }
 
@@ -173,7 +271,6 @@ fn determine_out_path(file_path: &str, out_dir: Option<&str>) -> Result<String, 
 
 /// Compile a `.ll` file to a binary using clang.
 fn compile_ll_to_binary(ll_path: &str, binary_path: &str) -> Result<(), String> {
-    // 2026-07-14: Same flags used by benchmarks/build_and_bench.sh linking fallback.
     let status = Command::new("clang")
         .args([
             "-O3",
@@ -206,7 +303,6 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     let tokens = lex(source)?;
     let items = parse(file_path, &tokens, source)?;
 
-    // 2026-07-14: Resolve imports — was accidentally dropped in Phase 7 refactoring.
     let mut resolver = brief_compiler::import_resolver::ImportResolver::new()
         .with_use_stdlib(!opts.no_stdlib);
     if let Some(ref stdlib_path) = opts.stdlib_path {
@@ -226,7 +322,6 @@ fn lex(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, String> {
     let mut tokens = Vec::new();
     for result in lexer {
         let token = result.map_err(|_| "lex error".to_string())?;
-        // 2026-07-12: span info from logos — currently stubbed.
         tokens.push((token, 0..0));
     }
     Ok(tokens)

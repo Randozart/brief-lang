@@ -19,6 +19,8 @@ pub enum BackendKind {
 pub struct TargetEntry {
     pub backend: String,
     pub defaults: Vec<String>,
+    /// System plugins enabled for this extension. None = default set.
+    pub plugins: Option<Vec<String>>,
 }
 
 /// Loaded config/targets.toml.
