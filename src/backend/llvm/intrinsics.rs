@@ -33,6 +33,7 @@ pub fn emit_intrinsic_call(
         "Print#" => return emit_print(backend, out, v, args, indent),
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
+        "AddressOf#" => return emit_address_of(backend, out, v, args, indent),
         "Len#" | "Length#" => return emit_len(backend, out, v, args, indent),
         "Concat#" => return emit_external_call(backend, out, v, name, args, indent),
         "Length#" => return emit_external_call(backend, out, v, name, args, indent),
@@ -184,6 +185,38 @@ fn emit_get_global_id(
     let ext = backend.fun.gen_reg();
     writeln!(out, "{}{} = zext i32 {} to i64", indent, ext, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+// ─── AddressOf# — compile-time address resolution ─────────────────────
+
+/// 2026-07-15: AddressOf# resolves a named device/entity to a typed pointer.
+/// The address is resolved at compile time via the shared address_resolver
+/// (which reads config/address-map.toml + hardcoded fallbacks).
+/// Emits: %v = inttoptr i64 <addr> to ptr
+fn emit_address_of(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    // Guard against empty args — address must be provided
+    let Some(arg) = args.first() else {
+        eprintln!("AddressOf#: warning — no arguments, emitting 0 as address");
+        backend.emit_inttoptr(out, indent, &v, &"0");
+        return BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::bits(8)) };
+    };
+    // The argument must be a string literal at compile time
+    let id = match arg {
+        Expr::Quoted(bytes) => String::from_utf8_lossy(bytes).to_string(),
+        _ => {
+            // If not a literal, try emitting as expression and warn
+            let reg = emit_arg(backend, out, &args[0], indent);
+            eprintln!("AddressOf#: warning — argument is not a string literal, using runtime value");
+            format!("dynamic_{}", reg)
+        }
+    };
+    let addr = crate::address_resolver::resolve_address(&id);
+    let addr_str = addr.to_string();
+    backend.emit_inttoptr(out, indent, &v, &addr_str);
+    BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::bits(8)) }
 }
 
 // ─── Len# / Length# — load list length from 2-slot header ──────────────

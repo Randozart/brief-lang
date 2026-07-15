@@ -740,6 +740,12 @@ impl WebstackGenerator {
                         "Sleep#" => {
                             format!("new Promise(resolve => setTimeout(resolve, {}))", ts_args.join(", "))
                         }
+                        "AddressOf#" => {
+                            // AddressOf# resolves to a numeric address; in Web/WASM we
+                            // can't access hardware addresses, so return 0 as a stub.
+                            // 2026-07-15: Web assembly cannot access physical addresses.
+                            format!("(() => {{ console.warn(\"AddressOf#({}) is a no-op in WASM\"); return 0; }})()", ts_args.join(", "))
+                        }
                         "Abs#" => format!("Math.abs({})", ts_args.join(", ")),
                         "Sqrt#" => format!("Math.sqrt({})", ts_args.join(", ")),
                         "Ceil#" => format!("Math.ceil({})", ts_args.join(", ")),
@@ -1008,6 +1014,7 @@ impl WebstackGenerator {
                     "SetStdoutBuf#" => format!("set_stdout_buf({})", joined),
                     "Strlen#" => format!("strlen({})", joined),
                     "ReadFile#" => format!("read_file({})", joined),
+                    "AddressOf#" => format!("0 /* AddressOf#({}) stub */", joined),
                     "Abs#" => format!("({}).abs()", joined),
                     "Sqrt#" => format!("({} as f64).sqrt() as i64", joined),
                     "Ceil#" => format!("({} as f64).ceil() as i64", joined),

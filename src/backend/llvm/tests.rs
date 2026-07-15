@@ -2061,3 +2061,38 @@ fn test_fn_ptr_not_crashes() {
     assert!(output.contains("define i32 @main"),
         "Should emit main function");
 }
+
+#[test]
+fn test_emit_address_of() {
+    // AddressOf#("uart") should emit inttoptr with uart's address (0xFFE01000)
+    let program = vec![
+        TopLevel::Transaction(Transaction {
+            name: "main".to_string(),
+            is_reactive: false,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: default_contract(),
+            body: vec![
+                Statement::Assign(
+                    Expr::Identifier("ptr".to_string()),
+                    Expr::Call("AddressOf#".to_string(), vec![Expr::Quoted(b"uart".to_vec())]),
+                ),
+                Statement::Term(None),
+            ],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+        }),
+    ];
+    let output = LlvmBackend::new().generate(&program, None);
+    // uart = 0xFFE01000 in config/address-map.toml
+    assert!(output.contains("inttoptr"), "Should emit inttoptr");
+    // Resolve the expected address from the shared resolver
+    let expected_addr = crate::address_resolver::resolve_address("uart");
+    let expected_str = expected_addr.to_string();
+    assert!(output.contains(&expected_str), "Should contain uart address {} (= 0x{:X})", expected_str, expected_addr);
+}
