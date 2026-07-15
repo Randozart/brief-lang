@@ -20,10 +20,11 @@
 // that is itself a compiler, interpreter, or similar tool that incorporates
 // or embeds the Work.
 
-use crate::ast::{Expr, Import, TopLevel, Type};
+use crate::ast::{Expr, Import, ImportKind, TopLevel, Type};
 use crate::dbrief::v2 as dbrief_v2;
 use crate::lexer::Token;
 use logos::Logos;
+use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -31,6 +32,35 @@ use std::path::{Path, PathBuf};
 // Prelude is now a system plugin (plugins/front/prelude.bv) that runs
 // at the Front stage via InsertLiteralImport$ calls.
 // Removed fields: use_stdlib, core_imported. Removed method: with_use_stdlib.
+
+#[derive(Deserialize)]
+struct ModuleRegistry {
+    modules: HashMap<String, String>,
+}
+
+/// Load the module registry from config/module-registry.toml.
+/// When the file doesn't exist or can't be parsed, returns an empty map
+/// so that Registry imports fall back to literal filesystem resolution.
+/// 2026-07-15: Phase 7i
+fn load_module_registry() -> HashMap<String, String> {
+    let config_path = PathBuf::from("config/module-registry.toml");
+    if !config_path.exists() {
+        return HashMap::new();
+    }
+    match std::fs::read_to_string(&config_path) {
+        Ok(content) => match toml::from_str::<ModuleRegistry>(&content) {
+            Ok(reg) => reg.modules,
+            Err(e) => {
+                eprintln!("Warning: failed to parse config/module-registry.toml: {}", e);
+                HashMap::new()
+            }
+        },
+        Err(e) => {
+            eprintln!("Warning: failed to read config/module-registry.toml: {}", e);
+            HashMap::new()
+        }
+    }
+}
 
 pub struct ImportResolver {
     loaded_modules: HashMap<String, (Vec<TopLevel>, Vec<String>)>,
@@ -42,6 +72,10 @@ pub struct ImportResolver {
     // 2026-07-01: Cycle detection for import resolution.
     // Tracks path strings currently being resolved to detect A→B→A cycles.
     in_progress: HashSet<String>,
+    /// Registry mapping from module names to filesystem paths.
+    /// Loaded from config/module-registry.toml or hardcoded fallback.
+    /// 2026-07-15: Phase 7i — import <name> resolution.
+    registry: HashMap<String, String>,
 }
 
 impl ImportResolver {
@@ -53,6 +87,7 @@ impl ImportResolver {
             stdlib_path: None,
             board_name: None,
             in_progress: HashSet::new(),
+            registry: load_module_registry(),
         }
     }
 
@@ -212,6 +247,23 @@ impl ImportResolver {
         // Skip empty module paths
         if import.path().is_empty() {
             return Ok(vec![]);
+        }
+
+        // Handle Registry imports — look up name in the module registry config
+        // to find the actual filesystem path, then recurse as a Literal import.
+        // 2026-07-15: Phase 7i
+        if let ImportKind::Registry(name) = &import.kind {
+            let resolved_path = self.registry.get(name.as_str());
+            let actual_path = match resolved_path {
+                Some(p) => p.clone(),
+                None => {
+                    // Name not found in registry — fall back to using the name
+                    // as a literal path (same as import "name").
+                    name.clone()
+                }
+            };
+            let literal_import = Import::literal(actual_path, import.symbols.clone());
+            return self.resolve_import(&literal_import, source_file);
         }
 
         // Handle `import "target"` — board-level device description

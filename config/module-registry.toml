@@ -1,0 +1,54 @@
+# ── Module Registry ─────────────────────────────────────────────────────────
+# 2026-07-15: Compiler module registry for import <name> resolution.
+# Maps registry names to filesystem paths (relative to stdlib root).
+# Used by ImportKind::Registry to resolve import <name> at compile time.
+#
+# When the registry file doesn't exist, Registry imports fall back to
+# literal filesystem resolution (same as import "path").
+
+[modules]
+# Core language modules
+std/prelude     = "prelude.bv"
+std/option      = "option.bv"
+std/result      = "result.bv"
+std/char        = "char.bv"
+std/string      = "string.bv"
+std/string_builder = "string_builder.bv"
+std/collections = "collections.bv"
+std/iterator    = "iterator.bv"
+std/hashmap     = "hashmap.bv"
+std/hashset     = "hashset.bv"
+std/stack       = "stack.bv"
+std/queue       = "queue.bv"
+std/ptr         = "ptr.bv"
+std/types       = "types.bv"
+std/io          = "io.bv"
+std/out         = "out.bv"
+std/env         = "env.bv"
+std/process     = "process.bv"
+std/time        = "time.bv"
+std/http        = "http.bv"
+std/json        = "json.bv"
+std/encoding    = "encoding.bv"
+std/bits        = "bits.bv"
+std/from-bits   = "from-bits.bv"
+std/atomic      = "atomic.bv"
+std/state       = "state.bv"
+std/system      = "system.bv"
+std/console     = "console.bv"
+std/tty         = "tty.bv"
+std/gpu         = "gpu.bv"
+std/spatial     = "spatial.bv"
+std/xxhash      = "xxhash.bv"
+std/skiplist    = "skiplist.bv"
+std/shm         = "shm.bv"
+std/syscall     = "syscall.bv"
+std/brief_rt    = "brief_rt.bv"
+
+# Subdirectories (import <std/types> loads the dir's index)
+std/core        = "core"
+std/types       = "types"
+std/c           = "c"
+std/ffi         = "ffi"
+std/os          = "os"
+std/ext         = "ext"
