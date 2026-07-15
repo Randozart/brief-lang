@@ -54,8 +54,7 @@ mod tests {
     use crate::ast::*;
 
     /// 2026-07-15: Kernel with [idx < 64] compiles to valid SPIR-V.
-    /// 2026-07-15: v1 — builder API needs structured blocks; ignored for now.
-    #[ignore]
+    #[test]
     fn test_minimal_kernel_compiles() {
         let contract = Contract {
             pre_condition: Expr::BinaryOp(

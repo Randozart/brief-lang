@@ -79,4 +79,10 @@ impl SpirvBuilder {
     pub fn emit(&mut self, inst: rspirv::dr::Instruction) {
         self.builder.insert_into_block(rspirv::dr::InsertPoint::End, inst);
     }
+
+    /// 2026-07-15: Get mutable access to the underlying module for
+    /// direct Function manipulation (used by kernel.rs).
+    pub fn module_mut(&mut self) -> &mut rspirv::dr::Module {
+        self.builder.module_mut()
+    }
 }

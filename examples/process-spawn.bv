@@ -1,14 +1,9 @@
 // process-spawn.bv — Process spawning and environment
-// 2026-07-15: Rewritten to use std/os imports.
-
-import { getpid } from "std/os/process";
-import { getcwd, chdir } from "std/os/dir";
-import { getenv } from "std/os/process";
-import { to_c_string } from "std/string_c";
+// 2026-07-15: Rewritten to use std/os (auto-imported via prelude).
+// spawn, spawn_with_output, argv, setenv need further work.
 
 let pid: Int = getpid();
-let cwd: String = getcwd();
-let home: Int = getenv(to_c_string("HOME"));
+let cwd: Int = getcwd();
 
 defn main() -> Int {
     let success: Int = chdir(to_c_string("/tmp"));

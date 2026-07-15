@@ -1,8 +1,5 @@
 // mmap-demo.bv — Memory-mapped I/O demonstration
-// 2026-07-15: Rewritten to use std/os imports.
-
-import { mmap, munmap, mprotect } from "std/os/mem";
-import { atomic_load, atomic_store, atomic_add } from "std/os/atomic";
+// 2026-07-15: Rewritten to use std/os (auto-imported via prelude).
 
 defn main() -> Int {
     let mapped: Int = mmap(0, 4096, 3, 0x22, -1, 0);

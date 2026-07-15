@@ -1,8 +1,5 @@
 // networking.bv — Basic socket operations
-// 2026-07-15: Rewritten to use std/os imports.
-
-import { socket, bind, listen, accept, connect, send, recv, shutdown } from "std/os/net";
-import { close } from "std/os/fs";
+// 2026-07-15: Rewritten to use std/os (auto-imported via prelude).
 
 defn main() -> Int {
     let sock: Int = socket(2, 1, 0);

@@ -244,4 +244,14 @@ mod tests {
         assert!(get_intrinsic_signature("DlOpen#").unwrap().observable);
         assert!(get_intrinsic_signature("Backtrace#").unwrap().observable);
     }
+
+    #[test]
+    fn test_address_of_signature() {
+        let sig = get_intrinsic_signature("AddressOf#").unwrap();
+        assert_eq!(sig.name, "AddressOf#");
+        assert_eq!(sig.parameters.len(), 1);
+        assert_eq!(sig.parameters[0].0, "id");
+        assert!(!sig.observable);
+        assert!(matches!(sig.return_kind, ReturnKind::Exact(_)));
+    }
 }

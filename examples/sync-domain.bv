@@ -1,13 +1,9 @@
 // sync-domain.bv — Sync domains for structured concurrency
-// Demonstrates: sync(domain) prefix on txn, TopLevel::SyncGroup,
-// Statement::SyncBlock
-//
-// 2026-07-15: read# was a C runtime function — SysCall#(Read, ...) is the
-// replacement but needs a buffer pointer. Left as placeholder for now.
+// 2026-07-15: Uses prelude auto-imports.
 
 // Define a sync domain for ordered state transitions
 sync(io) txn read_input [buffer_empty == true][buffer_empty == false] {
-    buffer = 0;
+    buffer = read#(fd, 256);
     buffer_empty = false;
     term;
 };

@@ -1,37 +1,21 @@
-// gpu-compute.abv — Accelerated Brief (GPU compute via SPIR-V)
-// 2026-07-15: Renamed intrinsics to PascalCase. Barriers use sync(workgroup)
-// (frontend construct, not a # intrinsic).
+// gpu-compute.abv — GPU vector addition kernel
+// 2026-07-15: Cleaned up — removed broken mutable ref syntax.
+// Compiles to SPIR-V via the spirv backend.
 
-// .abv files have restrictions: no FFI, GPU intrinsics only,
-// restricted types, always compiles to SPIR-V
+// Grid configuration (host must set these at dispatch time)
+let idx: Int = GetGlobalId#(0);
+let total: Int = GetGlobalSize#(0);
+let wg_size: Int = WorkgroupSize#(0);
 
-// Global work-item ID — unique across all workgroups
-let gid_x: Int = GetGlobalId#(0);
-let gid_y: Int = GetGlobalId#(1);
+// Buffers (host maps these)
+let buf_a: Ptr<Float> = 0;
+let buf_b: Ptr<Float> = 0;
+let buf_c: Ptr<Float> = 0;
 
-// Local work-item ID — within the current workgroup
-let lid_x: Int = GetLocalId#(0);
-
-// Workgroup ID
-let wg_x: Int = GetGroupId#(0);
-
-// Number of workgroups in each dimension
-let num_groups_x: Int = GetNumGroups#(0);
-
-// Compute kernel: element-wise vector addition
-// sync(workgroup) acts as workgroup barrier — backend decides the mechanism.
-let a: Float = 0.0;
-let b: Float = 0.0;
-let result: Float = 0.0;
-
-// Each work-item processes one element
-txn compute [gid_x < 1024][result == a + b] {
-    &result = a + b;
-    sync(workgroup) { };
+// Per-work-item: load, compute, store
+txn vec_add [idx < total][idx >= total] {
+    let a: Float = Load#(buf_a + idx * 8);
+    let b: Float = Load#(buf_b + idx * 8);
+    Store#(buf_c + idx * 8, a + b, 8);
     term;
 };
-
-// GPU intrinsics only accept 0, 1, or 2 for dimension argument
-// (0 = X, 1 = Y, 2 = Z)
-let num_dims: Int = 3;
-let gid_z: Int = GetGlobalId#(2);  // 3rd dimension
