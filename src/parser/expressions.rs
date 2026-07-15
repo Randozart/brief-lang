@@ -240,7 +240,11 @@ impl<'a> Parser<'a> {
             // ── List literal: [expr, ...] ───────────────────────────
             Some((Token::LBracket, _)) => self.parse_list_literal(),
 
+            // 2026-07-15: Keywords used as identifiers (input, output, etc.)
             Some((tok, span)) => {
+                if let Some(name) = self.keyword_as_identifier(&tok) {
+                    return Ok(Expr::Identifier(name));
+                }
                 let msg = format!("unexpected token '{}'", tok);
                 Err(SyntaxError::InvalidExpression {
                     reason: msg,
