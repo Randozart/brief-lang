@@ -116,6 +116,17 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type,
             infer_expression(expr, ctx)
         }
         Expr::DerivationBlock(_) => Ok(Type::void()),
+        // 2026-07-15: Dereference: *ptr returns the pointee type (strip outer Ptr).
+        Expr::Deref(inner) => {
+            let inner_ty = infer_expression(inner, ctx)?;
+            match inner_ty {
+                Type::Ptr(pointee) => Ok((*pointee).clone()),
+                _ => Err(TypeError::InvalidOperation {
+                    operation: format!("cannot dereference non-pointer type '{}'", inner_ty),
+                    type_name: inner_ty.to_string(),
+                }),
+            }
+        }
         Expr::PropertyGet(name) => Err(TypeError::UndefinedVariable {
             name: name.clone(),
             available: vec![],

@@ -126,6 +126,9 @@ impl LlvmBackend {
                 Box::new(Self::rewrite_cell_identifiers(fallback, cell_name)),
             ),
             Expr::DerivationBlock(db) => Self::rewrite_derivation(db, cell_name),
+            Expr::Deref(inner) => Expr::Deref(
+                Box::new(Self::rewrite_cell_identifiers(inner, cell_name)),
+            ),
         }
     }
 

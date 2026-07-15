@@ -401,4 +401,27 @@ mod tests {
         let v = zero_bits(4);
         assert_eq!(v.as_i64(), Some(0));
     }
+
+    #[test]
+    fn test_deref_expression_evaluates_inner() {
+        // Deref in the interpreter just evaluates the inner expression.
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert("x".to_string(), i64_to_bits(42));
+        let expr = Expr::Deref(Box::new(Expr::Identifier("x".to_string())));
+        let result = eval_expr(&expr, &mut heap, &mut bindings).unwrap();
+        assert_eq!(result.as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_deref_nested() {
+        // Deref of deref: *(*y) — inner is evaluated, then outer.
+        let mut heap = VirtualHeap::new();
+        let mut bindings = std::collections::HashMap::new();
+        bindings.insert("y".to_string(), i64_to_bits(99));
+        let inner = Expr::Deref(Box::new(Expr::Identifier("y".to_string())));
+        let outer = Expr::Deref(Box::new(inner));
+        let result = eval_expr(&outer, &mut heap, &mut bindings).unwrap();
+        assert_eq!(result.as_i64(), Some(99));
+    }
 }

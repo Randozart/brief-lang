@@ -108,6 +108,17 @@ pub fn execute_intrinsic(
         "GetGlobalSize#" => Err(RuntimeError::UnsupportedIntrinsic("GetGlobalSize#".to_string())),
         "GetLocalId#"    => Err(RuntimeError::UnsupportedIntrinsic("GetLocalId#".to_string())),
 
+        // ── Pointers ─────────────────────────────────────────────────
+        // 2026-07-15: AddressOf# resolves a named address to a pointer value.
+        // In the interpreter, we look up the address map and return the i64 value.
+        // For known addresses (from config/address-map.toml), this returns the
+        // configured address. Unknown addresses return a default (0xFE000000).
+        "AddressOf#" => {
+            let id = arg_as_string(args, 0)?;
+            let addr = resolve_address_for_interp(&id);
+            Ok(i64_to_bits(addr as i64))
+        }
+
         _ => Err(RuntimeError::UnsupportedIntrinsic(name.to_string())),
     }
 }
@@ -189,6 +200,21 @@ fn arg_as_string(args: &[Value], index: usize) -> Result<String, RuntimeError> {
             expected: "String".into(),
             found: format!("{:?}", args.get(index)),
         }),
+    }
+}
+
+/// 2026-07-15: Resolve a named address to its numeric value for the interpreter.
+/// Known addresses: "uart" → 0xFFE01000, "gpio" → 0xFE001000, "timer" → 0xFE002000.
+/// Unknown addresses resolve to a default MMIO range address.
+fn resolve_address_for_interp(id: &str) -> u64 {
+    match id.to_lowercase().as_str() {
+        "uart"  | "uart0"  | "/dev/ttyS0"  | "/dev/ttyAMA0"  => 0xFFE01000,
+        "gpio"  | "gpio0"  | "/dev/gpiochip0"                => 0xFE001000,
+        "timer" | "timer0" | "/dev/timer0"                   => 0xFE002000,
+        "spi"   | "spi0"   | "/dev/spidev0.0"                => 0xFE003000,
+        "i2c"   | "i2c0"   | "/dev/i2c-0"                    => 0xFE004000,
+        "dma"   | "dma0"   | "/dev/dma"                      => 0xFE005000,
+        _ => 0xFE000000, // default MMIO region base
     }
 }
 
@@ -299,5 +325,21 @@ mod tests {
         let mut heap = VirtualHeap::new();
         let r = execute_intrinsic("ToFloat#", &[i64_to_bits(42)], &mut heap).unwrap();
         assert!((r.as_f64().unwrap() - 42.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_address_of_known() {
+        let mut heap = VirtualHeap::new();
+        let uart_str = Value::bits("uart".as_bytes().to_vec());
+        let r = execute_intrinsic("AddressOf#", &[uart_str], &mut heap).unwrap();
+        assert_eq!(r.as_i64(), Some(0xFFE01000i64));
+    }
+
+    #[test]
+    fn test_address_of_unknown_defaults() {
+        let mut heap = VirtualHeap::new();
+        let dev_str = Value::bits("unknown_device".as_bytes().to_vec());
+        let r = execute_intrinsic("AddressOf#", &[dev_str], &mut heap).unwrap();
+        assert_eq!(r.as_i64(), Some(0xFE000000i64));
     }
 }

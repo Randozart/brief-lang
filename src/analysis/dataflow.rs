@@ -109,6 +109,9 @@ impl<'a> DataflowAnalyzer<'a> {
                 self.extract_ids_recursive(list, ids);
                 self.extract_ids_recursive(idx, ids);
             }
+            Expr::Deref(inner) => {
+                self.extract_ids_recursive(inner, ids);
+            }
             Expr::Field(obj, _) => {
                 self.extract_ids_recursive(obj, ids);
             }

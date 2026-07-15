@@ -94,6 +94,9 @@ pub fn eval_expr(
         // ── Derivation block ─────────────────────────────────────
         Expr::DerivationBlock(_) => Ok(Value::Void),
 
+        // ── Dereference ──────────────────────────────────────────
+        Expr::Deref(inner) => eval_expr(inner, heap, bindings),
+
         // ── Property get ─────────────────────────────────────────
         Expr::PropertyGet(_) => Ok(Value::Void),
 

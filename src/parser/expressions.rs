@@ -127,7 +127,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    /// Unary: !a, -a, ~a, &a
+    /// Unary: !a, -a, ~a, &a, *a (deref)
     fn parse_unary(&mut self) -> Result<Expr, SyntaxError> {
         if self.eat(&Token::Not) {
             let expr = self.parse_unary()?;
@@ -140,6 +140,12 @@ impl<'a> Parser<'a> {
         if self.eat(&Token::Tilde) {
             let expr = self.parse_unary()?;
             return Ok(Expr::UnaryOp(UnaryOpKind::BitNot, Box::new(expr)));
+        }
+        // 2026-07-15: Unary * for pointer dereference. Higher precedence than
+        // binary * (multiplication) since it's in parse_unary.
+        if self.eat(&Token::Star) {
+            let expr = self.parse_unary()?;
+            return Ok(Expr::Deref(Box::new(expr)));
         }
         self.parse_postfix()
     }

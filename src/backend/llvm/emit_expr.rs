@@ -213,6 +213,19 @@ impl LlvmBackend {
                 self.emit_expr(out, body, indent)
             }
 
+            // ── Dereference ───────────────────────────────────────────
+            Expr::Deref(inner) => {
+                let ptr_reg = self.emit_expr(out, inner, indent);
+                // Check if the pointer type carries a LLVM pointer representation.
+                let pointee_ty = match &ptr_reg.ty {
+                    Type::Ptr(inner_ty) => inner_ty.as_ref().clone(),
+                    _ => Type::int(), // fallback
+                };
+                let llvm_ty = lower_type(&pointee_ty);
+                writeln!(out, "{}{} = load {}, ptr {}, align 8", indent, v, llvm_ty, ptr_reg.name).ok();
+                TypedRegister { name: v.to_string(), ty: pointee_ty }
+            }
+
             // ── DerivationBlock / PropertyGet / FormattingAnnotation ─
             Expr::DerivationBlock(_) | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {
                 writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();

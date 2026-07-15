@@ -269,6 +269,9 @@ pub fn eval_symbolic(expr: &Expr, state: &SymbolicState) -> SymbolicValue {
         Expr::DerivationBlock(_)
         | Expr::PropertyGet(_)
         | Expr::FormattingAnnotation(_) => SymbolicValue::Unknown,
+
+        // Pointer dereference
+        Expr::Deref(inner) => eval_symbolic(inner, state),
     }
 }
 

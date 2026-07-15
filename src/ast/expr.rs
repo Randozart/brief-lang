@@ -46,6 +46,9 @@ pub enum Expr {
     // ── Derivation ──────────────────────────────────────────────
     DerivationBlock(DerivationBlock),
 
+    // ── Pointers ────────────────────────────────────────────────
+    Deref(Box<Expr>),
+
 
 
     // ── Metadata ────────────────────────────────────────────────
@@ -158,6 +161,7 @@ impl Expr {
             Expr::IsType(e, _) => e.collect_vars_into(acc),
             Expr::Within(l, r) => { l.collect_vars_into(acc); r.collect_vars_into(acc); }
             Expr::DerivationBlock(d) => { for ex in &d.examples { for inp in &ex.inputs { inp.collect_vars_into(acc); } } }
+            Expr::Deref(inner) => inner.collect_vars_into(acc),
             _ => {}
         }
     }

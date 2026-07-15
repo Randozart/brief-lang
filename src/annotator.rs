@@ -128,6 +128,7 @@ impl Annotator {
                 self.collect_calls_from_expr(list, calls);
                 self.collect_calls_from_expr(index, calls);
             }
+            Expr::Deref(inner) => self.collect_calls_from_expr(inner, calls),
             Expr::Field(obj, _) => self.collect_calls_from_expr(obj, calls),
             Expr::Tuple(elems) => {
                 for e in elems {
@@ -547,6 +548,7 @@ impl Annotator {
                 }).collect();
                 format!(":= {{ {} }}", examples_str.join("; "))
             }
+            Expr::Deref(inner) => format!("*{}", self.format_expr(inner)),
             Expr::PropertyGet(name) => format!("property '{}'", name),
             Expr::FormattingAnnotation(f) => format!("formatting <~ {}", f.name()),
         }

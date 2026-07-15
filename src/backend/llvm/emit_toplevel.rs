@@ -508,6 +508,17 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = load volatile {}, {}* @{}", indent, raw, store_ty, store_ty, sym).ok();
                 self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
             }
+            // 2026-07-15: @ *ptr dynamic trigger — emit the pointer expression,
+            // then load volatile from the resulting pointer value.
+            crate::ast::LinkRef::Deref(ptr_expr) => {
+                let store_ty = super::trg_llvm_storage_ty(trg_ty);
+                let tr_counter = self.fun.txn_counter;
+                self.fun.txn_counter += 1;
+                let raw = format!("%tr{}", tr_counter);
+                let ptr_reg = self.emit_expr(out, ptr_expr, indent);
+                writeln!(out, "{}{} = load volatile {}, ptr {}, align 1", indent, raw, store_ty, ptr_reg.name).ok();
+                self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
+            }
             _ => {
                 // Stdin, Timer, Signal — event loop stores values to state.
                 // Emit add i64 0, 0 as zero default; callers with field access

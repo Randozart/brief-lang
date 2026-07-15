@@ -409,6 +409,9 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
                 collect_strings_expr(&ex.output, seen, out);
             }
         }
+        Expr::Deref(inner) => {
+            collect_strings_expr(inner, seen, out);
+        }
         // Leaves — no sub-expressions
         Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
         | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}
@@ -1459,10 +1462,18 @@ impl LlvmBackend {
                 TopLevel::Trigger(trg) => {
                     // 2026-07-14: Convert new AST Trigger to TriggerDeclaration.
                     // The new Trigger struct has name/instance/port/span fields.
+                    // 2026-07-15: Support @ *ptr dynamic triggers — map Expr::Deref
+                    // to LinkRef::Deref so emit_trg_load emits a load from the pointer.
+                    let address = match &trg.instance {
+                        Expr::Deref(ptr_expr) => {
+                            crate::ast::LinkRef::Deref(ptr_expr.clone())
+                        }
+                        _ => crate::ast::LinkRef::Explicit(0),
+                    };
                     let trg_decl = crate::ast::TriggerDeclaration {
                         name: trg.name.clone(),
                         ty: crate::ast::Type::string(),
-                        address: crate::ast::LinkRef::Explicit(0),
+                        address,
                         bit_range: None,
                         stages: vec![],
                         condition: None,

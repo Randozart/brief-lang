@@ -69,6 +69,14 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "GetGlobalSize#" => Some(Signature { name: "GetGlobalSize#", parameters: vec![], return_type: None, observable: false }),
         "GetLocalId#"    => Some(Signature { name: "GetLocalId#",    parameters: vec![], return_type: None, observable: false }),
 
+        // ── Pointers (compile-time address resolution) ──────────────
+        "AddressOf#" => Some(Signature {
+            name: "AddressOf#",
+            parameters: vec![("id", Type::string())],
+            return_type: Some(Type::ptr(Type::bits(8))),
+            observable: false,
+        }),
+
         _ => None,
     }
 }
@@ -88,6 +96,7 @@ mod tests {
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "Get#", "Insert#",
             "GetGlobalId#", "GetGlobalSize#", "GetLocalId#",
+            "AddressOf#",
         ];
         for name in &intrinsics {
             let sig = get_intrinsic_signature(name);
@@ -113,5 +122,15 @@ mod tests {
         assert!(get_intrinsic_signature("Insert#").unwrap().observable);
         assert!(!get_intrinsic_signature("Add#").unwrap().observable);
         assert!(!get_intrinsic_signature("Eq#").unwrap().observable);
+    }
+
+    #[test]
+    fn test_address_of_signature() {
+        let sig = get_intrinsic_signature("AddressOf#").unwrap();
+        assert_eq!(sig.name, "AddressOf#");
+        assert_eq!(sig.parameters.len(), 1);
+        assert_eq!(sig.parameters[0].0, "id");
+        assert!(!sig.observable);
+        assert!(sig.return_type.is_some());
     }
 }

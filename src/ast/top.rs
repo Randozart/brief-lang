@@ -504,6 +504,7 @@ pub enum LinkRef {
     Stdin,
     Timer(u64),
     Signal(String),
+    Deref(Box<Expr>),
 }
 
 #[derive(Debug, Clone)]

@@ -245,6 +245,9 @@ pub fn collect_expr_identifiers(expr: &Expr, ids: &mut std::collections::HashSet
                 collect_expr_identifiers(&ex.output, ids);
             }
         }
+        Expr::Deref(inner) => {
+            collect_expr_identifiers(inner, ids);
+        }
         Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}
         Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Quoted(_) => {}
     }
