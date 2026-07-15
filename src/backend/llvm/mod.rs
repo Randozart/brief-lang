@@ -879,6 +879,13 @@ impl LlvmBackend {
         self
     }
 
+    /// Set the LLVM data layout string (overrides the auto-derived layout).
+    /// 2026-07-15: Phase 7 — config-driven from targets.toml.
+    pub fn with_data_layout(mut self, dl: &str) -> Self {
+        self.ctx.data_layout = Some(dl.to_string());
+        self
+    }
+
     /// Emit a ptrtoint instruction with the correct pointer-width integer type.
     /// Uses i64 on x86_64, i32 on wasm32.
     /// Uses `&dyn Display` for dest/src so any Display-able type (String, &str,

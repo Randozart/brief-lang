@@ -219,6 +219,17 @@ fn codegen(
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
             }
+            // Apply target config if available
+            let ext = get_extension(&opts.file_path);
+            let target_config = TargetConfig::load();
+            if let Some(entry) = target_config.lookup(&ext) {
+                if let Some(ref triple) = entry.target_triple {
+                    b = b.with_target_triple(triple);
+                }
+                if let Some(ref dl) = entry.data_layout {
+                    b = b.with_data_layout(dl);
+                }
+            }
             output = b.generate(items, None);
             ".ll"
         }
@@ -238,6 +249,17 @@ fn codegen(
                 .with_optimize_budget(opts.optimize_budget)
                 .with_type_universe(universe.clone())
                 .with_gpu_offload(true);
+            // Apply target config (same logic as Llvm)
+            let ext = get_extension(&opts.file_path);
+            let target_config = TargetConfig::load();
+            if let Some(entry) = target_config.lookup(&ext) {
+                if let Some(ref triple) = entry.target_triple {
+                    b = b.with_target_triple(triple);
+                }
+                if let Some(ref dl) = entry.data_layout {
+                    b = b.with_data_layout(dl);
+                }
+            }
             output = b.generate(items, None);
             ".ll"
         }

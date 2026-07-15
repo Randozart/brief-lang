@@ -21,6 +21,12 @@ pub struct TargetEntry {
     pub defaults: Vec<String>,
     /// System plugins enabled for this extension. None = default set.
     pub plugins: Option<Vec<String>>,
+    /// Override LLVM target triple (e.g. "wasm32-unknown-wasi").
+    /// 2026-07-15: Phase 7 — optional, defaults to x86_64-unknown-linux-gnu.
+    pub target_triple: Option<String>,
+    /// Override LLVM data layout string.
+    /// 2026-07-15: Phase 7 — optional, auto-derived from target_triple if not set.
+    pub data_layout: Option<String>,
 }
 
 /// Loaded config/targets.toml.
