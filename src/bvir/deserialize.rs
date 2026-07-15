@@ -333,7 +333,7 @@ fn parse_statement(expr: &SExpr) -> Result<Statement, String> {
     }
 }
 
-fn parse_expr(expr: &SExpr) -> Result<Expr, String> {
+pub(crate) fn parse_expr(expr: &SExpr) -> Result<Expr, String> {
     match expr {
         SExpr::Atom(a) => match a {
             Atom::Int(n) => Ok(Expr::Decimal(*n)),
@@ -373,6 +373,7 @@ fn parse_expr(expr: &SExpr) -> Result<Expr, String> {
                     Ok(Expr::List(items))
                 }
                 "cast" => Ok(Expr::Cast(Box::new(parse_expr(&parts[1])?), parse_type(&parts[2])?)),
+                "deref" => Ok(Expr::Deref(Box::new(parse_expr(&parts[1])?))),
                 "string" => Ok(Expr::Quoted(sexpr_str(&parts[1])?.as_bytes().to_vec())),
                 _ => Err(format!("unknown expression tag '{}'", tag)),
             }

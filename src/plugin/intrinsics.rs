@@ -20,6 +20,7 @@
 // add compile-time expression evaluation for full metaprogramming.
 
 use crate::ast::{Expr, Import, Statement, TopLevel};
+use crate::bvir;
 use crate::type_universe::TypeUniverse;
 
 /// Result of evaluating a single $ intrinsic call.
@@ -42,7 +43,7 @@ pub fn dispatch_intrinsic(
     name: &str,
     args: &[Expr],
     program: &mut Vec<TopLevel>,
-    _universe: &mut TypeUniverse,
+    universe: &mut TypeUniverse,
 ) -> Result<(), String> {
     match name {
         "InsertLiteralImport$" => intrinsic_insert_literal_import(args, program),
@@ -50,7 +51,7 @@ pub fn dispatch_intrinsic(
         "EmitWarning$" => intrinsic_emit_warning(args),
         "EmitError$" => intrinsic_emit_error(args),
         "Collect$" => intrinsic_collect(args, program),
-        "MatchIR$" => intrinsic_match_ir(args, program),
+        "MatchIR$" => intrinsic_match_ir(args, program, universe),
         _ => Err(format!(
             "unknown $ intrinsic '{}'. Available: InsertRegistryImport$, \
              EmitWarning$, EmitError$, Collect$, MatchIR$",
@@ -158,20 +159,82 @@ fn intrinsic_emit_error(args: &[Expr]) -> Result<(), String> {
 
 /// `Collect$(pattern)` — Collect AST nodes matching a pattern.
 ///
-/// 2026-07-15: Phase 3 — Stub returning empty list. Phase 6 will implement
-/// the full pattern matching engine (see BVIR pattern compiler).
-fn intrinsic_collect(_args: &[Expr], _program: &[TopLevel]) -> Result<(), String> {
-    // Phase 6: match pattern against program, return matched nodes.
-    // For now, return empty set (no-op).
+/// 2026-07-15: Phase 6 — Serializes the program AST to BVIR, then matches
+/// the pattern against all sub-expressions. Logs match count and first match.
+/// Future: return collected nodes as a compile-time value.
+fn intrinsic_collect(args: &[Expr], program: &[TopLevel]) -> Result<(), String> {
+    let pattern_str = expect_string_arg(args, 0, "Collect$")?;
+    let pattern = bvir::pattern::parse_pattern(&pattern_str)
+        .map_err(|e| format!("Collect$: invalid pattern '{}': {}", pattern_str, e))?;
+
+    // Serialize program to BVIR for pattern matching
+    let universe = TypeUniverse::new();
+    let bvir_text = bvir::serialize::to_bvir(program, &universe);
+    let tokens = bvir::sexpr::tokenize(&bvir_text)
+        .map_err(|e| format!("Collect$: tokenize error: {}", e))?;
+    let root = bvir::sexpr::parse(&tokens)
+        .map_err(|e| format!("Collect$: parse error: {}", e))?;
+
+    let matches = bvir::pattern::collect_matches(&pattern, &root);
+    let count = matches.len();
+
+    if count == 0 {
+        eprintln!("Collect$: no matches for pattern '{}'", pattern_str);
+    } else {
+        eprintln!("Collect$: found {} match(es) for pattern '{}'", count, pattern_str);
+        for (i, m) in matches.iter().enumerate().take(3) {
+            let s = bvir::sexpr::to_string(m);
+            let truncated = if s.len() > 80 { format!("{}...", &s[..77]) } else { s };
+            eprintln!("  match[{}]: {}", i, truncated);
+        }
+    }
     Ok(())
 }
 
 /// `MatchIR$(pattern, replacement)` — Match and rewrite IR patterns.
 ///
-/// 2026-07-15: Phase 3 — Stub returning false (no match). Phase 6 will
-/// implement the full S-expression pattern matcher.
-fn intrinsic_match_ir(_args: &[Expr], _program: &[TopLevel]) -> Result<(), String> {
-    // Phase 6: match pattern, apply replacement, return true if changed.
+/// 2026-07-15: Phase 6 — Serializes the program AST to BVIR, applies the
+/// pattern-match replacement, then deserializes back into the AST.
+/// The program is modified in place. Returns error if pattern matches nothing.
+fn intrinsic_match_ir(
+    args: &[Expr],
+    program: &mut Vec<TopLevel>,
+    universe: &mut TypeUniverse,
+) -> Result<(), String> {
+    let pattern_str = expect_string_arg(args, 0, "MatchIR$")?;
+    let replacement_str = expect_string_arg(args, 1, "MatchIR$")?;
+
+    let pattern = bvir::pattern::parse_pattern(&pattern_str)
+        .map_err(|e| format!("MatchIR$: invalid pattern '{}': {}", pattern_str, e))?;
+    let replacement = bvir::pattern::parse_pattern(&replacement_str)
+        .map_err(|e| format!("MatchIR$: invalid replacement '{}': {}", replacement_str, e))?;
+
+    // Serialize program + universe to BVIR
+    let bvir_text = bvir::serialize::to_bvir(program, universe);
+    let tokens = bvir::sexpr::tokenize(&bvir_text)
+        .map_err(|e| format!("MatchIR$: tokenize error: {}", e))?;
+    let root = bvir::sexpr::parse(&tokens)
+        .map_err(|e| format!("MatchIR$: parse error: {}", e))?;
+
+    // Apply replacement
+    let (new_root, count) = bvir::pattern::replace_all(&pattern, &replacement, &root);
+
+    if count == 0 {
+        return Err(format!(
+            "MatchIR$: pattern '{}' did not match any AST node",
+            pattern_str
+        ));
+    }
+
+    // Deserialize back into AST
+    let new_bvir = bvir::sexpr::to_string(&new_root);
+    let (new_items, new_universe) = bvir::deserialize::from_bvir(&new_bvir)
+        .map_err(|e| format!("MatchIR$: deserialize error after replacement: {}", e))?;
+
+    *program = new_items;
+    *universe = new_universe;
+
+    eprintln!("MatchIR$: applied {} replacement(s)", count);
     Ok(())
 }
 

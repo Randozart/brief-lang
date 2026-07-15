@@ -208,6 +208,9 @@ fn emit_expr(e: &Expr) -> SExpr {
         Expr::Cast(expr, ty) => {
             list(&[atom("cast"), emit_expr(expr), emit_type(ty)])
         }
+        Expr::Deref(inner) => {
+            list(&[atom("deref"), emit_expr(inner)])
+        }
         Expr::If(cond, t, f) => {
             let mut children = vec![atom("if"), emit_expr(cond), emit_expr(t)];
             if let Some(fe) = f { children.push(emit_expr(fe)); }
@@ -282,5 +285,25 @@ mod tests {
             }
             _ => panic!("expected StateDecl"),
         }
+    }
+
+    #[test]
+    fn test_serialize_deref() {
+        let expr = Expr::Deref(Box::new(Expr::Identifier("ptr".into())));
+        let sexpr = emit_expr(&expr);
+        let s = to_string(&sexpr);
+        assert!(s.contains("deref"));
+        assert!(s.contains("ptr"));
+    }
+
+    #[test]
+    fn test_roundtrip_deref() {
+        let expr = Expr::Deref(Box::new(Expr::Identifier("x".into())));
+        let sexpr = emit_expr(&expr);
+        let s = to_string(&sexpr);
+        let tokens = crate::bvir::sexpr::tokenize(&s).unwrap();
+        let parsed = crate::bvir::sexpr::parse(&tokens).unwrap();
+        let restored = crate::bvir::deserialize::parse_expr(&parsed).unwrap();
+        assert_eq!(expr, restored);
     }
 }
