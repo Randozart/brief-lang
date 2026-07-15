@@ -48,7 +48,7 @@ defn get_or_zero(items: List<Int>) -> Int {
 
 // Chaining with Result
 defn parse_and_divide(input: String) -> Result<Int, String> {
-    let parsed: Result<Int, String> = int_to_str#(input) :> Parse;
+    let parsed: Result<Int, String> = ToString#(input) :> Parse;
     [is_ok(parsed)] {
         term divide(unwrap(parsed), 2);
     };

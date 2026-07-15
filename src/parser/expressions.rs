@@ -147,7 +147,18 @@ impl<'a> Parser<'a> {
             let expr = self.parse_unary()?;
             return Ok(Expr::Deref(Box::new(expr)));
         }
-        self.parse_postfix()
+        self.parse_as()
+    }
+
+    /// Type cast: expr as Type. Tighter than unary but looser than postfix.
+    /// 2026-07-15: Unblocks volatile-io.bv, target-import.bv, etc.
+    fn parse_as(&mut self) -> Result<Expr, SyntaxError> {
+        let mut expr = self.parse_postfix()?;
+        if self.eat(&Token::As) {
+            let ty = self.parse_type()?;
+            expr = Expr::Cast(Box::new(expr), ty);
+        }
+        Ok(expr)
     }
 
     /// Postfix: a[b], a.f, a(args), a within { }

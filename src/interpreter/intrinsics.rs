@@ -125,7 +125,25 @@ pub fn execute_intrinsic(
         "Length#"   => Err(RuntimeError::UnsupportedIntrinsic("Length#".to_string())),
         "ToInt#"    => { let f = arg_as_f64(args, 0)?; Ok(i64_to_bits(f as i64)) }
         "ToFloat#"  => { let n = arg_as_i64(args, 0)?; Ok(f64_to_bits(n as f64)) }
-        "ToString#" => Err(RuntimeError::UnsupportedIntrinsic("ToString#".to_string())),
+        "ToString#" => {
+            let s = if let Ok(n) = arg_as_i64(args, 0) {
+                n.to_string()
+            } else if let Ok(f) = arg_as_f64(args, 0) {
+                f.to_string()
+            } else {
+                arg_as_string(args, 0)?
+            };
+            let bytes = s.into_bytes();
+            let len = bytes.len() as i64;
+            let mut header = len.to_le_bytes().to_vec();
+            header.extend_from_slice(&bytes);
+            let addr = heap.allocate(header.len());
+            if heap.write(addr as u64, &header).is_ok() {
+                Ok(i64_to_bits(addr as i64))
+            } else {
+                Ok(i64_to_bits(0))
+            }
+        },
 
         // ── Collection ──────────────────────────────────────────────
         "Get#"    => Err(RuntimeError::UnsupportedIntrinsic("Get#".to_string())),
@@ -135,6 +153,9 @@ pub fn execute_intrinsic(
         "GetGlobalId#"   => Err(RuntimeError::UnsupportedIntrinsic("GetGlobalId#".to_string())),
         "GetGlobalSize#" => Err(RuntimeError::UnsupportedIntrinsic("GetGlobalSize#".to_string())),
         "GetLocalId#"    => Err(RuntimeError::UnsupportedIntrinsic("GetLocalId#".to_string())),
+        "GetGroupId#"    => Err(RuntimeError::UnsupportedIntrinsic("GetGroupId#".to_string())),
+        "GetNumGroups#"  => Err(RuntimeError::UnsupportedIntrinsic("GetNumGroups#".to_string())),
+        "Dims#"          => Err(RuntimeError::UnsupportedIntrinsic("Dims#".to_string())),
 
         // ── Pointers ─────────────────────────────────────────────────
         // 2026-07-15: AddressOf# resolves a named address to a pointer value.

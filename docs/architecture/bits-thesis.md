@@ -262,8 +262,25 @@ The frontend recognizes a fixed set of metadata properties for its own use:
 | `bytes` | Byte width of the type | Yes (Axiom 1) |
 | `alignment` | Memory alignment | Yes (layout engine) |
 | `op X` | Operator binding | Yes (Axiom 3 — rune→op, not op→intrinsic) |
+| `alu` | ALU routing tag (PascalCase, exhaustive set) | **No** — backend-specific |
 | `llvm` | LLVM type representation | **No** — opaque to frontend |
 | `hw_storage` | Hardware storage type | **No** — opaque to frontend |
+
+The `alu` metadata replaces the earlier `primitive` concept. It tells the
+backend which arithmetic unit to route `Bits(N)` through:
+
+| `alu` | LLVM behavior | CIRCT behavior |
+|-------|---------------|----------------|
+| `Int` | Native `i64` — general ALU | Raw `Bits(N)` — ignored |
+| `Float` | Native `double` — float ALU | Raw `Bits(N)` — ignored |
+| `Bool` | Native `i1` — condition unit | Raw `Bits(N)` — ignored |
+| `Ptr` | Native pointer type — AGU | Raw `Bits(N)` — ignored |
+| *(custom)* | Inline ASM or target attribute | Raw `Bits(N)` — ignored |
+
+Unrecognized `alu` values trigger a fallback path in the backend: emit
+inline assembly or a target-specific attribute. The frontend never needs
+to enumerate ALUs — it just attaches the routing tag. CIRCT and the SMT
+solver ignore `alu` entirely; they only see `Bits(N)`.
 
 Any property the frontend does not recognize is stored, serialized to the
 `.bvsa` archive, and ignored. Only backend-specific tooling (e.g.,

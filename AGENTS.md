@@ -789,6 +789,34 @@ For every hybrid subsystem, implement a clear, testable cost-model function
 (e.g., `optimal_unroll_factor` or `is_fully_precomputable`) to cleanly divide
 the execution paths.
 
+### 5. Frontend Constructs Are Abstract — Backends Give Meaning
+
+A frontend construct (`sync`, `txn`, `let`, `[pre][post]`) has a single
+consistent meaning regardless of backend. The backend chooses how to
+implement that meaning:
+
+| Construct | Universal meaning | LLVM | SPIR-V | CIRCT |
+|-----------|------------------|------|--------|-------|
+| `sync(d) {}` | Atomic execution + synchronization | Transaction ordering | `OpControlBarrier` | Handshake stall |
+| `txn` | Convergent state loop | Phi-node + br | Work-item loop | Clock cycle |
+| `let x` | Named binding | Stack or register | Register | Wire |
+| `[pre][post]` | State convergence | Branch invariants | Guard predicates | Setup/teardown |
+
+**The rule:** Before adding a `#` intrinsic, check if an existing frontend
+construct already carries the semantic information. `Barrier#()` was wrong
+because `sync(domain) {}` already means "synchronize here." The backend
+should map `sync` to `OpControlBarrier` for SPIR-V. Adding a `#` intrinsic
+duplicates semantics and creates maintenance burden.
+
+A `#` intrinsic is only justified when:
+1. No frontend construct exists for the operation, AND
+2. The operation genuinely requires compiler knowledge (`Sqrt#`, `Memcpy#`)
+
+If the interpreter runs a `sync` block correctly (as sequential code on
+CPU), that's the correctness baseline. Backends that need more (barriers,
+pipeline stalls) must add `SyncBlock` handling in their codegen — not a
+new intrinsic.
+
 ## Key References
 
 | Resource | Location |

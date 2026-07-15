@@ -29,7 +29,7 @@ fn main() {
         "help" | "--help" | "-h" => { print_usage(&args[0]); Ok(()) }
         _ => {
             // Default: compile the file
-            if args[1].ends_with(".bv") || args[1].ends_with(".rbv") {
+            if args[1].ends_with(".bv") || args[1].ends_with(".rbv") || args[1].ends_with(".abv") {
                 run_build(&args[1..])
             } else {
                 eprintln!("unknown command: {}", args[1]);

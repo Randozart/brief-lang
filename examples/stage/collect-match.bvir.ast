@@ -1,0 +1,99 @@
+(
+  ("defn" "main" ("params") ("outputs") ("body") ("term" 0))
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/types/bootstrap.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/fs.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/net.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/signal.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/ipc.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/thread.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/dir.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/process.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/tty.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/user.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/time.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/mem.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/rand.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/sched.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/resource.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/sysinfo.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/temp.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/dynlib.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/debug.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/ring.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/io.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/os/atomic.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/core/ptr.bv"), symbols: [], span: None })"
+)
+  (
+  "toplevel"
+  "Import(Import { kind: Literal("std/core/string_builder.bv"), symbols: [], span: None })"
+)
+)
