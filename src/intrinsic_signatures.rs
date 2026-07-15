@@ -65,8 +65,10 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         // ── Memory (observable) ─────────────────────────────────────
         "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
         "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(1)))], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-        "Memcpy#"  => Some(Signature { name: "Memcpy#",  parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
-        "Memset#"  => Some(Signature { name: "Memset#",  parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "Load#"    => Some(Signature { name: "Load#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true }),
+        "Store#"   => Some(Signature { name: "Store#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "Copy#"    => Some(Signature { name: "Copy#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "Fill#"    => Some(Signature { name: "Fill#",    parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
 
         // ── I/O (observable, returns native Int) ──────────────────────
         "Print#"  => Some(Signature { name: "Print#",  parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
@@ -201,7 +203,7 @@ mod tests {
             "Add#", "Sub#", "Mul#", "Div#", "Rem#", "Neg#", "Abs#",
             "Eq#", "Neq#", "Lt#", "Gt#", "Le#", "Ge#",
             "Sqrt#", "Sin#", "Cos#", "Fabs#", "Ceil#", "Floor#", "Pow#",
-            "Malloc#", "Free#", "Memcpy#", "Memset#",
+            "Malloc#", "Free#", "Load#", "Store#", "Copy#", "Fill#",
             "Print#", "GetEnv#",
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "Get#", "Insert#",
@@ -231,7 +233,8 @@ mod tests {
         assert!(get_intrinsic_signature("Print#").unwrap().observable);
         assert!(get_intrinsic_signature("Malloc#").unwrap().observable);
         assert!(get_intrinsic_signature("Free#").unwrap().observable);
-        assert!(get_intrinsic_signature("Memcpy#").unwrap().observable);
+        assert!(get_intrinsic_signature("Load#").unwrap().observable);
+        assert!(get_intrinsic_signature("Copy#").unwrap().observable);
         assert!(get_intrinsic_signature("GetEnv#").unwrap().observable);
         assert!(get_intrinsic_signature("Insert#").unwrap().observable);
         assert!(!get_intrinsic_signature("Add#").unwrap().observable);

@@ -28,16 +28,15 @@ pub fn emit_intrinsic_call(
     match name {
         "Malloc#" => return emit_malloc(backend, out, v, args, indent),
         "Free#" => return emit_free(backend, out, v, args, indent),
-        "Memcpy#" => return emit_memcpy(backend, out, v, args, indent),
-        "Memset#" => return emit_memset(backend, out, v, args, indent),
+        "Load#" => return emit_load(backend, out, v, args, indent),
+        "Store#" => return emit_store(backend, out, v, args, indent),
+        "Copy#" => return emit_copy(backend, out, v, args, indent),
+        "Fill#" => return emit_fill(backend, out, v, args, indent),
         "Print#" => return emit_print(backend, out, v, args, indent),
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
         "GetGlobalSize#" => return emit_external_call(backend, out, v, name, args, indent),
         "GetLocalId#" => return emit_external_call(backend, out, v, name, args, indent),
-        "GetGroupId#" => return emit_external_call(backend, out, v, name, args, indent),
-        "GetNumGroups#" => return emit_external_call(backend, out, v, name, args, indent),
-        "Dims#" => return emit_external_call(backend, out, v, name, args, indent),
         "AddressOf#" => return emit_address_of(backend, out, v, args, indent),
         "SysCall#" => return emit_syscall(backend, out, v, args, indent),
         "SysConf#" => return emit_sysconf(backend, out, v, args, indent),
@@ -161,22 +160,60 @@ fn emit_free(
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }
 
-fn emit_memcpy(
+ fn emit_load(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let regs = emit_args(backend, out, args, indent);
-    writeln!(out, "{}call ptr @memcpy(ptr {}, ptr {}, i64 {})", indent, regs[0], regs[1], regs[2]).ok();
+    let addr = emit_arg(backend, out, &args[0], indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
+    let bytes = args.get(1).and_then(|a| if let Expr::Decimal(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
+    writeln!(out, "{}{} = load i{}, ptr {}", indent, v, bytes * 8, ptr).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+fn emit_store(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let addr = emit_arg(backend, out, &args[0], indent);
+    let val = emit_arg(backend, out, &args[1], indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
+    let bytes = args.get(2).and_then(|a| if let Expr::Decimal(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
+    writeln!(out, "{}store i{} {}, ptr {}", indent, bytes * 8, val, ptr).ok();
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }
 
-fn emit_memset(
+fn emit_copy(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let regs = emit_args(backend, out, args, indent);
-    writeln!(out, "{}call ptr @memset(ptr {}, i64 {}, i64 {})", indent, regs[0], regs[1], regs[2]).ok();
+    let dst = emit_arg(backend, out, &args[0], indent);
+    let src = emit_arg(backend, out, &args[1], indent);
+    let len = emit_arg(backend, out, &args[2], indent);
+    let dptr = backend.fun.gen_reg();
+    let sptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, dptr, dst).ok();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, sptr, src).ok();
+    writeln!(out, "{}call void @llvm.memcpy.p0.p0.i64(ptr {}, ptr {}, i64 {}, i1 false)", indent, dptr, sptr, len).ok();
+    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::void() }
+}
+
+fn emit_fill(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr_arg = emit_arg(backend, out, &args[0], indent);
+    let val = emit_arg(backend, out, &args[1], indent);
+    let len = emit_arg(backend, out, &args[2], indent);
+    let p = backend.fun.gen_reg();
+    let v8 = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, p, ptr_arg).ok();
+    writeln!(out, "{}{} = trunc i64 {} to i8", indent, v8, val).ok();
+    writeln!(out, "{}call void @llvm.memset.p0.i64(ptr {}, i8 {}, i64 {}, i1 false)", indent, p, v8, len).ok();
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }

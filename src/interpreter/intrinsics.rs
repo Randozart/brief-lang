@@ -85,24 +85,43 @@ pub fn execute_intrinsic(
                 .map_err(|_| RuntimeError::HeapError("free failed".into()))?;
             Ok(Value::Void)
         }
-        "Memcpy#" => {
-            let dst = arg_as_i64(args, 0)?;
-            let src = arg_as_i64(args, 1)?;
-            let n = arg_as_i64(args, 2)? as usize;
-            let data = heap.read(src as u64, n)
-                .ok_or_else(|| RuntimeError::HeapError("memcpy source read failed".into()))?;
-            let data_vec = data.to_vec();
-            heap.write(dst as u64, &data_vec)
-                .map_err(|_| RuntimeError::HeapError("memcpy dest write failed".into()))?;
+         "Load#" => {
+            let addr = arg_as_i64(args, 0)? as u64;
+            let bytes = args.get(1).and_then(|a| if let Value::Int(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
+            let data = heap.read(addr, bytes)
+                .ok_or_else(|| RuntimeError::HeapError("Load# read failed".into()))?;
+            let mut buf = data.to_vec();
+            buf.resize(8, 0);
+            let val = i64::from_le_bytes([buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]]);
+            Ok(i64_to_bits(val))
+        }
+        "Store#" => {
+            let addr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let bytes = args.get(2).and_then(|a| if let Value::Int(n) = a { Some(*n as usize) } else { None }).unwrap_or(8);
+            let data = val.to_le_bytes()[..bytes].to_vec();
+            heap.write(addr, &data)
+                .map_err(|_| RuntimeError::HeapError("Store# write failed".into()))?;
             Ok(Value::Void)
         }
-        "Memset#" => {
-            let ptr = arg_as_i64(args, 0)?;
+        "Copy#" => {
+            let dst = arg_as_i64(args, 0)? as u64;
+            let src = arg_as_i64(args, 1)? as u64;
+            let n = arg_as_i64(args, 2)? as usize;
+            let data = heap.read(src, n)
+                .ok_or_else(|| RuntimeError::HeapError("Copy# read failed".into()))?;
+            let data_vec = data.to_vec();
+            heap.write(dst, &data_vec)
+                .map_err(|_| RuntimeError::HeapError("Copy# write failed".into()))?;
+            Ok(Value::Void)
+        }
+        "Fill#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
             let val = arg_as_i64(args, 1)?;
             let n = arg_as_i64(args, 2)? as usize;
             let data = vec![val as u8; n];
-            heap.write(ptr as u64, &data)
-                .map_err(|_| RuntimeError::HeapError("memset failed".into()))?;
+            heap.write(ptr, &data)
+                .map_err(|_| RuntimeError::HeapError("Fill# failed".into()))?;
             Ok(Value::Void)
         }
 
@@ -153,15 +172,6 @@ pub fn execute_intrinsic(
         "GetGlobalId#"   => Err(RuntimeError::UnsupportedIntrinsic("GetGlobalId#".to_string())),
         "GetGlobalSize#" => Err(RuntimeError::UnsupportedIntrinsic("GetGlobalSize#".to_string())),
         "GetLocalId#"    => Err(RuntimeError::UnsupportedIntrinsic("GetLocalId#".to_string())),
-        "GetGroupId#"    => Err(RuntimeError::UnsupportedIntrinsic("GetGroupId#".to_string())),
-        "GetNumGroups#"  => Err(RuntimeError::UnsupportedIntrinsic("GetNumGroups#".to_string())),
-        "Dims#"          => Err(RuntimeError::UnsupportedIntrinsic("Dims#".to_string())),
-
-        // ── Pointers ─────────────────────────────────────────────────
-        // 2026-07-15: AddressOf# resolves a named address to a pointer value.
-        // In the interpreter, we look up the address map and return the i64 value.
-        // For known addresses (from config/address-map.toml), this returns the
-        // configured address. Unknown addresses return a default (0xFE000000).
         "AddressOf#" => {
             let id = arg_as_string(args, 0)?;
             let addr = resolve_address_for_interp(&id);

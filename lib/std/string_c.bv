@@ -7,7 +7,7 @@ defn to_c_string(s: Ptr<Byte>) -> Ptr<Byte> {
     let len: Int = Length#(s);
     let data_start: Ptr<Byte> = s + 8;
     let cstr: Ptr<Byte> = Malloc#(len + 1);
-    Memcpy#(cstr, data_start, len);
-    Memset#(cstr + len, 0, 1);
+    Copy#(cstr, data_start, len);
+    Fill#(cstr + len, 0, 1);
     term cstr;
 };
