@@ -1,13 +1,16 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+//
+// 2026-07-15: Replaced inop with defn + to_c_string + Syscall#.
 
-inop __sys_mkstemp(tmpl: Ptr<Byte>) -> Int {
-    %r = call i64 @__mkstemp__(i64 %tmpl);
-    ret i64 %r;
+import { to_c_string } from "std/string_c";
+
+defn mkstemp(tmpl: Ptr<Byte>) -> Int {
+    let ctmpl = to_c_string(tmpl);
+    Syscall#(Mkstemp, ctmpl, 0, 0, 0, 0, 0);
 };
 
-inop __sys_mkdtemp(tmpl: Ptr<Byte>) -> Int {
-    %r = call i64 @__mkdtemp__(i64 %tmpl);
-    ret i64 %r;
+defn mkdtemp(tmpl: Ptr<Byte>) -> Int {
+    let ctmpl = to_c_string(tmpl);
+    Syscall#(MkDt, ctmpl, 0, 0, 0, 0, 0);
 };
-

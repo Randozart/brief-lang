@@ -13,7 +13,7 @@
 //                     (.2|> skips 2 commands back,
 //                      reads from index 2-2 = 0)
 //
-// Run: brief-compiler rbv examples/pipe-skip.bv
+// Run: brief-compiler build --llvm examples/pipe-skip.bv
 
 defn square(x: Int) -> Int { term x * x; };
 defn add_one(x: Int) -> Int { term x + 1; };
@@ -21,5 +21,5 @@ defn double(x: Int) -> Int { term x * 2; };
 
 txn main() -> Bool {
     let result: Int = 3 |> square() |> add_one() .2|> double();
-    term! -> print_int#(result);   // prints 6
+    term! -> Print#(result);   // prints 6
 };

@@ -1,0 +1,18 @@
+// ── Registry Import Example ───────────────────────────────────────────
+//
+// 2026-07-15: Demos import <name> (angle-bracket registry) syntax.
+// The compiler resolves <name> against config/module-registry.toml
+// instead of searching the filesystem.
+//
+// Check: brief-compiler check examples/registry-import.bv
+
+// Import all symbols from the collections module via registry
+import <collections>;
+
+// Selective import from registry — only bring in one symbol
+import { map } from <collections>;
+
+defn main() -> Int {
+    // Both <collections> and the selective import provide map
+    term 0;
+};

@@ -47,7 +47,7 @@ brief build program.bv
 brief init my-project
 
 # Add a dependency
-brief import <name> --path <location>
+brief register <name> --path <location>
 ```
 
 ## Project Structure
@@ -112,7 +112,7 @@ The Brief logic owns all state; HTML and CSS are declarative projections of that
 
 ```bash
 # Compile .rbv to a directory
-brief rbv component.rbv --out dist/
+brief build --backend webstack component.rbv --out dist/
 ```
 
 This generates:

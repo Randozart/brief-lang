@@ -19,7 +19,7 @@
 // preconditions + increments + const bound → O(1) store per counter.
 //
 // Build:
-//   cargo run --bin brief-compiler -- llvm benchmarks/async_counters_idio.bv \
+//   cargo run --bin brief-compiler -- build --llvm benchmarks/async_counters_idio.bv \
 //     --out benchmarks --optimize-budget 256
 
 

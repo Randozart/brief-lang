@@ -220,6 +220,16 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__float_to_str(float)").ok();
         writeln!(out, "declare i64 @__to_str(i64)").ok();
         writeln!(out, "declare i64 @__stack_top__(i64)").ok();
+        // 2026-07-15: Raw OS syscall (Syscall# intrinsic)
+        writeln!(out, "declare i64 @brief_syscall(i64, i64, i64, i64, i64, i64, i64)").ok();
+        // 2026-07-15: Runtime system configuration (Sysconf# intrinsic)
+        writeln!(out, "declare i64 @brief_sysconf(i64)").ok();
+        // 2026-07-15: Dynamic linker (DlOpen#/DlSym#/DlClose# intrinsics)
+        writeln!(out, "declare ptr @dlopen(ptr, i32) nounwind").ok();
+        writeln!(out, "declare ptr @dlsym(ptr, ptr) nounwind").ok();
+        writeln!(out, "declare i32 @dlclose(ptr) nounwind").ok();
+        // 2026-07-15: Stack backtrace (Backtrace# intrinsic)
+        writeln!(out, "declare i64 @brief_backtrace()").ok();
         writeln!(out, "declare i64 @__queue_front__(i64)").ok();
         writeln!(out, "declare i64 @__hashmap_get__(i64, i64)").ok();
         writeln!(out, "declare i64 @__hashset_elements__(i64)").ok();

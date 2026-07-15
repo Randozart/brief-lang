@@ -1,0 +1,17 @@
+// ── entry-check: Reject programs with no entry point ──────────────────
+//
+// 2026-07-15: Mid-stage plugin. Verifies at least one entry mechanism
+// exists: [#] entry marker, top-level trigger, or reactive transaction
+// with live field bindings (verified by CheckReactive$).
+//
+// Runs after auto-main so it sees any [#] added by that plugin.
+
+$(Mid) {
+    let has_entry: Int = Collect$("(contract (entry) ??*)");
+    let has_trg: Int = Collect$("(trigger ?name ?type @ ?binding)");
+
+    [has_entry == 0 && has_trg == 0] {
+        // CheckReactive$ verifies at least one rct txn has live bindings
+        CheckReactive$();
+    };
+};

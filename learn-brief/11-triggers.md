@@ -208,9 +208,8 @@ rct txn count_input [io.io_ready] {
     term;
 };
 
-// Compile:     brief llvm program.bv --link-rt
-// The --link-rt flag writes brief_rt.c to the output directory
-// and invokes cc to produce brief_rt.o.
+// Compile:     brief build --llvm program.bv
+// Produces program.ll + brief_rt.c, then links to binary.
 // Link:        ld program.o brief_rt.o -o program
 ```
 
@@ -266,17 +265,17 @@ The LLVM backend is the primary compilation target for event-driven Brief progra
 ### Compile and Link
 
 ```bash
-# Generate .ll file
-brief llvm program.bv --link-rt
+# Build (produces .ll + links with brief_rt)
+brief build --llvm program.bv --out output/
 
 # Or manually:
-brief llvm program.bv -o output/
+brief build --llvm program.bv --out output/
 llc output/program.ll -filetype=obj -o output/program.o
 cc -c runtime/brief_rt.c -o output/brief_rt.o
 ld output/program.o output/brief_rt.o -o program
 ```
 
-The `--link-rt` flag writes the embedded `brief_rt.c` source to the output directory, compiles it with `cc`, and prints the final `ld` command.
+The `build --llvm` writes the embedded `brief_rt.c` source to the output directory, compiles it with `cc`, and prints the final `ld` command.
 
 ### Runtime Source
 

@@ -368,14 +368,14 @@ impl fmt::Display for TopLevel {
                         if import.symbols.is_empty() {
                             write!(f, "import \"{}\";", path)
                         } else {
-                            write!(f, "import {} from \"{}\";", import.symbols.join(", "), path)
+                            write!(f, "import {{ {} }} from \"{}\";", import.symbols.join(", "), path)
                         }
                     }
                     ImportKind::Registry(name) => {
                         if import.symbols.is_empty() {
                             write!(f, "import <{}>;", name)
                         } else {
-                            write!(f, "import {} from <{}>;", import.symbols.join(", "), name)
+                            write!(f, "import {{ {} }} from <{}>;", import.symbols.join(", "), name)
                         }
                     }
                 }

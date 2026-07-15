@@ -7,13 +7,13 @@ frgn output_written: Bool = false;
 // term -> swan_song: commit action that runs BEFORE the transaction
 // terminates but does NOT exit the program
 txn commit_action [output_written == false][output_written == true] {
-    term -> print_int#(42);   // runs before term, program continues
+    term -> Print#(42);   // runs before term, program continues
 };
 
 // term! -> swan_song: program exit, the swan song is the last
 // observable action before the process terminates
 txn program_exit [output_written == true][true] {
-    term! -> println#("Goodbye!");
+    term! -> Print#("Goodbye!");
 };
 
 // Without swan song, this program is dead code — the compiler

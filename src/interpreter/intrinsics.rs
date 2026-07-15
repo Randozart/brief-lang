@@ -6,6 +6,34 @@
 use crate::errors::RuntimeError;
 use crate::interpreter::{bool_to_bits, f64_to_bits, i64_to_bits, zero_bits, Value, VirtualHeap};
 
+// 2026-07-15: Syscall# abstract op → syscall number mapping (x86_64)
+fn resolve_syscall_number_interp(name: &str) -> Option<i64> {
+    Some(match name {
+        "Read" => 0, "Write" => 1, "Open" => 2, "Close" => 3,
+        "Stat" => 4, "FStat" => 5, "LSeek" => 8, "Mmap" => 9,
+        "Munmap" => 11, "Brk" => 12, "RtSigAction" => 13,
+        "RtSigProcmask" => 14, "IoCtl" => 16, "Pipe" => 22,
+        "SchedYield" => 24, "NanoSleep" => 35,
+        "GetPid" => 39, "GetPPid" => 40, "Socket" => 41,
+        "Connect" => 42, "Accept" => 43, "Send" => 44,
+        "Recv" => 45, "SendTo" => 44, "RecvFrom" => 45,
+        "Bind" => 49, "Listen" => 50, "Exit" => 60,
+        "Fcntl" => 72, "FTruncate" => 77, "GetCwd" => 79,
+        "ChDir" => 80, "MkDir" => 83, "RmDir" => 84,
+        "Unlink" => 87, "Dup" => 32, "Dup2" => 33,
+        "FSync" => 74, "MkDt" => 85, "ReadLink" => 89,
+        "ChMod" => 90, "ChOwn" => 92, "UMask" => 95,
+        "GetPgid" => 109, "GetSid" => 124, "ShmGet" => 29,
+        "ShmAt" => 30, "ShmDt" => 31, "SemGet" => 64,
+        "SemOp" => 65, "SemCtl" => 66, "ClockGetTime" => 228,
+        "ClockSetTime" => 229, "Futex" => 202,
+        "GetRandom" => 318, "Openat" => 257,
+        "Membarrier" => 324, "CopyFileRange" => 326,
+        "PRead" => 17, "PWrite" => 18,
+        _ => return None,
+    })
+}
+
 /// Execute a named intrinsic with the given evaluated arguments.
 pub fn execute_intrinsic(
     name: &str,
@@ -117,6 +145,146 @@ pub fn execute_intrinsic(
             let id = arg_as_string(args, 0)?;
             let addr = resolve_address_for_interp(&id);
             Ok(i64_to_bits(addr as i64))
+        }
+
+        // ── POSIX sysconf (observable) ────────────────────────────────
+        "Sysconf#" => {
+            if args.is_empty() { return Ok(i64_to_bits(0)); }
+            let name: i64 = match &args[0] {
+                Value::Int(n) => *n,
+                Value::Bits(b) => {
+                    let mut arr = [0u8; 8];
+                    let copy_len = b.len().min(8);
+                    arr[..copy_len].copy_from_slice(&b[..copy_len]);
+                    i64::from_le_bytes(arr)
+                }
+                other => {
+                    let s = format!("{:?}", other);
+                    match s.as_str() {
+                        "PageSize" => 30,
+                        "CpuCount" => 83,
+                        "HostNameMax" => 180,
+                        "OpenMax" => 4,
+                        _ => {
+                            eprintln!("Sysconf#: unknown abstract name '{}', using 0", s);
+                            0
+                        }
+                    }
+                }
+            };
+            let result = unsafe { libc::sysconf(name as i32) };
+            Ok(i64_to_bits(result as i64))
+        }
+
+        // ── OS Syscall (observable) ───────────────────────────────────
+        // 2026-07-15: Syscall# executes a raw OS syscall via libc::syscall().
+        // In check mode, returns 0 for successful execution or -1 for error.
+        // The first arg is the syscall number (Int) or PascalCase abstract op
+        // name (resolved to a number here).
+        "Syscall#" => {
+            if args.is_empty() { return Ok(zero_bits(0)); }
+            let mut sysno: i64 = 0;
+            match &args[0] {
+                Value::Int(n) => { sysno = *n; }
+                Value::Bits(b) => {
+                    // Convert Vec<u8> to i64 (little-endian)
+                    let mut arr = [0u8; 8];
+                    let copy_len = b.len().min(8);
+                    arr[..copy_len].copy_from_slice(&b[..copy_len]);
+                    sysno = i64::from_le_bytes(arr);
+                }
+                other => {
+                    let name = format!("{:?}", other);
+                    sysno = resolve_syscall_number_interp(&name).unwrap_or(0);
+                }
+            }
+            // Extract up to 6 Int arguments, default 0
+            let arg_val = |i: usize| -> i64 {
+                args.get(i).map(|v| match v {
+                    Value::Int(n) => *n,
+                    Value::Bits(b) => {
+                        let mut arr = [0u8; 8];
+                        let copy_len = b.len().min(8);
+                        arr[..copy_len].copy_from_slice(&b[..copy_len]);
+                        i64::from_le_bytes(arr)
+                    }
+                    _ => 0
+                }).unwrap_or(0)
+            };
+            let a1 = arg_val(1); let a2 = arg_val(2); let a3 = arg_val(3);
+            let a4 = arg_val(4); let a5 = arg_val(5); let a6 = arg_val(6);
+            let result = unsafe { libc::syscall(sysno, a1, a2, a3, a4, a5, a6) };
+            Ok(i64_to_bits(result as i64))
+        }
+
+        // ── Atomic operations (non-atomic in check mode) ──────────────
+        // 2026-07-15: Single-threaded check mode — just do regular heap
+        // load/store. Full LLVM atomicrmw is emitted at runtime.
+        "AtomicLoad#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let data = heap.read(ptr, 8).map(|b| i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]])).unwrap_or(0);
+            Ok(i64_to_bits(data))
+        }
+        "AtomicStore#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let bytes = val.to_le_bytes();
+            heap.write(ptr, &bytes).ok();
+            Ok(Value::Void)
+        }
+        "AtomicCas#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let expected = arg_as_i64(args, 1)?;
+            let desired = arg_as_i64(args, 2)?;
+            let current = heap.read(ptr, 8).map(|b| i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]])).unwrap_or(0);
+            if current == expected {
+                heap.write(ptr, &desired.to_le_bytes()).ok();
+            }
+            Ok(i64_to_bits(current))
+        }
+        "AtomicXchg#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let old = heap.read(ptr, 8).map(|b| i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]])).unwrap_or(0);
+            heap.write(ptr, &val.to_le_bytes()).ok();
+            Ok(i64_to_bits(old))
+        }
+        "AtomicAdd#" => {
+            let ptr = arg_as_i64(args, 0)? as u64;
+            let val = arg_as_i64(args, 1)?;
+            let old = heap.read(ptr, 8).map(|b| i64::from_le_bytes([b[0],b[1],b[2],b[3],b[4],b[5],b[6],b[7]])).unwrap_or(0);
+            let new = old.wrapping_add(val);
+            heap.write(ptr, &new.to_le_bytes()).ok();
+            Ok(i64_to_bits(old))
+        }
+        "Fence#" => {
+            Ok(Value::Void)
+        }
+
+        // ── Dynamic linker intrinsics (observable) ────────────────────
+        // 2026-07-15: In check mode, call host libc functions.
+        "DlOpen#" => {
+            let path_ptr = arg_as_i64(args, 0)? as *const libc::c_char;
+            let flags = arg_as_i64(args, 1)? as libc::c_int;
+            let result = unsafe { libc::dlopen(path_ptr, flags) };
+            Ok(i64_to_bits(result as i64))
+        }
+        "DlSym#" => {
+            let handle = arg_as_i64(args, 0)? as *mut libc::c_void;
+            let symbol_ptr = arg_as_i64(args, 1)? as *const libc::c_char;
+            let result = unsafe { libc::dlsym(handle, symbol_ptr) };
+            Ok(i64_to_bits(result as i64))
+        }
+        "DlClose#" => {
+            let handle = arg_as_i64(args, 0)? as *mut libc::c_void;
+            let result = unsafe { libc::dlclose(handle) };
+            Ok(i64_to_bits(result as i64))
+        }
+
+        // ── Backtrace intrinsic (observable) ──────────────────────────
+        // 2026-07-15: In check mode, stub returning 0.
+        "Backtrace#" => {
+            Ok(i64_to_bits(0))
         }
 
         _ => Err(RuntimeError::UnsupportedIntrinsic(name.to_string())),

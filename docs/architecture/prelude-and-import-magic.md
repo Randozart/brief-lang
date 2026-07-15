@@ -120,13 +120,12 @@ By default (without `--no-std`), the compiler:
 4. Resolves through normal import resolution (recursive, dedup'd)
 
 The user never sees these imports in their source, but they can inspect
-what's available by reading the `core/` directory. The `--no-std` flag
+what's available by reading the `core/` directory. The `--disable-plugin prelude` flag
 disables this entirely.
 
-## `--no-std` Flag
+## `--disable-plugin prelude` Flag
 
-Replaces the existing `--no-stdlib` flag (which only affected the
-TypeChecker). The new `--no-std` flag:
+Replaces the existing `--no-std` / `--no-stdlib` flags. The `--disable-plugin prelude` flag:
 
 1. Disables auto-import of `core/`
 2. Disables FFI binding resolution for std paths
@@ -176,7 +175,7 @@ Previously these types were hardcoded as Rust `Vec<ResolvedType>` literals in
 - Also handle when `BRIEF_STDLIB_PATH` env var is set
 
 ### Phase 6: CLI
-- Add `--no-std` flag (replaces `--no-stdlib` internally)
+- Add `--disable-plugin prelude` flag (replaces `--no-std` / `--no-stdlib` internally)
 - Thread through to import resolver at all call sites
 - Keep `--stdlib-path` for custom stdlib location
 
@@ -228,5 +227,5 @@ apply. The `core/`, `ffi/`, `ext/` split is internal to `BRIEF_STDLIB_PATH`;
 project-relative imports can still resolve old paths if a project has its
 own `lib/std/` mirror.
 
-The `--no-std` flag replaces `--no-stdlib` (kept as an alias for
-backward compatibility at the CLI level).
+The `--disable-plugin prelude` flag replaces `--no-std` / `--no-stdlib`
+(kept as aliases for backward compatibility at the CLI level).

@@ -20,7 +20,7 @@
 // guarantees no data races -- plain loads/stores, no atomics needed.
 //
 // Build:
-//   cargo run --bin brief-compiler -- llvm benchmarks/async_counters_sym.bv \
+//   cargo run --bin brief-compiler -- build --llvm benchmarks/async_counters_sym.bv \
 //     --out benchmarks --optimize-budget 256
 //
 // C reference: async_counters_sym_c.c (two pthreads + barriers)

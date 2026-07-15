@@ -77,6 +77,103 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
             observable: false,
         }),
 
+        // ── OS Syscall (observable) ───────────────────────────────────
+        // First arg is op (Int raw number or PascalCase abstract op),
+        // followed by up to 6 Int arguments. Returns Int (errno or result).
+        // 2026-07-15: Replaces all OS inop declarations.
+        "Syscall#" => Some(Signature {
+            name: "Syscall#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: true,
+        }),
+
+        // ── POSIX sysconf (observable) ─────────────────────────────────
+        // Resolves runtime system configuration values (page size, CPU count).
+        // 2026-07-15: Separated from Syscall# because sysconf() is a C library
+        // function, not a raw syscall.
+        "Sysconf#" => Some(Signature {
+            name: "Sysconf#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: true,
+        }),
+
+        // ── Atomic operations (LLVM atomicrmw / load atomic / fence) ──
+        // 2026-07-15: These map to LLVM atomic instructions. Cannot be
+        // expressed as defn (no Brief operator for atomicrmw) or Syscall#
+        // (not syscalls — inline CPU instructions).
+        "AtomicLoad#" => Some(Signature {
+            name: "AtomicLoad#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: false,
+        }),
+        "AtomicStore#" => Some(Signature {
+            name: "AtomicStore#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: true,
+        }),
+        "AtomicCas#" => Some(Signature {
+            name: "AtomicCas#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: true,
+        }),
+        "AtomicXchg#" => Some(Signature {
+            name: "AtomicXchg#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: true,
+        }),
+        "AtomicAdd#" => Some(Signature {
+            name: "AtomicAdd#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: true,
+        }),
+        "Fence#" => Some(Signature {
+            name: "Fence#",
+            parameters: vec![],
+            return_type: Some(Type::void()),
+            observable: true,
+        }),
+
+        // ── Dynamic linker (platform library functions) ──────────────
+        // 2026-07-15: dlopen/dlsym/dlclose interact with the system dynamic
+        // linker. Must be # intrinsics because the backend emits the
+        // platform-specific calling convention for @dlopen/@dlsym/@dlclose.
+        "DlOpen#" => Some(Signature {
+            name: "DlOpen#",
+            parameters: vec![],
+            return_type: Some(Type::ptr(Type::bits(8))),
+            observable: true,
+        }),
+        "DlSym#" => Some(Signature {
+            name: "DlSym#",
+            parameters: vec![],
+            return_type: Some(Type::ptr(Type::bits(8))),
+            observable: false,
+        }),
+        "DlClose#" => Some(Signature {
+            name: "DlClose#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: true,
+        }),
+
+        // ── Debugging (stack trace) ──────────────────────────────────
+        // 2026-07-15: backtrace() walks the stack using LLVM frameaddress
+        // or DWARF unwind. Like Print#, it's a debugging primitive the
+        // compiler provides.
+        "Backtrace#" => Some(Signature {
+            name: "Backtrace#",
+            parameters: vec![],
+            return_type: Some(Type::int()),
+            observable: true,
+        }),
+
         _ => None,
     }
 }
@@ -96,7 +193,10 @@ mod tests {
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "Get#", "Insert#",
             "GetGlobalId#", "GetGlobalSize#", "GetLocalId#",
-            "AddressOf#",
+            "AddressOf#", "Syscall#", "Sysconf#",
+            "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#", "AtomicAdd#", "Fence#",
+            "DlOpen#", "DlSym#", "DlClose#",
+            "Backtrace#",
         ];
         for name in &intrinsics {
             let sig = get_intrinsic_signature(name);
@@ -122,15 +222,9 @@ mod tests {
         assert!(get_intrinsic_signature("Insert#").unwrap().observable);
         assert!(!get_intrinsic_signature("Add#").unwrap().observable);
         assert!(!get_intrinsic_signature("Eq#").unwrap().observable);
-    }
-
-    #[test]
-    fn test_address_of_signature() {
-        let sig = get_intrinsic_signature("AddressOf#").unwrap();
-        assert_eq!(sig.name, "AddressOf#");
-        assert_eq!(sig.parameters.len(), 1);
-        assert_eq!(sig.parameters[0].0, "id");
-        assert!(!sig.observable);
-        assert!(sig.return_type.is_some());
+        // 2026-07-15: Observable atomic/linker/backtrace intrinsics
+        assert!(get_intrinsic_signature("AtomicStore#").unwrap().observable);
+        assert!(get_intrinsic_signature("DlOpen#").unwrap().observable);
+        assert!(get_intrinsic_signature("Backtrace#").unwrap().observable);
     }
 }

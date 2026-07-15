@@ -4,7 +4,7 @@
 // bounds is a separate optimization target.
 //
 // Build:
-//   ./target/release/brief-compiler llvm benchmarks/async_counters_runtime.bv \
+//   ./target/release/brief-compiler build --llvm benchmarks/async_counters_runtime.bv \
 //       --out benchmarks --optimize-budget 256
 
 

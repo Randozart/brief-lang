@@ -1,13 +1,10 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
+// 2026-07-15: Replaced inop with defn + Syscall#(GetRlimit/SetRlimit, ...);
+// Uses prlimit64 (x86_64: 302) via abstract op.
 
-inop __sys_getrlimit(resource: Int) -> Int {
-    %r = call i64 @__getrlimit__(i64 %resource);
-    ret i64 %r;
+defn getrlimit(resource: Int) -> Int {
+    Syscall#(GetRlimit, resource, 0, 0, 0, 0, 0);
 };
 
-inop __sys_setrlimit(resource: Int, packed: Int) -> Int {
-    %r = call i64 @__setrlimit__(i64 %resource, i64 %packed);
-    ret i64 %r;
+defn setrlimit(resource: Int, packed: Int) -> Int {
+    Syscall#(SetRlimit, resource, packed, 0, 0, 0, 0);
 };
-

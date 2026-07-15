@@ -1,18 +1,22 @@
 # Compiler Plugins
 
-Brief supports loadable compiler plugins — WASM or native dynamic libraries
-that run at defined hooks in the compilation pipeline.
+Brief supports built-in compiler plugins that run at defined hooks in the
+compilation pipeline. Plugins are named stages that you can enable or disable.
 
-## Loading a Plugin
+## Enabling/Disabling Plugins
 
 ```bash
-brief build file.bv --plugin ./my_plugin.so
+# Disable the prelude plugin (no auto-imports)
+brief build file.bv --disable-plugin prelude
+
+# Enable a specific plugin
+brief build file.bv --enable-plugin my-custom
 ```
 
-Multiple plugins run in registration order:
+Multiple plugins can be enabled or disabled:
 
 ```bash
-brief build file.bv --plugin ./lint.wasm --plugin ./verify.wasm
+brief build file.bv --disable-plugin prelude --enable-plugin lint
 ```
 
 ## What a Plugin Can Do

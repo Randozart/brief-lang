@@ -1,13 +1,30 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+//
+// 2026-07-15: Ring buffer using AtomicCas# for lock-free head/tail.
+// All values are Int (8 bytes). Buffer capacity is 256 slots.
 
-inop __sys_ring_push(handle: Int, val: Int) -> Int {
-    %r = call i64 @brief_ring_push(i64 %handle, i64 %val);
-    ret i64 %r;
+defn ring_push(handle: Int, val: Int) -> Int {
+    let head: Int = AtomicLoad#(handle);
+    let tail: Int = AtomicLoad#(handle + 8);
+    let next: Int = head + 1;
+    [next >= tail + 256] {
+        term -1;
+    };
+    let data_base: Int = handle + 16;
+    AtomicStore#(data_base + head * 8, val);
+    AtomicStore#(handle, handle + 1);
+    term 0;
 };
 
-inop __sys_ring_pop(handle: Int) -> Int {
-    %r = call i64 @brief_ring_pop(i64 %handle);
-    ret i64 %r;
+defn ring_pop(handle: Int) -> Int {
+    let head: Int = AtomicLoad#(handle);
+    let tail: Int = AtomicLoad#(handle + 8);
+    [head == tail] {
+        term -1;
+    };
+    let data_base: Int = handle + 16;
+    let val: Int = AtomicLoad#(data_base + tail * 8);
+    AtomicStore#(handle + 8, handle + 8 + 1);
+    term val;
 };
-

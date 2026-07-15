@@ -29,6 +29,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #ifdef __linux__
 #include <sys/utsname.h>
 #include <sys/random.h>
@@ -1809,3 +1810,11 @@ int64_t brief_cpu_count(void) {
 }
 
 int64_t brief_ttyname(int64_t fd) { return (int64_t)(uintptr_t)ttyname((int)fd); }
+
+int64_t brief_syscall(int64_t num, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5, int64_t a6) {
+    return syscall((long)num, (long)a1, (long)a2, (long)a3, (long)a4, (long)a5, (long)a6);
+}
+
+int64_t brief_sysconf(int64_t name) {
+    return sysconf((int)name);
+}

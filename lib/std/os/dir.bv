@@ -1,73 +1,76 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+//
+// 2026-07-15: Replaced inop with defn + to_c_string + Syscall#.
 
-inop mkdir(path: Ptr<Byte>, mode: Int) -> Int {
-    %r = call i64 @brief_mkdir(i64 %path, i64 %mode);
-    ret i64 %r;
+import { to_c_string } from "std/string_c";
+
+defn mkdir(path: Ptr<Byte>, mode: Int) -> Int {
+    let cpath = to_c_string(path);
+    Syscall#(MkDir, cpath, mode, 0, 0, 0, 0);
 };
 
-inop rmdir(path: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_rmdir(i64 %path);
-    ret i64 %r;
+defn rmdir(path: Ptr<Byte>) -> Int {
+    let cpath = to_c_string(path);
+    Syscall#(RmDir, cpath, 0, 0, 0, 0, 0);
 };
 
-inop unlink(path: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_unlink(i64 %path);
-    ret i64 %r;
+defn unlink(path: Ptr<Byte>) -> Int {
+    let cpath = to_c_string(path);
+    Syscall#(Unlink, cpath, 0, 0, 0, 0, 0);
 };
 
-inop rename(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_rename(i64 %oldpath, i64 %newpath);
-    ret i64 %r;
+defn rename(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int {
+    let cpath_old = to_c_string(oldpath);
+    let cpath_new = to_c_string(newpath);
+    Syscall#(Rename, cpath_old, cpath_new, 0, 0, 0, 0);
 };
 
-inop symlink(target: Ptr<Byte>, linkpath: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_symlink(i64 %target, i64 %linkpath);
-    ret i64 %r;
+defn symlink(target: Ptr<Byte>, linkpath: Ptr<Byte>) -> Int {
+    let ctarget = to_c_string(target);
+    let clink = to_c_string(linkpath);
+    Syscall#(Symlink, ctarget, clink, 0, 0, 0, 0);
 };
 
-inop read_link(path: Ptr<Byte>, buf: Ptr<Byte>, bufsiz: Int) -> Int {
-    %r = call i64 @__readlink__(i64 %path, i64 %buf, i64 %bufsiz);
-    ret i64 %r;
+defn read_link(path: Ptr<Byte>, buf: Ptr<Byte>, bufsiz: Int) -> Int {
+    let cpath = to_c_string(path);
+    Syscall#(ReadLink, cpath, buf, bufsiz, 0, 0, 0);
 };
 
-inop link_path(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_link(i64 %oldpath, i64 %newpath);
-    ret i64 %r;
+defn link_path(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int {
+    let cold = to_c_string(oldpath);
+    let cnew = to_c_string(newpath);
+    Syscall#(Link, cold, cnew, 0, 0, 0, 0);
 };
 
-inop getcwd(buf: Ptr<Byte>, size: Int) -> Int {
-    %r = call i64 @__getcwd__(i64 %buf, i64 %size);
-    ret i64 %r;
+defn getcwd(buf: Ptr<Byte>, size: Int) -> Int {
+    Syscall#(GetCwd, buf, size, 0, 0, 0, 0);
 };
 
-inop chdir(path: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_chdir(i64 %path);
-    ret i64 %r;
+defn chdir(path: Ptr<Byte>) -> Int {
+    let cpath = to_c_string(path);
+    Syscall#(ChDir, cpath, 0, 0, 0, 0, 0);
 };
 
-inop readdir(dirp: Int, buf: Ptr<Byte>) -> Int {
-    %r = call i64 @__readdir__(i64 %dirp, i64 %buf);
-    ret i64 %r;
+defn readdir(dirp: Int, buf: Ptr<Byte>) -> Int {
+    Syscall#(ReadDir, dirp, buf, 0, 0, 0, 0);
 };
 
-inop chmod(path: Ptr<Byte>, mode: Int) -> Int {
-    %r = call i64 @brief_chmod(i64 %path, i64 %mode);
-    ret i64 %r;
+defn chmod(path: Ptr<Byte>, mode: Int) -> Int {
+    let cpath = to_c_string(path);
+    Syscall#(ChMod, cpath, mode, 0, 0, 0, 0);
 };
 
-inop chown(path: Ptr<Byte>, owner: Int, group: Int) -> Int {
-    %r = call i64 @brief_chown(i64 %path, i64 %owner, i64 %group);
-    ret i64 %r;
+defn chown(path: Ptr<Byte>, owner: Int, group: Int) -> Int {
+    let cpath = to_c_string(path);
+    Syscall#(ChOwn, cpath, owner, group, 0, 0, 0);
 };
 
-inop umask(mask: Int) -> Int {
-    %r = call i64 @brief_umask(i64 %mask);
-    ret i64 %r;
+defn umask(mask: Int) -> Int {
+    Syscall#(UMask, mask, 0, 0, 0, 0, 0);
 };
 
-inop access(path: Ptr<Byte>, mode: Int) -> Int {
-    %r = call i64 @brief_access(i64 %path, i64 %mode);
-    ret i64 %r;
+defn access(path: Ptr<Byte>, mode: Int) -> Int {
+    let cpath = to_c_string(path);
+    Syscall#(Access, cpath, mode, 0, 0, 0, 0);
 };
-

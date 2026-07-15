@@ -1,8 +1,9 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+//
+// 2026-07-15: Uses Backtrace# intrinsic which emits call to C runtime
+// @brief_backtrace(). Returns number of stack frames captured.
 
-inop __sys_backtrace() -> Int {
-    %r = call i64 @__backtrace__();
-    ret i64 %r;
+defn backtrace() -> Int {
+    term Backtrace#();
 };
-

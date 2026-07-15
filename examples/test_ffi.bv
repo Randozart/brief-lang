@@ -12,22 +12,22 @@ frgn string_concat(a: String, b: String) -> Result<String, StringError> ;
 
 // Test 1: println via intrinsic
 txn test1 [true][term == void] {
-    term println#("Hello from Brief FFI!");
+    term Print#("Hello from Brief FFI!");
 };
 
 // Test 2: sqrt via intrinsic  
-txn test2 [sqrt#(16.0) == 4.0][term == 4.0] {
-    term sqrt#(16.0);
+txn test2 [Sqrt#(16.0) == 4.0][term == 4.0] {
+    term Sqrt#(16.0);
 };
 
 // Test 3: sin via intrinsic
-txn test3 [sin#(0.0) == 0.0][term == 0.0] {
-    term sin#(0.0);
+txn test3 [Sin#(0.0) == 0.0][term == 0.0] {
+    term Sin#(0.0);
 };
 
 // Test 4: pow via intrinsic
-txn test4 [pow#(2.0, 3.0) == 8.0][term == 8.0] {
-    term pow#(2.0, 3.0);
+txn test4 [Pow#(2.0, 3.0) == 8.0][term == 8.0] {
+    term Pow#(2.0, 3.0);
 };
 
 // Test 5: string length — GLUE-style FFI
@@ -52,11 +52,11 @@ txn run_all [true][all_passed] {
     let all_passed = t1 && t2 && t3 && t4 && t5 && t6;
     
     [all_passed] {
-        println#("ALL FFI TESTS PASSED!");
+        Print#("ALL FFI TESTS PASSED!");
     };
     
     [~all_passed] {
-        println#("SOME TESTS FAILED!");
+        Print#("SOME TESTS FAILED!");
     };
     
     term all_passed;

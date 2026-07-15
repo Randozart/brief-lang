@@ -1,8 +1,5 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
+// 2026-07-15: Replaced inop with defn + Syscall#(SchedYield, ...);
 
-inop __sys_sched_yield() -> Int {
-    %r = call i64 @brief_sched_yield();
-    ret i64 %r;
+defn sched_yield() -> Int {
+    Syscall#(SchedYield, 0, 0, 0, 0, 0, 0);
 };
-

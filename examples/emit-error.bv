@@ -1,0 +1,15 @@
+// ── EmitError$ Example ────────────────────────────────────────────────
+//
+// 2026-07-15: Demos compile-time error emission via $(Front) stage block.
+// The EmitError$ intrinsic aborts compilation with a custom message.
+//
+// Check: brief-compiler check examples/emit-error.bv
+//   (will emit error: "This program requires --feature-x flag")
+
+$(Front) {
+    EmitError$("This program requires --feature-x flag");
+};
+
+defn main() -> Int {
+    term 0;
+};

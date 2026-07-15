@@ -1,13 +1,9 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
+// 2026-07-15: Replaced inop with defn + Syscall#(ClockGetTime/NanoSleep, ...);
 
-inop __sys_clock_gettime(clock_id: Int, tp: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_clock_gettime(i64 %clock_id, i64 %tp);
-    ret i64 %r;
+defn clock_gettime(clock_id: Int, tp: Ptr<Byte>) -> Int {
+    Syscall#(ClockGetTime, clock_id, tp, 0, 0, 0, 0);
 };
 
-inop __sys_nanosleep(req: Ptr<Byte>, rem: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_nanosleep(i64 %req, i64 %rem);
-    ret i64 %r;
+defn nanosleep(req: Ptr<Byte>, rem: Ptr<Byte>) -> Int {
+    Syscall#(NanoSleep, req, rem, 0, 0, 0, 0);
 };
-

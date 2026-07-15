@@ -1,33 +1,17 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+//
+// 2026-07-15: Simple ops → defn + Syscall#.
+// shm_open, shm_unlink, sem_open need to_c_string (Phase 2).
 
-inop pipe(pipefd: Ptr<Int>) -> Int {
-    %r = call i64 @brief_pipe(i64 %pipefd);
-    ret i64 %r;
+defn pipe(pipefd: Ptr<Int>) -> Int {
+    Syscall#(Pipe, pipefd, 0, 0, 0, 0, 0);
 };
 
-inop shm_open(name: Ptr<Byte>, oflag: Int, mode: Int) -> Int {
-    %r = call i64 @brief_shm_open(i64 %name, i64 %oflag, i64 %mode);
-    ret i64 %r;
+defn sem_wait(sem: Ptr<Byte>) -> Int {
+    Syscall#(SemOp, sem, 0, 0, 0, 0, 0);
 };
 
-inop shm_unlink(name: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_shm_unlink(i64 %name);
-    ret i64 %r;
+defn sem_post(sem: Ptr<Byte>) -> Int {
+    Syscall#(SemOp, sem, 1, 0, 0, 0, 0);
 };
-
-inop sem_open(name: Ptr<Byte>, oflag: Int, mode: Int, value: Int) -> Int {
-    %r = call i64 @brief_sem_open(i64 %name, i64 %oflag, i64 %mode, i64 %value);
-    ret i64 %r;
-};
-
-inop sem_wait(sem: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_sem_wait(i64 %sem);
-    ret i64 %r;
-};
-
-inop sem_post(sem: Ptr<Byte>) -> Int {
-    %r = call i64 @brief_sem_post(i64 %sem);
-    ret i64 %r;
-};
-

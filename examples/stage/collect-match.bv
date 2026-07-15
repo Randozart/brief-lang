@@ -1,0 +1,16 @@
+// ── Collect$/MatchIR$ BVIR Pattern Example ────────────────────────────
+//
+// 2026-07-15: Demos BVIR pattern matching in a $(Back) stage block.
+// Collect$ gathers all AST nodes matching a pattern (read-only, logs count).
+// MatchIR$ rewrites matched nodes with a replacement pattern.
+//
+// Build: brief-compiler build examples/stage/collect-match.bv --emit-bvir
+
+$(Back) {
+    // Collect all defn declarations and log them
+    Collect$("(defn ?name ?params ?ret ?body)");
+};
+
+defn main() -> Int {
+    term 0;
+};

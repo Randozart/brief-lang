@@ -277,7 +277,7 @@ impl<'a> Parser<'a> {
             }
         }
 
-        if self.eat(&Token::LParen) {
+        if self.eat(&Token::LBrace) {
             // Import with symbols: import { a, b } from "module" or from <name>
             let mut symbols = Vec::new();
             loop {
@@ -286,7 +286,7 @@ impl<'a> Parser<'a> {
                     break;
                 }
             }
-            self.expect(Token::RParen)?;
+            self.expect(Token::RBrace)?;
             if !self.eat(&Token::From) {
                 let tok = self.advance().unwrap();
                 return Err(SyntaxError::UnexpectedToken {
@@ -304,7 +304,7 @@ impl<'a> Parser<'a> {
             });
         }
 
-        // Check for < without LParen: import <name>
+        // Check for < without LBrace: import <name>
         if self.eat(&Token::Lt) {
             let name = self.expect_identifier()?;
             self.expect(Token::Gt)?;

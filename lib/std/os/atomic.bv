@@ -1,46 +1,36 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
-// Uses direct LLVM IR atomic instructions (not C function calls).
+//
+// 2026-07-15: Uses AtomicLoad#/AtomicStore#/AtomicCas#/AtomicXchg#/AtomicAdd#/Fence#
+// intrinsics which map to LLVM atomicrmw / load atomic / fence instructions.
+// futex uses Syscall#(Futex, ...).
 
-inop atomic_load(ptr: Ptr<Byte>) -> Int {
-    %p = inttoptr i64 %ptr to ptr;
-    %r = load atomic i64, ptr %p seq_cst, align 8;
-    ret i64 %r;
+defn atomic_load(ptr: Ptr<Byte>) -> Int {
+    term AtomicLoad#(ptr);
 };
 
-inop atomic_store(ptr: Ptr<Byte>, val: Int) -> Int {
-    %p = inttoptr i64 %ptr to ptr;
-    store atomic i64 %val, ptr %p seq_cst, align 8;
-    %r = add i64 0, 1;
-    ret i64 %r;
+defn atomic_store(ptr: Ptr<Byte>, val: Int) -> Int {
+    AtomicStore#(ptr, val);
+    term 0;
 };
 
-inop atomic_cas(ptr: Ptr<Byte>, expected: Int, desired: Int) -> Int {
-    %p = inttoptr i64 %ptr to ptr;
-    %pair = cmpxchg ptr %p, i64 %expected, i64 %desired seq_cst seq_cst;
-    %r = extractvalue { i64, i1 } %pair, 0;
-    ret i64 %r;
+defn atomic_cas(ptr: Ptr<Byte>, expected: Int, desired: Int) -> Int {
+    term AtomicCas#(ptr, expected, desired);
 };
 
-inop atomic_xchg(ptr: Ptr<Byte>, val: Int) -> Int {
-    %p = inttoptr i64 %ptr to ptr;
-    %r = atomicrmw xchg ptr %p, i64 %val seq_cst, align 8;
-    ret i64 %r;
+defn atomic_xchg(ptr: Ptr<Byte>, val: Int) -> Int {
+    term AtomicXchg#(ptr, val);
 };
 
-inop atomic_add(ptr: Ptr<Byte>, val: Int) -> Int {
-    %p = inttoptr i64 %ptr to ptr;
-    %r = atomicrmw add ptr %p, i64 %val seq_cst, align 8;
-    ret i64 %r;
+defn atomic_add(ptr: Ptr<Byte>, val: Int) -> Int {
+    term AtomicAdd#(ptr, val);
 };
 
-inop fence() -> Int {
-    fence seq_cst;
-    %r = add i64 0, 1;
-    ret i64 %r;
+defn fence() -> Int {
+    Fence#();
+    term 0;
 };
 
-inop futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int {
-    %r = call i64 @brief_futex(i64 %uaddr, i64 %opcode, i64 %val, i64 %timeout, i64 %uaddr2, i64 %val3);
-    ret i64 %r;
+defn futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int {
+    Syscall#(Futex, uaddr, opcode, val, timeout, uaddr2, val3);
 };

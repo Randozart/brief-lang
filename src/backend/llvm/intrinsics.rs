@@ -34,11 +34,26 @@ pub fn emit_intrinsic_call(
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
         "AddressOf#" => return emit_address_of(backend, out, v, args, indent),
+        "Syscall#" => return emit_syscall(backend, out, v, args, indent),
+        "Sysconf#" => return emit_sysconf(backend, out, v, args, indent),
         "Len#" | "Length#" => return emit_len(backend, out, v, args, indent),
         "Concat#" => return emit_external_call(backend, out, v, name, args, indent),
         "Length#" => return emit_external_call(backend, out, v, name, args, indent),
         "Get#" => return emit_external_call(backend, out, v, name, args, indent),
         "Insert#" => return emit_external_call(backend, out, v, name, args, indent),
+        // 2026-07-15: Atomic operations (LLVM atomic instructions)
+        "AtomicLoad#" => return emit_atomic_load(backend, out, v, args, indent),
+        "AtomicStore#" => return emit_atomic_store(backend, out, v, args, indent),
+        "AtomicCas#" => return emit_atomic_cas(backend, out, v, args, indent),
+        "AtomicXchg#" => return emit_atomic_xchg(backend, out, v, args, indent),
+        "AtomicAdd#" => return emit_atomic_add(backend, out, v, args, indent),
+        "Fence#" => return emit_fence(backend, out, v, args, indent),
+        // 2026-07-15: Dynamic linker intrinsics
+        "DlOpen#" => return emit_dl_open(backend, out, v, args, indent),
+        "DlSym#" => return emit_dl_sym(backend, out, v, args, indent),
+        "DlClose#" => return emit_dl_close(backend, out, v, args, indent),
+        // 2026-07-15: Debugging intrinsics
+        "Backtrace#" => return emit_backtrace(backend, out, v, args, indent),
         _ => {}
     }
 
@@ -229,6 +244,230 @@ fn emit_len(
     let ptr = backend.fun.gen_reg();
     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, list).ok();
     writeln!(out, "{}{} = load i64, ptr {}", indent, v, ptr).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+// ─── Syscall# — raw OS syscall ───────────────────────────────────────
+
+/// Resolve a PascalCase abstract op name to a syscall number (x86_64).
+/// 2026-07-15: Single mapping table for all OS operations.
+fn resolve_syscall_number(op: &str) -> Option<i64> {
+    Some(match op {
+        "Read" => 0, "Write" => 1, "Open" => 2, "Close" => 3,
+        "Stat" => 4, "FStat" => 5, "LSeek" => 8, "Mmap" => 9,
+        "Munmap" => 11, "Brk" => 12, "RtSigAction" => 13,
+        "RtSigProcmask" => 14, "IoCtl" => 16, "Pipe" => 22,
+        "SchedYield" => 24, "NanoSleep" => 35,
+        "GetPid" => 39, "GetPPid" => 40, "Socket" => 41,
+        "Connect" => 42, "Accept" => 43, "Send" => 44,
+        "Recv" => 45, "SendTo" => 44, "RecvFrom" => 45,
+        "Bind" => 49, "Listen" => 50, "Exit" => 60,
+        "Fcntl" => 72, "FTruncate" => 77, "GetCwd" => 79,
+        "ChDir" => 80, "MkDir" => 83, "RmDir" => 84,
+        "Unlink" => 87, "Dup" => 32, "Dup2" => 33,
+        "FSync" => 74, "MkDt" => 85, "ReadLink" => 89,
+        "ChMod" => 90, "ChOwn" => 92, "UMask" => 95,
+        "GetPgid" => 109, "GetSid" => 124, "ShmGet" => 29,
+        "ShmAt" => 30, "ShmDt" => 31, "SemGet" => 64,
+        "SemOp" => 65, "SemCtl" => 66, "ClockGetTime" => 228,
+        "ClockSetTime" => 229, "Futex" => 202,
+        "GetRandom" => 318, "Openat" => 257,
+        "Membarrier" => 324, "CopyFileRange" => 326,
+        "PRead" => 17, "PWrite" => 18,
+        _ => return None,
+    })
+}
+
+/// 2026-07-15: Emit Syscall# — first arg is op (Int raw number or PascalCase
+/// abstract name), followed by up to 6 Int arguments.
+/// Emits: call i64 @brief_syscall(i64 %num, i64 %a1, ..., i64 %a6)
+fn emit_syscall(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    if args.is_empty() {
+        writeln!(out, "{}call void @brief_syscall()", indent).ok();
+        writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+        return BTypedRegister { name: v.to_string(), ty: Type::int() };
+    }
+    // Resolve the syscall number from the first argument
+    let num_reg = match &args[0] {
+        // Raw numeric syscall number: Syscall#(2, args...)
+        Expr::Decimal(n) => format!("{}", n),
+        // Abstract PascalCase op: Syscall#(Open, args...)
+        Expr::Identifier(op) => {
+            let n = resolve_syscall_number(op)
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| {
+                    eprintln!("Syscall#: unknown abstract op '{}', using 0", op);
+                    "0".to_string()
+                });
+            n
+        }
+        _ => {
+            // Fallback: emit as expression
+            let reg = emit_arg(backend, out, &args[0], indent);
+            reg
+        }
+    };
+    // Emit remaining args as i64, padding to 7 total (num + 6 args)
+    let mut all_args = vec![format!("i64 {}", num_reg)];
+    for i in 1..args.len() {
+        let reg = emit_arg(backend, out, &args[i], indent);
+        all_args.push(format!("i64 {}", reg));
+    }
+    while all_args.len() < 7 {
+        all_args.push("i64 0".to_string());
+    }
+    writeln!(out, "{}{} = call i64 @brief_syscall({})", indent, v, all_args.join(", ")).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+// ─── Sysconf# — runtime system configuration ──────────────────────────
+
+/// 2026-07-15: Emit Sysconf# — resolves POSIX sysconf() values at runtime.
+/// First arg is a PascalCase abstract name (e.g., PageSize, CpuCount) or
+/// a raw Int constant. Emits call to @brief_sysconf(i64 %name).
+fn emit_sysconf(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let name_reg: String = match args.first() {
+        Some(Expr::Identifier(name)) => {
+            let n: i64 = match name.as_str() {
+                "PageSize" => 30,
+                "CpuCount" => 83,
+                "HostNameMax" => 180,
+                "OpenMax" => 4,
+                "ArgMax" => 0,
+                "ChildMax" => 1,
+                "ClkTck" => 2,
+                "NGroupsMax" => 3,
+                _ => {
+                    eprintln!("Sysconf#: unknown abstract name '{}', using 0", name);
+                    0
+                }
+            };
+            n.to_string()
+        }
+        Some(Expr::Decimal(n)) => n.to_string(),
+        Some(arg) => emit_arg(backend, out, arg, indent),
+        None => "0".to_string(),
+    };
+    writeln!(out, "{}{} = call i64 @brief_sysconf(i64 {})", indent, v, name_reg).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+// ─── Atomic operations ───────────────────────────────────────────────
+// 2026-07-15: Each maps to a single LLVM atomic instruction.
+// All use seq_cst ordering. The interpreter does non-atomic loads/stores
+// (correct for single-threaded check mode).
+
+fn emit_atomic_load(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr = emit_arg(backend, out, &args[0], indent);
+    writeln!(out, "{}{} = load atomic i64, ptr {}, seq_cst", indent, v, ptr).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+fn emit_atomic_store(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr = emit_arg(backend, out, &args[0], indent);
+    let val = emit_arg(backend, out, &args[1], indent);
+    writeln!(out, "{}store atomic i64 {}, ptr {}, seq_cst", indent, val, ptr).ok();
+    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::void() }
+}
+
+fn emit_atomic_cas(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr = emit_arg(backend, out, &args[0], indent);
+    let exp = emit_arg(backend, out, &args[1], indent);
+    let des = emit_arg(backend, out, &args[2], indent);
+    writeln!(out, "{}{} = cmpxchg ptr {}, i64 {}, i64 {} seq_cst seq_cst", indent, v, ptr, exp, des).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+fn emit_atomic_xchg(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr = emit_arg(backend, out, &args[0], indent);
+    let val = emit_arg(backend, out, &args[1], indent);
+    writeln!(out, "{}{} = atomicrmw xchg ptr {}, i64 {} seq_cst", indent, v, ptr, val).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+fn emit_atomic_add(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let ptr = emit_arg(backend, out, &args[0], indent);
+    let val = emit_arg(backend, out, &args[1], indent);
+    writeln!(out, "{}{} = atomicrmw add ptr {}, i64 {} seq_cst", indent, v, ptr, val).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
+}
+
+fn emit_fence(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    writeln!(out, "{}fence seq_cst", indent).ok();
+    writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::void() }
+}
+
+// ─── Dynamic linker intrinsics ───────────────────────────────────────
+// 2026-07-15: dlopen/dlsym/dlclose are C library functions, not syscalls.
+// The backend emits calls to @dlopen/@dlsym/@dlclose which are resolved
+// by the system linker at load time.
+
+fn emit_dl_open(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let path = emit_arg(backend, out, &args[0], indent);
+    let flags = emit_arg(backend, out, &args[1], indent);
+    writeln!(out, "{}{} = call ptr @dlopen(ptr {}, i32 {})", indent, v, path, flags).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::bits(8)) }
+}
+
+fn emit_dl_sym(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let handle = emit_arg(backend, out, &args[0], indent);
+    let symbol = emit_arg(backend, out, &args[1], indent);
+    writeln!(out, "{}{} = call ptr @dlsym(ptr {}, ptr {})", indent, v, handle, symbol).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::bits(8)) }
+}
+
+fn emit_dl_close(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    let handle = emit_arg(backend, out, &args[0], indent);
+    writeln!(out, "{}{} = call i32 @dlclose(ptr {})", indent, v, handle).ok();
+    let ext = backend.fun.gen_reg();
+    writeln!(out, "{}{} = sext i32 {} to i64", indent, ext, v).ok();
+    BTypedRegister { name: ext.to_string(), ty: Type::int() }
+}
+
+// ─── Backtrace intrinsic ─────────────────────────────────────────────
+// 2026-07-15: backtrace() walks the stack. Emits call to C runtime
+// function @brief_backtrace() which uses glibc's backtrace().
+
+fn emit_backtrace(
+    backend: &mut LlvmBackend, out: &mut String, v: &str,
+    args: &[Expr], indent: &str,
+) -> BTypedRegister {
+    writeln!(out, "{}{} = call i64 @brief_backtrace()", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 

@@ -48,6 +48,8 @@ fn emit_toplevel(item: &TopLevel) -> SExpr {
 fn emit_definition(d: &Definition) -> SExpr {
     let mut children: Vec<SExpr> = vec![atom("defn"), atom(&d.name), emit_params(&d.parameters)];
     children.push(emit_outputs(&d.outputs));
+    // 2026-07-15: Serialize contract (including is_entry) for BVIR round-trip
+    children.push(emit_contract(&d.contract));
     for (k, v) in &d.metadata {
         children.push(list(&[atom("metadata"), atom(k), pv_to_sexpr(v)]));
     }
@@ -75,9 +77,14 @@ fn emit_transaction(t: &Transaction) -> SExpr {
 }
 
 fn emit_contract(c: &Contract) -> SExpr {
-    list(&[atom("contract"),
-        list(&[atom("pre"), emit_expr(&c.pre_condition)]),
-        list(&[atom("post"), emit_expr(&c.post_condition)])])
+    // 2026-07-15: (entry) preserves is_entry through BVIR round-trip
+    let mut children = vec![atom("contract")];
+    if c.is_entry {
+        children.push(atom("entry"));
+    }
+    children.push(list(&[atom("pre"), emit_expr(&c.pre_condition)]));
+    children.push(list(&[atom("post"), emit_expr(&c.post_condition)]));
+    SExpr::List(children)
 }
 
 fn emit_statedecl(s: &StateDecl) -> SExpr {
@@ -294,6 +301,44 @@ mod tests {
         let s = to_string(&sexpr);
         assert!(s.contains("deref"));
         assert!(s.contains("ptr"));
+    }
+
+    #[test]
+    fn test_contract_entry_roundtrip() {
+        // 2026-07-15: Verify is_entry survives BVIR serialize/deserialize
+        let entry_contract = Contract {
+            pre_condition: Expr::Bool(true),
+            post_condition: Expr::Bool(true),
+            is_entry: true,
+            watchdog: None,
+            span: None,
+        };
+        let items = vec![
+            TopLevel::Definition(Definition {
+                name: "main".into(),
+                type_params: vec![],
+                parameters: vec![],
+                output_type: None,
+                outputs: vec![Type::int()],
+                contract: entry_contract,
+                body: vec![],
+                metadata: std::collections::HashMap::new(),
+                derivation: None,
+                modifiers: vec![],
+                annotations: vec![],
+                span: None,
+            }),
+        ];
+        let universe = TypeUniverse::new();
+        let ir = to_bvir(&items, &universe);
+        let (restored, _) = from_bvir(&ir).unwrap();
+        assert_eq!(items.len(), restored.len());
+        match &restored[0] {
+            TopLevel::Definition(d) => {
+                assert!(d.contract.is_entry, "is_entry must survive round-trip");
+            }
+            _ => panic!("expected Definition"),
+        }
     }
 
     #[test]

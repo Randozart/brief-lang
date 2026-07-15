@@ -10,7 +10,7 @@
 // i64::MAX. No BOUND env var needed.
 //
 // Build:
-//   ./target/release/brief-compiler llvm benchmarks/bit_clear.bv \
+//   ./target/release/brief-compiler build --llvm benchmarks/bit_clear.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // C reference: bit_clear_c.c

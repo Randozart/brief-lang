@@ -1,0 +1,19 @@
+// ── auto-main: Auto-wire [#] to defn/txn main ─────────────────────────
+//
+// 2026-07-15: Mid-stage plugin. Finds defn main or txn main and sets
+// the is_entry flag on its contract, equivalent to adding [#] in source.
+//
+// Runs before entry-check so entry-check sees the newly-added marker.
+
+$(Mid) {
+    // Rewrite defn main contract to include (entry)
+    MatchIR$(
+        "(defn main ?contract ?params ?ret ?body)",
+        "(defn main (contract (entry) (pre true) (post true)) ?params ?ret ?body)"
+    );
+    // Rewrite txn main contract to include (entry)
+    MatchIR$(
+        "(txn main ?contract ??* ?body)",
+        "(txn main (contract (entry) (pre true) (post true)) ??* ?body)"
+    );
+};

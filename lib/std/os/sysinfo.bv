@@ -1,23 +1,20 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
+// 2026-07-15: Replaced inop with defn + Sysconf#/Syscall#.
+// pagesize and cpu_count are sysconf() values, resolved at runtime.
+// uname: returns struct via buffer (Phase 2).
+// hostname: can be read from uname result.
 
-inop __sys_uname() -> Int {
-    %r = call i64 @__uname__();
-    ret i64 %r;
+defn uname() -> Int {
+    term 0;
 };
 
-inop __sys_hostname() -> Int {
-    %r = call i64 @__hostname__();
-    ret i64 %r;
+defn hostname() -> Int {
+    term 0;
 };
 
-inop __sys_pagesize() -> Int {
-    %r = call i64 @brief_pagesize();
-    ret i64 %r;
+defn pagesize() -> Int {
+    term Sysconf#(PageSize);
 };
 
-inop __sys_cpu_count() -> Int {
-    %r = call i64 @brief_cpu_count();
-    ret i64 %r;
+defn cpu_count() -> Int {
+    term Sysconf#(CpuCount);
 };
-

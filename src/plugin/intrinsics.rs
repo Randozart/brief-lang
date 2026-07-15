@@ -52,9 +52,10 @@ pub fn dispatch_intrinsic(
         "EmitError$" => intrinsic_emit_error(args),
         "Collect$" => intrinsic_collect(args, program),
         "MatchIR$" => intrinsic_match_ir(args, program, universe),
+        "CheckReactive$" => intrinsic_check_reactive(args, program),
         _ => Err(format!(
             "unknown $ intrinsic '{}'. Available: InsertRegistryImport$, \
-             EmitWarning$, EmitError$, Collect$, MatchIR$",
+             EmitWarning$, EmitError$, Collect$, MatchIR$, CheckReactive$",
             name
         )),
     }
@@ -222,6 +223,60 @@ fn intrinsic_match_ir(
     Ok(())
 }
 
+// ── CheckReactive$ ────────────────────────────────────────────────────
+
+/// `CheckReactive$()` — Verify reactive transactions have live field bindings.
+///
+/// 2026-07-15: Phase 8 — Walks the program AST to find let-bindings with
+/// initial values (live fields) and checks that each rct txn reads at least
+/// one. Returns Err if zero reactive transactions have live bindings and
+/// zero have [#] entry markers.
+///
+/// Uses a text-heuristic on the body (checks if binding names appear in the
+/// body's Debug output). This may produce false positives if a field name
+/// appears in a string literal, but is correct for all practical cases.
+fn intrinsic_check_reactive(args: &[Expr], program: &[TopLevel]) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err("CheckReactive$ takes no arguments".into());
+    }
+
+    // Collect all top-level let-binding names that have initial values.
+    // Top-level `let` is represented as TopLevel::Statement(Statement::Let{...}).
+    let live_fields: Vec<String> = program.iter()
+        .filter_map(|item| {
+            if let TopLevel::Statement(stmt) = item {
+                if let Statement::Let { name, expr: Some(_), .. } = stmt.as_ref() {
+                    return Some(name.clone());
+                }
+            }
+            None
+        })
+        .collect();
+
+    // For each rct txn, check it reads at least one live field or has [#]
+    let mut live_rct_count = 0u32;
+    for item in program {
+        if let TopLevel::Transaction(txn) = item {
+            if txn.is_reactive {
+                if txn.contract.is_entry {
+                    live_rct_count += 1;
+                    continue;
+                }
+                let body_text = format!("{:?}", txn.body);
+                let reads_live = live_fields.iter().any(|name| body_text.contains(name.as_str()));
+                if reads_live {
+                    live_rct_count += 1;
+                }
+            }
+        }
+    }
+
+    if live_rct_count == 0 {
+        return Err("no reactive transaction with live field bindings or [#] entry".into());
+    }
+    Ok(())
+}
+
 // ── Evaluate a Statement for $ intrinsic calls ────────────────────────
 
 /// Evaluate a single Statement, dispatching any $ intrinsic calls found.
@@ -318,7 +373,8 @@ fn evaluate_expression_for_intrinsic(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Expr, ImportKind, Statement, TopLevel};
+    use crate::ast::{Contract, Expr, ImportKind, Statement, TopLevel, Transaction};
+    use std::collections::HashMap;
 
     // ── Helper: create a $ call expression ────────────────────────────
 
@@ -510,5 +566,87 @@ mod tests {
         let result = evaluate_statement(&stmt, &mut program, &mut universe);
         assert!(result.is_ok());
         assert!(program.is_empty());
+    }
+
+    // ── CheckReactive$ ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_check_reactive_rejects_args() {
+        let result = dispatch_intrinsic("CheckReactive$", &[make_int(0)], &mut vec![], &mut TypeUniverse::new());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("takes no arguments"));
+    }
+
+    #[test]
+    fn test_check_reactive_rejects_dead() {
+        // A reactive txn with no live field bindings and no [#]
+        let txn = Transaction {
+            name: "work".into(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
+                is_entry: false, watchdog: None, span: None },
+            body: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+        };
+        let program = vec![TopLevel::Transaction(txn)];
+        let result = intrinsic_check_reactive(&[], &program);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no reactive transaction"));
+    }
+
+    #[test]
+    fn test_check_reactive_accepts_entry() {
+        // A reactive txn with [#] entry marker (is_entry = true)
+        let txn = Transaction {
+            name: "main".into(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
+                is_entry: true, watchdog: None, span: None },
+            body: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+        };
+        let program = vec![TopLevel::Transaction(txn)];
+        let result = intrinsic_check_reactive(&[], &program);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_reactive_skips_non_reactive() {
+        // A non-reactive txn should not be counted
+        let txn = Transaction {
+            name: "work".into(),
+            is_reactive: false,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
+                is_entry: false, watchdog: None, span: None },
+            body: vec![],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+        };
+        let program = vec![TopLevel::Transaction(txn)];
+        let result = intrinsic_check_reactive(&[], &program);
+        assert!(result.is_err(), "non-reactive txn should not count");
     }
 }

@@ -1,18 +1,21 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+//
+// 2026-07-15: Uses DlOpen#/DlSym#/DlClose# intrinsics for dynamic linker.
+// String args converted via to_c_string from std/string_c.
 
-inop __sys_dlopen(filename: Ptr<Byte>) -> Int {
-    %r = call i64 @__dlopen__(i64 %filename);
-    ret i64 %r;
+import { to_c_string } from "std/string_c";
+
+defn dlopen(filename: Ptr<Byte>) -> Int {
+    let cpath: Ptr<Byte> = to_c_string(filename);
+    term DlOpen#(cpath, 2);
 };
 
-inop __sys_dlsym(handle: Int, symbol: Ptr<Byte>) -> Int {
-    %r = call i64 @__dlsym__(i64 %handle, i64 %symbol);
-    ret i64 %r;
+defn dlsym(handle: Ptr<Byte>, symbol: Ptr<Byte>) -> Int {
+    let csym: Ptr<Byte> = to_c_string(symbol);
+    term DlSym#(handle, csym);
 };
 
-inop __sys_dlclose(handle: Int) -> Int {
-    %r = call i64 @__dlclose__(i64 %handle);
-    ret i64 %r;
+defn dlclose(handle: Ptr<Byte>) -> Int {
+    term DlClose#(handle);
 };
-

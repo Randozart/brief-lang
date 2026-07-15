@@ -1,63 +1,49 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
+// 2026-07-15: Replaced inop with defn + Syscall#(Socket/Bind/Listen/etc., ...);
 
-inop __sys_socket(domain: Int, type_: Int, protocol: Int) -> Int {
-    %r = call i64 @brief_socket(i64 %domain, i64 %type_, i64 %protocol);
-    ret i64 %r;
+defn socket(domain: Int, type_: Int, protocol: Int) -> Int {
+    Syscall#(Socket, domain, type_, protocol, 0, 0, 0);
 };
 
-inop __sys_bind(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int {
-    %r = call i64 @brief_bind(i64 %fd, i64 %addr, i64 %addrlen);
-    ret i64 %r;
+defn bind(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int {
+    Syscall#(Bind, fd, addr, addrlen, 0, 0, 0);
 };
 
-inop __sys_listen(fd: Int, backlog: Int) -> Int {
-    %r = call i64 @brief_listen(i64 %fd, i64 %backlog);
-    ret i64 %r;
+defn listen(fd: Int, backlog: Int) -> Int {
+    Syscall#(Listen, fd, backlog, 0, 0, 0, 0);
 };
 
-inop __sys_accept(fd: Int, addr: Ptr<Byte>, addrlen: Ptr<Int>) -> Int {
-    %r = call i64 @brief_accept(i64 %fd, i64 %addr, i64 %addrlen);
-    ret i64 %r;
+defn accept(fd: Int, addr: Ptr<Byte>, addrlen: Ptr<Int>) -> Int {
+    Syscall#(Accept, fd, addr, addrlen, 0, 0, 0);
 };
 
-inop __sys_connect(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int {
-    %r = call i64 @brief_connect(i64 %fd, i64 %addr, i64 %addrlen);
-    ret i64 %r;
+defn connect(fd: Int, addr: Ptr<Byte>, addrlen: Int) -> Int {
+    Syscall#(Connect, fd, addr, addrlen, 0, 0, 0);
 };
 
-inop __sys_send(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
-    %r = call i64 @brief_send(i64 %fd, i64 %buf, i64 %len, i64 %flags);
-    ret i64 %r;
+defn send(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
+    Syscall#(Send, fd, buf, len, flags, 0, 0);
 };
 
-inop __sys_recv(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
-    %r = call i64 @brief_recv(i64 %fd, i64 %buf, i64 %len, i64 %flags);
-    ret i64 %r;
+defn recv(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
+    Syscall#(Recv, fd, buf, len, flags, 0, 0);
 };
 
-inop __sys_sendto(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int, dest: Ptr<Byte>, destlen: Int) -> Int {
-    %r = call i64 @brief_sendto(i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %dest, i64 %destlen);
-    ret i64 %r;
+defn sendto(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int, dest: Ptr<Byte>, destlen: Int) -> Int {
+    Syscall#(SendTo, fd, buf, len, flags, dest, destlen);
 };
 
-inop __sys_recvfrom(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int, src: Ptr<Byte>, srclen: Ptr<Int>) -> Int {
-    %r = call i64 @brief_recvfrom(i64 %fd, i64 %buf, i64 %len, i64 %flags, i64 %src, i64 %srclen);
-    ret i64 %r;
+defn recvfrom(fd: Int, buf: Ptr<Byte>, len: Int, flags: Int, src: Ptr<Byte>, srclen: Ptr<Int>) -> Int {
+    Syscall#(RecvFrom, fd, buf, len, flags, src, srclen);
 };
 
-inop __sys_setsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Int) -> Int {
-    %r = call i64 @brief_setsockopt(i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen);
-    ret i64 %r;
+defn setsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Int) -> Int {
+    Syscall#(SetSockOpt, fd, level, optname, optval, optlen, 0);
 };
 
-inop __sys_getsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Ptr<Int>) -> Int {
-    %r = call i64 @brief_getsockopt(i64 %fd, i64 %level, i64 %optname, i64 %optval, i64 %optlen);
-    ret i64 %r;
+defn getsockopt(fd: Int, level: Int, optname: Int, optval: Ptr<Byte>, optlen: Ptr<Int>) -> Int {
+    Syscall#(GetSockOpt, fd, level, optname, optval, optlen, 0);
 };
 
-inop __sys_shutdown(fd: Int, how: Int) -> Int {
-    %r = call i64 @brief_shutdown(i64 %fd, i64 %how);
-    ret i64 %r;
+defn shutdown(fd: Int, how: Int) -> Int {
+    Syscall#(Shutdown, fd, how, 0, 0, 0, 0);
 };
-

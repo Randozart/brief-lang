@@ -158,15 +158,9 @@ txn main() [true][true] {
 # Emit LLVM IR instead of a binary
 ./target/debug/brief-compiler build --llvm counter.bv
 
-# Strict mode verification (.sbv files or --strict flag)
-./target/debug/brief-compiler check --strict counter.bv
-./target/debug/brief-compiler build --strict counter.bv
-
-# Generate FFI bindings for a foreign library
-./target/debug/brief-compiler bind mylib.h
-
-# Start the LSP server
-./target/debug/brief-compiler lsp
+# Check + Build (typecheck without execution, then compile)
+./target/debug/brief-compiler check counter.bv
+./target/debug/brief-compiler build counter.bv
 ```
 
 ## Language Variants

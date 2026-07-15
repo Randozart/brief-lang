@@ -193,3 +193,57 @@ txn handle_input [has_device][has_device] {
 Phase 5 implemented `AddressOf#`, the `*` deref expression
 (`Expr::Deref`), and the two-phase safety model. Phase 6 added the BVIR
 pattern compiler for `Collect$`/`MatchIR$`.
+
+## Mid-Stage Plugins (Auto-Entry + Entry Check)
+
+Three Mid-stage plugins are enabled by default. They run in priority order:
+
+| Plugin | Stage | Priority | Purpose |
+|--------|-------|----------|---------|
+| `auto-main` | Mid | 0 | Adds `[#]` entry marker to `defn main` or `txn main` |
+| `entry-check` | Mid | 1 | Rejects programs with no entry mechanism |
+| `check-reactive` | Mid | 2 | Verifies reactive transactions have live field bindings |
+
+### auto-main (`plugins/mid/auto-main.bv`)
+
+Uses `MatchIR$` to rewrite `defn main` or `txn main`, inserting an `(entry)`
+marker in the contract. This is equivalent to writing `[#]` in the source:
+
+```brief
+$(Mid) {
+    MatchIR$(
+        "(defn main ?contract ?params ?ret ?body)",
+        "(defn main (contract (entry) (pre true) (post true)) ?params ?ret ?body)"
+    );
+};
+```
+
+After this plugin runs, the program has an explicit entry point. Disable
+with `--disable-plugin auto-main`.
+
+### entry-check (`plugins/mid/entry-check.bv`)
+
+Uses `Collect$` to check for `(entry)` markers, reactive transactions, and
+top-level triggers. If none exist, emits `EmitError$`:
+
+```brief
+$(Mid) {
+    let has_entry = Collect$("(contract (entry) ??*)");
+    let has_trg = Collect$("(trigger ?name ?type @ ?binding)");
+    [has_entry == 0 && has_trg == 0] {
+        CheckReactive$();
+    };
+};
+```
+
+This rejects programs that have no way to start executing.
+
+### check-reactive (`CheckReactive$` intrinsic)
+
+A `$` intrinsic (invoked by `entry-check`) that walks the program AST to
+verify at least one reactive transaction has either an `[#]` entry marker or
+reads a top-level `let` binding with an initial value. This ensures reactive
+transactions have something to react to on startup.
+
+Disable with `--disable-plugin entry-check` (which also suppresses
+`CheckReactive$` since it's called from `entry-check`).

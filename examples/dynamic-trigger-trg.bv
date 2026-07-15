@@ -1,0 +1,15 @@
+// ── AddressOf# Example ───────────────────────────────────────────────
+//
+// 2026-07-15: Demos AddressOf# intrinsic resolving to a hardware address.
+// AddressOf# reads from config/address-map.toml at compile time and
+// returns a typed pointer that can be used with trigger bindings.
+//
+// Build: brief-compiler build --llvm examples/dynamic-trigger-trg.bv
+// Check: brief-compiler check examples/dynamic-trigger-trg.bv
+
+// Resolve "uart_status" from the address map
+let uart_addr: Int = AddressOf#("uart_status");
+
+defn main() -> Int {
+    term uart_addr;
+};

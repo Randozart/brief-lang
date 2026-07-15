@@ -78,6 +78,22 @@ fn assert_tag(parts: &[SExpr], i: usize, expected: &str) -> Result<(), String> {
     Ok(())
 }
 
+// 2026-07-15: Extract tag from a child node that may be a bare atom (":reactive")
+// or a tagged list like ("params" ...). Returns the tag string.
+fn child_tag(expr: &SExpr) -> Result<&str, String> {
+    match expr {
+        SExpr::Atom(Atom::String(s)) => Ok(s.as_str()),
+        SExpr::List(children) => {
+            if let Some(first) = children.first() {
+                sexpr_str(first)
+            } else {
+                Err("empty list — expected tagged child".into())
+            }
+        }
+        _ => Err("expected string atom or tagged list".into()),
+    }
+}
+
 fn parse_universe(parts: &[SExpr]) -> Result<ResolvedType, String> {
     let name = tag(parts, 1)?.to_string();
     let mut rt = ResolvedType {
@@ -162,14 +178,18 @@ fn parse_definition(parts: &[SExpr]) -> Result<Definition, String> {
     let name = tag(parts, 1)?.to_string();
     let mut params = Vec::new();
     let mut outputs = Vec::new();
+    let mut contract = Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true),
+        is_entry: false, watchdog: None, span: None };
     let mut body = Vec::new();
     let mut metadata = HashMap::new();
     let mut i = 2;
+    // 2026-07-15: Use child_tag to handle both bare atoms and (tag ...) lists
     while i < parts.len() {
-        let key = tag(parts, i)?;
+        let key = child_tag(&parts[i])?;
         match key {
             "params" => { params = parse_params(&parts[i])?; i += 1; }
             "outputs" => { outputs = parse_outputs(&parts[i])?; i += 1; }
+            "contract" => { contract = parse_contract(&parts[i])?; i += 1; }
             "metadata" => {
                 if let SExpr::List(pair) = &parts[i + 1] {
                     if pair.len() == 2 {
@@ -188,8 +208,8 @@ fn parse_definition(parts: &[SExpr]) -> Result<Definition, String> {
         }
     }
     Ok(Definition { name, parameters: params, outputs, body, type_params: vec![],
-        output_type: None, contract: Contract { pre_condition: Expr::Bool(true), post_condition: Expr::Bool(true), is_entry: false, watchdog: None, span: None },
-        metadata, annotations: vec![], derivation: None, modifiers: vec![], span: None })
+        output_type: None, contract, metadata, annotations: vec![],
+        derivation: None, modifiers: vec![], span: None })
 }
 
 fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
@@ -201,8 +221,9 @@ fn parse_transaction(parts: &[SExpr]) -> Result<Transaction, String> {
     let mut is_reactive = false;
     let mut is_async = false;
     let mut i = 2;
+    // 2026-07-15: Use child_tag to handle both bare atoms and (tag ...) lists
     while i < parts.len() {
-        let key = tag(parts, i)?;
+        let key = child_tag(&parts[i])?;
         match key {
             ":reactive" => { is_reactive = true; i += 1; }
             ":async" => { is_async = true; i += 1; }
@@ -224,16 +245,27 @@ fn parse_contract(expr: &SExpr) -> Result<Contract, String> {
     let parts = match expr { SExpr::List(p) => p, _ => return Err("expected list for contract".into()) };
     let mut pre = Expr::Bool(true);
     let mut post = Expr::Bool(true);
+    let mut is_entry = false;
     let mut i = 1;
     while i < parts.len() {
-        let key = tag(parts, i)?;
+        let key = child_tag(&parts[i])?;
         match key {
-            "pre" => { pre = parse_expr(&parts[i + 1])?; i += 2; }
-            "post" => { post = parse_expr(&parts[i + 1])?; i += 2; }
+            "entry" => { is_entry = true; i += 1; }
+            "pre" => {
+                // (pre <expr>) — expr is at index 1 inside this sub-list
+                let sub = match &parts[i] { SExpr::List(p) => p, _ => return Err("expected list for pre".into()) };
+                pre = parse_expr(&sub[1])?;
+                i += 1;
+            }
+            "post" => {
+                let sub = match &parts[i] { SExpr::List(p) => p, _ => return Err("expected list for post".into()) };
+                post = parse_expr(&sub[1])?;
+                i += 1;
+            }
             _ => { i += 1; }
         }
     }
-    Ok(Contract { pre_condition: pre, post_condition: post, is_entry: false, watchdog: None, span: None })
+    Ok(Contract { pre_condition: pre, post_condition: post, is_entry, watchdog: None, span: None })
 }
 
 fn parse_statedecl(parts: &[SExpr]) -> Result<TopLevel, String> {

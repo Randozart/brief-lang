@@ -1,13 +1,9 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
+// 2026-07-15: Replaced inop with defn + Syscall#(GetPid/GetPPid, ...);
 
-inop __sys_getpid() -> Int {
-    %r = call i64 @brief_getpid();
-    ret i64 %r;
+defn getpid() -> Int {
+    Syscall#(GetPid, 0, 0, 0, 0, 0, 0);
 };
 
-inop __sys_getppid() -> Int {
-    %r = call i64 @brief_getppid();
-    ret i64 %r;
+defn getppid() -> Int {
+    Syscall#(GetPPid, 0, 0, 0, 0, 0, 0);
 };
-

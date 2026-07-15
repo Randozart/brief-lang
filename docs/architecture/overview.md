@@ -12,7 +12,7 @@ Source ─► Lex ─► Parse ─► Resolve ─► [NORMALIZE] ─► Codegen 
                                     Validates intrinsics/ffi/melds
 
 
-                         PLUGIN PATH (--plugin path/to/exe)
+                         PLUGIN PATH (--enable-plugin <name>)
 Source ─► Lex ─► Parse ─► Resolve ─► serialize ─► [PLUGIN CHAIN] ─► deserialize ─► [NORMALIZE] ─► Codegen
                                                                                         │
                                                                                    Same normalizer

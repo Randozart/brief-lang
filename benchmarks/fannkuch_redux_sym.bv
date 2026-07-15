@@ -3,7 +3,7 @@
 // Prevents LLVM precomputation by adding hot-loop FFI.
 //
 // Build:
-//   ./target/release/brief-compiler llvm benchmarks/fannkuch_redux_sym.bv \
+//   ./target/release/brief-compiler build --llvm benchmarks/fannkuch_redux_sym.bv \
 //       --out benchmarks --optimize-budget 256
 
 

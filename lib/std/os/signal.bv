@@ -1,13 +1,9 @@
-// Phase 3: relocated from compiler Intrinsic enum to std/os/ module
-// Auto-imported via prelude.
+// 2026-07-15: Replaced inop with defn + Syscall#(RtSigAction/RtSigProcmask, ...);
 
-inop __sys_sigaction(sig_num: Int, action: Ptr<Byte>, old_action: Ptr<Byte>) -> Int {
-    %r = call i64 @__sigaction__(i64 %sig_num, i64 %action, i64 %old_action);
-    ret i64 %r;
+defn sigaction(sig_num: Int, action: Ptr<Byte>, old_action: Ptr<Byte>) -> Int {
+    Syscall#(RtSigAction, sig_num, action, old_action, 0, 0, 0);
 };
 
-inop __sys_sigprocmask(how: Int, set: Ptr<Byte>, old_set: Ptr<Byte>) -> Int {
-    %r = call i64 @__sigprocmask__(i64 %how, i64 %set, i64 %old_set);
-    ret i64 %r;
+defn sigprocmask(how: Int, set: Ptr<Byte>, old_set: Ptr<Byte>) -> Int {
+    Syscall#(RtSigProcmask, how, set, old_set, 0, 0, 0);
 };
-

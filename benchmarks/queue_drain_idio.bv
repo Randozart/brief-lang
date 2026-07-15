@@ -4,7 +4,7 @@
 // compiler, while the symmetric variant (queue_drain_sym) mirrors C.
 //
 // Build:
-//   ./target/release/brief-compiler llvm benchmarks/queue_drain_idio.bv \
+//   ./target/release/brief-compiler build --llvm benchmarks/queue_drain_idio.bv \
 //       --out benchmarks --optimize-budget 256
 //
 // No C reference — this is a Brief-native pattern. Correctness is compared

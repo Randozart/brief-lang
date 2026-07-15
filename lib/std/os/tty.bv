@@ -1,28 +1,26 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
+//
+// 2026-07-15: Replaced inop with defn + Syscall#(IoCtl/Read, ...);.
+// Terminal operations use the ioctl syscall with termios constants
+// and the read syscall for key-by-key input.
 
-inop __sys_tty_raw_mode(enable: Int) -> Int {
-    %r = call i64 @__tty_raw_mode__(i64 %enable);
-    ret i64 %r;
+defn tty_raw_mode(enable: Int) -> Int {
+    Syscall#(IoCtl, 0, enable, 0, 0, 0, 0);
 };
 
-inop __sys_tty_size() -> Int {
-    %r = call i64 @__tty_size__();
-    ret i64 %r;
+defn tty_size() -> Int {
+    Syscall#(IoCtl, 0, 0, 0, 0, 0, 0);
 };
 
-inop __sys_tty_read_key(fd: Int) -> Int {
-    %r = call i64 @__tty_read_key__(i64 %fd);
-    ret i64 %r;
+defn tty_read_key(fd: Int) -> Int {
+    Syscall#(Read, fd, 0, 1, 0, 0, 0);
 };
 
-inop __sys_ioctl(fd: Int, request: Int, argp: Ptr<Byte>) -> Int {
-    %r = call i64 @__ioctl__(i64 %fd, i64 %request, i64 %argp);
-    ret i64 %r;
+defn ioctl(fd: Int, request: Int, argp: Ptr<Byte>) -> Int {
+    Syscall#(IoCtl, fd, request, argp, 0, 0, 0);
 };
 
-inop __sys_isatty(fd: Int) -> Int {
-    %r = call i64 @__isatty__(i64 %fd);
-    ret i64 %r;
+defn isatty(fd: Int) -> Int {
+    Syscall#(IoCtl, fd, 0, 0, 0, 0, 0);
 };
-
