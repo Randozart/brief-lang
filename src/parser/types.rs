@@ -19,9 +19,13 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 Ok(Type::Custom("UInt".into()))
             }
-            Some(Token::TypeFloat) => {
+            Some(Token::TypeFloat) | Some(Token::TypeFloat32) => {
                 self.pos += 1;
                 Ok(Type::float())
+            }
+            Some(Token::TypeFloat64) => {
+                self.pos += 1;
+                Ok(Type::float64())
             }
             Some(Token::TypeString) => {
                 self.pos += 1;

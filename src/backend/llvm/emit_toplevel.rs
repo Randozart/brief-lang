@@ -1298,6 +1298,7 @@ impl LlvmBackend {
             // ret/br, and leaves basic blocks unterminated.
             self.fun.in_callable_txn = false;
             self.fun.returns_i64 = false;
+            self.fun.fn_ret_ty = "void".to_string();
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
@@ -1345,6 +1346,7 @@ impl LlvmBackend {
             // assume_action path above (emit_definition leaks into txn).
             self.fun.in_callable_txn = false;
             self.fun.returns_i64 = false;
+            self.fun.fn_ret_ty = "void".to_string();
             if !matches!(txn.contract.pre_condition, Expr::Bool(true)) {
                 self.emit_precondition_check(out, &txn.contract.pre_condition, "  ");
             }
@@ -1361,8 +1363,10 @@ impl LlvmBackend {
             }
             if !self.fun.terminated {
                 self.emit_arena_fini(out, "  ");
-                writeln!(out, "  ret void").ok();
             }
+            // 2026-07-15: Always emit ret void — terminates the function
+            // even when the last block was a guard end label.
+            writeln!(out, "  ret void").ok();
             writeln!(out, "}}").ok();
         }
 
@@ -1723,6 +1727,7 @@ impl LlvmBackend {
         writeln!(out, "{}:", txn_fire_l).ok();
         self.fun.terminated = false;
         self.fun.returns_i64 = false;
+            self.fun.fn_ret_ty = "void".to_string();
         for s in &txn.body {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");
@@ -1765,6 +1770,7 @@ impl LlvmBackend {
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
+            self.fun.fn_ret_ty = "void".to_string();
         for s in &combined {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");
@@ -1780,6 +1786,7 @@ impl LlvmBackend {
         writeln!(out, "  br i1 true, label %body, label %rollback").ok();
         writeln!(out, "  body:").ok();
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear();         self.fun.terminated = false; self.fun.returns_i64 = false;
+            self.fun.fn_ret_ty = "void".to_string();
         for s in body {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");
@@ -1815,6 +1822,7 @@ impl LlvmBackend {
         writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {} {{", name, fused_attr).ok();
         writeln!(out, "  entry:").ok();
         self.fun.txn_counter = 0; self.fun.let_bindings.clear(); self.fun.let_binding_types.clear(); self.fun.let_original_types.clear(); self.fun.reg_float_cache.clear(); self.fun.reg_type_cache.clear(); self.fun.terminated = false; self.fun.returns_i64 = false;
+            self.fun.fn_ret_ty = "void".to_string();
         for s in body {
             if self.fun.terminated { break; }
             emit_statement(self, out, s, "  ");

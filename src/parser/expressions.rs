@@ -207,7 +207,9 @@ impl<'a> Parser<'a> {
         match self.advance() {
             // ── Literals ────────────────────────────────────────────
             Some((Token::Integer(n), _)) => Ok(Expr::Decimal(n)),
-            Some((Token::Float(f), _)) => Ok(Expr::Float(f)),
+            Some((Token::Float(f), _))
+            | Some((Token::Float32(f), _))
+            | Some((Token::Float64(f), _)) => Ok(Expr::Float(f)),
             Some((Token::String(s), _)) => Ok(Expr::Quoted(s.into_bytes())),
             Some((Token::Char(c), _)) => Ok(Expr::Decimal(c as i64)),
             Some((Token::BoolTrue, _)) => Ok(Expr::Bool(true)),

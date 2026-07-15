@@ -7,7 +7,7 @@
 
 
 import { get_env_int } from "std/env.bv";
-import "link/brief_rt.c";
+// brief_rt.c linked automatically
 
 let bound: Int = get_env_int("BOUND");
 let count: Int = 0;

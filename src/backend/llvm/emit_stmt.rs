@@ -55,9 +55,12 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Term(val) | Statement::TermBang(val) => {
             if let Some(val) = val {
                 let reg = backend.emit_expr(out, val, indent);
-                // 2026-07-14: return type must match reg.ty — hardcoded i64 breaks bool/float returns
-                let ret_ty = crate::backend::llvm::types::lower_type(&reg.ty);
-                writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
+                if backend.fun.fn_ret_ty != "void" {
+                    let ret_ty = crate::backend::llvm::types::lower_type(&reg.ty);
+                    writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
+                    backend.fun.terminated = true;
+                }
+                // 2026-07-15: Void functions: just set terminated — caller emits ret at done:
                 backend.fun.terminated = true;
             }
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
@@ -65,7 +68,6 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         Statement::Return(val) => {
             if let Some(val) = val {
                 let reg = backend.emit_expr(out, val, indent);
-                // 2026-07-14: return type must match reg.ty — hardcoded i64 breaks bool/float returns
                 let ret_ty = crate::backend::llvm::types::lower_type(&reg.ty);
                 writeln!(out, "{}ret {} {}", indent, ret_ty, reg.name).ok();
                 backend.fun.terminated = true;
@@ -92,6 +94,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             for stmt in body {
                 emit_statement(backend, out, stmt, indent);
             }
+            // 2026-07-15: Always emit br to end (even if then body terminated)
             writeln!(out, "{}br label %{}", indent, end_lbl).ok();
             writeln!(out, "{}{}:", indent, end_lbl).ok();
             TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }
