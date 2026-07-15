@@ -40,6 +40,16 @@ impl<'a> Parser<'a> {
             Some(Token::Const) => {
                 Ok(TopLevel::Constant(self.parse_const_declaration()?))
             }
+            // 2026-07-15: $(Stage) compile-time metaprogramming block
+            Some(Token::Dollar) => {
+                // Check if the next token is LParen without consuming
+                if self.tokens.get(self.pos + 1).map(|(t, _)| t) == Some(&Token::LParen) {
+                    self.parse_stage_block().map(TopLevel::StageBlock)
+                } else {
+                    let name = self.expect_identifier()?;
+                    self.error_at_current(&format!("unexpected top-level item '{}'", name))
+                }
+            }
             _ => {
                 let name = self.expect_identifier()?;
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
@@ -250,10 +260,25 @@ impl<'a> Parser<'a> {
     }
 
     /// Parse: import "module" or import sym from "module"
+    /// 2026-07-15: Added import <name> (registry lookup) support.
     fn parse_import(&mut self) -> Result<Import, SyntaxError> {
         self.pos += 1;
+
+        // Helper: parse a string path or angle-bracketed registry name.
+        // Must be a local fn to avoid borrow conflicts with &mut self.
+        fn parse_import_path(parser: &mut Parser) -> Result<ImportKind, SyntaxError> {
+            if parser.eat(&Token::Lt) {
+                let name = parser.expect_identifier()?;
+                parser.expect(Token::Gt)?;
+                Ok(ImportKind::Registry(name))
+            } else {
+                let path = parser.expect_string()?;
+                Ok(ImportKind::Literal(path))
+            }
+        }
+
         if self.eat(&Token::LParen) {
-            // Import with symbols: import { a, b } from "module"
+            // Import with symbols: import { a, b } from "module" or from <name>
             let mut symbols = Vec::new();
             loop {
                 symbols.push(self.expect_identifier()?);
@@ -270,31 +295,45 @@ impl<'a> Parser<'a> {
                     span: self.make_span(tok.1),
                 });
             }
-            let module = self.expect_string()?;
+            let kind = parse_import_path(self)?;
             self.expect(Token::Semicolon)?;
             return Ok(Import {
-                module,
+                kind,
                 symbols,
                 span: None,
             });
         }
-        if matches!(self.peek(), Some(Token::String(_))) {
-            // Simple import: import "module"
-            let module = self.expect_string()?;
+
+        // Check for < without LParen: import <name>
+        if self.eat(&Token::Lt) {
+            let name = self.expect_identifier()?;
+            self.expect(Token::Gt)?;
             self.expect(Token::Semicolon)?;
             return Ok(Import {
-                module,
+                kind: ImportKind::Registry(name),
                 symbols: vec![],
                 span: None,
             });
         }
-        // Import with symbols: import sym from "module"
-        let first = self.expect_identifier()?;
-        if self.eat_identifier("from") {
+
+        // Check for string: import "path"
+        if matches!(self.peek(), Some(Token::String(_))) {
             let module = self.expect_string()?;
             self.expect(Token::Semicolon)?;
+            return Ok(Import {
+                kind: ImportKind::Literal(module),
+                symbols: vec![],
+                span: None,
+            });
+        }
+
+        // Import with symbols: import sym from "module" or from <name>
+        let first = self.expect_identifier()?;
+        if self.eat_identifier("from") {
+            let kind = parse_import_path(self)?;
+            self.expect(Token::Semicolon)?;
             Ok(Import {
-                module,
+                kind,
                 symbols: vec![first],
                 span: None,
             })
@@ -307,14 +346,79 @@ impl<'a> Parser<'a> {
                 symbols.push(self.expect_identifier()?);
             }
             self.eat_identifier("from");
-            let module = self.expect_string()?;
+            let kind = parse_import_path(self)?;
             self.expect(Token::Semicolon)?;
             Ok(Import {
-                module,
+                kind,
                 symbols,
                 span: None,
             })
         }
+    }
+
+    /// Parse: $(Stage @ priority) { body }
+    /// 2026-07-15: Compile-time metaprogramming block.
+    /// Stage is one of: Front, Mid, Post, Back.
+    /// Priority is optional, defaults to 500 (normal).
+    fn parse_stage_block(&mut self) -> Result<StageBlock, SyntaxError> {
+        self.pos += 1; // consume $
+        self.expect(Token::LParen)?;
+        let stage_str = self.expect_identifier()?;
+        let stage = match stage_str.as_str() {
+            "Front" => StageKind::Front,
+            "Mid" => StageKind::Mid,
+            "Post" => StageKind::Post,
+            "Back" => StageKind::Back,
+            _ => {
+                return Err(SyntaxError::InvalidExpression {
+                    reason: format!(
+                        "unknown stage '{}'. Expected one of: Front, Mid, Post, Back",
+                        stage_str
+                    ),
+                    span: crate::errors::Span::dummy(),
+                });
+            }
+        };
+
+        // Optional priority: @ N or @ name
+        let priority = if self.eat(&Token::At) {
+            if let Some(Token::Integer(n)) = self.peek() {
+                let p = *n as u32;
+                self.pos += 1;
+                p
+            } else {
+                let name = self.expect_identifier()?;
+                match name.as_str() {
+                    "highest" => 1000,
+                    "high" => 750,
+                    "normal" => 500,
+                    "low" => 250,
+                    "lowest" => 0,
+                    _ => {
+                        return Err(SyntaxError::InvalidExpression {
+                            reason: format!(
+                                "unknown priority '{}'. Expected integer or one of: \
+                                 highest, high, normal, low, lowest",
+                                name
+                            ),
+                            span: crate::errors::Span::dummy(),
+                        });
+                    }
+                }
+            }
+        } else {
+            500
+        };
+
+        self.expect(Token::RParen)?;
+        let body = self.parse_block()?;
+
+        Ok(StageBlock {
+            stage,
+            priority,
+            body,
+            span: None,
+        })
     }
 
     /// Parse: meld name -> target;
@@ -356,14 +460,25 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse top-level trg binding: trg name @ type.port;
+    /// Parse top-level trg binding: trg name @ instance.#port;
+    /// 2026-07-15: The # prefix is required for layout port access.
     fn parse_top_level_trg(&mut self) -> Result<Trigger, SyntaxError> {
         self.pos += 1;
         let name = self.expect_identifier()?;
         self.expect(Token::At)?;
         let instance = self.parse_expression()?;
         self.expect(Token::Dot)?;
+        // Require # prefix for layout port access
         let port = self.expect_identifier()?;
+        if !port.starts_with('#') {
+            return Err(SyntaxError::InvalidExpression {
+                reason: format!(
+                    "trigger port '{}' must use # prefix for layout access: .#{}",
+                    port, port
+                ),
+                span: crate::errors::Span::dummy(),
+            });
+        }
         self.expect(Token::Semicolon)?;
         Ok(Trigger {
             name,

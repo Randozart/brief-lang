@@ -52,18 +52,8 @@ pub enum TopLevel {
         cases: Vec<FuzzCase>,
     },
     Statement(Box<Statement>),
-    MacroDef {
-        name: String,
-        params: Vec<(String, MacroArgType)>,
-        return_type: Option<MacroArgType>,
-        body: Vec<Statement>,
-    },
-    TemplateDef {
-        name: String,
-        params: Vec<(String, MacroArgType)>,
-        return_type: Option<MacroArgType>,
-        body: Vec<Statement>,
-    },
+    // 2026-07-15: $(Stage) compile-time metaprogramming block
+    StageBlock(StageBlock),
     RenderBlock(RenderBlock),
     Stylesheet(String),
     SvgComponent {
@@ -270,11 +260,78 @@ pub enum SigModifier {
     Export(Option<String>),
 }
 
+/// Whether an import path is a literal file path or a registry lookup.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportKind {
+    /// import "path" — file/project-anchored path
+    Literal(String),
+    /// import <name> — compiler registry lookup
+    Registry(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct Import {
-    pub module: String,
+    pub kind: ImportKind,
     pub symbols: Vec<String>,
     pub span: Option<Span>,
+}
+
+impl Import {
+    /// Get the path string regardless of import kind.
+    /// For `Literal("path")` returns `"path"`.
+    /// For `Registry("name")` returns `"name"` (without angle brackets).
+    pub fn path(&self) -> &str {
+        match &self.kind {
+            ImportKind::Literal(p) => p.as_str(),
+            ImportKind::Registry(n) => n.as_str(),
+        }
+    }
+
+    /// Compatibility accessor — returns the same as `path()`.
+    /// Allows existing code using `.module` to continue working
+    /// after the field was renamed to `.kind`.
+    pub fn module(&self) -> &str {
+        self.path()
+    }
+
+    /// Create a new literal import with the given path.
+    pub fn literal(path: impl Into<String>, symbols: Vec<String>) -> Self {
+        Import {
+            kind: ImportKind::Literal(path.into()),
+            symbols,
+            span: None,
+        }
+    }
+
+    /// Create a new registry import with the given name.
+    pub fn registry(name: impl Into<String>, symbols: Vec<String>) -> Self {
+        Import {
+            kind: ImportKind::Registry(name.into()),
+            symbols,
+            span: None,
+        }
+    }
+}
+
+/// A compile-time $(Stage) block.
+/// The body is executed at compile time during the specified pipeline stage.
+/// 2026-07-15: Phase 1b — Plugin architecture.
+#[derive(Debug, Clone)]
+pub struct StageBlock {
+    pub stage: StageKind,
+    pub priority: u32,
+    pub body: Vec<Statement>,
+    pub span: Option<Span>,
+}
+
+/// The four pipeline stages at which compile-time plugins can run.
+/// 2026-07-15: Phase 1b — Plugin architecture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StageKind {
+    Front,
+    Mid,
+    Post,
+    Back,
 }
 
 #[derive(Debug, Clone)]
@@ -625,11 +682,6 @@ pub struct FuzzCase {
     pub bindings: Vec<(String, Expr)>,
     pub expected: Expr,
     pub span: Option<Span>,
-}
-
-#[derive(Debug, Clone)]
-pub enum MacroArgType {
-    Expr, Stmt, Block, Type, Int, String, Bool,
 }
 
 #[derive(Debug, Clone)]

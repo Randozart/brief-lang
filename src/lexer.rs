@@ -149,11 +149,7 @@ pub enum Token {
     #[token("match")]
     Match,
 
-    #[token("template")]
-    Template,
-
-    #[token("macro")]
-    Macro,
+    // 2026-07-15: template/macro removed — replaced by $(Stage) blocks
 
     #[token("quote")]
     Quote,
@@ -609,9 +605,14 @@ pub enum Token {
     // ── Identifiers (including PascalCase# intrinsics) ────────
     // 2026-07-12: # is a valid identifier character.
     // This allows Sqrt#, AddI64#, PrintInt# as single tokens.
+    // 2026-07-15: $ is also a valid identifier character.
+    // This allows InsertRegistryImport$ as a single token.
+    // $(Front) parses as Dollar LParen Identifier("Front") RParen
+    // because $ standalone (with non-identifier char after) matches
+    // the exact #[token("$")] before the identifier regex.
     // Specific multi-char hash tokens (#[, #![, #pragma, etc.)
     // are matched BEFORE this regex due to logos priority rules.
-    #[regex(r"[a-zA-Z_#][a-zA-Z0-9_#]*", |lex| lex.slice().to_string())]
+    #[regex(r"[a-zA-Z_#$][a-zA-Z0-9_#$]*", |lex| lex.slice().to_string())]
     Identifier(String),
 }
 
@@ -653,8 +654,8 @@ impl std::fmt::Display for Token {
             Token::Ok => write!(f, "Ok"),
             Token::Err => write!(f, "Err"),
             Token::Match => write!(f, "match"),
-            Token::Template => write!(f, "template"),
-            Token::Macro => write!(f, "macro"),
+            // 2026-07-15: Template/Macro tokens removed
+
             Token::Quote => write!(f, "quote"),
             Token::Dollar => write!(f, "$"),
             Token::DollarBang => write!(f, "$!"),
@@ -852,21 +853,14 @@ mod tests {
     }
 
     #[test]
-    fn test_template_macro_keywords() {
-        let mut lexer = Token::lexer("template macro quote");
-        assert_eq!(lexer.next(), Some(Ok(Token::Template)));
-        assert_eq!(lexer.next(), Some(Ok(Token::Macro)));
-        assert_eq!(lexer.next(), Some(Ok(Token::Quote)));
-        assert_eq!(lexer.next(), None);
-    }
-
-    #[test]
     fn test_dollar_tokens() {
+        // 2026-07-15: $ is a valid identifier character, so $unless is a
+        // single Identifier token (longest match wins). $! is still a
+        // single DollarBang token (exact token match beats identifier).
         let mut lexer = Token::lexer("$unless $!circular_buffer");
-        assert_eq!(lexer.next(), Some(Ok(Token::Dollar)));
         assert_eq!(
             lexer.next(),
-            Some(Ok(Token::Identifier("unless".to_string())))
+            Some(Ok(Token::Identifier("$unless".to_string())))
         );
         assert_eq!(lexer.next(), Some(Ok(Token::DollarBang)));
         assert_eq!(

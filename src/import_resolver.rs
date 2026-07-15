@@ -150,18 +150,13 @@ impl ImportResolver {
             // Auto-import the bootstrap type universe (14 primitive types)
             let has_bootstrap_import = items.iter().any(|item| {
                 if let TopLevel::Import(imp) = item {
-                    let path = &imp.module;
-                    path == "std/types/bootstrap.bv"
+                    imp.path() == "std/types/bootstrap.bv"
                 } else {
                     false
                 }
             });
             if !has_bootstrap_import {
-                items.insert(0, TopLevel::Import(Import {
-                    module: "std/types/bootstrap.bv".to_string(),
-                    symbols: vec![],
-                    span: None,
-                }));
+                items.insert(0, TopLevel::Import(Import::literal("std/types/bootstrap.bv", vec![])));
             }
 
             let prelude_modules = [
@@ -177,24 +172,19 @@ impl ImportResolver {
             for module_path in &prelude_modules {
                 let has_import = items.iter().any(|item| {
                     if let TopLevel::Import(imp) = item {
-                        imp.module == *module_path
+                        imp.path() == *module_path
                     } else {
                         false
                     }
                 });
                 if !has_import {
-                    items.push(TopLevel::Import(Import {
-                        module: module_path.to_string(),
-                        symbols: vec![],
-                        span: None,
-                    }));
+                    items.push(TopLevel::Import(Import::literal(*module_path, vec![])));
                 }
             }
 
             let has_core_imports = items.iter().any(|item| {
                 if let TopLevel::Import(imp) = item {
-                    let path = &imp.module;
-                    path.starts_with("std/core")
+                    imp.path().starts_with("std/core")
                 } else {
                     false
                 }
@@ -205,11 +195,7 @@ impl ImportResolver {
                     "string_builder.bv",
                 ];
                 for module in safe_core_modules {
-                    items.insert(0, TopLevel::Import(Import {
-                        module: format!("std/core/{}", module),
-                        symbols: vec![],
-                        span: None,
-                    }));
+                    items.insert(0, TopLevel::Import(Import::literal(format!("std/core/{}", module), vec![])));
                 }
             }
         }
@@ -286,40 +272,40 @@ impl ImportResolver {
         source_file: &PathBuf,
     ) -> Result<Vec<TopLevel>, String> {
         // Skip empty module paths
-        if import.module.is_empty() {
+        if import.path().is_empty() {
             return Ok(vec![]);
         }
 
         // Handle `import "target"` — board-level device description
-        if import.module == "target" {
+        if import.path() == "target" {
             return self.resolve_target_import();
         }
 
         // Handle glob expansion (* or ** in last path segment)
-        let is_glob = import.module.ends_with("/*") || import.module.ends_with("/**");
+        let is_glob = import.path().ends_with("/*") || import.path().ends_with("/**");
         if is_glob {
             return self.resolve_glob(import, source_file);
         }
 
         // Cache check
-        if let Some((cached, sed_names)) = self.loaded_modules.get(&import.module) {
+        if let Some((cached, sed_names)) = self.loaded_modules.get(import.path()) {
             return self.filter_items(cached, sed_names, &import.symbols);
         }
 
         // Check for CSS import
-        if import.module.ends_with(".css") {
+        if import.path().ends_with(".css") {
             let css_path = source_file
                 .parent()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(&import.module);
+                .join(&import.path());
 
             if css_path.exists() {
                 let css_content = std::fs::read_to_string(&css_path)
                     .map_err(|e| format!("Failed to read CSS '{}': {}", css_path.display(), e))?;
                 let css_for_cache = css_content.clone();
                 self.loaded_modules.insert(
-                    import.module.clone(),
+                    import.path().to_string(),
                     (vec![TopLevel::Stylesheet(css_for_cache)], vec![]),
                 );
                 return Ok(vec![TopLevel::Stylesheet(css_content)]);
@@ -327,12 +313,12 @@ impl ImportResolver {
         }
 
         // Check for SVG import
-        if import.module.ends_with(".svg") {
+        if import.path().ends_with(".svg") {
             let svg_path = source_file
                 .parent()
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(&import.module);
+                .join(&import.path());
 
             if svg_path.exists() {
                 let svg_content = std::fs::read_to_string(&svg_path)
@@ -342,10 +328,10 @@ impl ImportResolver {
                     .first()
                     .cloned()
                     .unwrap_or_else(|| {
-                        let file_name = if let Some(last_slash) = import.module.rfind('/') {
-                            &import.module[last_slash + 1..]
+                        let file_name = if let Some(last_slash) = import.path().rfind('/') {
+                            &import.path()[last_slash + 1..]
                         } else {
-                            &import.module
+                            &import.path()
                         };
                         let file_name = file_name.trim_end_matches(".svg");
                         file_name
@@ -363,7 +349,7 @@ impl ImportResolver {
                     });
                 let svg_for_cache = svg_content.clone();
                 self.loaded_modules.insert(
-                    import.module.clone(),
+                    import.path().to_string(),
                     (vec![TopLevel::SvgComponent {
                         name: component_name.clone(),
                         content: svg_for_cache,
@@ -377,7 +363,7 @@ impl ImportResolver {
         }
 
         // Check for DBrief import (.dbv, .dbvl, .dbvs)
-        if import.module.ends_with(".dbv") || import.module.ends_with(".dbvl") || import.module.ends_with(".dbvs") {
+        if import.path().ends_with(".dbv") || import.path().ends_with(".dbvl") || import.path().ends_with(".dbvs") {
             let dbrief_src_dir = source_file
                 .parent()
                 .map(|p| p.to_path_buf())
@@ -386,20 +372,20 @@ impl ImportResolver {
             let dbrief_path = self
                 .search_paths
                 .iter()
-                .map(|p| dbrief_src_dir.join(p).join(&import.module))
-                .chain(std::iter::once(dbrief_src_dir.join(&import.module)))
+                .map(|p| dbrief_src_dir.join(p).join(&import.path()))
+                .chain(std::iter::once(dbrief_src_dir.join(&import.path())))
                 .find(|p| p.exists())
                 .ok_or_else(|| {
                     format!(
                         "DBrief file not found: {} (searched in lib/, imports/, ./ and source dir)",
-                        import.module
+                        import.path()
                     )
                 })?;
 
             let content = std::fs::read_to_string(&dbrief_path)
                 .map_err(|e| format!("Failed to read DBrief file '{}': {}", dbrief_path.display(), e))?;
 
-            let is_dbvl = import.module.ends_with(".dbvl");
+            let is_dbvl = import.path().ends_with(".dbvl");
 
             // For .dbvl files, use offset-tracking parser for lazy loading
             let doc = if is_dbvl {
@@ -428,7 +414,7 @@ impl ImportResolver {
             let program_for_cache = dbrief_items.clone();
 
             self.loaded_modules.insert(
-                import.module.clone(),
+                import.path().to_string(),
                 (program_for_cache, vec![]),
             );
 
@@ -437,18 +423,18 @@ impl ImportResolver {
 
         // Default: Brief module (.bv or .ebv)
         let module_path = {
-            if import.module.ends_with(".bv") {
-                import.module[..import.module.len() - 3].replace('.', "/")
-            } else if import.module.ends_with(".ebv") {
-                import.module[..import.module.len() - 4].replace('.', "/")
+            if import.path().ends_with(".bv") {
+                import.path()[..import.path().len() - 3].replace('.', "/")
+            } else if import.path().ends_with(".ebv") {
+                import.path()[..import.path().len() - 4].replace('.', "/")
             } else {
-                import.module.replace('.', "/")
+                import.path().replace('.', "/")
             }
         };
         // TypeScript-style import resolution:
         //   "./foo" or "../foo" → relative to importing file
         //   "foo/bar"           → relative to project root
-        let is_relative = import.module.starts_with("./") || import.module.starts_with("../");
+        let is_relative = import.path().starts_with("./") || import.path().starts_with("../");
         let source_dir = if is_relative {
             source_file
                 .parent()
@@ -480,7 +466,7 @@ impl ImportResolver {
         }
 
         // For std.* or std/ imports, also search from project root's lib/ directory
-        if !found_both && found_path.is_none() && (import.module.starts_with("std.") || import.module.starts_with("std/")) {
+        if !found_both && found_path.is_none() && (import.path().starts_with("std.") || import.path().starts_with("std/")) {
             let mut current = source_dir.clone();
             while let Some(parent) = current.parent() {
                 if parent.join("Cargo.toml").exists() {
@@ -515,7 +501,7 @@ impl ImportResolver {
         if found_both {
             return Err(format!(
                 "Ambiguous import '{}'. Both .bv and .ebv files exist. Please specify the extension.",
-                import.module
+                import.path()
             ));
         }
 
@@ -526,17 +512,17 @@ impl ImportResolver {
                  {dir}/lib/{mp}.{{bv,ebv}}, \
                  {dir}/imports/{mp}.{{bv,ebv}}, \
                  {dir}/{mp}.{{bv,ebv}}",
-                import.module,
+                import.path(),
                 mp = module_path,
             )
         })?;
 
         // 2026-07-01: Cycle detection
-        if !self.in_progress.insert(import.module.clone()) {
+        if !self.in_progress.insert(import.path().to_string()) {
             return Err(format!(
                 "Circular import detected: '{}' is already being resolved \
                  (direct or transitive self-import).",
-                import.module
+                import.path()
             ));
         }
 
@@ -554,10 +540,10 @@ impl ImportResolver {
 
         // Cache the fully resolved program
         self.loaded_modules
-            .insert(import.module.clone(), (resolved.clone(), vec![]));
+            .insert(import.path().to_string(), (resolved.clone(), vec![]));
 
         let result = self.filter_items(&resolved, &[], &import.symbols);
-        self.in_progress.remove(&import.module);
+        self.in_progress.remove(import.path());
         result
     }
 
@@ -567,8 +553,8 @@ impl ImportResolver {
         import: &Import,
         source_file: &PathBuf,
     ) -> Result<Vec<TopLevel>, String> {
-        let is_recursive = import.module.ends_with("/**");
-        let glob_prefix = import.module.trim_end_matches("/*").trim_end_matches("/**");
+        let is_recursive = import.path().ends_with("/**");
+        let glob_prefix = import.path().trim_end_matches("/*").trim_end_matches("/**");
         let path_prefix: Vec<String> = glob_prefix.split('/').map(|s| s.to_string()).collect();
 
         // Determine base directory
@@ -625,11 +611,7 @@ impl ImportResolver {
                 let mut path_components = path_prefix.clone();
                 path_components.extend(rel_path.split('/').map(|s| s.to_string()));
                 let module_path = path_components.join("/");
-                TopLevel::Import(Import {
-                    module: module_path,
-                    symbols: vec![],
-                    span: None,
-                })
+                TopLevel::Import(Import::literal(module_path, vec![]))
             })
             .collect();
 
@@ -817,7 +799,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn import_program(path: &str, symbols: Vec<String>) -> Vec<TopLevel> {
-        vec![TopLevel::Import(Import { module: path.to_string(), symbols, span: None })]
+        vec![TopLevel::Import(Import::literal(path.to_string(), symbols))]
     }
 
     #[test]
@@ -932,11 +914,7 @@ mod tests {
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let items = vec![TopLevel::Import(Import {
-            module: "std/core/*".to_string(),
-            symbols: vec![],
-            span: None,
-        })];
+        let items = vec![TopLevel::Import(Import::literal("std/core/*", vec![]))];
         let mut resolver = ImportResolver::new()
             .with_use_stdlib(false);
         resolver.add_search_path(stdlib_root);

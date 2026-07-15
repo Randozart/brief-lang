@@ -362,15 +362,21 @@ impl fmt::Display for TopLevel {
                 write!(f, "cell {} {{ ... }};", cell.name)
             }
             TopLevel::Import(import) => {
-                if import.symbols.is_empty() {
-                    write!(f, "import \"{}\";", import.module)
-                } else {
-                    write!(
-                        f,
-                        "import {} from \"{}\";",
-                        import.symbols.join(", "),
-                        import.module
-                    )
+                match &import.kind {
+                    ImportKind::Literal(path) => {
+                        if import.symbols.is_empty() {
+                            write!(f, "import \"{}\";", path)
+                        } else {
+                            write!(f, "import {} from \"{}\";", import.symbols.join(", "), path)
+                        }
+                    }
+                    ImportKind::Registry(name) => {
+                        if import.symbols.is_empty() {
+                            write!(f, "import <{}>;", name)
+                        } else {
+                            write!(f, "import {} from <{}>;", import.symbols.join(", "), name)
+                        }
+                    }
                 }
             }
             TopLevel::Export(export) => {

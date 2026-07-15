@@ -83,6 +83,37 @@ proven at compile time, not `unsafe` blocks.
     Rationale comments are institutional memory. A plan without a documentation
     strategy will produce unmaintainable code.
 
+## Plan Directives
+
+Every plan document and every implementation commit must adhere to these five
+directives. They are non-negotiable — refer to "Plan Directives" in reviews.
+
+1. **FLAT CONTROL FLOW**: Max 2 nesting levels. No arrowhead code. Use `?`,
+   `if let`, guard clauses, and early returns. Extract deeply nested logic
+   into named helper functions.
+
+2. **COMMENT THE CODE**: Every modified or added code site must have a rationale
+   comment (`// YYYY-MM-DD: <why>`). Comments explain intent, not mechanics.
+   Never delete rationale comments from refactored code — rewrite them to
+   explain the new structure.
+
+3. **UPDATE ALL EXAMPLES**: When syntax changes, update every example file
+   (`examples/`, `lib/std/`, `benchmarks/`) that used the old syntax. Create
+   new example files for any syntax that has no existing example.
+
+4. **DOCUMENTATION IS CODE**: Update `docs/architecture/`, `docs/features/`,
+   and inline `///` doc comments in the same commit as the code change.
+   Outdated docs are bugs.
+
+5. **BEHAVIORAL TESTS, NOT LITERAL TESTS**: Every new feature must have unit
+   tests that assert behavioral outcomes — not literal IR snapshots or
+   implementation details. A test must pass after refactoring if the behavior
+   is preserved. This is the primary regression guard. Test the contract, not
+   the implementation.
+
+The user will refer to these as "the Plan Directives" and expects them to be
+followed without being reminded.
+
 ## Coding Standards
 
 ### 1. Flat Control Flow — Max 2 Levels Deep
@@ -774,3 +805,5 @@ the execution paths.
 | **Kani harnesses** | `docs/architecture/kani-harnesses.md` |
 | **Plan documents** | `docs/plans/` |
 | **Ptr Level 3 plan** | `docs/plans/2026-07-09-ptr-level3-borrow-checking.md` |
+| **Compile-time meta + plugin architecture** | `docs/plans/2026-07-15-compiletime-meta-and-plugin-architecture.md` |
+| **Layout DSL** | `docs/architecture/layout-dsl.md` |

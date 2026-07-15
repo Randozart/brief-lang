@@ -93,7 +93,7 @@ impl HardwareValidator {
                     ));
                 }
                 TopLevel::Import(imp) => {
-                    if imp.module.starts_with("link/") || imp.module == "link" {
+                    if imp.path().starts_with("link/") || imp.path() == "link" {
                         diagnostics.push(Diagnostic::new(
                             "B5003",
                             Severity::Error,
@@ -395,7 +395,7 @@ impl HardwareValidator {
         
         for item in program {
             if let TopLevel::Import(import) = item {
-                let path_str = import.module.clone();
+                let path_str = import.path().to_string();
                 if path_str.ends_with(".dbvs") {
                     if let Some(parent) = source_file.parent() {
                         schema_files.push((path_str.clone(), parent.join(&path_str)));

@@ -237,8 +237,9 @@ impl<'a> Parser<'a> {
             Token::Enum => "enum".into(), Token::Trg => "trg".into(),
             Token::Within => "within".into(), Token::PtrBang => "Ptr!".into(),
             Token::Ok => "Ok".into(), Token::Err => "Err".into(),
-            Token::Match => "match".into(), Token::Template => "template".into(),
-            Token::Macro => "macro".into(), Token::Quote => "quote".into(),
+            Token::Match => "match".into(),
+            // 2026-07-15: Template/Macro tokens removed
+            Token::Quote => "quote".into(),
             Token::Dollar => "$".into(), Token::DollarBang => "$!".into(),
             Token::Foreach => "foreach".into(), Token::Pvt => "pvt".into(),
             Token::Sed => "sed".into(), Token::Sync => "sync".into(),
