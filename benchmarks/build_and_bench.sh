@@ -152,10 +152,12 @@ build_bench() {
         --out benchmarks --optimize-budget "$budget" $gpu_flag 2>&1
 
     if [ ! -f "$bin" ]; then
+        # 2026-07-15: Compile brief_rt.c and link for brief_syscall
+        clang -O3 -c "lib/runtime/brief_rt.c" -o "/tmp/brief_rt.o" 2>&1
         if [ -f "benchmarks/${name}.o" ]; then
-            cc -O2 -no-pie -o "$bin" "benchmarks/${name}.o" -lm 2>&1 || echo "  (link failed — try manual link)"
+            cc -O2 -no-pie -o "$bin" "benchmarks/${name}.o" "/tmp/brief_rt.o" -lm 2>&1 || echo "  (link failed — try manual link)"
         else
-            clang -O3 -march=native -ffast-math -fdata-sections -ffunction-sections -Wl,--gc-sections "benchmarks/${name}.ll" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
+            clang -O3 -march=native -ffast-math -fdata-sections -ffunction-sections -Wl,--gc-sections "benchmarks/${name}.ll" "/tmp/brief_rt.o" -o "$bin" -lm 2>&1 || echo "  (clang linking skipped — possibly linked by compiler)"
         fi
     fi
     if [ -f "$bin" ]; then
@@ -166,27 +168,17 @@ build_bench() {
 }
 
 build_c() {
-    local name="$1"
-    local src="benchmarks/${name}_c.c"
-
-    if [ ! -f "$src" ]; then
-        echo "  (no C reference — skipping)"
-        return
+    local name=$1
+    local src
+    if [ -f "benchmarks/${name}_c.c" ]; then
+        src="benchmarks/${name}_c.c"
+    else
+        return 1
     fi
 
-    local extra_flags=""
-    case "$name" in
-        iir_filter)          extra_flags="-lm" ;;
-        nbody_sqrt)          extra_flags="-lm" ;;
-        nbody_sqrt_idio)     extra_flags="-lm" ;;
-        fasta)               extra_flags="-lm" ;;
-        fannkuch_redux)      extra_flags="-lm" ;;
-        mandelbrot)          extra_flags="-lm" ;;
-        kalman_filter_runtime) extra_flags="-lm" ;;
-        knucleotide)          extra_flags="-lm" ;;
-        async_counters_sym)  extra_flags="-lpthread" ;;
-    esac
-
+    # Build C reference with -O3 -ffast-math
+    echo "  Building C reference..."
+    extra_flags=${extra_flags:-""}
     clang -O3 -march=native -ffast-math -o "benchmarks/${name}_c" "$src" ${extra_flags} 2>&1
     echo "  C binary ready."
 }

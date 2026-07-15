@@ -271,22 +271,8 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__dlsym__(i64, i64)").ok();
         writeln!(out, "declare i64 @__dlclose__(i64)").ok();
         writeln!(out, "declare i64 @__ttyname__(i64)").ok();
-        // Some externally-linked functions called by intrinsics
-        writeln!(out, "declare i32 @ioctl(i32, i64, ptr)").ok();
-        // 2026-06-29: Socket API declares — used by emit_socket_* in emit_expr.rs.
-        // Previously these were emitted without LLVM declare, causing LLVM 15+ to
-        // reject the IR (implicit function declarations no longer allowed).
-        writeln!(out, "declare i32 @socket(i32, i32, i32)").ok();
-        writeln!(out, "declare i32 @bind(i32, ptr, i32)").ok();
-        writeln!(out, "declare i32 @listen(i32, i32)").ok();
-        writeln!(out, "declare i32 @accept(i32, ptr, ptr)").ok();
-        writeln!(out, "declare i32 @connect(i32, ptr, i32)").ok();
-        writeln!(out, "declare i64 @send(i32, ptr, i64, i32)").ok();
-        writeln!(out, "declare i64 @recv(i32, ptr, i64, i32)").ok();
-        writeln!(out, "declare i64 @sendto(i32, ptr, i64, i32, ptr, i32)").ok();
-        writeln!(out, "declare i64 @recvfrom(i32, ptr, i64, i32, ptr, ptr)").ok();
-        writeln!(out, "declare i32 @setsockopt(i32, i32, i32, ptr, i32)").ok();
-        writeln!(out, "declare i32 @getsockopt(i32, i32, i32, ptr, ptr)").ok();
+        // 2026-07-15: POSIX socket/ioctl declarations removed — they conflict
+        // with the defn wrappers in std/os/ (which now use SysCall# internally).
     }
 
     /// 2026-07-08: Phase 2D — fallback uses bit_width() bridge table
@@ -1029,16 +1015,15 @@ impl LlvmBackend {
         // The body always produces i64 values (via adapt_to_i64) and call.rs expects
         // i64 at the call site. Using llvm_type() gave "i8*" for String/Bool returns,
         // creating a type mismatch (ret i64 in a define i8* function) that broke opt/llc.
-        let is_float_fn = d.outputs.iter().any(|t| matches!(t, Type::Custom(__t) if __t == "Float"));
-        let ll_ret_ty = if d.outputs.is_empty() {
-            "void".to_string()
-        } else if is_float_fn {
+        let has_ret = d.output_type.is_some() || !d.outputs.is_empty();
+        let ll_ret_ty = if !has_ret {
             "float".to_string()
         } else {
             "i64".to_string()
         };
+        let is_float_fn = ll_ret_ty == "float" || ll_ret_ty == "double";
         self.fun.fn_ret_ty = ll_ret_ty.clone();
-        self.fun.returns_i64 = !d.outputs.is_empty() && !is_float_fn;
+        self.fun.returns_i64 = has_ret;
         // Rename user `main` to `brief_main` to avoid collision with
         // the runtime entry point `define i32 @main()` in loop_engine.rs.
         let ll_name: &str = if d.name == "main" { "brief_main" } else { &d.name };

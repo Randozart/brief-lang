@@ -2,9 +2,9 @@
 // Uses prlimit64 (x86_64: 302) via abstract op.
 
 defn getrlimit(resource: Int) -> Int {
-    SysCall#(GetRlimit, resource, 0, 0, 0, 0, 0);
+    term SysCall#(GetRlimit, resource, 0, 0, 0, 0, 0);
 };
 
 defn setrlimit(resource: Int, packed: Int) -> Int {
-    SysCall#(SetRlimit, resource, packed, 0, 0, 0, 0);
+    term SysCall#(SetRlimit, resource, packed, 0, 0, 0, 0);
 };

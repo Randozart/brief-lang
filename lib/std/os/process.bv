@@ -2,15 +2,15 @@
 // getenv: uses GetEnv# intrinsic (registered in intrinsic_signatures).
 
 defn getpid() -> Int {
-    SysCall#(GetPid, 0, 0, 0, 0, 0, 0);
+    term SysCall#(GetPid, 0, 0, 0, 0, 0, 0);
 };
 
 defn getppid() -> Int {
-    SysCall#(GetPPid, 0, 0, 0, 0, 0, 0);
+    term SysCall#(GetPPid, 0, 0, 0, 0, 0, 0);
 };
 
 defn exit(code: Int) -> Int {
-    SysCall#(Exit, code, 0, 0, 0, 0, 0);
+    term SysCall#(Exit, code, 0, 0, 0, 0, 0);
 };
 
 defn getenv(name: Ptr<Byte>) -> Int {

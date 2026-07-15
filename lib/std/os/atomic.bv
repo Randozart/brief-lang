@@ -32,5 +32,5 @@ defn fence() -> Int {
 };
 
 defn futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int {
-    SysCall#(Futex, uaddr, opcode, val, timeout, uaddr2, val3);
+    term SysCall#(Futex, uaddr, opcode, val, timeout, uaddr2, val3);
 };

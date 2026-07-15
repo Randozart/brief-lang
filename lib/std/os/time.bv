@@ -1,9 +1,9 @@
 // 2026-07-15: Replaced inop with defn + SysCall#(ClockGetTime/NanoSleep, ...);
 
 defn clock_gettime(clock_id: Int, tp: Ptr<Byte>) -> Int {
-    SysCall#(ClockGetTime, clock_id, tp, 0, 0, 0, 0);
+    term SysCall#(ClockGetTime, clock_id, tp, 0, 0, 0, 0);
 };
 
 defn nanosleep(req: Ptr<Byte>, rem: Ptr<Byte>) -> Int {
-    SysCall#(NanoSleep, req, rem, 0, 0, 0, 0);
+    term SysCall#(NanoSleep, req, rem, 0, 0, 0, 0);
 };

@@ -7,10 +7,10 @@ import { to_c_string } from "std/string_c";
 
 defn mkstemp(tmpl: Ptr<Byte>) -> Int {
     let ctmpl = to_c_string(tmpl);
-    SysCall#(Mkstemp, ctmpl, 0, 0, 0, 0, 0);
+    term SysCall#(Mkstemp, ctmpl, 0, 0, 0, 0, 0);
 };
 
 defn mkdtemp(tmpl: Ptr<Byte>) -> Int {
     let ctmpl = to_c_string(tmpl);
-    SysCall#(MkDt, ctmpl, 0, 0, 0, 0, 0);
+    term SysCall#(MkDt, ctmpl, 0, 0, 0, 0, 0);
 };

@@ -1,5 +1,5 @@
 // 2026-07-15: Replaced inop with defn + SysCall#(GetRandom, ...);
 
 defn getrandom(buf: Ptr<Byte>, len: Int, flags: Int) -> Int {
-    SysCall#(GetRandom, buf, len, flags, 0, 0, 0);
+    term SysCall#(GetRandom, buf, len, flags, 0, 0, 0);
 };

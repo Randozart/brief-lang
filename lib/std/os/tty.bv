@@ -6,21 +6,21 @@
 // and the read syscall for key-by-key input.
 
 defn tty_raw_mode(enable: Int) -> Int {
-    SysCall#(IoCtl, 0, enable, 0, 0, 0, 0);
+    term SysCall#(IoCtl, 0, enable, 0, 0, 0, 0);
 };
 
 defn tty_size() -> Int {
-    SysCall#(IoCtl, 0, 0, 0, 0, 0, 0);
+    term SysCall#(IoCtl, 0, 0, 0, 0, 0, 0);
 };
 
 defn tty_read_key(fd: Int) -> Int {
-    SysCall#(Read, fd, 0, 1, 0, 0, 0);
+    term SysCall#(Read, fd, 0, 1, 0, 0, 0);
 };
 
 defn ioctl(fd: Int, request: Int, argp: Ptr<Byte>) -> Int {
-    SysCall#(IoCtl, fd, request, argp, 0, 0, 0);
+    term SysCall#(IoCtl, fd, request, argp, 0, 0, 0);
 };
 
 defn isatty(fd: Int) -> Int {
-    SysCall#(IoCtl, fd, 0, 0, 0, 0, 0);
+    term SysCall#(IoCtl, fd, 0, 0, 0, 0, 0);
 };

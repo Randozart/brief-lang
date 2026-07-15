@@ -340,12 +340,15 @@ fn determine_out_path(file_path: &str, out_dir: Option<&str>) -> Result<String, 
 
 /// Compile a `.ll` file to a binary using clang.
 fn compile_ll_to_binary(ll_path: &str, binary_path: &str) -> Result<(), String> {
+    let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
+    let rt_str = rt_path.to_string_lossy().to_string();
     let status = Command::new("clang")
         .args([
             "-O3",
             "-march=native",
             "-ffast-math",
             ll_path,
+            &rt_str,
             "-o",
             binary_path,
             "-lm",

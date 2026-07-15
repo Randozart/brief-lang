@@ -1,17 +1,17 @@
 // 2026-07-15: Replaced inop with defn + SysCall#(GetUid/GetEuid/GetGid/GetEgid, ...);
 
 defn getuid() -> Int {
-    SysCall#(GetUid, 0, 0, 0, 0, 0, 0);
+    term SysCall#(GetUid, 0, 0, 0, 0, 0, 0);
 };
 
 defn geteuid() -> Int {
-    SysCall#(GetEuid, 0, 0, 0, 0, 0, 0);
+    term SysCall#(GetEuid, 0, 0, 0, 0, 0, 0);
 };
 
 defn getgid() -> Int {
-    SysCall#(GetGid, 0, 0, 0, 0, 0, 0);
+    term SysCall#(GetGid, 0, 0, 0, 0, 0, 0);
 };
 
 defn getegid() -> Int {
-    SysCall#(GetEgid, 0, 0, 0, 0, 0, 0);
+    term SysCall#(GetEgid, 0, 0, 0, 0, 0, 0);
 };

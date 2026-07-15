@@ -1,9 +1,9 @@
 // 2026-07-15: Replaced inop with defn + SysCall#(RtSigAction/RtSigProcmask, ...);
 
 defn sigaction(sig_num: Int, action: Ptr<Byte>, old_action: Ptr<Byte>) -> Int {
-    SysCall#(RtSigAction, sig_num, action, old_action, 0, 0, 0);
+    term SysCall#(RtSigAction, sig_num, action, old_action, 0, 0, 0);
 };
 
 defn sigprocmask(how: Int, set: Ptr<Byte>, old_set: Ptr<Byte>) -> Int {
-    SysCall#(RtSigProcmask, how, set, old_set, 0, 0, 0);
+    term SysCall#(RtSigProcmask, how, set, old_set, 0, 0, 0);
 };

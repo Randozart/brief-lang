@@ -7,7 +7,7 @@
 import { to_c_string } from "std/string_c";
 
 defn dlopen(filename: Ptr<Byte>) -> Int {
-    let cpath: Ptr<Byte> = to_c_string(filename);
+    let cpath: Int = to_c_string(filename);
     term DlOpen#(cpath, 2);
 };
 

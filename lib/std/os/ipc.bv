@@ -5,13 +5,13 @@
 // shm_open, shm_unlink, sem_open need to_c_string (Phase 2).
 
 defn pipe(pipefd: Ptr<Int>) -> Int {
-    SysCall#(Pipe, pipefd, 0, 0, 0, 0, 0);
+    term SysCall#(Pipe, pipefd, 0, 0, 0, 0, 0);
 };
 
 defn sem_wait(sem: Ptr<Byte>) -> Int {
-    SysCall#(SemOp, sem, 0, 0, 0, 0, 0);
+    term SysCall#(SemOp, sem, 0, 0, 0, 0, 0);
 };
 
 defn sem_post(sem: Ptr<Byte>) -> Int {
-    SysCall#(SemOp, sem, 1, 0, 0, 0, 0);
+    term SysCall#(SemOp, sem, 1, 0, 0, 0, 0);
 };

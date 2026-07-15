@@ -146,8 +146,12 @@ fn emit_malloc(
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let size = emit_arg(backend, out, &args[0], indent);
-    writeln!(out, "{}{} = call ptr @malloc(i64 {})", indent, v, size).ok();
-    BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::bits(1)) }
+    // 2026-07-15: Return i64 (not ptr) so arithmetic works. Callers use
+    // inttoptr when they need a pointer (e.g. Memcpy#/Memset#).
+    let name = v.trim_start_matches('%');
+    writeln!(out, "{}%{}_p = call ptr @malloc(i64 {})", indent, name, size).ok();
+    writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
+    BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
 fn emit_free(
@@ -225,8 +229,11 @@ fn emit_get_env(
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let name_reg = emit_arg(backend, out, &args[0], indent);
+    let ptr_reg = backend.fun.gen_reg();
+    // 2026-07-15: name_reg is i64 — convert to ptr for C runtime
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr_reg, name_reg).ok();
     let env_ptr = backend.fun.gen_reg();
-    writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, name_reg).ok();
+    writeln!(out, "{}{} = call ptr @getenv(ptr {})", indent, env_ptr, ptr_reg).ok();
     writeln!(out, "{}{} = call i64 @atol(ptr {})", indent, v, env_ptr).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
@@ -409,8 +416,10 @@ fn emit_atomic_load(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let ptr = emit_arg(backend, out, &args[0], indent);
-    writeln!(out, "{}{} = load atomic i64, ptr {}, seq_cst", indent, v, ptr).ok();
+    let addr = emit_arg(backend, out, &args[0], indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
+    writeln!(out, "{}{} = load atomic i64, ptr {} seq_cst, align 8", indent, v, ptr).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
@@ -418,9 +427,12 @@ fn emit_atomic_store(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let ptr = emit_arg(backend, out, &args[0], indent);
+    let addr = emit_arg(backend, out, &args[0], indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let val = emit_arg(backend, out, &args[1], indent);
-    writeln!(out, "{}store atomic i64 {}, ptr {}, seq_cst", indent, val, ptr).ok();
+    // 2026-07-15: LLVM 18 syntax: no comma before ordering, align required
+    writeln!(out, "{}store atomic i64 {}, ptr {} seq_cst, align 8", indent, val, ptr).ok();
     writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
     BTypedRegister { name: v.to_string(), ty: Type::void() }
 }
@@ -429,10 +441,15 @@ fn emit_atomic_cas(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let ptr = emit_arg(backend, out, &args[0], indent);
+    let addr = emit_arg(backend, out, &args[0], indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let exp = emit_arg(backend, out, &args[1], indent);
     let des = emit_arg(backend, out, &args[2], indent);
-    writeln!(out, "{}{} = cmpxchg ptr {}, i64 {}, i64 {} seq_cst seq_cst", indent, v, ptr, exp, des).ok();
+    let cx = backend.fun.gen_reg();
+    writeln!(out, "{}{} = cmpxchg ptr {}, i64 {}, i64 {} seq_cst seq_cst", indent, cx, ptr, exp, des).ok();
+    // 2026-07-15: cmpxchg returns {i64, i1} — extract the value
+    writeln!(out, "{}{} = extractvalue {{ i64, i1 }} {}, 0", indent, v, cx).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
@@ -440,7 +457,9 @@ fn emit_atomic_xchg(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let ptr = emit_arg(backend, out, &args[0], indent);
+    let addr = emit_arg(backend, out, &args[0], indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let val = emit_arg(backend, out, &args[1], indent);
     writeln!(out, "{}{} = atomicrmw xchg ptr {}, i64 {} seq_cst", indent, v, ptr, val).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }
@@ -450,7 +469,9 @@ fn emit_atomic_add(
     backend: &mut LlvmBackend, out: &mut String, v: &str,
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
-    let ptr = emit_arg(backend, out, &args[0], indent);
+    let addr = emit_arg(backend, out, &args[0], indent);
+    let ptr = backend.fun.gen_reg();
+    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
     let val = emit_arg(backend, out, &args[1], indent);
     writeln!(out, "{}{} = atomicrmw add ptr {}, i64 {} seq_cst", indent, v, ptr, val).ok();
     BTypedRegister { name: v.to_string(), ty: Type::int() }

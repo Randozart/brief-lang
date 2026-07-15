@@ -57,6 +57,16 @@ pub(crate) fn float64_to_llvm_hex(f: f64) -> String {
     format!("{}", bits)
 }
 
+/// 2026-07-15: Emit a float constant in the correct LLVM format.
+/// For `float` (32-bit): `bitcast (i32 <bits> to float)`
+/// For `double` (64-bit): `bitcast (i64 <bits> to double)`
+pub(crate) fn float_to_llvm_str(f: f64, llvm_ty: &str) -> String {
+    match llvm_ty {
+        "float" => format!("bitcast (i32 {} to float)", float_to_llvm_hex(f)),
+        _ => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(f)),
+    }
+}
+
 /// Recursively evaluate a constant expression tree to a concrete f64.
 /// Used to fold `const m0: Float = 4.0 * pi * pi` into a literal before
 /// global emission, avoiding the `constant float 0` bug.
@@ -1725,24 +1735,8 @@ impl LlvmBackend {
             }
             writeln!(out, ") #6").ok();
         }
-        // Declare memory/string helpers used by inline concat and FFI marshaling
-        // malloc/strlen declared by brief_rt.c via #include <stdlib.h> + <string.h>
-        writeln!(out, "declare i64 @strlen(i8*) #1").ok();
-
-        // Declare epoll + libc functions for the trg reactive event loop
-        writeln!(out, "declare i32 @epoll_create1(i32) #1").ok();
-        writeln!(out, "declare i32 @epoll_ctl(i32, i32, i32, ptr) #1").ok();
-        writeln!(out, "declare i32 @epoll_wait(i32, ptr, i32, i32) #1").ok();
-        writeln!(out, "declare i64 @read(i32, ptr, i64) #1").ok();
-        writeln!(out, "declare i32 @fcntl(i32, i32, i32) #1").ok();
-        writeln!(out, "declare i32 @timerfd_create(i32, i32) #1").ok();
-        writeln!(out, "declare i32 @timerfd_settime(i32, i32, ptr, ptr) #1").ok();
-        writeln!(out, "declare i32 @signalfd(i32, ptr, i32) #1").ok();
-        writeln!(out, "declare i32 @sigemptyset(i8*) #1").ok();
-        writeln!(out, "declare i32 @sigaddset(i8*, i32) #1").ok();
-        writeln!(out, "declare i32 @sigprocmask(i32, ptr, ptr) #1").ok();
-        // The step() function is defined in the same module — no declare needed.
-        // writeln!(out, "declare void @step(ptr, i64) #1").ok();
+        // 2026-07-15: POSIX declares removed — they conflict with defn wrappers
+        // (getpid, sigprocmask, close, nanosleep, sched_yield, getuid, etc.)
 
         // Declare cast helper functions
         writeln!(out, "declare i8* @__chr_to_str(i32) #1").ok();
@@ -1849,27 +1843,10 @@ impl LlvmBackend {
         writeln!(out, "declare i32 @printf(ptr, ...) #1").ok();
         writeln!(out, "declare i32 @fputc(i32, ptr) #1").ok();
         writeln!(out, "declare i32 @fflush(ptr) #1").ok();
-        writeln!(out, "declare ptr @getenv(ptr) #1").ok();
+        // 2026-07-15: atol used by getenv — kept, no conflict with defn wrappers
         writeln!(out, "declare i64 @atol(ptr) #1").ok();
-        writeln!(out, "declare void @exit(i32) #1").ok();
-        // D12–D18 direct libc declares (2026-06-19)
-        writeln!(out, "declare void @abort() #1").ok();
-        writeln!(out, "declare i64 @sysconf(i32) #1").ok();
-        writeln!(out, "declare i32 @sched_yield() #1").ok();
-        writeln!(out, "declare i32 @getpriority(i32, i32) #1").ok();
-        writeln!(out, "declare i32 @setpriority(i32, i32, i32) #1").ok();
-        writeln!(out, "declare i32 @getuid() #1").ok();
-        writeln!(out, "declare i32 @geteuid() #1").ok();
-        writeln!(out, "declare i32 @getgid() #1").ok();
-        writeln!(out, "declare i32 @getegid() #1").ok();
-        writeln!(out, "declare i32 @setvbuf(ptr, ptr, i32, i64) #1").ok();
-        writeln!(out, "declare i32 @pthread_create(ptr, ptr, ptr, ptr) #1").ok();
-        writeln!(out, "declare i32 @pthread_join(i64, ptr) #1").ok();
-        writeln!(out, "declare i32 @sleep(i32) #1").ok();
-        writeln!(out, "declare i32 @nanosleep(ptr, ptr) #1").ok();
-        writeln!(out, "declare ptr @fopen(ptr, ptr) #1").ok();
-        writeln!(out, "declare i64 @fwrite(ptr, i64, i64, ptr) #1").ok();
-        writeln!(out, "declare i32 @fclose(ptr) #1").ok();
+        // 2026-07-15: Removed conflicting POSIX declares (getuid, sched_yield,
+        // nanosleep, exit, etc.) — replaced by Brief defn wrappers using SysCall#.
 
         // Emit external global declarations for linked triggers (fixes bug 4B)
         for (name, trg) in &self.ctx.triggers {
@@ -1917,11 +1894,11 @@ impl LlvmBackend {
                 _ => "i64",
             };
             let key = match expr {
-                Expr::Float(f) => format!("{}:bitcast(i64 {} to double)", llvm_ty, float64_to_llvm_hex(*f)),
+                Expr::Float(f) => format!("{}:{}", llvm_ty, float_to_llvm_str(*f, llvm_ty)),
                 Expr::Decimal(n) => format!("{}:{}", llvm_ty, n),
                 Expr::Bool(b) => format!("{}:{}", llvm_ty, if *b { "true" } else { "false" }),
                 Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match inner.as_ref() {
-                    Expr::Float(f) => format!("{}:bitcast(i64 {} to double)", llvm_ty, float64_to_llvm_hex(-*f)),
+                    Expr::Float(f) => format!("{}:{}", llvm_ty, float_to_llvm_str(-*f, llvm_ty)),
                     Expr::Decimal(n) => format!("{}:-{}", llvm_ty, n),
                     _ => format!("{}:neg:{}", llvm_ty, name),
                 },
@@ -1963,11 +1940,11 @@ impl LlvmBackend {
                 _ => "i64",
             };
             let val_str = match expr {
-                Expr::Float(f) => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(*f)),
+                Expr::Float(f) => float_to_llvm_str(*f, llvm_ty),
                 Expr::Decimal(n) => n.to_string(),
                 Expr::Bool(b) => (if *b { "true" } else { "false" }).to_string(),
                 Expr::UnaryOp(crate::ast::UnaryOpKind::Neg, inner) => match inner.as_ref() {
-                    Expr::Float(f) => format!("bitcast (i64 {} to double)", float64_to_llvm_hex(-*f)),
+                    Expr::Float(f) => float_to_llvm_str(-*f, llvm_ty),
                     Expr::Decimal(n) => format!("-{}", n),
                     _ => if *ty == Type::float() { "0.0".to_string() } else { "0".to_string() },
                 },

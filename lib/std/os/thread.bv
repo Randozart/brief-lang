@@ -9,33 +9,33 @@ defn thread_create(fn_ptr: Int, arg: Int) -> Int {
     let stack: Int = SysCall#(Mmap, 0, 65536, 3, 0x22, -1, 0);;
     let child_stack: Int = stack + 65536;
     let flags: Int = 0x3D0F00;
-    SysCall#(Clone, flags, child_stack, fn_ptr, arg, 0, 0);
+    term SysCall#(Clone, flags, child_stack, fn_ptr, arg, 0, 0);
 };
 
 defn thread_join(thread: Int) -> Int {
-    SysCall#(GetPid, 0, 0, 0, 0, 0, 0);
+    term SysCall#(GetPid, 0, 0, 0, 0, 0, 0);
 };
 
 defn thread_exit(code: Int) -> Int {
-    SysCall#(Exit, code, 0, 0, 0, 0, 0);
+    term SysCall#(Exit, code, 0, 0, 0, 0, 0);
 };
 
 defn mutex_lock(mptr: Int) -> Int {
-    SysCall#(Futex, mptr, 0, 0, 0, 0, 0);
+    term SysCall#(Futex, mptr, 0, 0, 0, 0, 0);
 };
 
 defn mutex_unlock(mptr: Int) -> Int {
-    SysCall#(Futex, mptr, 1, 0, 0, 0, 0);
+    term SysCall#(Futex, mptr, 1, 0, 0, 0, 0);
 };
 
 defn condvar_wait(cptr: Int, mptr: Int) -> Int {
-    SysCall#(Futex, cptr, 0, mptr, 0, 0, 0);
+    term SysCall#(Futex, cptr, 0, mptr, 0, 0, 0);
 };
 
 defn condvar_signal(cptr: Int) -> Int {
-    SysCall#(Futex, cptr, 1, 0, 0, 0, 0);
+    term SysCall#(Futex, cptr, 1, 0, 0, 0, 0);
 };
 
 defn condvar_broadcast(cptr: Int) -> Int {
-    SysCall#(Futex, cptr, 2, 0, 0, 0, 0);
+    term SysCall#(Futex, cptr, 2, 0, 0, 0, 0);
 };
