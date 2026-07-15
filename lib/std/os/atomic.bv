@@ -3,7 +3,7 @@
 //
 // 2026-07-15: Uses AtomicLoad#/AtomicStore#/AtomicCas#/AtomicXchg#/AtomicAdd#/Fence#
 // intrinsics which map to LLVM atomicrmw / load atomic / fence instructions.
-// futex uses Syscall#(Futex, ...).
+// futex uses SysCall#(Futex, ...).
 
 defn atomic_load(ptr: Ptr<Byte>) -> Int {
     term AtomicLoad#(ptr);
@@ -32,5 +32,5 @@ defn fence() -> Int {
 };
 
 defn futex(uaddr: Ptr<Int>, opcode: Int, val: Int, timeout: Ptr<Byte>, uaddr2: Ptr<Int>, val3: Int) -> Int {
-    Syscall#(Futex, uaddr, opcode, val, timeout, uaddr2, val3);
+    SysCall#(Futex, uaddr, opcode, val, timeout, uaddr2, val3);
 };

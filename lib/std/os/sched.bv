@@ -1,5 +1,5 @@
-// 2026-07-15: Replaced inop with defn + Syscall#(SchedYield, ...);
+// 2026-07-15: Replaced inop with defn + SysCall#(SchedYield, ...);
 
 defn sched_yield() -> Int {
-    Syscall#(SchedYield, 0, 0, 0, 0, 0, 0);
+    SysCall#(SchedYield, 0, 0, 0, 0, 0, 0);
 };

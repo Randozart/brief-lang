@@ -1,9 +1,18 @@
-// 2026-07-15: Replaced inop with defn + Syscall#(GetPid/GetPPid, ...);
+// 2026-07-15: Replaced inop with defn + SysCall#(GetPid/GetPPid/Exit, ...);
+// getenv: uses GetEnv# intrinsic (registered in intrinsic_signatures).
 
 defn getpid() -> Int {
-    Syscall#(GetPid, 0, 0, 0, 0, 0, 0);
+    SysCall#(GetPid, 0, 0, 0, 0, 0, 0);
 };
 
 defn getppid() -> Int {
-    Syscall#(GetPPid, 0, 0, 0, 0, 0, 0);
+    SysCall#(GetPPid, 0, 0, 0, 0, 0, 0);
+};
+
+defn exit(code: Int) -> Int {
+    SysCall#(Exit, code, 0, 0, 0, 0, 0);
+};
+
+defn getenv(name: Ptr<Byte>) -> Int {
+    term GetEnv#(name);
 };

@@ -6,7 +6,7 @@
 use crate::errors::RuntimeError;
 use crate::interpreter::{bool_to_bits, f64_to_bits, i64_to_bits, zero_bits, Value, VirtualHeap};
 
-// 2026-07-15: Syscall# abstract op → syscall number mapping (x86_64)
+// 2026-07-15: SysCall# abstract op → syscall number mapping (x86_64)
 fn resolve_syscall_number_interp(name: &str) -> Option<i64> {
     Some(match name {
         "Read" => 0, "Write" => 1, "Open" => 2, "Close" => 3,
@@ -148,7 +148,7 @@ pub fn execute_intrinsic(
         }
 
         // ── POSIX sysconf (observable) ────────────────────────────────
-        "Sysconf#" => {
+        "SysConf#" => {
             if args.is_empty() { return Ok(i64_to_bits(0)); }
             let name: i64 = match &args[0] {
                 Value::Int(n) => *n,
@@ -166,7 +166,7 @@ pub fn execute_intrinsic(
                         "HostNameMax" => 180,
                         "OpenMax" => 4,
                         _ => {
-                            eprintln!("Sysconf#: unknown abstract name '{}', using 0", s);
+                            eprintln!("SysConf#: unknown abstract name '{}', using 0", s);
                             0
                         }
                     }
@@ -177,11 +177,11 @@ pub fn execute_intrinsic(
         }
 
         // ── OS Syscall (observable) ───────────────────────────────────
-        // 2026-07-15: Syscall# executes a raw OS syscall via libc::syscall().
+        // 2026-07-15: SysCall# executes a raw OS syscall via libc::syscall().
         // In check mode, returns 0 for successful execution or -1 for error.
         // The first arg is the syscall number (Int) or PascalCase abstract op
         // name (resolved to a number here).
-        "Syscall#" => {
+        "SysCall#" => {
             if args.is_empty() { return Ok(zero_bits(0)); }
             let mut sysno: i64 = 0;
             match &args[0] {

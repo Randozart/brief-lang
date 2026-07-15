@@ -1,17 +1,17 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 //
-// 2026-07-15: Simple ops → defn + Syscall#.
+// 2026-07-15: Simple ops → defn + SysCall#.
 // shm_open, shm_unlink, sem_open need to_c_string (Phase 2).
 
 defn pipe(pipefd: Ptr<Int>) -> Int {
-    Syscall#(Pipe, pipefd, 0, 0, 0, 0, 0);
+    SysCall#(Pipe, pipefd, 0, 0, 0, 0, 0);
 };
 
 defn sem_wait(sem: Ptr<Byte>) -> Int {
-    Syscall#(SemOp, sem, 0, 0, 0, 0, 0);
+    SysCall#(SemOp, sem, 0, 0, 0, 0, 0);
 };
 
 defn sem_post(sem: Ptr<Byte>) -> Int {
-    Syscall#(SemOp, sem, 1, 0, 0, 0, 0);
+    SysCall#(SemOp, sem, 1, 0, 0, 0, 0);
 };

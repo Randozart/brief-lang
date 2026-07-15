@@ -475,5 +475,168 @@ behavior because:
    properties changes the semantics without changing the bits.
 
 4. **All extension is user-defined.** A new type, new operator, new backend
-   target — none require compiler changes. Types are declared, operators
-   bound, backends subscribe to properties they understand.
+    target — none require compiler changes. Types are declared, operators
+    bound, backends subscribe to properties they understand.
+
+---
+
+## FAQ
+
+### Q1: If everything is Bits, why does the compiler still have `Int`, `Float`, `Bool` as separate concepts?
+
+**It doesn't — not in the type system itself.** The compiler's type checker
+sees only `Bits(N)` with optional metadata. The named types (`Int`, `Float`,
+`Bool`) are **stdlib aliases** defined in `lib/std/types.bv`:
+
+```brief
+type Int   <~ Bits(64)  // sets primitive<~Int, bytes<~8
+type Float <~ Bits(64)  // sets primitive<~Float, bytes<~8
+type Bool  <~ Bits(1)   // sets primitive<~Bool, bytes<~1
+```
+
+The compiler frontend never matches on the name `"Int"`. It matches on
+`Bits(64)` and reads the `primitive` metadata if it needs to.
+
+The only place "Int" appears as a hardcoded concept is the `ReturnKind` enum,
+which is a **compiler-to-backend contract**, not a type system feature:
+
+```rust
+ReturnKind::Native("Int")   // backend: "emit 64-bit integer ops"
+ReturnKind::Native("Float") // backend: "emit 64-bit float ops"
+ReturnKind::Native("Bool")  // backend: "emit 1-bit bool ops"
+```
+
+These tell the backend what LLVM IR to emit. They are not type judgments.
+
+### Q2: What does each consumer in the pipeline see?
+
+| Consumer | Sees | Action |
+|----------|------|--------|
+| Parser | raw bytes + token forms | No type knowledge |
+| Type checker | `Bits(N)` + metadata | Structural comparison on `N` |
+| SMT solver | `(_ BitVec N)` | Ignores all metadata |
+| CIRCT backend | `Bits(N)` + `hw_storage` | Uses metadata if present, else raw bits |
+| LLVM backend | `Bits(N)` + `primitive` | Reads `primitive` for instruction selection |
+| Meld/FFI | `Bits(N)` + shape/mapping | Enforces C layout compatibility |
+
+The SMT solver and CIRCT backend **never need to know about `Int` or `Float`**.
+They operate on pure bit-vectors. The `primitive` metadata is only consumed by
+LLVM and similar CPU-targeting backends that must decide between integer ALUs,
+float ALUs, and address-generation units.
+
+### Q3: Does the type checker force me to coerce types at every boundary?
+
+**No.** The type checker compares types structurally by `Bits(N)` width.
+Metadata (`primitive`, `llvm`, etc.) is **not part of the comparison key**.
+An `Int` and a `Float` both have `Bits(64)` width, so the type checker sees
+them as compatible at the structural level. Coercion only matters at the
+LLVM codegen level, where `primitive<~Int` vs `primitive<~Float` determines
+which ALU instruction to emit.
+
+The exception is explicit `meld` (FFI) declarations, where C's type system
+requires specific layout guarantees. That's an opt-in mechanism, not the
+default path.
+
+### Q4: Are CPU types (`Int`, `Float`) real, or are they just convenience?
+
+**Both.** CPU architectures have evolved to the point where specific bit
+patterns trigger specific hardware units:
+- `i64` → general-purpose ALU (integer add, mul, etc.)
+- `double` → float ALU (fadd, fmul, etc.)
+- `i1` → branch condition (je, jne, etc.)
+
+These are genuine physical realities of the hardware. `primitive<~Int`
+metadata routes `Bits(64)` to the integer ALU. `primitive<~Float` routes
+it to the float ALU. The same `Bits(64)` go into different silicon, but
+they're still bits.
+
+The Bits thesis does not deny this. It says: **the bits are the true
+representation. The `primitive` tag is a routing hint for backends that
+have multiple ALUs.**
+
+### Q5: Does this mean `ReturnKind::Native("Int")` could map to `i32` on an embedded target?
+
+**Yes, exactly.** On x86_64, `#Int` → `i64`. On a 32-bit ARM target, the
+same intrinsic could map to `i32`. The `.bv` source doesn't change — only
+the backend's interpretation of `#Int` changes. The `bytes` metadata on
+`Int` would be set per-target:
+
+```brief
+// x86_64 backend: bytes <~ 8 → i64
+// ARM32 backend:  bytes <~ 4 → i32
+type Int <~ Bits { bytes <~ TARGET_PTR_SIZE; ... };
+```
+
+All algebraic operations on `Int` automatically use the right width because
+they operate on `Bits(N)` where `N` is the target pointer size.
+
+### Q6: If metadata is ignored by the type checker, how does the `primitive` tag affect anything?
+
+**It doesn't affect the type checker.** It only affects the LLVM backend.
+The pipeline is:
+
+1. Type checker: verifies `Bits(N)` structural compatibility → **metadata ignored**
+2. LLVM backend: reads `primitive` → emits `add i64` or `fadd double`
+
+The metadata travels through the pipeline **opaque to the type checker**.
+It's like a sticky note attached to the type that says "when you get to LLVM,
+use float instructions." The type checker never reads the sticky note.
+
+### Q7: Is the Bits thesis hogwash? Should we reintroduce primitives as first-class compiler concepts?
+
+**No — the Bits thesis is correct, and primitives should NOT be reintroduced
+as first-class compiler concepts.**
+
+The Bits thesis is the deepest correct description of computation: everything
+is `Bits(N)`. The `primitive` metadata is a thin routing layer on top that
+only CPU-targeting backends consume. Reintroducing primitives as first-class
+AST types would:
+- Duplicate the `Bits(N)` width information
+- Require special-casing in the type checker, SMT solver, and CIRCT backend
+- Break the axiom that every type is `Bits(N)` + metadata
+- Force users to learn about primitives when defining custom types
+
+The current architecture — `Bits(N)` at the core, `primitive` as metadata,
+`ReturnKind` as compiler-to-backend contract — is the right balance.
+
+### Q8: How does FFI fit into this? C expects specific types.
+
+The `meld` keyword bridges Brief's type system to foreign (C) ABIs. It
+explicitly maps Brief types to C types with layout guarantees:
+
+```brief
+meld type FileHandle <~ C "int" {
+    bytes <~ 4;
+    signed <~ true;
+};
+```
+
+The FFI path is **opt-in** — you explicitly declare when a type needs C
+compatibility. The `meld` declaration provides shape and mapping metadata
+that the backend uses to emit the correct C ABI. Outside of `meld`,
+everything is `Bits(N)`.
+
+### Q9: Why does the compiler have `ReturnKind::Inferred` if everything is supposed to be explicit about `Bits(N)`?
+
+`Inferred` is not about **type inference at the language level**. It's about
+**argument-to-return type propagation at the intrinsic level**. A concrete
+example:
+
+```
+Add#(a: Bits(64), b: Bits(64)) → Bits(64)  // return = same width as args
+Add#(a: Bits(32), b: Bits(32)) → Bits(32)  // return = same width as args
+```
+
+`Inferred` says "the return type is derived from the argument types, not
+declared independently." This is only used for polymorphic intrinsics like
+`Add#`, `Sub#`, `Mul#`. Most intrinsics use `Native("Int")` or
+`Exact(Type)`.
+
+### Q10: If CIRCT and SMT ignore metadata, how does CIRCT know the width of a type?
+
+CIRCT reads `Bytes(N)` from the type — specifically the `bytes` metadata,
+which is Axiom 1. `Bytes(8)` → hardware `uint64_t` or equivalent. The
+`primitive` tag (`Int` vs `Float`) is irrelevant for hardware synthesis —
+CIRCT only needs bit widths and dataflow connections. This is by design:
+**hardware doesn't have separate integer and float ALUs at the RTL level,
+it has wires and gates.**

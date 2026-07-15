@@ -1,7 +1,7 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 //
-// 2026-07-15: Replaced inop with defn + to_c_string + Syscall#(Write, ...);.
+// 2026-07-15: Replaced inop with defn + to_c_string + SysCall#(Write, ...);.
 // Prints a Brief string to stdout by converting to C string and writing.
 
 import { to_c_string } from "std/string_c";
@@ -9,5 +9,5 @@ import { to_c_string } from "std/string_c";
 defn print(s: Ptr<Byte>) -> Int {
     let cstr = to_c_string(s);
     let len: Int = Length#(s);
-    Syscall#(Write, 1, cstr, len, 0, 0, 0);
+    SysCall#(Write, 1, cstr, len, 0, 0, 0);
 };

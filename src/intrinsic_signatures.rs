@@ -2,14 +2,33 @@
 // 2026-07-14: Generic operations. Types inferred from arguments.
 // Adding a new intrinsic: add one arm here + one arm in execute_intrinsic().
 // Every generic op uses vec![] for param_types — type is inferred.
+//
+// 2026-07-15: ReturnKind replaces return_type: Option<Type> for
+// backend-agnostic type dispatch. Native("Int") means "backend's native
+// integer type" — LLVM maps to i64 { primitive <~ Int, bytes <~ 8 }.
+// Inferred means polymorphic (return matches argument type).
 
 use crate::ast::Type;
+
+/// How an intrinsic's return type is determined.
+/// 2026-07-15: Backend-agnostic type dispatch.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ReturnKind {
+    /// Backend-native type — exact representation depends on target.
+    /// LLVM: #Int → i64 { primitive <~ Int, bytes <~ 8 }
+    ///       #Float → double { primitive <~ Float, bytes <~ 8 }
+    Native(&'static str),
+    /// Inferred from argument types (e.g. Add# returns same as input).
+    Inferred,
+    /// Fixed concrete type (pointer, void, etc.).
+    Exact(Type),
+}
 
 /// The signature of a compiler-known # intrinsic.
 pub struct Signature {
     pub name: &'static str,
     pub parameters: Vec<(&'static str, Type)>,
-    pub return_type: Option<Type>,
+    pub return_kind: ReturnKind,
     /// If true, this intrinsic has observable side effects (DCE guard).
     pub observable: bool,
 }
@@ -17,160 +36,150 @@ pub struct Signature {
 /// Look up the signature of a # intrinsic by name.
 pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
     match name {
-        // ── Arithmetic (type-inferred) ──────────────────────────────
-        "Add#" => Some(Signature { name: "Add#", parameters: vec![], return_type: None, observable: false }),
-        "Sub#" => Some(Signature { name: "Sub#", parameters: vec![], return_type: None, observable: false }),
-        "Mul#" => Some(Signature { name: "Mul#", parameters: vec![], return_type: None, observable: false }),
-        "Div#" => Some(Signature { name: "Div#", parameters: vec![], return_type: None, observable: false }),
-        "Rem#" => Some(Signature { name: "Rem#", parameters: vec![], return_type: None, observable: false }),
-        "Neg#" => Some(Signature { name: "Neg#", parameters: vec![], return_type: None, observable: false }),
-        "Abs#" => Some(Signature { name: "Abs#", parameters: vec![], return_type: None, observable: false }),
+        // ── Arithmetic (return matches input type) ────────────────────
+        "Add#" => Some(Signature { name: "Add#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Sub#" => Some(Signature { name: "Sub#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Mul#" => Some(Signature { name: "Mul#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Div#" => Some(Signature { name: "Div#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Rem#" => Some(Signature { name: "Rem#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Neg#" => Some(Signature { name: "Neg#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Abs#" => Some(Signature { name: "Abs#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
 
-        // ── Comparison (type-inferred) ──────────────────────────────
-        "Eq#"  => Some(Signature { name: "Eq#",  parameters: vec![], return_type: None, observable: false }),
-        "Neq#" => Some(Signature { name: "Neq#", parameters: vec![], return_type: None, observable: false }),
-        "Lt#"  => Some(Signature { name: "Lt#",  parameters: vec![], return_type: None, observable: false }),
-        "Gt#"  => Some(Signature { name: "Gt#",  parameters: vec![], return_type: None, observable: false }),
-        "Le#"  => Some(Signature { name: "Le#",  parameters: vec![], return_type: None, observable: false }),
-        "Ge#"  => Some(Signature { name: "Ge#",  parameters: vec![], return_type: None, observable: false }),
+        // ── Comparison (returns Bool, but type-inferred) ──────────────
+        "Eq#"  => Some(Signature { name: "Eq#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Neq#" => Some(Signature { name: "Neq#", parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Lt#"  => Some(Signature { name: "Lt#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Gt#"  => Some(Signature { name: "Gt#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Le#"  => Some(Signature { name: "Le#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Ge#"  => Some(Signature { name: "Ge#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
 
-        // ── Float math (type-inferred, float-specific) ──────────────
-        "Sqrt#"  => Some(Signature { name: "Sqrt#",  parameters: vec![], return_type: None, observable: false }),
-        "Sin#"   => Some(Signature { name: "Sin#",   parameters: vec![], return_type: None, observable: false }),
-        "Cos#"   => Some(Signature { name: "Cos#",   parameters: vec![], return_type: None, observable: false }),
-        "Fabs#"  => Some(Signature { name: "Fabs#",  parameters: vec![], return_type: None, observable: false }),
-        "Ceil#"  => Some(Signature { name: "Ceil#",  parameters: vec![], return_type: None, observable: false }),
-        "Floor#" => Some(Signature { name: "Floor#", parameters: vec![], return_type: None, observable: false }),
-        "Pow#"   => Some(Signature { name: "Pow#",   parameters: vec![], return_type: None, observable: false }),
+        // ── Float math (returns native Float) ─────────────────────────
+        "Sqrt#"  => Some(Signature { name: "Sqrt#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
+        "Sin#"   => Some(Signature { name: "Sin#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
+        "Cos#"   => Some(Signature { name: "Cos#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
+        "Fabs#"  => Some(Signature { name: "Fabs#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
+        "Ceil#"  => Some(Signature { name: "Ceil#",  parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
+        "Floor#" => Some(Signature { name: "Floor#", parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
+        "Pow#"   => Some(Signature { name: "Pow#",   parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
 
         // ── Memory (observable) ─────────────────────────────────────
-        "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_type: Some(Type::ptr(Type::bits(1))), observable: true }),
-        "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(1)))], return_type: None, observable: true }),
-        "Memcpy#"  => Some(Signature { name: "Memcpy#",  parameters: vec![], return_type: None, observable: true }),
-        "Memset#"  => Some(Signature { name: "Memset#",  parameters: vec![], return_type: None, observable: true }),
+        "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
+        "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(1)))], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "Memcpy#"  => Some(Signature { name: "Memcpy#",  parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "Memset#"  => Some(Signature { name: "Memset#",  parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
 
-        // ── I/O (observable) ─────────────────────────────────────────
-        "Print#"  => Some(Signature { name: "Print#",  parameters: vec![], return_type: None, observable: true }),
-        "GetEnv#" => Some(Signature { name: "GetEnv#", parameters: vec![], return_type: None, observable: true }),
+        // ── I/O (observable, returns native Int) ──────────────────────
+        "Print#"  => Some(Signature { name: "Print#",  parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
+        "GetEnv#" => Some(Signature { name: "GetEnv#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true }),
 
-        // ── String (type-inferred) ──────────────────────────────────
-        "Concat#"    => Some(Signature { name: "Concat#",    parameters: vec![], return_type: None, observable: false }),
-        "Length#"    => Some(Signature { name: "Length#",    parameters: vec![], return_type: None, observable: false }),
-        "ToInt#"     => Some(Signature { name: "ToInt#",     parameters: vec![], return_type: None, observable: false }),
-        "ToFloat#"   => Some(Signature { name: "ToFloat#",   parameters: vec![], return_type: None, observable: false }),
-        "ToString#"  => Some(Signature { name: "ToString#",  parameters: vec![], return_type: None, observable: false }),
+        // ── String ───────────────────────────────────────────────────
+        "Concat#"    => Some(Signature { name: "Concat#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Length#"    => Some(Signature { name: "Length#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
+        "ToInt#"     => Some(Signature { name: "ToInt#",     parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
+        "ToFloat#"   => Some(Signature { name: "ToFloat#",   parameters: vec![], return_kind: ReturnKind::Native("Float"), observable: false }),
+        "ToString#"  => Some(Signature { name: "ToString#",  parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
 
-        // ── Collection (observable due to mutation) ─────────────────
-        "Get#"    => Some(Signature { name: "Get#",    parameters: vec![], return_type: None, observable: false }),
-        "Insert#" => Some(Signature { name: "Insert#", parameters: vec![], return_type: None, observable: true }),
+        // ── Collection ───────────────────────────────────────────────
+        "Get#"    => Some(Signature { name: "Get#",    parameters: vec![], return_kind: ReturnKind::Inferred, observable: false }),
+        "Insert#" => Some(Signature { name: "Insert#", parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
 
-        // ── GPU (observable due to side channels) ───────────────────
-        "GetGlobalId#"   => Some(Signature { name: "GetGlobalId#",   parameters: vec![], return_type: None, observable: false }),
-        "GetGlobalSize#" => Some(Signature { name: "GetGlobalSize#", parameters: vec![], return_type: None, observable: false }),
-        "GetLocalId#"    => Some(Signature { name: "GetLocalId#",    parameters: vec![], return_type: None, observable: false }),
+        // ── GPU ───────────────────────────────────────────────────────
+        "GetGlobalId#"   => Some(Signature { name: "GetGlobalId#",   parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
+        "GetGlobalSize#" => Some(Signature { name: "GetGlobalSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
+        "GetLocalId#"    => Some(Signature { name: "GetLocalId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
 
         // ── Pointers (compile-time address resolution) ──────────────
         "AddressOf#" => Some(Signature {
             name: "AddressOf#",
             parameters: vec![("id", Type::string())],
-            return_type: Some(Type::ptr(Type::bits(8))),
+            return_kind: ReturnKind::Exact(Type::ptr(Type::bits(8))),
             observable: false,
         }),
 
-        // ── OS Syscall (observable) ───────────────────────────────────
-        // First arg is op (Int raw number or PascalCase abstract op),
-        // followed by up to 6 Int arguments. Returns Int (errno or result).
-        // 2026-07-15: Replaces all OS inop declarations.
-        "Syscall#" => Some(Signature {
-            name: "Syscall#",
+        // ── OS SysCall (observable) ────────────────────────────────────
+        // 2026-07-15: Returns native Int (result or errno).
+        "SysCall#" => Some(Signature {
+            name: "SysCall#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: true,
         }),
 
-        // ── POSIX sysconf (observable) ─────────────────────────────────
-        // Resolves runtime system configuration values (page size, CPU count).
-        // 2026-07-15: Separated from Syscall# because sysconf() is a C library
-        // function, not a raw syscall.
-        "Sysconf#" => Some(Signature {
-            name: "Sysconf#",
+        // ── POSIX SysConf (observable) ─────────────────────────────────
+        // 2026-07-15: Returns native Int (page size, CPU count, etc.).
+        "SysConf#" => Some(Signature {
+            name: "SysConf#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: true,
         }),
 
         // ── Atomic operations (LLVM atomicrmw / load atomic / fence) ──
-        // 2026-07-15: These map to LLVM atomic instructions. Cannot be
-        // expressed as defn (no Brief operator for atomicrmw) or Syscall#
-        // (not syscalls — inline CPU instructions).
+        // 2026-07-15: All return native Int except Fence# (void).
         "AtomicLoad#" => Some(Signature {
             name: "AtomicLoad#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: false,
         }),
         "AtomicStore#" => Some(Signature {
             name: "AtomicStore#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: true,
         }),
         "AtomicCas#" => Some(Signature {
             name: "AtomicCas#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: true,
         }),
         "AtomicXchg#" => Some(Signature {
             name: "AtomicXchg#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: true,
         }),
         "AtomicAdd#" => Some(Signature {
             name: "AtomicAdd#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: true,
         }),
         "Fence#" => Some(Signature {
             name: "Fence#",
             parameters: vec![],
-            return_type: Some(Type::void()),
+            return_kind: ReturnKind::Exact(Type::void()),
             observable: true,
         }),
 
         // ── Dynamic linker (platform library functions) ──────────────
-        // 2026-07-15: dlopen/dlsym/dlclose interact with the system dynamic
-        // linker. Must be # intrinsics because the backend emits the
-        // platform-specific calling convention for @dlopen/@dlsym/@dlclose.
+        // 2026-07-15: Return pointers (DlOpen#, DlSym#) or Int (DlClose#).
         "DlOpen#" => Some(Signature {
             name: "DlOpen#",
             parameters: vec![],
-            return_type: Some(Type::ptr(Type::bits(8))),
+            return_kind: ReturnKind::Exact(Type::ptr(Type::bits(8))),
             observable: true,
         }),
         "DlSym#" => Some(Signature {
             name: "DlSym#",
             parameters: vec![],
-            return_type: Some(Type::ptr(Type::bits(8))),
+            return_kind: ReturnKind::Exact(Type::ptr(Type::bits(8))),
             observable: false,
         }),
         "DlClose#" => Some(Signature {
             name: "DlClose#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: true,
         }),
 
         // ── Debugging (stack trace) ──────────────────────────────────
-        // 2026-07-15: backtrace() walks the stack using LLVM frameaddress
-        // or DWARF unwind. Like Print#, it's a debugging primitive the
-        // compiler provides.
+        // 2026-07-15: Returns frame count (native Int).
         "Backtrace#" => Some(Signature {
             name: "Backtrace#",
             parameters: vec![],
-            return_type: Some(Type::int()),
+            return_kind: ReturnKind::Native("Int"),
             observable: true,
         }),
 
@@ -183,7 +192,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_all_generic_intrinsics_have_signatures() {
+    fn test_all_intrinsics_have_signatures() {
         let intrinsics = [
             "Add#", "Sub#", "Mul#", "Div#", "Rem#", "Neg#", "Abs#",
             "Eq#", "Neq#", "Lt#", "Gt#", "Le#", "Ge#",
@@ -193,7 +202,7 @@ mod tests {
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "Get#", "Insert#",
             "GetGlobalId#", "GetGlobalSize#", "GetLocalId#",
-            "AddressOf#", "Syscall#", "Sysconf#",
+            "AddressOf#", "SysCall#", "SysConf#",
             "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#", "AtomicAdd#", "Fence#",
             "DlOpen#", "DlSym#", "DlClose#",
             "Backtrace#",
@@ -222,7 +231,6 @@ mod tests {
         assert!(get_intrinsic_signature("Insert#").unwrap().observable);
         assert!(!get_intrinsic_signature("Add#").unwrap().observable);
         assert!(!get_intrinsic_signature("Eq#").unwrap().observable);
-        // 2026-07-15: Observable atomic/linker/backtrace intrinsics
         assert!(get_intrinsic_signature("AtomicStore#").unwrap().observable);
         assert!(get_intrinsic_signature("DlOpen#").unwrap().observable);
         assert!(get_intrinsic_signature("Backtrace#").unwrap().observable);

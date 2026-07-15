@@ -14,7 +14,7 @@ pub use validate::*;
 
 use crate::ast::*;
 use crate::errors::{SyntaxError, TypeError};
-use crate::intrinsic_signatures::{get_intrinsic_signature, Signature};
+use crate::intrinsic_signatures::{get_intrinsic_signature, ReturnKind, Signature};
 use crate::type_universe::{builtin_operator_binding, TypeUniverse};
 use std::collections::HashMap;
 
@@ -186,7 +186,18 @@ fn infer_intrinsic_call(
             });
         }
     }
-    Ok(sig.return_type.clone().unwrap_or(Type::void()))
+    // 2026-07-15: ReturnKind replaces return_type: Option<Type>
+    Ok(match &sig.return_kind {
+        ReturnKind::Native("Int") => Type::int(),
+        ReturnKind::Native("Float") => Type::float(),
+        ReturnKind::Native("Bool") => Type::bool_(),
+        ReturnKind::Inferred => {
+            // Infer from first argument's type
+            args.first().map(|a| infer_expression(a, ctx)).unwrap_or(Ok(Type::int()))?
+        }
+        ReturnKind::Exact(t) => t.clone(),
+        _ => Type::int(), // fallback for unknown Native kinds
+    })
 }
 
 /// Infer the type of a binary operation.

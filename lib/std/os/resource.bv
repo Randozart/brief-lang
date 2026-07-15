@@ -1,10 +1,10 @@
-// 2026-07-15: Replaced inop with defn + Syscall#(GetRlimit/SetRlimit, ...);
+// 2026-07-15: Replaced inop with defn + SysCall#(GetRlimit/SetRlimit, ...);
 // Uses prlimit64 (x86_64: 302) via abstract op.
 
 defn getrlimit(resource: Int) -> Int {
-    Syscall#(GetRlimit, resource, 0, 0, 0, 0, 0);
+    SysCall#(GetRlimit, resource, 0, 0, 0, 0, 0);
 };
 
 defn setrlimit(resource: Int, packed: Int) -> Int {
-    Syscall#(SetRlimit, resource, packed, 0, 0, 0, 0);
+    SysCall#(SetRlimit, resource, packed, 0, 0, 0, 0);
 };

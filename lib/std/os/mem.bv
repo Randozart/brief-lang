@@ -1,21 +1,21 @@
-// 2026-07-15: Replaced inop with defn + Syscall#(Mmap/Munmap/Mprotect/Brk/Mlock, ...);
+// 2026-07-15: Replaced inop with defn + SysCall#(Mmap/Munmap/Mprotect/Brk/Mlock, ...);
 
 defn mmap(addr: Ptr<Byte>, length: Int, prot: Int, flags: Int, fd: Int, offset: Int) -> Int {
-    Syscall#(Mmap, addr, length, prot, flags, fd, offset);
+    SysCall#(Mmap, addr, length, prot, flags, fd, offset);
 };
 
 defn munmap(addr: Ptr<Byte>, length: Int) -> Int {
-    Syscall#(Munmap, addr, length, 0, 0, 0, 0);
+    SysCall#(Munmap, addr, length, 0, 0, 0, 0);
 };
 
 defn mprotect(addr: Ptr<Byte>, length: Int, prot: Int) -> Int {
-    Syscall#(Mprotect, addr, length, prot, 0, 0, 0);
+    SysCall#(Mprotect, addr, length, prot, 0, 0, 0);
 };
 
 defn brk(addr: Ptr<Byte>) -> Int {
-    Syscall#(Brk, addr, 0, 0, 0, 0, 0);
+    SysCall#(Brk, addr, 0, 0, 0, 0, 0);
 };
 
 defn mlock(addr: Ptr<Byte>, length: Int) -> Int {
-    Syscall#(Mlock, addr, length, 0, 0, 0, 0);
+    SysCall#(Mlock, addr, length, 0, 0, 0, 0);
 };

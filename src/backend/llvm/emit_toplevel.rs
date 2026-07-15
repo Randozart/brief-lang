@@ -220,9 +220,9 @@ impl LlvmBackend {
         writeln!(out, "declare i64 @__float_to_str(float)").ok();
         writeln!(out, "declare i64 @__to_str(i64)").ok();
         writeln!(out, "declare i64 @__stack_top__(i64)").ok();
-        // 2026-07-15: Raw OS syscall (Syscall# intrinsic)
+        // 2026-07-15: Raw OS syscall (SysCall# intrinsic)
         writeln!(out, "declare i64 @brief_syscall(i64, i64, i64, i64, i64, i64, i64)").ok();
-        // 2026-07-15: Runtime system configuration (Sysconf# intrinsic)
+        // 2026-07-15: Runtime system configuration (SysConf# intrinsic)
         writeln!(out, "declare i64 @brief_sysconf(i64)").ok();
         // 2026-07-15: Dynamic linker (DlOpen#/DlSym#/DlClose# intrinsics)
         writeln!(out, "declare ptr @dlopen(ptr, i32) nounwind").ok();

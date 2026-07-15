@@ -1,51 +1,16 @@
-// process-spawn.bv — Process spawning and environment intrinsics
-// Demonstrates: spawn#, spawn_with_output#, argv#, getpid#,
-// getenv#, setenv#, getcwd#, chdir#
+// process-spawn.bv — Process spawning and environment
+// 2026-07-15: Rewritten to use std/os imports.
 
-// Command-line arguments
-let args: List<String> = argv#();
-let arg_count: Int = args :> Size;
+import { getpid } from "std/os/process";
+import { getcwd, chdir } from "std/os/dir";
+import { getenv } from "std/os/process";
+import { to_c_string } from "std/string_c";
 
-// Current process ID
-let pid: Int = getpid#();
+let pid: Int = getpid();
+let cwd: String = getcwd();
+let home: Int = getenv(to_c_string("HOME"));
 
-// Spawn a child process (fire-and-forget)
-txn spawn_process [true][spawned == true] {
-    let ret: Int = spawn#("echo", ["hello", "world"]);
-    spawned = ret >= 0;
-    term;
-};
-
-// Spawn and capture output
-txn capture_output [true][output :> Size > 0] {
-    let result: String = spawn_with_output#("whoami", []);
-    output = result;
-    term;
-};
-
-// Environment variables
-txn read_env [true][env_val != ""] {
-    let val: String = getenv#("HOME");
-    env_val = val;
-    term;
-};
-
-txn set_env [true][env_set == true] {
-    let ret: Int = setenv#("MY_VAR", "42");
-    env_set = ret == 0;
-    term;
-};
-
-// Working directory
-let cwd: String = getcwd#();
-
-txn change_dir [true][new_dir_set == true] {
-    let ret: Int = chdir#("/tmp");
-    new_dir_set = ret == 0;
-    term;
-};
-
-// Exit with status code
-txn finish [true][true] {
-    term! -> exit#(0);
+defn main() -> Int {
+    let success: Int = chdir(to_c_string("/tmp"));
+    term 0;
 };

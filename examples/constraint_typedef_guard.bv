@@ -10,5 +10,5 @@ let x: Positive = 10;  // OK: 10 > 0
 // let y: Positive = -5;  // ERROR at runtime: guard _ > 0 violated
 
 rct txn use_positive {
-  term print_int#(x);
+  term Print#(x);
 };

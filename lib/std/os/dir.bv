@@ -1,76 +1,76 @@
 // Phase 3: relocated from compiler Intrinsic enum to std/os/ module
 // Auto-imported via prelude.
 //
-// 2026-07-15: Replaced inop with defn + to_c_string + Syscall#.
+// 2026-07-15: Replaced inop with defn + to_c_string + SysCall#.
 
 import { to_c_string } from "std/string_c";
 
 defn mkdir(path: Ptr<Byte>, mode: Int) -> Int {
     let cpath = to_c_string(path);
-    Syscall#(MkDir, cpath, mode, 0, 0, 0, 0);
+    SysCall#(MkDir, cpath, mode, 0, 0, 0, 0);
 };
 
 defn rmdir(path: Ptr<Byte>) -> Int {
     let cpath = to_c_string(path);
-    Syscall#(RmDir, cpath, 0, 0, 0, 0, 0);
+    SysCall#(RmDir, cpath, 0, 0, 0, 0, 0);
 };
 
 defn unlink(path: Ptr<Byte>) -> Int {
     let cpath = to_c_string(path);
-    Syscall#(Unlink, cpath, 0, 0, 0, 0, 0);
+    SysCall#(Unlink, cpath, 0, 0, 0, 0, 0);
 };
 
 defn rename(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int {
     let cpath_old = to_c_string(oldpath);
     let cpath_new = to_c_string(newpath);
-    Syscall#(Rename, cpath_old, cpath_new, 0, 0, 0, 0);
+    SysCall#(Rename, cpath_old, cpath_new, 0, 0, 0, 0);
 };
 
 defn symlink(target: Ptr<Byte>, linkpath: Ptr<Byte>) -> Int {
     let ctarget = to_c_string(target);
     let clink = to_c_string(linkpath);
-    Syscall#(Symlink, ctarget, clink, 0, 0, 0, 0);
+    SysCall#(Symlink, ctarget, clink, 0, 0, 0, 0);
 };
 
 defn read_link(path: Ptr<Byte>, buf: Ptr<Byte>, bufsiz: Int) -> Int {
     let cpath = to_c_string(path);
-    Syscall#(ReadLink, cpath, buf, bufsiz, 0, 0, 0);
+    SysCall#(ReadLink, cpath, buf, bufsiz, 0, 0, 0);
 };
 
 defn link_path(oldpath: Ptr<Byte>, newpath: Ptr<Byte>) -> Int {
     let cold = to_c_string(oldpath);
     let cnew = to_c_string(newpath);
-    Syscall#(Link, cold, cnew, 0, 0, 0, 0);
+    SysCall#(Link, cold, cnew, 0, 0, 0, 0);
 };
 
 defn getcwd(buf: Ptr<Byte>, size: Int) -> Int {
-    Syscall#(GetCwd, buf, size, 0, 0, 0, 0);
+    SysCall#(GetCwd, buf, size, 0, 0, 0, 0);
 };
 
 defn chdir(path: Ptr<Byte>) -> Int {
     let cpath = to_c_string(path);
-    Syscall#(ChDir, cpath, 0, 0, 0, 0, 0);
+    SysCall#(ChDir, cpath, 0, 0, 0, 0, 0);
 };
 
 defn readdir(dirp: Int, buf: Ptr<Byte>) -> Int {
-    Syscall#(ReadDir, dirp, buf, 0, 0, 0, 0);
+    SysCall#(ReadDir, dirp, buf, 0, 0, 0, 0);
 };
 
 defn chmod(path: Ptr<Byte>, mode: Int) -> Int {
     let cpath = to_c_string(path);
-    Syscall#(ChMod, cpath, mode, 0, 0, 0, 0);
+    SysCall#(ChMod, cpath, mode, 0, 0, 0, 0);
 };
 
 defn chown(path: Ptr<Byte>, owner: Int, group: Int) -> Int {
     let cpath = to_c_string(path);
-    Syscall#(ChOwn, cpath, owner, group, 0, 0, 0);
+    SysCall#(ChOwn, cpath, owner, group, 0, 0, 0);
 };
 
 defn umask(mask: Int) -> Int {
-    Syscall#(UMask, mask, 0, 0, 0, 0, 0);
+    SysCall#(UMask, mask, 0, 0, 0, 0, 0);
 };
 
 defn access(path: Ptr<Byte>, mode: Int) -> Int {
     let cpath = to_c_string(path);
-    Syscall#(Access, cpath, mode, 0, 0, 0, 0);
+    SysCall#(Access, cpath, mode, 0, 0, 0, 0);
 };

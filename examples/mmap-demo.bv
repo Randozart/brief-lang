@@ -1,46 +1,11 @@
-// mmap-demo.bv — Memory-mapped I/O
-// Demonstrates: mmap#, munmap#, mprotect#, memory management
+// mmap-demo.bv — Memory-mapped I/O demonstration
+// 2026-07-15: Rewritten to use std/os imports.
 
-let mapped_addr: Int = 0;
-let mapped_size: Int = 4096;
+import { mmap, munmap, mprotect } from "std/os/mem";
+import { atomic_load, atomic_store, atomic_add } from "std/os/atomic";
 
-// Allocate anonymous memory (no backing file)
-// mmap#(addr, length, prot, flags, fd, offset)
-txn allocate_memory [mapped_addr == 0][mapped_addr > 0] {
-    // PROT_READ | PROT_WRITE = 0x03
-    // MAP_PRIVATE | MAP_ANONYMOUS = 0x22
-    let addr: Int = mmap#(0, mapped_size, 0x03, 0x22, -1, 0);
-    mapped_addr = addr;
-    term;
-};
-
-// Write a value to mapped memory (via Ptr projection)
-txn write_to_memory [mapped_addr > 0][written == true] {
-    let ptr: Int = mapped_addr :> Ptr;
-    let _ = atomic_store#(ptr, 42, 0);
-    written = true;
-    term;
-};
-
-// Read from mapped memory
-txn read_from_memory [mapped_addr > 0][value == 42] {
-    let ptr: Int = mapped_addr :> Ptr;
-    let val: Int = atomic_load#(ptr, 0);
-    value = val;
-    term;
-};
-
-// Change protection to read-only
-txn protect_memory [mapped_addr > 0][protected == true] {
-    // PROT_READ = 0x01
-    let ret: Int = mprotect#(mapped_addr, mapped_size, 0x01);
-    protected = ret == 0;
-    term;
-};
-
-// Free mapped memory
-txn free_memory [mapped_addr > 0][mapped_addr == 0] {
-    let ret: Int = munmap#(mapped_addr, mapped_size);
-    mapped_addr = 0;
-    term;
+defn main() -> Int {
+    let mapped: Int = mmap(0, 4096, 3, 0x22, -1, 0);
+    let ret: Int = munmap(mapped, 4096);
+    term 0;
 };

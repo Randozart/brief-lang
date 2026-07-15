@@ -17,7 +17,7 @@ cell adder(a: Int, b: Int) -> sum: Int {
 // Script: call the cell, print result, exit
 rct txn boot [!boot_done]] {
     let result = cell adder(40, 2);
-    print_int#(result);
+    Print#(result);
     PutChar#(10);
     boot_done = true;
     term!;

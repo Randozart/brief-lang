@@ -13,5 +13,5 @@ rct txn swap [a != 99 || b != 42][a == 99 && b == 42] {
   let tmp = *pa;      // read a's value through pointer
   *pa = *pb;          // copy b into a through pointers
   *pb = tmp;          // write old a into b through pointer
-  term! -> print_int#(a);
+  term! -> Print#(a);
 };

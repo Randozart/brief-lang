@@ -13,5 +13,5 @@ defn main() -> Int {
     // Access projection on the cast value
     // (The cast identity means b:>Size == a:>Size in LLVM)
     let s: Int = b :> Size;
-    term print_int#(s);
+    term Print#(s);
 };

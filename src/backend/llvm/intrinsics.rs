@@ -34,8 +34,8 @@ pub fn emit_intrinsic_call(
         "GetEnv#" => return emit_get_env(backend, out, v, args, indent),
         "GetGlobalId#" => return emit_get_global_id(backend, out, v, args, indent),
         "AddressOf#" => return emit_address_of(backend, out, v, args, indent),
-        "Syscall#" => return emit_syscall(backend, out, v, args, indent),
-        "Sysconf#" => return emit_sysconf(backend, out, v, args, indent),
+        "SysCall#" => return emit_syscall(backend, out, v, args, indent),
+        "SysConf#" => return emit_sysconf(backend, out, v, args, indent),
         "Len#" | "Length#" => return emit_len(backend, out, v, args, indent),
         "Concat#" => return emit_external_call(backend, out, v, name, args, indent),
         "Length#" => return emit_external_call(backend, out, v, name, args, indent),
@@ -247,7 +247,7 @@ fn emit_len(
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
-// ─── Syscall# — raw OS syscall ───────────────────────────────────────
+// ─── SysCall# — raw OS syscall ───────────────────────────────────────
 
 /// Resolve a PascalCase abstract op name to a syscall number (x86_64).
 /// 2026-07-15: Single mapping table for all OS operations.
@@ -278,7 +278,7 @@ fn resolve_syscall_number(op: &str) -> Option<i64> {
     })
 }
 
-/// 2026-07-15: Emit Syscall# — first arg is op (Int raw number or PascalCase
+/// 2026-07-15: Emit SysCall# — first arg is op (Int raw number or PascalCase
 /// abstract name), followed by up to 6 Int arguments.
 /// Emits: call i64 @brief_syscall(i64 %num, i64 %a1, ..., i64 %a6)
 fn emit_syscall(
@@ -292,14 +292,14 @@ fn emit_syscall(
     }
     // Resolve the syscall number from the first argument
     let num_reg = match &args[0] {
-        // Raw numeric syscall number: Syscall#(2, args...)
+        // Raw numeric syscall number: SysCall#(2, args...)
         Expr::Decimal(n) => format!("{}", n),
-        // Abstract PascalCase op: Syscall#(Open, args...)
+        // Abstract PascalCase op: SysCall#(Open, args...)
         Expr::Identifier(op) => {
             let n = resolve_syscall_number(op)
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| {
-                    eprintln!("Syscall#: unknown abstract op '{}', using 0", op);
+                    eprintln!("SysCall#: unknown abstract op '{}', using 0", op);
                     "0".to_string()
                 });
             n
@@ -323,9 +323,9 @@ fn emit_syscall(
     BTypedRegister { name: v.to_string(), ty: Type::int() }
 }
 
-// ─── Sysconf# — runtime system configuration ──────────────────────────
+// ─── SysConf# — runtime system configuration ──────────────────────────
 
-/// 2026-07-15: Emit Sysconf# — resolves POSIX sysconf() values at runtime.
+/// 2026-07-15: Emit SysConf# — resolves POSIX sysconf() values at runtime.
 /// First arg is a PascalCase abstract name (e.g., PageSize, CpuCount) or
 /// a raw Int constant. Emits call to @brief_sysconf(i64 %name).
 fn emit_sysconf(
@@ -344,7 +344,7 @@ fn emit_sysconf(
                 "ClkTck" => 2,
                 "NGroupsMax" => 3,
                 _ => {
-                    eprintln!("Sysconf#: unknown abstract name '{}', using 0", name);
+                    eprintln!("SysConf#: unknown abstract name '{}', using 0", name);
                     0
                 }
             };

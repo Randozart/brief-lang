@@ -24,6 +24,6 @@ cell! counter(start: Int) -> val: Int {
 defn main() -> Int {
     // Sync cell call
     let result = cell adder(40, 2);
-    print_int#(result);
+    Print#(result);
     term result;
 };
