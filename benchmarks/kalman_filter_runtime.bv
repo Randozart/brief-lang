@@ -71,7 +71,7 @@ rct txn propagate [
     let ap22: Float = a20 * p02 + a21 * p12 + a22 * p22;
 
     // Step 2: P_new = AP * A^T + Q
-    &p00 = ap00 * a00 + ap01 * a10 + ap02 * a20 + q00;
+p00 = ap00 * a00 + ap01 * a10 + ap02 * a20 + q00;
     p01 = ap00 * a01 + ap01 * a11 + ap02 * a21 + q01;
     p02 = ap00 * a02 + ap01 * a12 + ap02 * a22 + q02;
 
@@ -84,12 +84,12 @@ rct txn propagate [
     p22 = ap20 * a02 + ap21 * a12 + ap22 * a22 + q22;
 
     // Update state vector
-    &x0 = nx0;
+x0 = nx0;
     x1 = nx1;
     x2 = nx2;
 
     // Increment counter
-    &count = count + 1;
+count = count + 1;
 
     // Structural liveness: FFI output keeps all float state live via DFE.
     [count % 5000000 == 0] {

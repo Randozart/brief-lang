@@ -25,7 +25,7 @@ let queue: RingBuffer<Int> = [0];
 rct txn work [count < N][count == N] {
     <- &queue;
     &queue <- count;
-    &count = count + 1;
+count = count + 1;
 
     [count % 5000000 == 0] {
         Print#(count);

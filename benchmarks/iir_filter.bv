@@ -62,12 +62,12 @@ rct txn process [count < total][count == total] {
     let out: Float = ff - fb;
 
     // Shift delay line
-    &x2 = x1;
+x2 = x1;
     x1 = input;
     y2 = y1;
     y1 = out;
 
     // Bump loop counter
-    &count = count + 1;
+count = count + 1;
     term;
 };
