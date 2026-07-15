@@ -23,6 +23,7 @@
 // or embeds the Work.
 
 pub mod annotator;
+pub mod address_resolver;
 pub mod assertion_verify;
 pub mod ast;
 pub mod analysis;

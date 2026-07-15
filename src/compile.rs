@@ -20,6 +20,10 @@ use brief_compiler::plugin::PluginManager;
 use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
 use brief_compiler::type_universe::TypeUniverse;
 
+/// Re-export the LLVM backend's TrgUnresolvedAction for CLI flag parsing.
+/// 2026-07-15: Phase 7i — Defined in the backend to avoid circular deps.
+pub use brief_compiler::backend::llvm::TrgUnresolvedAction;
+
 /// Pipeline stage at which to emit a BVIR snapshot.
 /// 2026-07-15: Phase 7 — Used by --emit-bvir for metaprogramming introspection.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -60,6 +64,8 @@ pub struct BuildOptions {
     pub disable_plugins: Vec<String>,
     /// Plugin names to enable exclusively (CLI --enable-plugin).
     pub enable_plugins: Vec<String>,
+    /// Action on unresolved dynamic trigger target (--error-unresolved-trg).
+    pub trg_unresolved_action: TrgUnresolvedAction,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -157,6 +163,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         stdlib_path: None,
         disable_plugins: vec![],
         enable_plugins: vec![],
+        trg_unresolved_action: TrgUnresolvedAction::Warn,
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
@@ -207,7 +214,8 @@ fn codegen(
         BackendKind::Llvm => {
             let mut b = LlvmBackend::new()
                 .with_optimize_budget(opts.optimize_budget)
-                .with_type_universe(universe.clone());
+                .with_type_universe(universe.clone())
+                .with_trg_unresolved_action(opts.trg_unresolved_action);
             if opts.gpu_offload {
                 b = b.with_gpu_offload(true);
             }

@@ -203,19 +203,11 @@ fn arg_as_string(args: &[Value], index: usize) -> Result<String, RuntimeError> {
     }
 }
 
-/// 2026-07-15: Resolve a named address to its numeric value for the interpreter.
-/// Known addresses: "uart" → 0xFFE01000, "gpio" → 0xFE001000, "timer" → 0xFE002000.
-/// Unknown addresses resolve to a default MMIO range address.
+/// 2026-07-15: Resolve a named address to its numeric value.
+/// Delegates to the shared address_resolver module used by both
+/// the interpreter and LLVM backend.
 fn resolve_address_for_interp(id: &str) -> u64 {
-    match id.to_lowercase().as_str() {
-        "uart"  | "uart0"  | "/dev/ttyS0"  | "/dev/ttyAMA0"  => 0xFFE01000,
-        "gpio"  | "gpio0"  | "/dev/gpiochip0"                => 0xFE001000,
-        "timer" | "timer0" | "/dev/timer0"                   => 0xFE002000,
-        "spi"   | "spi0"   | "/dev/spidev0.0"                => 0xFE003000,
-        "i2c"   | "i2c0"   | "/dev/i2c-0"                    => 0xFE004000,
-        "dma"   | "dma0"   | "/dev/dma"                      => 0xFE005000,
-        _ => 0xFE000000, // default MMIO region base
-    }
+    crate::address_resolver::resolve_address(id)
 }
 
 #[cfg(test)]

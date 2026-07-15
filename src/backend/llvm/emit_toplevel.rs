@@ -510,12 +510,25 @@ impl LlvmBackend {
             }
             // 2026-07-15: @ *ptr dynamic trigger — emit the pointer expression,
             // then load volatile from the resulting pointer value.
+            // When --error-unresolved-trg is set, emit a null check before the
+            // load that branches to unreachable if the pointer is null.
             crate::ast::LinkRef::Deref(ptr_expr) => {
                 let store_ty = super::trg_llvm_storage_ty(trg_ty);
                 let tr_counter = self.fun.txn_counter;
                 self.fun.txn_counter += 1;
                 let raw = format!("%tr{}", tr_counter);
                 let ptr_reg = self.emit_expr(out, ptr_expr, indent);
+                if self.trg_unresolved_action == crate::backend::llvm::TrgUnresolvedAction::Error {
+                    let err_bb = format!("trg_err_{}", tr_counter);
+                    let ok_bb = format!("trg_ok_{}", tr_counter);
+                    let null_check = format!("%nullchk_{}", tr_counter);
+                    writeln!(out, "{}{} = icmp eq ptr {}, null", indent, null_check, ptr_reg.name).ok();
+                    writeln!(out, "  br i1 {}, label %{}, label %{}", null_check, err_bb, ok_bb).ok();
+                    writeln!(out, "{}:", err_bb).ok();
+                    writeln!(out, "  call void @llvm.trap()").ok();
+                    writeln!(out, "  unreachable").ok();
+                    writeln!(out, "{}:", ok_bb).ok();
+                }
                 writeln!(out, "{}{} = load volatile {}, ptr {}, align 1", indent, raw, store_ty, ptr_reg.name).ok();
                 self.emit_trg_load_finish(out, indent, dst, raw, trg_ty);
             }

@@ -89,6 +89,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut stdlib_path: Option<String> = None;
     let mut disable_plugins = Vec::new();
     let mut enable_plugins = Vec::new();
+    let mut trg_unresolved_action = compile::TrgUnresolvedAction::Warn;
 
     let mut i = 0;
     while i < args.len() {
@@ -144,6 +145,12 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             let name = args.get(i + 1).ok_or("--enable-plugin requires a plugin name argument")?;
             enable_plugins.push(name.clone());
             i += 2;
+        } else if arg == "--warn-unresolved-trg" {
+            trg_unresolved_action = compile::TrgUnresolvedAction::Warn;
+            i += 1;
+        } else if arg == "--error-unresolved-trg" {
+            trg_unresolved_action = compile::TrgUnresolvedAction::Error;
+            i += 1;
         } else if arg.starts_with('-') {
             return Err(format!("unknown flag: {}", arg));
         } else if file_path.is_some() {
@@ -181,6 +188,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         stdlib_path,
         disable_plugins,
         enable_plugins,
+        trg_unresolved_action,
     })
 }
 

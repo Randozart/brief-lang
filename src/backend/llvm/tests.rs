@@ -2096,3 +2096,93 @@ fn test_emit_address_of() {
     let expected_str = expected_addr.to_string();
     assert!(output.contains(&expected_str), "Should contain uart address {} (= 0x{:X})", expected_str, expected_addr);
 }
+
+#[test]
+fn test_trg_deref_error_flag() {
+    // When --error-unresolved-trg is set, a @ *ptr dynamic trigger should
+    // emit a null check + unreachable before the load volatile.
+    // The trigger must be referenced in the transaction's precondition
+    // for emit_trg_load to be called. Without a precondition reference,
+    // the trigger is dead code and the backend skips it.
+    use crate::ast::Contract;
+    let program = vec![
+        TopLevel::Trigger(Trigger {
+            name: "dyn_trg".to_string(),
+            // @ *ptr — Expr::Deref wraps the pointer expression
+            instance: Expr::Deref(Box::new(Expr::Identifier("my_ptr".to_string()))),
+            port: "data".to_string(),
+            span: None,
+        }),
+        TopLevel::Transaction(Transaction {
+            name: "pump".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(
+                    BinaryOpKind::Eq,
+                    Box::new(Expr::Identifier("dyn_trg".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+                post_condition: Expr::Bool(true),
+                is_entry: false,
+                watchdog: None,
+                span: None,
+            },
+            body: vec![Statement::Term(None)],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+        }),
+    ];
+    let output = LlvmBackend::new()
+        .with_trg_unresolved_action(crate::backend::llvm::TrgUnresolvedAction::Error)
+        .generate(&program, None);
+    assert!(output.contains("icmp eq ptr"), "Should emit null check for error mode");
+    assert!(output.contains("unreachable"), "Should emit unreachable for error mode");
+}
+
+#[test]
+fn test_trg_deref_warn_default_no_null_check() {
+    // Default (Warn) mode should NOT emit null check for @ *ptr triggers.
+    use crate::ast::Contract;
+    let program = vec![
+        TopLevel::Trigger(Trigger {
+            name: "dyn_trg".to_string(),
+            instance: Expr::Deref(Box::new(Expr::Identifier("my_ptr".to_string()))),
+            port: "data".to_string(),
+            span: None,
+        }),
+        TopLevel::Transaction(Transaction {
+            name: "pump".to_string(),
+            is_reactive: true,
+            is_async: false,
+            type_params: vec![],
+            parameters: vec![],
+            output_type: None,
+            outputs: vec![],
+            contract: Contract {
+                pre_condition: Expr::BinaryOp(
+                    BinaryOpKind::Eq,
+                    Box::new(Expr::Identifier("dyn_trg".to_string())),
+                    Box::new(Expr::Decimal(1)),
+                ),
+                post_condition: Expr::Bool(true),
+                is_entry: false,
+                watchdog: None,
+                span: None,
+            },
+            body: vec![Statement::Term(None)],
+            metadata: HashMap::new(),
+            derivation: None,
+            modifiers: vec![],
+            span: None,
+        }),
+    ];
+    let output = LlvmBackend::new().generate(&program, None);
+    assert!(!output.contains("icmp eq ptr"), "Default mode should not emit null check");
+}

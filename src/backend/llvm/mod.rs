@@ -628,6 +628,16 @@ fn find_perfect_hash(keys: &[i64]) -> Option<(u64, u32)> {
     None
 }
 
+/// Action when a `@ *ptr` dynamic trigger target resolves to null.
+/// 2026-07-15: Phase 7i — --error-unresolved-trg threads this to codegen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrgUnresolvedAction {
+    /// Warn on null target (default — currently a no-op at codegen).
+    Warn,
+    /// Emit null check + unreachable to abort at runtime.
+    Error,
+}
+
 pub struct LlvmBackend {
     // ── Context Architecture (Phase 0) ─────────────────────
     //
@@ -664,6 +674,10 @@ pub struct LlvmBackend {
     // ── GPU Offloading ─────────────────────────────────────
     pub(crate) spirv_kernels: Vec<String>,
     pub(crate) spirv_blobs: Vec<Vec<u8>>,
+
+    // ── Dynamic Trigger Safety ─────────────────────────────
+    // 2026-07-15: Phase 7i — Controls null-check emission for @ *ptr.
+    pub(crate) trg_unresolved_action: TrgUnresolvedAction,
 }
 
 #[derive(Debug, Clone)]
@@ -745,6 +759,7 @@ impl LlvmBackend {
             pending_async_await_count: 0,
             spirv_kernels: Vec::new(),
             spirv_blobs: Vec::new(),
+            trg_unresolved_action: TrgUnresolvedAction::Warn,
         }
     }
 
@@ -814,6 +829,11 @@ impl LlvmBackend {
 
     pub fn with_gpu_offload(mut self, offload: bool) -> Self {
         self.ctx.gpu_offload = offload;
+        self
+    }
+
+    pub fn with_trg_unresolved_action(mut self, action: TrgUnresolvedAction) -> Self {
+        self.trg_unresolved_action = action;
         self
     }
 
