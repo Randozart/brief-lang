@@ -19,6 +19,7 @@
 // 2026-07-15: Removed old PluginHook/PluginAction types. The new trait
 // exposes stage-specific methods that return Result<(), String>.
 
+pub mod intrinsics;
 pub mod loader;
 pub mod runner;
 

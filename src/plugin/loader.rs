@@ -9,6 +9,7 @@
 // retained but will be replaced by the stage-based architecture in
 // Phase 5.
 
+use super::intrinsics;
 use super::{Plugin, PluginManager};
 use crate::ast::{StageBlock, StageKind, TopLevel};
 use crate::parser::Parser;
@@ -46,11 +47,17 @@ impl StageBlockPlugin {
     }
 
     /// Evaluate the block's body statements.
-    /// Currently a no-op — Phase 3 will dispatch $ intrinsics.
-    /// 2026-07-15: Phase 2 — Placeholder; Phase 3 adds $ intrinsic dispatch.
-    fn evaluate_body(&self) -> Result<(), String> {
-        if !self.body.is_empty() {
-            // Phase 3: interpret $ calls in the body
+    /// Iterates each statement and dispatches $ intrinsic calls via
+    /// intrinsics::evaluate_statement().
+    /// 2026-07-15: Phase 3 — Full $ intrinsic dispatch for on_ast.
+    /// on_ir evaluation is a no-op for now (body contains AST intrinsics).
+    fn evaluate_body(
+        &self,
+        program: &mut Vec<TopLevel>,
+        universe: &mut TypeUniverse,
+    ) -> Result<(), String> {
+        for stmt in &self.body {
+            intrinsics::evaluate_statement(stmt, program, universe)?;
         }
         Ok(())
     }
@@ -67,14 +74,16 @@ impl Plugin for StageBlockPlugin {
 
     fn on_ast(
         &self,
-        _program: &mut Vec<TopLevel>,
-        _universe: &mut TypeUniverse,
+        program: &mut Vec<TopLevel>,
+        universe: &mut TypeUniverse,
     ) -> Result<(), String> {
-        self.evaluate_body()
+        self.evaluate_body(program, universe)
     }
 
     fn on_ir(&self, _ir: &mut String) -> Result<(), String> {
-        self.evaluate_body()
+        // $(Stage) blocks primarily manipulate AST; IR manipulation is
+        // reserved for future use (Phase 6 may add IR-level $ intrinsics).
+        Ok(())
     }
 }
 
