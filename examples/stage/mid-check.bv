@@ -1,0 +1,13 @@
+$(Mid) {
+    // Verify that certain patterns exist after typechecking
+    // $ MatchIR$("(call PrintInt# ?*)", "(call PrintInt# (int 0))");
+    EmitWarning$("Mid stage: type-checked AST ready for inspection");
+};
+
+defn compute(x: Int) -> Int {
+    term x * 2;
+};
+
+defn main() -> Int {
+    term compute(21);
+};

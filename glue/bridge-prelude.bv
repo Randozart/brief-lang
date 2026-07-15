@@ -1,12 +1,12 @@
 // GLUE Bridge Prelude — minimal type universe for bridge files
 //
 // Defines the core types that bridge files need without pulling in the
-// full stdlib OS prelude (which adds syscall runtime dependencies).
-// Use `--no-stdlib` + import "glue/bridge-prelude.bv" to avoid
+// full prelude plugin (which adds OS runtime dependencies).
+// Use `--disable-plugin prelude` + import "glue/bridge-prelude.bv" to avoid
 // pulling in brief_rt.c dependencies.
 //
 // Usage:
-//   brief build --no-stdlib --library bridge.bv --out .
+//   brief build --disable-plugin prelude --library bridge.bv --out .
 
 type Int <: Bits {
     bytes <~ 8;

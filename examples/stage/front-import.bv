@@ -1,0 +1,10 @@
+$(Front) {
+    // Insert a literal import before the typechecker sees the AST
+    InsertLiteralImport$("std/option.bv");
+};
+
+// The import inserted above is available here:
+defn main() -> Int {
+    let x: Option<Int> = Option::Some(42);
+    term 0;
+};

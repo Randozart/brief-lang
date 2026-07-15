@@ -16,10 +16,30 @@ use std::process::Command;
 use brief_compiler::backend::llvm::LlvmBackend;
 use brief_compiler::lexer::Token;
 use brief_compiler::plugin::loader::{discover_system_plugins, extract_inline_stage_blocks};
-use brief_compiler::plugin::runner::run_plugin_chain;
 use brief_compiler::plugin::PluginManager;
 use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
 use brief_compiler::type_universe::TypeUniverse;
+
+/// Pipeline stage at which to emit a BVIR snapshot.
+/// 2026-07-15: Phase 7 — Used by --emit-bvir for metaprogramming introspection.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BvirStage {
+    Ast,
+    Mid,
+    Post,
+}
+
+impl std::str::FromStr for BvirStage {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ast" => Ok(BvirStage::Ast),
+            "mid" => Ok(BvirStage::Mid),
+            "post" => Ok(BvirStage::Post),
+            _ => Err(format!("unknown BVIR stage '{}'. Use: ast, mid, post", s)),
+        }
+    }
+}
 
 /// Options parsed from the `brief-compiler build` CLI flags.
 pub struct BuildOptions {
@@ -28,8 +48,8 @@ pub struct BuildOptions {
     pub out_dir: Option<String>,
     pub optimize_budget: u64,
     pub gpu_offload: bool,
-    pub plugin_paths: Vec<String>,
-    pub emit_bvir: bool,
+    /// BVIR snapshot stages to emit (--emit-bvir). Empty = no emission.
+    pub emit_bvir_stages: Vec<BvirStage>,
     /// Selected backend (resolved from extension + --backend flag).
     pub backend: BackendKind,
     /// Disable automatic stdlib import (for bare-metal/no-OS targets).
@@ -63,6 +83,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         pm.run_front_ast(&mut items, &mut front_universe)?;
     }
 
+    // BVIR snapshot at Ast stage (after parse + front, for metaprogramming)
+    {
+        let snapshot_universe = TypeUniverse::new();
+        emit_bvir_snapshot(file_path, BvirStage::Ast, &items, &snapshot_universe, opts)?;
+    }
+
     // ── Import resolution ─────────────────────────────────────────────
     let mut resolver = brief_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
@@ -77,8 +103,8 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // ── Mid stage: AST transformation (after type check) ──────────────
     pm.run_mid_ast(&mut items, &mut universe)?;
 
-    // ── BVIR plugin chain (external plugins) ──────────────────────────
-    run_bvir_plugin_chain(&mut items, &mut universe, opts)?;
+    // BVIR snapshot at Mid stage (for metaprogrammer inspection)
+    emit_bvir_snapshot(file_path, BvirStage::Mid, &items, &universe, opts)?;
 
     // ── Normalizer pass ───────────────────────────────────────────────
     match opts.backend {
@@ -92,6 +118,9 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
             brief_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe)?;
         }
     }
+
+    // BVIR snapshot at Post stage (after normalizer, before codegen)
+    emit_bvir_snapshot(file_path, BvirStage::Post, &items, &universe, opts)?;
 
     // ── Code generation ───────────────────────────────────────────────
     let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts)?;
@@ -122,8 +151,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         out_dir: None,
         optimize_budget: 0,
         gpu_offload: false,
-        plugin_paths: vec![],
-        emit_bvir: false,
+        emit_bvir_stages: vec![],
         backend: BackendKind::Llvm,
         no_stdlib: false,
         stdlib_path: None,
@@ -156,6 +184,10 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
     }
     if !opts.disable_plugins.is_empty() {
         pm = pm.with_disabled(opts.disable_plugins.clone());
+    }
+    // --no-std is equivalent to --disable-plugin prelude
+    if opts.no_stdlib {
+        pm = pm.with_disabled(vec!["prelude".to_string()]);
     }
 
     pm
@@ -212,42 +244,32 @@ fn codegen(
     Ok((output, ext))
 }
 
-// Legacy: external BVIR plugin path for backwards compatibility.
-// Used when --plugin or --emit-bvir is passed.
-// 2026-07-15: Phase 2 — Retained for external plugin chain support.
-fn run_bvir_plugin_chain(
-    items: &mut Vec<brief_compiler::ast::TopLevel>,
-    universe: &mut TypeUniverse,
+/// Write a BVIR snapshot at the given pipeline stage, if --emit-bvir includes it.
+/// 2026-07-15: Phase 7 — Metaprogrammer introspection tool.
+fn emit_bvir_snapshot(
+    file_path: &str,
+    stage: BvirStage,
+    items: &[brief_compiler::ast::TopLevel],
+    universe: &TypeUniverse,
     opts: &BuildOptions,
 ) -> Result<(), String> {
-    let has_plugins = !opts.plugin_paths.is_empty();
-    if !has_plugins && !opts.emit_bvir {
+    if !opts.emit_bvir_stages.contains(&stage) {
         return Ok(());
     }
-
-    let file_path = &opts.file_path;
-    let bvir_before = brief_compiler::bvir::to_bvir(items, universe);
-    if opts.emit_bvir {
-        let path = format!("{}.bvir.before", file_path.strip_suffix(".bv").unwrap_or(file_path));
-        std::fs::write(&path, &bvir_before)
-            .map_err(|e| format!("cannot write '{}': {}", path, e))?;
-    }
-
-    let bvir_after = if has_plugins {
-        run_plugin_chain(&bvir_before, &opts.plugin_paths)?
-    } else {
-        bvir_before.clone()
+    let stage_name = match stage {
+        BvirStage::Ast => "ast",
+        BvirStage::Mid => "mid",
+        BvirStage::Post => "post",
     };
-
-    if opts.emit_bvir {
-        let path = format!("{}.bvir.after", file_path.strip_suffix(".bv").unwrap_or(file_path));
-        std::fs::write(&path, &bvir_after)
-            .map_err(|e| format!("cannot write '{}': {}", path, e))?;
-    }
-
-    let (restored_items, restored_universe) = brief_compiler::bvir::from_bvir(&bvir_after)?;
-    *items = restored_items;
-    *universe = restored_universe;
+    let bvir = brief_compiler::bvir::to_bvir(items, universe);
+    let path = format!(
+        "{}.bvir.{}",
+        file_path.strip_suffix(".bv").unwrap_or(file_path),
+        stage_name
+    );
+    std::fs::write(&path, &bvir)
+        .map_err(|e| format!("cannot write '{}': {}", path, e))?;
+    eprintln!("wrote BVIR snapshot: {}", path);
     Ok(())
 }
 

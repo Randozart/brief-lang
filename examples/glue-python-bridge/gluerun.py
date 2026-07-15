@@ -3,7 +3,7 @@
 GLUE Python Bridge — call Brief exports from Python via ctypes.
 
 Workflow:
-  1. brief build --no-stdlib --library bridge.bv --out .  → bridge.ll
+  1. brief build --disable-plugin prelude --library bridge.bv --out .  → bridge.ll
   2. llc -filetype=obj bridge.ll -o bridge.o              → bridge.o
   3. cc -shared bridge.o -o libbridge.so                  → libbridge.so
   4. python3 gluerun.py                                   → runs this script
@@ -25,7 +25,7 @@ def build_bridge():
     bridge_ll = SCRIPT_DIR / "bridge.ll"
     if not bridge_ll.exists():
         print("ERROR: bridge.ll not found. Run first:", file=sys.stderr)
-        print(f"  brief build --no-stdlib --library bridge.bv --out {SCRIPT_DIR}", file=sys.stderr)
+        print(f"  brief build --disable-plugin prelude --library bridge.bv --out {SCRIPT_DIR}", file=sys.stderr)
         sys.exit(1)
 
     bridge_o = SCRIPT_DIR / "bridge.o"

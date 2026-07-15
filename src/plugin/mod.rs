@@ -21,7 +21,6 @@
 
 pub mod intrinsics;
 pub mod loader;
-pub mod runner;
 
 use crate::ast::{StageKind, TopLevel};
 use crate::target::TargetConfig;

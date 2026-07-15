@@ -83,22 +83,6 @@ fn expect_string_arg(args: &[Expr], idx: usize, intrinsic: &str) -> Result<Strin
     }
 }
 
-/// Extract an integer literal from an expression at the given argument index.
-/// 2026-07-15: Phase 3 — literal-only.
-#[allow(dead_code)]
-fn expect_int_arg(args: &[Expr], idx: usize, intrinsic: &str) -> Result<i64, String> {
-    let arg = args.get(idx).ok_or_else(|| {
-        format!("{}: missing argument {}", intrinsic, idx)
-    })?;
-    match arg {
-        Expr::Decimal(n) => Ok(*n),
-        _ => Err(format!(
-            "{}: argument {} must be an integer literal, got {:?}",
-            intrinsic, idx, arg
-        )),
-    }
-}
-
 // ── Intrinsic Implementations ─────────────────────────────────────────
 
 /// `InsertLiteralImport$(path)` — Inject a literal (filesystem) import.

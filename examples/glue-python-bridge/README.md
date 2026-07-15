@@ -6,7 +6,7 @@ Call Brief-exported functions from Python via the GLUE protocol.
 
 ```bash
 cd examples/glue-python-bridge
-brief build --no-stdlib --library bridge.bv --out .
+brief build --disable-plugin prelude --library bridge.bv --out .
 python3 gluerun.py
 ```
 
@@ -21,7 +21,7 @@ Expected output:
 
 ## How It Works
 
-1. `brief build --no-stdlib --library bridge.bv --out .` compiles to `bridge.ll`
+1. `brief build --disable-plugin prelude --library bridge.bv --out .` compiles to `bridge.ll`
    — a reusable LLVM IR module with `__brief_init_state()` + exports, no `main()`
 2. `gluerun.py` automates:
    - `llc bridge.ll -filetype=obj -O2 -o bridge.o`

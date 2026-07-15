@@ -1,7 +1,7 @@
 /// build.rs — GLUE Rust bridge compilation
 ///
 /// Compiles bridge.ll → bridge.o → libbridge.a and links it into the binary.
-/// The bridge.ll is produced by `brief build --no-stdlib --library bridge.bv --out .`.
+/// The bridge.ll is produced by `brief build --disable-plugin prelude --library bridge.bv --out .`.
 
 use std::path::PathBuf;
 
@@ -12,7 +12,7 @@ fn main() {
     if !bridge_ll.exists() {
         println!("cargo:warning=bridge.ll not found. Generate it first:");
         println!("cargo:warning=  cd examples/glue-rust-bridge");
-        println!("cargo:warning=  brief build --no-stdlib --library bridge.bv --out .");
+        println!("cargo:warning=  brief build --disable-plugin prelude --library bridge.bv --out .");
         return;
     }
 

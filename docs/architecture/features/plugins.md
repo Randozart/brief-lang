@@ -33,11 +33,72 @@ System plugins discovered from `plugins/{stage}/<name>.bv` are registered
 with the name `<name>` (the file stem, no prefix/suffix). This lets
 `config/targets.toml` reference them by simple name in the `plugins` list.
 
-## BVIR path not needed for in-process plugins
+## Metaprogramming with Collect$ and MatchIR$
 
-The BVIR serialize→external→deserialize path is only for the legacy
-`--plugin` CLI flag (external executables). In-process plugins via
-`PluginManager` work directly on AST/IR in memory.
+**2026-07-15**: Phase 6. Two `$` intrinsics provide BVIR-level pattern
+matching for compile-time metaprogramming:
+
+- `Collect$(pattern)` — serialize the current program AST to BVIR, match
+  the pattern against all sub-trees, log the match count and first few
+  matches. Useful for inspecting what the compiler sees.
+- `MatchIR$(pattern, replacement)` — serialize, apply pattern-match
+  replacement, deserialize back into the AST. The program is modified
+  in place. Returns an error if the pattern matches nothing.
+
+### Pattern syntax
+
+The BVIR pattern language uses S-expressions with `?` variables:
+
+| Pattern | Meaning |
+|---------|---------|
+| `?x` | Match any single sub-tree, bind to `x` |
+| `?*` | Wildcard: match any single sub-tree, no binding |
+| `??*` | Rest wildcard: match zero or more trailing children |
+| `*` | Wildcard tag: match any list tag (first position) |
+| `(?tag ?x ?y)` | Match list with tag `?tag`, children `?x`, `?y` in order |
+| `(ident ?name)` | Match list with tag `ident`, bind first child to `name` |
+| `(call ?fn ??*)` | Match list with tag `call`, bind `fn`, rest wildcard |
+
+### Collect$ example
+
+```brief
+$(Mid) {
+    // --emit-bvir mid to see what BVIR looks like at this stage
+    Collect$("(call PrintInt# ?*)");
+};
+```
+
+### MatchIR$ example
+
+```brief
+$(Mid) {
+    // Replace all (add (int 0) ?x) with just ?x
+    MatchIR$("(add (int 0) ?x)", "(?x)");
+};
+```
+
+## Visualing BVIR with --emit-bvir
+
+The `--emit-bvir` flag writes BVIR snapshots at pipeline stages so
+metaprogrammers can inspect the AST format when writing `Collect$` and
+`MatchIR$` patterns:
+
+```bash
+brief-compiler build program.bv --emit-bvir ast    # after parse + front plugins
+brief-compiler build program.bv --emit-bvir mid    # after typecheck + mid plugins
+brief-compiler build program.bv --emit-bvir post   # after normalizer, before codegen
+brief-compiler build program.bv --emit-bvir        # all three stages
+```
+
+Each stage writes `<file>.bvir.{ast,mid,post}`. Use these files to
+understand what patterns match your AST.
+
+## --no-std is now --disable-plugin prelude
+
+The old `--no-std` flag still works but is equivalent to
+`--disable-plugin prelude`. The prelude is a system plugin
+(`plugins/front/prelude.bv`) that injects stdlib imports. To disable
+it, use either form.
 
 ## Webstack output
 
@@ -129,5 +190,6 @@ txn handle_input [has_device][has_device] {
 5. Post-stage plugin: inject a validation guard that runs at init and
    warns on unresolved targets
 
-Phase 5 will implement the full `AddressOf#` intrinsic, the `*` deref
-expression, and the two-phase safety model.
+Phase 5 implemented `AddressOf#`, the `*` deref expression
+(`Expr::Deref`), and the two-phase safety model. Phase 6 added the BVIR
+pattern compiler for `Collect$`/`MatchIR$`.

@@ -10,6 +10,7 @@ use std::env;
 use std::path::Path;
 
 use brief_compiler::target::{BackendKind, TargetConfig, get_extension};
+use compile::BvirStage;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -53,10 +54,10 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --llvm        Emit LLVM IR only, no binary", name);
     eprintln!("  {} build <file.bv> --out <dir>   Set output directory", name);
     eprintln!("  {} build <file.bv> --backend <name>  Select backend: llvm, circt, webstack, gpu", name);
-    eprintln!("  {} build <file.bv> --no-std          Disable stdlib auto-import", name);
+    eprintln!("  {} build <file.bv> --emit-bvir [ast|mid|post|all]  Emit BVIR snapshots (default: all)", name);
+    eprintln!("  {} build <file.bv> --no-std          Disable prelude (equivalent to --disable-plugin prelude)", name);
     eprintln!("  {} build <file.bv> --stdlib-path <p>   Set stdlib search path", name);
-    eprintln!("  {} build <file.bv> --emit-bvir      Write .bvir IR files", name);
-    eprintln!("  {} build <file.bv> --disable-plugin <name>  Disable a plugin by name", name);
+    eprintln!("  {} build <file.bv> --disable-plugin <name>  Disable a system plugin by name", name);
     eprintln!("  {} build <file.bv> --enable-plugin <name>   Enable only specific plugins", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
@@ -73,17 +74,15 @@ fn print_usage(program: &str) {
 ///   --out <dir>             output directory
 ///   --optimize-budget <N>   simulation budget (default 256)
 ///   --gpu-offload           enable GPU offload
-///   --plugin <path>         add a plugin executable to the chain
-///   --emit-bvir             write .bvir files before/after plugins
 ///   --backend <name>        select backend (llvm, circt, webstack, gpu)
+///   --emit-bvir [stage]     emit BVIR snapshots (ast, mid, post, all; default all)
 fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut file_path: Option<String> = None;
     let mut emit_ir_only = false;
     let mut out_dir: Option<String> = None;
     let mut optimize_budget = 256u64;
     let mut gpu_offload = false;
-    let mut plugin_paths = Vec::new();
-    let mut emit_bvir = false;
+    let mut emit_bvir: Vec<BvirStage> = Vec::new();
     let mut backend_override: Option<String> = None;
     let mut no_stdlib = false;
     let mut stdlib_path: Option<String> = None;
@@ -108,13 +107,23 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
             optimize_budget = val.parse()
                 .map_err(|_| format!("invalid --optimize-budget value: '{}'", val))?;
             i += 2;
-        } else if arg == "--plugin" {
-            let path = args.get(i + 1).ok_or("--plugin requires a path argument")?;
-            plugin_paths.push(path.clone());
-            i += 2;
         } else if arg == "--emit-bvir" {
-            emit_bvir = true;
-            i += 1;
+            // --emit-bvir with optional stage arg: "ast", "mid", "post"
+            // If no arg or "all", emit all stages.
+            let next = args.get(i + 1);
+            let stage_str = next.filter(|s| !s.starts_with('-')).map(|s| s.as_str());
+            match stage_str {
+                Some("ast") => emit_bvir.push(BvirStage::Ast),
+                Some("mid") => emit_bvir.push(BvirStage::Mid),
+                Some("post") => emit_bvir.push(BvirStage::Post),
+                Some("all") | None => {
+                    emit_bvir.push(BvirStage::Ast);
+                    emit_bvir.push(BvirStage::Mid);
+                    emit_bvir.push(BvirStage::Post);
+                }
+                Some(other) => return Err(format!("unknown BVIR stage '{}'. Use: ast, mid, post, all", other)),
+            }
+            i += if stage_str.is_some() { 2 } else { 1 };
         } else if arg == "--backend" {
             let name = args.get(i + 1).ok_or("--backend requires a name argument (llvm, circt, webstack, gpu)")?;
             backend_override = Some(name.clone());
@@ -165,8 +174,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         out_dir,
         optimize_budget,
         gpu_offload,
-        plugin_paths,
-        emit_bvir,
+        emit_bvir_stages: emit_bvir,
         backend,
         no_stdlib,
         stdlib_path,

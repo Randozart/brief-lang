@@ -1,0 +1,13 @@
+$(Post) {
+    // Post stage can inspect or validate the generated IR
+    EmitWarning$("Post stage: codegen complete, about to write output");
+};
+
+defn greet(name: String) -> String {
+    term "Hello, " + name;
+};
+
+defn main() -> Int {
+    let msg: String = greet("Brief");
+    term 0;
+};

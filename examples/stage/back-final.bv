@@ -1,0 +1,15 @@
+$(Back) {
+    // Back stage: final validation before writing to disk
+    EmitWarning$("Back stage: final check passed");
+};
+
+$(Front) {
+    // Multiple stage blocks in one file
+    InsertLiteralImport$("std/types.bv");
+};
+
+defn main() -> Int {
+    // AddressOf# returns a typed pointer for trigger bindings
+    let uart: Ptr<Bits<8>> = AddressOf#("sys:uart/status");
+    term 0;
+};
