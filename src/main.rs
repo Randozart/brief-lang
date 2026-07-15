@@ -25,6 +25,7 @@ fn main() {
         "derive" => run_derive(&args[2..]),
         "library" | "lib" => library::run_library_mode(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
+        "register" => run_register(&args[2..]),
         "help" | "--help" | "-h" => { print_usage(&args[0]); Ok(()) }
         _ => {
             // Default: compile the file
@@ -195,6 +196,13 @@ fn run_check(args: &[String]) -> Result<(), String> {
     let source = std::fs::read_to_string(file_path)
         .map_err(|e| format!("cannot read '{}': {}", file_path, e))?;
     compile::check_source(file_path, &source)
+}
+
+/// `brief-compiler register <name>` — register a project/target schema.
+/// 2026-07-15: Phase 7 — Stub implementation.
+fn run_register(_args: &[String]) -> Result<(), String> {
+    eprintln!("register: not yet implemented — schema registration is a future feature");
+    Ok(())
 }
 
 fn run_derive(args: &[String]) -> Result<(), String> {

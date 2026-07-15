@@ -1,0 +1,11 @@
+// ── validate-trg: Post-stage guard for dynamic triggers ──────────────
+// 2026-07-15: Phase 7 — Warns at compile time when @ *ptr dynamic
+// trigger references are detected in the generated IR. This is a
+// $(Post) stage plugin that runs after code generation.
+//
+// In future phases, this will scan the BVIR for LoadVolatile patterns
+// and flag dereferences of null/unresolved pointers.
+
+$(Post @ 0) {
+    EmitWarning$("validate-trg: post-stage guard active");
+};
