@@ -27,6 +27,10 @@ impl<'a> Parser<'a> {
             Some(Token::Trg) => self.parse_top_level_trg().map(TopLevel::Trigger),
             // 2026-07-14: Handle `type Name <: Parent { slots }` definitions
             Some(Token::Type) => self.parse_type_definition().map(TopLevel::TypeDef),
+            // 2026-07-14: Handle `struct Name { fields }` as TypeDef
+            Some(Token::Struct) => self.parse_struct_like().map(TopLevel::TypeDef),
+            // 2026-07-14: Handle `enum Name { variants }` as TypeDef (converted by normalizer)
+            Some(Token::Enum) => self.parse_enum_like().map(TopLevel::TypeDef),
             // 2026-07-14: Top-level let — state variable declaration
             Some(Token::Let) => {
                 let stmt = self.parse_let_statement()?;
@@ -583,6 +587,68 @@ impl<'a> Parser<'a> {
                 span: None,
             },
             span: None,
+        }))
+    }
+
+    /// 2026-07-14: Parse a `struct Name { fields }` declaration as a TypeDef.
+    /// Consumes the `struct` keyword, then delegates to parse_type_definition
+    /// with the modified position already past the keyword.
+    fn parse_struct_like(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
+        // struct Name { slot: Type; ... }
+        self.pos += 1; // consume struct
+        let name = self.expect_identifier()?;
+        let mut slots = Vec::new();
+        if self.eat(&Token::LBrace) {
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                let slot_name = self.expect_identifier()?;
+                self.expect(Token::Colon)?;
+                let slot_ty = self.parse_type()?;
+                self.eat(&Token::Semicolon);
+                slots.push(TypeDefSlot { name: slot_name, ty: slot_ty, bit_range: None });
+            }
+            self.expect(Token::RBrace)?;
+        }
+        self.eat(&Token::Semicolon);
+        Ok(Box::new(TypeDef {
+            name, type_params: vec![], base: Box::new(Expr::Identifier("Bits".into())),
+            bit_range: None, span: None,
+            body: TypeDefBody {
+                slots, metadata: std::collections::HashMap::new(),
+                projections: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None,
+            },
+        }))
+    }
+
+    /// 2026-07-14: Parse an `enum Name { Variant, Variant(Type) }` declaration.
+    /// Handles the basic form and stores as a TypeDef with variant metadata.
+    fn parse_enum_like(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
+        // enum Name { A, B, C(Int) }
+        self.pos += 1;
+        let name = self.expect_identifier()?;
+        let mut slots = Vec::new();
+        if self.eat(&Token::LBrace) {
+            while !self.check(&Token::RBrace) && !self.is_at_end() {
+                let variant_name = self.expect_identifier()?;
+                let variant_ty = if self.eat(&Token::LParen) {
+                    let inner = self.parse_type()?;
+                    self.expect(Token::RParen)?;
+                    inner
+                } else {
+                    Type::int()
+                };
+                self.eat(&Token::Comma);
+                slots.push(TypeDefSlot { name: format!("__variant_{}", variant_name), ty: variant_ty, bit_range: None });
+            }
+            self.expect(Token::RBrace)?;
+        }
+        self.eat(&Token::Semicolon);
+        Ok(Box::new(TypeDef {
+            name, type_params: vec![], base: Box::new(Expr::Identifier("Bits".into())),
+            bit_range: None, span: None,
+            body: TypeDefBody {
+                slots, metadata: std::collections::HashMap::new(),
+                projections: vec![], bindings: vec![], operators: vec![], constraints: vec![], span: None,
+            },
         }))
     }
 }

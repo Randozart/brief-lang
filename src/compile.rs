@@ -26,11 +26,15 @@ pub struct BuildOptions {
     pub emit_bvir: bool,
     /// Selected backend (resolved from extension + --backend flag).
     pub backend: BackendKind,
+    /// Disable automatic stdlib import (for bare-metal/no-OS targets).
+    pub no_stdlib: bool,
+    /// Override stdlib search path.
+    pub stdlib_path: Option<String>,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
 pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(), String> {
-    let (mut items, mut universe) = parse_and_check(file_path, source)?;
+    let (mut items, mut universe) = parse_and_check(file_path, source, opts)?;
 
     // Plugin path: serialize to BVIR, run plugins, deserialize.
     let has_plugins = !opts.plugin_paths.is_empty();
@@ -133,7 +137,19 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 
 /// Type-check only: don't generate code.
 pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
-    let (_items, _universe) = parse_and_check(file_path, source)?;
+    let default_opts = BuildOptions {
+        file_path: file_path.to_string(),
+        emit_ir_only: false,
+        out_dir: None,
+        optimize_budget: 0,
+        gpu_offload: false,
+        plugin_paths: vec![],
+        emit_bvir: false,
+        backend: BackendKind::Llvm,
+        no_stdlib: false,
+        stdlib_path: None,
+    };
+    let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
     Ok(())
 }
@@ -185,10 +201,19 @@ fn compile_ll_to_binary(ll_path: &str, binary_path: &str) -> Result<(), String> 
     Ok(())
 }
 
-/// Lex + parse + typecheck a source file, returning the TypeUniverse for the backend.
-fn parse_and_check(file_path: &str, source: &str) -> Result<(Vec<brief_compiler::ast::TopLevel>, TypeUniverse), String> {
+/// Lex + parse + resolve imports + typecheck, returning items and universe.
+fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result<(Vec<brief_compiler::ast::TopLevel>, TypeUniverse), String> {
     let tokens = lex(source)?;
     let items = parse(file_path, &tokens, source)?;
+
+    // 2026-07-14: Resolve imports — was accidentally dropped in Phase 7 refactoring.
+    let mut resolver = brief_compiler::import_resolver::ImportResolver::new()
+        .with_use_stdlib(!opts.no_stdlib);
+    if let Some(ref stdlib_path) = opts.stdlib_path {
+        resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
+    }
+    let items = resolver.resolve_imports(items, &std::path::PathBuf::from(file_path))?;
+
     let universe = TypeUniverse::new();
     check_types(&items, &universe)?;
     Ok((items, universe))

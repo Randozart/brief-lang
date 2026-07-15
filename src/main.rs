@@ -53,6 +53,8 @@ fn print_usage(program: &str) {
     eprintln!("  {} build <file.bv> --llvm        Emit LLVM IR only, no binary", name);
     eprintln!("  {} build <file.bv> --out <dir>   Set output directory", name);
     eprintln!("  {} build <file.bv> --backend <name>  Select backend: llvm, circt, webstack, gpu", name);
+    eprintln!("  {} build <file.bv> --no-std          Disable stdlib auto-import", name);
+    eprintln!("  {} build <file.bv> --stdlib-path <p>   Set stdlib search path", name);
     eprintln!("  {} build <file.bv> --emit-bvir    Write .bvir IR files", name);
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
@@ -81,6 +83,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut plugin_paths = Vec::new();
     let mut emit_bvir = false;
     let mut backend_override: Option<String> = None;
+    let mut no_stdlib = false;
+    let mut stdlib_path: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -110,6 +114,13 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         } else if arg == "--backend" {
             let name = args.get(i + 1).ok_or("--backend requires a name argument (llvm, circt, webstack, gpu)")?;
             backend_override = Some(name.clone());
+            i += 2;
+        } else if arg == "--no-std" {
+            no_stdlib = true;
+            i += 1;
+        } else if arg == "--stdlib-path" {
+            let val = args.get(i + 1).ok_or("--stdlib-path requires a path argument")?;
+            stdlib_path = Some(val.clone());
             i += 2;
         } else if arg.starts_with('-') {
             return Err(format!("unknown flag: {}", arg));
@@ -145,6 +156,8 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         plugin_paths,
         emit_bvir,
         backend,
+        no_stdlib,
+        stdlib_path,
     })
 }
 
