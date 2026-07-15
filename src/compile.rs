@@ -123,6 +123,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
         BackendKind::Webstack => {
             brief_compiler::backend::webstack_normalizer::normalize(&mut items, &mut universe)?;
         }
+        BackendKind::Spirv => {
+            // 2026-07-15: SPIR-V normalizer resolves types, flags kernels
+            brief_compiler::backend::spirv::normalizer::normalize(&mut items, &mut universe)?;
+        }
     }
 
     // BVIR snapshot at Post stage (after normalizer, before codegen)
@@ -135,9 +139,12 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     let out_path = determine_out_path(file_path, opts.out_dir.as_deref())?;
     let out_path = out_path.replace(".ll", ext);
 
-    std::fs::write(&out_path, &codegen_output)
-        .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
-    println!("wrote {}", out_path);
+    // 2026-07-15: SPIR-V writes inside codegen (binary format), skip outer write
+    if opts.backend != BackendKind::Spirv {
+        std::fs::write(&out_path, &codegen_output)
+            .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
+        println!("wrote {}", out_path);
+    }
 
     if !opts.emit_ir_only {
         let binary_path = out_path.strip_suffix(ext).unwrap_or(&out_path);
@@ -262,6 +269,17 @@ fn codegen(
             }
             output = b.generate(items, None);
             ".ll"
+        }
+        BackendKind::Spirv => {
+            // 2026-07-15: SPIR-V backend compiles kernels to binary
+            let binary = brief_compiler::backend::spirv::compile_spirv(items, "main")?;
+            let out = determine_out_path(&opts.file_path, opts.out_dir.as_deref())?;
+            let out_path = out.replace(".ll", ".spv");
+            std::fs::write(&out_path, &binary)
+                .map_err(|e| format!("cannot write '{}': {}", out_path, e))?;
+            println!("wrote {}", out_path);
+            output = String::new();
+            ".spv"
         }
     };
 

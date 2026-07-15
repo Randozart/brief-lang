@@ -1,0 +1,78 @@
+# SPIR-V Operation Config
+# Maps (operation, alu, bytes) → SPIR-V instruction template.
+# %v = result id, %a = first arg, %b = second, %c = third
+
+[op.Add.Int]
+8 = "OpIAdd %v %a %b"
+
+[op.Sub.Int]
+8 = "OpISub %v %a %b"
+
+[op.Mul.Int]
+8 = "OpIMul %v %a %b"
+
+[op.Div.Int]
+8 = "OpSDiv %v %a %b"
+
+[op.Rem.Int]
+8 = "OpSMod %v %a %b"
+
+[op.Add.Float]
+8 = "OpFAdd %v %a %b"
+
+[op.Sub.Float]
+8 = "OpFSub %v %a %b"
+
+[op.Mul.Float]
+8 = "OpFMul %v %a %b"
+
+[op.Div.Float]
+8 = "OpFDiv %v %a %b"
+
+[op.Eq.Int]
+8 = "OpIEqual %v %a %b"
+
+[op.Neq.Int]
+8 = "OpINotEqual %v %a %b"
+
+[op.Lt.Int]
+8 = "OpSLessThan %v %a %b"
+
+[op.Gt.Int]
+8 = "OpSGreaterThan %v %a %b"
+
+[op.Le.Int]
+8 = "OpSLessThanEqual %v %a %b"
+
+[op.Ge.Int]
+8 = "OpSGreaterThanEqual %v %a %b"
+
+[op.Eq.Float]
+8 = "OpFOrdEqual %v %a %b"
+
+[op.Lt.Float]
+8 = "OpFOrdLessThan %v %a %b"
+
+[op.BitAnd.Int]
+8 = "OpBitwiseAnd %v %a %b"
+
+[op.BitOr.Int]
+8 = "OpBitwiseOr %v %a %b"
+
+[op.BitXor.Int]
+8 = "OpBitwiseXor %v %a %b"
+
+[op.Shl.Int]
+8 = "OpShiftLeftLogical %v %a %b"
+
+[op.Shr.Int]
+8 = "OpShiftRightLogical %v %a %b"
+
+[op.Not.Int]
+8 = "OpNot %v %a"
+
+[op.Neg.Int]
+8 = "OpSNegate %v %a"
+
+[op.Neg.Float]
+8 = "OpFNegate %v %a"

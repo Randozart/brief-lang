@@ -25,6 +25,6 @@ defaults = ["--target", "wasm"]
 plugins = ["prelude"]
 
 [".abv"]
-backend = "gpu"
+backend = "spirv"
 defaults = ["--gpu-offload"]
 plugins = ["prelude"]

@@ -38,12 +38,39 @@ impl TypeConfig {
 /// Pure function: derive LLVM type string from (primitive, bytes).
 /// Fallback is i{N*8} for raw Bits(N).
 pub fn derive_llvm_type(primitive: Option<&str>, bytes: u64, config: &TypeConfig) -> String {
-    if let Some(prim) = primitive {
-        if let Some(llvm_ty) = config.lookup(prim, bytes) {
-            return llvm_ty.to_string();
+    match primitive {
+        Some("Int") if bytes == 8 => "i64".to_string(),
+        Some("Int") => format!("i{}", bytes * 8),
+        Some("Float") if bytes == 8 => "double".to_string(),
+        Some("Float") if bytes == 4 => "float".to_string(),
+        Some("Bool") => "i1".to_string(),
+        Some("Ptr") => "ptr".to_string(),
+        _ => {
+            if let Some(entry) = config.lookup(primitive.unwrap_or("Int"), bytes) {
+                entry.to_string()
+            } else {
+                format!("i{}", bytes * 8)
+            }
         }
     }
-    format!("i{}", bytes * 8)
+}
+
+/// 2026-07-15: Derive `alu` metadata from primitive + bytes for SPIR-V.
+/// Maps to SPIR-V OpType* variants: Int → OpTypeInt, Float → OpTypeFloat.
+pub fn derive_alu_type(primitive: Option<&str>, bytes: u64, config: &TypeConfig) -> String {
+    match primitive {
+        Some("Int") => "Int".to_string(),
+        Some("Float") => "Float".to_string(),
+        Some("Bool") => "Bool".to_string(),
+        Some("Ptr") => "Ptr".to_string(),
+        _ => {
+            if let Some(entry) = config.lookup(primitive.unwrap_or("Int"), bytes) {
+                entry.to_string()
+            } else {
+                "Int".to_string()
+            }
+        }
+    }
 }
 
 /// Maps (operation, primitive, bytes) → LLVM IR template.
@@ -56,9 +83,15 @@ pub struct OpConfig {
 }
 
 impl OpConfig {
-    /// Load the built-in op config file.
+    /// Load the built-in op config file (config/llvm-ops.toml).
     pub fn load() -> Self {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/llvm-ops.toml");
+        Self::load_from("llvm-ops.toml")
+    }
+
+    /// 2026-07-15: Load an op config file by name from config/ directory.
+    /// Example: OpConfig::load_from("spirv-ops.toml")
+    pub fn load_from(name: &str) -> Self {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config").join(name);
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
         let raw: HashMap<String, toml::Value> = toml::from_str(&content)

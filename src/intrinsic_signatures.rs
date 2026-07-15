@@ -89,6 +89,7 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
         "GetGlobalId#"   => Some(Signature { name: "GetGlobalId#",   parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
         "GetGlobalSize#" => Some(Signature { name: "GetGlobalSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
         "GetLocalId#"    => Some(Signature { name: "GetLocalId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
+        "WorkgroupSize#" => Some(Signature { name: "WorkgroupSize#", parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
         // 2026-07-15: Additional GPU intrinsics
         "GetGroupId#"    => Some(Signature { name: "GetGroupId#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
         "GetNumGroups#"  => Some(Signature { name: "GetNumGroups#",  parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: false }),
@@ -207,7 +208,7 @@ mod tests {
             "Print#", "GetEnv#",
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "Get#", "Insert#",
-            "GetGlobalId#", "GetGlobalSize#", "GetLocalId#",
+            "GetGlobalId#", "GetGlobalSize#", "GetLocalId#", "WorkgroupSize#",
             "GetGroupId#", "GetNumGroups#", "Dims#",
             "AddressOf#", "SysCall#", "SysConf#",
             "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#", "AtomicAdd#", "Fence#",

@@ -12,6 +12,7 @@ pub enum BackendKind {
     Circt,
     Webstack,
     Gpu,
+    Spirv,
 }
 
 /// One entry from config/targets.toml.
@@ -56,6 +57,7 @@ impl TargetConfig {
             "circt" => Ok(BackendKind::Circt),
             "webstack" => Ok(BackendKind::Webstack),
             "gpu" => Ok(BackendKind::Gpu),
+            "spirv" => Ok(BackendKind::Spirv),
             _ => Err(format!("unknown backend '{}'. Supported: llvm, circt, webstack", name)),
         }
     }
@@ -93,6 +95,7 @@ mod tests {
         assert_eq!(TargetConfig::resolve("llvm").unwrap(), BackendKind::Llvm);
         assert_eq!(TargetConfig::resolve("circt").unwrap(), BackendKind::Circt);
         assert_eq!(TargetConfig::resolve("webstack").unwrap(), BackendKind::Webstack);
+        assert_eq!(TargetConfig::resolve("spirv").unwrap(), BackendKind::Spirv);
         assert!(TargetConfig::resolve("unknown").is_err());
     }
 
