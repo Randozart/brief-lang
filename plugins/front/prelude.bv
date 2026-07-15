@@ -1,0 +1,8 @@
+// ── Standard Prelude — LLVM/Webstack/GPU Targets ─────────────────────────
+// 2026-07-15: Injects std/prelude.bv imports. Runs at Front stage with
+// highest priority so imports are available before type checking.
+// Phase 3 will fill in: InsertRegistryImport$("std/prelude.bv");
+
+$(Front @ highest) {
+
+};

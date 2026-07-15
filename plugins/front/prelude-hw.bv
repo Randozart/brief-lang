@@ -1,0 +1,8 @@
+// ── Hardware Prelude — CIRCT / Cell Targets ──────────────────────────────
+// 2026-07-15: Injects std/hardware.bv imports. Runs at Front stage with
+// highest priority. Used by .cbv files; provides Cell, Wire, Register, Bit.
+// Phase 3 will fill in: InsertRegistryImport$("std/hardware.bv");
+
+$(Front @ highest) {
+
+};

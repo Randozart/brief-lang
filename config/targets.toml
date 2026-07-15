@@ -17,12 +17,12 @@ plugins = ["prelude"]
 [".cbv"]
 backend = "circt"
 defaults = []
-plugins = ["prelude-core"]
+plugins = ["prelude-hw"]
 
 [".rbv"]
 backend = "webstack"
 defaults = ["--target", "wasm"]
-plugins = []
+plugins = ["prelude"]
 
 [".abv"]
 backend = "gpu"

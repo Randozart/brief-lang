@@ -145,7 +145,13 @@ pub fn discover_system_plugins(mgr: &mut PluginManager) {
             let mut block_idx = 0u32;
             for item in &items {
                 if let TopLevel::StageBlock(block) = item {
-                    let plugin_name = format!("sys:{}:{}", file_stem, block_idx);
+                    // Plugin name is the filestem (e.g. "prelude", "prelude-hw").
+                    // Multi-block files get suffixes ("prelude-1", etc).
+                    let plugin_name = if block_idx == 0 {
+                        file_stem.clone()
+                    } else {
+                        format!("{}-{}", file_stem, block_idx)
+                    };
                     let plugin = StageBlockPlugin::new(
                         plugin_name,
                         block.clone(),
@@ -333,8 +339,8 @@ mod tests {
     #[test]
     fn test_filter_for_extension_cbv() {
         let mut mgr = PluginManager::new();
-        let prelude_core = StageBlockPlugin::new(
-            "prelude-core".to_string(),
+        let prelude_hw = StageBlockPlugin::new(
+            "prelude-hw".to_string(),
             StageBlock {
                 stage: StageKind::Front,
                 priority: 0,
@@ -342,14 +348,14 @@ mod tests {
                 span: None,
             },
         );
-        mgr.register(Box::new(prelude_core));
+        mgr.register(Box::new(prelude_hw));
         mgr.register(Box::new(ValidationPlugin::new()));
 
         let config = TargetConfig::load();
         mgr.filter_for_extension(".cbv", &config);
 
         let names = mgr.enabled_names(None);
-        assert!(names.contains(&"prelude-core".to_string()));
+        assert!(names.contains(&"prelude-hw".to_string()));
         assert!(!names.contains(&"builtin:validation".to_string()));
     }
 
