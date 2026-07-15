@@ -63,6 +63,8 @@ impl<'a> Parser<'a> {
     /// term expr; or term! expr;
     fn parse_term_statement(&mut self, bang: bool) -> Result<Statement, SyntaxError> {
         self.pos += 1;
+        // 2026-07-15: Restore swan song: term! -> expr;
+        self.eat(&Token::Arrow);
         let val = if !self.check(&Token::Semicolon) && !self.check(&Token::RBrace) {
             Some(self.parse_expression()?)
         } else {
