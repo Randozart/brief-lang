@@ -136,7 +136,13 @@ fn build_supported_ops(config: &OpConfig) -> HashSet<String> {
     }
     // Also add some well-known intrinsics that don't appear as operations
     for name in &["GetEnv#", "GetGlobalId#", "GetGlobalSize#", "GetLocalId#",
-                   "ToInt#", "ToFloat#", "ToString#", "Concat#", "Length#"] {
+                   "ToInt#", "ToFloat#", "ToString#", "Concat#", "Length#",
+                   "AddressOf#", "SysCall#", "SysConf#",
+                   "Load#", "Store#", "Copy#", "Fill#",
+                   "AtomicLoad#", "AtomicStore#", "AtomicCas#", "AtomicXchg#",
+                   "AtomicAdd#", "Fence#",
+                   "DlOpen#", "DlSym#", "DlClose#",
+                   "Backtrace#", "WorkgroupSize#"] {
         set.insert(name.to_string());
     }
     set
@@ -147,7 +153,8 @@ const STANDARD_OPS: &[&str] = &[
     "Add", "Sub", "Mul", "Div", "Rem",
     "Eq", "Neq", "Lt", "Gt", "Le", "Ge",
     "Neg", "Abs",
+    "BitAnd", "BitOr", "BitXor", "Shl", "Shr",
     "Sqrt", "Sin", "Cos", "Fabs", "Ceil", "Floor", "Pow",
     "Print",
-    "Malloc", "Free", "Memcpy", "Memset",
+    "Malloc", "Free",
 ];

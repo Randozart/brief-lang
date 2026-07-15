@@ -11,7 +11,7 @@ use std::collections::HashMap;
 fn rune_to_op_name(rune: &str) -> Option<&'static str> {
     Some(match rune {
         "+" => "Add",
-        "-" if false => "Sub", // handled contextually
+        "-" => "Sub",
         "*" => "Mul",
         "/" => "Div",
         "%" => "Rem",

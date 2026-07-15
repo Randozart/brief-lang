@@ -415,10 +415,17 @@ pub fn check_program(items: &[TopLevel], universe: &TypeUniverse) -> Result<(), 
     // 2026-07-14: Pre-collect state variable bindings from top-level `let`
     // so they are visible to all transactions and definitions.
     let state_bindings: HashMap<String, Type> = items.iter().filter_map(|item| {
-        if let TopLevel::Statement(stmt) = item {
-            if let Statement::Let { name, ty, .. } = stmt.as_ref() {
-                return ty.clone().map(|t| (name.clone(), t));
+        match item {
+            TopLevel::Statement(stmt) => {
+                if let Statement::Let { name, ty, .. } = stmt.as_ref() {
+                    return ty.clone().map(|t| (name.clone(), t));
+                }
             }
+            // 2026-07-15: Also collect top-level const so it's visible in txn bodies
+            TopLevel::Constant(c) => {
+                return Some((c.name.clone(), c.ty.clone()));
+            }
+            _ => {}
         }
         None
     }).collect();
