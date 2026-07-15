@@ -45,6 +45,7 @@ pub fn dispatch_intrinsic(
     _universe: &mut TypeUniverse,
 ) -> Result<(), String> {
     match name {
+        "InsertLiteralImport$" => intrinsic_insert_literal_import(args, program),
         "InsertRegistryImport$" => intrinsic_insert_registry_import(args, program),
         "EmitWarning$" => intrinsic_emit_warning(args),
         "EmitError$" => intrinsic_emit_error(args),
@@ -99,13 +100,33 @@ fn expect_int_arg(args: &[Expr], idx: usize, intrinsic: &str) -> Result<i64, Str
 
 // ── Intrinsic Implementations ─────────────────────────────────────────
 
-/// `InsertRegistryImport$(path)` — Inject a compiler-registry import.
+/// `InsertLiteralImport$(path)` — Inject a literal (filesystem) import.
 ///
-/// Pushes `TopLevel::Import(Import::registry(path))` into the program AST.
-/// The import resolver will process it in the next pipeline stage.
+/// Pushes `TopLevel::Import(Import::literal(path, []))` into the program AST.
+/// The path is resolved against the project's search paths (same as
+/// `import "path"` in source code). Used for prelude injection and other
+/// filesystem-based imports.
 ///
-/// 2026-07-15: Phase 3 — Replaces the hardcoded prelude injection in
-/// import_resolver.rs::resolve_imports(). Called from $(Front) blocks.
+/// 2026-07-15: Phase 4 — Replaces the hardcoded prelude injection in
+/// import_resolver.rs. Used by plugins/front/prelude.bv.
+fn intrinsic_insert_literal_import(
+    args: &[Expr],
+    program: &mut Vec<TopLevel>,
+) -> Result<(), String> {
+    let path = expect_string_arg(args, 0, "InsertLiteralImport$")?;
+    program.push(TopLevel::Import(Import::literal(path, vec![])));
+    Ok(())
+}
+
+/// `InsertRegistryImport$(name)` — Inject a config-registry import.
+///
+/// Pushes `TopLevel::Import(Import::registry(name, []))` into the program AST.
+/// The name is resolved against the compiler's module registry config
+/// (`config/module-registry.toml`). When the registry config doesn't exist,
+/// falls back to literal filesystem resolution.
+///
+/// 2026-07-15: Phase 3 — Currently creates Import::registry (same resolution
+/// as literal until the config registry is implemented in a later phase).
 fn intrinsic_insert_registry_import(
     args: &[Expr],
     program: &mut Vec<TopLevel>,

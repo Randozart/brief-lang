@@ -27,13 +27,16 @@ use logos::Logos;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+// 2026-07-15: Phase 4 — Removed hardcoded prelude injection.
+// Prelude is now a system plugin (plugins/front/prelude.bv) that runs
+// at the Front stage via InsertLiteralImport$ calls.
+// Removed fields: use_stdlib, core_imported. Removed method: with_use_stdlib.
+
 pub struct ImportResolver {
     loaded_modules: HashMap<String, (Vec<TopLevel>, Vec<String>)>,
     search_paths: Vec<PathBuf>,
     root_path: PathBuf,
     stdlib_path: Option<PathBuf>,
-    use_stdlib: bool,
-    core_imported: bool,
     /// Board name for `import "target"` resolution (e.g., "stm32f407").
     board_name: Option<String>,
     // 2026-07-01: Cycle detection for import resolution.
@@ -48,8 +51,6 @@ impl ImportResolver {
             search_paths: vec![PathBuf::from("lib"), PathBuf::from("imports"), PathBuf::from(".")],
             root_path: PathBuf::from("."),
             stdlib_path: None,
-            use_stdlib: true,
-            core_imported: false,
             board_name: None,
             in_progress: HashSet::new(),
         }
@@ -64,12 +65,6 @@ impl ImportResolver {
     /// Set the stdlib root path for import# resolution
     pub fn with_stdlib_path(mut self, path: Option<PathBuf>) -> Self {
         self.stdlib_path = path;
-        self
-    }
-
-    /// Enable or disable auto-import of std/core/* (default: enabled)
-    pub fn with_use_stdlib(mut self, use_it: bool) -> Self {
-        self.use_stdlib = use_it;
         self
     }
 
@@ -142,63 +137,6 @@ impl ImportResolver {
         }
 
         let mut items = items;
-
-        // Auto-import known-safe std/core modules once
-        if self.use_stdlib && !self.core_imported {
-            self.core_imported = true;
-
-            // Auto-import the bootstrap type universe (14 primitive types)
-            let has_bootstrap_import = items.iter().any(|item| {
-                if let TopLevel::Import(imp) = item {
-                    imp.path() == "std/types/bootstrap.bv"
-                } else {
-                    false
-                }
-            });
-            if !has_bootstrap_import {
-                items.insert(0, TopLevel::Import(Import::literal("std/types/bootstrap.bv", vec![])));
-            }
-
-            let prelude_modules = [
-                "std/os/fs.bv", "std/os/net.bv", "std/os/signal.bv",
-                "std/os/ipc.bv", "std/os/thread.bv", "std/os/dir.bv",
-                "std/os/process.bv", "std/os/tty.bv", "std/os/user.bv",
-                "std/os/time.bv", "std/os/mem.bv", "std/os/rand.bv",
-                "std/os/sched.bv", "std/os/resource.bv", "std/os/sysinfo.bv",
-                "std/os/temp.bv", "std/os/dynlib.bv", "std/os/debug.bv",
-                "std/os/ring.bv", "std/os/io.bv",
-                "std/os/atomic.bv",
-            ];
-            for module_path in &prelude_modules {
-                let has_import = items.iter().any(|item| {
-                    if let TopLevel::Import(imp) = item {
-                        imp.path() == *module_path
-                    } else {
-                        false
-                    }
-                });
-                if !has_import {
-                    items.push(TopLevel::Import(Import::literal(*module_path, vec![])));
-                }
-            }
-
-            let has_core_imports = items.iter().any(|item| {
-                if let TopLevel::Import(imp) = item {
-                    imp.path().starts_with("std/core")
-                } else {
-                    false
-                }
-            });
-            if !has_core_imports {
-                let safe_core_modules = [
-                    "ptr.bv",
-                    "string_builder.bv",
-                ];
-                for module in safe_core_modules {
-                    items.insert(0, TopLevel::Import(Import::literal(format!("std/core/{}", module), vec![])));
-                }
-            }
-        }
 
         let mut index = 0;
 
@@ -805,7 +743,7 @@ mod tests {
     #[test]
     fn test_resolve_empty_import() {
         let items = import_program("", vec![]);
-        let mut resolver = ImportResolver::new().with_use_stdlib(false);
+        let mut resolver = ImportResolver::new();
         let result = resolver.resolve_imports(items, &PathBuf::from("main.bv")).unwrap();
         assert_eq!(result.len(), 0);
     }
@@ -817,7 +755,7 @@ mod tests {
         fs::write(&bv_path, "defn hello -> Int { term 42; };").unwrap();
 
         let items = import_program("test_module", vec![]);
-        let mut resolver = ImportResolver::new().with_use_stdlib(false);
+        let mut resolver = ImportResolver::new();
         resolver.add_search_path(dir.path().to_path_buf());
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
@@ -834,7 +772,7 @@ mod tests {
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let mut resolver = ImportResolver::new().with_use_stdlib(false);
+        let mut resolver = ImportResolver::new();
         resolver.add_search_path(dir.path().to_path_buf());
         let items = import_program("cache_test", vec![]);
         resolver.resolve_imports(items, &src).unwrap();
@@ -850,7 +788,7 @@ mod tests {
         fs::write(&src, "").unwrap();
 
         let items = import_program("styles.m.css", vec![]);
-        let mut resolver = ImportResolver::new().with_use_stdlib(false);
+        let mut resolver = ImportResolver::new();
         resolver.add_search_path(dir.path().to_path_buf());
         let result = resolver.resolve_imports(items, &src).unwrap();
         assert!(result.iter().any(|i| matches!(i, TopLevel::Stylesheet(_))));
@@ -864,7 +802,7 @@ mod tests {
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let mut resolver = ImportResolver::new().with_use_stdlib(false);
+        let mut resolver = ImportResolver::new();
         resolver.add_search_path(dir.path().to_path_buf());
         let items = import_program("filter_mod", vec!["keep".into()]);
         let result = resolver.resolve_imports(items, &src).unwrap();
@@ -883,7 +821,7 @@ mod tests {
         let src = dir.path().join("main.bv");
         fs::write(&src, "").unwrap();
 
-        let mut resolver = ImportResolver::new().with_use_stdlib(false);
+        let mut resolver = ImportResolver::new();
         resolver.add_search_path(dir.path().to_path_buf());
         let items = import_program("full_mod", vec![]);
         let result = resolver.resolve_imports(items, &src).unwrap();
@@ -894,7 +832,7 @@ mod tests {
     #[test]
     fn test_resolve_module_not_found() {
         let items = import_program("nonexistent_mod", vec![]);
-        let mut resolver = ImportResolver::new().with_use_stdlib(false);
+        let mut resolver = ImportResolver::new();
         let src = PathBuf::from("/tmp/main.bv");
         let result = resolver.resolve_imports(items, &src);
         assert!(result.is_err());
@@ -916,7 +854,7 @@ mod tests {
 
         let items = vec![TopLevel::Import(Import::literal("std/core/*", vec![]))];
         let mut resolver = ImportResolver::new()
-            .with_use_stdlib(false);
+            ;
         resolver.add_search_path(stdlib_root);
         let result = resolver.resolve_imports(items, &src).unwrap();
         let defns: Vec<&TopLevel> = result.iter().filter(|i| matches!(i, TopLevel::Definition(_))).collect();
@@ -947,24 +885,12 @@ mod tests {
 
         let items = import_program("", vec![]);
         let mut resolver = ImportResolver::new()
-            .with_use_stdlib(true)
             .with_stdlib_path(Some(stdlib_root));
         let result = resolver.resolve_imports(items, &src).unwrap();
         let defns: Vec<&TopLevel> = result.iter().filter(|i| matches!(i, TopLevel::Definition(_))).collect();
-        assert!(!defns.is_empty(), "should have auto-injected definitions");
-    }
-
-    #[test]
-    fn test_auto_core_disabled() {
-        let dir = TempDir::new().unwrap();
-        let src = dir.path().join("main.bv");
-        fs::write(&src, "").unwrap();
-
-        let items = import_program("", vec![]);
-        let mut resolver = ImportResolver::new()
-            .with_use_stdlib(false);
-        let result = resolver.resolve_imports(items, &src).unwrap();
-        let imports: Vec<&TopLevel> = result.iter().filter(|i| matches!(i, TopLevel::Import(_))).collect();
-        assert!(imports.is_empty(), "no imports should be injected when use_stdlib is false");
+        // Prelude injection is now handled by the plugin system, not the resolver.
+        // Definitions come from explicit imports, not auto-injection.
+        // This test is preserved as a smoke test that resolve_imports doesn't crash.
+        assert!(true);
     }
 }

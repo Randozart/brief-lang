@@ -64,8 +64,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     }
 
     // ── Import resolution ─────────────────────────────────────────────
-    let mut resolver = brief_compiler::import_resolver::ImportResolver::new()
-        .with_use_stdlib(!opts.no_stdlib);
+    let mut resolver = brief_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
@@ -303,8 +302,7 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     let tokens = lex(source)?;
     let items = parse(file_path, &tokens, source)?;
 
-    let mut resolver = brief_compiler::import_resolver::ImportResolver::new()
-        .with_use_stdlib(!opts.no_stdlib);
+    let mut resolver = brief_compiler::import_resolver::ImportResolver::new();
     if let Some(ref stdlib_path) = opts.stdlib_path {
         resolver = resolver.with_stdlib_path(Some(std::path::PathBuf::from(stdlib_path)));
     }
