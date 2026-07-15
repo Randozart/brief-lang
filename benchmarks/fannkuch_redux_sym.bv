@@ -57,8 +57,3 @@ rct txn fan [count < N][count == N] {
     count = count + 1;
     term;
 };
-    [count == N] {
-        term! -> Print#(checksum);
-    };
-    term;
-};

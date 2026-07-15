@@ -50,9 +50,16 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
-                // Local binding lookup — if not found, emit as global ref
+                // 2026-07-14: Three paths: local binding, state field, global
                 if let Some(reg) = self.get_local(name) {
                     TypedRegister { name: reg.clone(), ty: self.get_local_type(name) }
+                } else if let Some(&idx) = self.ctx.field_index_map.get(name) {
+                    // State field access via GEP from %state
+                    let gep = self.fun.gen_reg();
+                    writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                        indent, gep, idx).ok();
+                    writeln!(out, "{}{} = load i64, ptr {}", indent, v, gep).ok();
+                    TypedRegister { name: v.to_string(), ty: Type::int() }
                 } else {
                     writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
                     TypedRegister { name: v.to_string(), ty: Type::int() }
