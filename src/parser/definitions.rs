@@ -55,10 +55,113 @@ impl<'a> Parser<'a> {
                     self.error_at_current(&format!("unexpected top-level item '{}'", name))
                 }
             }
+            // 2026-07-16: P3 — Parse `frgn` and `frgn!` declarations
+            Some(Token::Frgn) | Some(Token::FrgnBang) => {
+                self.advance();
+                self.parse_frgn_decl().map(TopLevel::ForeignBinding)
+            }
             _ => {
                 let name = self.expect_identifier()?;
                 self.error_at_current(&format!("unexpected top-level item '{}'", name))
             }
+        }
+    }
+
+    /// 2026-07-16: P3 — Parse `frgn` declaration.
+    /// Syntax: frgn name(params) -> Ret from "path";
+    ///         frgn name(params) -> Ret from <name>;
+    ///         frgn name(params) -> Ret from "path" target "c";
+    fn parse_frgn_decl(&mut self) -> Result<ForeignBinding, SyntaxError> {
+        let name = self.expect_identifier()?;
+        self.expect(Token::LParen)?;
+        let mut inputs = Vec::new();
+        while !self.check(&Token::RParen) {
+            let param_name = self.expect_identifier()?;
+            self.expect(Token::Colon)?;
+            let param_type = self.parse_type()?;
+            inputs.push((param_name, param_type));
+            if !self.eat(&Token::Comma) {
+                break;
+            }
+        }
+        self.expect(Token::RParen)?;
+        let success_output = if self.eat(&Token::Arrow) {
+            vec![(String::new(), self.parse_type()?)]
+        } else {
+            vec![]
+        };
+        let from = if self.eat(&Token::From) {
+            self.parse_from_spec()?
+        } else {
+            FromSpec::default()
+        };
+        let mut target = ForeignTarget::C;
+        if self.eat_identifier("target") {
+            let target_str = self.expect_string()?;
+            target = match ForeignTarget::from_name(&target_str) {
+                Some(t) => t,
+                None => {
+                    let msg = format!("unknown target: {}", target_str);
+                    return self.error_at_current(&msg);
+                }
+            };
+        }
+        self.expect(Token::Semicolon)?;
+        Ok(ForeignBinding {
+            name,
+            from,
+            target,
+            inputs,
+            success_output,
+            error_type: "Error".to_string(),
+            error_fields: vec![],
+            input_layout: None,
+            output_layout: None,
+            precondition: None,
+            postcondition: None,
+            buffer_mode: None,
+            default_watchdog: None,
+            wasm_impl: None,
+            wasm_setup: None,
+            span: None,
+        })
+    }
+
+    /// 2026-07-16: P3 — Parse `from "path"` or `from <name>` after `from` token is consumed.
+    /// 2026-07-16: P3 — Parse `from "path"` or `from <name>` after `from` token is consumed.
+    fn parse_from_spec(&mut self) -> Result<FromSpec, SyntaxError> {
+        if self.eat(&Token::Lt) {
+            // Consume all tokens until `>`, building the name string.
+            // Supports: <xxhash.c>, <std/io.c>, <a.b.c>
+            let mut name = String::new();
+            loop {
+                match self.peek() {
+                    Some(Token::Gt) => {
+                        self.advance();
+                        break;
+                    }
+                    Some(Token::Identifier(seg)) => {
+                        name.push_str(seg);
+                        self.advance();
+                    }
+                    Some(Token::Dot) => {
+                        name.push('.');
+                        self.advance();
+                    }
+                    Some(Token::Slash) => {
+                        name.push('/');
+                        self.advance();
+                    }
+                    other => {
+                        let msg = format!("expected '>' to close compiler-relative path, found {:?}", other);
+                        return self.error_at_current(&msg);
+                    }
+                }
+            }
+            Ok(FromSpec::CompilerRegistry(name))
+        } else {
+            let path_str = self.expect_string()?;
+            Ok(FromSpec::Literal(std::path::PathBuf::from(path_str)))
         }
     }
 
@@ -918,5 +1021,75 @@ mod tests {
         // "Int.c.sso" should parse as Type::Custom("Int.c.sso")
         let ty = parse_type("Int.c.sso").unwrap();
         assert_eq!(ty, crate::ast::Type::Custom("Int.c.sso".into()));
+    }
+
+    // ── P3: frgn declaration parsing ─────────────────────────────────
+
+    fn parse_frgn(src: &str) -> Result<crate::ast::ForeignBinding, crate::errors::SyntaxError> {
+        let tokens = tokenize(src).unwrap();
+        let mut p = Parser::new(tokens, src);
+        match p.parse_top_level()? {
+            crate::ast::TopLevel::ForeignBinding(fb) => Ok(fb),
+            _ => panic!("expected ForeignBinding"),
+        }
+    }
+
+    #[test]
+    fn test_parse_frgn_literal_path() {
+        let fb = parse_frgn(r#"frgn strlen(s: String) -> Int from "libc.so.6";"#).unwrap();
+        assert_eq!(fb.name, "strlen");
+        assert_eq!(fb.inputs.len(), 1);
+        assert_eq!(fb.inputs[0].0, "s");
+        assert_eq!(fb.inputs[0].1, crate::ast::Type::string());
+        assert_eq!(fb.success_output.len(), 1);
+        match &fb.from {
+            crate::ast::FromSpec::Literal(p) => {
+                assert_eq!(p.to_string_lossy(), "libc.so.6");
+            }
+            _ => panic!("expected Literal"),
+        }
+    }
+
+    #[test]
+    fn test_parse_frgn_compiler_path() {
+        let fb = parse_frgn(r#"frgn hash(data: Data) -> Int from <xxhash.c>;"#).unwrap();
+        assert_eq!(fb.name, "hash");
+        assert_eq!(fb.inputs.len(), 1);
+        match &fb.from {
+            crate::ast::FromSpec::CompilerRegistry(name) => {
+                assert_eq!(name, "xxhash.c");
+            }
+            _ => panic!("expected CompilerRegistry"),
+        }
+    }
+
+    #[test]
+    fn test_parse_frgn_no_return() {
+        let fb = parse_frgn(r#"frgn print(s: String) from "libio.so";"#).unwrap();
+        assert_eq!(fb.name, "print");
+        assert!(fb.success_output.is_empty());
+    }
+
+    #[test]
+    fn test_from_spec_extension() {
+        use crate::ast::FromSpec;
+        use std::path::PathBuf;
+        let lit = FromSpec::Literal(PathBuf::from("libc.so.6"));
+        // PathBuf::extension() returns only the segment after the LAST dot
+        assert_eq!(lit.extension(), Some("6".into()));
+        let reg = FromSpec::CompilerRegistry("xxhash.c".into());
+        assert_eq!(reg.extension(), Some("c".into()));
+        let no_ext = FromSpec::Literal(PathBuf::from("Makefile"));
+        assert_eq!(no_ext.extension(), None);
+    }
+
+    #[test]
+    fn test_from_spec_as_str() {
+        use crate::ast::FromSpec;
+        use std::path::PathBuf;
+        let lit = FromSpec::Literal(PathBuf::from("libc.so.6"));
+        assert_eq!(lit.as_str(), "libc.so.6");
+        let reg = FromSpec::CompilerRegistry("xxhash.c".into());
+        assert_eq!(reg.as_str(), "xxhash.c");
     }
 }

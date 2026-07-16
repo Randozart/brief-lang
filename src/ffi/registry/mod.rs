@@ -175,10 +175,11 @@ impl FunctionRegistry {
     fn load_from_toml(&mut self, path: &std::path::Path) -> Result<(), String> {
         let bindings = loader::load_binding(path).map_err(|e| format!("Failed to parse TOML: {}", e))?;
         for binding in bindings {
-            if let Some(func) = resolve_location_to_impl(&binding.location) {
-                self.register(binding.location, func);
+            let loc_str = binding.from.as_str();
+            if let Some(func) = resolve_location_to_impl(&loc_str) {
+                self.register(loc_str.clone(), func);
             } else {
-                eprintln!("[WARN] No implementation for location '{}' in {}", binding.location, path.display());
+                eprintln!("[WARN] No implementation for location '{}' in {}", loc_str, path.display());
             }
         }
         Ok(())

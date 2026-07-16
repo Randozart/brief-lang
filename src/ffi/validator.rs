@@ -78,12 +78,14 @@ pub fn is_valid_ffi_type(ty: &Type) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::FromSpec;
+    use std::path::PathBuf;
 
     #[test]
     fn test_validate_matching_signatures() {
         let frgn = ForeignSignature {
             name: "read_file".to_string(),
-            location: "std::fs::read_to_string".to_string(),
+            from: FromSpec::Literal(PathBuf::from("std::fs::read_to_string")),
             wasm_impl: None,
             wasm_setup: None,
             inputs: vec![("path".to_string(), Type::string())],
@@ -93,7 +95,7 @@ mod tests {
 
         let binding = ForeignBinding {
             name: "read_file".to_string(),
-            location: "std::fs::read_to_string".to_string(),
+            from: FromSpec::Literal(PathBuf::from("std::fs::read_to_string")),
             target: crate::ast::ForeignTarget::Native,
             wasm_impl: None,
             wasm_setup: None,
@@ -112,7 +114,7 @@ mod tests {
 
         let binding2 = ForeignBinding {
             name: "write_file".to_string(),
-            location: "test".to_string(),
+            from: FromSpec::Literal(PathBuf::from("test")),
             target: crate::ast::ForeignTarget::Native,
             wasm_impl: None,
             wasm_setup: None,

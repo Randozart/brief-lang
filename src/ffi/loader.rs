@@ -26,8 +26,8 @@
 
 use super::types::{Endian, FieldDescriptor, MemoryLayout};
 use super::FfiError;
-use crate::ast::{ForeignBinding, ForeignTarget, Type};
-use std::path::Path;
+use crate::ast::{ForeignBinding, ForeignTarget, FromSpec, Type};
+use std::path::{Path, PathBuf};
 
 /// Parse a TOML binding file and extract all function bindings
 pub fn load_binding(path: &Path) -> Result<Vec<ForeignBinding>, FfiError> {
@@ -221,7 +221,7 @@ fn parse_toml_bindings(content: &str) -> Result<Vec<ForeignBinding>, FfiError> {
 
         let binding = ForeignBinding {
             name,
-            location,
+            from: FromSpec::Literal(std::path::PathBuf::from(&location)),
             target,
             wasm_impl,
             wasm_setup: wasm_setup.clone(),
@@ -431,7 +431,7 @@ message = "String"
         let bindings = result.unwrap();
         assert_eq!(bindings.len(), 1);
         assert_eq!(bindings[0].name, "read_file");
-        assert_eq!(bindings[0].location, "std::fs::read_to_string");
+        assert_eq!(bindings[0].from.as_str(), "std::fs::read_to_string");
         assert_eq!(bindings[0].error_type, "IoError");
     }
 }

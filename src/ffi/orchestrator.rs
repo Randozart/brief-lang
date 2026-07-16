@@ -193,12 +193,13 @@ fn is_empty_value(value: &Value) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{ForeignBinding, ForeignTarget, Type};
+    use crate::ast::{ForeignBinding, ForeignTarget, FromSpec, Type};
+use std::path::PathBuf;
 
     #[test]
     fn test_orchestrator_new() {
         let orch = Orchestrator::new();
-        assert_eq!(is_metropolitan_target(&ForeignBinding::new("test".into(), "loc".into(), ForeignTarget::Native)), false);
+        assert_eq!(is_metropolitan_target(&ForeignBinding::new("test".into(), FromSpec::Literal(PathBuf::from("loc")), ForeignTarget::Native)), false);
     }
 
     #[test]
@@ -210,14 +211,14 @@ mod tests {
 
     #[test]
     fn test_is_metropolitan_target_match() {
-        let binding = ForeignBinding::new("m".into(), "l".into(), ForeignTarget::Metropolitan);
+        let binding = ForeignBinding::new("m".into(), FromSpec::Literal(PathBuf::from("l")), ForeignTarget::Metropolitan);
         assert!(is_metropolitan_target(&binding));
     }
 
     #[test]
     fn test_is_metropolitan_target_mismatch() {
-        let native = ForeignBinding::new("n".into(), "l".into(), ForeignTarget::Native);
-        let c = ForeignBinding::new("c".into(), "l".into(), ForeignTarget::C);
+        let native = ForeignBinding::new("n".into(), FromSpec::Literal(PathBuf::from("l")), ForeignTarget::Native);
+        let c = ForeignBinding::new("c".into(), FromSpec::Literal(PathBuf::from("l")), ForeignTarget::C);
         assert!(!is_metropolitan_target(&native));
         assert!(!is_metropolitan_target(&c));
     }
@@ -239,7 +240,7 @@ mod tests {
         let binding = ForeignBinding {
             input_layout: None,
             output_layout: None,
-            ..ForeignBinding::new("test".into(), "loc".into(), ForeignTarget::Native)
+            ..ForeignBinding::new("test".into(), FromSpec::Literal(PathBuf::from("loc")), ForeignTarget::Native)
         };
         let result = orch.call(&binding, vec![], dummy_fn);
         assert!(result.is_err());
@@ -248,7 +249,7 @@ mod tests {
     #[test]
     fn test_orchestrator_sentinel_default() {
         let mut sentinel = Sentinel::new();
-        let binding = ForeignBinding::new("test".into(), "loc".into(), ForeignTarget::Native);
+        let binding = ForeignBinding::new("test".into(), FromSpec::Literal(PathBuf::from("loc")), ForeignTarget::Native);
         let result = sentinel.validate_precondition(&binding, &[]);
         assert!(result.is_ok());
     }

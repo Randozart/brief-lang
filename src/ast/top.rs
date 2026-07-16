@@ -11,6 +11,7 @@
 use crate::ast::{BitRange, DerivationBlock, Expr, Formatting, PropertyValue, Type};
 use crate::errors::Span;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 // ── TopLevel ───────────────────────────────────────────────────────────
 
@@ -428,10 +429,60 @@ pub enum ForeignTarget {
     Metropolitan,
 }
 
+impl ForeignTarget {
+    /// 2026-07-16: P3 — Look up a target variant by string name.
+    pub fn from_name(name: &str) -> Option<ForeignTarget> {
+        match name {
+            "native" => Some(ForeignTarget::Native),
+            "wasm" => Some(ForeignTarget::Wasm),
+            "c" => Some(ForeignTarget::C),
+            "python" => Some(ForeignTarget::Python),
+            "js" => Some(ForeignTarget::Js),
+            "swift" => Some(ForeignTarget::Swift),
+            "go" => Some(ForeignTarget::Go),
+            "metropolitan" => Some(ForeignTarget::Metropolitan),
+            _ => None,
+        }
+    }
+}
+
+/// 2026-07-16: P3 — Where a frgn function's implementation comes from.
+#[derive(Debug, Clone)]
+pub enum FromSpec {
+    /// from "path/to/file" — literal path (CWD-relative or absolute).
+    Literal(PathBuf),
+    /// from <name> — compiler-relative lookup (same pattern as import <name>).
+    CompilerRegistry(String),
+}
+
+impl Default for FromSpec {
+    fn default() -> Self {
+        Self::Literal(PathBuf::new())
+    }
+}
+
+impl FromSpec {
+    /// Extract the file extension for convention derivation.
+    pub fn extension(&self) -> Option<String> {
+        match self {
+            Self::Literal(p) => p.extension().and_then(|s| s.to_str()).map(|s| s.to_string()),
+            Self::CompilerRegistry(name) => name.rsplit('.').next().map(|s| s.to_string()),
+        }
+    }
+
+    /// Return the string representation for registry matching.
+    pub fn as_str(&self) -> String {
+        match self {
+            Self::Literal(p) => p.to_string_lossy().to_string(),
+            Self::CompilerRegistry(n) => n.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ForeignSignature {
     pub name: String,
-    pub location: String,
+    pub from: FromSpec,
     pub inputs: Vec<(String, Type)>,
     pub result_type: ResultType,
     pub wasm_impl: Option<String>,
@@ -443,7 +494,7 @@ impl Default for ForeignSignature {
     fn default() -> Self {
         ForeignSignature {
             name: String::new(),
-            location: String::new(),
+            from: FromSpec::default(),
             inputs: Vec::new(),
             result_type: ResultType::VoidType,
             wasm_impl: None,
@@ -457,7 +508,7 @@ impl Default for ForeignSignature {
 #[derive(Debug, Clone)]
 pub struct ForeignBinding {
     pub name: String,
-    pub location: String,
+    pub from: FromSpec,
     pub target: ForeignTarget,
     pub inputs: Vec<(String, Type)>,
     pub success_output: Vec<(String, Type)>,
@@ -475,10 +526,10 @@ pub struct ForeignBinding {
 }
 
 impl ForeignBinding {
-    pub fn new(name: String, location: String, target: ForeignTarget) -> Self {
+    pub fn new(name: String, from: FromSpec, target: ForeignTarget) -> Self {
         ForeignBinding {
             name,
-            location,
+            from,
             target,
             inputs: Vec::new(),
             success_output: Vec::new(),

@@ -107,12 +107,18 @@ impl ImportResolver {
         self.search_paths.push(path);
     }
 
+    /// 2026-07-16: P3 — Resolve a path relative to the stdlib root.
+    /// Searches the same paths as resolve_stdlib_root().
+    pub fn resolve_stdlib_relative_path(&self, relative: &str) -> Option<PathBuf> {
+        self.resolve_stdlib_root().map(|root| root.join(relative)).filter(|p| p.exists())
+    }
+
     /// Resolve the stdlib root path, trying multiple sources in order:
     /// 1. Explicitly configured path (from --stdlib-path)
     /// 2. BRIEF_STDLIB_PATH env var
     /// 3. Executable-relative (dev layout: target/release/ -> ../../lib/)
     /// 4. root_path/lib/ (project-local)
-    fn resolve_stdlib_root(&self) -> Option<PathBuf> {
+    pub fn resolve_stdlib_root(&self) -> Option<PathBuf> {
         // 1. Explicitly configured
         if let Some(ref path) = self.stdlib_path {
             if path.exists() {
