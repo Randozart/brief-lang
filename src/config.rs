@@ -15,13 +15,21 @@ pub struct TypeConfig {
 }
 
 impl TypeConfig {
-    /// Load the built-in config file.
+    /// Load the built-in config file (compile-time baked fallback).
     pub fn load() -> Self {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/llvm-primitives.toml");
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
         toml::from_str(&content)
             .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path.display(), e))
+    }
+
+    /// 2026-07-16: P1 — load from a concrete file path.
+    pub fn load_from(path: &Path) -> Result<Self, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read '{}': {}", path.display(), e))?;
+        toml::from_str(&content)
+            .map_err(|e| format!("parse error in '{}': {}", path.display(), e))
     }
 
     /// Look up the LLVM type string for (primitive, bytes).
@@ -85,17 +93,24 @@ pub struct OpConfig {
 impl OpConfig {
     /// Load the built-in op config file (config/llvm-ops.toml).
     pub fn load() -> Self {
-        Self::load_from("llvm-ops.toml")
+        Self::load_from_path(&Path::new(env!("CARGO_MANIFEST_DIR")).join("config/llvm-ops.toml"))
+            .expect("Failed to load config/llvm-ops.toml")
     }
 
     /// 2026-07-15: Load an op config file by name from config/ directory.
     /// Example: OpConfig::load_from("spirv-ops.toml")
     pub fn load_from(name: &str) -> Self {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config").join(name);
-        let content = std::fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
+        Self::load_from_path(&path)
+            .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e))
+    }
+
+    /// 2026-07-16: P1 — load op config from a concrete file path.
+    pub fn load_from_path(path: &Path) -> Result<Self, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read '{}': {}", path.display(), e))?;
         let raw: HashMap<String, toml::Value> = toml::from_str(&content)
-            .unwrap_or_else(|e| panic!("Failed to parse {}: {}", path.display(), e));
+            .map_err(|e| format!("parse error in '{}': {}", path.display(), e))?;
 
         let mut op = HashMap::new();
         for (key, value) in raw {
@@ -123,7 +138,7 @@ impl OpConfig {
                 op.insert(op_name.to_string(), prim_map);
             }
         }
-        OpConfig { op }
+        Ok(OpConfig { op })
     }
 
     /// Look up the LLVM IR template for (operation, primitive, bytes).

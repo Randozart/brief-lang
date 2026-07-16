@@ -24,6 +24,7 @@ fn main() {
         "check" => run_check(&args[2..]),
         "derive" => run_derive(&args[2..]),
         "library" | "lib" => library::run_library_mode(&args[2..]),
+        "config" => run_config(&args[2..]),
         "init" => run_init(args.get(2).map(|s| s.as_str())),
         "register" => run_register(&args[2..]),
         "help" | "--help" | "-h" => { print_usage(&args[0]); Ok(()) }
@@ -51,10 +52,11 @@ fn print_usage(program: &str) {
         .unwrap_or("brief-compiler");
     eprintln!("Brief Compiler");
     eprintln!("Usage:");
-    eprintln!("  {} build <file.bv>              Compile a Brief source file", name);
-    eprintln!("  {} build <file.bv> --llvm        Emit LLVM IR only, no binary", name);
-    eprintln!("  {} build <file.bv> --out <dir>   Set output directory", name);
-    eprintln!("  {} build <file.bv> --backend <name>  Select backend: llvm, circt, webstack, gpu", name);
+    eprintln!("  {} build <file.bv>                 Compile a Brief source file", name);
+    eprintln!("  {} build <file.bv> --llvm           Emit LLVM IR only, no binary", name);
+    eprintln!("  {} build <file.bv> --config-dir <d>  Set config directory", name);
+    eprintln!("  {} build <file.bv> --out <dir>      Set output directory", name);
+    eprintln!("  {} build <file.bv> --backend <name> Select backend: llvm, circt, webstack, gpu", name);
     eprintln!("  {} build <file.bv> --emit-bvir [ast|mid|post|all]  Emit BVIR snapshots (default: all)", name);
     eprintln!("  {} build <file.bv> --no-std          Disable prelude (equivalent to --disable-plugin prelude)", name);
     eprintln!("  {} build <file.bv> --stdlib-path <p>   Set stdlib search path", name);
@@ -63,6 +65,10 @@ fn print_usage(program: &str) {
     eprintln!("  {} check <file.bv>               Type-check only", name);
     eprintln!("  {} derive <file.bv>              Synthesize derivation blocks", name);
     eprintln!("  {} library <file.bv>             Compile to .a library", name);
+    eprintln!("  {} config list                   List available config profiles", name);
+    eprintln!("  {} config show                   Show active config profile", name);
+    eprintln!("  {} config set <name>             Switch to a config profile", name);
+    eprintln!("  {} config init <name>            Create a new config profile", name);
     eprintln!("  {} init <name>                   Create a new project", name);
     eprintln!("  {} help                          Show this help", name);
 }
@@ -80,6 +86,7 @@ fn print_usage(program: &str) {
 fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     let mut file_path: Option<String> = None;
     let mut emit_ir_only = false;
+    let mut config_dir: Option<String> = None;
     let mut out_dir: Option<String> = None;
     let mut optimize_budget = 256u64;
     let mut gpu_offload = false;
@@ -100,6 +107,10 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         } else if arg == "--gpu-offload" {
             gpu_offload = true;
             i += 1;
+        } else if arg == "--config-dir" {
+            let val = args.get(i + 1).ok_or("--config-dir requires a directory argument")?;
+            config_dir = Some(val.clone());
+            i += 2;
         } else if arg == "--out" {
             let val = args.get(i + 1).ok_or("--out requires a directory argument")?;
             out_dir = Some(val.clone());
@@ -168,7 +179,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         Some(name) => TargetConfig::resolve(name)?,
         None => {
             let ext = get_extension(&file_path);
-            let config = TargetConfig::load();
+            let config = load_target_config(config_dir.as_deref());
             match config.lookup(&ext) {
                 Some(entry) => TargetConfig::resolve(&entry.backend)?,
                 None => BackendKind::Llvm,
@@ -177,6 +188,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
     };
 
     Ok(compile::BuildOptions {
+        config_dir,
         file_path,
         emit_ir_only,
         out_dir,
@@ -216,6 +228,51 @@ fn run_register(_args: &[String]) -> Result<(), String> {
 fn run_derive(args: &[String]) -> Result<(), String> {
     let file_path = args.first().ok_or("missing file argument")?;
     brief_compiler::derive::handle_derive_command(file_path)
+}
+
+/// Load TargetConfig with optional --config-dir override.
+/// 2026-07-16: P1 — Respects runtime config directory when set.
+fn load_target_config(config_dir: Option<&str>) -> TargetConfig {
+    match config_dir {
+        Some(dir) => {
+            let path = std::path::Path::new(dir).join("targets.toml");
+            TargetConfig::load_from(&path).unwrap_or_else(|e| {
+                eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
+                TargetConfig::load()
+            })
+        }
+        None => TargetConfig::load(),
+    }
+}
+
+/// `brief-compiler config <subcommand>` — manage config profiles.
+/// Subcommands: list, show, set <name>, init <name>
+fn run_config(args: &[String]) -> Result<(), String> {
+    let sub = args.first().map(|s| s.as_str()).unwrap_or("show");
+    match sub {
+        "list" => {
+            let profiles = brief_compiler::config_resolver::list_profiles()?;
+            if profiles.is_empty() {
+                println!("no profiles configured");
+            } else {
+                println!("available profiles:");
+                for p in &profiles {
+                    println!("  {}", p);
+                }
+            }
+            Ok(())
+        }
+        "show" => brief_compiler::config_resolver::show_active_profile(),
+        "set" => {
+            let name = args.get(1).ok_or("usage: brief-compiler config set <profile-name>")?;
+            brief_compiler::config_resolver::set_active_profile(name)
+        }
+        "init" => {
+            let name = args.get(1).ok_or("usage: brief-compiler config init <profile-name>")?;
+            brief_compiler::config_resolver::init_profile(name)
+        }
+        _ => Err(format!("unknown config subcommand '{}'. Use: list, show, set <name>, init <name>", sub)),
+    }
 }
 
 fn run_init(name: Option<&str>) -> Result<(), String> {

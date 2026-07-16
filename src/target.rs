@@ -38,10 +38,18 @@ pub struct TargetConfig {
 }
 
 impl TargetConfig {
-    /// Load the compiled-in target config.
+    /// Load the compiled-in target config (fallback).
     pub fn load() -> Self {
         let content = include_str!("../config/targets.toml");
         toml::from_str(content).unwrap_or_else(|e| panic!("config/targets.toml parse error: {}", e))
+    }
+
+    /// 2026-07-16: P1 — load from a concrete file path.
+    pub fn load_from(path: &std::path::Path) -> Result<Self, String> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| format!("cannot read '{}': {}", path.display(), e))?;
+        toml::from_str(&content)
+            .map_err(|e| format!("parse error in '{}': {}", path.display(), e))
     }
 
     /// Look up a target entry by file extension (e.g. ".bv").

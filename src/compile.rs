@@ -47,6 +47,7 @@ impl std::str::FromStr for BvirStage {
 
 /// Options parsed from the `brief-compiler build` CLI flags.
 pub struct BuildOptions {
+    pub config_dir: Option<String>,
     pub file_path: String,
     pub emit_ir_only: bool,
     pub out_dir: Option<String>,
@@ -159,6 +160,7 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
 /// Type-check only: don't generate code.
 pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
     let default_opts = BuildOptions {
+        config_dir: None,
         file_path: file_path.to_string(),
         emit_ir_only: false,
         out_dir: None,
@@ -189,7 +191,7 @@ fn build_plugin_manager(file_path: &str, opts: &BuildOptions) -> PluginManager {
 
     // Apply per-extension filtering from config/targets.toml
     let ext = get_extension(file_path);
-    let config = TargetConfig::load();
+    let config = load_target_config(opts);
     pm.filter_for_extension(&ext, &config);
 
     // Apply CLI overrides
@@ -228,7 +230,7 @@ fn codegen(
             }
             // Apply target config if available
             let ext = get_extension(&opts.file_path);
-            let target_config = TargetConfig::load();
+            let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {
                 if let Some(ref triple) = entry.target_triple {
                     b = b.with_target_triple(triple);
@@ -258,7 +260,7 @@ fn codegen(
                 .with_gpu_offload(true);
             // Apply target config (same logic as Llvm)
             let ext = get_extension(&opts.file_path);
-            let target_config = TargetConfig::load();
+            let target_config = load_target_config(opts);
             if let Some(entry) = target_config.lookup(&ext) {
                 if let Some(ref triple) = entry.target_triple {
                     b = b.with_target_triple(triple);
@@ -384,6 +386,21 @@ fn parse_and_check(file_path: &str, source: &str, opts: &BuildOptions) -> Result
     let universe = TypeUniverse::new();
     check_types(&items, &universe)?;
     Ok((items, universe))
+}
+
+/// Load TargetConfig, respecting --config-dir when set in opts.
+/// 2026-07-16: P1 — Runtime config directory overrides compile-time baked.
+fn load_target_config(opts: &BuildOptions) -> TargetConfig {
+    match &opts.config_dir {
+        Some(dir) => {
+            let path = Path::new(dir).join("targets.toml");
+            TargetConfig::load_from(&path).unwrap_or_else(|e| {
+                eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
+                TargetConfig::load()
+            })
+        }
+        None => TargetConfig::load(),
+    }
 }
 
 /// Lex the source into tokens.

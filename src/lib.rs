@@ -31,6 +31,7 @@ pub mod archive;
 pub mod backend;
 pub mod bvir;
 pub mod config;
+pub mod config_resolver;
 pub mod target;
 pub mod features;
 pub mod type_universe;
