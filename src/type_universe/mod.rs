@@ -64,6 +64,47 @@ impl TypeUniverse {
             .or_else(|| self.melds.get(&(b.to_string(), a.to_string())))
     }
 
+    /// 2026-07-16: P2 — Look up "String.c" from base "String" and extension "c".
+    pub fn get_extension(&self, base: &str, ext: &str) -> Option<&ResolvedType> {
+        self.types.get(&format!("{}.{}", base, ext))
+    }
+
+    /// 2026-07-16: P2 — Find meld between base type and an extension type directly.
+    pub fn find_ext_meld(&self, base: &str, ext: &str) -> Option<&MeldDeclaration> {
+        let ext_name = format!("{}.{}", base, ext);
+        self.find_meld(base, &ext_name)
+    }
+
+    /// 2026-07-16: P2 — Find a meld from `ty` to any type ending in `.ext`.
+    /// Priority:
+    ///   1. Direct meld T <:> T.ext  (exact match)
+    ///   2. Direct meld T <:> Any.ext  (custom → standard extension)
+    ///   3. T.ext exists with auto-generated identity meld
+    ///   4. None — no meld possible
+    pub fn find_meld_to_extension(&self, ty: &str, ext: &str) -> Option<(String, MeldDeclaration)> {
+        let exact = format!("{}.{}", ty, ext);
+        if let Some(decl) = self.find_ext_meld(ty, ext) {
+            return Some((exact, decl.clone()));
+        }
+        for ((a, b), decl) in &self.melds {
+            if a == ty && b.ends_with(&format!(".{}", ext)) {
+                return Some((b.clone(), decl.clone()));
+            }
+            if b == ty && a.ends_with(&format!(".{}", ext)) {
+                return Some((a.clone(), decl.clone()));
+            }
+        }
+        if self.types.contains_key(&exact) {
+            return Some((exact.clone(), MeldDeclaration {
+                name_a: ty.to_string(),
+                name_b: exact,
+                routes: vec![],
+                span: None,
+            }));
+        }
+        None
+    }
+
     pub fn get(&self, name: &str) -> Option<&ResolvedType> {
         self.types.get(name)
     }
@@ -93,5 +134,94 @@ impl TypeUniverse {
                 }
             })
             .unwrap_or(crate::ast::Formatting::None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::top::MeldRouteDef;
+    use crate::ast::Expr;
+
+    #[test]
+    fn test_get_extension_exists() {
+        let mut u = TypeUniverse::new();
+        u.types.insert("String.c".into(), ResolvedType {
+            name: "String.c".into(), base: "String".into(), bytes: 8, alignment: 8,
+            properties: HashMap::new(),
+        });
+        assert!(u.get_extension("String", "c").is_some());
+    }
+
+    #[test]
+    fn test_get_extension_not_found() {
+        let u = TypeUniverse::new();
+        assert!(u.get_extension("String", "c").is_none());
+    }
+
+    #[test]
+    fn test_find_ext_meld_direct() {
+        let mut u = TypeUniverse::new();
+        u.melds.insert(("String".into(), "String.c".into()), MeldDeclaration {
+            name_a: "String".into(), name_b: "String.c".into(),
+            routes: vec![], span: None,
+        });
+        u.melds.insert(("String.c".into(), "String".into()), MeldDeclaration {
+            name_a: "String.c".into(), name_b: "String".into(),
+            routes: vec![], span: None,
+        });
+        assert!(u.find_ext_meld("String", "c").is_some());
+    }
+
+    #[test]
+    fn test_find_meld_to_extension_priority1() {
+        let mut u = TypeUniverse::new();
+        u.melds.insert(("String".into(), "String.c".into()), MeldDeclaration {
+            name_a: "String".into(), name_b: "String.c".into(),
+            routes: vec![], span: None,
+        });
+        u.melds.insert(("String.c".into(), "String".into()), MeldDeclaration {
+            name_a: "String.c".into(), name_b: "String".into(),
+            routes: vec![], span: None,
+        });
+        let result = u.find_meld_to_extension("String", "c");
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, "String.c");
+    }
+
+    #[test]
+    fn test_find_meld_to_extension_priority2() {
+        let mut u = TypeUniverse::new();
+        u.melds.insert(("MyType".into(), "String.c".into()), MeldDeclaration {
+            name_a: "MyType".into(), name_b: "String.c".into(),
+            routes: vec![], span: None,
+        });
+        u.melds.insert(("String.c".into(), "MyType".into()), MeldDeclaration {
+            name_a: "String.c".into(), name_b: "MyType".into(),
+            routes: vec![], span: None,
+        });
+        let result = u.find_meld_to_extension("MyType", "c");
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_find_meld_to_extension_priority3_identity() {
+        let mut u = TypeUniverse::new();
+        u.types.insert("String.c".into(), ResolvedType {
+            name: "String.c".into(), base: "String".into(), bytes: 8, alignment: 8,
+            properties: HashMap::new(),
+        });
+        let result = u.find_meld_to_extension("String", "c");
+        assert!(result.is_some());
+        let (name, decl) = result.unwrap();
+        assert_eq!(name, "String.c");
+        assert_eq!(decl.name_a, "String");
+        assert_eq!(decl.name_b, "String.c");
+    }
+
+    #[test]
+    fn test_find_meld_to_extension_none() {
+        let u = TypeUniverse::new();
+        assert!(u.find_meld_to_extension("String", "c").is_none());
     }
 }

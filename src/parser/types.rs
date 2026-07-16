@@ -10,53 +10,87 @@ use crate::lexer::Token;
 impl<'a> Parser<'a> {
     /// Parse a type annotation.
     pub fn parse_type(&mut self) -> Result<Type, SyntaxError> {
-        match self.peek() {
+        let base = match self.peek() {
             Some(Token::TypeInt) => {
                 self.pos += 1;
-                Ok(Type::int())
+                ("Int", Type::int())
             }
             Some(Token::TypeUInt) => {
                 self.pos += 1;
-                Ok(Type::Custom("UInt".into()))
+                ("UInt", Type::Custom("UInt".into()))
             }
             Some(Token::TypeFloat) | Some(Token::TypeFloat32) => {
                 self.pos += 1;
-                Ok(Type::float())
+                ("Float", Type::float())
             }
             Some(Token::TypeFloat64) => {
                 self.pos += 1;
-                Ok(Type::float64())
+                ("Float64", Type::float64())
             }
             Some(Token::TypeString) => {
                 self.pos += 1;
-                Ok(Type::string())
+                ("String", Type::string())
             }
             Some(Token::TypeBool) => {
                 self.pos += 1;
-                Ok(Type::bool_())
+                ("Bool", Type::bool_())
             }
             Some(Token::TypeVoid) => {
                 self.pos += 1;
-                Ok(Type::void())
+                return Ok(Type::void());
             }
             Some(Token::TypeChar) => {
                 self.pos += 1;
-                Ok(Type::char_())
+                ("Char", Type::char_())
             }
             Some(Token::TypeData) => {
                 self.pos += 1;
-                Ok(Type::data())
+                ("Data", Type::data())
             }
-            Some(Token::Identifier(name)) => self.parse_named_type(name.clone()),
-            Some(Token::LParen) => self.parse_tuple_type(),
-            _ => self.error_at_current("expected type"),
+            Some(Token::Identifier(name)) => {
+                let name = name.clone();
+                self.pos += 1;
+                let ty = self.parse_named_type_body(&name)?;
+                return Ok(ty);
+            }
+            Some(Token::LParen) => return self.parse_tuple_type(),
+            _ => return self.error_at_current("expected type"),
+        };
+        // 2026-07-16: P2 — Check for .ext suffix on keyword types (e.g. String.c, Int.c.sso)
+        if let Some(ext) = self.try_parse_dot_extension() {
+            let mut full = format!("{}.{}", base.0, ext);
+            // Allow deeper extensions: "Int.c.sso"
+            while let Some(next) = self.try_parse_dot_extension() {
+                full = format!("{}.{}", full, next);
+            }
+            return Ok(Type::Custom(full));
+        }
+        Ok(base.1)
+    }
+
+    /// 2026-07-16: P2 — If the next token is `.ident`, consume and return the identifier.
+    /// Used to parse extension type names like String.c.
+    fn try_parse_dot_extension(&mut self) -> Option<String> {
+        if !self.eat(&Token::Dot) {
+            return None;
+        }
+        match self.peek() {
+            Some(Token::Identifier(name)) => {
+                let name = name.clone();
+                self.pos += 1;
+                Some(name)
+            }
+            _ => {
+                // Dot without following identifier — restore position.
+                // We can't easily un-eat the Dot, but in practice this shouldn't occur
+                // in valid programs.
+                None
+            }
         }
     }
 
-    /// Parse a named type, possibly with generic parameters or pointer prefix.
-    fn parse_named_type(&mut self, name: String) -> Result<Type, SyntaxError> {
-        self.pos += 1; // consume identifier
-
+    /// Parse a named type, possibly with generic parameters, pointer prefix, or extension.
+    fn parse_named_type_body(&mut self, name: &str) -> Result<Type, SyntaxError> {
         // Ptr<T> handling
         if name == "Ptr" || name == "Ptr!" {
             if self.eat(&Token::Lt) {
@@ -77,10 +111,20 @@ impl<'a> Parser<'a> {
                 }
             }
             self.expect(Token::Gt)?;
-            return Ok(Type::Applied(name, args));
+            return Ok(Type::Applied(name.to_string(), args));
         }
 
-        Ok(Type::Custom(name))
+        // 2026-07-16: P2 — Check for .ext suffix (e.g., "MyType.c", "MyType.c.sso")
+        if let Some(ext) = self.try_parse_dot_extension() {
+            let mut full = format!("{}.{}", name, ext);
+            // Allow deeper: "Int.c.sso"
+            while let Some(next) = self.try_parse_dot_extension() {
+                full = format!("{}.{}", full, next);
+            }
+            return Ok(Type::Custom(full));
+        }
+
+        Ok(Type::Custom(name.to_string()))
     }
 
     /// Parse a tuple type: (Int, String)

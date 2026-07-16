@@ -2,6 +2,7 @@
 // 2026-07-12: Phase 1.6 — expect, advance, peek, error reporting, span tracking.
 // Flat code: each function is max 2 levels of nesting.
 
+use crate::ast::TopLevel;
 use crate::errors::{Span, SyntaxError};
 use crate::lexer::Token;
 
@@ -10,6 +11,8 @@ pub struct Parser<'a> {
     pub pos: usize,
     pub source: &'a str,
     pub strict_mode: bool,
+    /// 2026-07-16: P2 — Extension group expansion stores extra TypeDefs here.
+    pub pending_types: std::vec::IntoIter<TopLevel>,
 }
 
 impl<'a> Parser<'a> {
@@ -19,6 +22,7 @@ impl<'a> Parser<'a> {
             pos: 0,
             source,
             strict_mode: false,
+            pending_types: Vec::new().into_iter(),
         }
     }
 
