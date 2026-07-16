@@ -10,7 +10,7 @@
 //             from config/targets.toml. System plugin discovery from
 //             plugins/{front,mid,post,back}/.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use brief_compiler::backend::llvm::LlvmBackend;
@@ -67,6 +67,8 @@ pub struct BuildOptions {
     pub enable_plugins: Vec<String>,
     /// Action on unresolved dynamic trigger target (--error-unresolved-trg).
     pub trg_unresolved_action: TrgUnresolvedAction,
+    /// 2026-07-16: P4 — Pre-compiled .o / .so / .a objects linked into the binary.
+    pub extra_objects: Vec<PathBuf>,
 }
 
 /// Compile a Brief source file: produce an executable binary (or `.ll` with `--llvm`).
@@ -133,6 +135,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     // BVIR snapshot at Post stage (after normalizer, before codegen)
     emit_bvir_snapshot(file_path, BvirStage::Post, &items, &universe, opts)?;
 
+    // 2026-07-16: P4 — Collect extra objects from ForeignBinding FromSpec paths
+    // for linking into the final binary.
+    let extra_objects = collect_extra_objects(&items, &resolver)?;
+
     // ── Code generation ───────────────────────────────────────────────
     let (codegen_output, ext) = codegen(&items, &mut universe, &pm, opts)?;
 
@@ -150,7 +156,10 @@ pub fn compile_source(file_path: &str, source: &str, opts: &BuildOptions) -> Res
     if !opts.emit_ir_only {
         let binary_path = out_path.strip_suffix(ext).unwrap_or(&out_path);
         if opts.backend == BackendKind::Llvm || opts.backend == BackendKind::Gpu {
-            compile_ll_to_binary(&out_path, binary_path)?;
+            // Merge CLI-provided extra_objects with ones collected from frgn declarations
+            let mut all_objects = opts.extra_objects.clone();
+            all_objects.extend(extra_objects);
+            compile_ll_to_binary(&out_path, binary_path, &all_objects)?;
         }
     }
 
@@ -173,6 +182,7 @@ pub fn check_source(file_path: &str, source: &str) -> Result<(), String> {
         disable_plugins: vec![],
         enable_plugins: vec![],
         trg_unresolved_action: TrgUnresolvedAction::Warn,
+        extra_objects: vec![],
     };
     let (_items, _universe) = parse_and_check(file_path, source, &default_opts)?;
     println!("OK");
@@ -340,22 +350,90 @@ fn determine_out_path(file_path: &str, out_dir: Option<&str>) -> Result<String, 
     Ok(format!("{}/{}.ll", parent, base))
 }
 
-/// Compile a `.ll` file to a binary using clang.
-fn compile_ll_to_binary(ll_path: &str, binary_path: &str) -> Result<(), String> {
-    let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
-    let rt_str = rt_path.to_string_lossy().to_string();
+/// 2026-07-16: P4 — Collect extra object files from ForeignBinding FromSpec paths.
+/// Each frgn declaration with a .c/.so/.a/etc. path triggers compilation or direct
+/// inclusion. The resolver is used to resolve compiler-relative <name> paths.
+fn collect_extra_objects(items: &[brief_compiler::ast::TopLevel], resolver: &brief_compiler::import_resolver::ImportResolver) -> Result<Vec<PathBuf>, String> {
+    let cache_dir = get_ffi_cache_dir();
+    let mut objects = Vec::new();
+    for item in items {
+        let fb = match item {
+            brief_compiler::ast::TopLevel::ForeignBinding(fb) => fb,
+            _ => continue,
+        };
+        let ext = fb.from.extension();
+        let resolved_path = || -> PathBuf {
+            resolver.resolve_stdlib_relative_path(&fb.from.as_str())
+                .unwrap_or_else(|| PathBuf::from(fb.from.as_str()))
+        };
+        match ext.as_deref() {
+            Some("c") | Some("cpp") | Some("cc") | Some("cxx") | Some("m") => {
+                let src = resolved_path();
+                let obj = compile_source_to_object(&src, &cache_dir)?;
+                objects.push(obj);
+            }
+            Some("so") | Some("dylib") | Some("a") | Some("o") => {
+                objects.push(resolved_path());
+            }
+            _ => {}
+        }
+    }
+    Ok(objects)
+}
+
+/// 2026-07-16: P4 — Get or create the FFI object cache directory.
+fn get_ffi_cache_dir() -> PathBuf {
+    let base = dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("brief-compiler")
+        .join("ffi");
+    std::fs::create_dir_all(&base).ok();
+    base
+}
+
+/// 2026-07-16: P4 — Compile a C/C++ source to a .o object file.
+/// Content-hash cached at ~/.cache/brief-compiler/ffi/<hash>.o.
+fn compile_source_to_object(source_path: &Path, cache_dir: &Path) -> Result<PathBuf, String> {
+    let content = std::fs::read(source_path)
+        .map_err(|e| format!("cannot read '{}': {}", source_path.display(), e))?;
+    let hash = blake3::hash(&content);
+    let cache_path = cache_dir.join(format!("{}.o", hash.to_hex()));
+    if cache_path.exists() {
+        return Ok(cache_path);
+    }
+    let ext = source_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let lang_flag = match ext {
+        "c" | "m" => "c",
+        "cpp" | "cc" | "cxx" => "c++",
+        _ => return Err(format!("unknown source extension '{}' for '{}'", ext, source_path.display())),
+    };
     let status = Command::new("clang")
         .args([
-            "-O3",
-            "-march=native",
-            "-ffast-math",
-            ll_path,
-            &rt_str,
-            "-o",
-            binary_path,
-            "-lm",
+            "-O3", "-march=native", "-ffast-math",
+            "-x", lang_flag,
+            "-c",
+            source_path.to_str().unwrap(),
+            "-o", cache_path.to_str().unwrap(),
         ])
         .status()
+        .map_err(|e| format!("failed to invoke clang (is it installed?): {}", e))?;
+    if !status.success() {
+        return Err(format!("clang failed to compile '{}'", source_path.display()));
+    }
+    Ok(cache_path)
+}
+
+/// Compile a `.ll` file to a binary using clang.
+fn compile_ll_to_binary(ll_path: &str, binary_path: &str, extra_objects: &[PathBuf]) -> Result<(), String> {
+    let rt_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/runtime/brief_rt.c");
+    let rt_str = rt_path.to_string_lossy().to_string();
+    let mut cmd = Command::new("clang");
+    cmd.args(["-O3", "-march=native", "-ffast-math", ll_path, &rt_str]);
+    for obj in extra_objects {
+        cmd.arg(obj.as_os_str());
+    }
+    cmd.args(["-o", binary_path, "-lm"]);
+    let status = cmd.status()
         .map_err(|e| format!(
             "failed to invoke clang: {} (is clang installed? use --llvm to emit IR only)",
             e
@@ -428,4 +506,54 @@ fn check_types(items: &[brief_compiler::ast::TopLevel], universe: &TypeUniverse)
             let msgs: Vec<String> = errors.iter().map(|e| format!("{}", e)).collect();
             format!("type errors:\n  {}", msgs.join("\n  "))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create a temporary file with given content, run a function on its path.
+    fn with_temp_file<F>(content: &str, f: F)
+    where F: FnOnce(&Path)
+    {
+        let dir = std::env::temp_dir().join("brief_compile_test");
+        std::fs::create_dir_all(&dir).ok();
+        let path = dir.join(format!("test_{}.c", std::process::id()));
+        std::fs::write(&path, content).ok();
+        f(&path);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_compile_source_to_object_cached() {
+        let content = "int foo() { return 42; }";
+        with_temp_file(content, |path| {
+            let cache_dir = get_ffi_cache_dir();
+            // First compilation
+            let result1 = compile_source_to_object(path, &cache_dir);
+            assert!(result1.is_ok(), "first compile failed: {:?}", result1);
+            let obj1 = result1.unwrap();
+            assert!(obj1.exists(), "object file not created");
+            // Same source → same hash → returns cached path (identical)
+            let result2 = compile_source_to_object(path, &cache_dir);
+            assert!(result2.is_ok(), "second compile failed: {:?}", result2);
+            let obj2 = result2.unwrap();
+            assert_eq!(obj1, obj2, "cached path should match");
+        });
+    }
+
+    #[test]
+    fn test_get_ffi_cache_dir_creates_dir() {
+        let dir = get_ffi_cache_dir();
+        assert!(dir.exists(), "cache directory should be created");
+    }
+
+    #[test]
+    fn test_compile_source_to_object_bad_ext() {
+        let path = Path::new("/tmp/test_bad_ext.xyz");
+        std::fs::write(path, "hello").ok();
+        let result = compile_source_to_object(path, &get_ffi_cache_dir());
+        assert!(result.is_err(), "expected compile error for unknown extension");
+        let _ = std::fs::remove_file(path);
+    }
 }

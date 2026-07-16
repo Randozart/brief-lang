@@ -201,6 +201,7 @@ fn parse_build_args(args: &[String]) -> Result<compile::BuildOptions, String> {
         disable_plugins,
         enable_plugins,
         trg_unresolved_action,
+        extra_objects: vec![],
     })
 }
 
