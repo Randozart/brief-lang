@@ -169,6 +169,10 @@ impl LlvmBackend {
             // ── Cast ─────────────────────────────────────────────────
             // 2026-07-14: Added string conversion paths. i64→ptr calls
             // __int_to_str__, ptr→i64 calls __str_to_int after inttoptr.
+            // 2026-07-16: String → Int must check is_string_chain because
+            // emit_string_literal returns Type::int() (ptrtoint representation)
+            // but the value is semantically a String — the LLVM type match
+            // alone would produce a no-op bitcast.
             Expr::Cast(expr, target) => {
                 let src = self.emit_expr(out, expr, indent);
                 let target_ll = lower_type(target);
@@ -183,6 +187,13 @@ impl LlvmBackend {
                 } else if src_ll == "ptr" && target_ll == "i64" {
                     // 2026-07-14: String → Int: call runtime with ptr
                     writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, src.name).ok();
+                } else if self.is_string_chain(expr) && target_ll == "i64" {
+                    // 2026-07-16: String-producing expr → Int: ptrtoint was
+                    // already done by emit_string_literal, so inttoptr back
+                    // and call __str_to_int.
+                    let ip = self.fun.gen_reg();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ip, src.name).ok();
+                    writeln!(out, "{}{} = call i64 @__str_to_int(ptr {})", indent, v, ip).ok();
                 } else {
                     writeln!(out, "{}{} = bitcast {} {} to {}", indent, v, src_ll, src.name, target_ll).ok();
                 }
@@ -282,7 +293,10 @@ impl LlvmBackend {
         writeln!(out, "{}store i8 0, ptr {}", indent, last).ok();
         writeln!(out, "{}{} = getelementptr inbounds [{} x i8], ptr {}, i32 0, i32 0",
             indent, v, len, alloca).ok();
-        TypedRegister { name: v.to_string(), ty: Type::string() }
+        // 2026-07-15: ptrtoint so callers see i64 (Brief universal type)
+        let p2i = self.fun.gen_reg();
+        writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, p2i, v).ok();
+        TypedRegister { name: p2i, ty: Type::int() }
     }
 
     /// Emit a user function call.
