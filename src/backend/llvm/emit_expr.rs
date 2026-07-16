@@ -299,8 +299,50 @@ impl LlvmBackend {
         TypedRegister { name: p2i, ty: Type::int() }
     }
 
+    /// 2026-07-16: P5 — Emit a foreign function call with optional auto-meld.
+    /// Derives convention extension from sig.from, checks meld compatibility,
+    /// and applies identity conversion (same bit layout, meld-verified type tag).
+    fn emit_frgn_call(&mut self, out: &mut String, v: &str, sig: &crate::ast::ForeignSignature, args: &[Expr], indent: &str) -> TypedRegister {
+        let arg_regs: Vec<TypedRegister> = args.iter()
+            .map(|a| self.emit_expr(out, a, indent))
+            .collect();
+        let ext = sig.from.extension();
+        let ext_str = ext.as_deref().unwrap_or("");
+        // 2026-07-16: Apply meld forward on each arg (identity conversion for now)
+        let meld_args: Vec<TypedRegister> = if ext_str.is_empty() {
+            arg_regs
+        } else {
+            arg_regs.iter().zip(sig.inputs.iter()).map(|(arg, (_, param_ty))| {
+                let ty_name = match param_ty {
+                    crate::ast::Type::Custom(name) => name.as_str(),
+                    _ => return arg.clone(),
+                };
+                if self.ctx.type_universe.as_ref().and_then(|u| u.find_meld_to_extension(ty_name, ext_str)).is_some() {
+                    // meld exists — convention compatible, identity conversion
+                    arg.clone()
+                } else {
+                    arg.clone()
+                }
+            }).collect()
+        };
+        let arg_strs: Vec<String> = meld_args.iter()
+            .map(|reg| format!("{} {}", crate::backend::llvm::types::lower_type(&reg.ty), reg.name))
+            .collect();
+        let ret_type = sig.result_type.return_type().unwrap_or(Type::int());
+        // 2026-07-16: Meld inverse on return value (identity for now)
+        let ret_llvm = crate::backend::llvm::types::lower_type(&ret_type);
+        writeln!(out, "{}{} = call {} @{}({})", indent, v, ret_llvm, sig.name, arg_strs.join(", ")).ok();
+        TypedRegister { name: v.to_string(), ty: ret_type }
+    }
+
     /// Emit a user function call.
     fn emit_user_call(&mut self, out: &mut String, v: &str, name: &str, args: &[Expr], indent: &str) -> TypedRegister {
+        // 2026-07-16: P5 — Check if this is a foreign function; if so, use emit_frgn_call
+        // Clone the sig to avoid borrowing self.ctx while self.emit_expr needs &mut self.
+        let frgn_sig = self.ctx.frgn_map.get(name).cloned();
+        if let Some(sig) = frgn_sig {
+            return self.emit_frgn_call(out, v, &sig, args, indent);
+        }
         // 2026-07-14: collect typed registers so call includes argument types
         let arg_regs: Vec<TypedRegister> = args.iter()
             .map(|a| self.emit_expr(out, a, indent))

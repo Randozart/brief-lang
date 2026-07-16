@@ -417,6 +417,16 @@ pub enum ResultType {
     VoidType,
 }
 
+impl ResultType {
+    /// 2026-07-16: P5 — Get the first return type, if any.
+    pub fn return_type(&self) -> Option<Type> {
+        match self {
+            ResultType::Projection(ts) => ts.first().cloned(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ForeignTarget {
     Native,
