@@ -36,6 +36,45 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
         }
     }
 
+    // 2026-07-16: P0 — register meld declarations in TypeUniverse for bidirectional lookup.
+    // This is the critical wiring that populates universe.melds (previously always empty).
+    // Without this, find_meld() returns None and all meld-dependent features are dead.
+    for item in items.iter() {
+        if let TopLevel::Meld(m) = &item {
+            // Convert layout bindings to MeldRouteDef entries.
+            // bindings["layout.<src_field>"] = "<dst_field>" → route
+            //   with accessor = dst_field (field on partner type)
+            //   and dest_expr = Field(Ident(source_type), src_field)
+            let mut routes = Vec::new();
+            for (key, val) in &m.bindings {
+                if let Some(src_field) = key.strip_prefix("layout.") {
+                    routes.push(MeldRouteDef {
+                        accessor: val.clone(),
+                        dest_expr: Expr::Field(
+                            Box::new(Expr::Identifier(m.name.clone())),
+                            src_field.to_string(),
+                        ),
+                    });
+                }
+            }
+            let decl = MeldDeclaration {
+                name_a: m.name.clone(),
+                name_b: m.target.clone(),
+                routes,
+                span: m.span.clone(),
+            };
+            // Store both orderings for bidirectional O(1) lookup.
+            universe.melds.insert(
+                (decl.name_a.clone(), decl.name_b.clone()),
+                decl.clone(),
+            );
+            universe.melds.insert(
+                (decl.name_b.clone(), decl.name_a.clone()),
+                decl,
+            );
+        }
+    }
+
     // Validate intrinsics against supported set
     let op_config = OpConfig::load();
     let supported = build_supported_ops(&op_config);
