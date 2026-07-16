@@ -9,49 +9,31 @@ use crate::lexer::Token;
 
 impl<'a> Parser<'a> {
     /// Parse a type annotation.
+    /// 2026-07-16: Bits-thesis — all type names are Token::Identifier.
+    /// Dispatch on identifier string, not token variant.
     pub fn parse_type(&mut self) -> Result<Type, SyntaxError> {
         let base = match self.peek() {
-            Some(Token::TypeInt) => {
-                self.pos += 1;
-                ("Int", Type::int())
-            }
-            Some(Token::TypeUInt) => {
-                self.pos += 1;
-                ("UInt", Type::Custom("UInt".into()))
-            }
-            Some(Token::TypeFloat) | Some(Token::TypeFloat32) => {
-                self.pos += 1;
-                ("Float", Type::float())
-            }
-            Some(Token::TypeFloat64) => {
-                self.pos += 1;
-                ("Float64", Type::float64())
-            }
-            Some(Token::TypeString) => {
-                self.pos += 1;
-                ("String", Type::string())
-            }
-            Some(Token::TypeBool) => {
-                self.pos += 1;
-                ("Bool", Type::bool_())
-            }
-            Some(Token::TypeVoid) => {
-                self.pos += 1;
-                return Ok(Type::void());
-            }
-            Some(Token::TypeChar) => {
-                self.pos += 1;
-                ("Char", Type::char_())
-            }
-            Some(Token::TypeData) => {
-                self.pos += 1;
-                ("Data", Type::data())
-            }
             Some(Token::Identifier(name)) => {
                 let name = name.clone();
                 self.pos += 1;
-                let ty = self.parse_named_type_body(&name)?;
-                return Ok(ty);
+                match name.as_str() {
+                    // Type::int() etc. are frontend conveniences for Bits(N) + metadata.
+                    "Int" => ("Int", Type::int()),
+                    "UInt" => ("UInt", Type::Custom("UInt".into())),
+                    "Float" | "Float32" | "F32" => ("Float", Type::float()),
+                    "Float64" | "F64" | "Double" => ("Float64", Type::float64()),
+                    "String" => ("String", Type::string()),
+                    "Bool" => ("Bool", Type::bool_()),
+                    "Void" => return Ok(Type::void()),
+                    "Char" => ("Char", Type::char_()),
+                    "Data" => ("Data", Type::data()),
+                    _ => {
+                        // Unknown name — delegate to parse_named_type_body
+                        // (handles Ptr<T>, Foo<T>, .ext suffixes, Custom types)
+                        let ty = self.parse_named_type_body(&name)?;
+                        return Ok(ty);
+                    }
+                }
             }
             Some(Token::LParen) => return self.parse_tuple_type(),
             _ => return self.error_at_current("expected type"),

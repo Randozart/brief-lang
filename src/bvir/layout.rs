@@ -71,10 +71,20 @@ fn tokenize(input: &str) -> Result<Vec<String>, String> {
 // ── Top-level ──────────────────────────────────────────────────────────
 
 fn parse_layout(tokens: &[String], pos: &mut usize) -> Result<LayoutPattern, String> {
+    // 2026-07-16: Tokenizer splits "le:" into ["le", ":"], so check for
+    // "le" or "be" followed by ":". Also accept bare "le:" for compat.
     let t = peek(tokens, *pos);
     match t {
         Some("le:") => { *pos += 1; Ok(LayoutPattern::Slice(parse_slice(tokens, pos)?)) }
         Some("be:") => { *pos += 1; Ok(LayoutPattern::Slice(parse_slice(tokens, pos)?)) }
+        Some("le") if peek(tokens, *pos + 1) == Some(":") => {
+            *pos += 2; // consume "le" and ":"
+            Ok(LayoutPattern::Slice(parse_slice(tokens, pos)?))
+        }
+        Some("be") if peek(tokens, *pos + 1) == Some(":") => {
+            *pos += 2; // consume "be" and ":"
+            Ok(LayoutPattern::Slice(parse_slice(tokens, pos)?))
+        }
         _ => parse_pattern(tokens, pos),
     }
 }
@@ -168,7 +178,13 @@ fn parse_primary(tokens: &[String], pos: &mut usize) -> Result<LayoutPattern, St
             expect_token(tokens, pos)?; // consume ')'
             apply_repetition(tokens, pos, inner)
         }
-        "[" => parse_layout(tokens, pos),
+        "[" => {
+            // 2026-07-16: Advance past '[' to prevent infinite recursion.
+            // parse_layout() expects '[' already consumed when called from
+            // a non-le:/be: path (parse_primary is the only such caller).
+            *pos += 1;
+            parse_layout(tokens, pos)
+        }
         "{" => parse_any_bytes(tokens, pos),
         _ => {
             if next.starts_with("0x") {

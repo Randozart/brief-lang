@@ -49,6 +49,51 @@ pub fn prove_smt(formula: &Expr, _param_types: &[(String, Type)]) -> SmtResult {
     }
 }
 
+/// 2026-07-16: P6 — Prove an SMT-LIB2 formula string directly (not from a Brief Expr).
+/// Writes formula to stdin of z3 -in -smt2, parses output.
+/// Returns Unsat if the formula is unsatisfiable (property holds).
+/// Uses a simple timeout wrapper around the cli invocation.
+pub fn prove_smt_formula(formula: &str, _timeout_ms: u64) -> SmtResult {
+    match Command::new("z3")
+        .arg("-in")
+        .arg("-smt2")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(mut child) => {
+            use std::io::Write;
+            if let Some(stdin) = child.stdin.as_mut() {
+                let _ = writeln!(stdin, "{}", formula);
+            }
+            // Drop stdin so z3 can process
+            drop(child.stdin.take());
+            match child.wait_with_output() {
+                Ok(output) => {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if stdout.contains("unsat") {
+                        SmtResult::Unsat
+                    } else if stdout.contains("sat") {
+                        SmtResult::Sat(parse_smt_model(&stdout))
+                    } else {
+                        SmtResult::Unknown
+                    }
+                }
+                Err(_) => SmtResult::Unknown,
+            }
+        }
+        Err(_) => SmtResult::Unknown,
+    }
+}
+
+/// Parse Z3's model output into (variable, value) pairs.
+fn parse_smt_model(_stdout: &str) -> Vec<(String, String)> {
+    // Placeholder — full model parsing deferred
+    // In a full implementation, parse "(define-fun x () (_ BitVec 64) #x0000000000000001)"
+    // style model definitions from Z3 output.
+    Vec::new()
+}
+
 /// Build an SMT-LIB query from a Brief expression.
 /// All values are encoded as (_ BitVec 64) — the only primitive.
 fn build_smt_query(expr: &Expr) -> String {

@@ -461,6 +461,32 @@ fn execute_statement(stmt: &Statement, state: &mut SymbolicState) {
     }
 }
 
+/// 2026-07-16: P6 — Evaluate an expression symbolically given explicit input bindings.
+/// Unlike eval_symbolic, this does NOT require a full SymbolicState — just a
+/// HashMap of input bindings. Used by meld validation Layer 4.
+pub fn eval_symbolic_expr(
+    expr: &Expr,
+    inputs: &std::collections::HashMap<String, SymbolicValue>,
+) -> SymbolicValue {
+    match expr {
+        Expr::Identifier(name) => {
+            inputs.get(name).cloned().unwrap_or(SymbolicValue::Unknown)
+        }
+        Expr::Field(_, _) => SymbolicValue::Unknown,
+        Expr::BinaryOp(kind, l, r) => {
+            let lv = eval_symbolic_expr(l, inputs);
+            let rv = eval_symbolic_expr(r, inputs);
+            SymbolicValue::Binary(
+                format!("{:?}", kind),
+                Box::new(lv),
+                Box::new(rv),
+            )
+        }
+        Expr::Decimal(n) => SymbolicValue::Literal(*n, "i64".to_string()),
+        _ => SymbolicValue::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

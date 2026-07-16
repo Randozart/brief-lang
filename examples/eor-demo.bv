@@ -9,12 +9,12 @@ type Meters <: Bits @/0..63 {
     alignment <~ 8;
 };
 
-meld Meters <:> Int;  // bidirectional cast compatibility
+meld Meters -> Int;  // bidirectional cast compatibility
 
 defn scale(val: Meters, factor: Int) -> Meters {
     // EOR pattern: (val as Int) * factor as Meters
     // The backend detects Cast(BinaryOp(Cast(a, Int), Cast(b, Int)), Meters)
-    // where Meters <:> Int, and emits a single mul i64 — no redundant casts.
+    // where Meters -> Int, and emits a single mul i64 — no redundant casts.
     term (val as Int) * factor as Meters;
 };
 

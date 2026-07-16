@@ -3414,7 +3414,11 @@ impl LlvmBackend {
         old_pairs.sort_by_key(|(_, idx)| *idx);
 
         for (name, _old_idx) in &old_pairs {
-            let mode = self.ctx.field_modes.get(name).copied().unwrap_or(crate::analysis::FieldMode::Never);
+            // 2026-07-16: Default to Always for fields without an explicit mode.
+            // Fields referenced only in defn bodies (not txn bodies) don't get a
+            // field_modes entry — changing Never→Always prevents their accidental
+            // elimination while still allowing explicitly-marked fields to be pruned.
+            let mode = self.ctx.field_modes.get(name).copied().unwrap_or(crate::analysis::FieldMode::Always);
             match mode {
                 crate::analysis::FieldMode::Never => {
                     // Eliminate this field from %State entirely

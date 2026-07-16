@@ -6,7 +6,7 @@
 // Usage in a bridge file:
 //   import { PyLongObject, PyUnicodeObject } from "glue/python/layouts.bv";
 //   import { Int } from "std/types.bv";
-//   meld Int <:> PyLongObject {
+//   meld Int -> PyLongObject {
 //       Ptr -> ob_digit_0;
 //       Size -> ob_size;
 //       Bytes -> 4;
@@ -91,18 +91,18 @@ struct PyUnicodeObject {
 //   let digit: Int = obj.ob_digit_0;
 
 // PyObject → PyVarObject: compatible header (same first 16 bytes)
-meld PyObject <:> PyVarObject;
+meld PyObject -> PyVarObject;
 
 // PyVarObject → PyLongObject: PyLongObject extends PyVarObject
 // (last 8 bytes of PyLongObject is ob_digit_0 — access via explicit route)
-meld PyVarObject <:> PyLongObject {
+meld PyVarObject -> PyLongObject {
     ob_refcnt -> ob_refcnt;
     ob_type -> ob_type;
     ob_size -> ob_size;
 };
 
 // PyASCIIObject → PyCompactUnicodeObject: compact extends ascii
-meld PyASCIIObject <:> PyCompactUnicodeObject;
+meld PyASCIIObject -> PyCompactUnicodeObject;
 
 // PyCompactUnicodeObject → PyUnicodeObject: full extends compact
-meld PyCompactUnicodeObject <:> PyUnicodeObject;
+meld PyCompactUnicodeObject -> PyUnicodeObject;

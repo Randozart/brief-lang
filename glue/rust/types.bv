@@ -6,7 +6,7 @@
 //
 // A bridge file imports these and melds them to Brief types:
 //   import { i64, f64 } from "glue/rust/types.bv";
-//   meld Int <:> i64 { Ptr -> Ptr; Size -> 8; Bytes -> 8; };
+//   meld Int -> i64 { Ptr -> Ptr; Size -> 8; Bytes -> 8; };
 //   #export add(a: Int) -> Int { term a; };
 //
 // The C ABI type (int64_t, double, etc.) for each of these is recorded

@@ -481,14 +481,17 @@ fn load_target_config(opts: &BuildOptions) -> TargetConfig {
     }
 }
 
-/// Lex the source into tokens.
+/// Lex the source into tokens with source spans.
+/// 2026-07-16: Fixed — use actual spans from logos instead of 0..0.
+/// The spans are needed by read_layout_body for byte-level slicing.
 fn lex(source: &str) -> Result<Vec<(Token, std::ops::Range<usize>)>, String> {
     use logos::Logos;
-    let lexer = Token::lexer(source);
+    let mut lexer = Token::lexer(source);
     let mut tokens = Vec::new();
-    for result in lexer {
+    while let Some(result) = lexer.next() {
         let token = result.map_err(|_| "lex error".to_string())?;
-        tokens.push((token, 0..0));
+        let span = lexer.span();
+        tokens.push((token, span));
     }
     Ok(tokens)
 }

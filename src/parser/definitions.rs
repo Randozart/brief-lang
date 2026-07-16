@@ -533,9 +533,10 @@ impl<'a> Parser<'a> {
     fn parse_meld(&mut self) -> Result<Meld, SyntaxError> {
         self.pos += 1;
         let name = self.expect_identifier()?;
+        // 2026-07-16: -> separates the two meld types
         self.expect(Token::Arrow)?;
         let target = self.expect_identifier()?;
-        // 2026-07-14: Optional body with layout { field <:> field; } mappings
+        // 2026-07-14: Optional body with layout { field -> field; } mappings
         let mut bindings = std::collections::HashMap::new();
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
@@ -545,12 +546,15 @@ impl<'a> Parser<'a> {
                     self.expect(Token::LBrace)?;
                     while !self.check(&Token::RBrace) && !self.is_at_end() {
                         let lhs = self.expect_identifier()?;
-                        self.expect(Token::Meld)?; // <:>
+                        // 2026-07-16: -> maps source field to target field
+                        self.expect(Token::Arrow)?;
                         let rhs = self.expect_identifier()?;
                         self.eat(&Token::Semicolon);
                         bindings.insert(format!("layout.{}", lhs), rhs);
                     }
                     self.expect(Token::RBrace)?;
+                    // 2026-07-16: layout { ... }; — eat the statement terminator
+                    self.eat(&Token::Semicolon);
                 } else {
                     return Err(SyntaxError::InvalidExpression {
                         reason: format!("expected 'layout' in meld body, got '{}'", keyword),
@@ -730,18 +734,8 @@ impl<'a> Parser<'a> {
     /// For groups, stores extra TypeDefs in self.pending_types for subsequent drain.
     fn parse_type_or_group(&mut self) -> Result<Box<TypeDef>, SyntaxError> {
         self.pos += 1; // consume `type` token
-        // 2026-07-14: Type name may be Int, Float, etc. which lex as dedicated
-        // tokens not Identifier. Try expect_identifier first, then check for
-        // built-in type name tokens (TypeInt, TypeFloat, etc).
-        let name = match self.peek() {
-            Some(Token::TypeInt) => { self.advance(); "Int".to_string() }
-            Some(Token::TypeFloat) => { self.advance(); "Float".to_string() }
-            Some(Token::TypeUInt) => { self.advance(); "UInt".to_string() }
-            Some(Token::TypeString) => { self.advance(); "String".to_string() }
-            Some(Token::TypeBool) => { self.advance(); "Bool".to_string() }
-            Some(Token::TypeChar) => { self.advance(); "Char".to_string() }
-            _ => self.expect_identifier()?,
-        };
+        // 2026-07-16: All type names are Token::Identifier after Type token removal.
+        let name = self.expect_identifier()?;
         // 2026-07-16: P2 — Check for .[ext, ...] extension group syntax
         if self.eat(&Token::Dot) && self.eat(&Token::LBracket) {
             return self.parse_extension_group_body(&name);
@@ -780,9 +774,15 @@ impl<'a> Parser<'a> {
                 }
                 if slot_name == "layout" && self.check(&Token::TildeArrow) {
                     self.advance();
-                    let raw = self.read_layout_body()?;
+                    // 2026-07-16: Two syntaxes: { field: Type } (struct) or <...> (angle explicit)
+                    if self.check(&Token::LBrace) {
+                        let fields = self.parse_layout_struct_body()?;
+                        metadata.insert("layout_struct".into(), fields);
+                    } else {
+                        let raw = self.read_layout_body()?;
+                        metadata.insert("layout".into(), PropertyValue::String(raw));
+                    }
                     self.eat(&Token::Semicolon);
-                    metadata.insert("layout".into(), PropertyValue::String(raw));
                     continue;
                 }
                 if slot_name == "op" {
@@ -878,9 +878,15 @@ impl<'a> Parser<'a> {
                 }
                 if slot_name == "layout" && self.check(&Token::TildeArrow) {
                     self.advance();
-                    let raw = self.read_layout_body()?;
+                    // 2026-07-16: Two syntaxes: { field: Type } (struct) or <...> (angle explicit)
+                    if self.check(&Token::LBrace) {
+                        let fields = self.parse_layout_struct_body()?;
+                        metadata.insert("layout_struct".into(), fields);
+                    } else {
+                        let raw = self.read_layout_body()?;
+                        metadata.insert("layout".into(), PropertyValue::String(raw));
+                    }
                     self.eat(&Token::Semicolon);
-                    metadata.insert("layout".into(), PropertyValue::String(raw));
                     continue;
                 }
                 if slot_name == "op" {
@@ -926,6 +932,26 @@ impl<'a> Parser<'a> {
             },
             span: None,
         }))
+    }
+
+    /// 2026-07-16: Parse struct-format layout body: { field: Type, ... }.
+    /// Returns PropertyValue::List of [name_string, type_name_identifier] pairs.
+    fn parse_layout_struct_body(&mut self) -> Result<PropertyValue, SyntaxError> {
+        self.expect(Token::LBrace)?;
+        let mut fields = Vec::new();
+        while !self.check(&Token::RBrace) && !self.is_at_end() {
+            let name = self.expect_identifier()?;
+            self.expect(Token::Colon)?;
+            let ty = self.parse_type()?;
+            self.eat(&Token::Comma);
+            self.eat(&Token::Semicolon);
+            fields.push(PropertyValue::List(vec![
+                PropertyValue::String(name),
+                PropertyValue::Identifier(ty.to_string()),
+            ]));
+        }
+        self.expect(Token::RBrace)?;
+        Ok(PropertyValue::List(fields))
     }
 
     /// 2026-07-14: Parse a `struct Name { fields }` declaration as a TypeDef.

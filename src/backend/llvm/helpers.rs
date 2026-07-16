@@ -1733,7 +1733,7 @@ impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
 
     /// Try to emit an EOR-optimized cast:
-    /// `Cast(BinaryOp(Cast(a, T), Cast(b, T)), U)` where U <:> T.
+    /// `Cast(BinaryOp(Cast(a, T), Cast(b, T)), U)` where U -> T.
     /// If matched, emits the binary op directly without redundant casts.
     ///
     /// 2026-07-03: Cast elimination optimization — when both operands of a

@@ -15,63 +15,56 @@ use crate::type_universe::TypeUniverse;
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
     let prim_config = TypeConfig::load();
 
-    // Attach llvm_type to every type
+    // 2026-07-16: Attach llvm_type to every type that doesn't already have one
+    // (primordial types carry an explicit llvm_type, e.g. "%String").
     for rt in universe.types.values_mut() {
+        if rt.properties.contains_key("llvm_type") {
+            continue;
+        }
         let prim = rt.primitive();
         let llvm_ty = derive_llvm_type(prim, rt.bytes, &prim_config);
         rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
 
         // 2026-07-14: Parse layout pattern and attach field annotations
+        // 2026-07-16: Strip leading '<' that read_layout_body includes
         if let Some(PropertyValue::String(layout_str)) = rt.properties.get("layout") {
-            if let Ok(pat) = crate::bvir::layout::parse_layout_pattern(layout_str) {
+            let cleaned = layout_str.strip_prefix('<').unwrap_or(layout_str);
+            if let Ok(pat) = crate::bvir::layout::parse_layout_pattern(cleaned) {
                 attach_layout_fields(rt, &pat);
             }
         }
     }
 
-    // 2026-07-14: Process meld layout mappings — synthesize bit-shuffles
-    for item in items.iter() {
-        if let TopLevel::Meld(m) = &item {
-            synthesize_meld_shuffle(m, universe)?;
-        }
-    }
+    // 2026-07-16: Register all TopLevel::TypeDef items into the TypeUniverse
+    // before meld processing, so validate_bit_permutation can find types.
+    register_typedefs(items, universe, &prim_config);
 
-    // 2026-07-16: P0 — register meld declarations in TypeUniverse for bidirectional lookup.
-    // This is the critical wiring that populates universe.melds (previously always empty).
-    // Without this, find_meld() returns None and all meld-dependent features are dead.
+    // 2026-07-16: P0+P6 — Process meld layout declarations in a single pass.
+    //  1. Synthesize bit-shuffle metadata
+    //  2. Register in TypeUniverse for bidirectional lookup
+    //  3. Run 5-layer validation cascade (L1-3 fatal, L4-5 warnings)
     for item in items.iter() {
         if let TopLevel::Meld(m) = &item {
-            // Convert layout bindings to MeldRouteDef entries.
-            // bindings["layout.<src_field>"] = "<dst_field>" → route
-            //   with accessor = dst_field (field on partner type)
-            //   and dest_expr = Field(Ident(source_type), src_field)
-            let mut routes = Vec::new();
-            for (key, val) in &m.bindings {
-                if let Some(src_field) = key.strip_prefix("layout.") {
-                    routes.push(MeldRouteDef {
-                        accessor: val.clone(),
-                        dest_expr: Expr::Field(
-                            Box::new(Expr::Identifier(m.name.clone())),
-                            src_field.to_string(),
-                        ),
-                    });
-                }
-            }
-            let decl = MeldDeclaration {
-                name_a: m.name.clone(),
-                name_b: m.target.clone(),
-                routes,
-                span: m.span.clone(),
-            };
-            // Store both orderings for bidirectional O(1) lookup.
+            // 1. Synthesize shuffle metadata
+            synthesize_meld_shuffle(m, universe)?;
+            // 2. Build canonical declaration
+            let decl = crate::analysis::meld_validation::build_meld_declaration(
+                &m.name, &m.target, &m.bindings, &m.span,
+            );
+            // 3. Register both orderings
             universe.melds.insert(
                 (decl.name_a.clone(), decl.name_b.clone()),
                 decl.clone(),
             );
             universe.melds.insert(
                 (decl.name_b.clone(), decl.name_a.clone()),
-                decl,
+                decl.clone(),
             );
+            // 4. Run validation cascade
+            if let Err(errs) = crate::analysis::meld_validation::validate_meld_layout(&decl, universe, false) {
+                let msg: Vec<String> = errs.iter().map(|e| format!("{}", e)).collect();
+                return Err(format!("meld validation failed for '{}': {}", m.name, msg.join("; ")));
+            }
         }
     }
 
@@ -91,6 +84,182 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     Ok(())
+}
+
+/// 2026-07-16: Compute total bits from a layout pattern string.
+/// Returns None for patterns with variable-length components.
+fn compute_layout_total_bits(s: &str) -> Option<u64> {
+    // 2026-07-16: Strip leading '<' that read_layout_body includes
+    let cleaned = s.strip_prefix('<').unwrap_or(s);
+    let pat = crate::bvir::layout::parse_layout_pattern(cleaned).ok()?;
+    match &pat {
+        crate::ast::layout::LayoutPattern::Slice(fields) => {
+            Some(fields.iter().map(|f| f.bits as u64).sum())
+        }
+        crate::ast::layout::LayoutPattern::Sequence(seq) => {
+            let mut total = 0u64;
+            for p in seq {
+                let bits = layout_pattern_bits(p)?;
+                total += bits;
+            }
+            Some(total)
+        }
+        crate::ast::layout::LayoutPattern::Repetition(_) | crate::ast::layout::LayoutPattern::Optional(_) => {
+            None  // Variable-length — can't determine at compile time
+        }
+        crate::ast::layout::LayoutPattern::ByteLiteral(_) => Some(8),
+        crate::ast::layout::LayoutPattern::ByteRange(_, _) => None,  // Variable
+        crate::ast::layout::LayoutPattern::AnyBytes(n) => Some(n * 8),
+        crate::ast::layout::LayoutPattern::VariableRef(_) => None,
+        crate::ast::layout::LayoutPattern::TypedRef(_, _) => None,
+        crate::ast::layout::LayoutPattern::PointerRef(_) => None,
+        crate::ast::layout::LayoutPattern::SemanticLabel(_, inner) => layout_pattern_bits(inner),
+        crate::ast::layout::LayoutPattern::GenericParam(_) => None,
+        crate::ast::layout::LayoutPattern::Alternation(_) => None,
+    }
+}
+
+/// 2026-07-16: Compute total bits from a parsed LayoutPattern.
+fn layout_pattern_bits(pat: &crate::ast::layout::LayoutPattern) -> Option<u64> {
+    match pat {
+        crate::ast::layout::LayoutPattern::Slice(fields) => {
+            Some(fields.iter().map(|f| f.bits as u64).sum())
+        }
+        crate::ast::layout::LayoutPattern::Sequence(seq) => {
+            let mut total = 0u64;
+            for p in seq {
+                total += layout_pattern_bits(p)?;
+            }
+            Some(total)
+        }
+        crate::ast::layout::LayoutPattern::ByteLiteral(_) => Some(8),
+        crate::ast::layout::LayoutPattern::AnyBytes(n) => Some(n * 8),
+        crate::ast::layout::LayoutPattern::SemanticLabel(_, inner) => layout_pattern_bits(inner),
+        _ => None,
+    }
+}
+
+/// 2026-07-16: Register all TopLevel::TypeDef items into the TypeUniverse.
+/// Extracts byte size from layout metadata or slots, attaches field annotations,
+/// and registers each type so meld validation can look it up.
+fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, prim_config: &TypeConfig) {
+    for item in items {
+        let td = match item {
+            TopLevel::TypeDef(td) => td,
+            _ => continue,
+        };
+        // Determine byte size: check metadata first, then layout pattern, else 8
+        let bytes = td.body.metadata.get("bytes")
+            .and_then(|pv| {
+                if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
+            })
+            .or_else(|| {
+                // Try to compute from layout pattern: sum field widths / 8
+                td.body.metadata.get("layout").and_then(|pv| {
+                    if let PropertyValue::String(s) = pv {
+                        let total_bits = compute_layout_total_bits(s)?;
+                        if total_bits % 8 == 0 { Some(total_bits / 8) } else { None }
+                    } else { None }
+                })
+            })
+            .or_else(|| {
+                // 2026-07-16: Try struct-format layout: sum resolved type widths / 8
+                td.body.metadata.get("layout_struct").and_then(|pv| {
+                    if let PropertyValue::List(entries) = pv {
+                        let mut total_bits = 0u64;
+                        for entry in entries {
+                            if let PropertyValue::List(parts) = entry {
+                                if parts.len() >= 2 {
+                                    if let PropertyValue::Identifier(type_name) = &parts[1] {
+                                        let bits = universe.get(type_name)
+                                            .map(|r| r.bytes * 8)
+                                            .unwrap_or(64);
+                                        total_bits += bits;
+                                    }
+                                }
+                            }
+                        }
+                        if total_bits % 8 == 0 { Some(total_bits / 8) } else { None }
+                    } else { None }
+                })
+            })
+            .unwrap_or(8);
+        // Determine alignment from metadata or default to bytes (clamped to 8)
+        let alignment = td.body.metadata.get("alignment")
+            .and_then(|pv| {
+                if let PropertyValue::Int(n) = pv { Some(*n as u64) } else { None }
+            })
+            .unwrap_or_else(|| bytes.min(8));
+        // Collect properties from metadata and slots
+        let mut properties: std::collections::HashMap<String, PropertyValue> = td.body.metadata.clone();
+        for slot in &td.body.slots {
+            properties.insert(format!("slot.{}", slot.name), PropertyValue::Identifier(slot.ty.to_string()));
+        }
+        // Build ResolvedType. The base type is the Expr name (e.g. "Bits"),
+        // or "Bits" if the base expr is not an identifier.
+        let base = match td.base.as_ref() {
+            Expr::Identifier(name) => name.clone(),
+            _ => "Bits".to_string(),
+        };
+        let mut rt = crate::type_universe::ResolvedType {
+            name: td.name.clone(),
+            base,
+            bytes,
+            alignment,
+            properties,
+        };
+        // Attach field-level layout annotations if layout property is set
+        // 2026-07-16: Strip leading '<' that read_layout_body includes
+        if let Some(PropertyValue::String(layout_str)) = rt.properties.get("layout") {
+            let cleaned = layout_str.strip_prefix('<').unwrap_or(layout_str);
+            if let Ok(pat) = crate::bvir::layout::parse_layout_pattern(cleaned) {
+                attach_layout_fields(&mut rt, &pat);
+            }
+        }
+        // 2026-07-16: Handle struct-format layout: layout <~ { field: Type }.
+        // Resolves each type name in the universe to get byte width, then
+        // builds a LayoutPattern::Slice with sequential offsets.
+        if let Some(PropertyValue::List(entries)) = rt.properties.get("layout_struct") {
+            let mut layout_fields = Vec::new();
+            for entry in entries {
+                let parts = match entry {
+                    PropertyValue::List(p) => p,
+                    _ => continue,
+                };
+                if parts.len() < 2 {
+                    continue;
+                }
+                let name = match &parts[0] {
+                    PropertyValue::String(s) => s.clone(),
+                    _ => continue,
+                };
+                let type_name = match &parts[1] {
+                    PropertyValue::Identifier(s) => s.clone(),
+                    _ => continue,
+                };
+                // Look up the type in the universe to get byte size
+                let bits = if let Some(resolved) = universe.get(&type_name) {
+                    resolved.bytes * 8
+                } else {
+                    64  // Default to 64 bits if type not found
+                };
+                layout_fields.push(crate::ast::layout::LayoutField {
+                    name,
+                    bits,
+                    mutable: false,
+                    structural: false,
+                });
+            }
+            if !layout_fields.is_empty() {
+                attach_layout_fields(&mut rt, &crate::ast::layout::LayoutPattern::Slice(layout_fields));
+            }
+        }
+        // Attach llvm_type (same as the main loop does for existing types)
+        let prim = rt.primitive();
+        let llvm_ty = derive_llvm_type(prim, rt.bytes, prim_config);
+        rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
+        universe.register(rt);
+    }
 }
 
 /// 2026-07-14: For a meld with layout mappings, compute bit positions and

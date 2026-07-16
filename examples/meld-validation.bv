@@ -1,0 +1,89 @@
+// meld-validation.bv — Compile-time meld layout validation
+//
+// Demonstrates the 5-layer verification cascade:
+//   L1: Structural     — types exist, fields reference valid annotations
+//   L2: Bit-permutation — field widths match, no overlap, no gaps
+//   L3: Unit-vector     — per-field value survives round-trip
+//   L4: Symbolic        — symbolic round-trip identity
+//   L5: SMT             — Z3 QF_BV universal proof
+
+// ── 128-bit types with 2 fields each ────────────────────────────
+
+// Type A: ptr at bits 0..63, size at bits 64..127.
+// 2026-07-16: Uses struct-format layout syntax { field: Type }
+type A <: Bits {
+    bytes <~ 16;
+    layout <~ { ptr: Int, size: Int };
+};
+
+// Type B: same layout, same field order. Identity meld.
+type B <: Bits {
+    bytes <~ 16;
+    layout <~ <le: [ptr: 64, size: 64]>;
+};
+
+meld A -> B {
+    layout {
+        ptr -> ptr;
+        size -> size;
+    };
+};
+
+// ── Reordered fields ────────────────────────────────────────────
+
+// Type C: size at bits 0..63, ptr at bits 64..127 (reversed).
+type C <: Bits {
+    bytes <~ 16;
+    layout <~ <le: [size: 64, ptr: 64]>;
+};
+
+meld A -> C {
+    layout {
+        ptr -> ptr;
+        size -> size;
+    };
+};
+
+// ── 96-bit type (3 fields) ─────────────────────────────────────
+
+type D <: Bits {
+    bytes <~ 12;
+    layout <~ <le: [x: 32, y: 32, z: 32]>;
+};
+
+type E <: Bits {
+    bytes <~ 12;
+    layout <~ <le: [z: 32, y: 32, x: 32]>;
+};
+
+meld D -> E {
+    layout {
+        x -> x;
+        y -> y;
+        z -> z;
+    };
+};
+
+// ── Padding fields are exempt from gap checks ───────────────────
+
+type F <: Bits {
+    bytes <~ 16;
+    layout <~ <le: [data: 64, pad0: 32, pad1: 32]>;
+};
+
+type G <: Bits {
+    bytes <~ 16;
+    layout <~ <le: [data: 64, pad0: 32, pad1: 32]>;
+};
+
+meld F -> G {
+    layout {
+        data -> data;
+    };
+};
+
+// ── Verify with a simple main ───────────────────────────────────
+
+defn main() -> Int {
+    term 0 as Int;
+};

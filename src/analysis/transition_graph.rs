@@ -866,8 +866,19 @@ fn collect_projection_identifiers(expr: &Expr, state_fields: &HashSet<String>, u
 }
 
 pub fn compute_referenced_fields(items: &[TopLevel]) -> HashSet<String> {
+    // 2026-07-16: Include both StateDecl items AND top-level Statement::Let items.
+    // build_field_index registers both as state fields, but only StateDecl was
+    // included here, causing fields from let x: T = expr; to be treated as dead.
     let state_fields: HashSet<String> = items.iter()
-        .filter_map(|item| if let TopLevel::StateDecl(s) = item { Some(s.name.clone()) } else { None })
+        .filter_map(|item| match item {
+            TopLevel::StateDecl(s) => Some(s.name.clone()),
+            TopLevel::Statement(stmt) => {
+                if let crate::ast::Statement::Let { name, .. } = stmt.as_ref() {
+                    Some(name.clone())
+                } else { None }
+            }
+            _ => None,
+        })
         .collect();
     let mut referenced: HashSet<String> = HashSet::new();
 

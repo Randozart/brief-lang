@@ -340,9 +340,6 @@ pub enum Token {
     #[token(";")]
     Semicolon,
 
-    #[token("<:>")]
-    LtColonGt,
-
     #[token("<:")]
     LtColon,
 
@@ -500,108 +497,6 @@ pub enum Token {
     })]
     Char(char),
 
-    // ── Type keywords ─────────────────────────────────────────
-    #[token("Int")]
-    TypeInt,
-
-    #[token("UInt")]
-    TypeUInt,
-
-    #[token("Unsigned")]
-    TypeUnsigned,
-
-    #[token("USgn")]
-    TypeUSgn,
-
-    #[token("Signed")]
-    TypeSigned,
-
-    #[token("Sgn")]
-    TypeSgn,
-
-    #[token("Float")]
-    TypeFloat,
-
-    #[token("String")]
-    TypeString,
-
-    #[token("Bool")]
-    TypeBool,
-
-    #[token("void")]
-    TypeVoid,
-
-    #[token("Data")]
-    TypeData,
-
-    #[token("Char")]
-    TypeChar,
-
-    // Shorthand sized integer types
-    #[token("i8")]
-    TypeI8,
-
-    #[token("u8")]
-    TypeU8,
-
-    #[token("i16")]
-    TypeI16,
-
-    #[token("u16")]
-    TypeU16,
-
-    #[token("i32")]
-    TypeI32,
-
-    #[token("u32")]
-    TypeU32,
-
-    #[token("i64")]
-    TypeI64,
-
-    #[token("u64")]
-    TypeU64,
-
-    // Long-form type keyword aliases
-    #[token("Int8")]
-    TypeInt8,
-
-    #[token("Int16")]
-    TypeInt16,
-
-    #[token("Int32")]
-    TypeInt32,
-
-    #[token("Int64")]
-    TypeInt64,
-
-    #[token("UInt8")]
-    TypeUInt8,
-
-    #[token("UInt16")]
-    TypeUInt16,
-
-    #[token("UInt32")]
-    TypeUInt32,
-
-    #[token("UInt64")]
-    TypeUInt64,
-
-    #[token("Float32")]
-    TypeFloat32,
-
-    #[token("F32")]
-    TypeF32,
-
-    #[token("Float64")]
-    TypeFloat64,
-
-    #[token("F64")]
-    TypeF64,
-
-    #[token("Double")]
-    TypeDouble,
-
     // ── Identifiers (including PascalCase# intrinsics) ────────
     // 2026-07-12: # is a valid identifier character.
     // This allows Sqrt#, AddI64#, PrintInt# as single tokens.
@@ -713,7 +608,6 @@ impl std::fmt::Display for Token {
             Token::HashQuestion => write!(f, "#?"),
             Token::HashBang => write!(f, "#!"),
             Token::Semicolon => write!(f, ";"),
-            Token::LtColonGt => write!(f, "<:>"),
             Token::LtColon => write!(f, "<:"),
             Token::ColonGreaterThan => write!(f, ":>"),
             Token::ColonEq => write!(f, ":="),
@@ -746,39 +640,6 @@ impl std::fmt::Display for Token {
             Token::Float64(n) => write!(f, "{}f64", n),
             Token::String(s) => write!(f, "\"{}\"", s),
             Token::Char(c) => write!(f, "'{}'", c),
-            Token::TypeInt => write!(f, "Int"),
-            Token::TypeUInt => write!(f, "UInt"),
-            Token::TypeUnsigned => write!(f, "Unsigned"),
-            Token::TypeUSgn => write!(f, "USgn"),
-            Token::TypeSigned => write!(f, "Signed"),
-            Token::TypeSgn => write!(f, "Sgn"),
-            Token::TypeFloat => write!(f, "Float"),
-            Token::TypeString => write!(f, "String"),
-            Token::TypeBool => write!(f, "Bool"),
-            Token::TypeVoid => write!(f, "void"),
-            Token::TypeData => write!(f, "Data"),
-            Token::TypeChar => write!(f, "Char"),
-            Token::TypeI8 => write!(f, "i8"),
-            Token::TypeU8 => write!(f, "u8"),
-            Token::TypeI16 => write!(f, "i16"),
-            Token::TypeU16 => write!(f, "u16"),
-            Token::TypeI32 => write!(f, "i32"),
-            Token::TypeU32 => write!(f, "u32"),
-            Token::TypeI64 => write!(f, "i64"),
-            Token::TypeU64 => write!(f, "u64"),
-            Token::TypeInt8 => write!(f, "Int8"),
-            Token::TypeInt16 => write!(f, "Int16"),
-            Token::TypeInt32 => write!(f, "Int32"),
-            Token::TypeInt64 => write!(f, "Int64"),
-            Token::TypeUInt8 => write!(f, "UInt8"),
-            Token::TypeUInt16 => write!(f, "UInt16"),
-            Token::TypeUInt32 => write!(f, "UInt32"),
-            Token::TypeUInt64 => write!(f, "UInt64"),
-            Token::TypeFloat32 => write!(f, "Float32"),
-            Token::TypeF32 => write!(f, "F32"),
-            Token::TypeFloat64 => write!(f, "Float64"),
-            Token::TypeF64 => write!(f, "F64"),
-            Token::TypeDouble => write!(f, "Double"),
             Token::Identifier(s) => write!(f, "{}", s),
         }
     }
@@ -797,9 +658,9 @@ mod tests {
             Some(Ok(Token::Identifier("fetch".to_string())))
         );
         assert_eq!(lexer.next(), Some(Ok(Token::Colon)));
-        assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("Int".to_string()))));
         assert_eq!(lexer.next(), Some(Ok(Token::Arrow)));
-        assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("Int".to_string()))));
         assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
         assert_eq!(lexer.next(), None);
     }
@@ -828,7 +689,7 @@ mod tests {
         assert_eq!(lexer.next(), Some(Ok(Token::Let)));
         assert_eq!(lexer.next(), Some(Ok(Token::Identifier("c".to_string()))));
         assert_eq!(lexer.next(), Some(Ok(Token::Colon)));
-        assert_eq!(lexer.next(), Some(Ok(Token::TypeChar)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("Char".to_string()))));
         assert_eq!(lexer.next(), Some(Ok(Token::Eq)));
         assert_eq!(lexer.next(), Some(Ok(Token::Char('x'))));
         assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
@@ -847,7 +708,7 @@ mod tests {
             Some(Ok(Token::Identifier("List".to_string())))
         );
         assert_eq!(lexer.next(), Some(Ok(Token::Lt)));
-        assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("Int".to_string()))));
         assert_eq!(lexer.next(), Some(Ok(Token::Shr)));
         assert_eq!(lexer.next(), None);
     }
@@ -967,7 +828,7 @@ mod tests {
             Some(Ok(Token::Identifier("port".to_string())))
         );
         assert_eq!(lexer.next(), Some(Ok(Token::Colon)));
-        assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("Int".to_string()))));
         assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
         assert_eq!(lexer.next(), None);
     }
@@ -981,7 +842,7 @@ mod tests {
             Some(Ok(Token::Identifier("status".to_string())))
         );
         assert_eq!(lexer.next(), Some(Ok(Token::Colon)));
-        assert_eq!(lexer.next(), Some(Ok(Token::TypeInt)));
+        assert_eq!(lexer.next(), Some(Ok(Token::Identifier("Int".to_string()))));
         assert_eq!(lexer.next(), Some(Ok(Token::Semicolon)));
         assert_eq!(lexer.next(), None);
     }

@@ -20,6 +20,7 @@ pub mod region;
 pub mod schema_validator;
 pub mod transition_graph;
 pub mod watchdog;
+pub mod meld_validation;
 
 /// Determines how a state field behaves in the %State struct layout.
 /// Used by the Adaptive Layout Engine (Phase 1) to eliminate unused fields

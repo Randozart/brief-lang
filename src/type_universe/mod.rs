@@ -52,9 +52,71 @@ pub struct TypeUniverse {
 
 impl TypeUniverse {
     pub fn new() -> Self {
-        TypeUniverse {
+        let mut universe = TypeUniverse {
             types: HashMap::new(),
             melds: HashMap::new(),
+        };
+        universe.seed_primordial_types();
+        universe
+    }
+
+    /// 2026-07-16: Seed the universe with primordial type entries so that
+    /// `Int`, `Float`, etc. are available without stdlib import. User
+    /// `type X <: Bits { ... }` declarations override these via register().
+    fn seed_primordial_types(&mut self) {
+        // Table: (name, bytes, alignment, primitive, llvm_type)
+        const PRIMORDIALS: &[(&str, u64, u64, &str, &str)] = &[
+            ("Int",    8, 8, "signed",   "i64"),
+            ("UInt",   8, 8, "unsigned", "i64"),
+            ("Int8",   1, 1, "signed",   "i8"),
+            ("UInt8",  1, 1, "unsigned", "i8"),
+            ("Int16",  2, 2, "signed",   "i16"),
+            ("UInt16", 2, 2, "unsigned", "i16"),
+            ("Int32",  4, 4, "signed",   "i32"),
+            ("UInt32", 4, 4, "unsigned", "i32"),
+            ("Int64",  8, 8, "signed",   "i64"),
+            ("UInt64", 8, 8, "unsigned", "i64"),
+            ("Float",  4, 4, "float",    "float"),
+            ("Float32",4, 4, "float",    "float"),
+            ("Float64",8, 8, "float",    "double"),
+            ("Double", 8, 8, "float",    "double"),
+            ("Bool",   1, 1, "unsigned", "i8"),
+            ("Char",   4, 4, "unsigned", "i32"),
+            ("Data",   8, 8, "pointer",  "i8*"),
+            ("Void",   0, 0, "void",     "void"),
+        ];
+        for &(name, bytes, alignment, primitive, llvm_type) in PRIMORDIALS {
+            let mut properties = std::collections::HashMap::new();
+            properties.insert("primitive".into(), crate::ast::PropertyValue::Identifier(primitive.to_string()));
+            properties.insert("llvm_type".into(), crate::ast::PropertyValue::String(llvm_type.to_string()));
+            properties.insert("alignment".into(), crate::ast::PropertyValue::Int(alignment as i64));
+            self.types.insert(name.to_string(), ResolvedType {
+                name: name.to_string(),
+                base: "Bits".to_string(),
+                bytes,
+                alignment,
+                properties,
+            });
+        }
+        // String — special case: explicit %String llvm type + field annotations
+        {
+            let mut p = std::collections::HashMap::new();
+            p.insert("primitive".into(), crate::ast::PropertyValue::Identifier("struct".to_string()));
+            p.insert("llvm_type".into(), crate::ast::PropertyValue::String("%String".to_string()));
+            p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
+            p.insert("field.ptr.offset".into(), crate::ast::PropertyValue::Int(0));
+            p.insert("field.ptr.width".into(), crate::ast::PropertyValue::Int(64));
+            p.insert("field.len.offset".into(), crate::ast::PropertyValue::Int(64));
+            p.insert("field.len.width".into(), crate::ast::PropertyValue::Int(64));
+            p.insert("field.codec.offset".into(), crate::ast::PropertyValue::Int(128));
+            p.insert("field.codec.width".into(), crate::ast::PropertyValue::Int(8));
+            self.types.insert("String".to_string(), ResolvedType {
+                name: "String".to_string(),
+                base: "Bits".to_string(),
+                bytes: 24,
+                alignment: 8,
+                properties: p,
+            });
         }
     }
 
@@ -77,8 +139,8 @@ impl TypeUniverse {
 
     /// 2026-07-16: P2 — Find a meld from `ty` to any type ending in `.ext`.
     /// Priority:
-    ///   1. Direct meld T <:> T.ext  (exact match)
-    ///   2. Direct meld T <:> Any.ext  (custom → standard extension)
+    ///   1. Direct meld T -> T.ext  (exact match)
+    ///   2. Direct meld T -> Any.ext  (custom → standard extension)
     ///   3. T.ext exists with auto-generated identity meld
     ///   4. None — no meld possible
     pub fn find_meld_to_extension(&self, ty: &str, ext: &str) -> Option<(String, MeldDeclaration)> {

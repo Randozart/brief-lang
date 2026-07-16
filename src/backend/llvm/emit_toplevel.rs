@@ -282,13 +282,14 @@ impl LlvmBackend {
     /// special cases where LLVM storage type != to_bits().
     fn fallback_llvm_type(ty: &Type) -> &'static str {
         match ty {
+            Type::Ptr(_) => "ptr",
             Type::Custom(__t) if __t == "Float" || __t == "Float64" => "double",
             Type::Custom(__t) if __t == "Bool" => "i8",
             Type::Custom(__t) if __t == "Char" => "i32",
-            Type::Custom(__t) if __t == "String" || __t == "Data" => "i8*",
+            Type::Custom(__t) if __t == "String" || __t == "Data" => "ptr",
             Type::Void => "void",
             Type::Bits(w) => match w {
-                1 => "i8",
+                1 => "i1",
                 8 => "i8",
                 16 => "i16",
                 32 => "i32",
@@ -300,6 +301,12 @@ impl LlvmBackend {
     }
 
     pub(super) fn llvm_type(&self, ty: &Type) -> String {
+        // 2026-07-15: Ptr<T> always maps to LLVM opaque pointer type.
+        // Must be checked BEFORE the universe lookup because Ptr<T> has no
+        // primitive property set (it's a compiler construct, not from bootstrap.bv).
+        if matches!(ty, Type::Ptr(_)) {
+            return "ptr".to_string();
+        }
         // 2026-07-10: Phase 1 — check for user-defined struct types first.
         // Struct types are passed by pointer at the FFI boundary, so return
         // "ptr" (LLVM opaque pointer). The named struct type is declared in
@@ -1504,7 +1511,7 @@ impl LlvmBackend {
             let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
             let i1 = format!("%pc{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             if cond.ty == Type::bool_() {
-                writeln!(out, "  {} = and i1 {}, true", i1, cond).ok();
+                writeln!(out, "  {} = trunc i8 {} to i1", i1, cond).ok();
             } else {
                 writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
             }
@@ -1716,7 +1723,9 @@ impl LlvmBackend {
         self.fun.ssa_old_float_regs.clear();
         let cond = self.emit_expr(out, &txn.contract.pre_condition, "  ");
         let i1 = if cond.ty == Type::bool_() {
-            cond.name.clone()
+            let b = format!("%ric{}", self.fun.txn_counter); self.fun.txn_counter += 1;
+            writeln!(out, "  {} = trunc i8 {} to i1", b, cond).ok();
+            b
         } else {
             let i1 = format!("%ri{}", self.fun.txn_counter); self.fun.txn_counter += 1;
             writeln!(out, "  {} = icmp ne i64 {}, 0", i1, cond).ok();
@@ -2086,7 +2095,9 @@ impl LlvmBackend {
                     let r = format!("%cpct_{}_{}", name, txn.name);
                     self.fun.txn_counter += 1;
                     if cond.ty == Type::bool_() {
-                        writeln!(out, "  {} = and i1 {}, true", r, cond.name).ok();
+                        let t = format!("%cpct_{}_{}_t", name, txn.name);
+                        writeln!(out, "  {} = trunc i8 {} to i1", t, cond.name).ok();
+                        writeln!(out, "  {} = and i1 {}, true", r, t).ok();
                     } else {
                         writeln!(out, "  {} = icmp ne i64 {}, 0", r, cond.name).ok();
                     }

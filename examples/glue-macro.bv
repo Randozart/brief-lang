@@ -3,7 +3,7 @@
 // Three-language bridge: Brief exports, Rust/Python/Node imports
 
 // The type bridge: prove Int and Float are layout-compatible
-meld Int <:> Float {
+meld Int -> Float {
     Ptr -> Ptr,
     Size -> Size,
     Bytes -> Bytes

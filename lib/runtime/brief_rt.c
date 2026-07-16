@@ -132,6 +132,11 @@ void __barrier_wait__(void) {
 void brief_thread_pool_shutdown(void) {
 }
 
+void __wait_for_trigger__(void) {
+    // 2026-07-15: Async event loop — wait for next trigger event
+    pause();
+}
+
 // ── File I/O (used by stdlib) ─────────────────────────────────────────
 
 int64_t __read_file__(int64_t path_bstr) {

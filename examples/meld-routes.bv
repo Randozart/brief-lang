@@ -1,7 +1,7 @@
 // meld-routes.bv — Meld with explicit route expressions
 // Tests: parser route parsing, TypeUniverse, route lookup
 
-meld Int <:> Float {
+meld Int -> Float {
     Ptr -> Ptr;
     Size -> Size;
     Bytes -> Bytes;
