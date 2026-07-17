@@ -301,7 +301,7 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
     }
 
     /// Load all state fields into SSA registers at loop body entry.
-    /// Used by A005e strategy to give LLVM SROA the full picture.
+    /// Used by EmitHybridCounterPhi strategy to give LLVM SROA the full picture.
     pub(crate) fn pre_load_all_fields(
         &mut self,
         out: &mut String,

@@ -330,7 +330,7 @@ pub struct FunctionContext {
     // as the phi backedge operand, eliminating the store→GEP→load roundtrip.
     pub pending_phi_native_backedge: HashMap<String, String>,
 
-    // 2026-07-04: Whether the A005c hot loop body must emit stores to %State
+    // 2026-07-04: Whether the EmitPerFieldPhi hot loop body must emit stores to %State
     // for the done: block to read. When false (the common case — no post-loop
     // hoisted guards), the field stores are suppressed. The phi registers and
     // pending_phi_native_backedge carry all values forward, and the latch uses
@@ -349,7 +349,7 @@ pub struct FunctionContext {
     //     the final iteration's field values.
     //
     // Both paths must be preserved when refactoring. Removing Path A
-    // regresses all A005c benchmarks by N dead stores per iteration
+    // regresses all EmitPerFieldPhi benchmarks by N dead stores per iteration
     // (N = field count). Removing Path B breaks term! swan song
     // correctness for benchmarks that print at convergence.
     pub needs_state_stores_in_body: bool,
@@ -360,12 +360,12 @@ pub struct FunctionContext {
     // (old value).  This makes every computation independent of every
     // other, enabling LLVM's vectorizer to SIMD the entire body.
     //
-    // Enabled for ALL bodies.  This restores the A005a struct-SSA behavior:
+    // Enabled for ALL bodies.  This restores the EmitInlineSsa struct-SSA behavior:
     // extractvalue from the state phi always gives old values, so all
     // computations are naturally independent.  The per-field phi loop
-    // (A005c) broke this by updating ssa_old caches after each &
+    // (EmitPerFieldPhi) broke this by updating ssa_old caches after each &
     // (correct per Brief semantics but creates artificial dependency
-    // chains).  Parallel-safe mode restores the A005a independence.
+    // chains).  Parallel-safe mode restores the EmitInlineSsa independence.
     //
     // Exception: the counter field (tracked by counter_field_name) always
     // updates ssa_old_*_regs even in parallel-safe mode.  Guard conditions

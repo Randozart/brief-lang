@@ -262,7 +262,21 @@ fn extract_bounded_pre(pre: &Expr) -> Option<BoundedPre> {
             }
         }
         Expr::BinaryOp(BinaryOpKind::And, l, r) => {
-            extract_bounded_pre(l).or_else(|| extract_bounded_pre(r))
+            // 2026-07-17: Try both sides and prefer variable-bound comparison
+            // over literal-bound. For `bound > 0 && ops < bound`, the left
+            // `bound > 0` matches first (Gt + Decimal), but `ops < bound`
+            // (Lt + Identifier) is the real counter loop condition. The
+            // literal-guard side has bound_literal = Some(n); the real
+            // counter loop has bound_literal = None. Prefer the latter so
+            // extract_valid_bounded_pre sees the correct var/inc match.
+            match (extract_bounded_pre(l), extract_bounded_pre(r)) {
+                (Some(lp), Some(rp)) => {
+                    if lp.bound_literal.is_some() { Some(rp) } else { Some(lp) }
+                }
+                (Some(lp), None) => Some(lp),
+                (None, Some(rp)) => Some(rp),
+                (None, None) => None,
+            }
         }
         _ => None,
     }

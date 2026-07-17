@@ -1415,7 +1415,7 @@ impl LlvmBackend {
         analysis.region_analyzer.compose_chains();
         analysis.region_analyzer.build_budget_plan(self.ctx.optimize_budget);
 
-        // ── Precomputation check (A000) ──────────────────────────────
+        // ── Precomputation check (EmitPureCounterFold) ──────────────────────────────
         //
         // Before emitting any runtime loop, check if the entire program can be
         // precomputed at compile time. If all inputs are const and the body
@@ -2185,14 +2185,14 @@ impl LlvmBackend {
         // structure to the optimal LLVM IR emission strategy:
         //
         //   Single txn + bounded counter:
-        //     → check = pure counter fold (A005c), folded SSA (A005a), or
-        //        folded memory (A005b)
+        //     → check = pure counter fold (EmitPerFieldPhi), folded SSA (EmitInlineSsa), or
+        //        folded memory (EmitMemoryCounter)
         //   All-const inputs:
-        //     → precompute (A000) — no runtime loop
+        //     → precompute (EmitPureCounterFold) — no runtime loop
         //   Multi-txn all-pure:
         //     → multi-txn pure fold (O(1) per counter)
         //   Sequential bounded multi-txn:
-        //     → SSA register pipeline (A006)
+        //     → SSA register pipeline (EmitSequentialSsa)
         //   Enumerable triggers:
         //     → switch-dispatch per-key folded loops
         //   Reactive with triggers:
@@ -2202,9 +2202,9 @@ impl LlvmBackend {
         // runtime profiling data. Contracts provide the bound/liveness info.
 
         // 2026-07-10: Count distinct fields written by the txn via &field = value.
-        // A005c per-field phi loop is optimal for 1-4 fields. Beyond that, the
+        // EmitPerFieldPhi per-field phi loop is optimal for 1-4 fields. Beyond that, the
         // GEP+load+store per tick overhead exceeds the phi register benefit,
-        // and A006 (direct SSA loop with full phi state) produces better code.
+        // and EmitSequentialSsa (direct SSA loop with full phi state) produces better code.
         let active_writes: usize = txns.first().map_or(0, |(_, txn)| {
             let mut seen = std::collections::HashSet::new();
             for stmt in &txn.body {
@@ -2255,17 +2255,17 @@ impl LlvmBackend {
                         //
                         // For bodies proven pure (or effectively pure), the compiler
                         // can emit an O(1) counter-only fold or a runtime phi pipeline.
-                        // For ALL other bodies, emit a per-field phi loop (A005c).
+                        // For ALL other bodies, emit a per-field phi loop (EmitPerFieldPhi).
                         //
-                        // Why per-field phis instead of the old A005a/A005b paths:
-                        //   A005a (inline SSA) used a %slot_case alloca round-trip:
+                        // Why per-field phis instead of the old EmitInlineSsa/EmitMemoryCounter paths:
+                        //   EmitInlineSsa (inline SSA) used a %slot_case alloca round-trip:
                         //     load %State → extractvalue×N → insertvalue×N → store
                         //     — 33-field struct load/store per iteration hid fields
                         //       from LLVM's induction variable analysis.
-                        //   A005b (memory) kept the counter in %State via GEP+load+store:
+                        //   EmitMemoryCounter (memory) kept the counter in %State via GEP+load+store:
                         //     — 3 extra memory uops per tick for the counter alone.
                         //
-                        //   A005c creates per-field phi nodes at the loop header
+                        //   EmitPerFieldPhi creates per-field phi nodes at the loop header
                         //   so LLVM sees a canonical loop structure (phi + icmp slt
                         //   + add) that enables induction variable analysis, SROA,
                         //   and loop vectorization. Guard branches in the body are
@@ -2273,14 +2273,14 @@ impl LlvmBackend {
                         //   addresses, and the latch reloads from them (GVN eliminates
                         //   the redundant load-via-store round trip).
                         //
-                        // 2026-07-04: A005d (memory loop) removed. A005c (per-field
+                        // 2026-07-04: Removed memory-loop variant. EmitPerFieldPhi (per-field
                         // phi loop) is now used for ALL field counts. The original
                         // concern was that 31+ phi nodes would choke SROA, but chunk
                         // allocas (≤15 fields per chunk, MAX_FIELDS_PER_ALLLOCA=15)
                         // decompose the state into SROA-friendly chunks. With Path A
-                        // (needs_state_stores_in_body=false), A005c emits zero memory
+                        // (needs_state_stores_in_body=false), EmitPerFieldPhi emits zero memory
                         // traffic regardless of field count — strictly better than
-                        // A005d's GEP+load+store per iteration.
+                        // Removed memory-loop variant's GEP+load+store per iteration.
                         if !has_swan_song && (node.is_pure_body || node.is_effectively_pure) {
                             let total_val = self.ctx.field_initializers
                                 .get(&bp.bound_var)
@@ -2294,7 +2294,7 @@ impl LlvmBackend {
                                     })
                                 });
                             if let Some(tv) = total_val {
-                                // A000: pure counter fold (O(1) — single store, no loop)
+                                // EmitPureCounterFold: pure counter fold (O(1) — single store, no loop)
                                 // 2026-07-14: Wrap in define i32 @main() so emitted IR is valid
                                 self.warnings.push(format!("info: txn '{}' dispatched via pure counter fold ({} iterations, O(1) store)", node.name, tv));
                                 writeln!(out, "define i32 @main() local_unnamed_addr #9 {{").ok();
@@ -2310,15 +2310,15 @@ impl LlvmBackend {
                                 writeln!(out, "}}").ok();
                                 true
                         } else {
-                            // Adaptive dispatch: A005a (inline SSA) vs A005c (per-field phi).
-                            // 2026-07-05: A005a is selected for dense-write, small-field
+                            // Adaptive dispatch: EmitInlineSsa (inline SSA) vs EmitPerFieldPhi (per-field phi).
+                            // 2026-07-05: EmitInlineSsa is selected for dense-write, small-field
                             // bodies — the single %State phi + insertvalue chain lets
                             // LLVM optimize the entire state as one SSA unit.  Guards are
-                            // handled via phi merge (emit_stmt.rs:983-992).  A005c is
+                            // handled via phi merge (emit_stmt.rs:983-992).  EmitPerFieldPhi is
                             // selected for sparse-write, large-field bodies — per-field
                             // phis avoid the long insertvalue chain.
                             // 2026-07-05: When the body has FFI calls (print_int#, etc.),
-                            // use A005c instead of A005a.  A005a's insertvalue chain makes
+                            // use EmitPerFieldPhi instead of EmitInlineSsa.  EmitInlineSsa's insertvalue chain makes
                             // it easier for LLVM's ipsccp/globalopt to prove the loop is
                             // pure (by analyzing @stdout as null/undef), which causes
                             // LLVM to eliminate the entire loop including all fprintf
@@ -2330,15 +2330,15 @@ impl LlvmBackend {
                                 crate::analysis::transition_graph::statement_contains_ffi(s)
                             });
                             if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
-                                // A005a: inline SSA with insertvalue chain.
+                                // EmitInlineSsa: inline SSA with insertvalue chain.
                                 // Best for dense writes (knucleotide: 4 fields all written,
                                 // mandelbrot: 5 fields all written).
                                 self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (A005a, {}/{} fields written)", &node.name, write_count, total_fields));
+                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (EmitInlineSsa, {}/{} fields written)", &node.name, write_count, total_fields));
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
                                 true
                             } else {
-                                // A005c: per-field phi loop with Path A + dead-field
+                                // EmitPerFieldPhi: per-field phi loop with Path A + dead-field
                                 // elimination + commit block.
                                 // 2026-07-10: Cap write_set to avoid register spilling.
                                 // Too many phi registers (>=8) causes LLVM to spill to
@@ -2359,20 +2359,20 @@ impl LlvmBackend {
                                 }
                                 self.fun.pending_post_hoist = post_hoist;
                                 let num_fields = capped_set.len().max(2);
-                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
+                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
                                 self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
                                 true
                             }
                             }
                         } else {
-                            // Adaptive dispatch for non-pure bodies: A005a vs A005c.
+                            // Adaptive dispatch for non-pure bodies: EmitInlineSsa vs EmitPerFieldPhi.
                             // 2026-07-05: Same criteria as pure path — dense writes,
-                            // small fields favors A005a insertvalue chain.  The SSA mode
+                            // small fields favors EmitInlineSsa insertvalue chain.  The SSA mode
                             // guard handler (emit_stmt.rs:983-992) handles guards with
-                            // phi merge, so guards don't disqualify A005a.
+                            // phi merge, so guards don't disqualify EmitInlineSsa.
                             // 2026-07-05: has_body_ffi check — when the body has FFI
-                            // calls, use A005c to prevent LLVM from eliminating the
+                            // calls, use EmitPerFieldPhi to prevent LLVM from eliminating the
                             // loop+fprintf chain via globalopt (knucleotide bug).
                             let total_fields = self.ctx.field_index_map.len();
                             let write_count = node.write_set.len();
@@ -2382,7 +2382,7 @@ impl LlvmBackend {
                             });
                             if write_density >= 0.5 && total_fields < 8 && !has_body_ffi {
                                 self.fun.pending_post_hoist = post_hoist;
-                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (A005a, {}/{} fields written)", &node.name, write_count, total_fields));
+                                self.warnings.push(format!("info: txn '{}' dispatched via inline SSA (EmitInlineSsa, {}/{} fields written)", &node.name, write_count, total_fields));
                                 self.emit_folded_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, false, Some(&body_stmts));
                                 true
                             } else {
@@ -2401,7 +2401,7 @@ impl LlvmBackend {
                                 }
                                 self.fun.pending_post_hoist = post_hoist;
                                 let num_fields = capped_set.len().max(2);
-                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (A005c, {} fields)", &node.name, num_fields));
+                                self.warnings.push(format!("info: txn '{}' dispatched via per-field phi loop (EmitPerFieldPhi, {} fields)", &node.name, num_fields));
                                 let is_decreasing = bp.direction == crate::analysis::transition_graph::ConvergeDirection::Decreasing;
                                 self.emit_countable_main(&mut out, &node.name, counter_idx, total_idx, total_const_name, &body_stmts, &capped_set, is_decreasing);
                                 true
@@ -2422,7 +2422,7 @@ impl LlvmBackend {
 
         if !folded {
             let precomputed = if let Some(ref final_values) = precomputed_final_values {
-                // A000: fully precomputed — no runtime loop emitted
+                // EmitPureCounterFold: fully precomputed — no runtime loop emitted
                 self.warnings.push("info: program fully precomputed — no runtime loop emitted. If this is unexpected, increase --optimize-budget or add frgn calls for observability.".into());
                 self.emit_precomputed_main(&mut out, final_values);
                 true
@@ -2478,7 +2478,7 @@ impl LlvmBackend {
                     }
                 }
                 if !multi_fold_params.is_empty() {
-                    // A005: multi-txn pure fold
+                    // EmitAdaptive: multi-txn pure fold
                     let txn_list: Vec<&str> = multi_fold_params.keys().map(|s| s.as_str()).collect();
                     self.warnings.push(format!("info: txns [{}] dispatched via multi-txn pure fold (all-internal, async)", txn_list.join(", ")));
                     self.emit_folded_multi_main(&mut out, &txns, &[], &HashMap::new(), &multi_fold_params,
@@ -2487,15 +2487,15 @@ impl LlvmBackend {
                 } else if dispatch_mode == DispatchMode::Sequential && !txns.is_empty()
                     && enumerable.is_none() && !has_wake_triggers
                 {
-                    // A005: SSA register pipeline (or modulo-switch dispatch)
+                    // EmitAdaptive: SSA register pipeline (or modulo-switch dispatch)
                     // 2026-07-09: Removed bounded_pre + increments requirement —
                     // emit_ssa_main correctly handles txns without bounded_pre via
                     // emit_ssa_txn_with_precond (per-tick pre check + any_fired).
-                    // The A005 fold path is independently guarded by multi_fold_params.
-                    // The A006 fallback at line 2632 handles the same codegen path,
-                    // so entering here vs A006 produces identical IR for non-foldable
+                    // The EmitAdaptive fold path is independently guarded by multi_fold_params.
+                    // The EmitSequentialSsa fallback at line 2632 handles the same codegen path,
+                    // so entering here vs EmitSequentialSsa produces identical IR for non-foldable
                     // programs. This change allows mixed bounded/unbounded reactive txns
-                    // to share the SSA pipeline instead of falling through to A006.
+                    // to share the SSA pipeline instead of falling through to EmitSequentialSsa.
                     self.emit_ssa_main(&mut out, &txns, false);
                 } else if let Some(ref enum_sizes) = enumerable {
                 // Enumerable triggers — emit switch-dispatch main
@@ -2599,7 +2599,7 @@ impl LlvmBackend {
                 };
                 // Declare __rt_wait for wake-triggered programs.
                 // trg owns its runtime — the compiler emits the declare implicitly.
-                // A005: enum dispatch
+                // EmitAdaptive: enum dispatch
                 self.warnings.push(format!("info: program dispatched via enum trigger dispatch ({} trigger keys)", enum_keys.len()));
                 if has_wake_triggers {
                     writeln!(out, "declare void @__rt_wait() local_unnamed_addr").ok();
@@ -2630,7 +2630,7 @@ impl LlvmBackend {
                 && self.async_txn_names.is_empty()
                 && self.ctx.mmio_fields.is_empty()
             {
-                // A006: Direct phi-based loop — no async, no MMIO.
+                // EmitSequentialSsa: Direct phi-based loop — no async, no MMIO.
                 // Inline all txn bodies directly in main() instead of reactor_tick.
                 // Triggers are sampled inline via lazy emit_trg_load, wake path uses
                 // __rt_wait between ticks. LLVM promotes %State fields to phi nodes.
@@ -2645,7 +2645,7 @@ impl LlvmBackend {
                 self.emit_ssa_main(&mut out, &txns, has_wake_triggers);
             } else if !txns.is_empty() {
                 // reactor loop fallback — only reached for async dispatch or MMIO
-                // (all other programs go through A006 direct SSA loop above)
+                // (all other programs go through EmitSequentialSsa direct SSA loop above)
                 self.warnings.push(format!("info: program dispatched via reactor loop ({})", match dispatch_mode {
                     DispatchMode::Parallel => "parallel thread pool",
                     DispatchMode::Sequential => "sequential tick loop",

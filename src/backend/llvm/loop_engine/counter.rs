@@ -10,7 +10,7 @@
 //      Pure bodies with runtime-variable bound. Counter-only phi node,
 //      no body emission (body precomputed).
 //
-//   3. HYBRID COUNTER-PHI + MEMORY FIELDS (emit_countable_main, A005e):
+//   3. HYBRID COUNTER-PHI + MEMORY FIELDS (emit_countable_main, EmitHybridCounterPhi):
 //      Non-pure foldable single-txn programs. Single counter phi + per-field
 //      load/store. LLVM SROA converts to closed-SSA phis, avoiding the
 //      phi-escape problem that blocks the vectorizer.
@@ -145,7 +145,7 @@ impl LlvmBackend {
         writeln!(out).ok();
     }
 
-    /// Emit a foldable loop using memory-based counter (A005b path).
+    /// Emit a foldable loop using memory-based counter (EmitMemoryCounter path).
     /// Counter is tracked via GEP+load+store rather than SSA phi.
     pub(crate) fn emit_folded_memory_main(
         &mut self,
@@ -188,10 +188,10 @@ impl LlvmBackend {
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Strategy 3: Hybrid Countable Loop (A005e)
+    // Strategy 3: Hybrid Countable Loop (EmitHybridCounterPhi)
     // ═══════════════════════════════════════════════════════════════
 
-    /// Emit a countable main() with per-field phi nodes (A005c/A005e).
+    /// Emit a countable main() with per-field phi nodes (EmitPerFieldPhi/EmitHybridCounterPhi).
     ///
     /// 2026-07-17: Each state field in write_set gets its own phi node in
     /// the loop header. The body reads from phi registers and writes to

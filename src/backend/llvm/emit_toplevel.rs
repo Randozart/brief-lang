@@ -623,7 +623,7 @@ impl LlvmBackend {
         // 2026-07-04: Emit chunk struct definitions so SROA can decompose
         // each chunk into scalar registers.  Each chunk has ≤CHUNK fields
         // (15).  The monolithic %State is kept for backward compat with
-        // non-routed paths (old A005a/b, @init_state).
+        // non-routed paths (old EmitInlineSsa/b, @init_state).
         let chunk_size = crate::backend::llvm::emit_stmt::MAX_FIELDS_PER_ALLLOCA;
         let total = self.ctx.field_types.len();
         let num_chunks = (total + chunk_size - 1) / chunk_size;

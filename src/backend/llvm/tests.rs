@@ -779,7 +779,7 @@ fn make_wake_program_no_triggers() -> Vec<TopLevel> {
 fn test_main_and_reactor_use_non_willreturn_attr() {
     let program = make_wake_program_no_triggers();
     let output = LlvmBackend::new().generate(&program, None);
-    // 2026-07-14: Program may fold to a no-main constant store (A000) when
+    // 2026-07-14: Program may fold to a no-main constant store (EmitPureCounterFold) when
     // the analysis correctly detects it as fully precomputable.
     let has_main = output.contains("define i32 @main()");
     if has_main {

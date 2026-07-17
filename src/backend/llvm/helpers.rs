@@ -245,7 +245,7 @@ impl LlvmBackend {
     }
 
     /// Emit a `main()` that stores final precomputed values and returns.
-    /// A000: no runtime loop, no iteration. The region analyzer simulated
+    /// EmitPureCounterFold: no runtime loop, no iteration. The region analyzer simulated
     /// all transactions within `--optimize-budget` and produced final values.
     /// This is the most extreme optimization: zero runtime memory traffic.
     pub(crate) fn emit_precomputed_main(
