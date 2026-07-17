@@ -81,11 +81,17 @@ impl LlvmBackend {
         if is_decreasing {
             writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %{}.latch ]",
                 counter_name, init_name, next, label_prefix).ok();
-            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
+            // 2026-07-17: Fixed comparison direction. For decreasing counters we
+            // want `counter > 0` (continue while still above the bound), not
+            // `counter < bound` (which would exit immediately for decreasing).
+            writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         } else {
             writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %{}.latch ]",
                 counter_name, init_name, next, label_prefix).ok();
-            writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
+            // 2026-07-17: Fixed comparison direction. For increasing counters we
+            // want `counter < bound` (continue while below the bound), not
+            // `counter > bound` (which would exit immediately).
+            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         }
         writeln!(out, "  br i1 {}, label %{}.body, label %{}", done_reg, label_prefix, exit_label).ok();
         writeln!(out, "{}.body:", label_prefix).ok();
@@ -281,13 +287,16 @@ impl LlvmBackend {
             self.fun.backedge_field_regs.insert((*fname).clone(), be_f);
         }
 
-        // Exit check
+        // 2026-07-17: Exit check. For increasing counters we want
+        // `counter < bound` (continue while below the bound); for decreasing
+        // counters we want `counter > 0` (continue while above the bound).
+        // The br branches to .cm_body if done_reg is true.
         if is_decreasing {
-            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
-        } else {
             writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
+        } else {
+            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         }
-        writeln!(out, "  br i1 {}, label %.cm_body, label {}", done_reg, exit_label).ok();
+        writeln!(out, "  br i1 {}, label %.cm_body, label %{}", done_reg, exit_label).ok();
         writeln!(out, ".cm_body:").ok();
 
         // 2026-07-17: Initialize pending_phi_backedge with identity values.
@@ -303,9 +312,15 @@ impl LlvmBackend {
         // Path B (stores emitted for post-loop hoisted prints).
         self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
 
-        let mut hoisted = Vec::new();
-        self.emit_countable_body(out, body, write_set, &mut hoisted);
-        self.emit_hoisted_post_loop_prints(out, &hoisted);
+        // 2026-07-17: pending_post_hoist (set by hoist_terminating_guard) is
+        // emitted AFTER the loop closes, not inside the body. The hoisted
+        // swan song reads final accumulator values from %State (stored by
+        // Path B — needs_state_stores_in_body). Clone to satisfy borrow
+        // checker (self.emit_expr needs &mut self; pending_post_hoist is
+        // behind &self.fun).
+        let hoist = self.fun.pending_post_hoist.clone();
+        let mut empty = Vec::new();
+        self.emit_countable_body(out, body, write_set, &mut empty);
         writeln!(out, "  br label %.cm_latch").ok();
         writeln!(out, ".cm_latch:").ok();
         if is_decreasing {
@@ -330,6 +345,12 @@ impl LlvmBackend {
 
         writeln!(out, "  br label %.cm_header").ok();
         writeln!(out, "{}:", exit_label).ok();
+        // 2026-07-17: Emit hoisted post-loop prints (swan song) AFTER the loop
+        // closes, so they read the final accumulator values from %State. The
+        // guard condition was hoist_terminating_guard-removed; at this point
+        // the loop postcondition guarantees it holds.
+        let hoist = self.fun.pending_post_hoist.clone();
+        self.emit_hoisted_post_loop_prints(out, &hoist);
         let final_gep = self.fun.next_reg_with_prefix("cmg");
         writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
             final_gep, counter_idx).ok();
@@ -402,7 +423,13 @@ impl LlvmBackend {
                 gep, ti).ok();
             writeln!(out, "  {} = load i64, ptr {}, align 8", bound_reg, gep).ok();
         } else if let Some(tcn) = total_const_name {
-            if let Some(&idx) = self.ctx.field_index_map.get(tcn) {
+            // 2026-07-17: Resolve bound from compile-time constant value first.
+            // The tcn is the bound variable name. It may be a const (like
+            // `const total: Int = 500`) rather than a state field — in which
+            // case we read the literal from `self.ctx.constants`.
+            if let Some((_, Expr::Decimal(val))) = self.ctx.constants.get(tcn) {
+                writeln!(out, "  {} = add i64 0, {}", bound_reg, val).ok();
+            } else if let Some(&idx) = self.ctx.field_index_map.get(tcn) {
                 let gep = self.fun.next_reg_with_prefix("clb");
                 writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                     gep, idx).ok();

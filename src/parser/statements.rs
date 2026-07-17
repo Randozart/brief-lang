@@ -4,7 +4,7 @@
 // Handles: let, assign, term, if, guard, foreach, trg, asm, sync, return, escape, metadata.
 
 use super::helpers::Parser;
-use crate::ast::{PropertyValue, Statement};
+use crate::ast::{Expr, PropertyValue, Statement};
 use crate::errors::SyntaxError;
 use crate::lexer::Token;
 
@@ -196,6 +196,11 @@ impl<'a> Parser<'a> {
         let cond = self.parse_expression()?;
         self.expect(Token::RBracket)?;
         let body = self.parse_block()?;
+        // 2026-07-17: Consume the trailing semicolon after `[cond] { body }`.
+        // Without this, the `;` after `}` becomes a bare Statement::Expression(Decimal(0))
+        // that sits after the Guarded in the body, preventing hoist_terminating_guard
+        // from finding the Guarded as the last element (it finds Expression instead).
+        self.expect(Token::Semicolon)?;
         Ok(Statement::Guarded(cond, body))
     }
 
@@ -204,6 +209,8 @@ impl<'a> Parser<'a> {
         self.pos += 1; // consume 'when'
         let cond = self.parse_expression()?;
         let body = self.parse_block()?;
+        // 2026-07-17: Same trailing semicolon fix as bracket guard.
+        self.expect(Token::Semicolon)?;
         Ok(Statement::Guarded(cond, body))
     }
 
@@ -266,6 +273,18 @@ impl<'a> Parser<'a> {
     fn parse_expression_statement(&mut self) -> Result<Statement, SyntaxError> {
         let expr = self.parse_expression()?;
         self.expect(Token::Semicolon)?;
+        // 2026-07-17: Detect assignment at statement level. The expression
+        // parser treats both `=` and `==` as BinaryOpKind::Eq (lowest
+        // precedence through parse_assignment). At the statement level,
+        // `identifier = expr;` must produce Statement::Assign so the backend
+        // knows to emit a store for the computed value. A standalone
+        // equality check as an expression statement never appears in real
+        // programs — the result would be discarded.
+        if let Expr::BinaryOp(crate::ast::BinaryOpKind::Eq, lhs, rhs) = &expr {
+            let target: crate::ast::Expr = (**lhs).clone();
+            let value: crate::ast::Expr = (**rhs).clone();
+            return Ok(Statement::Assign(target, value));
+        }
         Ok(Statement::Expression(expr))
     }
 }

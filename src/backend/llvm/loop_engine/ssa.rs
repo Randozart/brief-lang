@@ -428,11 +428,14 @@ impl LlvmBackend {
     ) {
         for block in hoisted {
             for stmt in block {
-                if let Statement::TermBang(Some(e)) = stmt {
-                    self.emit_expr(out, e, "  ");
-                }
-                if let Statement::Term(Some(e)) = stmt {
-                    self.emit_expr(out, e, "  ");
+                match stmt {
+                    // 2026-07-17: hoist_terminating_guard wraps the swan song
+                    // as Statement::Expression(swan_song_expr). Also handle
+                    // TermBang/Term in case other paths produce those variants.
+                    Statement::TermBang(Some(e)) | Statement::Term(Some(e)) | Statement::Expression(e) => {
+                        self.emit_expr(out, e, "  ");
+                    }
+                    _ => {}
                 }
             }
         }

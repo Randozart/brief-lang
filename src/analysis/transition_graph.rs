@@ -78,13 +78,20 @@ impl ReactorTransitionGraph {
                     let increments = detect_increments(&simplified_body)
                         .or_else(|| detect_popcount_decay(&simplified_body));
                     let bounded_pre = extract_valid_bounded_pre(&txn.contract.pre_condition, &increments);
+                    // 2026-07-17: Collect state field names from both StateDecl
+                    // (hand-constructed ASTs in tests) and Statement::Let (parser
+                    // output for top-level `let name: Type = expr;`).
                     let state_field_names: HashSet<String> = items
                         .iter()
                         .filter_map(|i| {
-                            if let TopLevel::StateDecl(s) = i {
-                                Some(s.name.clone())
-                            } else {
-                                None
+                            match i {
+                                TopLevel::StateDecl(s) => Some(s.name.clone()),
+                                TopLevel::Statement(stmt) => {
+                                    if let Statement::Let { name, .. } = stmt.as_ref() {
+                                        Some(name.clone())
+                                    } else { None }
+                                }
+                                _ => None,
                             }
                         })
                         .collect();
@@ -792,8 +799,15 @@ pub fn compute_live_fields(
 }
 
 pub fn compute_projection_usage(items: &[TopLevel]) -> HashMap<String, HashSet<String>> {
+    // 2026-07-17: Collect from both StateDecl and Statement::Let (parser output).
     let state_fields: HashSet<String> = items.iter()
-        .filter_map(|item| if let TopLevel::StateDecl(s) = item { Some(s.name.clone()) } else { None })
+        .filter_map(|item| match item {
+            TopLevel::StateDecl(s) => Some(s.name.clone()),
+            TopLevel::Statement(stmt) => {
+                if let Statement::Let { name, .. } = stmt.as_ref() { Some(name.clone()) } else { None }
+            }
+            _ => None,
+        })
         .collect();
     let mut usage: HashMap<String, HashSet<String>> = HashMap::new();
     for item in items {
