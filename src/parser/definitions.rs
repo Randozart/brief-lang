@@ -276,9 +276,13 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parse: rct txn name [pre][post] { body }
+    /// Parse: rct [async] txn name [pre][post] { body }
     fn parse_reactive_transaction(&mut self) -> Result<Transaction, SyntaxError> {
         self.pos += 1; // consume 'rct'
+        // 2026-07-17: Optional 'async' keyword between rct and txn.
+        // rct async txn signals that the compiler should dispatch this
+        // transaction in parallel when write sets are disjoint.
+        let is_async = self.eat(&Token::Async);
         // 2026-07-14: 'txn' is a keyword token (Token::Txn), not an identifier.
         // Use eat() instead of expect_identifier() to match the keyword token.
         if !self.eat(&Token::Txn) {
@@ -302,7 +306,7 @@ impl<'a> Parser<'a> {
         Ok(Transaction {
             name,
             is_reactive: true,
-            is_async: false,
+            is_async,
             type_params: vec![],
             parameters,
             output_type: None,

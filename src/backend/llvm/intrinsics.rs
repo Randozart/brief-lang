@@ -151,12 +151,14 @@ fn emit_malloc(
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let size = emit_arg(backend, out, &args[0], indent);
-    // 2026-07-15: Return i64 (not ptr) so arithmetic works. Callers use
-    // inttoptr when they need a pointer (e.g. Memcpy#/Memset#).
+    // 2026-07-17: Return Ptr<Int> so Expr::Index correctly identifies this
+    // as a pointer type and emits GEP+load/store (not extractelement). The
+    // raw bits are still i64 (ptrtoint); the type annotation only affects
+    // downstream codegen dispatch. State storage boxes via adapt_to_i64.
     let name = v.trim_start_matches('%');
     writeln!(out, "{}%{}_p = call ptr @malloc(i64 {})", indent, name, size).ok();
     writeln!(out, "{}{} = ptrtoint ptr %{}_p to i64", indent, v, name).ok();
-    BTypedRegister { name: v.to_string(), ty: Type::int() }
+    BTypedRegister { name: v.to_string(), ty: Type::ptr(Type::int()) }
 }
 
 fn emit_free(

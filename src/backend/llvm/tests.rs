@@ -104,7 +104,9 @@ fn test_llvm_generates_transaction() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("@increment("));
+    // 2026-07-17: emit_transaction uses @txn_<name> prefix to match the
+    // call sites in emit_ssa_loop and emit_folded_multi_main.
+    assert!(output.contains("@txn_increment("));
 }
 
 #[test]

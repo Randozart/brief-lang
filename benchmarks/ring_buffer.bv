@@ -1,24 +1,35 @@
-// Ring Buffer — Tests enum dispatch with wake hybrid (Path 4)
+// Ring Buffer — Tests Malloc# + pointer indexing + concurrent enqueue/dequeue
 //
-// Tests:
-//   - Folded while-loop (ops < N → ops == N convergence)
-//   - FFI output prevents dead-code elimination
+// Allocates a 1024-slot buffer via Malloc#. Two reactive transactions
+// enqueue and dequeue from opposite ends, advancing head/tail pointers.
+// The buffer wraps around using modular arithmetic.
 //
-// import "link/brief_rt.c" in brief_rt.bv pulls in the runtime automatically.
-//
-// Build:
-//   cargo run --bin brief-compiler -- build --llvm benchmarks/ring_buffer.bv --out benchmarks --optimize-budget 256
+// The compiler must:
+//   1. Lower Malloc# to ptrtoint + allow state storage as i64
+//   2. Lower data[idx] to inttoptr + GEP + load/store (not extractelement)
+//   3. Detect that enqueue and dequeue write different fields (data[] writes
+//      via pointer are invisible to the name-based write-set analysis, but
+//      head vs tail writes are disjoint) → async dispatch if both marked rct async
 //
 // C reference: ring_buffer_c.c
 
+import { print_int } from "std/io.bv";
 
+const CAP: Int = 1024;
+const TOTAL: Int = 50000000;
+
+let data: Ptr<Int> = Malloc#(CAP * 8);
+let head: Int = 0;
+let tail: Int = 0;
 let ops: Int = 0;
-let N: Int = GetEnv#("BOUND");
 
-rct txn work [ops < N][ops == N] {
+rct txn enqueue [ops < TOTAL][ops == TOTAL] {
+    data[tail % CAP] = ops;
+    tail = tail + 1;
     ops = ops + 1;
     [ops % 5000000 == 0] {
-        Print#(ops);
+        let filled: Int = tail - head;
+        Print#(filled);
     };
     term;
 };

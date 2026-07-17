@@ -794,7 +794,14 @@ impl LlvmBackend {
     // distinguish types that share the same LLVM representation (e.g. Char
     // and Int32 both → "i32", Bool and Int8 both → "i8").
     pub(super) fn push_field_type(&mut self, ty: &Type) {
-        self.ctx.field_types.push(self.llvm_type(ty).to_string());
+        // 2026-07-17: Ptr fields are stored as i64 in %State (via ptrtoint
+        // in emit_malloc and subsequent adapt_to_i64). Override "ptr" → "i64"
+        // so the state struct slot and all field loads/stores use i64.
+        if matches!(ty, Type::Ptr(_)) {
+            self.ctx.field_types.push("i64".to_string());
+        } else {
+            self.ctx.field_types.push(self.llvm_type(ty).to_string());
+        }
         self.ctx.field_brief_types.push(ty.clone());
     }
 

@@ -219,7 +219,10 @@ impl LlvmBackend {
 
             // ── Index ────────────────────────────────────────────────
             // 2026-07-14: List/seq indexing uses 2-slot heap protocol.
-            // Ptr-typed values are heap-allocated sequences; others use extractelement.
+            // Ptr-typed values are heap-allocated buffers; others use extractelement.
+            // 2026-07-17: Raw Ptr buffers (from Malloc#) use index directly.
+            // List/tuple heap sequences use idx+1 (slot 0 = length header).
+            // Check the original AST expression to decide.
             Expr::Index(obj, index) => {
                 let obj_reg = self.emit_expr(out, obj, indent);
                 let idx_reg = self.emit_expr(out, index, indent);
@@ -227,7 +230,14 @@ impl LlvmBackend {
                     let ptr = self.fun.gen_reg();
                     writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
                     let offset = self.fun.gen_reg();
-                    writeln!(out, "{}{} = add i64 {}, 1", indent, offset, idx_reg.name).ok();
+                    // 2026-07-17: List/tuple literals have a length header at
+                    // slot 0 — elements start at index 1. Raw Ptr buffers
+                    // (from Malloc#) have no header.
+                    if matches!(obj.as_ref(), Expr::List(_) | Expr::Tuple(_)) {
+                        writeln!(out, "{}{} = add i64 {}, 1", indent, offset, idx_reg.name).ok();
+                    } else {
+                        writeln!(out, "{}{} = add i64 {}, 0", indent, offset, idx_reg.name).ok();
+                    }
                     let gep = self.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
                     writeln!(out, "{}{} = load i64, ptr {}", indent, v, gep).ok();

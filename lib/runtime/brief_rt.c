@@ -20,6 +20,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <pthread.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #ifdef __linux__
@@ -109,27 +110,111 @@ int32_t __trg_signalfd_read(int32_t fd) {
 }
 
 // ── Async runtime infrastructure ─────────────────────────────────────
+// Forward declaration for atexit cleanup handler
+void brief_thread_pool_shutdown(void);
+// 2026-07-17: Real thread pool implementation using pthreads.
+// Protocol:
+//   1. __thread_pool_init__ creates N worker threads, each pinned to a
+//      function pointer from the fn_ptrs array.
+//   2. Each tick: main calls __set_async_state__, __barrier_release__
+//      (workers run their body), then reactor_tick + __barrier_wait__.
+//   3. brief_thread_pool_shutdown joins all workers.
+
+typedef struct {
+    unsigned id;
+    void (*fn)(void*);
+} WorkerArg;
+
+static pthread_t* workers = NULL;
+static WorkerArg* worker_args = NULL;
+static unsigned worker_count = 0;
+static void* async_state = NULL;
+
+static pthread_mutex_t barrier_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t barrier_cond = PTHREAD_COND_INITIALIZER;
+static volatile int barrier_phase = 0;  // 0 = wait, 1 = go
+static volatile int workers_done = 0;
+
+static void* worker_thread(void* arg) {
+    WorkerArg* wa = (WorkerArg*)arg;
+    while (1) {
+        pthread_mutex_lock(&barrier_mutex);
+        while (barrier_phase == 0) {
+            pthread_cond_wait(&barrier_cond, &barrier_mutex);
+        }
+        // barrier_phase == 1: workers are released
+        pthread_mutex_unlock(&barrier_mutex);
+
+        // Execute the async body function with the current state
+        if (wa->fn && async_state) {
+            wa->fn(async_state);
+        }
+
+        // Signal completion
+        pthread_mutex_lock(&barrier_mutex);
+        workers_done++;
+        pthread_cond_signal(&barrier_cond);
+        pthread_mutex_unlock(&barrier_mutex);
+    }
+    return NULL;
+}
+
+// 2026-07-17: Thread pool shutdown registered as atexit handler so worker
+// threads are cleaned up when main() returns.
+static void __rt_cleanup(void) {
+    brief_thread_pool_shutdown();
+}
 
 void __rt_init(void) {
     signal(SIGPIPE, SIG_IGN);
+    atexit(__rt_cleanup);
 }
 
 void __set_async_state__(void* state) {
-    (void)state;
+    async_state = state;
 }
 
 void __thread_pool_init__(unsigned num_workers, void** fn_ptrs) {
-    (void)num_workers;
-    (void)fn_ptrs;
+    if (num_workers == 0) return;
+    worker_count = num_workers;
+    workers = (pthread_t*)calloc(num_workers, sizeof(pthread_t));
+    worker_args = (WorkerArg*)calloc(num_workers, sizeof(WorkerArg));
+    for (unsigned i = 0; i < num_workers; i++) {
+        worker_args[i].id = i;
+        worker_args[i].fn = (void (*)(void*))fn_ptrs[i];
+        pthread_create(&workers[i], NULL, worker_thread, &worker_args[i]);
+    }
 }
 
 void __barrier_release__(void) {
+    pthread_mutex_lock(&barrier_mutex);
+    workers_done = 0;
+    barrier_phase = 1;
+    pthread_cond_broadcast(&barrier_cond);
+    pthread_mutex_unlock(&barrier_mutex);
 }
 
 void __barrier_wait__(void) {
+    pthread_mutex_lock(&barrier_mutex);
+    while (workers_done < worker_count) {
+        pthread_cond_wait(&barrier_cond, &barrier_mutex);
+    }
+    barrier_phase = 0;
+    pthread_mutex_unlock(&barrier_mutex);
 }
 
 void brief_thread_pool_shutdown(void) {
+    if (!workers) return;
+    // Workers loop forever — cancel them on shutdown
+    for (unsigned i = 0; i < worker_count; i++) {
+        pthread_cancel(workers[i]);
+        pthread_join(workers[i], NULL);
+    }
+    free(workers);
+    free(worker_args);
+    workers = NULL;
+    worker_args = NULL;
+    worker_count = 0;
 }
 
 void __wait_for_trigger__(void) {

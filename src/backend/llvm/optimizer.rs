@@ -286,6 +286,13 @@ impl LlvmBackend {
                 async_txn_names.insert(ac.name.clone());
             }
         }
+        // 2026-07-17: Include user-flagged async txns (rct async txn) even
+        // if conflict analysis fails. The user explicitly asserts safety.
+        for txn in &async_candidates {
+            if txn.is_async {
+                async_txn_names.insert(txn.name.clone());
+            }
+        }
 
         self.has_async_txns = !async_txn_names.is_empty();
         self.async_txn_names = async_txn_names.iter().cloned().collect();

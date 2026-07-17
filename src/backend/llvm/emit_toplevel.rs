@@ -836,10 +836,10 @@ impl LlvmBackend {
             Some(expr) => {
                 let val_reg = self.emit_expr(out, &expr, indent);
                 let boxed = self.adapt_to_i64(out, indent, &val_reg);
-                // 2026-07-03: Use shared helper for type dispatch
-                let brief_ty = self.ctx.field_brief_types.get(idx).cloned();
-                let tv = self.ensure_typed_value(out, indent, ty, &boxed, brief_ty, None);
-                writeln!(out, "{}store {} {}, ptr {}, align {}", indent, ty, tv, gep, self.align_of(&ty)).ok();
+                // 2026-07-17: adapt_to_i64 guarantees the value is i64-ish
+                // (even for Ptr types — Malloc# returns ptrtoint'd i64).
+                // Store as i64 into the state field slot.
+                writeln!(out, "{}store i64 {}, ptr {}, align {}", indent, boxed, gep, self.align_of("i64")).ok();
             }
             None => {
                 if ty == "i8*" {
@@ -1297,7 +1297,11 @@ impl LlvmBackend {
             });
 
         if let Some(action) = assume_action {
-            writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            // 2026-07-17: Use @txn_<name> prefix so call sites in emit_ssa_loop
+            // and emit_folded_multi_main can reference the function (they call
+            // @txn_{name}). Without this, the definition is @<name> but the
+            // call is @txn_<name> — undefined reference error at link time.
+            writeln!(out, "define void @txn_{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             // Arena for body emission — same rationale as the standard path:
             // the reactor dispatch calls @txn_name as a separate function,
@@ -1355,7 +1359,8 @@ impl LlvmBackend {
             }
             writeln!(out, "}}").ok();
         } else {
-            writeln!(out, "define void @{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
+            // 2026-07-17: Use @txn_<name> prefix (same rationale as assume_action path).
+            writeln!(out, "define void @txn_{}(ptr noalias nocapture align 8 %state) local_unnamed_addr {}{} {{", name, txn_attr, alwaysinline).ok();
             writeln!(out, "  entry:").ok();
             self.fun.ssa_old_int_regs.clear();
             self.fun.ssa_old_float_regs.clear();

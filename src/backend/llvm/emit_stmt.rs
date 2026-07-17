@@ -29,25 +29,48 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
         }
         Statement::Assign(lhs, rhs) => {
             let val = backend.emit_expr(out, rhs, indent);
-            if let Expr::Identifier(name) = lhs {
-                if let Some(reg) = backend.fun.let_bindings.get(name) {
-                    // 2026-07-14: store type must match val.ty — hardcoded i64 breaks bool/float assigns
-                    let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
-                    writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
-                // 2026-07-14: Handle MMIO and regular state field assignments
-                } else if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
-                    let ptr = backend.fun.gen_reg();
-                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
-                    // 2026-07-14: volatile store type must match val.ty — hardcoded i64 breaks MMIO bools
-                    let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
-                    writeln!(out, "{}store volatile {} {}, ptr {}", indent, store_ty, val.name, ptr).ok();
-                } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
-                    let ptr = backend.fun.gen_reg();
-                    writeln!(out, "{}{} = getelementptr %State, ptr %state, i32 0, i32 {}", indent, ptr, idx).ok();
-                    // 2026-07-17: State stores always i64 — box via adapt_to_i64.
-                    let boxed = backend.adapt_to_i64(out, indent, &val);
-                    writeln!(out, "{}store i64 {}, ptr {}", indent, boxed, ptr).ok();
+            match lhs {
+                Expr::Identifier(name) => {
+                    if let Some(reg) = backend.fun.let_bindings.get(name) {
+                        // 2026-07-14: store type must match val.ty — hardcoded i64 breaks bool/float assigns
+                        let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                        writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, reg).ok();
+                    // 2026-07-14: Handle MMIO and regular state field assignments
+                    } else if let Some(&addr) = backend.ctx.mmio_fields.get(name) {
+                        let ptr = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, addr).ok();
+                        // 2026-07-14: volatile store type must match val.ty — hardcoded i64 breaks MMIO bools
+                        let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
+                        writeln!(out, "{}store volatile {} {}, ptr {}", indent, store_ty, val.name, ptr).ok();
+                    } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
+                        let ptr = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = getelementptr %State, ptr %state, i32 0, i32 {}", indent, ptr, idx).ok();
+                        // 2026-07-17: State stores always i64 — box via adapt_to_i64.
+                        let boxed = backend.adapt_to_i64(out, indent, &val);
+                        writeln!(out, "{}store i64 {}, ptr {}", indent, boxed, ptr).ok();
+                    }
                 }
+                // 2026-07-17: Pointer-indexed store — data[idx] = val.
+                // Emits inttoptr + GEP + store for Ptr-typed objects.
+                // List/tuple literals need idx+1 (slot 0 = length header).
+                Expr::Index(obj, idx) => {
+                    let obj_reg = backend.emit_expr(out, obj, indent);
+                    if matches!(obj_reg.ty, Type::Ptr(_)) {
+                        let idx_reg = backend.emit_expr(out, idx, indent);
+                        let ptr = backend.fun.gen_reg();
+                        writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, ptr, obj_reg.name).ok();
+                        let gep = backend.fun.gen_reg();
+                        let offset = backend.fun.gen_reg();
+                        if matches!(obj.as_ref(), Expr::List(_) | Expr::Tuple(_)) {
+                            writeln!(out, "{}{} = add i64 {}, 1", indent, offset, idx_reg.name).ok();
+                        } else {
+                            writeln!(out, "{}{} = add i64 {}, 0", indent, offset, idx_reg.name).ok();
+                        }
+                        writeln!(out, "{}{} = getelementptr i64, ptr {}, i64 {}", indent, gep, ptr, offset).ok();
+                        writeln!(out, "{}store i64 {}, ptr {}", indent, val.name, gep).ok();
+                    }
+                }
+                _ => {}
             }
             TypedRegister { name: val.name, ty: Type::void() }
         }

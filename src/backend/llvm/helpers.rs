@@ -1880,6 +1880,9 @@ impl LlvmBackend {
                 writeln!(out, "{}{} = ptrtoint i8* {} to i64", indent, tr, reg.name).ok();
                 tr
             }
+            // 2026-07-17: Ptr types are already represented as i64 (via
+            // ptrtoint in emit_malloc). Store the i64 bits directly.
+            Type::Ptr(_) => reg.name.clone(),
             _ => reg.name.clone(),
         }
     }
