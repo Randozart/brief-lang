@@ -765,11 +765,30 @@ impl<'a> Parser<'a> {
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 let slot_name = self.expect_identifier()?;
-                if slot_name == "primitive" && self.check(&Token::TildeArrow) {
+                // 2026-07-17: CTD replaces primitive; ALU is a new slot
+                if slot_name == "ctd" && self.check(&Token::TildeArrow) {
                     self.advance();
-                    let prim_name = self.expect_identifier()?;
+                    let ctd_name = self.expect_identifier()?;
                     self.eat(&Token::Semicolon);
-                    metadata.insert("primitive".into(), PropertyValue::Identifier(prim_name));
+                    metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
+                    continue;
+                }
+                if slot_name == "alu" && self.check(&Token::TildeArrow) {
+                    self.advance();
+                    // PascalCase identifier → known built-in ALU
+                    // Lowercase quoted string → backend/plugin-specific
+                    match self.peek() {
+                        Some(Token::Identifier(_)) => {
+                            let alu_name = self.expect_identifier()?;
+                            self.eat(&Token::Semicolon);
+                            metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
+                        }
+                        _ => {
+                            let alu_str = self.expect_string()?;
+                            self.eat(&Token::Semicolon);
+                            metadata.insert("alu".into(), PropertyValue::String(alu_str));
+                        }
+                    }
                     continue;
                 }
                 if slot_name == "layout" && self.check(&Token::TildeArrow) {
@@ -869,11 +888,30 @@ impl<'a> Parser<'a> {
         if self.eat(&Token::LBrace) {
             while !self.check(&Token::RBrace) && !self.is_at_end() {
                 let slot_name = self.expect_identifier()?;
-                if slot_name == "primitive" && self.check(&Token::TildeArrow) {
+                // 2026-07-17: CTD replaces primitive; ALU is a new slot
+                if slot_name == "ctd" && self.check(&Token::TildeArrow) {
                     self.advance();
-                    let prim_name = self.expect_identifier()?;
+                    let ctd_name = self.expect_identifier()?;
                     self.eat(&Token::Semicolon);
-                    metadata.insert("primitive".into(), PropertyValue::Identifier(prim_name));
+                    metadata.insert("ctd".into(), PropertyValue::Identifier(ctd_name));
+                    continue;
+                }
+                if slot_name == "alu" && self.check(&Token::TildeArrow) {
+                    self.advance();
+                    // PascalCase identifier → known built-in ALU
+                    // Lowercase quoted string → backend/plugin-specific
+                    match self.peek() {
+                        Some(Token::Identifier(_)) => {
+                            let alu_name = self.expect_identifier()?;
+                            self.eat(&Token::Semicolon);
+                            metadata.insert("alu".into(), PropertyValue::Identifier(alu_name));
+                        }
+                        _ => {
+                            let alu_str = self.expect_string()?;
+                            self.eat(&Token::Semicolon);
+                            metadata.insert("alu".into(), PropertyValue::String(alu_str));
+                        }
+                    }
                     continue;
                 }
                 if slot_name == "layout" && self.check(&Token::TildeArrow) {
