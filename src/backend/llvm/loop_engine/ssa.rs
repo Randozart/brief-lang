@@ -51,7 +51,16 @@ impl LlvmBackend {
         if cases.len() != reactive_txns.len() {
             return false;
         }
-        self.emit_modulo_switch_main(out, reactive_txns, &counter_name, divisor, &cases);
+        if cases.len() <= 8 {
+            // 2026-07-17: Use modulo-rotated loop for K ≤ 8 (sparse_dispatch).
+            // emit_modulo_switch_main is one-shot (no loop) and doesn't handle
+            // the bounded counter — it was designed for the old pre-check path.
+            let txns_ref: Vec<(String, &crate::ast::Transaction)> = reactive_txns.iter()
+                .map(|(n, t)| (n.clone(), *t)).collect();
+            self.emit_modulo_rotated(out, &txns_ref, &counter_name, divisor, &cases);
+        } else {
+            self.emit_modulo_switch_main(out, reactive_txns, &counter_name, divisor, &cases);
+        }
         true
     }
 
@@ -69,6 +78,16 @@ impl LlvmBackend {
                 };
                 Some((counter, divisor))
             }
+            // 2026-07-17: Handle Eq(Mod(counter, divisor), value) — the common
+            // pattern for `count % 8 == N` which wraps Mod inside Eq.
+            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::Eq => {
+                self.extract_mod_info(l).or_else(|| self.extract_mod_info(r))
+            }
+            // 2026-07-17: Handle compound AND expressions like
+            // `count < total && count % 8 == N` — extract Mod from either side.
+            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::And => {
+                self.extract_mod_info(l).or_else(|| self.extract_mod_info(r))
+            }
             _ => None,
         }
     }
@@ -76,6 +95,11 @@ impl LlvmBackend {
     /// Extract the expected modulo value from a guard expression.
     fn extract_mod_guard(&self, expr: &Expr, counter_name: &str, divisor: i64) -> Option<i64> {
         match expr {
+            // 2026-07-17: Handle compound AND — try both sides.
+            Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::And => {
+                self.extract_mod_guard(l, counter_name, divisor)
+                    .or_else(|| self.extract_mod_guard(r, counter_name, divisor))
+            }
             Expr::BinaryOp(kind, l, r) if *kind == crate::ast::BinaryOpKind::Eq => {
                 let inner = match l.as_ref() {
                     Expr::BinaryOp(k, cl, cr) if *k == crate::ast::BinaryOpKind::Mod
@@ -157,16 +181,29 @@ impl LlvmBackend {
             c_gep, counter_idx).ok();
         let c_val = self.fun.next_reg_with_prefix("mrv");
         writeln!(out, "  {} = load i64, ptr {}, align 8", c_val, c_gep).ok();
+        // 2026-07-17: Bound check — exit when counter >= total.
+        // The total field name may not be directly after counter; find by name.
+        let total_idx = self.ctx.field_index_map.get("total").copied().unwrap_or(counter_idx + 1);
+        let b_gep = self.fun.next_reg_with_prefix("mrb");
+        writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+            b_gep, total_idx).ok();
+        let bound_val = self.fun.next_reg_with_prefix("mrbv");
+        writeln!(out, "  {} = load i64, ptr {}, align 8", bound_val, b_gep).ok();
+        let done = self.fun.next_reg_with_prefix("mrd");
+        writeln!(out, "  {} = icmp sge i64 {}, {}", done, c_val, bound_val).ok();
+        writeln!(out, "  br i1 {}, label %.mr_end, label %.mr_cont", done).ok();
+        writeln!(out, ".mr_cont:").ok();
         let mod_val = self.fun.next_reg_with_prefix("mrm");
         writeln!(out, "  {} = srem i64 {}, {}", mod_val, c_val, divisor).ok();
-        for (val, name) in cases {
+        for (i, (val, name)) in cases.iter().enumerate() {
             let eq = self.fun.next_reg_with_prefix("mre");
+            let next_label = format!(".mr_next_{}", i);
             writeln!(out, "  {} = icmp eq i64 {}, {}", eq, mod_val, val).ok();
-            writeln!(out, "  br i1 {}, label %{}, label %.mr_next", eq, name).ok();
+            writeln!(out, "  br i1 {}, label %{}, label %{}", eq, name, next_label).ok();
             writeln!(out, "{}:", name).ok();
             writeln!(out, "  call void @txn_{}(ptr %state)", name).ok();
             writeln!(out, "  br label %.mr_latch").ok();
-            writeln!(out, ".mr_next:").ok();
+            writeln!(out, "{}:", next_label).ok();
         }
         writeln!(out, "  br label %.mr_latch").ok();
         writeln!(out, ".mr_latch:").ok();
@@ -174,6 +211,8 @@ impl LlvmBackend {
         writeln!(out, "  {} = add i64 {}, 1", next, c_val).ok();
         writeln!(out, "  store i64 {}, ptr {}, align 8", next, c_gep).ok();
         writeln!(out, "  br label %.mr_loop").ok();
+        writeln!(out, ".mr_end:").ok();
+        writeln!(out, "  ret i32 0").ok();
         writeln!(out, "}}").ok();
         writeln!(out).ok();
     }
@@ -278,9 +317,12 @@ impl LlvmBackend {
                 _ => "i64",
             };
             writeln!(out, "  {} = alloca {}, align 8", alloca, llvm_type).ok();
-            let brief_ty = self.ctx.field_brief_types.get(*idx).cloned().unwrap_or(Type::int());
-            self.fun.last_val_temps.insert(name.clone(), alloca);
-            self.fun.last_val_types.insert(name.clone(), brief_ty);
+            // 2026-07-17: Do NOT insert the alloca pointer into last_val_temps.
+            // Alloca registers are LLVM ptr type. When emit_expr looks up a
+            // field in last_val_temps, it expects a value register (i64) but
+            // gets a ptr — type mismatch at the icmp/cmp instruction.
+            // load_last_val_temps (called later in emit_ssa_main) properly
+            // loads state values into last_val_temps.
         }
     }
 
@@ -291,6 +333,16 @@ impl LlvmBackend {
         txns: &[(String, &crate::ast::Transaction)],
         _has_wake_triggers: bool,
     ) {
+        // 2026-07-17: Early-return for modulo-gated dispatch (sparse_dispatch).
+        // Checks if all reactive txns have counter % K == N preconditions and
+        // emits an optimized modulo-rotated loop that branches directly to the
+        // correct body without evaluating K preconditions per iteration.
+        let reactive_txns: Vec<&(String, &crate::ast::Transaction)> = txns.iter()
+            .filter(|(_, t)| t.is_reactive).collect();
+        if self.try_modulo_switch_dispatch(out, &reactive_txns) {
+            return;
+        }
+
         writeln!(out, "define i32 @main() local_unnamed_addr {} {{", self.slp_attr("main", "#0")).ok();
         writeln!(out, "entry:").ok();
         writeln!(out, "  %state = alloca %State, align 8").ok();

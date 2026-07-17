@@ -349,6 +349,12 @@ impl LlvmBackend {
         // closes, so they read the final accumulator values from %State. The
         // guard condition was hoist_terminating_guard-removed; at this point
         // the loop postcondition guarantees it holds.
+        // Clear the float cache to prevent reusing fpext registers from the
+        // loop body (which may be defined in non-dominating conditional blocks
+        // like periodic prints). Without this, the swan song reuses a register
+        // defined inside a conditional that never fires for small BOUND values,
+        // producing 0.0 from LLVM's undefined value handling — nbody_newton bug.
+        self.fun.reg_float_cache.clear();
         let hoist = self.fun.pending_post_hoist.clone();
         self.emit_hoisted_post_loop_prints(out, &hoist);
         let final_gep = self.fun.next_reg_with_prefix("cmg");
