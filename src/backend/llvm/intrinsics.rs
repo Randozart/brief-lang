@@ -72,10 +72,35 @@ pub fn emit_intrinsic_call(
 
     // Determine ctd and bytes from the first argument's type
     // 2026-07-17: CTD replaces primitive — ops TOML uses CTD-compatible keys
-    let prim = resolve_arg_ctd(backend, &arg_regs[0]);
-    let bytes = resolve_arg_bytes(backend, &arg_regs[0]).unwrap_or(8);
+    // 2026-07-17: Use the register's type directly instead of resolving through
+    // type_universe (which may not have bootstrap types loaded at intrinsic call
+    // time). Map float()→"Float"/4, float64()→"Double"/8, others→"Int"/8.
+    let (prim, bytes) = if arg_regs[0].ty == Type::float() {
+        ("Float".to_string(), 4u64)
+    } else if arg_regs[0].ty == Type::float64() {
+        ("Double".to_string(), 8u64)
+    } else {
+        (resolve_arg_ctd(backend, &arg_regs[0]), resolve_arg_bytes(backend, &arg_regs[0]).unwrap_or(8))
+    };
 
     let op_name = name.trim_end_matches('#');
+    // 2026-07-17: Directly emit float intrinsics (Sqrt#, Sin#, Cos#, etc.)
+    // without config lookup, to work around the TOML dotted-key parsing issue.
+    // The config/llvm-ops.toml has entries like [op.Sqrt.Float] which the TOML
+    // parser flattens to "op.Sqrt.Float" — the config.rs load function doesn't
+    // split this correctly. Bypass the config for math intrinsics.
+    let is_float_unary = matches!(op_name, "Sqrt" | "Sin" | "Cos" | "Fabs" | "Ceil" | "Floor");
+    if is_float_unary {
+        let llvm_name = op_name.to_lowercase();
+        if arg_regs[0].ty == Type::float64() {
+            writeln!(out, "{}{} = call double @llvm.{}.f64(double {})", indent, v, llvm_name, arg_regs[0].name).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::float64() };
+        } else {
+            writeln!(out, "{}{} = call float @llvm.{}.f32(float {})", indent, v, llvm_name, arg_regs[0].name).ok();
+            return BTypedRegister { name: v.to_string(), ty: Type::float() };
+        }
+    }
+
     if let Some(template) = OP_CONFIG.lookup(op_name, &prim, bytes) {
         let ir = template
             .replace("%v", v)
@@ -83,8 +108,12 @@ pub fn emit_intrinsic_call(
             .replace("%b", &arg_regs.get(1).map(|r| r.name.clone()).unwrap_or_default())
             .replace("%c", &arg_regs.get(2).map(|r| r.name.clone()).unwrap_or_default());
         writeln!(out, "{}  {}", indent, ir).ok();
-        // Try to determine return type from the template or fall back to i64
-        return BTypedRegister { name: v.to_string(), ty: Type::int() };
+        let ret_ty = if arg_regs.len() >= 1 {
+            if arg_regs[0].ty == Type::float64() { Type::float64() }
+            else if arg_regs[0].ty == Type::float() { Type::float() }
+            else { Type::int() }
+        } else { Type::int() };
+        return BTypedRegister { name: v.to_string(), ty: ret_ty };
     }
 
     // Fallback: emit as external call

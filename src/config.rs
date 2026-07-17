@@ -105,28 +105,35 @@ impl OpConfig {
 
         let mut op = HashMap::new();
         for (key, value) in raw {
-            if let Some(op_name) = key.strip_prefix("op.") {
-                let mut prim_map = HashMap::new();
+            if let Some(rest) = key.strip_prefix("op.") {
+                // 2026-07-17: Split key like "Sqrt.Float" into op_name="Sqrt"
+                // and primitive="Float". TOML dotted keys create nested tables
+                // but toml::from_str parses them as flat keys with '.' in the
+                // name. We split on the FIRST '.' to separate op from primitive.
+                let (op_name, primitive) = match rest.split_once('.') {
+                    Some((n, p)) => (n.to_string(), Some(p.to_string())),
+                    None => (rest.to_string(), None),
+                };
+                let mut prim_map: HashMap<String, HashMap<String, String>> = HashMap::new();
                 if let toml::Value::Table(table) = value {
                     for (prim_or_bytes, bytes_val) in table {
                         if let toml::Value::String(tmpl) = &bytes_val {
-                            // Direct: op.Malloc.8 = "template" → no primitive
                             let mut bytes_map = HashMap::new();
                             bytes_map.insert(prim_or_bytes.clone(), tmpl.clone());
-                            prim_map.insert("_".to_string(), bytes_map);
+                            prim_map.insert(primitive.clone().unwrap_or_else(|| "_".to_string()), bytes_map);
                         } else if let toml::Value::Table(bytes_table) = bytes_val {
-                            // Nested: op.Add.Int.8 = "template" → has primitive
                             let mut bytes_map = HashMap::new();
                             for (byte_key, byte_val) in bytes_table {
                                 if let toml::Value::String(tmpl) = byte_val {
                                     bytes_map.insert(byte_key, tmpl);
                                 }
                             }
-                            prim_map.insert(prim_or_bytes, bytes_map);
+                            let prim_name = primitive.clone().unwrap_or(prim_or_bytes);
+                            prim_map.insert(prim_name, bytes_map);
                         }
                     }
                 }
-                op.insert(op_name.to_string(), prim_map);
+                op.insert(op_name, prim_map);
             }
         }
         Ok(OpConfig { op })
