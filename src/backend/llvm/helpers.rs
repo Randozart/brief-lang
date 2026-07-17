@@ -1853,14 +1853,22 @@ impl LlvmBackend {
     // ═══════════════════════════════════════════════════════════════
 
     /// Box a typed register to i64 for uniform state storage.
-    /// Handles Float(double)→bitcast→i64, Bool(i8)→zext→i64,
-    /// String/Data(i8*)→ptrtoint→i64. Int is already i64 (identity).
+    /// Handles Float64(double)→bitcast→i64, Float(float)→bitcast→i32→zext→i64,
+    /// Bool(i8)→zext→i64, String/Data(i8*)→ptrtoint→i64. Int is already i64 (identity).
     pub(crate) fn adapt_to_i64(&mut self, out: &mut String, indent: &str, reg: &TypedRegister) -> String {
         match &reg.ty {
-            Type::Custom(t) if t == "Float" || t == "Float64" => {
+            Type::Custom(t) if t == "Float64" => {
                 let tr = self.fun.gen_reg();
                 writeln!(out, "{}{} = bitcast double {} to i64", indent, tr, reg.name).ok();
                 tr
+            }
+            // 2026-07-17: Float (32-bit) must go float→i32→i64, not direct bitcast.
+            Type::Custom(t) if t == "Float" => {
+                let tr = self.fun.gen_reg();
+                writeln!(out, "{}{} = bitcast float {} to i32", indent, tr, reg.name).ok();
+                let ze = self.fun.gen_reg();
+                writeln!(out, "{}{} = zext i32 {} to i64", indent, ze, tr).ok();
+                ze
             }
             Type::Custom(t) if t == "Bool" => {
                 let tr = self.fun.gen_reg();

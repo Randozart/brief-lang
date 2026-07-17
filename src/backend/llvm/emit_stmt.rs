@@ -44,9 +44,9 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                 } else if let Some(&idx) = backend.ctx.field_index_map.get(name) {
                     let ptr = backend.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr %State, ptr %state, i32 0, i32 {}", indent, ptr, idx).ok();
-                    // 2026-07-14: state field store type must match val.ty — hardcoded i64 breaks bool/float fields
-                    let store_ty = crate::backend::llvm::types::lower_type(&val.ty);
-                    writeln!(out, "{}store {} {}, ptr {}", indent, store_ty, val.name, ptr).ok();
+                    // 2026-07-17: State stores always i64 — box via adapt_to_i64.
+                    let boxed = backend.adapt_to_i64(out, indent, &val);
+                    writeln!(out, "{}store i64 {}, ptr {}", indent, boxed, ptr).ok();
                 }
             }
             TypedRegister { name: val.name, ty: Type::void() }

@@ -351,7 +351,9 @@ impl LlvmBackend {
                                 let gep = self.fun.next_reg_with_prefix("cms");
                                 writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                                     gep, idx).ok();
-                                writeln!(out, "  store i64 {}, ptr {}, align 8", val.name, gep).ok();
+                                // 2026-07-17: State stores always i64 — box via adapt_to_i64.
+                                let boxed = self.adapt_to_i64(out, "  ", &val);
+                                writeln!(out, "  store i64 {}, ptr {}, align 8", boxed, gep).ok();
                             }
                         }
                         self.fun.last_val_temps.insert(n.clone(), val.name);

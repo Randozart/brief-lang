@@ -50,16 +50,34 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
-                // 2026-07-14: Three paths: local binding, state field, global
+                // 2026-07-17: Three paths: local binding, state field (with type), global.
+                // State fields are stored as i64 in %State. For Float/Float64 fields,
+                // unbox to native float immediately so binary_ops see correct types.
                 if let Some(reg) = self.get_local(name) {
                     TypedRegister { name: reg.clone(), ty: self.get_local_type(name) }
                 } else if let Some(&idx) = self.ctx.field_index_map.get(name) {
-                    // State field access via GEP from %state
                     let gep = self.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                         indent, gep, idx).ok();
+                    let brief_ty = self.ctx.field_brief_types.get(idx)
+                        .cloned().unwrap_or(Type::int());
                     writeln!(out, "{}{} = load i64, ptr {}", indent, v, gep).ok();
-                    TypedRegister { name: v.to_string(), ty: Type::int() }
+                    // 2026-07-17: Float fields packed as i64 in state — unbox.
+                    if brief_ty == Type::float64() {
+                        let dbl = self.fun.gen_reg();
+                        writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, v).ok();
+                        self.fun.reg_float_cache.insert(v.to_string(), dbl.clone());
+                        TypedRegister { name: dbl, ty: Type::float64() }
+                    } else if brief_ty == Type::float() {
+                        let tr = self.fun.gen_reg();
+                        let fl = self.fun.gen_reg();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, v).ok();
+                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                        self.fun.reg_float_cache.insert(v.to_string(), fl.clone());
+                        TypedRegister { name: fl, ty: Type::float() }
+                    } else {
+                        TypedRegister { name: v.to_string(), ty: brief_ty }
+                    }
                 } else {
                     writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
                     TypedRegister { name: v.to_string(), ty: Type::int() }
