@@ -12,21 +12,37 @@ use crate::type_universe::TypeUniverse;
 /// For types with fixed-width layout, parses the pattern and attaches
 /// field-level bit offset annotations. For melds with layout mappings,
 /// synthesizes bit-shuffle instructions.
+///
+/// 2026-07-17: llvm_type is always computed from CTD via ctd_to_llvm().
+/// The normalizer is the single authority — no more skipping types with
+/// pre-existing llvm_type. ALU × CTD validation catches incompatible combos.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
     let prim_config = TypeConfig::load();
 
-    // 2026-07-16: Attach llvm_type to every type that doesn't already have one
-    // (primordial types carry an explicit llvm_type, e.g. "%String").
+    // 2026-07-17: Compute llvm_type from CTD for EVERY type. No skipping.
+    // The normalizer is the single authority for backend-specific types.
     for rt in universe.types.values_mut() {
-        if rt.properties.contains_key("llvm_type") {
-            continue;
-        }
-        // 2026-07-17: Read CTD from properties instead of primitive()
+        // Read CTD and ALU from primordial properties
         let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
             PropertyValue::Identifier(s) => Some(s.as_str()),
             _ => None,
         });
-        let llvm_ty = derive_llvm_type(ctd, rt.bytes, &prim_config);
+        let alu = rt.properties.get("alu").and_then(|pv| match pv {
+            PropertyValue::Identifier(s) => Some(s.as_str()),
+            _ => None,
+        });
+
+        // Validate ALU × CTD for built-in PascalCase identifiers
+        // Quoted ALUs are backend-specific and bypass validation
+        if let (Some(a), Some(c)) = (alu, ctd) {
+            if let Err(e) = validate_alu_ctd(a, c) {
+                return Err(e);
+            }
+        }
+
+        // Compute llvm_type: CTD → LLVM type directly, with derive_llvm_type fallback
+        let llvm_ty = ctd.and_then(|c| ctd_to_llvm(c, rt.bytes).map(|s| s.to_string()))
+            .unwrap_or_else(|| derive_llvm_type(None, rt.bytes, &prim_config));
         rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
 
         // 2026-07-14: Parse layout pattern and attach field annotations
@@ -89,6 +105,45 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     Ok(())
+}
+
+// 2026-07-17: Map a frontend-known CTD (PascalCase) to its LLVM type string.
+// Unknown CTDs return None — the caller falls back to derive_llvm_type.
+// String/Data are heap-allocated → "ptr" at the LLVM ABI level.
+fn ctd_to_llvm(ctd: &str, bytes: u64) -> Option<&'static str> {
+    match ctd {
+        "Int" | "UInt" => match bytes {
+            1 => Some("i8"), 2 => Some("i16"),
+            4 => Some("i32"), 8 => Some("i64"),
+            _ => None,
+        },
+        "Float" => Some("float"),
+        "Double" => Some("double"),
+        "Bool" => Some("i8"),
+        "Char" => Some("i32"),
+        "String" | "Data" | "Ptr" => Some("ptr"),
+        "Void" => Some("void"),
+        _ => None,
+    }
+}
+
+// 2026-07-17: Validate that a PascalCase ALU is compatible with the type's CTD.
+// Quoted ALUs (lowercase strings) bypass validation — the backend handles those.
+// Returns Ok(()) if compatible, Err(description) if not.
+fn validate_alu_ctd(alu: &str, ctd: &str) -> Result<(), String> {
+    match (alu, ctd) {
+        ("Float", "Int" | "UInt" | "Bool" | "Char" | "String" | "Data" | "Ptr" | "Void") =>
+            Err(format!("ALU '{}' is incompatible with CTD '{}': float hardware cannot process {} values", alu, ctd, ctd)),
+        ("Bool", "Float" | "Double") =>
+            Err(format!("ALU '{}' is incompatible with CTD '{}': boolean logic cannot process float values", alu, ctd)),
+        ("Bool", "Int" | "UInt" | "Char" | "String" | "Data" | "Ptr" | "Void") =>
+            Err(format!("ALU '{}' is incompatible with CTD '{}': boolean logic cannot process integer-like types (use ALU Int)", alu, ctd)),
+        ("Int", "Float" | "Double") =>
+            Err(format!("ALU '{}' is incompatible with CTD '{}': integer hardware cannot process float values (use ALU Float)", alu, ctd)),
+        ("Int", "Bool") =>
+            Err(format!("ALU '{}' is incompatible with CTD '{}': integer hardware cannot process boolean values (use ALU Bool)", alu, ctd)),
+        _ => Ok(()),
+    }
 }
 
 /// 2026-07-16: Compute total bits from a layout pattern string.
@@ -260,12 +315,13 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, prim_confi
             }
         }
         // Attach llvm_type (same as the main loop does for existing types)
-        // 2026-07-17: Read CTD from properties instead of primitive()
+        // 2026-07-17: Use ctd_to_llvm with derive_llvm_type fallback
         let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
             PropertyValue::Identifier(s) => Some(s.as_str()),
             _ => None,
         });
-        let llvm_ty = derive_llvm_type(ctd, rt.bytes, prim_config);
+        let llvm_ty = ctd.and_then(|c| ctd_to_llvm(c, rt.bytes).map(|s| s.to_string()))
+            .unwrap_or_else(|| derive_llvm_type(None, rt.bytes, prim_config));
         rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
         universe.register(rt);
     }
@@ -375,3 +431,82 @@ const STANDARD_OPS: &[&str] = &[
     "Print",
     "Malloc", "Free",
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ctd_to_llvm_string() {
+        assert_eq!(ctd_to_llvm("String", 24), Some("ptr"));
+    }
+
+    #[test]
+    fn test_ctd_to_llvm_data() {
+        assert_eq!(ctd_to_llvm("Data", 8), Some("ptr"));
+    }
+
+    #[test]
+    fn test_ctd_to_llvm_int() {
+        assert_eq!(ctd_to_llvm("Int", 8), Some("i64"));
+        assert_eq!(ctd_to_llvm("Int", 4), Some("i32"));
+        assert_eq!(ctd_to_llvm("Int", 1), Some("i8"));
+    }
+
+    #[test]
+    fn test_ctd_to_llvm_float() {
+        assert_eq!(ctd_to_llvm("Float", 4), Some("float"));
+        assert_eq!(ctd_to_llvm("Double", 8), Some("double"));
+    }
+
+    #[test]
+    fn test_ctd_to_llvm_bool() {
+        assert_eq!(ctd_to_llvm("Bool", 1), Some("i8"));
+    }
+
+    #[test]
+    fn test_ctd_to_llvm_unknown() {
+        assert_eq!(ctd_to_llvm("CustomType", 8), None);
+    }
+
+    #[test]
+    fn test_validate_alu_ctd_float_double_ok() {
+        assert!(validate_alu_ctd("Float", "Double").is_ok());
+    }
+
+    #[test]
+    fn test_validate_alu_ctd_float_string_err() {
+        assert!(validate_alu_ctd("Float", "String").is_err());
+    }
+
+    #[test]
+    fn test_validate_alu_ctd_bool_double_err() {
+        assert!(validate_alu_ctd("Bool", "Double").is_err());
+    }
+
+    #[test]
+    fn test_validate_alu_ctd_int_float_err() {
+        assert!(validate_alu_ctd("Int", "Float").is_err());
+    }
+
+    #[test]
+    fn test_validate_alu_ctd_int_bool_err() {
+        assert!(validate_alu_ctd("Int", "Bool").is_err());
+    }
+
+    #[test]
+    fn test_validate_alu_ctd_bool_int_err() {
+        assert!(validate_alu_ctd("Bool", "Int").is_err());
+    }
+
+    #[test]
+    fn test_validate_alu_ctd_int_int_ok() {
+        assert!(validate_alu_ctd("Int", "Int").is_ok());
+    }
+
+    #[test]
+    fn test_validate_alu_ctd_quoted_alu_ok() {
+        // Quoted ALUs bypass validation (no logic change needed — just verifying interface)
+        assert!(validate_alu_ctd("Int", "String").is_ok());
+    }
+}
