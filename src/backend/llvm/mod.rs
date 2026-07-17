@@ -322,6 +322,13 @@ use std::fmt::{Display, Write};
 fn collect_strings(items: &[TopLevel]) -> Vec<String> {
     let mut seen = std::collections::HashSet::new();
     let mut out = Vec::new();
+    // 2026-07-17: Always start with the empty string at index 0.
+    // emit_field_init_value references @str.0 as the uninitialized String
+    // sentinel (Site B at line 866). Without this, @str.0 is never emitted
+    // when no Expr::Quoted appears in the source, producing "use of undefined
+    // value '@str.0'" in 14 of 23 benchmarks.
+    out.push("".to_string());
+    seen.insert("".to_string());
     for item in items {
         collect_strings_tl(item, &mut seen, &mut out);
     }
