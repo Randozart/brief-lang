@@ -433,7 +433,7 @@ range       ::= integer ".." integer
 | `src/bvir/layout.rs` | Recursive descent DSL → LayoutPattern parser |
 | `src/parser/definitions.rs` | `layout <~` and `layout { ... }` in meld parsing |
 | `src/backend/normalizer.rs` | Bit-shuffling synthesis, DFA validation |
-| `config/llvm-primitives.toml` | (unaffected — still handles type→LLVM type string mapping) |
+| `config/ctd-llvm-mappings.toml` | (renamed from llvm-primitives.toml; section headers: [ctd.*]) |
 | `docs/plans/2026-07-14-layout-dsl.md` | Implementation plan |
 
 ## Inline vs Heap Indirection

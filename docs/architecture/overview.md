@@ -236,7 +236,7 @@ A backend can start with just `bytes` and be fully correct. It then opts into `p
 | File | Purpose |
 |------|---------|
 | `config/targets.toml` | File extension → backend routing |
-| `config/llvm-primitives.toml` | (primitive, bytes) → LLVM type string |
+| `config/ctd-llvm-mappings.toml` | (ctd, bytes) → LLVM type string |
 | `config/llvm-ops.toml` | (operation, primitive, bytes) → LLVM IR template |
 | `config/circt-ops.toml` | (operation, primitive, bytes) → MLIR template |
 | `config/webstack-ops.toml` | (operation, primitive, bytes) → JS/TS template |
