@@ -77,7 +77,26 @@ impl ReactorTransitionGraph {
                     let simplified_body = simplify_body(&body_no_term);
                     let increments = detect_increments(&simplified_body)
                         .or_else(|| detect_popcount_decay(&simplified_body));
-                    let bounded_pre = extract_valid_bounded_pre(&txn.contract.pre_condition, &increments);
+                    // 2026-07-17: detect_increments returns the FIRST match,
+                    // which may not be the bounded_pre's var (e.g. tail before ops).
+                    // If the first increment doesn't match, collect ALL increments
+                    // and try each one, updating increments to the matching one.
+                    let (bounded_pre, increments) = {
+                        let bp = extract_valid_bounded_pre(&txn.contract.pre_condition, &increments);
+                        if let Some(ref bp_val) = bp {
+                            (Some(bp_val.clone()), increments)
+                        } else {
+                            let all_incs = detect_all_increments(&simplified_body);
+                            let matched = all_incs.iter().find_map(|inc| {
+                                let bp = extract_valid_bounded_pre(&txn.contract.pre_condition, &Some(inc.clone()));
+                                bp.map(|b| (b, inc.clone()))
+                            });
+                            match matched {
+                                Some((bp_val, inc_val)) => (Some(bp_val), Some(inc_val)),
+                                None => (None, increments),
+                            }
+                        }
+                    };
                     // 2026-07-17: Collect state field names from both StateDecl
                     // (hand-constructed ASTs in tests) and Statement::Let (parser
                     // output for top-level `let name: Type = expr;`).
@@ -609,6 +628,42 @@ fn detect_popcount_decay(body: &[Statement]) -> Option<IncrementInfo> {
         }
     }
     None
+}
+
+/// Collect ALL increment patterns from a body. Unlike detect_increments which
+/// returns the first match, this returns every variable that is self-incremented.
+/// 2026-07-17: Fixes ring_buffer where tail = tail+1 (first match) shadows
+/// ops = ops+1 (the actual bounded counter).
+fn detect_all_increments(body: &[Statement]) -> Vec<IncrementInfo> {
+    let mut results = Vec::new();
+    for stmt in body {
+        if let Statement::Assign(lhs, expr) = stmt {
+            let Some(name) = lhs.as_var_name() else { continue; };
+            if let Expr::BinaryOp(BinaryOpKind::Add, a, b) = expr {
+                if let (Expr::Identifier(var), Some(delta)) = (a.as_ref(), get_int(b)) {
+                    if *var == name && delta > 0 {
+                        results.push(IncrementInfo { var: name.to_string(), delta });
+                        continue;
+                    }
+                }
+                if let (Expr::Identifier(var), Some(delta)) = (b.as_ref(), get_int(a)) {
+                    if *var == name && delta > 0 {
+                        results.push(IncrementInfo { var: name.to_string(), delta });
+                        continue;
+                    }
+                }
+            }
+            if let Expr::BinaryOp(BinaryOpKind::Sub, a, b) = expr {
+                if let (Expr::Identifier(var), Some(delta)) = (a.as_ref(), get_int(b)) {
+                    if *var == name && delta > 0 {
+                        results.push(IncrementInfo { var: name.to_string(), delta });
+                        continue;
+                    }
+                }
+            }
+        }
+    }
+    results
 }
 
 fn detect_lexicographic_ranking(pre: &Expr, body: &[Statement]) -> Vec<String> {

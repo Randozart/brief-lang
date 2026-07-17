@@ -8,9 +8,7 @@
 #include <stdint.h>
 
 int main(void) {
-    long N = 50000000L;
-    char *env = getenv("BOUND");
-    if (env) N = atol(env);
+    const long N = 50000000L;
 
     const long cap = 1024;
     int64_t* data = (int64_t*)malloc(cap * sizeof(int64_t));

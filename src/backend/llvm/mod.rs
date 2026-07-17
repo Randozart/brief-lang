@@ -2222,7 +2222,6 @@ impl LlvmBackend {
             && graph.nodes[0].bounded_pre.is_some()
             && graph.nodes[0].increments.is_some()
             && graph.nodes[0].is_reactive;
-
         let folded = if foldable {
             let node = &graph.nodes[0];
             let bp = node.bounded_pre.as_ref().unwrap();
