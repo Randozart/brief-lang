@@ -406,6 +406,7 @@ pub(crate) fn parse_expr(expr: &SExpr) -> Result<Expr, String> {
                 }
                 "cast" => Ok(Expr::Cast(Box::new(parse_expr(&parts[1])?), parse_type(&parts[2])?)),
                 "deref" => Ok(Expr::Deref(Box::new(parse_expr(&parts[1])?))),
+                "addrof" => Ok(Expr::AddrOf(Box::new(parse_expr(&parts[1])?))),
                 "string" => Ok(Expr::Quoted(sexpr_str(&parts[1])?.as_bytes().to_vec())),
                 _ => Err(format!("unknown expression tag '{}'", tag)),
             }

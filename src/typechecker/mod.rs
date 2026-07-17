@@ -116,6 +116,11 @@ pub fn infer_expression(expr: &Expr, ctx: &mut TypecheckContext) -> Result<Type,
             infer_expression(expr, ctx)
         }
         Expr::DerivationBlock(_) => Ok(Type::void()),
+        // 2026-07-17: Address-of: &expr returns a Ptr to the inner type.
+        Expr::AddrOf(inner) => {
+            let inner_ty = infer_expression(inner, ctx)?;
+            Ok(Type::Ptr(Box::new(inner_ty)))
+        }
         // 2026-07-15: Dereference: *ptr returns the pointee type (strip outer Ptr).
         Expr::Deref(inner) => {
             let inner_ty = infer_expression(inner, ctx)?;

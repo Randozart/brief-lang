@@ -137,6 +137,9 @@ impl LlvmBackend {
             Expr::Deref(inner) => Expr::Deref(
                 Box::new(Self::rewrite_cell_identifiers(inner, cell_name)),
             ),
+            Expr::AddrOf(inner) => Expr::AddrOf(
+                Box::new(Self::rewrite_cell_identifiers(inner, cell_name)),
+            ),
         }
     }
 

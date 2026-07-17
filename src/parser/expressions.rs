@@ -147,6 +147,12 @@ impl<'a> Parser<'a> {
             let expr = self.parse_unary()?;
             return Ok(Expr::Deref(Box::new(expr)));
         }
+        // 2026-07-17: Unary & for address-of. Used by <- arrow syntax to mark
+        // collection targets for push/pop/discard.
+        if self.eat(&Token::Ampersand) {
+            let expr = self.parse_unary()?;
+            return Ok(Expr::AddrOf(Box::new(expr)));
+        }
         self.parse_as()
     }
 

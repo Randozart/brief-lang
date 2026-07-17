@@ -26,6 +26,8 @@ impl<'a> Parser<'a> {
                 self.pos += 1;
                 Ok(Statement::Expression(crate::ast::Expr::Decimal(0)))
             }
+            // 2026-07-17: Discard: `<- &queue;` — pop and discard the value.
+            Some(Token::ArrowLeft) => self.parse_arrow_discard_statement(),
             _ => {
                 // Keywords that lex as identifiers: return, if
                 if self.check_identifier("return") {
@@ -269,9 +271,26 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Discard: `<- &queue;` — pop from collection, discard result.
+    fn parse_arrow_discard_statement(&mut self) -> Result<Statement, SyntaxError> {
+        self.pos += 1; // consume '<-'
+        let target = self.parse_expression()?;
+        self.expect(Token::Semicolon)?;
+        Ok(Statement::Expression(Expr::AddrOf(Box::new(target))))
+    }
+
     /// Fallback: parse as expression statement: expr;
+    /// Also handles infix `<-` for push/pop: `&queue <- value` or `x <- &queue`.
     fn parse_expression_statement(&mut self) -> Result<Statement, SyntaxError> {
-        let expr = self.parse_expression()?;
+        let lhs = self.parse_expression()?;
+        // 2026-07-17: Infix `<-` — push/pop. `&queue <- x` → push,
+        // `x <- &queue` → pop. The codegen distinguishes by which side
+        // has Expr::AddrOf.
+        if self.eat(&Token::ArrowLeft) {
+            let rhs = self.parse_expression()?;
+            self.expect(Token::Semicolon)?;
+            return Ok(Statement::Assign(lhs, rhs));
+        }
         self.expect(Token::Semicolon)?;
         // 2026-07-17: Detect assignment at statement level. The expression
         // parser treats both `=` and `==` as BinaryOpKind::Eq (lowest
@@ -280,11 +299,11 @@ impl<'a> Parser<'a> {
         // knows to emit a store for the computed value. A standalone
         // equality check as an expression statement never appears in real
         // programs — the result would be discarded.
-        if let Expr::BinaryOp(crate::ast::BinaryOpKind::Eq, lhs, rhs) = &expr {
+        if let Expr::BinaryOp(crate::ast::BinaryOpKind::Eq, lhs, rhs) = &lhs {
             let target: crate::ast::Expr = (**lhs).clone();
             let value: crate::ast::Expr = (**rhs).clone();
             return Ok(Statement::Assign(target, value));
         }
-        Ok(Statement::Expression(expr))
+        Ok(Statement::Expression(lhs))
     }
 }

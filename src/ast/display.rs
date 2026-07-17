@@ -86,6 +86,7 @@ impl fmt::Display for Expr {
             Expr::Within(expr, scope) => write!(f, "{} within {}", expr, scope),
             Expr::DerivationBlock(block) => fmt::Display::fmt(block, f),
             Expr::Deref(inner) => write!(f, "*{}", inner),
+            Expr::AddrOf(inner) => write!(f, "&{}", inner),
             Expr::PropertyGet(name) => write!(f, "property '{}'", name),
             Expr::FormattingAnnotation(fmt_) => write!(f, "formatting <~ {}", fmt_.name()),
         }

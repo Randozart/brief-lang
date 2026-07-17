@@ -334,6 +334,32 @@ impl LlvmBackend {
                 self.emit_expr(out, body, indent)
             }
 
+            // ── Address-of ────────────────────────────────────────────
+            Expr::AddrOf(inner) => {
+                // &expr provides the address of a state field or value.
+                // For state fields, emit GEP into %State and ptrtoint to i64.
+                match inner.as_ref() {
+                    Expr::Identifier(name) => {
+                        if let Some(&idx) = self.ctx.field_index_map.get(name) {
+                            let gep = self.fun.gen_reg();
+                            writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                                indent, gep, idx).ok();
+                            let ptr = self.fun.gen_reg();
+                            writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, ptr, gep).ok();
+                            TypedRegister { name: ptr, ty: Type::int() }
+                        } else {
+                            writeln!(out, "{}{} = add i64 0, 0", indent, v).ok();
+                            TypedRegister { name: v.to_string(), ty: Type::int() }
+                        }
+                    }
+                    _ => {
+                        let inner_reg = self.emit_expr(out, inner, indent);
+                        writeln!(out, "{}{} = add i64 0, {}", indent, v, inner_reg.name).ok();
+                        TypedRegister { name: v.to_string(), ty: Type::int() }
+                    }
+                }
+            }
+
             // ── Dereference ───────────────────────────────────────────
             Expr::Deref(inner) => {
                 let ptr_reg = self.emit_expr(out, inner, indent);

@@ -218,6 +218,9 @@ fn emit_expr(e: &Expr) -> SExpr {
         Expr::Deref(inner) => {
             list(&[atom("deref"), emit_expr(inner)])
         }
+        Expr::AddrOf(inner) => {
+            list(&[atom("addrof"), emit_expr(inner)])
+        }
         Expr::If(cond, t, f) => {
             let mut children = vec![atom("if"), emit_expr(cond), emit_expr(t)];
             if let Some(fe) = f { children.push(emit_expr(fe)); }

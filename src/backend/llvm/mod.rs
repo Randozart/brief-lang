@@ -429,6 +429,9 @@ fn collect_strings_expr(expr: &Expr, seen: &mut std::collections::HashSet<String
         Expr::Deref(inner) => {
             collect_strings_expr(inner, seen, out);
         }
+        Expr::AddrOf(inner) => {
+            collect_strings_expr(inner, seen, out);
+        }
         // Leaves — no sub-expressions
         Expr::Decimal(_) | Expr::Bool(_) | Expr::Float(_) | Expr::Identifier(_)
         | Expr::PropertyGet(_) | Expr::FormattingAnnotation(_) => {}

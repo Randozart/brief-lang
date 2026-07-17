@@ -96,6 +96,8 @@ pub fn eval_expr(
 
         // ── Dereference ──────────────────────────────────────────
         Expr::Deref(inner) => eval_expr(inner, heap, bindings),
+        // ── Address-of ───────────────────────────────────────────
+        Expr::AddrOf(inner) => eval_expr(inner, heap, bindings),
 
         // ── Property get ─────────────────────────────────────────
         Expr::PropertyGet(_) => Ok(Value::Void),
