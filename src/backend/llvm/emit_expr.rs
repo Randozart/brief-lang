@@ -50,11 +50,32 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
-                // 2026-07-17: Three paths: local binding, state field (with type), global.
-                // State fields are stored as i64 in %State. For Float/Float64 fields,
-                // unbox to native float immediately so binary_ops see correct types.
+                // 2026-07-17: Four paths: local binding, phi register, state field, global.
+                // State fields are stored as i64. If per-field phi mode is active,
+                // read from the phi register instead of GEP+load from %State.
                 if let Some(reg) = self.get_local(name) {
                     TypedRegister { name: reg.clone(), ty: self.get_local_type(name) }
+                } else if let Some(phi_reg_str) = self.fun.phi_field_regs.get(name).cloned() {
+                    // 2026-07-17: Per-field phi mode — read from SSA phi register.
+                    // Clone phi_reg_str before mutably borrowing self.fun for gen_reg().
+                    let brief_ty = self.ctx.field_index_map.get(name)
+                        .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned())
+                        .unwrap_or(Type::int());
+                    if brief_ty == Type::float64() {
+                        let dbl = self.fun.gen_reg();
+                        writeln!(out, "{}{} = bitcast i64 {} to double", indent, dbl, phi_reg_str).ok();
+                        self.fun.reg_float_cache.insert(phi_reg_str, dbl.clone());
+                        TypedRegister { name: dbl, ty: Type::float64() }
+                    } else if brief_ty == Type::float() {
+                        let tr = self.fun.gen_reg();
+                        let fl = self.fun.gen_reg();
+                        writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, phi_reg_str).ok();
+                        writeln!(out, "{}{} = bitcast i32 {} to float", indent, fl, tr).ok();
+                        self.fun.reg_float_cache.insert(phi_reg_str, fl.clone());
+                        TypedRegister { name: fl, ty: Type::float() }
+                    } else {
+                        TypedRegister { name: phi_reg_str, ty: brief_ty }
+                    }
                 } else if let Some(&idx) = self.ctx.field_index_map.get(name) {
                     let gep = self.fun.gen_reg();
                     writeln!(out, "{}{} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",

@@ -185,8 +185,19 @@ impl LlvmBackend {
     // Strategy 3: Hybrid Countable Loop (A005e)
     // ═══════════════════════════════════════════════════════════════
 
-    /// Emit a countable main() — single counter phi + per-field load/store
-    /// in the body. LLVM SROA converts GEP+load+store to closed-SSA phis.
+    /// Emit a countable main() with per-field phi nodes (A005c/A005e).
+    ///
+    /// 2026-07-17: Each state field in write_set gets its own phi node in
+    /// the loop header. The body reads from phi registers and writes to
+    /// pending_phi_backedge. The latch computes the backedge value for each
+    /// field (identity for unwritten, written value for modified).
+    ///
+    /// Path A (no post-loop hoists): Zero stores in the hot loop body — phi
+    /// registers carry all values. Enables LLVM SROA to decompose the loop
+    /// into closed-SSA form.
+    ///
+    /// Path B (post-loop hoists exist): GEP+store emitted for fields the
+    /// done: block reads. Ensures hoisted post-loop prints see final values.
     ///
     /// 2026-07-13: Extracted into a single function with max 2-level
     /// nesting. Loop setup, body, and latch are delegated to helpers.
@@ -213,27 +224,85 @@ impl LlvmBackend {
             gep, counter_idx).ok();
         let init_name = self.fun.next_reg_with_prefix("cmv");
         writeln!(out, "  {} = load i64, ptr {}, align 8", init_name, gep).ok();
-        // 2026-07-17: Pre-generate backedge register name (forward reference
-        // from phi header to latch definition — valid in LLVM IR).
+
+        // 2026-07-17: Pre-load all field initial values from state for per-field phis.
+        // Sort deterministically to avoid HashMap iteration non-determinism.
+        let mut sorted_fields: Vec<&String> = write_set.iter().collect();
+        sorted_fields.sort();
+        let mut phi_field_init: HashMap<String, String> = HashMap::new();
+        for fname in &sorted_fields {
+            if let Some(&idx) = self.ctx.field_index_map.get(fname.as_str()) {
+                let igep = self.fun.next_reg_with_prefix("cmi");
+                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                    igep, idx).ok();
+                let init_f = self.fun.next_reg_with_prefix("cmf");
+                writeln!(out, "  {} = load i64, ptr {}, align 8", init_f, igep).ok();
+                phi_field_init.insert((*fname).clone(), init_f);
+            }
+        }
+
+        // 2026-07-17: Pre-generate backedge register names for per-field phis
+        // (forward reference from header phi to latch definition).
         let next = self.fun.next_reg_with_prefix("cmn");
+        let mut be_field_regs: HashMap<String, String> = HashMap::new();
+        for fname in &sorted_fields {
+            let be_f = self.fun.next_reg_with_prefix("pbf");
+            be_field_regs.insert((*fname).clone(), be_f);
+        }
+
         let exit_label = format!(".cm_end_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
         writeln!(out, "  br label %.cm_header").ok();
         writeln!(out, ".cm_header:").ok();
         let counter_name = self.fun.next_reg_with_prefix("cmc");
         let done_reg = self.fun.next_reg_with_prefix("cmd");
+
+        // Counter phi
         if is_decreasing {
             writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cm_latch ]",
                 counter_name, init_name, next).ok();
-            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         } else {
             writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cm_latch ]",
                 counter_name, init_name, next).ok();
+        }
+
+        // 2026-07-17: Per-field phi nodes — one per written field.
+        self.fun.phi_field_regs.clear();
+        self.fun.backedge_field_regs.clear();
+        for fname in &sorted_fields {
+            let phi_f = self.fun.next_reg_with_prefix("ppf");
+            let be_f = be_field_regs.get(fname.as_str())
+                .cloned().unwrap_or_else(|| format!("%be_{}", fname));
+            let init_f = phi_field_init.get(fname.as_str())
+                .cloned().unwrap_or_else(|| "0".to_string());
+            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cm_latch ]",
+                phi_f, init_f, be_f).ok();
+            self.fun.phi_field_regs.insert((*fname).clone(), phi_f);
+            self.fun.backedge_field_regs.insert((*fname).clone(), be_f);
+        }
+
+        // Exit check
+        if is_decreasing {
+            writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
+        } else {
             writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         }
         writeln!(out, "  br i1 {}, label %.cm_body, label {}", done_reg, exit_label).ok();
         writeln!(out, ".cm_body:").ok();
-        self.pre_load_all_fields(out, "%state", Some(write_set));
+
+        // 2026-07-17: Initialize pending_phi_backedge with identity values.
+        // Body writes will overwrite entries for modified fields.
+        self.fun.pending_phi_backedge.clear();
+        for fname in &sorted_fields {
+            if let Some(phi_f) = self.fun.phi_field_regs.get(fname.as_str()) {
+                self.fun.pending_phi_backedge.insert((*fname).clone(), phi_f.clone());
+            }
+        }
+
+        // 2026-07-17: Determine store gating — Path A (stores suppressed) vs
+        // Path B (stores emitted for post-loop hoisted prints).
+        self.fun.needs_state_stores_in_body = !self.fun.pending_post_hoist.is_empty();
+
         let mut hoisted = Vec::new();
         self.emit_countable_body(out, body, write_set, &mut hoisted);
         self.emit_hoisted_post_loop_prints(out, &hoisted);
@@ -244,6 +313,21 @@ impl LlvmBackend {
         } else {
             writeln!(out, "  {} = add i64 {}, 1", next, counter_name).ok();
         }
+
+        // 2026-07-17: Per-field backedges. Modified fields use the written value;
+        // unwritten fields use identity (phi self-ref). LLVM peephole eliminates
+        // the `add i64 0, %val` copy in both cases.
+        for fname in &sorted_fields {
+            if let Some(be_f) = self.fun.backedge_field_regs.get(fname.as_str()) {
+                let val = self.fun.pending_phi_backedge.get(fname.as_str())
+                    .cloned().unwrap_or_else(|| {
+                        self.fun.phi_field_regs.get(fname.as_str())
+                            .cloned().unwrap_or_else(|| "0".to_string())
+                    });
+                writeln!(out, "  {} = add i64 0, {}", be_f, val).ok();
+            }
+        }
+
         writeln!(out, "  br label %.cm_header").ok();
         writeln!(out, "{}:", exit_label).ok();
         let final_gep = self.fun.next_reg_with_prefix("cmg");
@@ -351,13 +435,18 @@ impl LlvmBackend {
                     let val = self.emit_expr(out, expr, "  ");
                     if let Some(ref n) = lhs_name {
                         if write_set.contains(n) {
-                            if let Some(&idx) = self.ctx.field_index_map.get(n) {
-                                let gep = self.fun.next_reg_with_prefix("cms");
-                                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                                    gep, idx).ok();
-                                // 2026-07-17: State stores always i64 — box via adapt_to_i64.
-                                let boxed = self.adapt_to_i64(out, "  ", &val);
-                                writeln!(out, "  store i64 {}, ptr {}, align 8", boxed, gep).ok();
+                            // 2026-07-17: Track write for phi backedge (latch).
+                            self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
+                            // 2026-07-17: Path B — emit GEP+store only when post-loop
+                            // hoisted prints need final iteration values from %State.
+                            if self.fun.needs_state_stores_in_body {
+                                if let Some(&idx) = self.ctx.field_index_map.get(n) {
+                                    let gep = self.fun.next_reg_with_prefix("cms");
+                                    writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                                        gep, idx).ok();
+                                    let boxed = self.adapt_to_i64(out, "  ", &val);
+                                    writeln!(out, "  store i64 {}, ptr {}, align 8", boxed, gep).ok();
+                                }
                             }
                         }
                         self.fun.last_val_temps.insert(n.clone(), val.name);
