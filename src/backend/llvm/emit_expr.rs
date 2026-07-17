@@ -336,6 +336,9 @@ impl LlvmBackend {
     }
 
     /// Emit a user function call.
+    /// 2026-07-17: defn functions expect (ptr %state, ...) as their first parameter.
+    /// We must prepend the state pointer and adapt argument types from register
+    /// types to the function's parameter types (via defn_params).
     fn emit_user_call(&mut self, out: &mut String, v: &str, name: &str, args: &[Expr], indent: &str) -> TypedRegister {
         // 2026-07-16: P5 — Check if this is a foreign function; if so, use emit_frgn_call
         // Clone the sig to avoid borrowing self.ctx while self.emit_expr needs &mut self.
@@ -347,15 +350,44 @@ impl LlvmBackend {
         let arg_regs: Vec<TypedRegister> = args.iter()
             .map(|a| self.emit_expr(out, a, indent))
             .collect();
-        let arg_strs: Vec<String> = arg_regs.iter()
-            .map(|reg| format!("{} {}", crate::backend::llvm::types::lower_type(&reg.ty), reg.name))
-            .collect();
+        // 2026-07-17: Look up defn parameter types for type adaptation.
+        let defn_param_tys = self.ctx.defn_params.get(name);
+        let is_defn = defn_param_tys.is_some();
+        let mut call_args: Vec<String> = Vec::new();
+        if is_defn {
+            call_args.push("ptr %state".to_string());
+            let param_tys = defn_param_tys.unwrap();
+            for (i, reg) in arg_regs.iter().enumerate() {
+                let reg_llvm_ty = lower_type(&reg.ty);
+                // 2026-07-17: Get the function's expected parameter type.
+                // If available, use llvm_type() to determine the expected
+                // LLVM type and insert conversions (i64 → ptr for String/Data).
+                let param_llvm_ty = param_tys.get(i)
+                    .map(|pt| self.llvm_type(pt))
+                    .unwrap_or_else(|| reg_llvm_ty.to_string());
+                if param_llvm_ty == "ptr" && reg_llvm_ty == "i64" {
+                    let conv = self.fun.gen_reg();
+                    writeln!(out, "{}{} = inttoptr i64 {} to ptr", indent, conv, reg.name).ok();
+                    call_args.push(format!("ptr {}", conv));
+                } else if param_llvm_ty == "i64" && reg_llvm_ty == "ptr" {
+                    let conv = self.fun.gen_reg();
+                    writeln!(out, "{}{} = ptrtoint ptr {} to i64", indent, conv, reg.name).ok();
+                    call_args.push(format!("i64 {}", conv));
+                } else {
+                    call_args.push(format!("{} {}", reg_llvm_ty, reg.name));
+                }
+            }
+        } else {
+            for reg in &arg_regs {
+                call_args.push(format!("{} {}", lower_type(&reg.ty), reg.name));
+            }
+        }
         // 2026-07-14: user call return type from defn_return_types — fall back to i64
         let ret_type = self.ctx.defn_return_types.get(name)
             .and_then(|types| types.first().cloned())
             .unwrap_or(Type::int());
-        let ret_llvm = crate::backend::llvm::types::lower_type(&ret_type);
-        writeln!(out, "{}{} = call {} @{}({})", indent, v, ret_llvm, name, arg_strs.join(", ")).ok();
+        let ret_llvm = lower_type(&ret_type);
+        writeln!(out, "{}{} = call {} @{}({})", indent, v, ret_llvm, name, call_args.join(", ")).ok();
         TypedRegister { name: v.to_string(), ty: ret_type }
     }
 
