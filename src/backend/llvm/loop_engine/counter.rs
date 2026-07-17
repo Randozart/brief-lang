@@ -70,18 +70,21 @@ impl LlvmBackend {
             gep, counter_idx).ok();
         let init_name = self.fun.next_reg_with_prefix("fli");
         writeln!(out, "  {} = load i64, ptr {}, align 8", init_name, gep).ok();
+        // 2026-07-17: Pre-generate backedge register name (forward reference
+        // from phi header to latch definition — valid in LLVM IR).
+        let next = self.fun.next_reg_with_prefix("fln");
         let exit_label = format!("{}.end", label_prefix);
         writeln!(out, "  br label %{}.header", label_prefix).ok();
         writeln!(out, "{}.header:", label_prefix).ok();
         let counter_name = self.fun.next_reg_with_prefix("flc");
         let done_reg = self.fun.next_reg_with_prefix("fld");
         if is_decreasing {
-            writeln!(out, "  {} = phi i64 [ {}, %{}.header ], [ {}, %{}.latch ]",
-                counter_name, init_name, label_prefix, bound_reg, label_prefix).ok();
+            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %{}.latch ]",
+                counter_name, init_name, next, label_prefix).ok();
             writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         } else {
-            writeln!(out, "  {} = phi i64 [ {}, %{}.header ], [ {}, %{}.latch ]",
-                counter_name, init_name, label_prefix, bound_reg, label_prefix).ok();
+            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %{}.latch ]",
+                counter_name, init_name, next, label_prefix).ok();
             writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         }
         writeln!(out, "  br i1 {}, label %{}.body, label %{}", done_reg, label_prefix, exit_label).ok();
@@ -99,7 +102,6 @@ impl LlvmBackend {
 
         writeln!(out, "  br label %{}.latch", label_prefix).ok();
         writeln!(out, "{}.latch:", label_prefix).ok();
-        let next = self.fun.next_reg_with_prefix("fln");
         if is_decreasing {
             writeln!(out, "  {} = add i64 {}, -1", next, counter_name).ok();
         } else {
@@ -211,6 +213,9 @@ impl LlvmBackend {
             gep, counter_idx).ok();
         let init_name = self.fun.next_reg_with_prefix("cmv");
         writeln!(out, "  {} = load i64, ptr {}, align 8", init_name, gep).ok();
+        // 2026-07-17: Pre-generate backedge register name (forward reference
+        // from phi header to latch definition — valid in LLVM IR).
+        let next = self.fun.next_reg_with_prefix("cmn");
         let exit_label = format!(".cm_end_{}", self.fun.txn_counter);
         self.fun.txn_counter += 1;
         writeln!(out, "  br label %.cm_header").ok();
@@ -218,12 +223,12 @@ impl LlvmBackend {
         let counter_name = self.fun.next_reg_with_prefix("cmc");
         let done_reg = self.fun.next_reg_with_prefix("cmd");
         if is_decreasing {
-            writeln!(out, "  {} = phi i64 [ {}, %.cm_header ], [ {}, %.cm_latch ]",
-                counter_name, init_name, bound_reg).ok();
+            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cm_latch ]",
+                counter_name, init_name, next).ok();
             writeln!(out, "  {} = icmp slt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         } else {
-            writeln!(out, "  {} = phi i64 [ {}, %.cm_header ], [ {}, %.cm_latch ]",
-                counter_name, init_name, bound_reg).ok();
+            writeln!(out, "  {} = phi i64 [ {}, %entry ], [ {}, %.cm_latch ]",
+                counter_name, init_name, next).ok();
             writeln!(out, "  {} = icmp sgt i64 {}, {}", done_reg, counter_name, bound_reg).ok();
         }
         writeln!(out, "  br i1 {}, label %.cm_body, label {}", done_reg, exit_label).ok();
@@ -234,7 +239,6 @@ impl LlvmBackend {
         self.emit_hoisted_post_loop_prints(out, &hoisted);
         writeln!(out, "  br label %.cm_latch").ok();
         writeln!(out, ".cm_latch:").ok();
-        let next = self.fun.next_reg_with_prefix("cmn");
         if is_decreasing {
             writeln!(out, "  {} = add i64 {}, -1", next, counter_name).ok();
         } else {
