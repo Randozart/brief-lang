@@ -145,8 +145,11 @@ impl LlvmBackend {
             .field_index_map
             .get(name)
             .map(|&idx| {
-                let ll_ty = &self.ctx.field_types[idx];
-                ll_ty == "float" || ll_ty == "double"
+                // 2026-07-17: Check brief type (not LLVM type) since all state
+                // fields are stored as i64 regardless of their Brief type.
+                // field_types is always "i64" — use field_brief_types instead.
+                self.ctx.field_brief_types.get(idx)
+                    .map_or(false, |t| *t == Type::float() || *t == Type::float64())
             })
             .unwrap_or(false)
     }

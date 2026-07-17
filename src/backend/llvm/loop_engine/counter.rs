@@ -467,16 +467,20 @@ impl LlvmBackend {
                             // Phi registers track all fields as i64 (the %State
                             // representation). Float/double values must be boxed.
                             let boxed = self.adapt_to_i64(out, "  ", &val);
-                            self.fun.pending_phi_backedge.insert(n.clone(), boxed.clone());
-                            // 2026-07-17: Path B — emit GEP+store only when post-loop
-                            // hoisted prints need final iteration values from %State.
-                            if self.fun.needs_state_stores_in_body {
-                                if let Some(&idx) = self.ctx.field_index_map.get(n) {
-                                    let gep = self.fun.next_reg_with_prefix("cms");
-                                    writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
-                                        gep, idx).ok();
-                                    writeln!(out, "  store i64 {}, ptr {}, align 8", boxed, gep).ok();
-                                }
+                            self.fun.pending_phi_backedge.insert(n.clone(), boxed);
+                        }
+                        // 2026-07-17: When post-loop hoisted prints need final values,
+                        // emit state stores for ALL fields, not just phi-tracked ones.
+                        // Without this, fields outside the capped write_set (max 6)
+                        // silently lose their values between iterations — the body
+                        // computes the new value, but it's never stored back to %State.
+                        if self.fun.needs_state_stores_in_body {
+                            if let Some(&idx) = self.ctx.field_index_map.get(n) {
+                                let boxed = self.adapt_to_i64(out, "  ", &val);
+                                let gep = self.fun.next_reg_with_prefix("cms");
+                                writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
+                                    gep, idx).ok();
+                                writeln!(out, "  store i64 {}, ptr {}, align 8", boxed, gep).ok();
                             }
                         }
                         self.fun.last_val_temps.insert(n.clone(), val.name.clone());

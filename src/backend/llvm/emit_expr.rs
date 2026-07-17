@@ -36,11 +36,18 @@ impl LlvmBackend {
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
             Expr::Float(f) => {
-                // 2026-07-17: Fixed — use float not double. The typechecker
-                // assigns Type::float() (32-bit) to Float literals. The old
-                // fadd double + float64 return conflicted with the constant
-                // emitter which stores Float as "float" (32-bit LLVM type).
-                writeln!(out, "{}{} = fadd float 0.0, {}", indent, v, f).ok();
+                // 2026-07-17: Emit as float (32-bit) matching the typechecker.
+                // Use a bitcast from the hex i32 pattern to avoid LLVM's
+                // verifier rejecting high-precision literals — the string
+                // "0.001660076642744037" has more significant digits than
+                // f32 can represent, causing "floating point constant
+                // invalid for type" even though the rounded value is valid.
+                let h = crate::backend::llvm::float_to_llvm_hex(*f);
+                let hex_reg = self.fun.gen_reg();
+                let flt_reg = self.fun.gen_reg();
+                writeln!(out, "{}{} = add i32 0, {}", indent, hex_reg, h).ok();
+                writeln!(out, "{}{} = bitcast i32 {} to float", indent, flt_reg, hex_reg).ok();
+                writeln!(out, "{}{} = fadd float 0.0, {}", indent, v, flt_reg).ok();
                 TypedRegister { name: v.to_string(), ty: Type::float() }
             }
             Expr::Bool(b) => {
@@ -74,8 +81,6 @@ impl LlvmBackend {
                 } else if let Some(reg) = self.get_local(name) {
                     TypedRegister { name: reg.clone(), ty: self.get_local_type(name) }
                 } else if let Some(phi_reg_str) = self.fun.phi_field_regs.get(name).cloned() {
-                    // 2026-07-17: Per-field phi mode — read from SSA phi register.
-                    // Clone phi_reg_str before mutably borrowing self.fun for gen_reg().
                     let brief_ty = self.ctx.field_index_map.get(name)
                         .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned())
                         .unwrap_or(Type::int());
