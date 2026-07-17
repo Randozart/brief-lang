@@ -16,8 +16,8 @@ use crate::ast::top::MeldDeclaration;
 use std::collections::HashMap;
 
 /// Resolved metadata for a single type in the universe.
-/// llvm_type is NOT stored here — it is derived at query time from
-/// (primitive, bytes) via config/llvm-primitives.toml.
+/// CTD and ALU are set by the primordial, llvm_type by the normalizer.
+/// All three are read via properties — no hardcoded getter methods.
 #[derive(Debug, Clone)]
 pub struct ResolvedType {
     pub name: String,
@@ -25,19 +25,6 @@ pub struct ResolvedType {
     pub bytes: u64,
     pub alignment: u64,
     pub properties: HashMap<String, crate::ast::PropertyValue>,
-}
-
-impl ResolvedType {
-    /// Read the `primitive` metadata property, if set.
-    pub fn primitive(&self) -> Option<&str> {
-        self.properties.get("primitive").and_then(|pv| {
-            if let crate::ast::PropertyValue::Identifier(name) = pv {
-                Some(name.as_str())
-            } else {
-                None
-            }
-        })
-    }
 }
 
 /// Central type definition registry.
@@ -48,6 +35,19 @@ pub struct TypeUniverse {
     pub types: HashMap<String, ResolvedType>,
     /// Melds keyed by (type_a, type_b). Both orderings are stored.
     pub melds: HashMap<(String, String), MeldDeclaration>,
+}
+
+/// Return the default ALU for a given Common Type Definition.
+// 2026-07-17: ALU describes what hardware computes with values of this type.
+// PascalCase = known to all backends; lowercase-quoted = backend-specific.
+fn default_alu(ctd: &str) -> &'static str {
+    match ctd {
+        // Float and Double use the FPU; Bool uses boolean logic;
+        // everything else (Int, UInt, Char, String, Data, Ptr, Void) uses integer ALU.
+        "Float" | "Double" => "Float",
+        "Bool" => "Bool",
+        _ => "Int",
+    }
 }
 
 impl TypeUniverse {
@@ -63,32 +63,40 @@ impl TypeUniverse {
     /// 2026-07-16: Seed the universe with primordial type entries so that
     /// `Int`, `Float`, etc. are available without stdlib import. User
     /// `type X <: Bits { ... }` declarations override these via register().
+    ///
+    /// 2026-07-17: Types now store `ctd` (Common Type Definition — what the
+    /// type is semantically) and `alu` (what hardware computes with it) instead
+    /// of `primitive` + `llvm_type`. llvm_type is set by the backend normalizer.
     fn seed_primordial_types(&mut self) {
-        // Table: (name, bytes, alignment, primitive, llvm_type)
-        const PRIMORDIALS: &[(&str, u64, u64, &str, &str)] = &[
-            ("Int",    8, 8, "signed",   "i64"),
-            ("UInt",   8, 8, "unsigned", "i64"),
-            ("Int8",   1, 1, "signed",   "i8"),
-            ("UInt8",  1, 1, "unsigned", "i8"),
-            ("Int16",  2, 2, "signed",   "i16"),
-            ("UInt16", 2, 2, "unsigned", "i16"),
-            ("Int32",  4, 4, "signed",   "i32"),
-            ("UInt32", 4, 4, "unsigned", "i32"),
-            ("Int64",  8, 8, "signed",   "i64"),
-            ("UInt64", 8, 8, "unsigned", "i64"),
-            ("Float",  4, 4, "float",    "float"),
-            ("Float32",4, 4, "float",    "float"),
-            ("Float64",8, 8, "float",    "double"),
-            ("Double", 8, 8, "float",    "double"),
-            ("Bool",   1, 1, "unsigned", "i8"),
-            ("Char",   4, 4, "unsigned", "i32"),
-            ("Data",   8, 8, "pointer",  "i8*"),
-            ("Void",   0, 0, "void",     "void"),
+        // Table: (name, bytes, alignment, ctd)
+        // CTD is a PascalCase identifier from the exhaustive set:
+        //   Int, UInt, Float, Double, Bool, Char, String, Data, Ptr, Void
+        // ALU is derived from CTD via default_alu() and can be overridden.
+        const PRIMORDIALS: &[(&str, u64, u64, &str)] = &[
+            ("Int",    8, 8, "Int"),
+            ("UInt",   8, 8, "UInt"),
+            ("Int8",   1, 1, "Int"),
+            ("UInt8",  1, 1, "UInt"),
+            ("Int16",  2, 2, "Int"),
+            ("UInt16", 2, 2, "UInt"),
+            ("Int32",  4, 4, "Int"),
+            ("UInt32", 4, 4, "UInt"),
+            ("Int64",  8, 8, "Int"),
+            ("UInt64", 8, 8, "UInt"),
+            ("Float",  4, 4, "Float"),
+            ("Float32",4, 4, "Float"),
+            ("Float64",8, 8, "Double"),
+            ("Double", 8, 8, "Double"),
+            ("Bool",   1, 1, "Bool"),
+            ("Char",   4, 4, "Char"),
+            ("Data",   8, 8, "Data"),
+            ("Void",   0, 0, "Void"),
         ];
-        for &(name, bytes, alignment, primitive, llvm_type) in PRIMORDIALS {
+        for &(name, bytes, alignment, ctd) in PRIMORDIALS {
             let mut properties = std::collections::HashMap::new();
-            properties.insert("primitive".into(), crate::ast::PropertyValue::Identifier(primitive.to_string()));
-            properties.insert("llvm_type".into(), crate::ast::PropertyValue::String(llvm_type.to_string()));
+            properties.insert("ctd".into(), crate::ast::PropertyValue::Identifier(ctd.to_string()));
+            // 2026-07-17: Default ALU per CTD. User types can override via alu ~> ...;
+            properties.insert("alu".into(), crate::ast::PropertyValue::Identifier(default_alu(ctd).to_string()));
             properties.insert("alignment".into(), crate::ast::PropertyValue::Int(alignment as i64));
             self.types.insert(name.to_string(), ResolvedType {
                 name: name.to_string(),
@@ -98,11 +106,12 @@ impl TypeUniverse {
                 properties,
             });
         }
-        // String — special case: explicit %String llvm type + field annotations
+        // String — special case: heap-allocated struct with ptr+len+codec fields
+        // CTD = String tells the normalizer to map to "ptr" at ABI boundaries.
         {
             let mut p = std::collections::HashMap::new();
-            p.insert("primitive".into(), crate::ast::PropertyValue::Identifier("struct".to_string()));
-            p.insert("llvm_type".into(), crate::ast::PropertyValue::String("%String".to_string()));
+            p.insert("ctd".into(), crate::ast::PropertyValue::Identifier("String".to_string()));
+            p.insert("alu".into(), crate::ast::PropertyValue::Identifier("Int".to_string()));
             p.insert("alignment".into(), crate::ast::PropertyValue::Int(8));
             p.insert("field.ptr.offset".into(), crate::ast::PropertyValue::Int(0));
             p.insert("field.ptr.width".into(), crate::ast::PropertyValue::Int(64));

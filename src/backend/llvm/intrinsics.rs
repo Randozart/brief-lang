@@ -70,8 +70,9 @@ pub fn emit_intrinsic_call(
         return BTypedRegister { name: v.to_string(), ty: Type::void() };
     }
 
-    // Determine primitive and bytes from the first argument's type
-    let prim = resolve_arg_primitive(backend, &arg_regs[0]);
+    // Determine ctd and bytes from the first argument's type
+    // 2026-07-17: CTD replaces primitive — ops TOML uses CTD-compatible keys
+    let prim = resolve_arg_ctd(backend, &arg_regs[0]);
     let bytes = resolve_arg_bytes(backend, &arg_regs[0]).unwrap_or(8);
 
     let op_name = name.trim_end_matches('#');
@@ -90,11 +91,14 @@ pub fn emit_intrinsic_call(
     emit_external_call(backend, out, v, name, args, indent)
 }
 
-/// Resolve the primitive metadata for a typed register's type.
-fn resolve_arg_primitive(backend: &LlvmBackend, reg: &BTypedRegister) -> String {
+/// Resolve the CTD metadata for a typed register's type.
+/// 2026-07-17: Replaced primitive() with CTD property read.
+fn resolve_arg_ctd(backend: &LlvmBackend, reg: &BTypedRegister) -> String {
     backend.ctx.type_universe.as_ref()
         .and_then(|u| crate::type_universe::resolve_type(u, &reg.ty))
-        .and_then(|rt| rt.primitive().map(|s| s.to_string()))
+        .and_then(|rt| rt.properties.get("ctd").and_then(|pv| {
+            if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.clone()) } else { None }
+        }))
         .unwrap_or_else(|| "Int".to_string())
 }
 
@@ -123,7 +127,8 @@ fn emit_print(
     args: &[Expr], indent: &str,
 ) -> BTypedRegister {
     let reg = backend.emit_expr(out, &args[0], indent);
-    match resolve_arg_primitive(backend, &reg).as_str() {
+    // 2026-07-17: CTD replaces primitive — Float and String CTDs match directly.
+    match resolve_arg_ctd(backend, &reg).as_str() {
         "Float" => {
             let fl = backend.ensure_float_reg(out, indent, &reg);
             writeln!(out, "{}call i32 (ptr, ...) @printf(ptr @FMT_FLOAT, double {})", indent, fl).ok();

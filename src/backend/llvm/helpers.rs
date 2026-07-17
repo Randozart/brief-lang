@@ -26,8 +26,16 @@ static TYPE_CONFIG: LazyLock<crate::config::TypeConfig> = LazyLock::new(|| {
 });
 
 /// Derive LLVM type string from a ResolvedType using the global type config.
+/// 2026-07-17: Reads from normalizer-set llvm_type property first, falls back
+/// to deriving from CTD via derive_llvm_type.
 fn rt_llvm_type(rt: &ResolvedType) -> String {
-    crate::config::derive_llvm_type(rt.primitive(), rt.bytes, &*TYPE_CONFIG)
+    if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
+        return s.clone();
+    }
+    let ctd = rt.properties.get("ctd").and_then(|pv| {
+        if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.as_str()) } else { None }
+    });
+    crate::config::derive_llvm_type(ctd, rt.bytes, &*TYPE_CONFIG)
 }
 
 /// 2026-07-12: Check if a type matches a canonical name via property
@@ -630,14 +638,17 @@ impl LlvmBackend {
     /// Look up the LLVM codegen type for a Brief type.
     /// Returns `"float"` for Native storage types ≤32 bits, `"double"`
     /// for >32, and `"i64"` for Boxed or unknown types.
+    /// 2026-07-17: Reads ALU property instead of primitive().
     fn operator_llvm_type(&self, ty: &Type) -> &'static str {
         if let Some(ref universe) = self.ctx.type_universe {
             if let Some(rt) = ty.universe_key().and_then(|k| universe.get(k)) {
-                return match rt.primitive() {
-                    Some("Float") if rt.bytes <= 4 => "float",
-                    Some("Float") => "double",
-                    _ => "i64",
-                };
+                let is_float = rt.properties.get("alu").and_then(|pv| match pv {
+                    crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
+                    _ => None,
+                }).unwrap_or(false);
+                if is_float && rt.bytes <= 4 { return "float"; }
+                if is_float { return "double"; }
+                return "i64";
             }
         }
         if ty == &Type::float() {
@@ -1061,10 +1072,16 @@ impl LlvmBackend {
     }
 
     /// Check if a type is a native float (float/double) via the universe.
+    /// 2026-07-17: Reads ALU property instead of primitive().
     fn is_native_float(&self, ty: &Type) -> bool {
         self.ctx.type_universe.as_ref()
             .and_then(|u| ty.universe_key().and_then(|k| u.get(k)))
-            .map(|r| r.primitive() == Some("Float"))
+            .map(|r| {
+                r.properties.get("alu").and_then(|pv| match pv {
+                    crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
+                    _ => None,
+                }).unwrap_or(false)
+            })
             .unwrap_or_else(|| {
                 type_is(&self.ctx.type_universe, ty, "Float")
                     || type_is(&self.ctx.type_universe, ty, "Float64")
@@ -1202,9 +1219,15 @@ impl LlvmBackend {
         implementation: &Expr,
     ) -> TypedRegister {
         let v = self.fun.next_reg();
+        // 2026-07-17: Read ALU property instead of primitive()
         let is_native = self.ctx.type_universe.as_ref()
             .and_then(|u| a.ty.universe_key().and_then(|k| u.get(k)))
-            .map(|r| r.primitive() == Some("Float"))
+            .map(|r| {
+                r.properties.get("alu").and_then(|pv| match pv {
+                    crate::ast::PropertyValue::Identifier(s) => Some(s.as_str() == "Float"),
+                    _ => None,
+                }).unwrap_or(false)
+            })
             .unwrap_or(false);
         let (op_a, op_b) = if is_native {
             (self.ensure_float_reg(out, indent, a), self.ensure_float_reg(out, indent, b))

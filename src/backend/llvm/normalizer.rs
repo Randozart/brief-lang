@@ -21,8 +21,12 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
         if rt.properties.contains_key("llvm_type") {
             continue;
         }
-        let prim = rt.primitive();
-        let llvm_ty = derive_llvm_type(prim, rt.bytes, &prim_config);
+        // 2026-07-17: Read CTD from properties instead of primitive()
+        let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
+            PropertyValue::Identifier(s) => Some(s.as_str()),
+            _ => None,
+        });
+        let llvm_ty = derive_llvm_type(ctd, rt.bytes, &prim_config);
         rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
 
         // 2026-07-14: Parse layout pattern and attach field annotations
@@ -77,7 +81,8 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     // Strip metadata LLVM doesn't use
-    let keep: HashSet<String> = ["primitive", "llvm_type", "encoding", "layout"]
+    // 2026-07-17: Keep ctd and alu (replaces primitive), llvm_type, encoding, layout
+    let keep: HashSet<String> = ["ctd", "alu", "llvm_type", "encoding", "layout"]
         .iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
         rt.properties.retain(|k, _| keep.contains(k));
@@ -255,8 +260,12 @@ fn register_typedefs(items: &[TopLevel], universe: &mut TypeUniverse, prim_confi
             }
         }
         // Attach llvm_type (same as the main loop does for existing types)
-        let prim = rt.primitive();
-        let llvm_ty = derive_llvm_type(prim, rt.bytes, prim_config);
+        // 2026-07-17: Read CTD from properties instead of primitive()
+        let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
+            PropertyValue::Identifier(s) => Some(s.as_str()),
+            _ => None,
+        });
+        let llvm_ty = derive_llvm_type(ctd, rt.bytes, prim_config);
         rt.properties.insert("llvm_type".into(), PropertyValue::String(llvm_ty));
         universe.register(rt);
     }

@@ -10,15 +10,17 @@ use crate::type_universe::TypeUniverse;
 /// 2026-07-14: Normalize the AST for Webstack (WASM + JS) backend.
 /// Attaches js_type annotation based on primitive metadata.
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
-    // Attach js_type to every type
+    // 2026-07-17: Attach js_type from CTD (replaces old primitive() calls)
     for rt in universe.types.values_mut() {
-        let js_type = match rt.primitive() {
-            Some("Int") | Some("UInt") | Some("Int64") | Some("UInt64") => "number",
-            Some("Float") | Some("Float32") => "number",
-            Some("Float64") | Some("Double") => "number",
+        let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
+            PropertyValue::Identifier(s) => Some(s.as_str()),
+            _ => None,
+        });
+        let js_type = match ctd {
+            Some("Int") | Some("UInt") | Some("Char") => "number",
+            Some("Float") | Some("Double") => "number",
             Some("Bool") => "boolean",
             Some("String") => "string",
-            Some("Char") => "number",
             Some("Data") => "Uint8Array",
             _ => "object",
         };
@@ -33,7 +35,8 @@ pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Resu
     }
 
     // Strip hardware-specific metadata
-    let keep: HashSet<String> = ["primitive", "js_type", "encoding", "bytes"]
+    // 2026-07-17: ctd/alu replace primitive; js_type is the computed JS type
+    let keep: HashSet<String> = ["ctd", "alu", "js_type", "encoding", "bytes"]
         .iter().map(|s| s.to_string()).collect();
     for rt in universe.types.values_mut() {
         rt.properties.retain(|k, _| keep.contains(k));

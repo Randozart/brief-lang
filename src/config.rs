@@ -1,15 +1,18 @@
 // ── Type Config — Source-Driven LLVM Type Mappings ──────────────────────
-// 2026-07-14: Reads (primitive, bytes) → LLVM type string from
-// config/llvm-primitives.toml. Zero hardcoded Rust match arms.
-// Every type's LLVM representation is derived from source metadata.
+// 2026-07-17: Reads (ctd, bytes) → LLVM type string from
+// config/llvm-primitives.toml (to be renamed to ctd-llvm-mappings.toml).
+// CTD replaces the old `primitive` property. Every type's LLVM representation
+// is derived from CTD metadata.
 
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Maps (primitive name, bytes) → LLVM type string.
-/// Loaded from config/llvm-primitives.toml at compile time.
+/// Maps (ctd, bytes) → LLVM type string.
+/// Loaded from config/ctd-llvm-mappings.toml at compile time.
 /// Inner keys are TOML bare-key integers (stored as String, parsed at lookup).
 #[derive(Debug, Clone, serde::Deserialize)]
+// 2026-07-17: Field name 'primitive' matches TOML section headers [primitive.*].
+// Will be renamed to 'ctd' in a follow-up commit when the config file is renamed.
 pub struct TypeConfig {
     primitive: HashMap<String, HashMap<String, String>>,
 }
@@ -17,6 +20,7 @@ pub struct TypeConfig {
 impl TypeConfig {
     /// Load the built-in config file (compile-time baked fallback).
     pub fn load() -> Self {
+        // 2026-07-17: File will be renamed to ctd-llvm-mappings.toml in a follow-up commit
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/llvm-primitives.toml");
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
@@ -32,52 +36,42 @@ impl TypeConfig {
             .map_err(|e| format!("parse error in '{}': {}", path.display(), e))
     }
 
-    /// Look up the LLVM type string for (primitive, bytes).
+    /// Look up the LLVM type string for (ctd, bytes).
     /// Returns None if no mapping exists.
-    pub fn lookup(&self, primitive: &str, bytes: u64) -> Option<&str> {
+    /// 2026-07-17: Parameter renamed from primitive to ctd.
+    pub fn lookup(&self, ctd: &str, bytes: u64) -> Option<&str> {
         let key = bytes.to_string();
         self.primitive
-            .get(primitive)
+            .get(ctd)
             .and_then(|sizes| sizes.get(&key))
             .map(|s| s.as_str())
     }
 }
 
-/// Pure function: derive LLVM type string from (primitive, bytes).
+/// Pure function: derive LLVM type string from (ctd, bytes).
 /// Fallback is i{N*8} for raw Bits(N).
-pub fn derive_llvm_type(primitive: Option<&str>, bytes: u64, config: &TypeConfig) -> String {
-    match primitive {
-        Some("Int") if bytes == 8 => "i64".to_string(),
-        Some("Int") => format!("i{}", bytes * 8),
-        Some("Float") if bytes == 8 => "double".to_string(),
-        Some("Float") if bytes == 4 => "float".to_string(),
-        Some("Bool") => "i1".to_string(),
-        Some("Ptr") => "ptr".to_string(),
-        _ => {
-            if let Some(entry) = config.lookup(primitive.unwrap_or("Int"), bytes) {
-                entry.to_string()
-            } else {
-                format!("i{}", bytes * 8)
-            }
-        }
+/// 2026-07-17: Accepts CTD (PascalCase) instead of old primitive values.
+pub fn derive_llvm_type(ctd: Option<&str>, bytes: u64, config: &TypeConfig) -> String {
+    if let Some(entry) = config.lookup(ctd.unwrap_or("Int"), bytes) {
+        entry.to_string()
+    } else {
+        format!("i{}", bytes * 8)
     }
 }
 
-/// 2026-07-15: Derive `alu` metadata from primitive + bytes for SPIR-V.
+/// 2026-07-17: Derive ALU from CTD. The primordial sets ALU directly now
+/// (via default_alu or override), but this fallback supports backend tests
+/// that construct types without going through the universe.
 /// Maps to SPIR-V OpType* variants: Int → OpTypeInt, Float → OpTypeFloat.
-pub fn derive_alu_type(primitive: Option<&str>, bytes: u64, config: &TypeConfig) -> String {
-    match primitive {
-        Some("Int") => "Int".to_string(),
-        Some("Float") => "Float".to_string(),
+pub fn derive_alu_type(ctd: Option<&str>, bytes: u64, config: &TypeConfig) -> String {
+    // 2026-07-17: ALU is now a direct property on the type. This function is
+    // a backward-compat fallback using the same hardcoded mapping as before,
+    // but driven by CTD instead of the old primitive values.
+    match ctd {
+        Some("Float") | Some("Double") => "Float".to_string(),
         Some("Bool") => "Bool".to_string(),
         Some("Ptr") => "Ptr".to_string(),
-        _ => {
-            if let Some(entry) = config.lookup(primitive.unwrap_or("Int"), bytes) {
-                entry.to_string()
-            } else {
-                "Int".to_string()
-            }
-        }
+        _ => "Int".to_string(),
     }
 }
 

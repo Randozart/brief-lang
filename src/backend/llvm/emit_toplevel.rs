@@ -12,7 +12,15 @@ static TYPE_CONFIG: LazyLock<crate::config::TypeConfig> = LazyLock::new(|| {
 
 /// Derive LLVM type string from a ResolvedType using the global type config.
 fn rt_llvm_type(rt: &ResolvedType) -> String {
-    crate::config::derive_llvm_type(rt.primitive(), rt.bytes, &*TYPE_CONFIG)
+    // 2026-07-17: Read from normalizer-set llvm_type property first.
+    // Fall back to derive_llvm_type with CTD for types that bypassed the normalizer.
+    if let Some(crate::ast::PropertyValue::String(s)) = rt.properties.get("llvm_type") {
+        return s.clone();
+    }
+    let ctd = rt.properties.get("ctd").and_then(|pv| {
+        if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.as_str()) } else { None }
+    });
+    crate::config::derive_llvm_type(ctd, rt.bytes, &*TYPE_CONFIG)
 }
 
 impl LlvmBackend {

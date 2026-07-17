@@ -16,12 +16,17 @@ use std::collections::HashSet;
 pub fn normalize(items: &mut Vec<TopLevel>, universe: &mut TypeUniverse) -> Result<(), String> {
     let prim_config = TypeConfig::load();
 
-    // 2026-07-15: Attach `alu` property to every type based on primitive
+    // 2026-07-17: ALU now comes from primordial CTD+ALU properties.
+    // For types without an alu property, fall back to deriving from CTD.
     for rt in universe.types.values_mut() {
-        let prim = rt.primitive();
-        let bytes = rt.bytes;
-        let alu = derive_alu_type(prim, bytes, &prim_config);
-        rt.properties.insert("alu".into(), PropertyValue::String(alu));
+        if !rt.properties.contains_key("alu") {
+            let ctd = rt.properties.get("ctd").and_then(|pv| match pv {
+                PropertyValue::Identifier(s) => Some(s.as_str()),
+                _ => None,
+            });
+            let alu = derive_alu_type(ctd, rt.bytes, &prim_config);
+            rt.properties.insert("alu".into(), PropertyValue::String(alu));
+        }
     }
 
     // 2026-07-15: Flag kernel transactions ([idx < N] pattern)
