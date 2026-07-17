@@ -150,6 +150,29 @@ impl LlvmBackend {
 
             // ── BinaryOp ─────────────────────────────────────────────
             Expr::BinaryOp(kind, lhs, rhs) => {
+                // 2026-07-17: Mod with small constant divisor — trunc to i32
+                // so LLVM uses the cheaper imulq-based div magic (1 uop, 3c)
+                // instead of the full 128-bit mulq (3 uops, 4c). Without this,
+                // urem i64 forces LLVM to use mulq for the 64-bit magic constant
+                // division, adding ~2 uops per iteration.
+                // 2026-07-17: Mod with small constant divisor — trunc to i32
+                // so LLVM uses the cheaper imulq-based div magic (1 uop, 3c)
+                // instead of the full 128-bit mulq (3 uops, 4c).
+                if matches!(kind, crate::ast::BinaryOpKind::Mod) {
+                    if let Expr::Decimal(n) = rhs.as_ref() {
+                        if *n > 0 && *n < (1i64 << 31) {
+                            let l = self.emit_expr(out, lhs, indent);
+                            let tr = self.fun.gen_reg();
+                            writeln!(out, "{}{} = trunc i64 {} to i32", indent, tr, l.name).ok();
+                            // Emit the divisor constant directly as i32
+                            let ur = self.fun.gen_reg();
+                            writeln!(out, "{}{} = urem i32 {}, {}", indent, ur, tr, n).ok();
+                            let rz = self.fun.gen_reg();
+                            writeln!(out, "{}{} = zext i32 {} to i64", indent, rz, ur).ok();
+                            return TypedRegister { name: rz.to_string(), ty: Type::int() };
+                        }
+                    }
+                }
                 let l = self.emit_expr(out, lhs, indent);
                 let r = self.emit_expr(out, rhs, indent);
                 self.emit_binary_op(out, v, kind, &l, &r, indent)
