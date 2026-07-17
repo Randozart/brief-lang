@@ -1,6 +1,6 @@
 // ── Type Config — Source-Driven LLVM Type Mappings ──────────────────────
 // 2026-07-17: Reads (ctd, bytes) → LLVM type string from
-// config/llvm-primitives.toml (to be renamed to ctd-llvm-mappings.toml).
+// config/ctd-llvm-mappings.toml.
 // CTD replaces the old `primitive` property. Every type's LLVM representation
 // is derived from CTD metadata.
 
@@ -11,17 +11,14 @@ use std::path::Path;
 /// Loaded from config/ctd-llvm-mappings.toml at compile time.
 /// Inner keys are TOML bare-key integers (stored as String, parsed at lookup).
 #[derive(Debug, Clone, serde::Deserialize)]
-// 2026-07-17: Field name 'primitive' matches TOML section headers [primitive.*].
-// Will be renamed to 'ctd' in a follow-up commit when the config file is renamed.
 pub struct TypeConfig {
-    primitive: HashMap<String, HashMap<String, String>>,
+    ctd: HashMap<String, HashMap<String, String>>,
 }
 
 impl TypeConfig {
     /// Load the built-in config file (compile-time baked fallback).
     pub fn load() -> Self {
-        // 2026-07-17: File will be renamed to ctd-llvm-mappings.toml in a follow-up commit
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/llvm-primitives.toml");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config/ctd-llvm-mappings.toml");
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("Failed to read {}: {}", path.display(), e));
         toml::from_str(&content)
@@ -41,7 +38,7 @@ impl TypeConfig {
     /// 2026-07-17: Parameter renamed from primitive to ctd.
     pub fn lookup(&self, ctd: &str, bytes: u64) -> Option<&str> {
         let key = bytes.to_string();
-        self.primitive
+        self.ctd
             .get(ctd)
             .and_then(|sizes| sizes.get(&key))
             .map(|s| s.as_str())

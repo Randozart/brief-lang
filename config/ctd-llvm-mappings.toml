@@ -1,0 +1,33 @@
+# CTD → LLVM Type Mappings
+# Maps (ctd, bytes) → LLVM type string.
+# Read at compile time — no Rust hardcoded tables.
+# 2026-07-17: Section headers renamed from [primitive.*] to [ctd.*].
+
+[ctd.Int]
+1 = "i8"
+2 = "i16"
+4 = "i32"
+8 = "i64"
+
+[ctd.UInt]
+1 = "i8"
+2 = "i16"
+4 = "i32"
+8 = "i64"
+
+[ctd.Float]
+2 = "half"
+4 = "float"
+8 = "double"
+
+[ctd.Bool]
+1 = "i8"
+
+[ctd.Char]
+4 = "i32"
+
+[ctd.String]
+8 = "ptr"
+
+[ctd.Data]
+8 = "ptr"

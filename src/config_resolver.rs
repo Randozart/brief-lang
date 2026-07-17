@@ -45,7 +45,8 @@ impl ConfigResolver {
         let type_config = if config_dir.to_string_lossy() == "__baked__" {
             TypeConfig::load()
         } else {
-            let path = config_dir.join("llvm-primitives.toml");
+            // 2026-07-17: Renamed from llvm-primitives.toml to ctd-llvm-mappings.toml
+            let path = config_dir.join("ctd-llvm-mappings.toml");
             TypeConfig::load_from(&path).unwrap_or_else(|e| {
                 eprintln!("warning: cannot load '{}': {} — using baked fallback", path.display(), e);
                 TypeConfig::load()
@@ -240,7 +241,8 @@ pub fn init_profile(name: &str) -> Result<(), String> {
         .map_err(|e| format!("cannot create '{}': {}", profile_dir.display(), e))?;
 
     let baked_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");
-    for file in &["targets.toml", "llvm-primitives.toml", "llvm-ops.toml", "spirv-ops.toml"] {
+    // 2026-07-17: Renamed llvm-primitives.toml to ctd-llvm-mappings.toml
+    for file in &["targets.toml", "ctd-llvm-mappings.toml", "llvm-ops.toml", "spirv-ops.toml"] {
         let src = baked_dir.join(file);
         if src.exists() {
             let content = std::fs::read_to_string(&src)
