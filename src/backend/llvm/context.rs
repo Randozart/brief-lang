@@ -406,6 +406,13 @@ pub struct FunctionContext {
     // alloca register name.
     pub last_val_temps: HashMap<String, String>,
 
+    // 2026-07-17: Type of each last_val_temp entry. Parallel map so the
+    // Identifier handler in emit_expr can return the correct Type when
+    // reading a variable that was written earlier in the same body iteration.
+    // Without this, let bindings (e.g. `let f0: Float = b0 * input;`) would
+    // return Type::int() because f0 is not in field_index_map.
+    pub last_val_types: HashMap<String, Type>,
+
     // 2026-07-05: Fields participating in a body rotation pattern.
     // Forces body stores for these fields so the latch can reload them
     // via GEP, breaking circular phi chains for SCEV analysis.
@@ -490,6 +497,7 @@ impl FunctionContext {
             parallel_safe_exempt_fields: HashSet::new(),
             done_needs_fields: HashSet::new(),
             last_val_temps: HashMap::new(),
+            last_val_types: HashMap::new(),
             rotation_fields: HashSet::new(),
             vector_phi_groups: HashMap::new(),
             vector_phi_current: HashMap::new(),

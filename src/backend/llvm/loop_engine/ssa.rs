@@ -278,7 +278,9 @@ impl LlvmBackend {
                 _ => "i64",
             };
             writeln!(out, "  {} = alloca {}, align 8", alloca, llvm_type).ok();
+            let brief_ty = self.ctx.field_brief_types.get(*idx).cloned().unwrap_or(Type::int());
             self.fun.last_val_temps.insert(name.clone(), alloca);
+            self.fun.last_val_types.insert(name.clone(), brief_ty);
         }
     }
 
@@ -403,7 +405,9 @@ impl LlvmBackend {
                     gep, idx).ok();
                 let val = self.fun.next_reg_with_prefix("lvv");
                 writeln!(out, "  {} = load i64, ptr {}, align 8", val, gep).ok();
-                self.fun.last_val_temps.insert(name.clone(), val);
+                self.fun.last_val_temps.insert(name.clone(), val.clone());
+                let brief_ty = self.ctx.field_brief_types.get(idx).cloned().unwrap_or(Type::int());
+                self.fun.last_val_types.insert(name.clone(), brief_ty);
             }
         }
     }

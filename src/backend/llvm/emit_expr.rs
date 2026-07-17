@@ -36,8 +36,12 @@ impl LlvmBackend {
                 TypedRegister { name: v.to_string(), ty: Type::int() }
             }
             Expr::Float(f) => {
-                writeln!(out, "{}{} = fadd double 0.0, {}", indent, v, f).ok();
-                TypedRegister { name: v.to_string(), ty: Type::float64() }
+                // 2026-07-17: Fixed — use float not double. The typechecker
+                // assigns Type::float() (32-bit) to Float literals. The old
+                // fadd double + float64 return conflicted with the constant
+                // emitter which stores Float as "float" (32-bit LLVM type).
+                writeln!(out, "{}{} = fadd float 0.0, {}", indent, v, f).ok();
+                TypedRegister { name: v.to_string(), ty: Type::float() }
             }
             Expr::Bool(b) => {
                 let val = if *b { 1 } else { 0 };
@@ -50,10 +54,24 @@ impl LlvmBackend {
 
             // ── Identifier ───────────────────────────────────────────
             Expr::Identifier(name) => {
-                // 2026-07-17: Four paths: local binding, phi register, state field, global.
-                // State fields are stored as i64. If per-field phi mode is active,
-                // read from the phi register instead of GEP+load from %State.
-                if let Some(reg) = self.get_local(name) {
+                // 2026-07-17: Five paths: last_val_temps, local binding,
+                // phi register, state field, global constant.
+                //
+                // Check last_val_temps FIRST — this catches values written
+                // earlier in the same body iteration (e.g. count = count + 1
+                // followed by guard [count % 5000000 == 0]). Without this,
+                // the guard reads the phi register (start-of-iteration value)
+                // instead of the updated value, producing wrong guard results.
+                // The type is looked up from last_val_types (parallel map) or
+                // falls back to field_index_map or Int.
+                if let Some(reg) = self.fun.last_val_temps.get(name) {
+                    let brief_ty = self.fun.last_val_types.get(name)
+                        .cloned()
+                        .or_else(|| self.ctx.field_index_map.get(name)
+                            .and_then(|idx| self.ctx.field_brief_types.get(*idx).cloned()))
+                        .unwrap_or(Type::int());
+                    TypedRegister { name: reg.clone(), ty: brief_ty }
+                } else if let Some(reg) = self.get_local(name) {
                     TypedRegister { name: reg.clone(), ty: self.get_local_type(name) }
                 } else if let Some(phi_reg_str) = self.fun.phi_field_regs.get(name).cloned() {
                     // 2026-07-17: Per-field phi mode — read from SSA phi register.
@@ -98,6 +116,21 @@ impl LlvmBackend {
                         TypedRegister { name: fl, ty: Type::float() }
                     } else {
                         TypedRegister { name: v.to_string(), ty: brief_ty }
+                    }
+                } else if let Some((ty, _)) = self.ctx.constants.get(name) {
+                    // 2026-07-17: Load global constants with the correct LLVM
+                    // type. Float constants are declared as `constant float` in
+                    // the IR (not i64), so loading them as i64 produces garbage
+                    // bits and type mismatches in float operations.
+                    if *ty == Type::float() {
+                        writeln!(out, "{}{} = load float, ptr @{}", indent, v, name).ok();
+                        TypedRegister { name: v.to_string(), ty: Type::float() }
+                    } else if *ty == Type::float64() {
+                        writeln!(out, "{}{} = load double, ptr @{}", indent, v, name).ok();
+                        TypedRegister { name: v.to_string(), ty: Type::float64() }
+                    } else {
+                        writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
+                        TypedRegister { name: v.to_string(), ty: Type::int() }
                     }
                 } else {
                     writeln!(out, "{}{} = load i64, ptr @{}", indent, v, name).ok();
@@ -435,8 +468,14 @@ impl LlvmBackend {
         kind: &crate::ast::BinaryOpKind, l: &TypedRegister, r: &TypedRegister, indent: &str) -> TypedRegister {
         let is_float = l.ty == Type::float() || r.ty == Type::float() 
             || l.ty == Type::float64() || r.ty == Type::float64();
-        let ty_str = if is_float { "double" } else { "i64" };
+        let is_double = l.ty == Type::float64() || r.ty == Type::float64();
+        // 2026-07-17: Correct float type width — use "float" for Float (32-bit)
+        // and "double" for Float64 (64-bit). The old code always used "double"
+        // for all float operations, producing invalid IR when operands were
+        // actually 32-bit float values loaded from constants or state fields.
+        let ty_str = if is_double { "double" } else if is_float { "float" } else { "i64" };
         let fast = if is_float { " fast" } else { "" };
+        let ret_ty = if is_double { Type::float64() } else if is_float { Type::float() } else { Type::int() };
         match kind {
             crate::ast::BinaryOpKind::Add => {
                 // 2026-07-14: Add must branch on is_float — fadd i64 is invalid LLVM IR
@@ -445,7 +484,7 @@ impl LlvmBackend {
                 } else {
                     writeln!(out, "{}{} = add nsw i64 {}, {}", indent, v, l.name, r.name).ok();
                 }
-                TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
+                TypedRegister { name: v.to_string(), ty: ret_ty }
             }
             crate::ast::BinaryOpKind::Sub => {
                 // 2026-07-14: Sub must branch on is_float — fsub i64 is invalid LLVM IR
@@ -454,7 +493,7 @@ impl LlvmBackend {
                 } else {
                     writeln!(out, "{}{} = sub nsw i64 {}, {}", indent, v, l.name, r.name).ok();
                 }
-                TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
+                TypedRegister { name: v.to_string(), ty: ret_ty }
             }
             crate::ast::BinaryOpKind::Mul => {
                 // 2026-07-14: Mul must branch on is_float — fmul i64 is invalid LLVM IR
@@ -463,7 +502,7 @@ impl LlvmBackend {
                 } else {
                     writeln!(out, "{}{} = mul nsw i64 {}, {}", indent, v, l.name, r.name).ok();
                 }
-                TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
+                TypedRegister { name: v.to_string(), ty: ret_ty }
             }
             crate::ast::BinaryOpKind::Div => {
                 if is_float {
@@ -471,7 +510,7 @@ impl LlvmBackend {
                 } else {
                     writeln!(out, "{}{} = sdiv i64 {}, {}", indent, v, l.name, r.name).ok();
                 }
-                TypedRegister { name: v.to_string(), ty: if is_float { Type::float() } else { Type::int() } }
+                TypedRegister { name: v.to_string(), ty: ret_ty }
             }
             crate::ast::BinaryOpKind::Mod => {
                 writeln!(out, "{}{} = srem i64 {}, {}", indent, v, l.name, r.name).ok();

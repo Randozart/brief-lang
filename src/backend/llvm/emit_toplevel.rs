@@ -351,13 +351,20 @@ impl LlvmBackend {
         if let Some(cached) = self.fun.reg_float_cache.get(&reg.name) {
             return cached.clone();
         }
-        // 2026-07-12: All types are native — use their llvm type directly.
-        let is_native = true;
-
-        if is_native {
-            return reg.name.clone();
+        // 2026-07-17: If the register is Float (32-bit) but the caller expects
+        // double (e.g. Print# passes to printf which variadic-promotes float),
+        // emit an fpext to double. All brief floats are represented as float
+        // (32-bit), but C variadic functions receive double (64-bit).
+        if reg.ty == Type::float() {
+            let dbl = self.fun.gen_reg();
+            writeln!(out, "{}{} = fpext float {} to double", indent, dbl, reg.name).ok();
+            self.fun.reg_float_cache.insert(reg.name.clone(), dbl.clone());
+            return dbl;
         }
-        self.native_float_or_box(out, indent, &reg.name)
+        // 2026-07-17: For float64 (double) and non-float types, return as-is.
+        // The old code used a hardcoded is_native = true path that always
+        // returned reg.name directly, bypassing native_float_or_box entirely.
+        reg.name.clone()
     }
 
     /// Emit epoll-based initialization for built-in trigger sources.

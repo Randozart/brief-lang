@@ -275,7 +275,8 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
                 gep, idx).ok();
             let reg = self.fun.next_reg_with_prefix("pfl");
             writeln!(out, "  {} = load float, ptr {}, align 4", reg, gep).ok();
-            self.fun.last_val_temps.insert(name.clone(), reg);
+            self.fun.last_val_temps.insert(name.clone(), reg.clone());
+            self.fun.last_val_types.insert(name.clone(), Type::float());
         }
     }
 
@@ -294,7 +295,8 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
                 gep, idx).ok();
             let reg = self.fun.next_reg_with_prefix("pil");
             writeln!(out, "  {} = load i64, ptr {}, align 8", reg, gep).ok();
-            self.fun.last_val_temps.insert(name.clone(), reg);
+            self.fun.last_val_temps.insert(name.clone(), reg.clone());
+            self.fun.last_val_types.insert(name.clone(), Type::int());
         }
     }
 
@@ -337,7 +339,9 @@ pub(crate) fn emit_main(&mut self, out: &mut String, has_wake_triggers: bool) {
                     writeln!(out, "  {} = load i64, ptr {}, align 8", reg, gep).ok();
                 }
             }
-            self.fun.last_val_temps.insert(name.clone(), reg);
+            self.fun.last_val_temps.insert(name.clone(), reg.clone());
+            let brief_ty = self.ctx.field_brief_types.get(*idx).cloned().unwrap_or(Type::int());
+            self.fun.last_val_types.insert(name.clone(), brief_ty);
         }
     }
 }

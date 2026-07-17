@@ -455,15 +455,19 @@ impl LlvmBackend {
             match stmt {
                 Statement::Let { name, expr: Some(e), .. } => {
                     let reg = self.emit_expr(out, e, "  ");
-                    self.fun.last_val_temps.insert(name.clone(), reg.name);
+                    self.fun.last_val_temps.insert(name.clone(), reg.name.clone());
+                    self.fun.last_val_types.insert(name.clone(), reg.ty);
                 }
                 Statement::Assign(lhs, expr) => {
                     let lhs_name = Self::assign_target_name(lhs);
                     let val = self.emit_expr(out, expr, "  ");
                     if let Some(ref n) = lhs_name {
                         if write_set.contains(n) {
-                            // 2026-07-17: Track write for phi backedge (latch).
-                            self.fun.pending_phi_backedge.insert(n.clone(), val.name.clone());
+                            // 2026-07-17: Box the value to i64 for the phi backedge.
+                            // Phi registers track all fields as i64 (the %State
+                            // representation). Float/double values must be boxed.
+                            let boxed = self.adapt_to_i64(out, "  ", &val);
+                            self.fun.pending_phi_backedge.insert(n.clone(), boxed.clone());
                             // 2026-07-17: Path B — emit GEP+store only when post-loop
                             // hoisted prints need final iteration values from %State.
                             if self.fun.needs_state_stores_in_body {
@@ -471,12 +475,12 @@ impl LlvmBackend {
                                     let gep = self.fun.next_reg_with_prefix("cms");
                                     writeln!(out, "  {} = getelementptr inbounds %State, ptr %state, i32 0, i32 {}",
                                         gep, idx).ok();
-                                    let boxed = self.adapt_to_i64(out, "  ", &val);
                                     writeln!(out, "  store i64 {}, ptr {}, align 8", boxed, gep).ok();
                                 }
                             }
                         }
-                        self.fun.last_val_temps.insert(n.clone(), val.name);
+                        self.fun.last_val_temps.insert(n.clone(), val.name.clone());
+                        self.fun.last_val_types.insert(n.clone(), val.ty.clone());
                     }
                 }
                 Statement::Term(Some(e)) | Statement::TermBang(Some(e)) => {

@@ -364,8 +364,11 @@ fn test_float_binary_add() {
         }),
     ];
     let output = backend.generate(&program, None);
-    assert!(output.contains("fadd fast double"),
-        "Float binary add should emit fadd fast double");
+    // 2026-07-17: Float literal + Float field → fmul/fadd float (32-bit), not double.
+    // The typechecker assigns Type::float() to Float literals and the constant
+    // emitter stores Float as "float" in LLVM IR. Operations use the correct width.
+    assert!(output.contains("fadd fast float"),
+        "Float binary add should emit fadd fast float");
 }
 
 #[test]
@@ -706,9 +709,10 @@ fn test_local_float_binding() {
         }),
     ];
     let output = backend.generate(&program, None);
-    // 2026-07-14: Native fadd is correct — LLVM optimizes better than bitcast
-    assert!(output.contains("fadd double"),
-        "Float literal should emit fadd double: {}", output);
+    // 2026-07-17: Float literal emits fadd float (32-bit). The typechecker
+    // assigns Type::float() to Float literals, matching the constant emitter.
+    assert!(output.contains("fadd float"),
+        "Float literal should emit fadd float: {}", output);
 }
 
 #[test]
