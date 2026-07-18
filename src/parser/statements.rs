@@ -265,8 +265,12 @@ impl<'a> Parser<'a> {
                 self.expect(Token::RBracket)?;
                 Ok(PropertyValue::List(items))
             }
+            // 2026-07-18: Hash-prefixed compiler words for strategy op bindings
+            Some(Token::HashL) => { self.pos += 1; Ok(PropertyValue::HashL) }
+            Some(Token::HashR) => { self.pos += 1; Ok(PropertyValue::HashR) }
+            Some(Token::HashT) => { self.pos += 1; Ok(PropertyValue::HashT) }
             _ => self.error_at_current(
-                "expected metadata value (identifier, int, bool, string, or list)",
+                "expected metadata value (identifier, int, bool, string, list, or #L/#R/#T)",
             ),
         }
     }

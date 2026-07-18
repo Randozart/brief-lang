@@ -76,6 +76,9 @@ fn write_metadata(metadata: &HashMap<String, PropertyValue>, out: &mut String) {
                     .collect();
                 format!("[{}]", inner.join(", "))
             }
+            PropertyValue::HashL => "#L".to_string(),
+            PropertyValue::HashR => "#R".to_string(),
+            PropertyValue::HashT => "#T".to_string(),
         };
         use std::fmt::Write;
         writeln!(out, "  {} <~ {}", key, val_str).unwrap();

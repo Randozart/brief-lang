@@ -262,6 +262,9 @@ fn pv_to_sexpr(pv: &PropertyValue) -> SExpr {
             for item in items { children.push(pv_to_sexpr(item)); }
             SExpr::List(children)
         }
+        PropertyValue::HashL => atom("#L"),
+        PropertyValue::HashR => atom("#R"),
+        PropertyValue::HashT => atom("#T"),
     }
 }
 

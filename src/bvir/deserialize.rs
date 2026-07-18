@@ -458,7 +458,15 @@ fn parse_unop(s: &str) -> Result<UnaryOpKind, String> {
 
 fn sexpr_to_pv(expr: &SExpr) -> Result<PropertyValue, String> {
     match expr {
-        SExpr::Atom(Atom::String(s)) => Ok(PropertyValue::String(s.clone())),
+        SExpr::Atom(Atom::String(s)) => {
+            // 2026-07-18: Deserialize hash words from string tags
+            Ok(match s.as_str() {
+                "#L" => PropertyValue::HashL,
+                "#R" => PropertyValue::HashR,
+                "#T" => PropertyValue::HashT,
+                _ => PropertyValue::String(s.clone()),
+            })
+        }
         SExpr::Atom(Atom::Int(n)) => Ok(PropertyValue::Int(*n)),
         SExpr::Atom(Atom::Float(f)) => Ok(PropertyValue::Float(*f)),
         SExpr::Atom(Atom::Bool(b)) => Ok(PropertyValue::Bool(*b)),

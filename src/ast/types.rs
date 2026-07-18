@@ -155,6 +155,11 @@ pub enum PropertyValue {
     String(String),
     Identifier(String),
     List(Vec<PropertyValue>),
+    // 2026-07-18: Compiler-internal hash words for strategy op bindings.
+    // #L = left operand, #R = right operand, #T = type parameter.
+    HashL,
+    HashR,
+    HashT,
 }
 
 /// How an operator binding resolves to an implementation.

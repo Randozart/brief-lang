@@ -104,7 +104,7 @@ impl LlvmBackend {
     /// Check the target expression for an InsertAt strategy by looking up
     /// the variable's type's "insert_at" property in the TypeUniverse.
     /// 2026-07-14: Returns None when insert_strategy is not defined.
-    pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<String> {
+    pub(super) fn check_insert_strategy(&self, target: &crate::ast::Expr) -> Option<crate::ast::PropertyValue> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
             crate::ast::Expr::Identifier(n) => n,
@@ -113,15 +113,13 @@ impl LlvmBackend {
         let type_name = self.lookup_strategy_type_name(var_name)?;
         tu.get(&type_name)
             .and_then(|rt| rt.properties.get("insert_at"))
-            .and_then(|pv| {
-                if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.clone()) } else { None }
-            })
+            .cloned()
     }
 
     /// Check the target expression for an ExtractFrom strategy by looking up
     /// the variable's type's "extract_from" property in the TypeUniverse.
     /// 2026-07-14: Returns None when extract_strategy is not defined.
-    pub(super) fn check_extract_strategy(&self, target: &crate::ast::Expr) -> Option<String> {
+    pub(super) fn check_extract_strategy(&self, target: &crate::ast::Expr) -> Option<crate::ast::PropertyValue> {
         let tu = self.ctx.type_universe.as_ref()?;
         let var_name = match target {
             crate::ast::Expr::Identifier(n) => n,
@@ -130,9 +128,7 @@ impl LlvmBackend {
         let type_name = self.lookup_strategy_type_name(var_name)?;
         tu.get(&type_name)
             .and_then(|rt| rt.properties.get("extract_from"))
-            .and_then(|pv| {
-                if let crate::ast::PropertyValue::Identifier(s) = pv { Some(s.clone()) } else { None }
-            })
+            .cloned()
     }
 
     pub(super) fn emit_header(&self, out: &mut String) {

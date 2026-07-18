@@ -34,7 +34,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             if let Expr::AddrOf(source) = rhs {
                 let strat = backend.check_extract_strategy(source)
                     .or_else(|| backend.check_extract_strategy(rhs));
-                if strat.as_deref() == Some("ring_pop") {
+                if strat == Some(crate::ast::PropertyValue::Identifier("ring_pop".to_string())) {
                     let val = emit_ring_pop(backend, out, indent, source, None);
                     if let Expr::Identifier(name) = lhs {
                         if let Some(reg) = backend.fun.let_bindings.get(name) {
@@ -57,7 +57,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
                     // ring buffer push instead of a regular state store. This is
                     // how `queue <- value` works without requiring `&` on the LHS.
                     let strat = backend.check_insert_strategy(lhs);
-                    if strat.as_deref() == Some("ring_push") {
+                    if strat == Some(crate::ast::PropertyValue::Identifier("ring_push".to_string())) {
                         emit_ring_push(backend, out, indent, lhs, &val);
                     } else if let Some(reg) = backend.fun.let_bindings.get(name) {
                         // 2026-07-14: store type must match val.ty — hardcoded i64 breaks bool/float assigns
@@ -125,7 +125,7 @@ pub fn emit_statement(backend: &mut LlvmBackend, out: &mut String, stmt: &Statem
             if let Expr::AddrOf(source) = expr {
                 let strat = backend.check_extract_strategy(source)
                     .or_else(|| backend.check_extract_strategy(expr));
-                if strat.as_deref() == Some("ring_pop") {
+                if strat == Some(crate::ast::PropertyValue::Identifier("ring_pop".to_string())) {
                     emit_ring_pop(backend, out, indent, source, None);
                 }
                 TypedRegister { name: backend.fun.gen_reg(), ty: Type::void() }

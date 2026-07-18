@@ -336,6 +336,15 @@ pub enum Token {
     #[token("#!")]
     HashBang,
 
+    // 2026-07-18: Compiler-internal hash words for strategy op bindings.
+    // #L = left operand, #R = right operand, #T = type parameter.
+    #[token("#L")]
+    HashL,
+    #[token("#R")]
+    HashR,
+    #[token("#T")]
+    HashT,
+
     // ── Punctuation ───────────────────────────────────────────
     #[token(";")]
     Semicolon,
@@ -607,6 +616,9 @@ impl std::fmt::Display for Token {
             Token::PragmaBang => write!(f, "#!pragma"),
             Token::HashQuestion => write!(f, "#?"),
             Token::HashBang => write!(f, "#!"),
+            Token::HashL => write!(f, "#L"),
+            Token::HashR => write!(f, "#R"),
+            Token::HashT => write!(f, "#T"),
             Token::Semicolon => write!(f, ";"),
             Token::LtColon => write!(f, "<:"),
             Token::ColonGreaterThan => write!(f, ":>"),
