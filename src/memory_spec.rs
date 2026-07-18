@@ -224,9 +224,10 @@ fn estimate_type_size(ty: &Type) -> usize {
         Type::Custom(__t) if __t == "Float" => 8,
         Type::Custom(__t) if __t == "Float64" => 8,
         Type::Custom(__t) if __t == "Bool" => 1,
-        Type::Custom(__t) if __t == "String" => 24,
+        // 2026-07-18: String is 16 bytes (2 × i64 struct). Data stays rough.
+        Type::Custom(__t) if __t == "String" => 16,
         Type::Void => 0,
-        Type::Custom(__t) if __t == "Data" => 24,
+        Type::Custom(__t) if __t == "Data" => 16,
         Type::Custom(__t) if __t == "Char" => 4,
         Type::Custom(_) => 8,
         Type::Union(types) => types.iter().map(estimate_type_size).max().unwrap_or(8),
