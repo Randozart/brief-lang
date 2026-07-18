@@ -533,6 +533,14 @@ mod tests {
     }
 
     #[test]
+    fn test_alloc_interpreter() {
+        let mut heap = VirtualHeap::new();
+        let addr = execute_intrinsic("Alloc#", &[i64_to_bits(32)], &mut heap).unwrap();
+        let ptr = addr.as_i64().unwrap() as u64;
+        assert!(heap.contains(ptr));
+    }
+
+    #[test]
     fn test_print_int() {
         let mut heap = VirtualHeap::new();
         let r = execute_intrinsic("Print#", &[i64_to_bits(42)], &mut heap);
