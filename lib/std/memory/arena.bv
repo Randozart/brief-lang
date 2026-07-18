@@ -1,0 +1,45 @@
+// 2026-07-18: Arena — single-direction bump allocator in pure Brief.
+// Backed by Alloc# for the backing buffer. The arena is itself
+// arena-allocated when arena_init is called inside a txn context
+// (nested arena — the parent arena manages the child arena's backing
+// buffer). Arena lifecycle:
+//   1. arena_init(cap) — allocate backing buffer via Alloc#
+//   2. arena_alloc(a, size) — bump pointer forward
+//   3. arena_reset(a) — rewind offset to 0 (reuse memory)
+//   4. arena_free(a) — free backing buffer via Free#
+// The [pre][post] contract on arena_alloc prevents overflow.
+type Arena {
+    base: Ptr<Byte>,
+    offset: Int,
+    capacity: Int,
+};
+
+// Allocate backing buffer via Alloc#. If called inside a txn with
+// an active arena, the user's arena is nested within the txn's arena:
+// the outer arena gives memory for the inner arena's backing buffer.
+defn arena_init(cap: Int) -> Arena {
+    let base: Ptr<Byte> = Alloc#(cap) as Ptr<Byte>;
+    term Arena { base, offset: 0, capacity: cap };
+};
+
+// Bump-allocate `size` bytes from the arena. Contract ensures
+// offset never exceeds capacity. If contract violated at compile
+// time, the compiler catches it. At runtime, unpredictable.
+defn arena_alloc(a: Arena, size: Int) -> Ptr<Byte> [a.offset + size <= a.capacity] {
+    let ptr: Ptr<Byte> = a.base + a.offset;
+    a.offset = a.offset + size;
+    term ptr;
+};
+
+// Rewind offset to 0. The backing buffer stays live — memory is
+// reused on the next cycle. No system call.
+defn arena_reset(a: Arena) {
+    a.offset = 0;
+};
+
+// Free the backing buffer. If the arena was nested within a txn's
+// arena, Free# is a static-analysis no-op (arena memory managed by
+// outer arena). If standalone, calls @free.
+defn arena_free(a: Arena) {
+    Free#(a.base as Int);
+};

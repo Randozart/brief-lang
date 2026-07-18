@@ -1,0 +1,86 @@
+// 2026-07-18: CrosswordArena — dual-direction arena allocator.
+// Fixed-size slots grow from base upward (slot_offset).
+// Variable-length data (strings, byte buffers) grows from
+// (base + capacity) downward (string_offset).
+// The two regions meet in the middle — a collision means
+// the arena is full and a contract violation is triggered.
+//
+// This pattern mirrors the "crossword puzzle" layout from
+// high-performance game engines and network parsers:
+//   [ Slot 1 | Slot 2 | ... | String B | String A | Free ]
+//   ^                                  ^                  ^
+//   base                            string_offset    base+capacity
+//   slot_offset ->
+//                                    <- string_offset
+//
+// CrosswordArena<T> <: List<T> — supports the same <- push/pop
+// interface as List and RingBuffer, via InsertAt/ExtractFrom
+// property bindings.
+type CrosswordArena<T> <: List<T> {
+    InsertAt <~ crossword_push;
+    ExtractFrom <~ crossword_pop;
+};
+
+// Initialize with total capacity. slot_offset starts at 0
+// (bottom of arena). string_offset starts at capacity (top
+// of arena). Both grow toward each other.
+defn crossword_init(cap: Int) -> CrosswordArena<Byte> {
+    let base: Ptr<Byte> = Alloc#(cap) as Ptr<Byte>;
+    term CrosswordArena {
+        base,
+        capacity: cap,
+        slot_offset: 0,
+        string_offset: cap,
+    };
+};
+
+// Allocate a fixed-size slot from the bottom of the arena.
+// Bumps slot_offset forward. Contract ensures no collision
+// with the string region.
+defn crossword_alloc_slot(ca: CrosswordArena, size: Int) -> Ptr<Byte> {
+    let ptr: Ptr<Byte> = ca.base + ca.slot_offset;
+    ca.slot_offset = ca.slot_offset + size;
+    [ca.slot_offset <= ca.string_offset]; // collision guard
+    term ptr;
+};
+
+// Allocate variable-length data from the top of the arena.
+// Decrements string_offset backward. Contract ensures no
+// collision with the slot region.
+defn crossword_alloc_string(ca: CrosswordArena, len: Int) -> Ptr<Byte> {
+    ca.string_offset = ca.string_offset - len;
+    let ptr: Ptr<Byte> = ca.base + ca.string_offset;
+    [ca.slot_offset <= ca.string_offset]; // collision guard
+    term ptr;
+};
+
+// List interface: push = alloc slot, store value
+// handle is ptrtoint of the CrosswordArena struct
+defn crossword_push(handle: Int, val: Int) -> Int {
+    let ca: Ptr<CrosswordArena> = handle as Ptr<CrosswordArena>;
+    let slot: Ptr<Int> = crossword_alloc_slot(*ca, 8) as Ptr<Int>;
+    *slot = val;
+    ca.slot_offset = ca.slot_offset; // commit the bump
+    term 0;
+};
+
+// List interface: pop = read last slot, rewind slot_offset
+defn crossword_pop(handle: Int) -> Int {
+    let ca: Ptr<CrosswordArena> = handle as Ptr<CrosswordArena>;
+    ca.slot_offset = ca.slot_offset - 8;
+    let val: Int = *((ca.base + ca.slot_offset) as Ptr<Int>);
+    term val;
+};
+
+// Rewind both offsets. Backing buffer stays live.
+defn crossword_reset(ca: CrosswordArena) {
+    ca.slot_offset = 0;
+    ca.string_offset = ca.capacity;
+};
+
+// Free backing buffer. Same nested-arena optimization as
+// Arena.free: Free# on Alloc#-allocated memory is a
+// static-analysis no-op when nested.
+defn crossword_free(ca: CrosswordArena) {
+    Free#(ca.base as Int);
+};
