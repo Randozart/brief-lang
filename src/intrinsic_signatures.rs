@@ -79,6 +79,7 @@ pub fn get_intrinsic_signature(name: &str) -> Option<Signature> {
 
         // ── Memory (observable) ─────────────────────────────────────
         "Malloc#"  => Some(Signature { name: "Malloc#",  parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
+        "Alloc#"   => Some(Signature { name: "Alloc#",   parameters: vec![("size", Type::int())], return_kind: ReturnKind::Exact(Type::ptr(Type::bits(1))), observable: true }),
         "Free#"    => Some(Signature { name: "Free#",    parameters: vec![("ptr", Type::ptr(Type::bits(1)))], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
         "Load#"    => Some(Signature { name: "Load#",    parameters: vec![], return_kind: ReturnKind::Native("Int"), observable: true }),
         "Store#"   => Some(Signature { name: "Store#",   parameters: vec![], return_kind: ReturnKind::Exact(Type::void()), observable: true }),
@@ -219,7 +220,7 @@ mod tests {
             "Add#", "Sub#", "Mul#", "Div#", "Rem#", "Neg#", "Abs#",
             "Eq#", "Neq#", "Lt#", "Gt#", "Le#", "Ge#",
             "Sqrt#", "Sin#", "Cos#", "Fabs#", "Ceil#", "Floor#", "Pow#",
-            "Malloc#", "Free#", "Load#", "Store#", "Copy#", "Fill#",
+            "Malloc#", "Alloc#", "Free#", "Load#", "Store#", "Copy#", "Fill#",
             "Print#", "GetEnv#",
             "Concat#", "Length#", "ToInt#", "ToFloat#", "ToString#",
             "Get#", "Insert#",

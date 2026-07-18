@@ -26,7 +26,7 @@ use crate::ast::{
     TriggerDeclaration, Type,
 };
 use crate::backend::llvm::directive::OptimizationRemark;
-use crate::backend::llvm::ChimeraInfo;
+use crate::backend::llvm::{AllocStrategy, ChimeraInfo};
 use crate::dbrief::DbriefType;
 use crate::target_spec::TargetSpec;
 use crate::type_universe::TypeUniverse;
@@ -445,6 +445,12 @@ pub struct FunctionContext {
     // Only caches "expensive" ops (fp ops, division) — not cheap integer add/sub.
     // Cleared at function entry alongside other caches.
     pub expr_dedup_cache: HashMap<(String, String, String), String>,
+
+    // 2026-07-18: Allocation strategy per register name.
+    // Populated by emit_alloc / emit_malloc, consulted by emit_free.
+    // Keyed by the underlying SSA register (%t{N}) or alloca name.
+    // Propagated through let-bindings in emit_statement.
+    pub alloc_strategies: HashMap<String, AllocStrategy>,
 }
 
 impl FunctionContext {
@@ -503,6 +509,7 @@ impl FunctionContext {
             vector_phi_current: HashMap::new(),
             chimera_map: HashMap::new(),
             expr_dedup_cache: HashMap::new(),
+            alloc_strategies: HashMap::new(),
         }
     }
 

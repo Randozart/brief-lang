@@ -275,6 +275,17 @@ fn remap_expr_into(e: &mut Expr, map: &HashMap<String, String>) {
 
 use crate::ast::{BinaryOpKind, Expr, Statement, TopLevel, Type};
 
+// 2026-07-18: Allocation strategy — tracks how a pointer was allocated.
+// Arena: bump-allocated from per-txn arena (Free# is no-op).
+// Malloc: heap-allocated via @malloc (Free# must call @free).
+// Alloca: stack-allocated via alloca (Free# is no-op).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AllocStrategy {
+    Arena,
+    Malloc,
+    Alloca,
+}
+
 #[derive(Debug, Clone)]
 pub struct TypedRegister {
     pub name: String,
