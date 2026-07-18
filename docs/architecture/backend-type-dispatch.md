@@ -14,14 +14,17 @@ no guesswork. The programmer defines their own types, or loads the prelude.
 Every type is `Bits(N)` at minimum:
 
 ```brief
-type Int <: Bits { bytes <~ 8; ctd <~ Int; alu <~ Int; }
-type Float <: Bits { bytes <~ 4; ctd <~ Float; alu <~ Float; }
-type String <: Bits { bytes <~ 24; ctd <~ String; alu <~ Int; encoding <~ "utf-8"; }
+type Int <: Bits { bytes <~ 8; ctd <~ Int; alu <~ Int; op Add ~> "int.add"; }
+type Float <: Bits { bytes <~ 4; ctd <~ Float; alu <~ Float; op Add ~> "float.add"; }
+type String { data: Int; len: Int; encoding <~ "UTF-8"; tbaa <~ "String"; };
 ```
 
-- **`bytes <~ N`** — Every backend reads this. `Bits(8)` = 64-bit storage. Always sufficient.
-- **`ctd <~ PascalCase`** — Common Type Definition. What the type *is* semantically (exhaustive closed set: `Int`, `UInt`, `Float`, `Double`, `Bool`, `Char`, `String`, `Data`, `Ptr`, `Void`). The normalizer maps CTD to backend-specific types.
+- **`bytes <~ N`** — Every backend reads this. `Bits(8)` = 64-bit storage. For struct types with `fields`, bytes is derived from field type sizes (summed). Explicit `bytes <~ N` overrides the derivation.
+- **`ctd <~ PascalCase`** — Common Type Definition. What the type *is* semantically (exhaustive closed set: `Int`, `UInt`, `Float`, `Double`, `Bool`, `Char`, `String`, `Data`, `Ptr`, `Void`). The normalizer maps CTD to backend-specific types. Inherited from the primordial when not set in source.
 - **`alu <~ PascalCase` or `alu <~ "quoted"`** — What hardware computes with values of this type. PascalCase for known ALUs (`Int`, `Float`, `Bool`), lowercase-quoted for backend/plugin-specific hardware.
+- **`fields: Vec<(String, Type)>`** — Struct field declarations on `ResolvedType`. Populated from `TypeDef.body.slots` by the normalizer. Drives LLVM struct type lowering, state slot width, and `is_string_like()` detection. Example: String with `data: Int; len: Int;` → `fields = [("data", Int), ("len", Int)]`.
+- **`op Add ~> "int.add"`** — Operator binding to a generic backend-agnostic identifier. The typechecker reads this via `get_operator_intrinsic(universe, "+", &Int)`, which returns `OpBinding::Function("int.add")`. The backend then looks up `("Add", "Int", 8)` in `config/llvm-ops.toml` for the LLVM IR template.
+- **`encoding <~ "UTF-8"`** — String encoding, resolved through `config/encodings.toml`. All encoding names are quoted strings — no PascalCase hardcoded table. The config specifies `char_width` (for Index# GEP eligibility) and optional `ops.index_at`/`char_len` (stdlib functions for runtime dispatch).
 - **Other metadata** — Any backend is free to use any metadata it needs. Unrecognized metadata is silently ignored.
 
 ## Frontend/Backend Detachment
@@ -65,10 +68,12 @@ Each backend reads what it needs and ignores the rest.
 |----------|--------------|---------------|
 | `properties["llvm_type"]` | Set by normalizer; direct read, no recomputation | LLVM type string (`"i64"`, `"float"`, `"ptr"`, ...) |
 | `properties["alu"] == "Float"` | Determines float arithmetic vs integer | `fadd`/`fsub`/`fmul` vs `add`/`sub`/`mul` |
-| `properties["ctd"] == "String"` | Enables string-specific helpers | `__int_to_str__`, `__str_to_int`, `@ll_empty_list` |
-| `properties["encoding"]` | String/Data encoding | — (future: null vs length-prefixed) |
-| `bytes` | Storage width | `alloca`, `malloc` size, GEP offsets |
+| `is_string_like(ty, universe)` | Shape (2 Int fields) + encoding property | SSO handle or heap-allocated string helpers |
+| `properties["encoding"]` | Looked up in `config/encodings.toml` for `char_width` and stdlib ops | `Index#` emits GEP (fixed-width) or stdlib call (variable-width) |
+| `properties["op.Add"]` etc. | Generic identifier used for config dispatch | `OP_CONFIG.lookup("Add", "Int", 8)` → template fill |
+| `bytes` | Storage width. Derived from fields for struct types | `alloca`, `malloc` size, GEP offsets |
 | `alignment` | Memory alignment | `align N` attribute on `alloca`/`store` |
+| `fields` | Struct field list on `ResolvedType` | LLVM `{ i64, i64 }` type, `extractvalue`/`insertvalue` |
 | No `ctd` + no `llvm_type` | Falls back to `derive_llvm_type(None, bytes)` | `format!("i{}", bytes * 8)` — structural only |
 
 ### CIRCT (Hardware) Backend
@@ -251,6 +256,54 @@ For any Type value:
 A new backend starts with just `bytes` and is fully correct.
 It then opts into `primitive`, `encoding`, and other metadata as needed,
 one property at a time, without touching any other backend.
+
+## Operator Dispatch (Phase 0)
+
+Operator dispatch follows a layered approach with increasingly generic fallbacks:
+
+```
+                 Source: bootstrap.bv
+                    op Add ~> "int.add"
+                         ↓
+              Parser: metadata["op.Add"] = "int.add"
+                         ↓
+              Universe: ResolvedType.properties
+                         ↓
+        Typechecker: get_operator_intrinsic(universe, "+", &Int)
+            ┌───────────┴───────────┐
+            ↓                       ↓
+    universe["op.Add"] exists    fallback: builtin_operator_binding()
+    → OpBinding::Function        → OpBinding::Intrinsic("AddI64#")
+            ↓                       ↓
+        Backend: emit_binop_from_config()
+    OP_CONFIG.lookup("Add", "Int", 8)
+            ↓
+    template: "add nsw i64 %a, %b" → fill operands
+            ↓
+    Fallback: hardcoded BinaryOpKind matches in emit_binary_op()
+```
+
+The `config/llvm-ops.toml` file is the primary dispatch for the LLVM backend.
+The hardcoded `builtin_operator_binding()` table (in `operators.rs`) is a
+typechecker fallback for types without universe entries (e.g. during tests
+or `--no-stdlib` mode). The hardcoded `emit_binary_op` match arms are a
+codegen fallback when config lookup returns None.
+
+## Encoding Dispatch
+
+All encoding names are quoted strings resolved through `config/encodings.toml`:
+
+```
+encoding <~ "UTF-8"      → config/encodings.toml (char_width=0, ops.index_at, ops.char_len)
+encoding <~ "ASCII"      → config/encodings.toml (char_width=1, no ops — direct GEP)
+encoding <~ "shift_jis"  → config/encodings.toml (char_width=0, ops.index_at, ops.char_len)
+```
+
+No PascalCase hardcoded table. The `char_width` field tells the compiler
+whether `Index#` can emit a direct GEP (fixed-width, char_width > 0) or
+must delegate to a stdlib function (variable-width, char_width = 0).
+The `ops` map specifies which stdlib functions to call for encoding-aware
+operations.
 
 ## No Fallback Tables
 

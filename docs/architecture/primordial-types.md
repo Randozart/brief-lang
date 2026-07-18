@@ -82,18 +82,18 @@ commitments intact.
 | `Float64` | 8 | 8 | float | double | Alias `Double` |
 | `Bool` | 1 | 1 | unsigned | i8 | |
 | `Char` | 4 | 4 | unsigned | i32 | |
-| `String` | 24 | 8 | struct | %String | 3 fields: ptr, len, codec |
+| `String` | 16 | 8 | struct | %String | 2 fields: data, len |
 | `Data` | 8 | 8 | pointer | i8* | Typed pointer |
 | `Void` | 0 | 0 | void | void | Zero-width |
 
-String has pre-attached field annotations for meld validation and backend
-struct emission:
+String is a 2-field struct (`data: Int, len: Int`) with `encoding <~ "UTF-8"`
+property. Codegen identifies string-like types via `is_string_like()` which
+checks shape (2 Int fields) + encoding property, not the name `"String"`.
 
-| Field | Offset (bits) | Width (bits) |
-|-------|--------------|-------------|
-| `ptr` | 0 | 64 |
-| `len` | 64 | 64 |
-| `codec` | 128 | 8 |
+The `fields` vector on `ResolvedType` is populated from `TypeDef.body.slots`
+by the normalizer's `register_typedefs`. For the String primordial, fields
+are seeded in `seed_primordial_types()`. Backends use `fields` for LLVM
+struct type lowering, state slot width, and `is_string_like` detection.
 
 ---
 
